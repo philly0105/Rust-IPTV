@@ -35,6 +35,9 @@
   "errorTitleInternal": "Er ging iets mis",
 
   "errorHintNetwork": "Controleer je verbinding en de URL van de provider en probeer het opnieuw.",
+  "errorBodyServerUnreachable": "De eigen server van de app reageert niet, dus er kon niets worden geladen.",
+  "errorHintServerUnreachable": "Controleer of de Tsrust IPTV-server nog draait en probeer het opnieuw.",
+  "errorTechnicalDetails": "Technische details",
   "errorHintTimeout": "De provider is mogelijk druk. Probeer het zo opnieuw.",
   "errorHintAuth": "Controleer de gebruikersnaam, het wachtwoord of het MAC-adres in de broninstellingen.",
   "errorHintNotFound": "Mogelijk heeft de provider het verwijderd. Vernieuw de bron om de lijst bij te werken.",

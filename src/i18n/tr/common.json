@@ -35,6 +35,9 @@
   "errorTitleInternal": "Bir şeyler ters gitti",
 
   "errorHintNetwork": "Bağlantınızı ve sağlayıcı URL'sini kontrol edip tekrar deneyin.",
+  "errorBodyServerUnreachable": "Uygulamanın kendi sunucusu yanıt vermiyor, bu yüzden hiçbir şey yüklenemedi.",
+  "errorHintServerUnreachable": "Tsrust IPTV sunucusunun hâlâ çalıştığını kontrol edip tekrar deneyin.",
+  "errorTechnicalDetails": "Teknik ayrıntılar",
   "errorHintTimeout": "Sağlayıcı yoğun olabilir. Biraz sonra tekrar deneyin.",
   "errorHintAuth": "Kaynak ayarlarındaki kullanıcı adını, parolayı veya MAC adresini kontrol edin.",
   "errorHintNotFound": "Sağlayıcı tarafından kaldırılmış olabilir. Listeyi güncellemek için kaynağı yenileyin.",

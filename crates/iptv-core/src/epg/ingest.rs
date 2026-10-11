@@ -354,8 +354,19 @@ fn user_message(err: &CoreError) -> String {
         CoreError::Auth(m) => {
             format!("The EPG server refused access ({m}). Check the credentials of the source.")
         }
-        CoreError::NotFound(m) => format!("{m}. Check the URL in Settings > EPG."),
-        CoreError::Invalid(m) => format!("{m}. Check that the URL points to an XMLTV file."),
+        CoreError::NotFound(m) => {
+            format!(
+                "{}. Check the URL in Settings > EPG.",
+                m.trim_end_matches('.')
+            )
+        }
+        // Server-mode guard refusals already say what to do.
+        CoreError::Invalid(m) if m.contains(crate::http::ALLOW_PRIVATE_HINT) => m.clone(),
+        CoreError::Unsupported(m) => m.clone(),
+        CoreError::Invalid(m) => format!(
+            "{}. Check that the URL points to an XMLTV file.",
+            m.trim_end_matches('.')
+        ),
         other => other.to_string(),
     }
 }

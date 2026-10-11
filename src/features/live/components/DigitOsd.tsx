@@ -11,7 +11,7 @@ export function DigitOsd({ state }: { state: ZapFeedback | null }) {
       role="status"
       aria-live="assertive"
       data-testid="digit-osd"
-      className="pointer-events-none absolute top-4 right-4 z-30 flex min-w-24 flex-col items-end rounded-lg bg-black/75 px-4 py-2 text-white shadow-2 backdrop-blur-sm"
+      className="pointer-events-none absolute top-4 end-4 z-30 flex min-w-24 flex-col items-end rounded-lg bg-black/75 px-4 py-2 text-white shadow-2 backdrop-blur-sm"
     >
       {state.kind === 'typing' ? (
         <>

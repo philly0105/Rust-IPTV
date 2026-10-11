@@ -71,7 +71,7 @@
   "cancel": "Annuleren",
   "resumedAt": "Hervat op {{time}}",
   "externalPlaying": "Speelt af in {{player}}",
-  "externalStopHint": "Sluit het {{player}}-venster om het afspelen te stoppen.",
+  "externalStopHint": "Stop hier of sluit het {{player}}-venster.",
   "externalExited": "{{player}} is gesloten",
   "dismiss": "Sluiten",
   "mpvLoading": "Stream openen in MPV",

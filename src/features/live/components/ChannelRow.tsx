@@ -25,6 +25,8 @@ export interface ChannelRowProps {
   stripPrefix?: boolean;
   /** `settings.epgOffsetMinutes` */
   epgOffsetMinutes?: number;
+  /** Stalker: the portal's guide is not answering, so a row without a programme says so. */
+  guideUnavailable?: boolean;
   onActivate(index: number, how: 'click' | 'double' | 'key'): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
@@ -105,6 +107,10 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                 </span>
               ) : null}
             </>
+          ) : props.guideUnavailable ? (
+            <span className="truncate text-xs text-fg-subtle" data-testid="row-guide-unavailable">
+              {t('guideNotAnswering')}
+            </span>
           ) : (
             <span className="truncate text-xs text-fg-subtle">{channel.categoryName}</span>
           )}

@@ -9,7 +9,6 @@
 use crate::error::{CoreError, CoreResult};
 use crate::model::RequestHeaders;
 use crate::state::AppState;
-use futures::StreamExt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -49,6 +48,19 @@ pub fn classify(url: &str) -> CoreResult<Location> {
         return Err(CoreError::Invalid("empty EPG URL".into()));
     }
     Ok(Location::Local(PathBuf::from(t)))
+}
+
+/// Refusal of a local EPG path or `file://` URL in server mode (the server
+/// must not read files from its own disk for a browser client).
+pub const SERVER_EPG_FILE_MESSAGE: &str = "EPG files on the server's disk cannot be opened from the browser. Use an http(s) XMLTV URL instead.";
+
+/// In server mode, refuses (Unsupported) an EPG URL that is a local path or
+/// `file://` URL; a no-op otherwise. Never touches the file system.
+pub fn check_server_url(state: &AppState, url: &str) -> CoreResult<()> {
+    if crate::http::is_server_mode(state) && !matches!(classify(url), Ok(Location::Remote(_))) {
+        return Err(CoreError::Unsupported(SERVER_EPG_FILE_MESSAGE.into()));
+    }
+    Ok(())
 }
 
 /// A URL safe to log: remote URLs are redacted, local paths kept.
@@ -120,13 +132,13 @@ pub async fn fetch(
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> CoreResult<Fetched> {
     match classify(url)? {
+        Location::Local(_) if crate::http::is_server_mode(state) => {
+            Err(CoreError::Unsupported(SERVER_EPG_FILE_MESSAGE.into()))
+        }
         Location::Local(path) => {
             let meta = tokio::fs::metadata(&path).await.map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    CoreError::NotFound(format!(
-                        "EPG file not found: {}. Check the path in Settings > EPG.",
-                        path.display()
-                    ))
+                    CoreError::NotFound(format!("EPG file not found: {}", path.display()))
                 } else {
                     CoreError::Io(e)
                 }
@@ -164,8 +176,10 @@ async fn download(
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> CoreResult<Fetched> {
     // Server mode: guarded client; an XMLTV URL on a private host needs
-    // --allow-private-targets.
-    crate::http::check_fetch(state, url, None).await?;
+    // --allow-private-targets, unless it is a guide detected from a source
+    // and sits on that source's own host:port (trusted like the playlist).
+    let own = owning_source_authority(state, url).await?;
+    crate::http::check_fetch(state, url, own.as_ref()).await?;
     let mut req =
         crate::http::apply_source_headers(crate::http::client_for(state).get(url), headers);
     if let Some(tag) = etag {
@@ -193,11 +207,14 @@ async fn download(
     let path = dir.join(format!("epg-{}.part", uuid::Uuid::new_v4().simple()));
     let result = async {
         let mut file = tokio::fs::File::create(&path).await?;
+        // Body failures name the host; a stall ends after BODY_IDLE_TIMEOUT.
+        let host = resp.url().host_str().unwrap_or("the server").to_owned();
         let mut stream = resp.bytes_stream();
         let mut total: u64 = 0;
         let mut reported: u64 = 0;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+        while let Some(chunk) =
+            crate::http::next_body_chunk(&mut stream, &host, crate::http::BODY_IDLE_TIMEOUT).await?
+        {
             total += chunk.len() as u64;
             if total > MAX_DOWNLOAD_BYTES {
                 return Err(CoreError::Invalid("EPG file is larger than 2 GB".into()));
@@ -223,6 +240,26 @@ async fn download(
             let _ = tokio::fs::remove_file(&path).await;
             Err(err)
         }
+    }
+}
+
+/// In server mode, the `host:port` of the source that owns `url` when the
+/// URL comes from that source (`origin: source`); `None` otherwise.
+async fn owning_source_authority(
+    state: &AppState,
+    url: &str,
+) -> CoreResult<Option<crate::http::Authority>> {
+    if !crate::http::is_server_mode(state) {
+        return Ok(None);
+    }
+    let Some(cfg) = super::ingest::configured(state, url).await? else {
+        return Ok(None);
+    };
+    match (cfg.origin, cfg.source_id) {
+        (crate::model::EpgOrigin::Source, Some(id)) => {
+            crate::http::source_authority(state, &id).await
+        }
+        _ => Ok(None),
     }
 }
 

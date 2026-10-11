@@ -1,5 +1,6 @@
 import { Star } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { formatRating } from '../lib/format';
@@ -45,7 +46,8 @@ export function PosterCard({
   tabIndex,
   active,
 }: PosterCardProps) {
-  const r = formatRating(rating);
+  const { i18n } = useTranslation();
+  const r = formatRating(rating, i18n.language);
   return (
     <Link
       to={href}
@@ -63,7 +65,7 @@ export function PosterCard({
           'motion-safe:transition-[box-shadow,transform] motion-safe:duration-150 motion-safe:group-hover:-translate-y-0.5',
         )}
       >
-        <Poster src={posterUrl} alt="" aspect="poster" />
+        <Poster src={posterUrl} alt="" label={title} aspect="poster" />
         {badge && <div className="pointer-events-none absolute top-1.5 left-1.5 flex gap-1">{badge}</div>}
         {r && (
           <div className="tabular pointer-events-none absolute top-1.5 right-1.5 inline-flex items-center gap-1 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold text-white">

@@ -27,7 +27,7 @@ The list is `settings.epgUrls` (origin `settings`) followed by every source's `e
   - `http::with_retry` gives up to 3 attempts on transient failures.
   - When the previous fetch succeeded with data and an ETag is stored, the request carries `If-None-Match`. A 304 only updates `last_fetch_at`.
   - Non-2xx responses go through `http::status_error`: 404 maps to NotFound, 401/403 map to Auth.
-- `file://` URLs and plain paths are read in place.
+- `file://` URLs and plain paths are read in place on desktop. In server mode they are refused with Unsupported (also up front in `settings.update`, source EPG links and backup import), and a guide detected from a source trusts that source's own `host:port` like the playlist.
 - `open_reader` detects gzip by magic bytes `1f 8b`, independent of name and `Content-Encoding`, and uses `MultiGzDecoder`. Zip, xz and bzip2 are refused with a clear Unsupported error. A UTF-8 BOM is skipped.
 - Logs only ever show `crate::logging::redact_url(url)`, because Xtream `xmltv.php` URLs carry credentials.
 - Temp files are removed after ingest, and leftovers from a crash are cleared at boot.
@@ -40,7 +40,9 @@ Size limits, enforced by a byte-level guard between the decoded reader and quick
 
 - Document: more than `MAX_DOCUMENT_BYTES` (2 GB) read after decompression aborts the ingest with an Invalid error, even if some data was already parsed. Stored data is left alone. This caps gzip bombs.
 - Node: a text, CDATA or comment node passes only its first `MAX_NODE_BYTES` (4 MB) to quick-xml. The rest is read and discarded up to the node's end, and parsing continues. A 300 MB title in a 1.4 MB `.xml.gz` ingests with a peak RSS delta of about 5 MB.
-- Tag: a single tag (attributes included) larger than `MAX_NODE_BYTES` is an Invalid error, because cutting it would corrupt the document.
+- Tag: a single tag (attributes included) larger than `MAX_NODE_BYTES` is an Invalid error, because cutting it would corrupt the document. A `<!DOCTYPE ...>` declaration is capped the same way, and a processing instruction is cut like a text node.
+- The byte filter splits nodes exactly where quick-xml 0.37 splits events (`>` inside a quoted attribute value, `<`/`>` nesting in a DOCTYPE subset, `<?` to the first `?>`, `<![` to `]]>`, `<!-` plus one byte to `-->`), so no single event can grow past the cap (`epg_limits::single_event_bombs_stay_under_the_node_cap`).
+- Download: body chunks are read through `http::next_body_chunk`, so a server that stops mid-body fails after `BODY_IDLE_TIMEOUT` (20 s) with a Timeout that names the host.
 - `xmltv::parse_with_limits` takes both limits explicitly; `parse` uses the constants.
 
 - `<channel id>`: the first non-empty `display-name` and the first non-empty `icon src`.
@@ -95,6 +97,7 @@ The channel directory is cached and rebuilt when the generation counter changes,
   - Programme times are returned as RFC 3339 UTC.
   - Rows from all enabled URLs are merged in start order. Zero-length rows are dropped, equal starts are deduplicated, and overlaps are clipped to the next start.
   - At most 3000 programmes are returned per channel.
+  - `epg.nowNext` also takes `offsetMinutes` (`settings.epgOffsetMinutes`, -720..720). The UI shows every programme moved by the offset, so "now" is the programme airing at `now - offset`; times still come back unshifted and the UI shifts them, so channel rows, the dashboard rail and the ribbon agree. On Stalker sources the UI's row previews treat a `stalker.epg` timeout or network error as a source-wide outage: the preview queue pauses that source (30 s, doubling to 5 min), rows say the guide is not answering, and one "Try again" asks at once.
 - `epg.channelsSearch {query, limit?}` is a LIKE search on display name or id. Results are ordered by name prefix, then id prefix, then length. The default limit is 50 and the maximum is 500.
 - `epg.setMapping {ref, epgChannelId|null}` and `epg.clearMapping {ref}` write or delete the manual row.
 - `epg.clearAll` deletes every programme and guide channel in one transaction and resets each URL to `idle` with zero counts, no error and no ETag (so the next refresh downloads the whole feed). URLs, enabled flags, `last_fetch_at` (so the scheduler does not re-download at once) and manual mappings are kept, as are the staging rows of a refresh that is running. It bumps the runtime generation and emits `epg.changed`.

@@ -103,6 +103,15 @@ pub fn unreachable_error(portal_url: &str) -> CoreError {
     ))
 }
 
+/// User-facing error for a portal that took the connection but did not
+/// answer in time.
+pub fn slow_error(portal_url: &str) -> CoreError {
+    CoreError::Timeout(format!(
+        "{SLOW_PREFIX}{} did not answer in time. Try again later.",
+        portal_host(portal_url)
+    ))
+}
+
 /// `host[:port]` of a URL, or the trimmed input when it does not parse.
 fn portal_host(u: &str) -> String {
     match url::Url::parse(u.trim()) {
@@ -297,9 +306,8 @@ impl StalkerClient {
             let label = label.clone();
             async move {
                 tracing::trace!(%label, "stalker request");
-                let request = self
-                    .state
-                    .http
+                // Server mode: guarded client, portal host:port trusted.
+                let request = crate::http::trusted_client(&self.state, &self.config.portal_url)
                     .get(&url)
                     .headers(headers)
                     .timeout(req.timeout);
@@ -451,10 +459,10 @@ impl StalkerClient {
             Some(CoreError::NotFound(_)) | Some(CoreError::Invalid(_)) | None => CoreError::NotFound(
                 "No Stalker portal answered at this address. Check the portal URL (it usually ends in /c/).".into(),
             ),
-            // Nothing answered at all (refused, DNS, timeout): say so plainly.
-            Some(CoreError::Network(_)) | Some(CoreError::Timeout(_)) => {
-                unreachable_error(&self.config.portal_url)
-            }
+            // Nothing answered at all (refused, DNS): say so plainly.
+            Some(CoreError::Network(_)) => unreachable_error(&self.config.portal_url),
+            // The host took the connection and then stayed silent.
+            Some(CoreError::Timeout(_)) => slow_error(&self.config.portal_url),
             Some(other) => other,
         })
     }
@@ -629,17 +637,14 @@ const SLOW_PREFIX: &str = "The portal at ";
 /// server-mode guard refused (`Invalid`) keeps its own explanation.
 fn send_error(err: CoreError, url: &str) -> CoreError {
     match err {
-        CoreError::Timeout(_) => CoreError::Timeout(format!(
-            "{SLOW_PREFIX}{} did not answer in time. Try again later.",
-            portal_host(url)
-        )),
+        CoreError::Timeout(_) => slow_error(url),
         CoreError::Network(_) => unreachable_error(url),
         other => other,
     }
 }
 
 /// True for [`send_error`] results: the host gave no HTTP answer at all.
-fn is_unreachable(err: &CoreError) -> bool {
+pub(crate) fn is_unreachable(err: &CoreError) -> bool {
     match err {
         CoreError::Network(m) => m.starts_with(UNREACHABLE_PREFIX),
         CoreError::Timeout(m) => m.starts_with(SLOW_PREFIX),

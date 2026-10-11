@@ -101,7 +101,7 @@ Behaviour:
 - `mpv.attach {bounds, volume?, muted?}`: idempotent. With a live session it only moves the window. The optional volume (clamped to 0..100) and mute are passed as `--volume` and `--mute` and stored before mpv starts, so the first `mpv.state` already carries them.
 - `mpv.load {source}`: sends `["loadfile", url, "replace", -1, {force-media-title, user-agent, referrer, http-header-fields: "Origin:<o>", start: "+<resumeSeconds>"}]`. Live sources never seek. If mpv older than 0.38 rejects the 5-argument form, the command is retried as `["loadfile", url, "replace", "k=%len%v,..."]`, where `%len%` quoting keeps commas safe.
 - `mpv.command {cmd}`: passes a raw command through. `quit`, `run`, `subprocess`, `load-script` and similar commands are rejected, and object or array arguments are rejected.
-- `mpv.setProperty {name, value}`: `set_property`.
+- `mpv.setProperty {name, value}`: `set_property`, limited to `SETTABLE_PROPERTIES` (pause, volume, mute, speed, aid, sid, vid, audio-delay, sub-delay, sub-visibility, time-pos); any other name, such as `stream-record`, is Invalid. `mpv.command` applies the same allowlist to property commands (`set`, `set_property`, `add`, `cycle`, `cycle-values`, `change-list`, ...) and also blocks the file-writing `dump-cache`, `screenshot-to-file` and `write-watch-later-config`.
 - `mpv.setBounds {bounds}`: `factory.set_bounds`.
 - `mpv.detach`: sends `quit`, waits 2 s, kills the process if it is still running, destroys the window, and emits a final `{attached: false}` state. It is idempotent.
 - `mpv.record {start}`: sets mpv's `stream-record` property to `<dir>/<title>-YYYYMMDD-HHMM.ts` (unsafe filename characters removed, a ` (n)` suffix when the name is taken), or to `""` to stop. `<dir>` is `settings.recordingsDir`, else `<downloadsDir>/recordings`, and is created when missing. Returns `{recording, path}` and updates `MpvState.recording` and `recordPath`. Loading another source or detaching stops the recording. mpv copies packets without re-encoding and starts writing at the next keyframe.
@@ -123,7 +123,7 @@ Behaviour:
      d3dcompiler_43.dll
      ...
    ```
-3. `vendor/` is gitignored. For a packaged build, add `vendor/mpv/**` to the Tauri bundle resources so the files land beside the installed exe.
+3. Everything in `vendor/mpv/` is gitignored except `LICENSE.txt`, the GPL licence and source notice that ships beside `mpv.exe`. That file names one specific build (mpv version and commit, FFmpeg commit, libplacebo version), so when you swap in a different build, update those lines to match it and keep the source links pointing at the same commits. `pnpm tauri:build:mpv` merges `crates/iptv-tauri/tauri.mpv.conf.json`, which bundles the whole folder, notice included, as resources beside the installed exe.
 4. Check it: Settings > Players should show the detected path, and `player.capabilities` should return `embeddedMpv: true` in the desktop app.
 
 A system mpv works too (WinGet, scoop, choco, or `PATH`), and so does a path set in Settings > Players.

@@ -35,6 +35,9 @@
   "errorTitleInternal": "문제가 발생했습니다",
 
   "errorHintNetwork": "인터넷 연결과 제공업체 URL을 확인한 후 다시 시도하세요.",
+  "errorBodyServerUnreachable": "앱 자체 서버가 응답하지 않아 아무것도 불러오지 못했습니다.",
+  "errorHintServerUnreachable": "Tsrust IPTV 서버가 아직 실행 중인지 확인한 후 다시 시도하세요.",
+  "errorTechnicalDetails": "기술 세부 정보",
   "errorHintTimeout": "제공업체 서버가 혼잡할 수 있습니다. 잠시 후 다시 시도하세요.",
   "errorHintAuth": "소스 설정에서 사용자 이름, 비밀번호 또는 MAC 주소를 확인하세요.",
   "errorHintNotFound": "제공업체에서 삭제했을 수 있습니다. 소스를 새로 고쳐 목록을 업데이트하세요.",

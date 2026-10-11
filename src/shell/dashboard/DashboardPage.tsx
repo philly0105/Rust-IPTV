@@ -85,12 +85,13 @@ export function sharedRailError(errors: readonly unknown[]): unknown {
   return errors.every((e) => e !== null && e !== undefined && errorSignature(e) === sig) ? first : undefined;
 }
 
-function programmeProgress(start?: string, end?: string): number | undefined {
+/** `offsetMinutes`: `settings.epgOffsetMinutes`; the programme is shown moved by it. */
+function programmeProgress(start?: string, end?: string, offsetMinutes = 0): number | undefined {
   if (!start || !end) return undefined;
   const s = Date.parse(start);
   const e = Date.parse(end);
   if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return undefined;
-  return Math.max(0, Math.min(1, (Date.now() - s) / (e - s)));
+  return Math.max(0, Math.min(1, (Date.now() - offsetMinutes * 60_000 - s) / (e - s)));
 }
 
 function Hero({
@@ -119,7 +120,7 @@ function Hero({
           <img src={snap.posterUrl} alt="" className="h-full w-full scale-110 object-cover opacity-40 blur-2xl" referrerPolicy="no-referrer" />
         </div>
       )}
-      <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-surface via-surface/85 to-surface/30" />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-r rtl:bg-gradient-to-l from-surface via-surface/85 to-surface/30" />
       <div className="relative flex items-end gap-8 p-8">
         <div className="hidden w-[150px] shrink-0 md:block">
           <Poster src={snap?.posterUrl} alt={title} aspect="poster" eager className="shadow-2" />
@@ -243,7 +244,8 @@ function DashboardBody() {
   );
 
   const nowRefs = useMemo(() => liveFavorites.map((f) => f.ref), [liveFavorites]);
-  const nowNext = useRpcQuery('epg.nowNext', { refs: nowRefs }, { enabled: nowRefs.length > 0, staleTime: 60_000 });
+  const epgOffset = settings.data?.epgOffsetMinutes ?? 0;
+  const nowNext = useRpcQuery('epg.nowNext', epgOffset ? { refs: nowRefs, offsetMinutes: epgOffset } : { refs: nowRefs }, { enabled: nowRefs.length > 0, staleTime: 60_000 });
 
   // Rail queries actually on screen (each query once), for the shared-error collapse.
   const railQueries = [
@@ -396,7 +398,7 @@ function DashboardBody() {
                 name={f.snapshot.title}
                 logoUrl={f.snapshot.posterUrl}
                 now={nn?.now?.title}
-                nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end)}
+                nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
                 sourceName={sourceById.get(f.ref.sourceId)?.name}
                 isRadio={f.ref.contentType === 'radio'}
                 ariaLabel={t('playTitle', { title: f.snapshot.title })}

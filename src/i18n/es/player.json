@@ -71,7 +71,7 @@
   "cancel": "Cancelar",
   "resumedAt": "Reanudado en {{time}}",
   "externalPlaying": "Reproduciendo en {{player}}",
-  "externalStopHint": "Cierra la ventana de {{player}} para detener la reproducción.",
+  "externalStopHint": "Detén la reproducción aquí o cierra la ventana de {{player}}.",
   "externalExited": "Se cerró {{player}}",
   "dismiss": "Descartar",
   "mpvLoading": "Abriendo el stream en MPV",

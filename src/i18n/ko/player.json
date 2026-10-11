@@ -71,7 +71,7 @@
   "cancel": "취소",
   "resumedAt": "{{time}}부터 이어서 재생합니다",
   "externalPlaying": "{{player}}에서 재생 중",
-  "externalStopHint": "재생을 중지하려면 {{player}} 창을 닫으세요.",
+  "externalStopHint": "여기서 중지하거나 {{player}} 창을 닫으세요.",
   "externalExited": "{{player}} 종료됨",
   "dismiss": "닫기",
   "mpvLoading": "MPV에서 스트림을 여는 중",

@@ -31,6 +31,8 @@ export interface VodPageArgs {
   sourceId: string;
   categoryId?: string;
   query: PageQuery;
+  /** `catalog.*` only: SQLite keeps titles rated at least this, and `total` counts them. */
+  minRating?: number;
 }
 
 export interface GridQueryInput {
@@ -42,6 +44,8 @@ export interface GridQueryInput {
   sort: VodSortKey;
   dir: SortDir;
   search?: string;
+  /** Minimum rating (0 = off). Applied in SQLite for m3u/xtream; Stalker portals cannot filter, see {@link ratingFilterInCore}. */
+  minRating?: number;
 }
 
 export function pageSizeFor(sourceKind: SourceKind): number {
@@ -51,6 +55,11 @@ export function pageSizeFor(sourceKind: SourceKind): number {
 export function pageCommand(sourceKind: SourceKind, kind: VodKind): VodPageCommand {
   if (sourceKind === 'stalker') return kind === 'movie' ? 'stalker.movies' : 'stalker.series';
   return kind === 'movie' ? 'catalog.movies' : 'catalog.series';
+}
+
+/** True when the core filters by rating (SQLite-backed sources); Stalker grids filter loaded pages instead. */
+export function ratingFilterInCore(sourceKind: SourceKind): boolean {
+  return sourceKind !== 'stalker';
 }
 
 /** Default direction when the user picks a sort key: newest/best/latest first, names A..Z. */
@@ -69,6 +78,7 @@ export function buildPageRequest(
   if (search) query.search = search;
   const args: VodPageArgs = { sourceId: input.sourceId, query };
   if (input.categoryId && input.categoryId !== ALL_CATEGORIES) args.categoryId = input.categoryId;
+  if (input.minRating && input.minRating > 0 && ratingFilterInCore(input.sourceKind)) args.minRating = input.minRating;
   return { cmd: pageCommand(input.sourceKind, input.kind), args };
 }
 

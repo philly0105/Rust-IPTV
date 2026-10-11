@@ -71,7 +71,7 @@
   "cancel": "Mégse",
   "resumedAt": "Folytatva innen: {{time}}",
   "externalPlaying": "Lejátszás folyamatban: {{player}}",
-  "externalStopHint": "A lejátszás leállításához zárja be ezt az ablakot: {{player}}.",
+  "externalStopHint": "Állítsa le itt, vagy zárja be ezt az ablakot: {{player}}.",
   "externalExited": "{{player}} bezárult",
   "dismiss": "Elvetés",
   "mpvLoading": "Az adatfolyam megnyitása az MPV-ben",

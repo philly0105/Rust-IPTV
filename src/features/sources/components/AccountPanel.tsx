@@ -21,6 +21,27 @@ export function statusTone(status: string | undefined): Tone {
   return 'warning';
 }
 
+/**
+ * The panel's clock as text. A valid IANA zone formats the time in that zone
+ * and names it ("Oct 11, 2026, 5:14 PM, Europe/Berlin"); an unknown zone falls
+ * back to the viewer's local time without a label, so the two never disagree.
+ * An unparseable time is shown as sent.
+ */
+export function serverTimeText(serverTime: string | undefined, timezone: string | undefined, lang: string): string | undefined {
+  const tz = timezone?.trim() || undefined;
+  if (!serverTime) return tz;
+  const d = new Date(serverTime);
+  if (Number.isNaN(d.getTime())) return [serverTime, tz].filter(Boolean).join(', ');
+  if (tz) {
+    try {
+      return `${new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(d)}, ${tz}`;
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+    }
+  }
+  return absoluteTime(serverTime, lang) ?? serverTime;
+}
+
 /** Keys in a stalker `raw` reply that never belong on screen. */
 const SECRET_KEY = /pass|token|secret|key|signature|serial|device_?id/i;
 
@@ -138,7 +159,7 @@ function XtreamAccountView({ sourceId }: { sourceId: string }) {
         ) : null}
         {a.serverTime || a.timezone ? (
           <Row label={t('accountServerTime')}>
-            {[absoluteTime(a.serverTime, lang) ?? a.serverTime, a.timezone].filter(Boolean).join(', ')}
+            <span data-testid="account-server-time">{serverTimeText(a.serverTime, a.timezone, lang)}</span>
           </Row>
         ) : null}
       </dl>

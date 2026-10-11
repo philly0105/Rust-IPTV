@@ -44,7 +44,7 @@ export function Pagination({ offset, limit, total, onChange, className }: Pagina
       <ul className="flex items-center gap-1">
         <li>
           <button type="button" className={btn} onClick={() => go(current - 1)} disabled={current === 0} aria-label={t('previousPage')}>
-            <ChevronLeft aria-hidden size={16} />
+            <ChevronLeft aria-hidden size={16} className="rtl:rotate-180" />
           </button>
         </li>
         {pageWindow(current, count).map((p, i) =>
@@ -68,7 +68,7 @@ export function Pagination({ offset, limit, total, onChange, className }: Pagina
         )}
         <li>
           <button type="button" className={btn} onClick={() => go(current + 1)} disabled={current >= count - 1} aria-label={t('nextPage')}>
-            <ChevronRight aria-hidden size={16} />
+            <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
           </button>
         </li>
       </ul>

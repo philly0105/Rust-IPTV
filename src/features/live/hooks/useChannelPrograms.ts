@@ -5,6 +5,7 @@ import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 
 import { mergePrograms } from '../lib/epgMerge';
 import { ms } from '../lib/epgTime';
+import { usePortalEpg } from './usePortalEpg';
 
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** `stalker.epg` caps its answer at 50 programmes. */
@@ -37,11 +38,9 @@ export function useChannelPrograms(channel: Channel | undefined, kind: SourceKin
   );
   // `from` is the ribbon's floored window start, so the query key stays stable between renders.
   const past = channel?.archive?.enabled ? { from: new Date(from).toISOString() } : {};
-  const portal = useRpcQuery(
-    'stalker.epg',
-    { ref, limit: STALKER_RIBBON_LIMIT, ...past },
-    { enabled: !!channel && isStalker, staleTime: 5 * 60_000 },
-  );
+  // Not retried on the client: a silent portal already took 20-40 s to time out. With XMLTV the
+  // ribbon keeps showing that; without, it shows the error and its retry button.
+  const portal = usePortalEpg({ ref, limit: STALKER_RIBBON_LIMIT, ...past }, { enabled: !!channel && isStalker, staleTime: 5 * 60_000 });
 
   const programs = useMemo(() => {
     const inWindow = (p: EpgProgram) => ms(p.end) > from && ms(p.start) < to;

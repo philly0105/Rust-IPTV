@@ -30,9 +30,10 @@ Dark is the default when the OS has no stated preference.
 
 All of these are Radix-free and keyboard-complete:
 
-- `Button`, `IconButton`, `buttonClass`
+- `Button`, `IconButton`, `buttonClass`. A `loading` Button sets `aria-disabled` and `aria-busy` and ignores activation instead of using native `disabled`, so keyboard focus stays on it.
+- Direction: primitives and shell use logical utilities (`start-*`/`end-*`, `ps-*`/`pe-*`, `border-s`/`border-e`, `text-start`) and `rtl:` variants for transforms and gradients, so they mirror in RTL; Tabs, VirtualGrid, and the dashboard rails swap ArrowLeft and ArrowRight there, and Menu's `align` is logical. `ErrorState` shows a translated body and a local-server hint when the transport marks a `network` error with `details.transport === 'unreachable'`, with the raw browser text in a details disclosure.
 - `Input`, `Textarea`, `Select`, `Toggle` (role=switch), and `SearchInput`. The first Escape clears the field; the next one propagates.
-- `Dialog`: portal, focus trap, Escape, focus restore, scroll lock, and `[data-autofocus]`. The title row and footer are plain `div`s, because a portaled `<header>`/`<footer>` would add a second banner/contentinfo landmark.
+- `Dialog`: portal, focus trap, Escape, focus restore, scroll lock, and `[data-autofocus]`. The trap stands down once the dialog starts closing, so an always-`open` Dialog that its parent unmounts still hands focus back to the opener. The title row and footer are plain `div`s, because a portaled `<header>`/`<footer>` would add a second banner/contentinfo landmark.
 - `Tabs` and `Menu`: roving focus. Menu also has type-ahead.
 - `Tooltip`, `Kbd`, `Badge`, `LiveBadge`, `ProgressBar`
 - `Skeleton`, `SkeletonList`, `SkeletonGrid`
@@ -91,7 +92,7 @@ Theme: `settings.theme` is mirrored to localStorage (`tsrust.theme`) and applied
 
 Routes: `src/shell/routes.tsx` exports `shellRoutes`:
 
-- the index route is `StartupRedirect`. It goes to `lastRoute` when `startupBehavior` is `restore-last-view`, otherwise to `/dashboard`, or to `/sources` when `showDashboard` is off.
+- the index route is `StartupRedirect`. It goes to `lastRoute` when `startupBehavior` is `restore-last-view`, otherwise to `/dashboard`, or to `/sources` when `showDashboard` is off. On desktop it first waits for the one `app.pendingDeepLinks` pull (`pullStartupDeepLink`, memoized); a cold-start link wins and becomes the only navigation, so a lazy target route or late settings cannot override it. `useShellEvents` navigates to that link itself only when the app did not start at `/` (`src/shell/test/deepLinkStartup.test.tsx`).
 - `dashboard` renders `DashboardPage`.
 
 Wire them as:

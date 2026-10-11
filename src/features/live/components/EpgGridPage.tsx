@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { itemKey, type Channel, type EpgProgram, type ItemKey, type SourceKind } from '@/api/types';
+import { itemKey, type Channel, type EpgProgram, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
 import { Button, EmptyState, ErrorState, Skeleton, useToast } from '@/ui';
 import { useShell } from '@/shell';
@@ -19,6 +19,7 @@ import { mergePrograms } from '../lib/epgMerge';
 import {
   DAY,
   HOUR,
+  MAX_LOOKBACK_HOURS,
   MINUTE,
   canCatchUp,
   floorTo,
@@ -34,6 +35,7 @@ import {
 } from '../lib/epgTime';
 import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, timeStep, useIsRtl } from '../lib/rtl';
+import { GuideUnavailableNotice } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
 
 export const GRID_ROW = 56;
@@ -46,6 +48,49 @@ const HEADER_H = 36;
 /** Portal programmes per row: enough to fill the 6 h window from now. */
 const STALKER_GRID_LIMIT = 12;
 
+/**
+ * `stalker.epg` arguments for the archive channels of a grid window: `from` (the window start)
+ * while the window reaches into the archived past, and only the airing programme when the whole
+ * window is over (the past comes from the day tables, not the short EPG `limit` caps).
+ */
+export function stalkerArchiveQuery(start: number, end: number, now: number, limit = STALKER_GRID_LIMIT): { from?: number; limit: number } {
+  const inArchive = start < now && end > now - MAX_LOOKBACK_HOURS * HOUR;
+  return { from: inArchive ? start : undefined, limit: end <= now ? 1 : limit };
+}
+
+/**
+ * Grid window length for a page `width` px wide: whole 30-minute slots that fill the track
+ * beside the channel column, never less than 6 h (wide screens get a longer window, not a gap).
+ */
+export function gridWindowFor(width: number, channelCol: number): number {
+  const slots = Math.ceil(Math.max(0, width - channelCol) / GRID_SLOT_PX);
+  return Math.max(GRID_WINDOW, slots * GRID_SLOT_MIN * MINUTE);
+}
+
+/** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
+export function stalkerGridLimit(windowMs: number): number {
+  return Math.max(STALKER_GRID_LIMIT, Math.ceil((STALKER_GRID_LIMIT * windowMs) / GRID_WINDOW));
+}
+
+/** Width of the element the callback ref is attached to, kept current by a ResizeObserver. */
+function useElementWidth(): [(el: HTMLElement | null) => void, number] {
+  const [width, setWidth] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: HTMLElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el) return;
+    setWidth(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
+    observer.current = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w !== undefined) setWidth(w);
+    });
+    observer.current.observe(el);
+  }, []);
+  return [ref, width];
+}
+
 function defaultStart(now: number): number {
   return floorTo(now, GRID_SLOT_MIN * MINUTE) - GRID_SLOT_MIN * MINUTE;
 }
@@ -56,7 +101,7 @@ interface Selection {
   rect: { left: number; right: number; top: number; bottom: number };
 }
 
-/** Multi-channel guide: virtualized channel rows x 30-minute columns over a 6 h window. */
+/** Multi-channel guide: virtualized channel rows x 30-minute columns over a window of at least 6 h that fills the page width. */
 export function EpgGridPage() {
   const { t, i18n } = useTranslation('live');
   const { toast } = useToast();
@@ -75,7 +120,9 @@ export function EpgGridPage() {
   const categories = useRpcQuery('catalog.categories', { sourceId, contentType: 'live' }, { enabled: !!sourceId });
 
   const [start, setStart] = useState(() => defaultStart(Date.now()));
-  const end = start + GRID_WINDOW;
+  const [measurePage, pageWidth] = useElementWidth();
+  const windowMs = gridWindowFor(pageWidth, channelCol);
+  const end = start + windowMs;
   const fromIso = new Date(start).toISOString();
   const toIso = new Date(end).toISOString();
 
@@ -117,30 +164,36 @@ export function EpgGridPage() {
   const refsB = chunkB !== chunkA ? chunkRefs(chunkB) : [];
   const gridA = useRpcQuery('epg.grid', { refs: refsA, from: fromIso, to: toIso }, { enabled: refsA.length > 0, staleTime: 5 * 60_000 });
   const gridB = useRpcQuery('epg.grid', { refs: refsB, from: fromIso, to: toIso }, { enabled: refsB.length > 0, staleTime: 5 * 60_000 });
-  // Stalker: the portal's own guide for the visible rows, laid over the XMLTV grid.
+  // Stalker: the portal's own guide for the visible rows, laid over the XMLTV grid. Archive
+  // channels also get the archived past of the window (`from`), so earlier rows and catch-up
+  // work without XMLTV; the others keep the plain airing-onwards answer.
   const isStalker = kind === 'stalker';
   const { getChannel } = paged;
-  const visibleRefs = useMemo(() => {
-    if (!isStalker) return [];
-    const refs = [];
+  const [plainRefs, archiveRefs] = useMemo(() => {
+    const plain: ItemRef[] = [];
+    const archive: ItemRef[] = [];
+    if (!isStalker) return [plain, archive];
     for (let i = first; i <= last; i++) {
       const ch = getChannel(i);
-      if (ch) refs.push(ch.ref);
+      if (ch) (ch.archive?.enabled ? archive : plain).push(ch.ref);
     }
-    return refs;
+    return [plain, archive];
   }, [isStalker, first, last, getChannel]);
-  const portalPrograms = useStalkerPreviews(sourceId, isStalker, visibleRefs, now, STALKER_GRID_LIMIT);
+  const portalLimit = stalkerGridLimit(windowMs);
+  const archiveQuery = stalkerArchiveQuery(start, end, now, portalLimit);
+  const plainPortal = useStalkerPreviews(sourceId, isStalker, plainRefs, now, portalLimit);
+  const archivePortal = useStalkerPreviews(sourceId, isStalker, archiveRefs, now, archiveQuery.limit, archiveQuery.from);
   const programsFor = useCallback(
     (ch: Channel | undefined): EpgProgram[] | undefined => {
       if (!ch) return undefined;
       const k: ItemKey = itemKey(ch.ref);
       const list = gridA.data?.[k] ?? gridB.data?.[k];
-      const portal = isStalker ? portalPrograms(ch.ref) : undefined;
+      const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
       if (portal && portal.length > 0) return shiftPrograms(mergePrograms(portal, list ?? []), prefs.epgOffsetMinutes);
       if (list) return shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), prefs.epgOffsetMinutes);
       return gridA.data || gridB.data ? [] : undefined;
     },
-    [gridA.data, gridB.data, isStalker, portalPrograms, prefs.epgOffsetMinutes],
+    [gridA.data, gridB.data, isStalker, plainPortal, archivePortal, prefs.epgOffsetMinutes],
   );
   const gridError = gridA.error ?? gridB.error;
   const noEpgAnywhere =
@@ -277,13 +330,13 @@ export function EpgGridPage() {
   // ---- actions --------------------------------------------------------------
   const playLive = (channel: Channel) => {
     if (!kind) return;
-    playChannel(channel, kind).catch((err: unknown) =>
+    playChannel(channel, kind, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
       toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
     );
   };
   const catchup = (channel: Channel, program: EpgProgram) => {
     if (!kind) return;
-    playCatchup(channel, kind, program).catch((err: unknown) =>
+    playCatchup(channel, kind, program, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
       toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
     );
   };
@@ -294,7 +347,7 @@ export function EpgGridPage() {
     for (let s = start; s < end; s += GRID_SLOT_MIN * MINUTE) out.push(s);
     return out;
   }, [start, end]);
-  const trackWidth = (GRID_WINDOW / MINUTE) * PX_PER_MIN;
+  const trackWidth = (windowMs / MINUTE) * PX_PER_MIN;
   const nowInWindow = now >= start && now < end;
   const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
 
@@ -330,7 +383,7 @@ export function EpgGridPage() {
     'h-8 max-w-48 min-w-0 rounded-md border border-border bg-surface-2 px-2 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col bg-bg" data-testid="epg-grid-page">
+    <div ref={measurePage} className="flex h-full min-h-0 w-full min-w-0 flex-col bg-bg" data-testid="epg-grid-page">
       {heading}
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-2">
         <select aria-label={t('guideSource')} className={selectClass} value={sourceId} onChange={(e) => setQuery('source', e.target.value)}>
@@ -369,6 +422,13 @@ export function EpgGridPage() {
             {t('retry')}
           </button>
         </div>
+      ) : plainPortal.unavailable || archivePortal.unavailable ? (
+        <GuideUnavailableNotice
+          onRetry={() => {
+            plainPortal.retry();
+            archivePortal.retry();
+          }}
+        />
       ) : noEpgAnywhere ? (
         <div className="flex items-center gap-2 border-b border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted">
           {t('guideNoData')}

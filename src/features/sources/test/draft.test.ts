@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAddArgs, buildUpdatePatch, emptyDraft, type SourceDraft } from '../lib/draft';
+import { buildAddArgs, buildUpdatePatch, emptyDraft, patchNeedsRefresh, type SourceDraft } from '../lib/draft';
 import { addSourceHref, addSourcePathFromDeepLink } from '../lib/links';
 import { checkHttpUrl, formatMacInput, hasInfomirOui, looksLikeFullPortal, normalizeMac, normalizeXtreamServer, parseXtreamLink } from '../lib/validate';
 import { makeSource } from './harness';
@@ -187,6 +187,26 @@ describe('buildUpdatePatch', () => {
     d.autoRefresh = src.autoRefresh;
     const r = buildUpdatePatch(src, d, web);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe('patchNeedsRefresh', () => {
+  const url = makeSource('u', { m3u: { origin: 'url', url: 'http://a.example/x.m3u', headers: { userAgent: 'A/1' } } });
+  const text = makeSource('t', { m3u: { origin: 'text', headers: {} } });
+
+  it('is false for a header-only edit of a URL playlist', () => {
+    expect(patchNeedsRefresh({ m3u: { origin: 'url', url: 'http://a.example/x.m3u', headers: { userAgent: 'B/2' } } }, url)).toBe(false);
+  });
+  it('is true when the playlist address changes', () => {
+    expect(patchNeedsRefresh({ m3u: { origin: 'url', url: 'http://b.example/x.m3u', headers: { userAgent: 'A/1' } } }, url)).toBe(true);
+  });
+  it('is false for a pasted playlist, which cannot refresh', () => {
+    expect(patchNeedsRefresh({ m3u: { origin: 'text', headers: { userAgent: 'EditedUA/2' } } }, text)).toBe(false);
+    expect(patchNeedsRefresh({ m3u: { origin: 'text', headers: { userAgent: 'EditedUA/2' } } })).toBe(false);
+  });
+  it('is true for portal and Xtream config changes, false for name-only edits', () => {
+    expect(patchNeedsRefresh({ xtream: { serverUrl: 'http://x', username: 'a', password: 'b' } })).toBe(true);
+    expect(patchNeedsRefresh({ name: 'Renamed' }, url)).toBe(false);
   });
 });
 

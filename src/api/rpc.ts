@@ -227,8 +227,8 @@ export interface RpcMap {
     { sourceId: string; categoryId?: string; query: PageQuery; includeHidden?: boolean; radio?: boolean },
     Page<Channel>
   >;
-  'catalog.movies': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery }, Page<VodItem>>;
-  'catalog.series': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery }, Page<SeriesItem>>;
+  'catalog.movies': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery; /** Only titles rated at least this (unrated drop out); `total` counts the filtered set. */ minRating?: number }, Page<VodItem>>;
+  'catalog.series': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery; /** Only titles rated at least this (unrated drop out); `total` counts the filtered set. */ minRating?: number }, Page<SeriesItem>>;
   /** Shape by `ref.contentType`. */
   'catalog.item': Cmd<{ ref: ItemRef }, Channel | VodItem | SeriesItem>;
   'catalog.channelByNumber': Cmd<{ sourceId: string; number: number; contentType?: 'live' | 'radio' }, Channel | null>;
@@ -324,7 +324,8 @@ export interface RpcMap {
   'epg.sources': Cmd<void, EpgSourceStatus[]>;
   /** All enabled, or one; runs in background; emits epg.progress and epg.changed. */
   'epg.refresh': Cmd<{ url?: string }, void>;
-  'epg.nowNext': Cmd<{ refs: ItemRef[] }, Record<ItemKey, EpgNowNext>>;
+  /** `offsetMinutes` (`settings.epgOffsetMinutes`, -720..720): "now" is the programme airing at `now - offset`; times stay unshifted. */
+  'epg.nowNext': Cmd<{ refs: ItemRef[]; offsetMinutes?: number }, Record<ItemKey, EpgNowNext>>;
   'epg.programs': Cmd<{ ref: ItemRef; from: string; to: string }, EpgProgram[]>;
   'epg.grid': Cmd<{ refs: ItemRef[]; from: string; to: string }, Record<ItemKey, EpgProgram[]>>;
   'epg.channelsSearch': Cmd<{ query: string; limit?: number }, EpgChannelMatch[]>;

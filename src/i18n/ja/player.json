@@ -71,7 +71,7 @@
   "cancel": "キャンセル",
   "resumedAt": "{{time}}から再開しました",
   "externalPlaying": "{{player}}で再生中",
-  "externalStopHint": "再生を停止するには、{{player}}のウィンドウを閉じてください。",
+  "externalStopHint": "ここで停止するか、{{player}}のウィンドウを閉じてください。",
   "externalExited": "{{player}}が終了しました",
   "dismiss": "閉じる",
   "mpvLoading": "MPVでストリームを開いています",

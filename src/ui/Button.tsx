@@ -13,13 +13,17 @@ export interface ButtonProps extends ComponentPropsWithRef<'button'> {
   icon?: ReactNode;
   /** Trailing icon element. */
   iconRight?: ReactNode;
-  /** Shows a spinner, disables the button, and sets aria-busy. */
+  /**
+   * Shows a spinner, sets aria-busy, and ignores activation. Uses aria-disabled rather than
+   * native `disabled` so keyboard focus stays on the button while it works.
+   */
   loading?: boolean;
 }
 
 const base =
   'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium select-none ' +
-  'disabled:cursor-not-allowed disabled:opacity-50 motion-safe:transition-colors motion-safe:duration-150';
+  'disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ' +
+  'motion-safe:transition-colors motion-safe:duration-150';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'bg-accent text-accent-fg hover:bg-accent-hover shadow-1',
@@ -48,15 +52,25 @@ export function Button({
   className,
   children,
   type = 'button',
+  onClick,
   ...rest
 }: ButtonProps) {
   return (
     <button
       type={type}
       className={buttonClass(variant, size, className)}
-      disabled={disabled || loading}
+      disabled={disabled}
+      aria-disabled={loading || undefined}
       aria-busy={loading || undefined}
       {...rest}
+      onClick={(e) => {
+        // Blocks Enter/Space/click and implicit form submission while loading.
+        if (loading) {
+          e.preventDefault();
+          return;
+        }
+        onClick?.(e);
+      }}
     >
       {loading ? <LoaderCircle aria-hidden size={16} className="motion-safe:animate-spin" /> : icon}
       {children}

@@ -35,8 +35,8 @@ pnpm install
 Server flags: `iptv-server --port 7180 --data-dir ./.data --static ./dist`. It binds 127.0.0.1 unless you pass `--host`. Details are in `docs/architecture/server.md`.
 
 - The API answers only when the browser uses localhost, an IP address, or a name listed in `--allowed-hosts` / `IPTV_ALLOWED_HOSTS` (comma list). Behind a reverse proxy at `tv.example.com`, set `IPTV_ALLOWED_HOSTS=tv.example.com`.
-- The stream proxy and downloads only reach LAN addresses that belong to the source's own host and port. Pass `--allow-private-targets` (`IPTV_ALLOW_PRIVATE_TARGETS=true`) on a trusted network to lift that.
-- In the browser, playlists cannot be opened from the server's disk (upload the text instead), and downloads always go to `<data dir>/downloads`.
+- The stream proxy, downloads and playlist, guide, Xtream and Stalker requests only reach LAN addresses that belong to the source's own host and port. Pass `--allow-private-targets` (`IPTV_ALLOW_PRIVATE_TARGETS=true`, or `1`/`yes`/`on`) on a trusted network to lift that.
+- In the browser, playlists and EPG files cannot be opened from the server's disk (upload the playlist text or use an http(s) guide URL instead), and downloads always go to `<data dir>/downloads`.
 - `iptv-server --health` checks a running server; the Docker image uses it as its HEALTHCHECK.
 - The web build can be installed as an app (PWA manifest and service worker).
 
@@ -115,4 +115,4 @@ The updater is off unless the app is built with `--features updater` (for exampl
 
 Licence not chosen yet. The workspace manifests say MIT as a placeholder; confirm before publishing.
 
-The mpv build bundled by `pnpm tauri:build:mpv` is GPL-2.0-or-later and ships with its licence and source notice in `vendor/mpv/LICENSE.txt`, which is installed beside `mpv.exe`. Tsrust IPTV runs mpv as a separate process and does not link it.
+The mpv build bundled by `pnpm tauri:build:mpv` is GPL-2.0-or-later and ships with its licence and source notice in `vendor/mpv/LICENSE.txt`, which is installed beside `mpv.exe`. Tsrust IPTV runs mpv as a separate process and does not link it. That file is the only tracked file in `vendor/mpv/` and describes one specific build: when you replace the mpv build, update its version and commit lines (mpv, FFmpeg, libplacebo) to match the new one before building the installer.

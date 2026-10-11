@@ -35,6 +35,9 @@
   "errorTitleInternal": "發生錯誤",
 
   "errorHintNetwork": "請檢查網路連線與供應商 URL，然後再試一次。",
+  "errorBodyServerUnreachable": "應用程式內建的伺服器沒有回應，因此無法載入任何內容。",
+  "errorHintServerUnreachable": "請確認 Tsrust IPTV 伺服器仍在執行，然後再試一次。",
+  "errorTechnicalDetails": "技術詳細資料",
   "errorHintTimeout": "供應商可能忙碌中，請稍後再試。",
   "errorHintAuth": "請在播放來源設定中檢查使用者名稱、密碼或 MAC 位址。",
   "errorHintNotFound": "供應商可能已將其移除。請重新整理播放來源以更新清單。",

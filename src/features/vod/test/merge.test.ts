@@ -165,6 +165,20 @@ describe('episodes', () => {
     expect(resumeTarget([], [])).toBeUndefined();
   });
 
+  it('skips episodes already marked watched (R2-r2 F3)', () => {
+    const order = episodeOrder(seasons); // a1 a2 b1 b2 sp1
+    const w = (episodeId: string, updatedAt: string) => ({ ref: sref, episodeId, positionSeconds: 1000, durationSeconds: 1000, updatedAt, watched: true });
+    // "Mark season watched" on season 1, with E1 written last: start S02E01, not S01E02.
+    expect(resumeTarget(order, [w('a2', '2026-10-11T15:16:37.504Z'), w('a1', '2026-10-11T15:16:37.505Z')])).toEqual({ episode: order[2], resume: false });
+    // Walks past every watched episode after the latest finished one.
+    expect(resumeTarget(order, [w('a1', '2026-10-03'), w('a2', '2026-10-01'), w('b1', '2026-10-02')])).toEqual({ episode: order[3], resume: false });
+    // Latest finished is the last episode: the first unwatched one overall.
+    expect(resumeTarget(order, [w('sp1', '2026-10-05'), w('a1', '2026-10-01')])).toEqual({ episode: order[1], resume: false });
+    // Everything watched: back to the first episode.
+    const all = order.map((e, i) => w(e.id, `2026-10-0${i + 1}`));
+    expect(resumeTarget(order, all)).toEqual({ episode: order[0], resume: false });
+  });
+
   it('extracts YouTube keys from common URL shapes', () => {
     expect(youtubeKey('https://youtu.be/Way9Dexny3w')).toBe('Way9Dexny3w');
     expect(youtubeKey('https://www.youtube.com/embed/Way9Dexny3w?x=1')).toBe('Way9Dexny3w');

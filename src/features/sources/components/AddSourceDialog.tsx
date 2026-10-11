@@ -168,8 +168,10 @@ export function AddSourceDialog({
       const err = RpcError.from(e);
       setSubmitError(err);
       // The core keeps a source whose import failed (with lastError) and names it in the error.
-      // Remember it so the next submit retries it rather than adding a duplicate.
-      const id = failedSourceId(err);
+      // Remember it so the next submit retries it rather than adding a duplicate. A transport
+      // failure (proxy 504, network blip during a long import) names nothing although the core
+      // may already have created the row: look for it among the sources that are new since submit.
+      const id = failedSourceId(err) ?? (failed ? null : await adoptCreatedSource(built.value));
       if (id) claimRef.current.failedId = id;
       if (id) setFailed({ id, name: built.value.name });
       else setFailed((f) => (f ? { ...f, name: built.value.name } : f));
@@ -177,6 +179,25 @@ export function AddSourceDialog({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /**
+   * The source this dialog's `sources.add` created when the response never arrived: the one id
+   * not known at the first submit (or, when several are new, the one with this kind and name).
+   */
+  const adoptCreatedSource = async (args: SourcesAddArgs): Promise<string | null> => {
+    const known = claimRef.current.knownAtSubmit;
+    if (!known) return null;
+    let list: Source[];
+    try {
+      list = await rpc('sources.list');
+    } catch {
+      return null;
+    }
+    const fresh = list.filter((s) => !known.has(s.id));
+    if (fresh.length === 1) return fresh[0]!.id;
+    const same = fresh.filter((s) => s.kind === args.kind && s.name === args.name);
+    return same.length === 1 ? same[0]!.id : null;
   };
 
   /**

@@ -166,11 +166,32 @@ impl Runtime {
         self.page_sizes.retain(|k, _| !k.starts_with(&prefix));
     }
 
-    /// Drops everything cached in memory for a source (it was removed; its
-    /// `stalker_items` rows go with the `sources` row).
+    /// Drops everything cached in memory for a source (it was removed, or
+    /// now points at another portal). See [`forget_source`] for the
+    /// persisted rows.
     pub fn forget_source(&self, source_id: &str) {
         self.items.remove_prefix(&format!("{source_id}|"));
         self.forget_listings(source_id);
+    }
+}
+
+/// Forgets every row remembered for a source, in memory and in
+/// `stalker_items`. Called when the source is removed, replaced by a backup,
+/// or its portal URL or MAC changes, so details and playback never use a
+/// row (command, stream and poster URLs) listed by another portal.
+pub async fn forget_source(state: &AppState, source_id: &str) {
+    let rt = Runtime::get(state);
+    rt.forget_source(source_id);
+    let sid = source_id.to_string();
+    let res = state
+        .db_call(move |conn| {
+            ensure_items_table(&rt, conn)?;
+            conn.execute("DELETE FROM stalker_items WHERE source_id = ?1", [&sid])?;
+            Ok(())
+        })
+        .await;
+    if let Err(err) = res {
+        tracing::warn!(error = %err, "could not drop cached Stalker rows");
     }
 }
 

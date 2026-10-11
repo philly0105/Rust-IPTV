@@ -323,7 +323,8 @@ describe('server refusal reasons', () => {
   it('only treats our own server routes as having readable bodies', () => {
     expect(isOwnServerUrl('/api/proxy?url=x')).toBe(true);
     expect(isOwnServerUrl(`${window.location.origin}/api/files/abc`)).toBe(true);
-    expect(isOwnServerUrl('http://127.0.0.1:51234/api/proxy?url=x')).toBe(true); // desktop loopback proxy
+    expect(isOwnServerUrl('http://127.0.0.1:51234/api/proxy?url=x')).toBe(true); // desktop loopback proxy (legacy form)
+    expect(isOwnServerUrl('http://127.0.0.1:51234/s3cr3tTok/api/proxy?url=x')).toBe(true); // desktop loopback proxy with token
     expect(isOwnServerUrl('http://provider.example/live/1.ts')).toBe(false);
     expect(isOwnServerUrl('http://provider.example/api/stream')).toBe(false);
   });

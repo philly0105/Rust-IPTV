@@ -74,7 +74,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         </span>
       )}
       <button type="button" tabIndex={-1} onClick={onOpen} className={cn('shrink-0 overflow-hidden rounded-sm', square ? 'w-12' : 'w-9')}>
-        <Poster src={snapshot.posterUrl} alt="" aspect={square ? 'square' : 'poster'} />
+        <Poster src={snapshot.posterUrl} alt="" label={snapshot.title} aspect={square ? 'square' : 'poster'} />
       </button>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start text-left">
         <span className="w-full truncate text-sm font-medium text-fg">{snapshot.title}</span>

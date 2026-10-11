@@ -98,6 +98,8 @@ export interface SourceFacet {
   sourceId: string;
   sourceName: string;
   count: number;
+  /** The source has hits in a type that hit its cap, so `count` is a lower bound ("N+"). */
+  partial: boolean;
 }
 
 /** Trimmed query, or '' when it is too short to search. */
@@ -165,13 +167,18 @@ export function groupSearchResults(input: GroupInput): SearchGroup[] {
   return SEARCH_GROUP_ORDER.map((kind) => ({ kind, hits: groups[kind] })).filter((g) => g.hits.length > 0);
 }
 
-/** Per-source hit counts across all groups, largest first, for the source filter chips. */
-export function sourceFacets(groups: SearchGroup[]): SourceFacet[] {
+/**
+ * Per-source hit counts across all groups, largest first, for the source
+ * filter chips. `more` (from `capSearchResult`) marks a source partial when it
+ * contributes to a type that hit its cap.
+ */
+export function sourceFacets(groups: SearchGroup[], more?: SearchMore): SourceFacet[] {
   const map = new Map<string, SourceFacet>();
   for (const g of groups) {
     for (const h of g.hits) {
-      const f = map.get(h.sourceId) ?? { sourceId: h.sourceId, sourceName: h.sourceName, count: 0 };
+      const f = map.get(h.sourceId) ?? { sourceId: h.sourceId, sourceName: h.sourceName, count: 0, partial: false };
       f.count += 1;
+      if (more?.[g.kind]) f.partial = true;
       map.set(h.sourceId, f);
     }
   }

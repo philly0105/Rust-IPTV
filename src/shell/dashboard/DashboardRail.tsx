@@ -210,7 +210,7 @@ export function DashboardRail<T>({
               aria-label={t('scrollBack')}
               onClick={() => scrollBy(-1)}
               className={cn(
-                'absolute top-0 bottom-3 left-0 hidden w-12 items-center justify-center bg-gradient-to-r from-bg to-transparent text-fg',
+                'absolute top-0 bottom-3 start-0 hidden w-12 items-center justify-center bg-gradient-to-r rtl:bg-gradient-to-l from-bg to-transparent text-fg',
                 'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
               )}
             >
@@ -224,7 +224,7 @@ export function DashboardRail<T>({
               aria-label={t('scrollForward')}
               onClick={() => scrollBy(1)}
               className={cn(
-                'absolute top-0 right-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l from-bg to-transparent text-fg',
+                'absolute top-0 end-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l rtl:bg-gradient-to-r from-bg to-transparent text-fg',
                 'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
               )}
             >

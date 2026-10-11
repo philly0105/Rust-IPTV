@@ -71,7 +71,7 @@
   "cancel": "Annuler",
   "resumedAt": "Repris à {{time}}",
   "externalPlaying": "Lecture dans {{player}}",
-  "externalStopHint": "Fermez la fenêtre {{player}} pour arrêter la lecture.",
+  "externalStopHint": "Arrêtez ici, ou fermez la fenêtre {{player}}.",
   "externalExited": "{{player}} fermé",
   "dismiss": "Ignorer",
   "mpvLoading": "Ouverture du flux dans MPV",

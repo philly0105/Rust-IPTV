@@ -10,7 +10,7 @@ import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
 import { vodRoutes } from '../routes';
-import { i18n, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
+import { currentLocation, i18n, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -490,6 +490,36 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       renderAt('/search?q=dune', [{ path: '/search', element: <SearchPage /> }]);
       await screen.findByRole('heading', { name: /Movies\s*60$/ });
       expect(screen.queryByTestId('vod-search-capped')).toBeNull();
+    });
+
+    it('a source facet searches that source and marks capped chip counts "N+" (R2-r2 F4)', async () => {
+      // Each source has 100 matching movies; the all-sources page interleaves them.
+      rpcMock.handlers['catalog.search'] = (a) => {
+        const { limit, sourceId } = a as { limit: number; sourceId?: string };
+        const all = Array.from({ length: 200 }, (_, i) => movie(i, i % 2 === 0 ? 'src1' : 'src2'));
+        return { live: [], movies: all.filter((m) => !sourceId || m.ref.sourceId === sourceId).slice(0, limit), series: [] };
+      };
+      rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
+      renderAt('/search?q=movie', [{ path: '/search', element: <SearchPage /> }]);
+      const chips = await screen.findByRole('group', { name: 'Filter by source' });
+      expect(within(chips).getByRole('button', { name: /Beta Portal\s*30\+/ })).toBeTruthy();
+      expect(within(chips).getByRole('button', { name: /Alpha IPTV\s*30\+/ })).toBeTruthy();
+
+      fireEvent.click(within(chips).getByRole('button', { name: /Beta Portal/ }));
+      await screen.findByRole('heading', { name: /Movies\s*60\+/ });
+      expect(currentLocation).toBe('/search?q=movie&source=src2');
+      expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 61 });
+      // Every card belongs to the facet's source, and the chips still list both sources.
+      expect(document.querySelectorAll('a[href^="/s/src1/movie/"]')).toHaveLength(0);
+      expect(document.querySelectorAll('a[href^="/s/src2/movie/"]').length).toBeGreaterThan(30);
+      const after = screen.getByRole('group', { name: 'Filter by source' });
+      expect(within(after).getByRole('button', { name: /Alpha IPTV\s*30\+/ }).getAttribute('aria-pressed')).toBe('false');
+      expect(within(after).getByRole('button', { name: /Beta Portal\s*30\+/ }).getAttribute('aria-pressed')).toBe('true');
+
+      // "Show more" steps the facet's own search.
+      fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 200' }));
+      await screen.findByRole('heading', { name: /Movies\s*100$/ });
+      expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 201 });
     });
   });
 });

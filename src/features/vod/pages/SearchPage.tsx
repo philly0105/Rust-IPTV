@@ -95,15 +95,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     [sourceId, scopedSource.data, allSources],
   );
 
-  // Per-type cap, raised by "Show more"; any new query or scope starts again at the first step.
-  const capKey = `${sourceId ?? ''}\u0000${query}`;
+  // Per-type cap, raised by "Show more"; any new query, scope, or source facet starts again at the first step.
+  const capKey = `${sourceId ?? ''}\u0000${facet ?? ''}\u0000${query}`;
   const [cap, setCap] = useState({ key: capKey, limit: SEARCH_LIMIT });
   const limit = cap.key === capKey ? cap.limit : SEARCH_LIMIT;
   const nextLimit = nextSearchLimit(limit);
 
   const requestLimit = searchRequestLimit(limit);
-  const catalogArgs = sourceId ? { query, sourceId, limit: requestLimit } : { query, limit: requestLimit };
+  // A source facet searches that source alone, so its results and caps are its own.
+  const searchSourceId = sourceId ?? facet;
+  const catalogArgs = searchSourceId ? { query, sourceId: searchSourceId, limit: requestLimit } : { query, limit: requestLimit };
   const catalog = useRpcQuery('catalog.search', catalogArgs, { enabled: !!query, staleTime: 30_000, keepPrevious: true });
+  // The chips keep counting every source while a facet narrows the results.
+  const facetBase = useRpcQuery(
+    'catalog.search',
+    { query, limit: searchRequestLimit(SEARCH_LIMIT) },
+    { enabled: !!query && !!facet, staleTime: 30_000 },
+  );
   const stalker = useStalkerSearch(searchSources, query);
 
   // While a larger page loads, the previous page stays on screen: cap it by the limit it was fetched with.
@@ -126,14 +134,20 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       }),
     [capped.result, stalker.movies, stalker.series, allSources, searchSources, facet],
   );
+  const facetCapped = useMemo(
+    () => (facet ? capSearchResult(facetBase.data, SEARCH_LIMIT) : capped),
+    [facet, facetBase.data, capped],
+  );
   const facets = useMemo(
     () =>
       scoped
         ? []
         : sourceFacets(
-            groupSearchResults({ result: capped.result, extraMovies: stalker.movies, extraSeries: stalker.series, sources: allSources }),
+            groupSearchResults({ result: facetCapped.result, extraMovies: stalker.movies, extraSeries: stalker.series, sources: allSources }),
+            // A source in a capped type counts a lower bound, so its chip reads "N+".
+            facetCapped.more,
           ),
-    [scoped, capped.result, stalker.movies, stalker.series, allSources],
+    [scoped, facetCapped.result, facetCapped.more, stalker.movies, stalker.series, allSources],
   );
 
   const scopeName = scopedSource.data?.name;
@@ -193,7 +207,13 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           <div role="group" aria-label={t('filterBySource')} className="flex flex-wrap gap-2">
             <FacetChip active={!facet} onClick={() => setFacet(undefined)} label={t('allSources')} />
             {facets.map((f) => (
-              <FacetChip key={f.sourceId} active={facet === f.sourceId} onClick={() => setFacet(f.sourceId)} label={f.sourceName} count={f.count} />
+              <FacetChip
+                key={f.sourceId}
+                active={facet === f.sourceId}
+                onClick={() => setFacet(f.sourceId)}
+                label={f.sourceName}
+                count={f.partial ? t('searchCountMore', { count: f.count }) : f.count}
+              />
             ))}
           </div>
         )}
@@ -232,7 +252,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   );
 }
 
-function FacetChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number }) {
+function FacetChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number | string }) {
   return (
     <button
       type="button"

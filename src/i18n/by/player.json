@@ -71,7 +71,7 @@
   "cancel": "Скасаваць",
   "resumedAt": "Працягнута з {{time}}",
   "externalPlaying": "Прайграецца ў {{player}}",
-  "externalStopHint": "Закрыйце акно {{player}}, каб спыніць прайграванне.",
+  "externalStopHint": "Спыніце прайграванне тут або закрыйце акно {{player}}.",
   "externalExited": "{{player}} закрыты",
   "dismiss": "Схаваць",
   "mpvLoading": "Адкрыццё патоку ў MPV",

@@ -2,9 +2,9 @@
 //!
 //! The shell is thin: it builds `AppState` under the platform app-data dir,
 //! exposes one `rpc` command that forwards to `iptv_core::rpc::RpcRouter`, and
-//! bridges core events to the webview as `app-event`. Plugins: dialog, shell,
-//! opener, notification, deep-link (`iptv://`), single-instance, window-state,
-//! and (feature `updater`) the updater. A tray icon offers Show / Quit.
+//! bridges core events to the webview as `app-event`. Plugins: dialog,
+//! opener, deep-link (`iptv://`), single-instance, window-state, and (feature
+//! `updater`) the updater. A tray icon offers Show / Quit.
 //!
 //! On Windows, `mpv_window` provides the child window embedded mpv renders
 //! into. `proxy` serves a loopback media proxy so inline playback can send
@@ -68,6 +68,23 @@ async fn rpc(
     router
         .dispatch(state, &cmd, args.unwrap_or(serde_json::Value::Null))
         .await
+}
+
+/// Logs deep links (action names only: an `add` link's query can carry
+/// playlist credentials) and hands them to the core queue or the live event.
+fn log_and_deliver_deep_links(state: &AppState, via: &str, urls: Vec<String>) {
+    let actions: Vec<&str> = urls
+        .iter()
+        .map(|u| {
+            u.trim_start_matches("iptv:")
+                .trim_start_matches('/')
+                .split(['/', '?', '#'])
+                .next()
+                .unwrap_or("")
+        })
+        .collect();
+    tracing::info!(via, count = urls.len(), ?actions, "deep links received");
+    deliver_deep_links(state, urls);
 }
 
 /// Lets the webview play files from `dir` through the asset protocol
@@ -235,11 +252,15 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let state = Arc::clone(&state);
         app.deep_link().on_open_url(move |event| {
             let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
-            deliver_deep_links(&state, urls);
+            log_and_deliver_deep_links(&state, "open", urls);
         });
     }
     if let Ok(Some(urls)) = app.deep_link().get_current() {
-        deliver_deep_links(&state, urls.iter().map(|u| u.to_string()).collect());
+        log_and_deliver_deep_links(
+            &state,
+            "launch",
+            urls.iter().map(|u| u.to_string()).collect(),
+        );
     }
 
     #[cfg(all(
@@ -313,9 +334,7 @@ pub fn run() {
     builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {

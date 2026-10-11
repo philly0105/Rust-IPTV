@@ -92,7 +92,8 @@ async function callWeb(cmd: string, args: unknown): Promise<unknown> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network request failed';
-    throw new RpcError('network', `Cannot reach the server: ${message}`, true);
+    // `details.transport` tells the UI the app's own server is unreachable (not a provider error).
+    throw new RpcError('network', `Cannot reach the server: ${message}`, true, { transport: 'unreachable' });
   }
 
   const text = await res.text();

@@ -15,12 +15,27 @@ export interface PreviewQueueOptions {
   delayMs?: number;
   /** At most this many channels are fetched per sync (top of the visible window first). */
   maxPerSync?: number;
+  /** First pause after the portal's guide times out or the network fails; doubles per failure. */
+  backoffMs?: number;
+  /** Longest pause between two attempts at a silent portal. */
+  maxBackoffMs?: number;
   clock?: () => number;
 }
 
 interface Entry {
   programs: EpgProgram[];
   at: number;
+}
+
+/**
+ * A timeout or network failure: the portal did not answer at all (`stalker.epg` gives up after
+ * 20 s, 40 s with `from`). Asking the other rows would only queue more 20 s waits, so the whole
+ * source backs off instead. Anything else (a bad channel, a parse error) only affects its row.
+ */
+export function isTransientEpgError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { retryable?: unknown; code?: unknown };
+  return e.retryable === true || e.code === 'timeout' || e.code === 'network';
 }
 
 /**
@@ -36,6 +51,12 @@ export class StalkerPreviewQueue {
   private workers = 0;
   private generation = 0;
   private destroyed = false;
+  /** Last wanted set, replayed when a backoff ends or on `retry()`. */
+  private wanted: readonly ItemRef[] = [];
+  /** Consecutive transient failures; 0 while the portal answers. */
+  private failures = 0;
+  private pausedUntil = 0;
+  private resumeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly opts: Required<PreviewQueueOptions>;
 
   constructor(
@@ -49,6 +70,8 @@ export class StalkerPreviewQueue {
       concurrency: 2,
       delayMs: 150,
       maxPerSync: 30,
+      backoffMs: 30_000,
+      maxBackoffMs: 5 * 60_000,
       clock: Date.now,
       ...options,
     };
@@ -62,9 +85,36 @@ export class StalkerPreviewQueue {
     return this.usable(e) ? e.programs : undefined;
   }
 
+  /**
+   * True after the portal's guide timed out or the network failed, until an answer arrives.
+   * Rows keep their cached programmes; the rest show the guide as unavailable.
+   */
+  get unavailable(): boolean {
+    return this.failures > 0;
+  }
+
+  /** When the next automatic attempt runs (epoch ms), while backing off. */
+  get retryAt(): number | undefined {
+    return this.failures > 0 && this.pausedUntil > this.opts.clock() ? this.pausedUntil : undefined;
+  }
+
+  /** Ends the backoff now and asks the portal again for the wanted rows. */
+  retry(): void {
+    if (this.destroyed) return;
+    this.clearTimer();
+    this.pausedUntil = 0;
+    this.sync(this.wanted);
+  }
+
   /** Replaces the wanted set with `refs` (in display order) and starts fetching what is missing. */
   sync(refs: readonly ItemRef[]): void {
     if (this.destroyed) return;
+    this.wanted = refs;
+    // Backing off a silent portal: the timer replays the wanted set when the pause ends.
+    if (this.pausedUntil > this.opts.clock()) {
+      this.queue = [];
+      return;
+    }
     const missing: ItemRef[] = [];
     const seen = new Set<ItemKey>();
     for (const ref of refs) {
@@ -86,6 +136,30 @@ export class StalkerPreviewQueue {
     this.cache.clear();
     this.inFlight.clear();
     this.queue = [];
+    this.failures = 0;
+    this.pausedUntil = 0;
+    this.clearTimer();
+  }
+
+  private clearTimer(): void {
+    if (this.resumeTimer !== undefined) clearTimeout(this.resumeTimer);
+    this.resumeTimer = undefined;
+  }
+
+  /** One more transient failure: pause the whole source, doubling the pause each time. */
+  private backOff(): void {
+    const now = this.opts.clock();
+    // Workers already in flight when the pause began fail the same way; count the outage once.
+    if (this.pausedUntil > now) return;
+    this.failures++;
+    const pause = Math.min(this.opts.backoffMs * 2 ** (this.failures - 1), this.opts.maxBackoffMs);
+    this.pausedUntil = now + pause;
+    this.queue = [];
+    this.clearTimer();
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = undefined;
+      if (!this.destroyed) this.sync(this.wanted);
+    }, pause);
   }
 
   destroy(): void {
@@ -98,8 +172,10 @@ export class StalkerPreviewQueue {
     if (e.programs.length === 0) return now - e.at < this.opts.emptyTtlMs;
     if (now - e.at >= this.opts.ttlMs) return false;
     // A programme boundary always triggers a fresh request instead of serving the one that ended.
-    const first = e.programs.find((p) => ms(p.end) > ms(p.start));
-    return !!first && ms(first.end) > now;
+    // The boundary is the end of the programme airing when the answer came; archived programmes
+    // before it (an answer asked with `from`) are already over and never make the entry stale.
+    const airing = e.programs.find((p) => ms(p.end) > ms(p.start) && ms(p.end) > e.at);
+    return !airing || ms(airing.end) > now;
   }
 
   private pump(): void {
@@ -117,14 +193,25 @@ export class StalkerPreviewQueue {
         const key = itemKey(ref);
         this.inFlight.add(key);
         let programs: EpgProgram[];
+        let transient = false;
+        let answered = true;
         try {
           programs = await this.fetchPrograms(ref);
-        } catch {
+        } catch (err) {
           programs = [];
+          answered = false;
+          transient = isTransientEpgError(err);
         }
         if (this.destroyed || gen !== this.generation) return;
         this.inFlight.delete(key);
-        this.cache.set(key, { programs, at: this.opts.clock() });
+        if (transient) {
+          // Nothing cached for the row: it is asked again once the source's pause ends.
+          this.backOff();
+        } else {
+          // Only an answer proves the portal is back; a per-row error says nothing about it.
+          if (answered) this.failures = 0;
+          this.cache.set(key, { programs, at: this.opts.clock() });
+        }
         this.onUpdate();
         if (this.queue.length > 0 && this.opts.delayMs > 0) await new Promise((r) => setTimeout(r, this.opts.delayMs));
       }

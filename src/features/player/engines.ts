@@ -122,13 +122,13 @@ const MAX_REASON = 300;
 
 /**
  * A URL answered by our own server: the web `/api/...` routes (proxy, files) or the
- * desktop loopback proxy (`http://127.0.0.1:<port>/api/proxy`). Their non-2xx bodies
+ * desktop loopback proxy (`http://127.0.0.1:<port>/<token>/api/proxy`). Their non-2xx bodies
  * carry a readable reason (an RpcError JSON or plain text); upstream bodies do not.
  */
 export function isOwnServerUrl(url: string): boolean {
   try {
     const u = new URL(url, window.location.href);
-    if (u.pathname === '/api/proxy') return true;
+    if (u.pathname.endsWith('/api/proxy')) return true; // web route, or desktop `/<token>/api/proxy`
     return u.origin === window.location.origin && u.pathname.startsWith('/api/');
   } catch {
     return false;

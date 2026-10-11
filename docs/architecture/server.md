@@ -14,7 +14,7 @@ iptv-server --port 7180 --data-dir ./data --static ./dist
 | `--host` | `IPTV_HOST` | 127.0.0.1 | Interface to bind |
 | `--data-dir` | `IPTV_DATA_DIR` | `./data` | Database, logs, downloads |
 | `--static` | `IPTV_STATIC_DIR` | `./dist` | Output of `pnpm build` |
-| `--allow-private-targets` | `IPTV_ALLOW_PRIVATE_TARGETS` | off | Let the proxy, downloads and playlist/EPG fetches reach any LAN host |
+| `--allow-private-targets` | `IPTV_ALLOW_PRIVATE_TARGETS` | off | Let the proxy, downloads and playlist/EPG/Xtream/Stalker fetches reach any LAN host (env accepts `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`) |
 | `--allowed-hosts` | `IPTV_ALLOWED_HOSTS` | empty | Extra `Host` names accepted on `/api` (comma list; `*` turns the check off) |
 | `--health` | | | Probe `/api/health` on `--port` and exit 0 when healthy (Docker HEALTHCHECK) |
 
@@ -77,7 +77,8 @@ needs source headers or would be mixed content.
 3. Address policy (below). Refusals are 403 with an `RpcError` body.
 4. Fetch with the source's User-Agent / Referer / Origin (non-empty `ua`,
    `referer` and `origin` query parameters override them, for per-channel
-   `#EXTVLCOPT` headers) and the client's
+   `#EXTVLCOPT` headers; an override that is not a valid header value, such
+   as one with CR/LF, is a 400) and the client's
    `Range` / `If-Range` (not for `.m3u8`/`.m3u` paths). Redirects are followed by
    hand, up to 5, and each hop is re-validated. Connect failures and timeouts
    are retried twice with the core's backoff. Response headers must arrive
@@ -104,7 +105,8 @@ needs source headers or would be mixed content.
    the final URL and replaced with `/api/proxy?url=<absolute>&sourceId=<id>`
    (plus any `ua`/`referer`/`origin` overrides).
    `data:` and `skd:` URIs are left alone. The response is 200
-   `application/vnd.apple.mpegurl` with `Cache-Control: no-cache`.
+   `application/vnd.apple.mpegurl` (always; the upstream type is never
+   echoed) with `Cache-Control: no-cache`.
 
 Address policy. A target must be a public address unless it is the
 requesting source's own `host:port` (another port on the same LAN host is
@@ -119,9 +121,15 @@ trusted to resolve privately.
 
 The same guard lives in `iptv_core::http` (`NetGuard`, `ServerMode`), and
 `iptv-server` installs it on the core at startup: in server mode downloads,
-M3U URL imports and XMLTV downloads use a guarded client too, each trusting
-only its own source's `host:port`. The desktop app does not install it and
-may fetch from the LAN freely.
+M3U URL imports, XMLTV downloads and Xtream/Stalker API calls use a guarded
+client too, each trusting only its own source's `host:port` (a guide detected
+from a source trusts that source's `host:port`). Its redirect policy applies
+the port rule above: a redirect to another port of a trusted host name that
+resolves privately is refused. No client sends `Referer`, so redirects never
+carry Xtream credentials. Local EPG paths and `file://` guide URLs are
+refused (501). The desktop app does not install it and
+may fetch from the LAN freely. Its loopback media proxy reuses this route with
+private targets allowed; see [desktop.md](desktop.md).
 
 Consequence: an M3U playlist fetched from a public URL whose channels live on
 a LAN box will be refused for those channels; run with

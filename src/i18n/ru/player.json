@@ -71,7 +71,7 @@
   "cancel": "Отмена",
   "resumedAt": "Продолжено с {{time}}",
   "externalPlaying": "Воспроизводится в {{player}}",
-  "externalStopHint": "Закройте окно {{player}}, чтобы остановить воспроизведение.",
+  "externalStopHint": "Остановите воспроизведение здесь или закройте окно {{player}}.",
   "externalExited": "{{player}} закрыт",
   "dismiss": "Скрыть",
   "mpvLoading": "Открытие потока в MPV",

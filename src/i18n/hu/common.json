@@ -35,6 +35,9 @@
   "errorTitleInternal": "Hiba történt",
 
   "errorHintNetwork": "Ellenőrizze a kapcsolatot és a szolgáltató URL-címét, majd próbálja újra.",
+  "errorBodyServerUnreachable": "Az alkalmazás saját kiszolgálója nem válaszol, ezért semmi sem töltődött be.",
+  "errorHintServerUnreachable": "Ellenőrizze, hogy a Tsrust IPTV kiszolgáló még fut-e, majd próbálja újra.",
+  "errorTechnicalDetails": "Technikai részletek",
   "errorHintTimeout": "Lehet, hogy a szolgáltató túlterhelt. Próbálja újra kicsit később.",
   "errorHintAuth": "Ellenőrizze a felhasználónevet, a jelszót vagy a MAC-címet a forrás beállításaiban.",
   "errorHintNotFound": "Lehet, hogy a szolgáltató eltávolította. A lista frissítéséhez frissítse a forrást.",

@@ -19,13 +19,11 @@ iptv-fixtures = { path = "crates/iptv-fixtures" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-updater = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-window-state = "2"
-tauri-plugin-notification = "2"
 
 # Storage
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -66,7 +64,6 @@ tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
-md5 = "0.7"
 dirs = "6"
 rand = "0.8"
 memory-stats = "1"

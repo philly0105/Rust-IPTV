@@ -94,6 +94,14 @@ pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings>
         // Before validation, so a server client cannot probe which paths exist.
         check_desktop_only(&current, &merged, &DESKTOP_ONLY_FIELDS)?;
     }
+    // Server mode refuses new local EPG paths up front (no file access).
+    for u in merged
+        .epg_urls
+        .iter()
+        .filter(|u| !current.epg_urls.contains(u))
+    {
+        crate::epg::fetch::check_server_url(state, u)?;
+    }
     let next = validate(&current, merged)?;
     if next == current {
         // Nothing changed: skip the write and the event.

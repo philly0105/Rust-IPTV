@@ -38,15 +38,23 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
 
   const move = (e: KeyboardEvent<HTMLDivElement>) => {
     const idx = enabled.findIndex((i) => i.id === value);
+    // Arrow keys follow the screen: in RTL the tab row is mirrored, so ArrowLeft moves forward.
+    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
+    const forward = (idx + 1) % enabled.length;
+    const back = (idx - 1 + enabled.length) % enabled.length;
     let next = -1;
     switch (e.key) {
       case 'ArrowRight':
-      case 'ArrowDown':
-        next = (idx + 1) % enabled.length;
+        next = rtl ? back : forward;
         break;
       case 'ArrowLeft':
+        next = rtl ? forward : back;
+        break;
+      case 'ArrowDown':
+        next = forward;
+        break;
       case 'ArrowUp':
-        next = (idx - 1 + enabled.length) % enabled.length;
+        next = back;
         break;
       case 'Home':
         next = 0;

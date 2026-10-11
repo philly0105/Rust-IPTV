@@ -8,6 +8,7 @@ use iptv_core::player::args::{
 };
 use iptv_core::player::embedded::{
     legacy_options, recording_file_name, stream_record_command, validate_command,
+    validate_property, SETTABLE_PROPERTIES,
 };
 use iptv_core::player::external::{build_args, ExternalPlayer};
 use serde_json::json;
@@ -458,4 +459,75 @@ fn raw_commands_are_validated() {
     assert!(validate_command(&[json!("run"), json!("calc.exe")]).is_err());
     assert!(validate_command(&[json!("subprocess"), json!("x")]).is_err());
     assert!(validate_command(&[json!("loadfile"), json!({"a": 1})]).is_err());
+}
+
+#[test]
+fn only_ui_properties_can_be_set() {
+    // Everything the player UI sends through mpv.setProperty.
+    for name in ["pause", "volume", "mute", "speed", "aid", "sid"] {
+        assert!(validate_property(name).is_ok(), "{name}");
+        assert!(SETTABLE_PROPERTIES.contains(&name));
+    }
+    assert!(validate_property(" volume ").is_ok());
+    // Path-writing and arbitrary properties are refused as Invalid.
+    for name in [
+        "stream-record",
+        "dump-cache",
+        "screenshot-directory",
+        "log-file",
+        "input-ipc-server",
+        "scripts",
+        "",
+        "  ",
+    ] {
+        let err = validate_property(name).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{name}: {err:?}");
+    }
+}
+
+#[test]
+fn property_commands_cannot_bypass_the_allowlist() {
+    for cmd in [
+        vec![
+            json!("set_property"),
+            json!("stream-record"),
+            json!("C:/x.ts"),
+        ],
+        vec![json!("set"), json!("stream-record"), json!("C:/x.ts")],
+        vec![
+            json!("set_property_string"),
+            json!("dump-cache"),
+            json!("x"),
+        ],
+        vec![
+            json!("cycle-values"),
+            json!("!reverse"),
+            json!("stream-record"),
+            json!("a"),
+            json!("b"),
+        ],
+        vec![
+            json!("change-list"),
+            json!("scripts"),
+            json!("append"),
+            json!("C:/evil.lua"),
+        ],
+        vec![json!("add"), json!("stream-record")],
+        vec![json!("set_property")],
+        vec![json!("dump-cache"), json!(0), json!("no"), json!("C:/x.ts")],
+        vec![json!("screenshot-to-file"), json!("C:/x.png")],
+    ] {
+        let err = validate_command(&cmd).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{cmd:?}: {err:?}");
+    }
+    assert!(validate_command(&[json!("add"), json!("volume"), json!(5)]).is_ok());
+    assert!(validate_command(&[json!("cycle"), json!("mute")]).is_ok());
+    assert!(validate_command(&[
+        json!("cycle-values"),
+        json!("!reverse"),
+        json!("speed"),
+        json!(1),
+        json!(2)
+    ])
+    .is_ok());
 }

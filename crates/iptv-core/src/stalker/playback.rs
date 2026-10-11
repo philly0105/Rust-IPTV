@@ -308,9 +308,16 @@ fn check_archive_window(
     Ok(())
 }
 
+/// True when the portal gave no usable answer in time (no HTTP answer at
+/// all, or too slow). Falling back to another call would only wait again.
+fn no_answer(err: &CoreError) -> bool {
+    matches!(err, CoreError::Timeout(_)) || session::is_unreachable(err)
+}
+
 /// Every row of one day's programme table (`get_simple_data_table`), or
 /// `None` when the portal serves no table. Ministra serves it under `epg`;
-/// some builds only under `itv`. Auth failures propagate.
+/// some builds only under `itv`. Auth failures and a portal that does not
+/// answer ([`no_answer`]) propagate.
 async fn day_table(
     client: &StalkerClient,
     channel_id: &str,
@@ -327,6 +334,7 @@ async fn day_table(
             let js = match client.call(req).await {
                 Ok(js) => js,
                 Err(err @ CoreError::Auth(_)) => return Err(err),
+                Err(err) if no_answer(&err) => return Err(err),
                 Err(_) => break,
             };
             let total = n(&js, "total_items");
@@ -380,17 +388,31 @@ async fn find_archive_program(
 /// Furthest `stalker.epg` looks back with `from`.
 const MAX_PAST_DAYS: i64 = 7;
 
-/// Past programmes from `from` up to now, read from the day tables.
+/// Overall budget of `stalker.epg` without `from` (short EPG, or the bulk
+/// fallback). Past it the call fails with the slow-portal message.
+pub const EPG_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+/// Overall budget of `stalker.epg` with `from` (adds up to nine day tables).
+pub const EPG_PAST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40);
+
+/// The day tables [`past_programmes`] reads: the UTC dates from `from`
+/// (at most [`MAX_PAST_DAYS`] back) through the day after `now`, each once.
+fn past_days(from: DateTime<Utc>, now: DateTime<Utc>) -> Vec<NaiveDate> {
+    let first = from.max(now - Duration::days(MAX_PAST_DAYS)).date_naive();
+    let last = now.date_naive() + Duration::days(1);
+    first.iter_days().take_while(|d| *d <= last).collect()
+}
+
+/// Past programmes from `from` up to now, read from the day tables. The
+/// tables follow the portal's timezone (Europe/Paris), not UTC, so the
+/// programmes after local midnight sit in the next UTC date's table: that
+/// one is read too, and the caller drops what has not started yet.
 async fn past_programmes(
     client: &StalkerClient,
     channel_id: &str,
     from: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> CoreResult<Vec<Value>> {
-    let first = from.max(now - Duration::days(MAX_PAST_DAYS)).date_naive();
-    let last = now.date_naive();
-    let days: Vec<NaiveDate> = first.iter_days().take_while(|d| *d <= last).collect();
-    let tables: Vec<CoreResult<Option<Vec<Value>>>> = stream::iter(days)
+    let tables: Vec<CoreResult<Option<Vec<Value>>>> = stream::iter(past_days(from, now))
         .map(|d| day_table(client, channel_id, d))
         .buffered(3)
         .collect()
@@ -404,10 +426,14 @@ async fn past_programmes(
     Ok(out)
 }
 
-/// `stalker.epg`: short EPG, falling back to the bulk `get_epg_info`. With
-/// `from`, the archived programmes since `from` (day tables, at most
-/// [`MAX_PAST_DAYS`] back) come first; `limit` caps the airing and upcoming
-/// ones.
+/// `stalker.epg`: short EPG, falling back to the bulk `get_epg_info` when
+/// the portal answers without programmes. With `from`, the archived
+/// programmes since `from` (day tables, at most [`MAX_PAST_DAYS`] back) come
+/// first; `limit` caps the airing and upcoming ones.
+///
+/// The whole call is bounded by [`EPG_DEADLINE`] ([`EPG_PAST_DEADLINE`] with
+/// a past `from`). A portal that does not answer fails the call with its
+/// own message instead of falling back to slower calls or returning `[]`.
 pub async fn epg(
     state: &Arc<AppState>,
     r: &ItemRef,
@@ -426,12 +452,35 @@ pub async fn epg(
         ),
         None => None,
     };
+    let client = StalkerClient::for_source(state, &r.source_id).await?;
+    let from = from.filter(|f| *f < Utc::now());
+    let budget = if from.is_some() {
+        EPG_PAST_DEADLINE
+    } else {
+        EPG_DEADLINE
+    };
+    match tokio::time::timeout(budget, portal_epg(state, &client, r, limit, from)).await {
+        Ok(res) => res,
+        Err(_) => {
+            tracing::debug!(source_id = %r.source_id, "stalker.epg ran out of time");
+            Err(session::slow_error(&client.config.portal_url))
+        }
+    }
+}
+
+/// The body of [`epg`], without its deadline.
+async fn portal_epg(
+    state: &Arc<AppState>,
+    client: &StalkerClient,
+    r: &ItemRef,
+    limit: i64,
+    from: Option<DateTime<Utc>>,
+) -> CoreResult<Vec<EpgProgram>> {
     let row = catalog_row(state, r).await.ok();
     let channel_id = row
         .as_ref()
         .and_then(|r| r.epg_channel_id.clone())
         .unwrap_or_else(|| r.item_id.clone());
-    let client = StalkerClient::for_source(state, &r.source_id).await?;
 
     let short = client
         .call(
@@ -443,10 +492,12 @@ pub async fn epg(
     let mut entries = match short {
         Ok(js) => into_list(js),
         Err(err @ CoreError::Auth(_)) => return Err(err),
+        // Silent or unreachable portal: the bulk call would only wait longer.
+        Err(err) if no_answer(&err) => return Err(err),
         Err(_) => Vec::new(),
     };
     if entries.is_empty() {
-        if let Ok(js) = client
+        match client
             .call(
                 Req::new("itv", "get_epg_info")
                     .p("period", 6)
@@ -454,11 +505,15 @@ pub async fn epg(
             )
             .await
         {
-            let data = js.get("data").cloned().unwrap_or(js);
-            entries = match data.get(&r.item_id) {
-                Some(Value::Array(a)) => a.clone(),
-                _ => Vec::new(),
-            };
+            Ok(js) => {
+                let data = js.get("data").cloned().unwrap_or(js);
+                entries = match data.get(&r.item_id) {
+                    Some(Value::Array(a)) => a.clone(),
+                    _ => Vec::new(),
+                };
+            }
+            Err(err) if no_answer(&err) => return Err(err),
+            Err(_) => {}
         }
     }
     let now_at = Utc::now();
@@ -474,9 +529,10 @@ pub async fn epg(
 
     if let Some(from_at) = from.filter(|f| *f < now_at) {
         let from_s = from_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let past = match past_programmes(&client, &r.item_id, from_at, now_at).await {
+        let past = match past_programmes(client, &r.item_id, from_at, now_at).await {
             Ok(rows) => rows,
             Err(err @ CoreError::Auth(_)) => return Err(err),
+            Err(err) if no_answer(&err) => return Err(err),
             Err(_) => Vec::new(),
         };
         let earliest_upcoming = programs.first().map(|p| p.start.clone());
@@ -656,6 +712,27 @@ pub fn user_message(err: &CoreError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn past_days_include_the_next_utc_date() {
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
+        // 22:30 UTC is already the next day in Paris: that table is read too.
+        let now = at("2026-10-11T22:30:00Z");
+        assert_eq!(
+            past_days(at("2026-10-11T18:00:00Z"), now),
+            vec![d("2026-10-11"), d("2026-10-12")]
+        );
+        assert_eq!(
+            past_days(at("2026-10-10T23:00:00Z"), now),
+            vec![d("2026-10-10"), d("2026-10-11"), d("2026-10-12")]
+        );
+        // Capped at MAX_PAST_DAYS back, each date once.
+        let days = past_days(at("2026-09-01T00:00:00Z"), now);
+        assert_eq!(days.first(), Some(&d("2026-10-04")));
+        assert_eq!(days.last(), Some(&d("2026-10-12")));
+        assert_eq!(days.len(), 9);
+    }
 
     #[test]
     fn archive_window_rejects_future_and_too_old_starts() {

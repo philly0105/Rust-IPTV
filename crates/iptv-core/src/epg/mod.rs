@@ -93,14 +93,33 @@ fn resolve_many(
         .collect()
 }
 
+/// Largest `epg.nowNext` `offsetMinutes` accepted (the `epgOffsetMinutes` setting range).
+pub const MAX_OFFSET_MINUTES: i32 = 720;
+
 /// `epg.nowNext`: keyed by `ItemRef::key()`; refs without EPG map to `{}`.
 pub async fn now_next(
     state: &AppState,
     refs: Vec<ItemRef>,
 ) -> CoreResult<HashMap<String, EpgNowNext>> {
+    now_next_with_offset(state, refs, 0).await
+}
+
+/// `epg.nowNext` with `offsetMinutes` (`settings.epgOffsetMinutes`): the UI shows every
+/// programme moved by the offset, so the one airing on screen is the one the raw guide has
+/// airing at `now - offset`. Programmes come back unshifted; the UI shifts them for display.
+pub async fn now_next_with_offset(
+    state: &AppState,
+    refs: Vec<ItemRef>,
+    offset_minutes: i32,
+) -> CoreResult<HashMap<String, EpgNowNext>> {
     check_refs(&refs)?;
+    if !(-MAX_OFFSET_MINUTES..=MAX_OFFSET_MINUTES).contains(&offset_minutes) {
+        return Err(CoreError::Invalid(format!(
+            "offsetMinutes must be between -{MAX_OFFSET_MINUTES} and {MAX_OFFSET_MINUTES}, got {offset_minutes}"
+        )));
+    }
     let rt = runtime(state);
-    let now = chrono::Utc::now().timestamp();
+    let now = chrono::Utc::now().timestamp() - i64::from(offset_minutes) * 60;
     state
         .db_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;

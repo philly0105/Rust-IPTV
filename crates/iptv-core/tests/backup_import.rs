@@ -1082,3 +1082,68 @@ async fn large_raw_m3u_is_stored_on_disk_not_inline() {
     assert_eq!(sha_after, sha);
     assert_eq!(std::fs::read_to_string(&cached).unwrap(), text);
 }
+
+/// R3 round 2 F3 + F6: a Stalker source restored through `backup.import`
+/// records the portal totals (as `sources.add` does), a failed one stores
+/// the plain message (no `kind:` prefix), and a replace drops rows the
+/// stalker runtime remembered for the re-created id.
+#[tokio::test]
+async fn stalker_restore_records_totals_and_plain_errors() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let (_dir, state) = app(false).await;
+    let r = router();
+    let portal = mock.url("/stalker/c");
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [
+            {
+                "portalType": "stalker",
+                "exportedId": "stk-good",
+                "title": "Good portal",
+                "connection": { "portalUrl": portal, "macAddress": "00:1A:79:00:00:01", "isFullStalkerPortal": true },
+                "userState": { "favorites": [], "recentlyViewed": [] }
+            },
+            {
+                "portalType": "stalker",
+                "exportedId": "stk-bad",
+                "title": "Wrong MAC",
+                "connection": { "portalUrl": portal, "macAddress": "00:1A:79:00:00:99", "isFullStalkerPortal": true },
+                "userState": { "favorites": [], "recentlyViewed": [] }
+            }
+        ]
+    })
+    .to_string();
+    import(&r, &state, &manifest, "merge").await;
+
+    let check = |sources: Vec<Source>| {
+        let good = sources.iter().find(|s| s.id == "stk-good").unwrap();
+        assert_eq!(
+            (good.channel_count, good.movie_count, good.series_count),
+            (30, 30, 10),
+            "{good:?}"
+        );
+        assert_eq!(good.last_error, None);
+        let bad = sources.iter().find(|s| s.id == "stk-bad").unwrap();
+        assert_eq!(
+            bad.last_error.as_deref(),
+            Some("This MAC address is not registered on the portal. Check the MAC or contact your provider. Portal message: Your STB is not registered. Call the provider."),
+            "{bad:?}"
+        );
+    };
+    check(iptv_core::sources::list(&state).await.unwrap());
+
+    // A row remembered for the id must not survive a replace that
+    // re-creates the id (possibly against another portal).
+    let rt = iptv_core::stalker::Runtime::get(&state);
+    rt.items.insert(
+        "stk-good|movie|5005".into(),
+        iptv_core::stalker::CachedItem {
+            raw: json!({"id": "5005", "cmd": "http://old-portal.invalid/5005.mp4"}),
+            category_name: None,
+        },
+    );
+    import(&r, &state, &manifest, "replace").await;
+    assert!(!rt.items.contains_key("stk-good|movie|5005"));
+    check(iptv_core::sources::list(&state).await.unwrap());
+}

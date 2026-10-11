@@ -92,7 +92,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       }
       if (when !== 'future' && canCatchUp(p, channel, sourceKind, now) && (when === 'past' || props.watchingLive)) {
         try {
-          await playCatchup(channel, sourceKind!, p);
+          await playCatchup(channel, sourceKind!, p, undefined, channelName);
         } catch (err) {
           toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
         }
@@ -100,7 +100,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       }
       setFocused(p);
     },
-    [channel, now, props, sourceKind, t, toast],
+    [channel, channelName, now, props, sourceKind, t, toast],
   );
 
   const header = (
@@ -108,13 +108,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className="min-w-0 flex-1">
         {shown ? (
           <>
-            <p className="flex min-w-0 items-center gap-2 text-xs text-fg-muted">
+            {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
+            <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
               {programWhen(shown, now) === 'now' ? (
                 <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px text-[10px] font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
               ) : null}
               <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">{formatRange(shown, i18n.language)}</span>
               {programWhen(shown, now) === 'now' ? (
-                <span className="shrink-0 whitespace-nowrap" data-testid="ribbon-remaining">
+                <span className="min-w-0 truncate whitespace-nowrap" data-testid="ribbon-remaining" title={t('minutesLeft', { count: minutesLeft(shown, now) })}>
                   {t('minutesLeft', { count: minutesLeft(shown, now) })}
                 </span>
               ) : null}
@@ -134,8 +135,17 @@ export function EpgRibbon(props: EpgRibbonProps) {
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {channel && !props.watchingLive ? (
-          <Button size="sm" variant="secondary" icon={<Radio className="size-3.5" />} onClick={() => props.onPlayLive(channel)}>
-            {t('backToLive')}
+          // Icon-only below 1440 px, where the pane is too narrow for the label and the programme line together.
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Radio className="size-3.5" />}
+            aria-label={t('backToLive')}
+            title={t('backToLive')}
+            data-testid="ribbon-back-to-live"
+            onClick={() => props.onPlayLive(channel)}
+          >
+            <span className="hidden min-[1440px]:inline">{t('backToLive')}</span>
           </Button>
         ) : null}
         <div role="group" aria-label={t('guideView')} className="flex rounded-md border border-border p-0.5">

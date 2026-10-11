@@ -14,7 +14,8 @@
 //!
 //! Server mode (SSRF guard): the server binary installs [`ServerMode`] in the
 //! state's extensions. Core fetches of user-supplied URLs (downloads,
-//! playlists, XMLTV) then use [`client_for`], whose DNS resolver and redirect
+//! playlists, XMLTV; Xtream/Stalker via [`trusted_client`]) then use the
+//! guarded client ([`client_for`]), whose DNS resolver and redirect
 //! policy refuse loopback, private and link-local addresses, and call
 //! [`check_fetch`] first. A source's own `host:port` is trusted for that
 //! source's fetches; `--allow-private-targets` turns the guard off. The
@@ -65,6 +66,9 @@ fn builder(user_agent: Option<&str>) -> reqwest::ClientBuilder {
         .read_timeout(READ_TIMEOUT)
         .gzip(true)
         .brotli(true)
+        // Never send a Referer on redirects: it would carry the previous URL
+        // (Xtream credentials in the query) to the redirect target.
+        .referer(false)
 }
 
 fn build(b: reqwest::ClientBuilder) -> reqwest::Client {
@@ -549,21 +553,57 @@ impl NetGuard {
         let Some(auth) = Authority::of(url) else {
             return Ok(());
         };
-        let is_name = matches!(url.host(), Some(Host::Domain(_)));
-        if !is_name || trusted == Some(&auth) || !self.trusted.contains_host(&auth.host) {
+        if !self.needs_port_check(url, &auth, trusted) {
             return Ok(());
         }
         let addrs: Vec<SocketAddr> = tokio::net::lookup_host((auth.host.as_str(), auth.port))
             .await
             .map(Iterator::collect)
             .unwrap_or_default();
-        if addrs.iter().any(|a| !is_public_ip(a.ip())) {
-            return Err(TargetError::Forbidden(format!(
-                "Refusing to connect to {auth}: only the source's own port on this private host is allowed. {ALLOW_PRIVATE_HINT}"
-            )));
-        }
-        Ok(())
+        other_port_verdict(&auth, &addrs)
     }
+
+    /// The port rule of [`NetGuard::check`] for the synchronous redirect
+    /// policy. Resolves with a blocking lookup, which only happens for a
+    /// redirect to a trusted host name on a port that is not trusted.
+    fn check_other_port_blocking(
+        &self,
+        url: &Url,
+        trusted: Option<&Authority>,
+    ) -> Result<(), TargetError> {
+        if self.allow_private {
+            return Ok(());
+        }
+        let Some(auth) = Authority::of(url) else {
+            return Ok(());
+        };
+        if !self.needs_port_check(url, &auth, trusted) {
+            return Ok(());
+        }
+        use std::net::ToSocketAddrs;
+        let addrs: Vec<SocketAddr> = (auth.host.as_str(), auth.port)
+            .to_socket_addrs()
+            .map(Iterator::collect)
+            .unwrap_or_default();
+        other_port_verdict(&auth, &addrs)
+    }
+
+    /// A host name trusted only on another port.
+    fn needs_port_check(&self, url: &Url, auth: &Authority, trusted: Option<&Authority>) -> bool {
+        matches!(url.host(), Some(Host::Domain(_)))
+            && trusted != Some(auth)
+            && !self.trusted.contains(auth)
+            && self.trusted.contains_host(&auth.host)
+    }
+}
+
+fn other_port_verdict(auth: &Authority, addrs: &[SocketAddr]) -> Result<(), TargetError> {
+    if addrs.iter().any(|a| !is_public_ip(a.ip())) {
+        return Err(TargetError::Forbidden(format!(
+            "Refusing to connect to {auth}: only the source's own port on this private host is allowed. {ALLOW_PRIVATE_HINT}"
+        )));
+    }
+    Ok(())
 }
 
 /// Marker and guarded client installed by the server binary (extension
@@ -591,9 +631,13 @@ impl ServerMode {
             }
             let url = attempt.url();
             // IP literals are checked here (exact host:port trust); host
-            // names by the resolver when the redirect connects.
+            // names by the resolver when the redirect connects, except a
+            // name trusted only on another port (the resolver trusts names
+            // on every port), which gets NetGuard::check's port rule here.
             let trusted = Authority::of(url).filter(|a| policy_guard.trusted.contains(a));
-            match check_target(url, trusted.as_ref(), policy_guard.allow_private) {
+            let checked = check_target(url, trusted.as_ref(), policy_guard.allow_private)
+                .and_then(|()| policy_guard.check_other_port_blocking(url, trusted.as_ref()));
+            match checked {
                 Ok(()) => attempt.follow(),
                 Err(TargetError::Invalid(m) | TargetError::Forbidden(m)) => {
                     attempt.error(BlockedTarget(m))
@@ -638,6 +682,22 @@ pub fn client_for(state: &AppState) -> reqwest::Client {
     }
 }
 
+/// Client for a source's own API (Xtream server, Stalker portal). In server
+/// mode this is the guarded client with the `host:port` of `own_url` (the
+/// configured server or portal URL) trusted, so redirects elsewhere stay
+/// guarded; otherwise `state.http`.
+pub fn trusted_client(state: &AppState, own_url: &str) -> reqwest::Client {
+    match server_mode(state) {
+        Some(mode) => {
+            if let Some(a) = Authority::parse_lenient(own_url) {
+                mode.guard.trust(&a);
+            }
+            mode.client.clone()
+        }
+        None => state.http.clone(),
+    }
+}
+
 /// Validates a URL about to be fetched in server mode (no-op otherwise).
 /// `trusted` is the requesting source's own authority; it is recorded so the
 /// guarded resolver lets that host resolve to a private address.
@@ -655,6 +715,34 @@ pub async fn check_fetch(
         mode.guard.trust(t);
     }
     mode.guard.check(&parsed, trusted).await.map_err(Into::into)
+}
+
+/// Longest gap between two chunks of a playlist or EPG body before the
+/// download is abandoned. Shorter than [`READ_TIMEOUT`]: a server that stops
+/// mid-body rarely resumes.
+pub const BODY_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Next chunk of a response body, waiting at most `idle` for it. A stall is a
+/// `Timeout` and any other failure goes through [`transport_error`], so both
+/// name `host` and say what to do next.
+pub async fn next_body_chunk<S, T>(
+    stream: &mut S,
+    host: &str,
+    idle: Duration,
+) -> CoreResult<Option<T>>
+where
+    S: futures::Stream<Item = reqwest::Result<T>> + Unpin,
+{
+    use futures::StreamExt;
+    match tokio::time::timeout(idle, stream.next()).await {
+        Ok(Some(Ok(chunk))) => Ok(Some(chunk)),
+        Ok(Some(Err(err))) => Err(transport_error(host, err)),
+        Ok(None) => Ok(None),
+        Err(_) => Err(CoreError::Timeout(format!(
+            "{host} stopped sending data in the middle of the download (nothing for {} s). Check that the server is online, then try again.",
+            idle.as_secs()
+        ))),
+    }
 }
 
 #[cfg(test)]

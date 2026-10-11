@@ -64,6 +64,8 @@
   "guideSource": "Sorgente",
   "guideTime": "Orario della guida",
   "guideLoadFailed": "Una parte della guida non è stata caricata.",
+  "portalGuideUnavailable": "La guida del portale non risponde. Verrà interrogata di nuovo automaticamente.",
+  "guideNotAnswering": "La guida non risponde",
   "guideNoData": "Ancora nessun dato della guida per questi canali. Aggiungi un indirizzo XMLTV o aggiorna le sorgenti EPG.",
   "guideNoSources": "Ancora nessuna sorgente",
   "guideNoSourcesHint": "Aggiungi una playlist o un portale per vederne la guida TV.",

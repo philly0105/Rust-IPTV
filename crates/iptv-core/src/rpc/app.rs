@@ -77,7 +77,8 @@ pub const DESKTOP_INFO_KEY: &str = "app.desktop_info";
 /// Facts only the desktop shell knows, reported by `app.info`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DesktopInfo {
-    /// Loopback media proxy base (`http://127.0.0.1:<port>/api/proxy`).
+    /// Loopback media proxy base (`http://127.0.0.1:<port>/<token>/api/proxy`, where
+    /// `<token>` is a per-launch secret path segment).
     pub proxy_base: Option<String>,
     /// Built with the `updater` feature.
     pub updater_available: bool,

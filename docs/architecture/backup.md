@@ -57,7 +57,7 @@ Secrets (the Xtream password, and the Stalker password and signatures) are writt
 ## Import
 
 1. Parse and check. Invalid JSON, a legacy JSON array export, a wrong `kind`, a `version` other than 1, or a missing `playlists` array rejects the file (`Invalid`). Anything else is lenient: a bad entry is skipped with a warning (`skipped += 1`), and a bad user-state item is dropped.
-2. `replace` deletes every source (user state cascades), every VOD pin, parked state, and Stalker tokens.
+2. `replace` deletes every source (user state cascades), every VOD pin, parked state, and Stalker tokens, plus the deleted sources' cached playlist copies (`data_dir/playlists/<id>.m3u`).
 3. EPG URLs go through `settings::update`:
    - `merge`: the backup's URLs come first, then the current ones, deduplicated by URL identity.
    - `replace`: exactly the backup's URLs. A replace with no `settings` clears them.

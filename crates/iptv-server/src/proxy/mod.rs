@@ -194,6 +194,20 @@ async fn proxy(
             "url is not a valid absolute URL: {e}"
         )))
     })?;
+    for (name, value) in [
+        ("ua", &q.ua),
+        ("referer", &q.referer),
+        ("origin", &q.origin),
+    ] {
+        if value
+            .as_deref()
+            .is_some_and(|v| HeaderValue::from_str(v.trim()).is_err())
+        {
+            return Err(Fail::coded(RpcError::invalid(format!(
+                "invalid header override: {name} contains characters that are not allowed in an HTTP header"
+            ))));
+        }
+    }
     let source_id = q.source_id.clone().filter(|s| !s.trim().is_empty());
 
     let access = match &source_id {
@@ -446,12 +460,9 @@ async fn respond(
 
     let mut builder = Response::builder();
     let out = if playlist {
-        let ct_out = if hls::is_playlist_content_type(&ct) {
-            HeaderValue::from_str(&ct)
-                .unwrap_or(HeaderValue::from_static("application/vnd.apple.mpegurl"))
-        } else {
-            HeaderValue::from_static("application/vnd.apple.mpegurl")
-        };
+        // Never echo the upstream type: `text/html; x=mpegurl` would render
+        // as HTML on the app origin.
+        let ct_out = HeaderValue::from_static("application/vnd.apple.mpegurl");
         builder = builder
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, ct_out)

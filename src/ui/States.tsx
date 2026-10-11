@@ -88,10 +88,24 @@ export interface ErrorStateProps {
   title?: ReactNode;
 }
 
-/** Renders an RpcError's message plus a next-step hint chosen by its code. */
+/**
+ * True when the transport could not reach the app's own server (web mode `fetch` failed).
+ * transport.ts marks these with `details.transport === 'unreachable'`.
+ */
+export function isServerUnreachable(err: RpcError): boolean {
+  const d = err.details;
+  return err.code === 'network' && typeof d === 'object' && d !== null && (d as { transport?: unknown }).transport === 'unreachable';
+}
+
+/**
+ * Renders an RpcError's message plus a next-step hint chosen by its code. When the app's own
+ * server is unreachable the body and hint are translated and the raw browser text moves into a
+ * details disclosure.
+ */
 export function ErrorState({ error, onRetry, action, className, size = 'page', title }: ErrorStateProps) {
   const { t } = useTranslation('common');
   const err = RpcError.from(error);
+  const unreachable = isServerUnreachable(err);
   return (
     <div
       role="alert"
@@ -112,8 +126,16 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
       </div>
       <div className="flex max-w-lg flex-col gap-1.5">
         <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code])}</h2>
-        <p className="text-sm break-words text-fg-muted">{err.message}</p>
-        <p className="text-sm text-fg">{t(ERROR_HINT_KEYS[err.code])}</p>
+        <p className="text-sm break-words text-fg-muted">{unreachable ? t('errorBodyServerUnreachable') : err.message}</p>
+        <p className="text-sm text-fg">{t(unreachable ? 'errorHintServerUnreachable' : ERROR_HINT_KEYS[err.code])}</p>
+        {unreachable && (
+          <details className="text-xs text-fg-subtle">
+            <summary className="cursor-pointer rounded-sm hover:text-fg-muted">{t('errorTechnicalDetails')}</summary>
+            <p className="mt-1 font-mono break-words" dir="ltr">
+              {err.message}
+            </p>
+          </details>
+        )}
       </div>
       {(onRetry || action) && (
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">

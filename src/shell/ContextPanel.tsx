@@ -5,7 +5,7 @@ import { Dialog } from '@/ui';
 import { useShellStore } from './store';
 
 /**
- * Right-hand context panel. Inline column on wide windows; on narrower ones a
+ * Inline-end context panel (right in LTR, left in RTL). Inline column on wide windows; on narrower ones a
  * modal drawer toggled from the header. The drawer is the shared Dialog
  * primitive (`placement="end"`), so it traps focus, closes on Escape or the
  * scrim, and hands focus back to the header toggle when it closes.
@@ -23,7 +23,7 @@ export function ContextPanel({ inline }: { inline: boolean }) {
       <aside
         aria-label={t('contextPanel')}
         data-testid="context-panel"
-        className="w-(--panel-width) shrink-0 overflow-y-auto border-l border-border bg-surface"
+        className="w-(--panel-width) shrink-0 overflow-y-auto border-s border-border bg-surface"
       >
         {node}
       </aside>

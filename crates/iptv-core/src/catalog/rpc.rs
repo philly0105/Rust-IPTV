@@ -64,6 +64,9 @@ pub struct VodListArgs {
     pub category_id: Option<String>,
     #[serde(default)]
     pub query: PageQuery,
+    /// Only items rated at least this; the count covers the filtered set.
+    #[serde(default)]
+    pub min_rating: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +209,7 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
         category_id: a.category_id.filter(|c| !c.is_empty()),
         page: a.query,
         include_hidden: a.include_hidden,
+        min_rating: None,
     };
     let page = state.db_call(move |c| super::query_named(c, &q)).await?;
     Ok(page.map(NamedRow::into_channel))
@@ -218,6 +222,7 @@ pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem
         category_id: a.category_id.filter(|c| !c.is_empty()),
         page: a.query,
         include_hidden: false,
+        min_rating: a.min_rating,
     };
     let page = state.db_call(move |c| super::query_named(c, &q)).await?;
     Ok(page.map(NamedRow::into_vod))
@@ -230,6 +235,7 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
         category_id: a.category_id.filter(|c| !c.is_empty()),
         page: a.query,
         include_hidden: false,
+        min_rating: a.min_rating,
     };
     let page = state.db_call(move |c| super::query_named(c, &q)).await?;
     Ok(page.map(NamedRow::into_series))

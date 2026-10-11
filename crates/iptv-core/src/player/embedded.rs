@@ -50,7 +50,55 @@ const BLOCKED_COMMANDS: &[&str] = &[
     "subprocess",
     "load-script",
     "stop-screensaver",
+    // These write files at a caller-chosen path.
+    "dump-cache",
+    "screenshot-to-file",
+    "write-watch-later-config",
 ];
+
+/// Properties `mpv.setProperty` (and property commands sent through
+/// `mpv.command`) may change: the playback controls the UI exposes. Anything
+/// else is refused, notably `stream-record` / `dump-cache`-style properties
+/// that write to a path (recording goes through `mpv.record`).
+pub const SETTABLE_PROPERTIES: &[&str] = &[
+    "pause",
+    "volume",
+    "mute",
+    "speed",
+    "aid",
+    "sid",
+    "vid",
+    "audio-delay",
+    "sub-delay",
+    "sub-visibility",
+    "time-pos",
+];
+
+/// IPC commands whose first argument names a property to change.
+const PROPERTY_COMMANDS: &[&str] = &[
+    "set",
+    "set_property",
+    "set_property_string",
+    "add",
+    "multiply",
+    "cycle",
+    "cycle-values",
+    "change-list",
+];
+
+/// Refuses property names outside [`SETTABLE_PROPERTIES`].
+pub fn validate_property(name: &str) -> CoreResult<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(CoreError::invalid("property name is empty"));
+    }
+    if !SETTABLE_PROPERTIES.contains(&name) {
+        return Err(CoreError::invalid(format!(
+            "mpv property {name:?} cannot be set from the UI"
+        )));
+    }
+    Ok(())
+}
 
 /// The single embedded mpv session holder.
 #[derive(Default)]
@@ -335,7 +383,8 @@ pub async fn command(state: &Arc<AppState>, cmd: Vec<Value>) -> CoreResult<Value
     s.client.command(cmd).await
 }
 
-/// Rejects empty commands, non-scalar arguments, and [`BLOCKED_COMMANDS`].
+/// Rejects empty commands, non-scalar arguments, [`BLOCKED_COMMANDS`], and
+/// property commands aimed outside [`SETTABLE_PROPERTIES`].
 pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
     let Some(name) = cmd.first().and_then(Value::as_str) else {
         return Err(CoreError::invalid(
@@ -351,6 +400,15 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
         return Err(CoreError::invalid(
             "mpv command arguments must be strings, numbers, or booleans",
         ));
+    }
+    if PROPERTY_COMMANDS.contains(&name) {
+        // `cycle-values` may lead with the `!reverse` flag.
+        let prop = cmd[1..]
+            .iter()
+            .find(|v| v.as_str() != Some("!reverse"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        validate_property(prop)?;
     }
     Ok(())
 }
@@ -492,11 +550,9 @@ async fn stop_recording(s: &Session) {
 /// `mpv.setProperty`.
 pub async fn set_property(state: &Arc<AppState>, name: &str, value: Value) -> CoreResult<()> {
     ensure_platform()?;
-    if name.trim().is_empty() {
-        return Err(CoreError::invalid("property name is empty"));
-    }
+    validate_property(name)?;
     let s = current(&manager(state)).ok_or_else(not_attached)?;
-    s.client.set_property(name, value).await
+    s.client.set_property(name.trim(), value).await
 }
 
 /// `mpv.setBounds`.

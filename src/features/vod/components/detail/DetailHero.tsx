@@ -27,14 +27,14 @@ export interface DetailHeroProps {
  * one large type moment on the page.
  */
 export function DetailHero({ model, sourceId, actions, chips, note, notice }: DetailHeroProps) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const [expanded, setExpanded] = useState(false);
   // Provider artwork first; when it fails to load, the TMDB poster (if any) takes its place.
   const [failedPoster, setFailedPoster] = useState<string | undefined>(undefined);
   const posterSrc = failedPoster !== undefined && failedPoster === model.posterUrl && model.posterFallbackUrl ? model.posterFallbackUrl : model.posterUrl;
   const formatRuntime = useFormatRuntime();
   const runtime = formatRuntime(model.durationSeconds);
-  const rating = formatRating(model.rating);
+  const rating = formatRating(model.rating, i18n.language);
   const plotLong = (model.plot?.length ?? 0) > 360;
 
   return (

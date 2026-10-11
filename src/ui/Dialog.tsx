@@ -74,10 +74,14 @@ export function Dialog({
   const descId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Set while the dialog closes or unmounts, so the focusin trap below does not pull
+  // the restored focus back into a panel that is about to disappear.
+  const closingRef = useRef(false);
 
   // Focus management + scroll lock.
   useLayoutEffect(() => {
     if (!open) return;
+    closingRef.current = false;
     const previous = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
     if (panel) {
@@ -93,6 +97,7 @@ export function Dialog({
     const prevOverflow = html.style.overflow;
     html.style.overflow = 'hidden';
     return () => {
+      closingRef.current = true;
       openCount -= 1;
       if (openCount === 0) html.style.overflow = prevOverflow;
       if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
@@ -105,7 +110,7 @@ export function Dialog({
     if (!open) return;
     const onFocusIn = (e: FocusEvent) => {
       const panel = panelRef.current;
-      if (!panel || !(e.target instanceof Node)) return;
+      if (closingRef.current || !panel || !(e.target instanceof Node)) return;
       if (panel.contains(e.target)) return;
       // Allow nested portals that are themselves modal (stacked dialogs, menus).
       if (e.target instanceof Element && e.target.closest('[data-dialog-layer]')) return;
@@ -202,7 +207,7 @@ export function Dialog({
               aria-label={t('close')}
               onClick={() => onCloseRef.current()}
               className={cn(
-                drawer ? 'ms-auto' : '-mr-2',
+                drawer ? 'ms-auto' : '-me-2',
                 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg',
               )}
             >

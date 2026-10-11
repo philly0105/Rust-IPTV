@@ -31,9 +31,10 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | Document | Covers |
 | --- | --- |
 | [server.md](architecture/server.md) | `iptv-server`: REST/WS API, stream proxy, file serving, Docker |
+| [desktop.md](architecture/desktop.md) | Desktop shell: loopback media proxy (`proxyBase`, Host/Origin guards, private targets) and WebView2 memory trimming |
 | [ui-shell.md](architecture/ui-shell.md) | Design tokens, UI primitives, shell layout, shortcuts, dashboard, i18n |
 
-The desktop shell itself is small enough to read directly: `crates/iptv-tauri/src/lib.rs` (plugins, tray, `rpc` command, event bridge, asset scope for the downloads folder, deep links, exit cleanup) and `crates/iptv-tauri/src/mpv_window.rs` (the child window embedded mpv draws into).
+The rest of the desktop shell is small enough to read directly: `crates/iptv-tauri/src/lib.rs` (plugins, tray, `rpc` command, event bridge, asset scope for the downloads folder, deep links, exit cleanup), `crates/iptv-tauri/src/mpv_window.rs` (the child window embedded mpv draws into, see players.md), `crates/iptv-tauri/src/proxy.rs` (the loopback media proxy) and `crates/iptv-tauri/src/memory.rs` (idle memory trimming on Windows); desktop.md covers the last two.
 
 ## Events
 

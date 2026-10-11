@@ -83,8 +83,8 @@ export function EditSourceDialog({
       toast({
         variant: 'success',
         title: t('savedTitle', { name: updated.name }),
-        description: patchNeedsRefresh(patch) ? t('savedNeedsRefresh') : undefined,
-        action: patchNeedsRefresh(patch) ? { label: t('refreshNow'), onClick: () => onRefresh(updated) } : undefined,
+        description: patchNeedsRefresh(patch, source) ? t('savedNeedsRefresh') : undefined,
+        action: patchNeedsRefresh(patch, source) ? { label: t('refreshNow'), onClick: () => onRefresh(updated) } : undefined,
       });
       onClose();
     } catch (e) {

@@ -550,3 +550,182 @@ async fn failed_portal_totals_keep_the_stored_counts() {
     assert_eq!(list[0]["movieCount"], 30, "{list}");
     assert_eq!(list[0]["seriesCount"], 10, "{list}");
 }
+
+// ---------------------------------------------------------------------------
+// Round 2: silent portals, cached rows of another portal
+// ---------------------------------------------------------------------------
+
+/// A portal that accepts connections and never answers. Connections are
+/// held open (not closed) until the test ends.
+async fn spawn_silent_portal() -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            held.push(sock);
+        }
+    });
+    port
+}
+
+/// Caches a session for `SID` against `endpoint`, as a source synced before
+/// its portal went silent would have.
+async fn cache_session(state: &AppState, cfg: &StalkerSourceConfig, endpoint: &str) {
+    let value = json!({
+        "endpoint": endpoint,
+        "token": "cached-token",
+        "random": "0".repeat(40),
+        "identity": iptv_core::stalker::session::identity_fingerprint(cfg),
+    })
+    .to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO app_state (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+                rusqlite::params![iptv_core::stalker::session::token_key(SID), value],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// R3 r2 F1: `stalker.epg` on a portal that never answers fails within its
+/// overall deadline (20 s, 40 s with `from`) with the slow-portal message,
+/// instead of falling back to `get_epg_info` / day tables for minutes and
+/// returning `[]`.
+#[tokio::test]
+async fn silent_portal_epg_fails_within_the_deadline() {
+    let port = spawn_silent_portal().await;
+    let url = format!("http://127.0.0.1:{port}/stalker/c/");
+    let e = env_at(Some(url.clone()), MAC).await;
+    cache_session(
+        &e.state,
+        &config_for(url, MAC),
+        &format!("http://127.0.0.1:{port}/stalker/portal.php"),
+    )
+    .await;
+    let want = format!("The portal at 127.0.0.1:{port} did not answer in time. Try again later.");
+
+    let t0 = std::time::Instant::now();
+    let short = e.call("stalker.epg", json!({"ref": r("live", "1001"), "limit": 3}));
+    let past = e.call(
+        "stalker.epg",
+        json!({"ref": r("live", "1002"), "limit": 3, "from": rfc(chrono::Utc::now() - chrono::Duration::hours(6))}),
+    );
+    let short = async {
+        let res = short.await;
+        (res, t0.elapsed())
+    };
+    let past = async {
+        let res = past.await;
+        (res, t0.elapsed())
+    };
+    let ((short, t_short), (past, t_past)) = tokio::join!(short, past);
+
+    let err = short.expect_err("a silent portal is an error, not []");
+    assert_eq!(err.code, RpcErrorCode::Timeout, "{}", err.message);
+    assert!(err.retryable);
+    assert_eq!(err.message, want);
+    assert!(
+        t_short >= std::time::Duration::from_secs(19)
+            && t_short < std::time::Duration::from_secs(25),
+        "short EPG gave up after {t_short:?}"
+    );
+
+    let err = past.expect_err("a silent portal is an error, not []");
+    assert_eq!(err.code, RpcErrorCode::Timeout, "{}", err.message);
+    assert_eq!(err.message, want);
+    assert!(
+        t_past < std::time::Duration::from_secs(45),
+        "EPG with from gave up after {t_past:?}"
+    );
+}
+
+/// R3 r2 F4: a host that takes the connection and stays silent is reported
+/// as slow, not as unreachable.
+#[tokio::test]
+async fn silent_portal_test_says_it_did_not_answer() {
+    let port = spawn_silent_portal().await;
+    let url = format!("http://127.0.0.1:{port}/c/");
+    let e = env_at(Some(url.clone()), MAC).await;
+    let t0 = std::time::Instant::now();
+    let res = e
+        .ok("stalker.test", json!({"config": config_for(url, MAC)}))
+        .await;
+    assert_eq!(res["ok"], false);
+    assert_eq!(
+        res["message"],
+        format!("The portal at 127.0.0.1:{port} did not answer in time. Try again later.").as_str(),
+        "{res}"
+    );
+    assert!(t0.elapsed() < std::time::Duration::from_secs(25));
+}
+
+/// R3 r2 F6: rows listed from one portal are dropped (memory and
+/// `stalker_items`) when the source's portal URL or MAC changes, kept on an
+/// unrelated edit, and dropped from memory on removal.
+#[tokio::test]
+async fn portal_change_and_removal_drop_cached_rows() {
+    let e = env().await;
+    e.ok("stalker.sync", json!({"sourceId": SID})).await;
+    let list_movies = || async {
+        e.ok(
+            "stalker.movies",
+            json!({"sourceId": SID, "query": {"offset": 0, "limit": 14}}),
+        )
+        .await;
+    };
+    let rows = || {
+        count(
+            &e.state,
+            "SELECT count(*) FROM stalker_items WHERE source_id='stk1'",
+        )
+    };
+    let rt = iptv_core::stalker::Runtime::get(&e.state);
+    let key = format!("{SID}|movie|5003");
+    list_movies().await;
+    assert!(rows().await > 0);
+    assert!(rt.items.contains_key(&key));
+
+    // A rename keeps them.
+    e.ok(
+        "sources.update",
+        json!({"id": SID, "patch": {"name": "Renamed"}}),
+    )
+    .await;
+    assert!(rows().await > 0);
+    assert!(rt.items.contains_key(&key));
+
+    // Another portal URL drops them.
+    e.ok(
+        "sources.update",
+        json!({"id": SID, "patch": {"stalker": config_for(e.mock.url("/stalker/portal.php"), MAC)}}),
+    )
+    .await;
+    assert_eq!(rows().await, 0);
+    assert!(!rt.items.contains_key(&key));
+
+    // Another MAC drops them too.
+    list_movies().await;
+    assert!(rows().await > 0);
+    e.ok(
+        "sources.update",
+        json!({"id": SID, "patch": {"stalker": config_for(e.mock.url("/stalker/portal.php"), "00:1A:79:00:00:02")}}),
+    )
+    .await;
+    assert_eq!(rows().await, 0);
+    assert!(!rt.items.contains_key(&key));
+
+    // Removal drops what memory remembered.
+    e.ok(
+        "sources.update",
+        json!({"id": SID, "patch": {"stalker": config_for(e.mock.url("/stalker/portal.php"), MAC)}}),
+    )
+    .await;
+    list_movies().await;
+    assert!(rt.items.contains_key(&key));
+    e.ok("sources.remove", json!({"id": SID})).await;
+    assert!(!rt.items.contains_key(&key));
+}

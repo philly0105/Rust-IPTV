@@ -35,6 +35,9 @@
   "errorTitleInternal": "وقع شي خطأ",
 
   "errorHintNetwork": "شوف الاتصال ديالك والـURL ديال المزود، ومن بعد عاود جرّب.",
+  "errorBodyServerUnreachable": "الخادم ديال التطبيق راسو ما كيجاوبش، داكشي علاش حتى حاجة ما تشارجات.",
+  "errorHintServerUnreachable": "تأكد بلي الخادم ديال Tsrust IPTV مازال خدام، ومن بعد عاود جرّب.",
+  "errorTechnicalDetails": "التفاصيل التقنية",
   "errorHintTimeout": "يقدر المزود يكون مشغول. عاود جرّب من بعد شوية.",
   "errorHintAuth": "شوف اسم المستخدم، كلمة السر، ولا عنوان MAC فإعدادات المصدر.",
   "errorHintNotFound": "يقدر يكون المزود حيدو. حدّث المصدر باش تتحدث اللائحة.",

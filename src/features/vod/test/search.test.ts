@@ -49,9 +49,20 @@ describe('groupSearchResults', () => {
   it('filters to one source and builds facets by count', () => {
     expect(groupSearchResults({ result, sources, sourceFilter: 'b' }).flatMap((g) => g.hits.map((h) => h.sourceId))).toEqual(['b']);
     expect(sourceFacets(groupSearchResults({ result, sources }))).toEqual([
-      { sourceId: 'a', sourceName: 'Alpha IPTV', count: 2 },
-      { sourceId: 'b', sourceName: 'Beta Portal', count: 1 },
+      { sourceId: 'a', sourceName: 'Alpha IPTV', count: 2, partial: false },
+      { sourceId: 'b', sourceName: 'Beta Portal', count: 1, partial: false },
     ]);
+  });
+
+  it('marks only the sources that contribute to a capped type as partial (R6-r2 F3)', () => {
+    // Channels hit the cap; only source a has channels.
+    const facets = sourceFacets(groupSearchResults({ result, sources }), { live: true, movies: false, series: false });
+    expect(facets.map((f) => [f.sourceId, f.partial])).toEqual([
+      ['a', true],
+      ['b', false],
+    ]);
+    const all = sourceFacets(groupSearchResults({ result, sources }), { live: false, movies: true, series: false });
+    expect(all.every((f) => f.partial)).toBe(true);
   });
 
   it('falls back to the source id when the source is unknown', () => {

@@ -26,7 +26,7 @@ export interface OtherSourcesDialogProps {
  * open its own detail, or be pinned as the preferred source for Play.
  */
 export function OtherSourcesDialog({ open, onClose, current, currentSourceName, others, sources, pin, onPin, onPlay }: OtherSourcesDialogProps) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const rows: { item: VodItem; sourceName: string; isCurrent: boolean }[] = [
     { item: current, sourceName: currentSourceName, isCurrent: true },
     ...others.map((item) => ({ item, sourceName: sources.get(item.ref.sourceId)?.name ?? item.ref.sourceId, isCurrent: false })),
@@ -36,11 +36,11 @@ export function OtherSourcesDialog({ open, onClose, current, currentSourceName, 
       <ul className="flex flex-col divide-y divide-border">
         {rows.map(({ item, sourceName, isCurrent }) => {
           const pinned = isPinned(pin, item.ref);
-          const rating = formatRating(item.rating);
+          const rating = formatRating(item.rating, i18n.language);
           return (
             <li key={`${item.ref.sourceId}|${item.ref.itemId}`} className={cn('flex items-center gap-3 py-3', pinned && 'tuning-tick pl-3')}>
               <div className="w-10 shrink-0 overflow-hidden rounded-sm">
-                <Poster src={item.posterUrl} alt="" aspect="poster" />
+                <Poster src={item.posterUrl} alt="" label={item.title} aspect="poster" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-fg">{sourceName}</div>

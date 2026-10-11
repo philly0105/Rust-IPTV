@@ -240,6 +240,9 @@ pub struct CatalogQuery {
     pub category_id: Option<String>,
     pub page: PageQuery,
     pub include_hidden: bool,
+    /// Keep only items rated at least this (unrated items drop out). `None`
+    /// or a value <= 0 disables the filter.
+    pub min_rating: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -860,8 +863,8 @@ fn clamp_page(page: &PageQuery) -> (i64, i64) {
 
 /// Paged items of one source/content type with optional category, search
 /// (FTS word-prefix match, falling back to substring LIKE when the prefix
-/// match finds nothing), and sort. Without a category, items in hidden
-/// categories are excluded unless `include_hidden`.
+/// match finds nothing), optional minimum rating, and sort. Without a
+/// category, items in hidden categories are excluded unless `include_hidden`.
 pub fn query(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<ItemRow>> {
     Ok(query_named(conn, q)?.map(|n| n.row))
 }
@@ -891,6 +894,10 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
             where_sql.push_str(&format!(" AND i.category_id = ?{}", args.len()));
         } else if !q.include_hidden {
             where_sql.push_str(" AND COALESCE(c.hidden, 0) = 0");
+        }
+        if let Some(min) = q.min_rating.filter(|r| r.is_finite() && *r > 0.0) {
+            args.push(min.into());
+            where_sql.push_str(&format!(" AND i.rating >= ?{}", args.len()));
         }
         if let Some(s) = search {
             match m {

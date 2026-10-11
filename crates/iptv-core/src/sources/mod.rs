@@ -541,9 +541,11 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
     let auto_refresh = args.auto_refresh.unwrap_or(false);
     {
         let id = id.clone();
+        let data_dir = state.data_dir.clone();
         state
             .db_call(move |c| {
-                store::insert(c, &id, &name, auto_refresh, &config, raw_text.as_deref())
+                let raw = raw_text.as_deref().map(|t| (data_dir.as_path(), t));
+                store::insert(c, &id, &name, auto_refresh, &config, raw)
             })
             .await?;
     }
@@ -778,11 +780,30 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             s, stored_mac,
         )?));
     }
+    // Another portal (URL or MAC): rows listed by the old one must go.
+    let portal_changed = match (&current.stalker, &config) {
+        (Some(old), Some(SourceConfig::Stalker(new))) => {
+            old.portal_url.trim() != new.portal_url.trim()
+                || old.mac_address.trim() != new.mac_address.trim()
+        }
+        _ => false,
+    };
     let name = match patch.name.as_deref().map(str::trim) {
         Some("") => return Err(CoreError::Invalid("the name cannot be empty".into())),
         Some(n) => Some(n.to_string()),
         None => None,
     };
+    if let Some(p) = &patch.epg {
+        // Server mode refuses new local EPG paths up front (no file access).
+        let known = |u: &String| {
+            current.epg.detected_urls.contains(u) || current.epg.manual_urls.contains(u)
+        };
+        for u in p.manual_urls.iter().chain(&p.detected_urls).flatten() {
+            if !known(u) {
+                crate::epg::fetch::check_server_url(state, u)?;
+            }
+        }
+    }
     let epg = patch.epg.map(|p| {
         let mut e: EpgLinks = current.epg.clone();
         if let Some(v) = p.detected_urls {
@@ -799,7 +820,7 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
-    state
+    let updated = state
         .db_call(move |c| {
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             if let Some(n) = &name {
@@ -841,8 +862,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             }
             store::get(c, &sid)
         })
-        .await
-        .inspect(|_| emit_changed(state))
+        .await?;
+    if portal_changed {
+        crate::stalker::forget_source(state, id).await;
+    }
+    emit_changed(state);
+    Ok(updated)
 }
 
 /// `sources.remove`. Waits for a running import of the source to finish.
@@ -852,6 +877,7 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     let sid = id.to_string();
     state.db_call(move |c| store::delete(c, &sid)).await?;
     crate::m3u::remove_cached_playlist(state, id);
+    crate::stalker::forget_source(state, id).await;
     if let Some(locks) = state.ext::<LockMap>(LOCKS_KEY) {
         locks.remove(id);
     }

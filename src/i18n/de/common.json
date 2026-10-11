@@ -35,6 +35,9 @@
   "errorTitleInternal": "Etwas ist schief gelaufen",
 
   "errorHintNetwork": "Prüfen Sie Ihre Verbindung und die URL des Anbieters und versuchen Sie es dann erneut.",
+  "errorBodyServerUnreachable": "Der eigene Server der App antwortet nicht, daher konnte nichts geladen werden.",
+  "errorHintServerUnreachable": "Prüfen Sie, ob der Server von Tsrust IPTV noch läuft, und versuchen Sie es dann erneut.",
+  "errorTechnicalDetails": "Technische Details",
   "errorHintTimeout": "Der Anbieter ist möglicherweise ausgelastet. Versuchen Sie es gleich noch einmal.",
   "errorHintAuth": "Prüfen Sie Benutzername, Passwort oder MAC-Adresse in den Einstellungen der Quelle.",
   "errorHintNotFound": "Der Anbieter hat es möglicherweise entfernt. Aktualisieren Sie die Quelle, um die Liste neu zu laden.",

@@ -4,6 +4,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type Page } from '@/api/types';
 
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
+import { MINUTE } from '../lib/epgTime';
 import { useStalkerPreviews } from './useStalkerPreviews';
 
 export const CHANNEL_PAGE_SIZE = 120;
@@ -22,6 +23,11 @@ export interface PagedChannelsArgs {
    * (`stalker.epg`, throttled) and show it where XMLTV has nothing airing.
    */
   stalkerEpg?: boolean;
+  /**
+   * `settings.epgOffsetMinutes`: rows show programmes moved by it, so "now" is picked on the
+   * shifted clock (`epg.nowNext` `offsetMinutes`, and the portal previews at `now - offset`).
+   */
+  epgOffsetMinutes?: number;
 }
 
 export interface PagedChannels {
@@ -38,6 +44,10 @@ export interface PagedChannels {
   /** Channels currently held in memory, in index order. */
   loaded: { index: number; channel: Channel }[];
   pageSize: number;
+  /** Stalker: the portal's guide is not answering (timeout / network); previews are backing off. */
+  guideUnavailable: boolean;
+  /** Stalker: ask the portal's guide again now. */
+  retryGuide(): void;
 }
 
 function inPage(page: Page<Channel> | undefined, index: number): Channel | undefined {
@@ -46,10 +56,10 @@ function inPage(page: Page<Channel> | undefined, index: number): Channel | undef
   return i >= 0 && i < page.items.length ? page.items[i] : undefined;
 }
 
-function usePageExtras(page: Page<Channel> | undefined, enabled: boolean) {
+function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offsetMinutes: number) {
   const refs = useMemo(() => page?.items.map((c) => c.ref) ?? [], [page]);
   const has = enabled && refs.length > 0;
-  const nowNext = useRpcQuery('epg.nowNext', { refs }, { enabled: has, staleTime: 60_000 });
+  const nowNext = useRpcQuery('epg.nowNext', offsetMinutes ? { refs, offsetMinutes } : { refs }, { enabled: has, staleTime: 60_000 });
   const favs = useRpcQuery('favorites.contains', { refs }, { enabled: has });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };
@@ -85,8 +95,9 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   const total = freshTotal ?? totals.current.get(listKey);
 
   const extrasOn = args.withExtras ?? true;
-  const exA = usePageExtras(pageA, extrasOn);
-  const exB = usePageExtras(pageB, extrasOn);
+  const offsetMs = (args.epgOffsetMinutes ?? 0) * MINUTE;
+  const exA = usePageExtras(pageA, extrasOn, args.epgOffsetMinutes ?? 0);
+  const exB = usePageExtras(pageB, extrasOn, args.epgOffsetMinutes ?? 0);
 
   // Stalker: the portal's guide for the visible rows (the XMLTV now/next above covers the rest).
   const stalkerOn = extrasOn && !!args.stalkerEpg;
@@ -120,9 +131,10 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
       if (!ch) return undefined;
       const xmltv = (fromA ? exA.nowNext : exB.nowNext)?.[itemKey(ch.ref)];
       if (!stalkerOn) return xmltv;
-      return preferNowNext(nowNextFrom(portalPrograms(ch.ref), nowForPreviews ?? Date.now()), xmltv);
+      // Programmes come back unshifted: the one shown as airing is the one airing at `now - offset`.
+      return preferNowNext(nowNextFrom(portalPrograms.get(ch.ref), (nowForPreviews ?? Date.now()) - offsetMs), xmltv);
     },
-    [pageA, pageB, exA.nowNext, exB.nowNext, stalkerOn, portalPrograms, nowForPreviews],
+    [pageA, pageB, exA.nowNext, exB.nowNext, stalkerOn, portalPrograms, nowForPreviews, offsetMs],
   );
   const isFavorite = useCallback(
     (i: number) => {
@@ -139,9 +151,9 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   useEffect(() => {
     if (now === undefined) return;
     const maps = [exA.nowNext, exB.nowNext];
-    const stale = maps.some((m) => m && Object.values(m).some((nn) => nn.now && Date.parse(nn.now.end) <= now));
+    const stale = maps.some((m) => m && Object.values(m).some((nn) => nn.now && Date.parse(nn.now.end) <= now - offsetMs));
     if (stale) void invalidate('epg.nowNext');
-  }, [now, exA.nowNext, exB.nowNext]);
+  }, [now, offsetMs, exA.nowNext, exB.nowNext]);
 
   const loaded = useMemo(() => {
     const out: { index: number; channel: Channel }[] = [];
@@ -164,5 +176,7 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     },
     loaded,
     pageSize: size,
+    guideUnavailable: portalPrograms.unavailable,
+    retryGuide: portalPrograms.retry,
   };
 }

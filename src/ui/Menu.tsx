@@ -46,7 +46,7 @@ function isAction(i: MenuItem): i is MenuAction {
 export function Menu({ items, label, trigger, triggerClassName, align = 'end', className }: MenuProps) {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; right: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; right: number; rtl: boolean } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const focusOnOpen = useRef<'first' | 'last'>('first');
@@ -55,7 +55,8 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
 
   const place = () => {
     const r = triggerRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, left: r.left, right: window.innerWidth - r.right });
+    if (r && triggerRef.current)
+      setPos({ top: r.bottom + 6, left: r.left, right: window.innerWidth - r.right, rtl: getComputedStyle(triggerRef.current).direction === 'rtl' });
   };
 
   const openMenu = (where: 'first' | 'last') => {
@@ -187,7 +188,8 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
             data-dialog-layer=""
             aria-label={label}
             onKeyDown={onMenuKey}
-            style={align === 'end' ? { top: pos.top, right: pos.right } : { top: pos.top, left: pos.left }}
+            // `align` is logical: `end` lines the menu up with the trigger's inline-end edge (its left edge in RTL).
+            style={(align === 'end') !== pos.rtl ? { top: pos.top, right: pos.right } : { top: pos.top, left: pos.left }}
             className={cn(
               'fixed z-[60] min-w-48 max-w-80 rounded-md border border-border bg-surface p-1 shadow-2 motion-safe:animate-pop-in',
               className,

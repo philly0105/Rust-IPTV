@@ -32,6 +32,22 @@ describe('remove-all confirmation word', () => {
     expect(confirmWordMatches('removed', '削除')).toBe(false);
     expect(foldConfirmWord(' Ünïcödé ')).toBe('unicode');
   });
+  it('folds full-width IME input, Arabic tatweel and simplified/traditional Han variants', () => {
+    // Full-width Latin from a CJK IME in full-width mode.
+    expect(confirmWordMatches('ｒｅｍｏｖｅ', '削除')).toBe(true);
+    expect(confirmWordMatches('ＲＥＭＯＶＥ', '削除')).toBe(true);
+    expect(confirmWordMatches('ｒｅｍｏｖｅ', 'remove')).toBe(true);
+    // Tatweel (U+0640) stretches Arabic letters without changing the word.
+    expect(confirmWordMatches('حـذف', 'حذف')).toBe(true);
+    expect(confirmWordMatches('حــــذف', 'حذف')).toBe(true);
+    // zhtw word typed with a simplified IME, and the reverse.
+    expect(confirmWordMatches('删除', '刪除')).toBe(true);
+    expect(confirmWordMatches('刪除', '删除')).toBe(true);
+    // Still strict about the word itself.
+    expect(confirmWordMatches('حذ', 'حذف')).toBe(false);
+    expect(confirmWordMatches('删', '刪除')).toBe(false);
+    expect(confirmWordMatches('ｒｅｍｏｖ', '削除')).toBe(false);
+  });
 });
 
 describe('import error summaries', () => {

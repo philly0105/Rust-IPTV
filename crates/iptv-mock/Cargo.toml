@@ -34,5 +34,4 @@ parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
 
 [dev-dependencies]
-tower = { workspace = true }
 reqwest = { workspace = true }

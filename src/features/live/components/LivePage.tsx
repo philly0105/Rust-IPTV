@@ -28,9 +28,11 @@ import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
+import { usePortalEpg } from '../hooks/usePortalEpg';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
 import { displayChannelName } from '../lib/channelName';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
+import { MINUTE } from '../lib/epgTime';
 import { playChannel, resolveChannelSource } from '../lib/playback';
 import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
 import { CategorySidebar } from './CategorySidebar';
@@ -70,7 +72,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   useEffect(() => setSearch(''), [sourceId, categoryId]);
 
   const kind = source.data?.kind;
-  const paged = usePagedChannels({ sourceId, categoryId, search: debouncedSearch, radio: isRadio, now, stalkerEpg: kind === 'stalker' });
+  const paged = usePagedChannels({
+    sourceId,
+    categoryId,
+    search: debouncedSearch,
+    radio: isRadio,
+    now,
+    stalkerEpg: kind === 'stalker',
+    epgOffsetMinutes: prefs.epgOffsetMinutes,
+  });
 
   // ---- playback -----------------------------------------------------------
   const playerSource = usePlayerStore((s) => s.source);
@@ -83,15 +93,20 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const [activeChannel, setActiveChannel] = useState<Channel | undefined>(undefined);
   const ribbonChannel = playingChannel ?? activeChannel;
   const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
-  const playingNowNext = useRpcQuery('epg.nowNext', { refs: playingRef ? [playingRef] : [] }, { enabled: !!playingRef, staleTime: 60_000 });
-  const playingPortalEpg = useRpcQuery(
-    'stalker.epg',
+  const offset = prefs.epgOffsetMinutes;
+  const playingNowNext = useRpcQuery(
+    'epg.nowNext',
+    offset ? { refs: playingRef ? [playingRef] : [], offsetMinutes: offset } : { refs: playingRef ? [playingRef] : [] },
+    { enabled: !!playingRef, staleTime: 60_000 },
+  );
+  const playingPortalEpg = usePortalEpg(
     { ref: playingRef ?? EMPTY_REF, limit: PREVIEW_FETCH_SIZE },
     { enabled: !!playingRef && kind === 'stalker', staleTime: 60_000 },
   );
+  // Unshifted programmes: the one shown as airing is the one airing at `now - offset`.
   const currentNowNext = playingRef
     ? preferNowNext(
-        kind === 'stalker' ? nowNextFrom(playingPortalEpg.data, now) : undefined,
+        kind === 'stalker' ? nowNextFrom(playingPortalEpg.data, now - offset * MINUTE) : undefined,
         playingNowNext.data ? Object.values(playingNowNext.data)[0] : undefined,
       )
     : undefined;
@@ -105,11 +120,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const play = useCallback(
     (channel: Channel, nn?: EpgNowNext) => {
       if (!kind) return;
-      playChannel(channel, kind, nn?.now?.title).catch((err: unknown) =>
-        toast({ title: t('playFailed', { name: channel.name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+      playChannel(channel, kind, nn?.now?.title, name).catch((err: unknown) =>
+        toast({ title: t('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
       );
     },
-    [kind, t, toast],
+    [kind, prefs.stripCountryPrefix, t, toast],
   );
 
   // ---- number entry -------------------------------------------------------
@@ -277,7 +293,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     const src = source.data;
     const external = (player: 'mpv' | 'vlc') => async () => {
       try {
-        const s = await resolveChannelSource(ch, src);
+        const s = await resolveChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
         await rpc('player.openExternal', { player, source: s });
       } catch (err) {
         toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
@@ -309,7 +325,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       },
       { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => setMapping(ch) },
     ];
-  }, [menu, source.data, play, t, toast, toggleFavorite]);
+  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite]);
 
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
@@ -424,7 +440,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       {heading}
       {/* groups: column on wide screens, drawer below 1024 px */}
       {sidebarVisible ? (
-        <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">{sidebar}</aside>
+        <aside className="flex w-60 shrink-0 flex-col border-e border-border bg-surface">{sidebar}</aside>
       ) : null}
       {!wide && drawerOpen ? (
         <>
@@ -434,7 +450,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             aria-modal="true"
             aria-label={t('groups')}
             onKeyDown={(e) => e.key === 'Escape' && setDrawerOpen(false)}
-            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-border bg-surface shadow-2"
+            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-border bg-surface shadow-2"
           >
             {sidebar}
           </aside>
@@ -444,7 +460,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       {/* channel list */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        className="flex w-[clamp(272px,34vw,400px)] shrink-0 flex-col border-r border-border bg-surface"
+        className="flex w-[clamp(272px,34vw,400px)] shrink-0 flex-col border-e border-border bg-surface"
       >
         <div className="flex items-center gap-1 border-b border-border px-2 py-2">
           <IconButton

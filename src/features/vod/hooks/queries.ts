@@ -62,9 +62,10 @@ export function useVodPage(
 }
 
 /**
- * Sequential pages for a rating-filtered grid. A minimum rating hides an
- * unknown number of items per page, so sparse index paging cannot work; the
- * grid loads pages in order instead and filters them as they arrive.
+ * Sequential pages for a rating-filtered Stalker grid. The portal cannot
+ * filter by rating, so a minimum hides an unknown number of items per page and
+ * sparse index paging cannot work; the grid loads pages in order instead and
+ * filters them as they arrive. SQLite-backed grids filter in the core.
  */
 export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: boolean) {
   const first = input ? buildPageRequest(input, 0) : undefined;

@@ -128,7 +128,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
         aria-controls={listId}
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          'flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm',
+          'flex h-10 w-full items-center gap-3 rounded-md px-3 text-start text-sm',
           active ? 'text-fg' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg',
         )}
       >
@@ -146,7 +146,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
         />
       </button>
       {expanded && (
-        <ul id={listId} className="mt-0.5 mb-1 ml-[22px] flex flex-col gap-0.5 border-l border-border pl-2">
+        <ul id={listId} className="mt-0.5 mb-1 ms-[22px] flex flex-col gap-0.5 border-s border-border ps-2">
           {links.map((l) => (
             <li key={l.id}>
               <NavLink
@@ -187,7 +187,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
       data-testid="shell-rail"
       data-collapsed={collapsed || undefined}
       className={cn(
-        'flex h-full shrink-0 flex-col border-r border-border bg-surface',
+        'flex h-full shrink-0 flex-col border-e border-border bg-surface',
         collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
       )}
     >

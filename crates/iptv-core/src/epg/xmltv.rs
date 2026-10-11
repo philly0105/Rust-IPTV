@@ -17,8 +17,10 @@
 //!
 //! Hostile input is bounded: the document stops with an `Invalid` error once
 //! more than [`MAX_DOCUMENT_BYTES`] (decompressed) were read, a text, CDATA or
-//! comment node keeps only its first [`MAX_NODE_BYTES`] (the rest is read and
-//! discarded), and a single tag larger than that is an `Invalid` error.
+//! comment / processing-instruction node keeps only its first
+//! [`MAX_NODE_BYTES`] (the rest is read and discarded), and a single tag
+//! (quoted attribute values included) or DOCTYPE declaration larger than that
+//! is an `Invalid` error.
 //!
 //! Only the first non-empty `display-name` / `icon` of a channel and the first
 //! non-empty `title` / `desc` / `category` / `icon` of a programme are kept,
@@ -563,17 +565,30 @@ fn size_text(bytes: u64) -> String {
 enum Mode {
     /// Character data, up to the next `<`.
     Text,
-    /// Just after `<`: matching the `![CDATA[` / `!--` prefixes (bytes matched
-    /// of each, `usize::MAX` once it no longer matches).
-    Open { cdata: usize, comment: usize },
-    /// Inside a tag, up to the next `>`.
-    Tag,
-    /// Inside CDATA or a comment, up to `end`; `m` bytes of `end` matched.
+    /// Just after `<`.
+    Open,
+    /// Just after `<!`.
+    Bang,
+    /// Just after `<![`: `k` bytes of `CDATA[` matched (passed as part of the
+    /// opener, so they do not count against the node cap).
+    CdataOpen { k: usize },
+    /// Just after `<!-`: quick-xml takes one more byte as part of the opener
+    /// before it looks for `-->` (so `<!--->` is not a whole comment).
+    CommentOpen,
+    /// Inside an element or end tag, up to the next `>` outside quotes;
+    /// `quote` is the open quote byte, 0 when outside quotes.
+    Tag { quote: u8 },
+    /// Inside `<!DOCTYPE ...>`: `<` and `>` nest, the `>` at depth 0 ends it.
+    DocType { depth: u32 },
+    /// Inside CDATA, a comment or a processing instruction, up to `end`;
+    /// `m` bytes of `end` matched.
     Delim { end: &'static [u8], m: usize },
 }
 
-/// Byte-level state of [`Guard`]: a coarse XML lexer that knows where text,
-/// CDATA, comments and tags start and end, enough to cut oversized nodes.
+/// Byte-level state of [`Guard`]: a coarse XML lexer that splits the input
+/// into nodes exactly where quick-xml 0.37 splits it into events (quoted
+/// attribute values, `<?...?>`, `<!DOCTYPE [...]>`, CDATA and comments are one
+/// node each), enough to cut oversized nodes before quick-xml buffers them.
 struct Filter {
     mode: Mode,
     /// Bytes of the current node passed through.
@@ -626,11 +641,25 @@ impl Filter {
         }
     }
 
+    /// Copies bytes of a tag or DOCTYPE (which cannot be cut) to `out`;
+    /// errors once the node passes the cap. Returns the bytes copied.
+    fn tag_bytes(&mut self, src: &[u8], out: &mut [u8], what: &str) -> std::io::Result<usize> {
+        let n = src.len().min(out.len());
+        if self.run + n > self.max_node {
+            return Err(limit_error(format!(
+                "the XMLTV feed has {what} larger than {}",
+                size_text(self.max_node as u64)
+            )));
+        }
+        out[..n].copy_from_slice(&src[..n]);
+        self.run += n;
+        Ok(n)
+    }
+
     /// Filters `input` into `out`; returns (bytes consumed, bytes written).
     /// Makes progress whenever `out.len() >= 3`.
     fn step(&mut self, input: &[u8], out: &mut [u8]) -> std::io::Result<(usize, usize)> {
-        const CDATA: &[u8] = b"![CDATA[";
-        const COMMENT: &[u8] = b"!--";
+        const TAG: &str = "a tag";
         let (mut i, mut w) = (0, 0);
         while i < input.len() && w < out.len() {
             let b = input[i];
@@ -638,10 +667,8 @@ impl Filter {
                 Mode::Text if b == b'<' => {
                     out[w] = b;
                     (i, w) = (i + 1, w + 1);
-                    self.start_node(Mode::Open {
-                        cdata: 0,
-                        comment: 0,
-                    });
+                    self.start_node(Mode::Open);
+                    self.run = 1;
                 }
                 Mode::Text => {
                     let rest = &input[i..];
@@ -649,48 +676,94 @@ impl Filter {
                     let (used, wrote) = self.content(&rest[..end], &mut out[w..]);
                     (i, w) = (i + used, w + wrote);
                 }
-                Mode::Open { cdata, comment } => {
+                Mode::Open if b == b'!' => {
                     out[w] = b;
                     (i, w) = (i + 1, w + 1);
                     self.run += 1;
-                    let adv = |k: usize, pat: &[u8]| {
-                        if k < pat.len() && pat[k] == b {
-                            k + 1
-                        } else {
-                            usize::MAX
+                    self.mode = Mode::Bang;
+                }
+                Mode::Open if b == b'?' => {
+                    // quick-xml's PI scan starts at this `?`, so `<?>` is complete.
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    self.start_node(Mode::Delim { end: b"?>", m: 1 });
+                }
+                // Element or end tag: this byte is the first of the tag.
+                Mode::Open => self.mode = Mode::Tag { quote: 0 },
+                Mode::Bang if matches!(b, b'[' | b'-' | b'D' | b'd') => {
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    match b {
+                        b'[' => self.mode = Mode::CdataOpen { k: 0 },
+                        b'-' => self.mode = Mode::CommentOpen,
+                        _ => {
+                            self.run += 1;
+                            self.mode = Mode::DocType { depth: 0 };
                         }
-                    };
-                    let (cdata, comment) = (adv(cdata, CDATA), adv(comment, COMMENT));
-                    if b == b'>' {
-                        self.start_node(Mode::Text);
-                    } else if cdata == CDATA.len() {
-                        self.start_node(Mode::Delim { end: b"]]>", m: 0 });
-                    } else if comment == COMMENT.len() {
-                        self.start_node(Mode::Delim { end: b"-->", m: 0 });
-                    } else if cdata == usize::MAX && comment == usize::MAX {
-                        self.mode = Mode::Tag;
-                    } else {
-                        self.mode = Mode::Open { cdata, comment };
                     }
                 }
-                Mode::Tag if b == b'>' => {
+                // quick-xml rejects any other `<!`; bound it like a tag.
+                Mode::Bang => self.mode = Mode::Tag { quote: 0 },
+                Mode::CdataOpen { k } if k < 6 && b == b"CDATA["[k] => {
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    self.mode = Mode::CdataOpen { k: k + 1 };
+                }
+                // quick-xml ends any `<![` at `]]>`; this byte is content.
+                Mode::CdataOpen { .. } => self.start_node(Mode::Delim { end: b"]]>", m: 0 }),
+                Mode::CommentOpen => {
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    self.start_node(Mode::Delim { end: b"-->", m: 0 });
+                }
+                Mode::Tag { quote: 0 } if b == b'>' => {
                     out[w] = b;
                     (i, w) = (i + 1, w + 1);
                     self.start_node(Mode::Text);
                 }
-                Mode::Tag => {
+                Mode::Tag { quote } => {
                     let rest = &input[i..];
-                    let end = rest.iter().position(|&c| c == b'>').unwrap_or(rest.len());
-                    let n = end.min(out.len() - w);
-                    if self.run + n > self.max_node {
-                        return Err(limit_error(format!(
-                            "the XMLTV feed has a tag larger than {}",
-                            size_text(self.max_node as u64)
-                        )));
+                    let stop = rest
+                        .iter()
+                        .position(|&c| {
+                            if quote == 0 {
+                                matches!(c, b'>' | b'"' | b'\'')
+                            } else {
+                                c == quote
+                            }
+                        })
+                        .unwrap_or(rest.len());
+                    if stop > 0 {
+                        let n = self.tag_bytes(&rest[..stop], &mut out[w..], TAG)?;
+                        (i, w) = (i + n, w + n);
+                    } else {
+                        // `b` opens or closes a quoted value.
+                        self.tag_bytes(&rest[..1], &mut out[w..], TAG)?;
+                        (i, w) = (i + 1, w + 1);
+                        self.mode = Mode::Tag {
+                            quote: if quote == 0 { b } else { 0 },
+                        };
                     }
-                    out[w..w + n].copy_from_slice(&rest[..n]);
-                    (i, w) = (i + n, w + n);
-                    self.run += n;
+                }
+                Mode::DocType { depth } => {
+                    const WHAT: &str = "a DOCTYPE declaration";
+                    let rest = &input[i..];
+                    let stop = rest
+                        .iter()
+                        .position(|&c| c == b'<' || c == b'>')
+                        .unwrap_or(rest.len());
+                    if stop > 0 {
+                        let n = self.tag_bytes(&rest[..stop], &mut out[w..], WHAT)?;
+                        (i, w) = (i + n, w + n);
+                    } else {
+                        self.tag_bytes(&rest[..1], &mut out[w..], WHAT)?;
+                        (i, w) = (i + 1, w + 1);
+                        match (b, depth) {
+                            (b'>', 0) => self.start_node(Mode::Text),
+                            (b'>', d) => self.mode = Mode::DocType { depth: d - 1 },
+                            (_, d) => self.mode = Mode::DocType { depth: d + 1 },
+                        }
+                    }
                 }
                 Mode::Delim { end, m: 0 } if b != end[0] => {
                     // Plain content up to the next possible terminator byte.
@@ -1206,6 +1279,112 @@ mod tests {
             matches!(err, CoreError::Invalid(ref m) if m.contains("tag")),
             "{err}"
         );
+    }
+
+    /// Runs the byte filter alone over `xml`.
+    fn filtered(xml: &[u8], max_node: usize) -> std::io::Result<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut g = Guard {
+            inner: xml,
+            f: Filter::new(u64::MAX, max_node),
+        };
+        g.read_to_end(&mut out)?;
+        Ok(out)
+    }
+
+    /// `head`, then `reps` copies of `>` + 1000 `y` + `<z`, then `tail`.
+    fn angle_bomb(head: &str, reps: usize, tail: &str) -> Vec<u8> {
+        let mut v = head.as_bytes().to_vec();
+        for _ in 0..reps {
+            v.push(b'>');
+            v.extend(std::iter::repeat_n(b'y', 1000));
+            v.extend_from_slice(b"<z");
+        }
+        v.extend_from_slice(tail.as_bytes());
+        v
+    }
+
+    #[test]
+    fn quoted_attribute_with_angle_brackets_is_one_capped_tag() {
+        // R7-r2 F1 (a): quick-xml reads the quoted value as one tag.
+        for (open, close) in [("\"", "\""), ("'", "'")] {
+            let xml = angle_bomb(
+                &format!(r#"<tv><channel id="a"/><programme x={open}"#),
+                100,
+                &format!("{close}></programme></tv>"),
+            );
+            let err = filtered(&xml, 4096).unwrap_err();
+            assert!(err.to_string().contains("a tag larger"), "{err}");
+            let err = collect_limited(&xml, u64::MAX, 4096).unwrap_err();
+            assert!(
+                matches!(err, CoreError::Invalid(ref m) if m.contains("tag")),
+                "{err}"
+            );
+        }
+        // Same in an end tag (quick-xml tracks quotes there too).
+        let xml = angle_bomb(r#"<tv><channel id="a"></channel x=""#, 100, "\"></tv>");
+        assert!(filtered(&xml, 4096).is_err());
+    }
+
+    #[test]
+    fn doctype_internal_subset_is_one_capped_node() {
+        // R7-r2 F1 (b).
+        let mut xml = b"<?xml version=\"1.0\"?><!DOCTYPE tv [".to_vec();
+        for _ in 0..100 {
+            xml.extend_from_slice(b"<!ELEMENT a ANY>");
+            xml.extend(std::iter::repeat_n(b' ', 1000));
+        }
+        xml.extend_from_slice(br#"]><tv><channel id="a"/></tv>"#);
+        let err = filtered(&xml, 4096).unwrap_err();
+        assert!(err.to_string().contains("DOCTYPE"), "{err}");
+        let err = collect_limited(&xml, u64::MAX, 4096).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{err}");
+        // A small subset passes through untouched.
+        let xml = br#"<!DOCTYPE tv [<!ELEMENT tv ANY><!ATTLIST tv x CDATA "a>b">]><tv><channel id="a"/></tv>"#;
+        assert_eq!(filtered(xml, 4096).unwrap(), xml.to_vec());
+        assert_eq!(collect_limited(xml, u64::MAX, 4096).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn processing_instruction_is_cut_like_a_text_node() {
+        // R7-r2 F1 (c): `>` / `<` inside `<?...?>` do not end it.
+        let xml = angle_bomb(
+            r#"<tv><channel id="a"/><?pi "#,
+            100,
+            r#"?><channel id="b"/></tv>"#,
+        );
+        let out = filtered(&xml, 4096).unwrap();
+        assert!(out.len() < 4096 + 100, "{} bytes passed", out.len());
+        let items = collect_limited(&xml, u64::MAX, 4096).unwrap();
+        assert_eq!(items.len(), 2, "the channel after the PI is still read");
+    }
+
+    #[test]
+    fn bang_nodes_follow_quick_xml_boundaries() {
+        // `<!--->` is not a whole comment for quick-xml; `<!-x` and `<![x`
+        // open a comment and a CDATA section.
+        for head in ["<tv><!--->", "<tv><!-x", "<tv><![x"] {
+            let tail = if head.contains("<![") {
+                "]]></tv>"
+            } else {
+                "--></tv>"
+            };
+            let mut xml = head.as_bytes().to_vec();
+            for _ in 0..100 {
+                xml.extend_from_slice(b"<a>");
+                xml.extend(std::iter::repeat_n(b'y', 1000));
+            }
+            xml.extend_from_slice(tail.as_bytes());
+            let out = filtered(&xml, 4096).unwrap();
+            assert!(out.len() < 4096 + 100, "{head}: {} bytes passed", out.len());
+        }
+        // Transparent under the cap, odd but valid shapes included.
+        let xml = br#"<?xml version="1.0"?><??><tv a='>"' b=">'"><!-- x --><!----><![CDATA[]]><![CDATA[]]]><channel id="c"/></tv>"#;
+        assert_eq!(filtered(xml, 4096).unwrap(), xml.to_vec());
+        assert_eq!(collect_limited(xml, u64::MAX, 4096).unwrap().len(), 1);
+        // `<?>` is a whole (if empty) PI for quick-xml's lexer.
+        let xml = br#"<?><tv x="1">"#;
+        assert_eq!(filtered(xml, 4096).unwrap(), xml.to_vec());
     }
 
     #[test]

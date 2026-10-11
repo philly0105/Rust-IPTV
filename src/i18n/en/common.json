@@ -35,6 +35,9 @@
   "errorTitleInternal": "Something went wrong",
 
   "errorHintNetwork": "Check your connection and the provider URL, then try again.",
+  "errorBodyServerUnreachable": "The app's own server isn't answering, so nothing could load.",
+  "errorHintServerUnreachable": "Check that the Tsrust IPTV server is still running, then try again.",
+  "errorTechnicalDetails": "Technical details",
   "errorHintTimeout": "The provider may be busy. Try again in a moment.",
   "errorHintAuth": "Check the username, password, or MAC address in the source settings.",
   "errorHintNotFound": "It may have been removed by the provider. Refresh the source to update the list.",

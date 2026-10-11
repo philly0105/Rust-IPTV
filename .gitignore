@@ -5,7 +5,8 @@ target/
 crates/iptv-tauri/gen/
 
 # Vendored binaries (placed after user approval)
-vendor/mpv/
+vendor/mpv/*
+!vendor/mpv/LICENSE.txt
 
 # Secrets and local data
 .env

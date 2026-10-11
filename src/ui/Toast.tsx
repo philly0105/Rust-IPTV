@@ -191,14 +191,14 @@ function ToastItem({ t }: { t: ToastRecord }) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
       }}
       className={cn(
-        'pointer-events-auto relative flex w-full gap-3 overflow-hidden rounded-md border border-border bg-surface-2 py-3 pr-2 pl-4 shadow-2',
+        'pointer-events-auto relative flex w-full gap-3 overflow-hidden rounded-md border border-border bg-surface-2 py-3 pe-2 ps-4 shadow-2',
         'motion-safe:animate-toast-in',
       )}
     >
       <span
         aria-hidden
         className={cn(
-          'absolute inset-y-0 left-0 w-1',
+          'absolute inset-y-0 start-0 w-1',
           t.variant === 'success' ? 'bg-success' : t.variant === 'error' ? 'bg-danger' : 'bg-accent',
         )}
       />
@@ -257,7 +257,7 @@ export function ToastViewport() {
       aria-label={t('notifications')}
       aria-keyshortcuts="F8"
       data-toast-viewport=""
-      className="pointer-events-none fixed right-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]">
+      className="pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]">
       <ol className="flex flex-col gap-2">
         {toasts.map((x) => (
           <ToastItem key={x.id} t={x} />

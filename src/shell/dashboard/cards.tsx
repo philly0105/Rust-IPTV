@@ -9,7 +9,7 @@ import { LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 import type { RailCardProps } from './DashboardRail';
 
 const cardFocus =
-  'group/card block w-full rounded-md text-left outline-offset-4 focus-visible:outline-2';
+  'group/card block w-full rounded-md text-start outline-offset-4 focus-visible:outline-2';
 
 /** In-app path for an item's detail (movie/series) or browse (live/radio) page. */
 export function itemPath(ref: ItemRef): string {
@@ -70,7 +70,7 @@ export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, 
       <Lift>
         <Poster src={posterUrl} alt={title} aspect="poster" className="shadow-1">
           {onPlay && <PlayGlyph />}
-          {badge && <span className="absolute top-2 left-2">{badge}</span>}
+          {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
             <span className="absolute inset-x-2 bottom-2">
               <ProgressBar value={Math.min(1, progress) * 100} size="xs" className="bg-black/50" />
@@ -123,7 +123,7 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
         >
           <Poster src={logoUrl} alt={name} aspect="wide" fit="contain" kind={isRadio ? 'radio' : 'live'} className="bg-transparent" rounded="sm" />
           <PlayGlyph />
-          <span className="absolute top-2 left-2">
+          <span className="absolute top-2 start-2">
             <LiveBadge />
           </span>
           {nowProgress !== undefined && (
@@ -159,7 +159,7 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
         >
           <span className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
           <span className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-[11px] font-semibold text-white">{KIND_NAMES[source.kind]}</span>
-          {source.lastError && <span className="absolute top-3 right-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />}
+          {source.lastError && <span className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />}
         </div>
       </Lift>
       <span className="mt-2 block truncate text-sm font-medium text-fg">{source.name}</span>

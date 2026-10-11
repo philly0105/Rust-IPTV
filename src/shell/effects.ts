@@ -42,6 +42,69 @@ export function deepLinkToPath(raw: string): string | null {
   return null;
 }
 
+/** The first supported in-app path among `urls`, or null. */
+function firstDeepLinkPath(urls: readonly string[]): string | null {
+  for (const u of urls) {
+    const path = deepLinkToPath(u);
+    if (path) return path;
+  }
+  return null;
+}
+
+/** The cold-start deep link: `settled` once the pull answered; `path` until consumed. */
+export interface StartupDeepLink {
+  settled: boolean;
+  path: string | null;
+}
+
+let startupLink: StartupDeepLink | null = null;
+let startupPull: Promise<void> | null = null;
+
+/**
+ * Pulls `app.pendingDeepLinks` once per app run (desktop only; the web build
+ * has no queue). A link that launched the app is queued by the Tauri shell
+ * before the webview listens. The index route's StartupRedirect waits for
+ * this pull and redirects straight to the link, so the link is one
+ * navigation that neither a lazy route chunk nor late settings can override.
+ */
+export function pullStartupDeepLink(): Promise<void> {
+  startupPull ??= (isDesktop ? rpc('app.pendingDeepLinks').then(firstDeepLinkPath) : Promise.resolve(null))
+    .catch(() => null)
+    .then((path) => {
+      startupLink = { settled: true, path };
+    });
+  return startupPull;
+}
+
+/** Marks the startup deep link as handled so a later visit to `/` uses the normal target. */
+export function consumeStartupDeepLink(): void {
+  if (startupLink) startupLink = { settled: true, path: null };
+}
+
+/** Test hook: forget the pulled link so the next pull asks the core again. */
+export function resetStartupDeepLinkForTests(): void {
+  startupLink = null;
+  startupPull = null;
+}
+
+/** The startup deep link for StartupRedirect; settled immediately on the web. */
+export function useStartupDeepLink(): StartupDeepLink {
+  const [link, setLink] = useState<StartupDeepLink>(() =>
+    isDesktop ? (startupLink ?? { settled: false, path: null }) : { settled: true, path: null },
+  );
+  useEffect(() => {
+    if (link.settled) return;
+    let live = true;
+    void pullStartupDeepLink().then(() => {
+      if (live && startupLink) setLink(startupLink);
+    });
+    return () => {
+      live = false;
+    };
+  }, [link.settled]);
+  return link;
+}
+
 /** True when the Sources page is the active route (`/sources`, any query). */
 export function isSourcesRoute(pathname: string): boolean {
   return /^\/sources\/?$/.test(pathname);
@@ -153,22 +216,28 @@ export function useShellEvents(): void {
       }),
     );
 
-    const openDeepLinks = (urls: readonly string[]) => {
-      for (const u of urls) {
-        const path = deepLinkToPath(u);
-        if (path) {
-          navRef.current(path);
-          break;
-        }
-      }
-    };
-    offs.push(onAppEvent('deeplink.open', ({ urls }) => openDeepLinks(urls)));
+    offs.push(
+      onAppEvent('deeplink.open', ({ urls }) => {
+        const path = firstDeepLinkPath(urls);
+        if (path) navRef.current(path);
+      }),
+    );
     // Cold start through a link: the desktop shell queued it before this
-    // listener existed. Pull the queue once; later links arrive as events.
+    // listener existed; later links arrive as events. At the index route
+    // StartupRedirect redirects to the pulled link itself (navigating here as
+    // well would race its redirect). Elsewhere (a webview reload on another
+    // page) the shell navigates.
     if (isDesktop) {
-      rpc('app.pendingDeepLinks')
-        .then((urls) => openDeepLinks(urls))
-        .catch(() => undefined);
+      let live = true;
+      offs.push(() => {
+        live = false;
+      });
+      void pullStartupDeepLink().then(() => {
+        const path = startupLink?.path;
+        if (!live || !path || pathRef.current === '/') return;
+        consumeStartupDeepLink();
+        navRef.current(path);
+      });
     }
 
     // Web mode: tell the user when the live event stream drops, once.

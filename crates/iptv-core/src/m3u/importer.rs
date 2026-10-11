@@ -12,7 +12,6 @@ use crate::model::{
 };
 use crate::sources::{self, Importer};
 use crate::state::AppState;
-use futures::StreamExt;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -426,6 +425,30 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     // 1. Acquire bytes + sha256.
     let (payload, sha) = match cfg.origin {
         M3uOrigin::Text => {
+            let missing = || {
+                CoreError::Invalid(
+                    "the pasted playlist text is missing; edit the source and paste it again"
+                        .into(),
+                )
+            };
+            // Pasted text changes only through sources.add or a restore, which
+            // store its sha (or '' when it still has to be imported): an
+            // imported text playlist with a sha is unchanged without reading it.
+            let sid = source_id.clone();
+            let stored_sha = state
+                .db_call(move |c| {
+                    Ok(c.query_row(
+                        "SELECT sha256 FROM m3u_raw WHERE source_id = ?1",
+                        [&sid],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()?)
+                })
+                .await?
+                .ok_or_else(missing)?;
+            if source.last_refresh_at.is_some() && !stored_sha.is_empty() {
+                return keep_unchanged(&state, &source_id).await;
+            }
             let sid = source_id.clone();
             let raw = state
                 .db_call(move |c| {
@@ -437,12 +460,7 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                     .optional()?)
                 })
                 .await?
-                .ok_or_else(|| {
-                    CoreError::Invalid(
-                        "the pasted playlist text is missing; edit the source and paste it again"
-                            .into(),
-                    )
-                })?;
+                .ok_or_else(missing)?;
             // A large pasted / restored playlist lives on disk (raw = '').
             let cached = cached_playlist_path(&state.data_dir, &source_id);
             if raw.is_empty() && cached.is_file() {
@@ -505,23 +523,7 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         })
         .await?;
     if source.last_refresh_at.is_some() && prev_sha.as_deref() == Some(sha.as_str()) {
-        let sid = source_id.clone();
-        let (channels, movies, series) = state
-            .db_call(move |c| {
-                c.execute(
-                    "UPDATE m3u_raw SET fetched_at = ?2 WHERE source_id = ?1",
-                    params![sid, now_rfc3339()],
-                )?;
-                catalog::source_counts(c, &sid)
-            })
-            .await?;
-        tracing::info!(source_id = %source_id, "playlist unchanged; catalog kept");
-        sources::progress(&state, &source_id, "saving", 0, None, Some("unchanged"));
-        return Ok(ImportSummary {
-            channels,
-            movies,
-            series,
-        });
+        return keep_unchanged(&state, &source_id).await;
     }
 
     // 3. Parse + write in one transaction on the blocking pool.
@@ -535,6 +537,28 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     })
     .await?
     .map_err(|e| state.note_db_error(e))
+}
+
+/// The playlist is unchanged since the last successful import: keeps the
+/// catalog and only touches `fetched_at`.
+async fn keep_unchanged(state: &Arc<AppState>, source_id: &str) -> CoreResult<ImportSummary> {
+    let sid = source_id.to_string();
+    let (channels, movies, series) = state
+        .db_call(move |c| {
+            c.execute(
+                "UPDATE m3u_raw SET fetched_at = ?2 WHERE source_id = ?1",
+                params![sid, now_rfc3339()],
+            )?;
+            catalog::source_counts(c, &sid)
+        })
+        .await?;
+    tracing::info!(source_id, "playlist unchanged; catalog kept");
+    sources::progress(state, source_id, "saving", 0, None, Some("unchanged"));
+    Ok(ImportSummary {
+        channels,
+        movies,
+        series,
+    })
 }
 
 /// Streams `payload` through the parser into the catalog inside one IMMEDIATE
@@ -743,8 +767,34 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
     .await?
 }
 
+/// Longest gap between two body chunks of a playlist download.
+#[cfg(not(test))]
+const BODY_IDLE: std::time::Duration = crate::http::BODY_IDLE_TIMEOUT;
+#[cfg(test)]
+const BODY_IDLE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// A non-2xx answer to a playlist download, with what to do about it. The
+/// error code follows [`crate::http::status_error`].
+fn playlist_status_error(status: reqwest::StatusCode, host: &str) -> CoreError {
+    let hint = match status.as_u16() {
+        401 | 403 => "Check the playlist URL and account details; some providers also require a specific User-Agent.",
+        404 | 410 => "Check the playlist URL; the provider may have changed it.",
+        408 | 429 | 500..=599 => "The server is busy or down; try again later.",
+        _ => "Check the playlist URL.",
+    };
+    match crate::http::status_error(status, &format!("{host} answered the playlist download")) {
+        CoreError::Auth(m) => CoreError::Auth(format!("{m}. {hint}")),
+        CoreError::NotFound(m) => CoreError::NotFound(format!("{m}. {hint}")),
+        CoreError::Timeout(m) => CoreError::Timeout(format!("{m}. {hint}")),
+        CoreError::Network(m) => CoreError::Network(format!("{m}. {hint}")),
+        CoreError::Invalid(m) => CoreError::Invalid(format!("{m}. {hint}")),
+        other => other,
+    }
+}
+
 /// Downloads `url` with the source headers into `dest` (streamed, never held
-/// in memory), retrying transient failures. Returns the body's sha256.
+/// in memory), retrying transient failures, but not a server that stalled in
+/// the middle of the body. Returns the body's sha256.
 async fn fetch_to_file(
     state: &Arc<AppState>,
     source_id: &str,
@@ -761,31 +811,45 @@ async fn fetch_to_file(
         .and_then(|u| crate::http::Authority::of(&u));
     crate::http::check_fetch(state, url, own.as_ref()).await?;
     let client = crate::http::client_for(state);
-    crate::http::with_retry(FETCH_ATTEMPTS, || async {
+    let host = url::Url::parse(url.trim())
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "the server".to_owned());
+    // Err((error, stalled)): `stalled` when the body stopped arriving.
+    let attempt = || async {
         let req = crate::http::apply_source_headers(client.get(url), &cfg.headers);
-        let resp = crate::http::send_checked(req, "playlist download")
-            .await
-            .map_err(|e| {
-                tracing::warn!(url = %safe_url, error = %e, "playlist download failed");
-                e
-            })?;
+        let resp = crate::http::send(req).await.map_err(|e| (e, false))?;
+        if !resp.status().is_success() {
+            return Err((playlist_status_error(resp.status(), &host), false));
+        }
         let total = resp.content_length();
-        let mut file = tokio::fs::File::create(dest).await?;
+        let mut file = tokio::fs::File::create(dest)
+            .await
+            .map_err(|e| (e.into(), false))?;
         let mut hasher = Sha256::new();
         let mut done: u64 = 0;
         let mut last_report: u64 = 0;
         let mut stream = resp.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(CoreError::from)?;
+        loop {
+            let chunk = match crate::http::next_body_chunk(&mut stream, &host, BODY_IDLE).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                Err(e) => {
+                    let stalled = matches!(e, CoreError::Timeout(_));
+                    return Err((e, stalled));
+                }
+            };
             hasher.update(&chunk);
-            file.write_all(&chunk).await?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| (e.into(), false))?;
             done += chunk.len() as u64;
             if done - last_report >= 1024 * 1024 {
                 last_report = done;
                 sources::progress(state, source_id, "fetching", done, total, None);
             }
         }
-        file.flush().await?;
+        file.flush().await.map_err(|e| (e.into(), false))?;
         file.sync_all().await.ok();
         sources::progress(
             state,
@@ -795,15 +859,116 @@ async fn fetch_to_file(
             total.or(Some(done)),
             None,
         );
-        Ok(hex::encode(hasher.finalize()))
-    })
-    .await
+        Ok::<_, (CoreError, bool)>(hex::encode(hasher.finalize()))
+    };
+    let mut n = 0;
+    loop {
+        match attempt().await {
+            Ok(sha) => return Ok(sha),
+            Err((err, stalled)) => {
+                tracing::warn!(url = %safe_url, error = %err, attempt = n + 1, "playlist download failed");
+                if stalled || !err.is_retryable() || n + 1 >= FETCH_ATTEMPTS {
+                    return Err(err);
+                }
+                tokio::time::sleep(crate::http::backoff_delay(n)).await;
+                n += 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::m3u::parser::parse_str;
+
+    /// Local HTTP stub answering every connection with `head` (then holding
+    /// the socket open); returns its URL and a connection counter.
+    async fn raw_stub(head: &'static str) -> (String, Arc<std::sync::atomic::AtomicU32>) {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((mut sock, _)) = listener.accept().await {
+                h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(head.as_bytes()).await;
+                held.push(sock);
+            }
+        });
+        (format!("http://127.0.0.1:{}/list.m3u", addr.port()), hits)
+    }
+
+    async fn fetch(url: &str) -> (CoreResult<String>, std::time::Duration) {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let cfg = M3uSourceConfig {
+            origin: M3uOrigin::Url,
+            url: Some(url.into()),
+            file_path: None,
+            headers: Default::default(),
+        };
+        let started = std::time::Instant::now();
+        let r = fetch_to_file(&state, "s", url, &cfg, &tmp.path().join("x.part")).await;
+        (r, started.elapsed())
+    }
+
+    /// R7-r2 F4: a server that sends the head and then stalls fails once,
+    /// after the body idle limit, naming the host; no retries.
+    #[tokio::test]
+    async fn stall_after_head_fails_fast_without_retry() {
+        let (url, hits) =
+            raw_stub("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n#EXTM3U\n").await;
+        let (r, took) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("127.0.0.1") && msg.contains("try again"),
+            "{msg}"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "retried");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    /// An HTTP error status names the host and says what to do; 5xx retries.
+    #[tokio::test]
+    async fn http_status_failure_has_a_next_step() {
+        let (url, hits) = raw_stub(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        let (r, _) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("127.0.0.1")
+                && msg.contains("HTTP 503")
+                && msg.contains("try again later"),
+            "{msg}"
+        );
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            FETCH_ATTEMPTS
+        );
+        let err = playlist_status_error(reqwest::StatusCode::FORBIDDEN, "h");
+        assert!(
+            matches!(err, CoreError::Auth(ref m) if m.contains("HTTP 403") && m.contains("User-Agent"))
+        );
+    }
 
     #[test]
     fn ids_are_stable_and_unique() {

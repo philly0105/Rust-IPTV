@@ -89,7 +89,7 @@ export function ContextMenu({
             finish();
             it.onSelect();
           }}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left outline-none hover:bg-surface-2 focus-visible:bg-surface-2 disabled:opacity-40"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-start outline-none hover:bg-surface-2 focus-visible:bg-surface-2 disabled:opacity-40"
         >
           <span className="inline-flex size-4 items-center justify-center text-fg-muted">{it.icon}</span>
           {it.label}

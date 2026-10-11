@@ -84,8 +84,10 @@ Rust workspace deps (`[workspace.dependencies]`): tauri = "2", tauri-build = "2"
 
 If a version pin fails to resolve, W0 picks the latest compatible and records it.
 
+After the fix waves: `tower = { version = "0.5", features = ["util"] }` is also a workspace dependency (iptv-server; dev-dependency of iptv-tauri). iptv-tauri additionally depends on `iptv-server` (path; only the `/api/proxy` route, for the loopback media proxy), `tower-http` (CORS on that proxy) and `webview2-com = "0.39"` (cfg windows; WebView2 memory target in `memory.rs`). No crate uses `tauri-plugin-shell`, `tauri-plugin-notification` or `md5` any more: the shell and notification plugins and their capabilities were removed from iptv-tauri, and the Stalker client never needed md5.
+
 Node devDependencies: typescript ^5.9, tsc-rs (latest), vite ^7, @vitejs/plugin-react, tailwindcss ^4, @tailwindcss/vite, @tauri-apps/cli ^2, @playwright/test, @axe-core/playwright, vitest, @testing-library/react, jsdom, @types/react, @types/react-dom, @types/node.
-Node dependencies: react ^19, react-dom ^19, react-router ^7, @tanstack/react-query ^5, @tanstack/react-virtual ^3, zustand ^5, i18next, react-i18next, hls.js ^1.6, shaka-player ^4.15 (or 5 if types resolve), @tauri-apps/api ^2, @tauri-apps/plugin-dialog, @tauri-apps/plugin-opener, @tauri-apps/plugin-updater, lucide-react, clsx, cmdk.
+Node dependencies: react ^19, react-dom ^19, react-router ^7, @tanstack/react-query ^5, @tanstack/react-virtual ^3, zustand ^5, i18next, react-i18next, hls.js ^1.6, shaka-player ^4.15 (or 5 if types resolve), @tauri-apps/api ^2, @tauri-apps/plugin-dialog, @tauri-apps/plugin-opener, @tauri-apps/plugin-updater, lucide-react, clsx, cmdk, mpegts.js ^1.8 (MPEG-TS over HTTP in the HTML5 player), tailwind-merge ^3 (class merging in `@/ui`).
 
 ## 4. Contracts
 
@@ -163,7 +165,7 @@ export type RpcResult<K extends RpcName> = RpcMap[K]['result'];
 export class RpcError extends Error { code: RpcErrorCode; retryable: boolean; details?: unknown }
 export function rpc<K extends RpcName>(cmd: K, ...args: RpcArgs<K> extends void ? [] : [RpcArgs<K>]): Promise<RpcResult<K>>;
 export const isDesktop: boolean; // true when window.__TAURI_INTERNALS__ exists
-export function proxiedUrl(source: PlayerSource): string; // desktop: source.url; web: /api/proxy?url=...&sourceId=... when headers present or mixed content
+export function proxiedUrl(source: PlayerSource): string; // desktop: file -> asset URL; http(s) with headers or mixed content -> `${app.info.proxyBase}?url=...&sourceId=...&ua=&referer=&origin=` (loopback proxy), else source.url; web: /api/proxy?url=...&sourceId=...[&ua=&referer=&origin=] when headers present or mixed content
 // src/api/events.ts
 export function onAppEvent<T = unknown>(type: string, handler: (payload: T) => void): () => void;  // Tauri listen('app-event') or WS /api/events; reconnects with backoff
 // src/api/query.ts
@@ -434,6 +436,51 @@ Exactly the old app's `PlaylistBackupManifestV1` (old repo `libs/shared/interfac
 ### C16. Shell hooks (`src/shell/index.ts`, U1)
 
 `useShell(): { setHeader(h: { title: string; subtitle?: string; actions?: ReactNode; search?: { value; onChange; placeholder } }): void; setContextPanel(node: ReactNode | null): void; }` (call inside a `useEffect`, cleanup resets); `registerCommands(cmds: Command[]): () => void` with `Command { id; title; group: string; shortcut?: string; keywords?: string[]; run(): void }`; `useShortcut(combo: string, handler: (e: KeyboardEvent) => void, opts: { description: string; area: string; enabled?: boolean; allowInInput?: boolean }): void` (combo syntax `mod+k`, `shift+/`, `arrowleft`, `space`, `digit`); `shortcutRegistry.list(): {combo; description; area}[]` powers the `?` overlay; every `useShortcut` call is listed automatically. Required shortcuts (from the old README): mod+k palette, mod+f global search, mod+r recent, mod+b toggle live sidebar, 0-9 channel number entry, space/k play-pause, f fullscreen, arrowleft/right seek 5 s, arrowup/down volume 5 %, m mute, ? overlay, escape close. The shell owns the global ones (palette, search, recent, overlay, escape); U5 owns playback ones; U3 owns sidebar toggle and digit entry.
+
+### Amendments after fix waves
+
+These additions were made by the fix waves after review rounds 1 and 2. They extend C1, C2, C4 and C12 above; where they differ, they win. `src/api/rpc.ts` (`RpcMap`, `RPC_COMMANDS`) and `src/api/types.ts` are the code form, and the router parity test in `crates/iptv-core/src/rpc/mod.rs` keeps the Rust registrations equal to `RPC_COMMANDS`.
+
+C2 model additions (Rust `model.rs` mirrors each one; every new Settings field is `#[serde(default)]`):
+
+```ts
+export interface Source { /* ...C2 */ radioCount: number; }  // channelCount counts live channels only
+export interface CatchupInfo { type: 'default' | 'append' | 'shift' | 'xc' | 'flussonic' | (string & {}); days?: number; source?: string; } // type lowercased
+export interface Channel { /* ...C2 */ headers?: RequestHeaders; catchup?: CatchupInfo; } // per-channel #EXTVLCOPT / `url|Header=` headers, merged over the source headers
+export interface VodDetail { /* ...C2 */ providerDetailsUnavailable: boolean; providerError?: string; } // same two fields on SeriesDetail
+export interface PlaybackPosition { /* ...C2 */ watched: boolean; } // default false
+export interface Settings {
+  /* ...C2 */
+  stripCountryPrefix: boolean;   // default false; strip a leading `XX: ` / `XX | ` / `[XX] ` tag when rendering channel names
+  epgOffsetMinutes: number;      // default 0 (i32, -720..720); shifts displayed programme times
+  playerReuseInstance: boolean;  // default true; close the previous external player before launching the next (VLC also gets --one-instance --playlist-enqueue)
+  showExternalBar: boolean;      // default true; show the external-playback footer
+  vodMinRating: number;          // default 0 (f64, 0..10); VOD grids hide items rated below it
+  recordingsDir: string | null;  // default null = `<downloadsDir>/recordings`; desktop only
+}
+export interface AppInfo {
+  /* ...C2 */
+  proxyBase: string | null;      // desktop: loopback media proxy base `http://127.0.0.1:<port>/api/proxy`; null in server mode
+  updaterAvailable: boolean;     // true only in a desktop build compiled with the `updater` feature
+}
+export interface MpvState { /* ...C2 */ recording: boolean; recordPath: string | null; }
+```
+
+C4 command additions:
+
+- app: `app.pendingDeepLinks: void -> string[]` (returns and clears `iptv://` links the Tauri shell queued before the UI listened; later links arrive as the `deeplink.open {urls}` event).
+- sources: `sources.removeAll: void -> null` (removes every source through the `sources.remove` path; emits `sources.changed`).
+- userstate: `userstate.setWatched: {ref; episodeId?; watched: boolean} -> void` (`watched: true` writes the position row with `watched: true` and position = duration when known; `false` clears the row). `positions.continueWatching` excludes watched rows.
+- epg: `epg.clearAll: void -> void` (deletes every programme and guide channel and resets each EPG url's status; urls, enabled flags and manual mappings are kept; emits `epg.changed`).
+- player: `player.stopExternal: void -> {stopped: boolean}` (ends the external mpv/VLC this app launched last; players started outside the app are never touched); `mpv.record: {start: boolean} -> {recording: boolean; path: string | null}` (start writes the live stream through mpv's `stream-record` property to `<recordingsDir>/<title>-<yyyyMMdd-HHmm>.ts`; stop clears it; Windows desktop only).
+
+C4 argument changes: `mpv.attach: {bounds; volume?: number (0..100); muted?: boolean} -> MpvState` (applied before the first state event); `catalog.channelByNumber: {sourceId; number; contentType?: 'live' | 'radio'} -> Channel | null` (default: live first).
+
+C12 proxy: `/api/proxy` also accepts `ua`, `referer` and `origin` query parameters that override the source-level headers. The desktop app serves the same route on a loopback listener inside the Tauri process (`crates/iptv-tauri/src/proxy.rs`, `allow_private_targets` on, Host and Origin guards) and reports it as `app.info.proxyBase`; see `docs/architecture/desktop.md`.
+
+- catalog (U4-fix5): `catalog.movies` / `catalog.series` args gain `minRating?: number` (`{sourceId; categoryId?; query: PageQuery; minRating?}`). When > 0 the core keeps only items with `rating >= minRating` (unrated items drop out) and `total` counts the filtered set, so VOD grids apply `settings.vodMinRating` with normal paging. Stalker VOD (`stalker.movies`/`stalker.series`) has no rating filter; its grids filter loaded pages.
+- proxy (S-fix2): the desktop `app.info.proxyBase` carries a random per-launch token as its first path segment (`http://127.0.0.1:<port>/<token>/api/proxy`). The loopback proxy answers 403 to any request without it and prefixes the token onto the root-relative `/api/proxy?` URIs in rewritten HLS playlists. Clients use `proxyBase` verbatim (`${proxyBase}?url=...`) and never build a proxy path themselves.
+- epg (U3-fix5): `epg.nowNext` args gain `offsetMinutes?: number` (`{refs; offsetMinutes?}`, -720..720, default 0; outside that range is `invalid`). The core picks "now"/"next" at `now - offsetMinutes` and returns programme times unshifted; callers pass `settings.epgOffsetMinutes` and shift the times for display, so every view agrees with the ribbon on what is airing.
 
 ## 5. Run commands and ports
 

@@ -27,7 +27,7 @@ import type {
   VodDetail,
 } from '@/api/types';
 
-import { isResumable } from './format';
+import { isResumable, isWatched } from './format';
 
 export interface DetailModel {
   title: string;
@@ -268,18 +268,24 @@ export function nextEpisode(seasons: Season[], episodeId: string | undefined): E
   return i >= 0 ? order[i + 1] : undefined;
 }
 
-/** Where "Play" should start: the most recent unfinished episode, else the one after the most recent finished, else the first. */
+/**
+ * Where "Play" should start: the most recent unfinished episode; else, after
+ * the most recent finished one, the first episode not marked watched; else
+ * the first unwatched episode of the series; else the first episode.
+ */
 export function resumeTarget(order: Episode[], positions: PlaybackPosition[]): { episode: Episode; resume: boolean } | undefined {
   if (order.length === 0) return undefined;
+  const watched = new Set(positions.filter(isWatched).map((p) => p.episodeId));
+  const firstUnwatchedFrom = (start: number) => order.slice(start).find((e) => !watched.has(e.id));
   const latest = [...positions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   if (latest?.episodeId) {
     const i = order.findIndex((e) => e.id === latest.episodeId);
     const ep = order[i];
     if (ep) {
       if (isResumable(latest)) return { episode: ep, resume: true };
-      const after = order[i + 1];
+      const after = firstUnwatchedFrom(i + 1);
       if (after) return { episode: after, resume: false };
     }
   }
-  return { episode: order[0]!, resume: false };
+  return { episode: firstUnwatchedFrom(0) ?? order[0]!, resume: false };
 }

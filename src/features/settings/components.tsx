@@ -129,7 +129,7 @@ export function SwitchRow({
           aria-hidden
           className={clsx(
             'inline-block size-4 rounded-full shadow-1 motion-safe:transition-transform',
-            checked ? 'translate-x-6 bg-accent-fg' : 'translate-x-1 bg-fg-muted',
+            checked ? 'translate-x-6 bg-accent-fg rtl:-translate-x-6' : 'translate-x-1 bg-fg-muted rtl:-translate-x-1',
           )}
         />
       </button>

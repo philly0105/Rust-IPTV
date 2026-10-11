@@ -71,7 +71,7 @@
   "cancel": "Ακύρωση",
   "resumedAt": "Συνέχιση από {{time}}",
   "externalPlaying": "Αναπαραγωγή στο {{player}}",
-  "externalStopHint": "Κλείστε το παράθυρο του {{player}} για να σταματήσει η αναπαραγωγή.",
+  "externalStopHint": "Σταματήστε εδώ ή κλείστε το παράθυρο του {{player}}.",
   "externalExited": "Το {{player}} έκλεισε",
   "dismiss": "Απόρριψη",
   "mpvLoading": "Άνοιγμα της ροής στο MPV",

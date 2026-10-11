@@ -13,13 +13,11 @@
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
     "dialog:default",
-    "shell:default",
     "opener:default",
     {
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "$APPDATA/**" }, { "path": "$DOWNLOAD/**" }, { "path": "$VIDEO/**" }]
     },
-    "notification:default",
     "deep-link:default",
     "window-state:default"
   ]

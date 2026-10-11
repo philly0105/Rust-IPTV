@@ -35,6 +35,9 @@
   "errorTitleInternal": "問題が発生しました",
 
   "errorHintNetwork": "接続とプロバイダーのURLを確認してから、もう一度お試しください。",
+  "errorBodyServerUnreachable": "アプリ内蔵のサーバーが応答しないため、何も読み込めませんでした。",
+  "errorHintServerUnreachable": "Tsrust IPTVのサーバーがまだ実行中か確認してから、もう一度お試しください。",
+  "errorTechnicalDetails": "技術的な詳細",
   "errorHintTimeout": "プロバイダーが混雑している可能性があります。しばらくしてからもう一度お試しください。",
   "errorHintAuth": "ソース設定のユーザー名、パスワード、またはMACアドレスを確認してください。",
   "errorHintNotFound": "プロバイダーによって削除された可能性があります。ソースを更新して一覧を最新にしてください。",

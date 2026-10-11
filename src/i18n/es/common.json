@@ -35,6 +35,9 @@
   "errorTitleInternal": "Algo salió mal",
 
   "errorHintNetwork": "Revisa tu conexión y la URL del proveedor, y vuelve a intentarlo.",
+  "errorBodyServerUnreachable": "El servidor propio de la app no responde, así que no se pudo cargar nada.",
+  "errorHintServerUnreachable": "Comprueba que el servidor de Tsrust IPTV sigue en ejecución y vuelve a intentarlo.",
+  "errorTechnicalDetails": "Detalles técnicos",
   "errorHintTimeout": "Puede que el proveedor esté ocupado. Vuelve a intentarlo en un momento.",
   "errorHintAuth": "Revisa el usuario, la contraseña o la dirección MAC en los ajustes de la fuente.",
   "errorHintNotFound": "Puede que el proveedor lo haya eliminado. Actualiza la fuente para refrescar la lista.",

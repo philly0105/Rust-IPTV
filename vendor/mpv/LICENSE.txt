@@ -1,0 +1,47 @@
+Third-party software bundled in this folder
+===========================================
+
+mpv.exe, mpv.com
+----------------
+mpv media player, v0.41.0-dev (git 41f6a6450), Windows build of
+21 December 2025, with FFmpeg (git f853d12) and libplacebo v7.358.0
+statically linked.
+
+Copyright (C) 2000-2025 mpv/MPlayer/mplayer2 projects and contributors.
+
+mpv is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 2 of the License, or (at your option) any later
+version. Parts of mpv are also available under the LGPL v2.1 or later, but
+this build links GPL components (FFmpeg built with GPL options), so the
+binary as a whole is distributed under the GPL, version 2 or later.
+
+mpv is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for details.
+
+Full licence text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+mpv licensing notes: https://github.com/mpv-player/mpv/blob/master/Copyright
+
+Source code
+-----------
+mpv:     https://github.com/mpv-player/mpv (commit 41f6a6450)
+FFmpeg:  https://git.ffmpeg.org/ffmpeg.git (commit f853d12)
+libplacebo: https://code.videolan.org/videolan/libplacebo (v7.358.0)
+
+Written offer: for at least three years after you received this copy of
+Tsrust IPTV, the distributor will provide, on request, a complete
+machine-readable copy of the corresponding source code of the mpv binary in
+this folder (including the build scripts), for no more than the cost of
+physically performing the distribution. Ask through the project's issue
+tracker or the contact address published with the release.
+
+Tsrust IPTV itself is a separate program. It starts mpv.exe as a separate
+process and talks to it over mpv's JSON IPC pipe; it does not link mpv.
+
+vulkan-1.dll
+------------
+Khronos Vulkan loader. Copyright (c) 2014-2025 The Khronos Group Inc.,
+Valve Corporation, LunarG, Inc. Licensed under the Apache License, Version
+2.0: https://www.apache.org/licenses/LICENSE-2.0
+Source: https://github.com/KhronosGroup/Vulkan-Loader

@@ -21,12 +21,19 @@ export function railScrollDelta(dir: 1 | -1, rtl: boolean, clientWidth: number, 
 }
 
 /**
+ * Slack for the edge checks. Above the rail's 4 px inline padding, so a snap
+ * that settles on the first card's edge (scrollLeft 4, or -4 in RTL) still
+ * counts as the start.
+ */
+export const RAIL_EDGE_TOLERANCE = 6;
+
+/**
  * Whether the rail sits at its inline start / end. Uses `|scrollLeft|` so it
  * holds in RTL, where `scrollLeft` runs from 0 to `-(scrollWidth - clientWidth)`.
  */
 export function railEdges(scrollLeft: number, clientWidth: number, scrollWidth: number): { start: boolean; end: boolean } {
   const pos = Math.abs(scrollLeft);
-  return { start: pos <= 2, end: pos + clientWidth >= scrollWidth - 2 };
+  return { start: pos <= RAIL_EDGE_TOLERANCE, end: pos + clientWidth >= scrollWidth - RAIL_EDGE_TOLERANCE };
 }
 
 export interface PosterRailProps<T> {
@@ -114,7 +121,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
           role="list"
           onScroll={updateEdges}
           onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: items.length })}
-          className="-mx-1 flex snap-x gap-4 overflow-x-auto px-1 pt-1 pb-3 motion-safe:scroll-smooth"
+          className="-mx-1 flex snap-x scroll-px-1 gap-4 overflow-x-auto px-1 pt-1 pb-3 motion-safe:scroll-smooth"
         >
           {loading
             ? Array.from({ length: 8 }, (_, i) => (

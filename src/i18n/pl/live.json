@@ -67,6 +67,8 @@
   "guideSource": "Źródło",
   "guideTime": "Czas przewodnika",
   "guideLoadFailed": "Nie udało się załadować części przewodnika.",
+  "portalGuideUnavailable": "Przewodnik portalu nie odpowiada. Zapytanie zostanie automatycznie ponowione.",
+  "guideNotAnswering": "Przewodnik nie odpowiada",
   "guideNoData": "Brak danych przewodnika dla tych kanałów. Dodaj adres XMLTV lub odśwież źródła EPG.",
   "guideNoSources": "Brak źródeł",
   "guideNoSourcesHint": "Dodaj listę odtwarzania lub portal, aby zobaczyć przewodnik TV.",

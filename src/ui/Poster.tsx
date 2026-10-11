@@ -8,6 +8,11 @@ export type PosterAspect = 'poster' | 'wide' | 'square';
 export interface PosterProps {
   src?: string | null;
   alt: string;
+  /**
+   * Text for the fallback tile (initials and tint). Defaults to `alt`; pass the
+   * title here when `alt` is "" because a caption already names the item.
+   */
+  label?: string;
   aspect?: PosterAspect;
   className?: string;
   /** Fallback glyph kind when there is no image. */
@@ -53,6 +58,7 @@ export function initialsOf(text: string): string {
 export function Poster({
   src,
   alt,
+  label,
   aspect = 'poster',
   className,
   kind = 'movie',
@@ -67,7 +73,8 @@ export function Poster({
   const state: 'loading' | 'loaded' | 'error' =
     !src || failedSrc === src ? 'error' : loadedSrc === src ? 'loaded' : 'loading';
 
-  const hue = hueOf(alt);
+  const fallbackText = label ?? alt;
+  const hue = hueOf(fallbackText);
   const Glyph = kind === 'live' ? Tv : kind === 'radio' ? Radio : Clapperboard;
   const radius = { sm: 'rounded-sm', md: 'rounded-md', lg: 'rounded-lg' }[rounded];
 
@@ -96,7 +103,7 @@ export function Poster({
                   aspect === 'poster' ? 'text-3xl' : 'text-2xl',
                 )}
               >
-                {initialsOf(alt)}
+                {initialsOf(fallbackText)}
               </span>
               <Glyph size={16} className="text-white/60" />
             </>

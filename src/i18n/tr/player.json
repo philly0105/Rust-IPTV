@@ -71,7 +71,7 @@
   "cancel": "İptal",
   "resumedAt": "{{time}} noktasından devam ediliyor",
   "externalPlaying": "{{player}} ile oynatılıyor",
-  "externalStopHint": "Oynatmayı durdurmak için {{player}} penceresini kapatın.",
+  "externalStopHint": "Buradan durdurun veya {{player}} penceresini kapatın.",
   "externalExited": "{{player}} kapandı",
   "dismiss": "Kapat",
   "mpvLoading": "Yayın MPV'de açılıyor",

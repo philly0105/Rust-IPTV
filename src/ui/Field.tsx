@@ -160,7 +160,7 @@ export function Select({
       <div className={cn('relative', !label && !hint && !error && wrapperClassName)}>
         <select
           id={id}
-          className={cn(fieldBase, 'h-10 appearance-none pl-3 pr-9 text-sm', className)}
+          className={cn(fieldBase, 'h-10 appearance-none ps-3 pe-9 text-sm', className)}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy(id, { hint, error })}
           onChange={(e) => {
@@ -178,7 +178,7 @@ export function Select({
         <ChevronDown
           aria-hidden
           size={16}
-          className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-fg-muted"
+          className="pointer-events-none absolute top-1/2 end-3 -translate-y-1/2 text-fg-muted"
         />
       </div>
     </FieldFrame>
@@ -231,7 +231,7 @@ export function Toggle({ checked, onChange, label, description, disabled, id: id
           aria-hidden
           className={cn(
             'inline-block h-4.5 w-4.5 rounded-full shadow-1 motion-safe:transition-transform',
-            checked ? 'translate-x-5.5 bg-accent-fg' : 'translate-x-0.75 bg-fg-muted',
+            checked ? 'translate-x-5.5 bg-accent-fg rtl:-translate-x-5.5' : 'translate-x-0.75 bg-fg-muted rtl:-translate-x-0.75',
           )}
         />
       </button>
@@ -263,7 +263,7 @@ export function SearchInput({
   const { t } = useTranslation('common');
   return (
     <div className={cn('relative flex items-center', className)}>
-      <Search aria-hidden size={16} className="pointer-events-none absolute left-3 text-fg-subtle" />
+      <Search aria-hidden size={16} className="pointer-events-none absolute start-3 text-fg-subtle" />
       <input
         type="search"
         role="searchbox"
@@ -282,7 +282,7 @@ export function SearchInput({
         }}
         className={cn(
           fieldBase,
-          'pl-9 pr-9 text-sm [&::-webkit-search-cancel-button]:hidden',
+          'ps-9 pe-9 text-sm [&::-webkit-search-cancel-button]:hidden',
           size === 'sm' ? 'h-8' : 'h-10',
         )}
         {...rest}
@@ -292,7 +292,7 @@ export function SearchInput({
           type="button"
           aria-label={t('clearSearch')}
           onClick={() => onChange('')}
-          className="absolute right-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg"
+          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg"
         >
           <X aria-hidden size={14} />
         </button>

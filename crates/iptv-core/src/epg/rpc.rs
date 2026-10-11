@@ -13,8 +13,11 @@ struct RefreshArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RefsArgs {
+struct NowNextArgs {
     refs: Vec<ItemRef>,
+    /// `settings.epgOffsetMinutes`; "now" is matched against `now - offset`.
+    #[serde(default)]
+    offset_minutes: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -74,8 +77,10 @@ pub fn register(r: &mut RpcRouter) {
     r.add("epg.refresh", |s, a: RefreshArgs| async move {
         super::refresh(s, a.url).await.map_err(RpcError::from)
     });
-    r.add("epg.nowNext", |s, a: RefsArgs| async move {
-        super::now_next(&s, a.refs).await.map_err(RpcError::from)
+    r.add("epg.nowNext", |s, a: NowNextArgs| async move {
+        super::now_next_with_offset(&s, a.refs, a.offset_minutes.unwrap_or(0))
+            .await
+            .map_err(RpcError::from)
     });
     r.add("epg.programs", |s, a: ProgramsArgs| async move {
         super::programs(&s, a.item_ref, &a.from, &a.to)

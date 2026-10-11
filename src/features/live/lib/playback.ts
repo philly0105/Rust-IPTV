@@ -12,24 +12,44 @@ function guessKind(url: string): PlayerKind {
   return 'direct';
 }
 
-/** Resolves a playable source for a channel without starting playback (external player, copy URL). */
-export async function resolveChannelSource(channel: Channel, source: Pick<Source, 'kind' | 'm3u'>): Promise<PlayerSource> {
-  const base = { title: channel.name, posterUrl: channel.logoUrl, isLive: true, isRadio: channel.isRadio };
+/** Per-channel `#EXTVLCOPT` headers over the playlist's; undefined when none is set. */
+function mergeHeaders(sourceHeaders: RequestHeaders | undefined, channelHeaders: RequestHeaders | undefined): RequestHeaders | undefined {
+  const headers = { ...sourceHeaders, ...channelHeaders };
+  return Object.values(headers).some(Boolean) ? headers : undefined;
+}
+
+/**
+ * Resolves a playable source for a channel without starting playback (external player, copy URL).
+ * `displayName` is the name the live views show (`settings.stripCountryPrefix`); it titles the player.
+ */
+export async function resolveChannelSource(
+  channel: Channel,
+  source: Pick<Source, 'kind' | 'm3u'>,
+  displayName: string = channel.name,
+): Promise<PlayerSource> {
+  const base = { title: displayName || channel.name, posterUrl: channel.logoUrl, isLive: true, isRadio: channel.isRadio };
   if (source.kind === 'xtream') return { ...(await rpc('xtream.streamUrl', { ref: channel.ref })), ...base };
   if (source.kind === 'stalker') return { ...(await rpc('stalker.streamUrl', { ref: channel.ref })), ...base };
   let url = channel.url;
+  let channelHeaders = channel.headers;
   if (!url) {
     const item = (await rpc('catalog.item', { ref: channel.ref })) as Channel;
     url = item.url;
+    channelHeaders = item.headers ?? channelHeaders;
   }
   if (!url) throw new Error('This channel has no stream address.');
-  return { ...base, url, kind: guessKind(url), headers: source.m3u?.headers, ref: channel.ref };
+  const out: PlayerSource = { ...base, url, kind: guessKind(url), ref: channel.ref };
+  // Same merge as inline playback: per-channel `#EXTVLCOPT` headers override the playlist's.
+  const headers = mergeHeaders(source.m3u?.headers, channelHeaders);
+  if (headers) out.headers = headers;
+  return out;
 }
 
-export function playChannel(channel: Channel, kind: SourceKind, nowTitle?: string): Promise<void> {
+/** `displayName`: the name the live views show (`settings.stripCountryPrefix`); it titles the player and history. */
+export function playChannel(channel: Channel, kind: SourceKind, nowTitle?: string, displayName: string = channel.name): Promise<void> {
   return playItem({
     ref: channel.ref,
-    title: channel.name,
+    title: displayName || channel.name,
     subtitle: nowTitle,
     posterUrl: channel.logoUrl,
     isLive: true,
@@ -43,14 +63,22 @@ export function m3uCatchupSource(channel: Channel, program: EpgProgram, now: num
   const url = resolveM3uCatchupUrl(channel as Channel & CatchupChannel, { start: ms(program.start), end: ms(program.end), now });
   if (!url) throw new Error('This channel has no usable catch-up address.');
   const out: PlayerSource = { url, kind: guessKind(url), title: channel.name, ref: channel.ref, isLive: false, isRadio: false };
-  // Per-channel `#EXTVLCOPT` headers override the playlist's.
-  const headers = { ...sourceHeaders, ...(channel as Channel & { headers?: RequestHeaders }).headers };
-  if (Object.values(headers).some(Boolean)) out.headers = headers;
+  const headers = mergeHeaders(sourceHeaders, channel.headers);
+  if (headers) out.headers = headers;
   return out;
 }
 
-/** Plays an archived programme: the portal's timeshift link, or the M3U `catchup` URL. */
-export async function playCatchup(channel: Channel, kind: SourceKind, program: EpgProgram, now = Date.now()): Promise<void> {
+/**
+ * Plays an archived programme: the portal's timeshift link, or the M3U `catchup` URL.
+ * `displayName` (the name the live views show) titles the player when given.
+ */
+export async function playCatchup(
+  channel: Channel,
+  kind: SourceKind,
+  program: EpgProgram,
+  now = Date.now(),
+  displayName?: string,
+): Promise<void> {
   const args = { ref: channel.ref, start: program.start, durationMinutes: durationMinutes(program) };
   let src: PlayerSource;
   if (kind === 'xtream') {
@@ -68,7 +96,7 @@ export async function playCatchup(channel: Channel, kind: SourceKind, program: E
   }
   await playSource({
     ...src,
-    title: src.title || channel.name,
+    title: displayName || src.title || channel.name,
     subtitle: program.title,
     posterUrl: src.posterUrl ?? channel.logoUrl,
     ref: src.ref ?? channel.ref,

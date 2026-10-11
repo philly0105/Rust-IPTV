@@ -494,7 +494,7 @@ export interface AppInfo {
   platform: string;
   isDesktop: boolean;
   logFile: string;
-  /** Desktop: loopback media proxy base (`http://127.0.0.1:<port>/api/proxy`); null in server mode. */
+  /** Desktop: loopback media proxy base (`http://127.0.0.1:<port>/<token>/api/proxy`, where `<token>` is a per-launch secret path segment); null in server mode. */
   proxyBase: string | null;
   /** True only in a desktop build compiled with the updater feature. */
   updaterAvailable: boolean;

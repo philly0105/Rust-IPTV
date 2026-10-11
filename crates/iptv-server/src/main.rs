@@ -41,8 +41,13 @@ struct Args {
     #[arg(long = "static", env = "IPTV_STATIC_DIR", default_value = "./dist")]
     static_dir: PathBuf,
     /// Let /api/proxy, downloads, playlist and EPG fetches reach loopback and
-    /// private-network hosts, not only each source's own host:port.
-    #[arg(long, env = "IPTV_ALLOW_PRIVATE_TARGETS")]
+    /// private-network hosts, not only each source's own host:port. The env
+    /// value accepts true/false, 1/0, yes/no, on/off.
+    #[arg(
+        long,
+        env = "IPTV_ALLOW_PRIVATE_TARGETS",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
     allow_private_targets: bool,
     /// Extra host names the browser may use to reach the API (comma list,
     /// e.g. `tv.example.com,nas.local`; `*` disables the check). localhost

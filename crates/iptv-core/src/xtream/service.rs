@@ -57,7 +57,8 @@ async fn ctx(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Ctx> {
             Ok((source, item, m))
         })
         .await?;
-    let client = XtreamClient::new(state.http.clone(), &source.config)?;
+    let http = crate::http::trusted_client(state, &source.config.server_url);
+    let client = XtreamClient::new(http, &source.config)?;
     Ok(Ctx {
         source,
         client,
@@ -830,7 +831,8 @@ pub struct ConnectionTestResult {
 pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<XtreamAccountInfo> {
     let sid = source_id.to_string();
     let source = state.db_call(move |c| load_source(c, &sid)).await?;
-    let client = XtreamClient::new(state.http.clone(), &source.config)?;
+    let http = crate::http::trusted_client(state, &source.config.server_url);
+    let client = XtreamClient::new(http, &source.config)?;
     let acc = client.account().await?;
     let m = ServerMeta::from_account(&acc);
     let allowed_output_formats = m.allowed_output_formats.clone();
@@ -887,7 +889,8 @@ pub async fn test(
         message: Some(test_message(&err)),
         name: None,
     };
-    let client = match XtreamClient::new(state.http.clone(), cfg) {
+    let http = crate::http::trusted_client(state, &cfg.server_url);
+    let client = match XtreamClient::new(http, cfg) {
         Ok(c) => c.with_attempts(1),
         Err(err) => return Ok(fail(err)),
     };

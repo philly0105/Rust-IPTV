@@ -49,10 +49,27 @@ export function isResumable(pos: ProgressInput | undefined | null): boolean {
   return pos.positionSeconds < pos.durationSeconds * 0.95;
 }
 
-/** Rating to one decimal; providers report 0..10. */
-export function formatRating(r: number | undefined): string | undefined {
+const ratingFormats = new Map<string, Intl.NumberFormat>();
+
+function ratingFormat(locale: string | undefined): Intl.NumberFormat {
+  const key = locale ?? '';
+  let f = ratingFormats.get(key);
+  if (!f) {
+    const opts = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
+    try {
+      f = new Intl.NumberFormat(locale, opts);
+    } catch {
+      f = new Intl.NumberFormat('en', opts);
+    }
+    ratingFormats.set(key, f);
+  }
+  return f;
+}
+
+/** Rating to one decimal in the UI language ("8.2", de "8,2"); providers report 0..10. */
+export function formatRating(r: number | undefined, locale?: string): string | undefined {
   if (r === undefined || !Number.isFinite(r) || r <= 0) return undefined;
-  return (Math.round(r * 10) / 10).toFixed(1);
+  return ratingFormat(locale).format(Math.round(r * 10) / 10);
 }
 
 /** Season/episode code, `S01E04`. */

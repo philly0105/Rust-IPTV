@@ -2,6 +2,8 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { eagerRoutes, installDomStubs, makeSource, pending, renderAt, rpcMock } from './harness';
+import { serverTimeText } from '../components/AccountPanel';
+import { absoluteTime } from '../lib/format';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -190,6 +192,27 @@ describe('Account panel', () => {
     expect(raw.textContent).not.toContain('pw-secret');
   });
 
+  it('formats the server time in the server zone, or viewer-local without a label (R2-r2 F5)', async () => {
+    const at = '2026-10-11T15:14:00Z';
+    const berlin = serverTimeText(at, 'Europe/Berlin', 'en')!;
+    expect(berlin).toMatch(/5:14\s?PM, Europe\/Berlin$/);
+    expect(serverTimeText(at, 'America/New_York', 'en')).toMatch(/11:14\s?AM, America\/New_York$/);
+    // Not an IANA zone: the viewer's local time, with no misleading label.
+    const local = serverTimeText(at, 'GMT+2 (server)', 'en')!;
+    expect(local).toBe(absoluteTime(at, 'en'));
+    expect(local).not.toContain('GMT+2');
+    expect(serverTimeText(undefined, 'Europe/Berlin', 'en')).toBe('Europe/Berlin');
+    expect(serverTimeText('yesterday', 'Europe/Berlin', 'en')).toBe('yesterday, Europe/Berlin');
+    expect(serverTimeText(undefined, undefined, 'en')).toBeUndefined();
+
+    rpcMock.handlers['sources.list'] = () => [xtream('x')];
+    rpcMock.handlers['xtream.accountInfo'] = () => ({ status: 'Active', activeCons: 0, maxConnections: 1, isTrial: false, serverTime: at, timezone: 'Europe/Berlin' });
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-account'));
+    const time = await within(dialog()).findByTestId('account-server-time');
+    expect(time.textContent).toBe(berlin);
+  });
+
   it('has no account button or tab for M3U sources', async () => {
     rpcMock.handlers['sources.list'] = () => [makeSource('m')];
     renderAt(routes(), '/sources');
@@ -266,7 +289,7 @@ describe('Sort, filter and remove all', () => {
 
 describe('Retrying a failed add reuses the source it created', () => {
   /** A fake core: `sources.add` persists the source, then fails its import (as the core does). */
-  function failingCore(opts: { refreshFails?: boolean } = {}) {
+  function failingCore(opts: { refreshFails?: boolean; transport?: boolean } = {}) {
     const store: ReturnType<typeof makeSource>[] = [];
     let n = 0;
     rpcMock.handlers['sources.list'] = () => [...store];
@@ -281,6 +304,8 @@ describe('Retrying a failed add reuses the source it created', () => {
         lastError: 'error sending request',
       });
       store.push(s);
+      // A reverse proxy timing out a long import: the row exists, the error names nothing.
+      if (opts.transport) throw new RpcError('timeout', 'HTTP 504 Gateway Timeout');
       throw new RpcError('network', 'error sending request', true, { sourceId: s.id });
     };
     rpcMock.handlers['sources.get'] = (a) => {
@@ -382,6 +407,33 @@ describe('Retrying a failed add reuses the source it created', () => {
     await waitFor(() => expect(rpcMock.callsOf('sources.add')).toHaveLength(2));
     expect(rpcMock.callsOf('sources.remove')).toEqual([{ id: 'f1' }]);
     expect(store.map((s) => s.id)).toEqual(['f2']);
+  });
+
+  it('adopts the source the core created when the add failed at the transport level', async () => {
+    const store = failingCore({ transport: true });
+    await failFirstAdd();
+    await waitFor(() => expect(rpcMock.callsOf('sources.list').length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByTestId('add-source-submit').textContent).toBe('Try again'));
+    fireEvent.click(screen.getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'f1' }]));
+    expect(rpcMock.callsOf('sources.add')).toHaveLength(1);
+    expect(store.map((s) => s.id)).toEqual(['f1']);
+  });
+
+  it('adds again after a transport failure that created nothing', async () => {
+    const store = failingCore({ transport: true });
+    rpcMock.handlers['sources.add'] = () => {
+      throw new RpcError('network', 'Failed to fetch');
+    };
+    await failFirstAdd();
+    rpcMock.handlers['sources.add'] = (a) => {
+      const s = makeSource('ok', { name: (a as { name: string }).name });
+      store.push(s);
+      return s;
+    };
+    fireEvent.click(screen.getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.add')).toHaveLength(2));
+    expect(rpcMock.callsOf('sources.refresh')).toHaveLength(0);
   });
 
   it('adds again when the failed source was removed meanwhile', async () => {

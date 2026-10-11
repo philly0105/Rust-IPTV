@@ -42,7 +42,7 @@ describe('F7: PosterRail RTL', () => {
 
   it('computes edges from |scrollLeft| so RTL negative offsets work', () => {
     expect(railEdges(0, 500, 2000)).toEqual({ start: true, end: false });
-    expect(railEdges(-4, 500, 2000)).toEqual({ start: false, end: false });
+    expect(railEdges(-12, 500, 2000)).toEqual({ start: false, end: false });
     expect(railEdges(-1500, 500, 2000)).toEqual({ start: false, end: true });
     expect(railEdges(1500, 500, 2000)).toEqual({ start: false, end: true });
     expect(railEdges(0, 500, 400)).toEqual({ start: true, end: true });

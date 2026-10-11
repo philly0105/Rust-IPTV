@@ -48,8 +48,8 @@ COPY --from=web /src/dist /app/dist
 # IPTV_ALLOWED_HOSTS: extra host names (comma list) the browser may use to
 # reach the API, e.g. "tv.example.com" behind a reverse proxy. localhost and
 # IP addresses always work; any other Host header gets 403 (DNS-rebinding
-# protection). Set IPTV_ALLOW_PRIVATE_TARGETS=true to let the proxy and
-# downloads reach LAN hosts other than each source's own host:port.
+# protection). Set IPTV_ALLOW_PRIVATE_TARGETS=true (or 1/yes/on) to let the
+# proxy and core fetches reach LAN hosts other than each source's own host:port.
 ENV PORT=7180 \
     IPTV_HOST=0.0.0.0 \
     IPTV_ALLOWED_HOSTS="" \

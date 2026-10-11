@@ -112,15 +112,46 @@ pub fn get(conn: &Connection, id: &str) -> CoreResult<Source> {
     find(conn, id)?.ok_or_else(|| CoreError::NotFound(format!("source {id} not found")))
 }
 
-/// Inserts a new source at the end of the list. `raw_text` (pasted m3u) is
-/// stored in `m3u_raw` in the same transaction.
+/// Inserts a new source at the end of the list. `raw_text` is pasted m3u
+/// text with the data dir: it is stored in `m3u_raw` in the same transaction,
+/// inline up to `m3u::RAW_INLINE_MAX` and otherwise in the playlist cache
+/// (`raw = ''`, see `m3u::place_raw_text`), with its sha256 either way.
 pub fn insert(
     conn: &mut Connection,
     id: &str,
     name: &str,
     auto_refresh: bool,
     config: &SourceConfig,
-    raw_text: Option<&str>,
+    raw_text: Option<(&std::path::Path, &str)>,
+) -> CoreResult<()> {
+    // The cache file is written before the transaction so the write lock is
+    // not held during a large write; it is removed again if the insert fails.
+    let raw = match raw_text {
+        Some((data_dir, text)) => {
+            use sha2::{Digest, Sha256};
+            let sha = hex::encode(Sha256::digest(text.as_bytes()));
+            Some((
+                crate::m3u::place_raw_text(data_dir, id, text)?,
+                sha,
+                data_dir,
+            ))
+        }
+        None => None,
+    };
+    let result = insert_rows(conn, id, name, auto_refresh, config, raw.as_ref());
+    if let (Err(_), Some(("", _, data_dir))) = (&result, &raw) {
+        let _ = std::fs::remove_file(crate::m3u::cached_playlist_path(data_dir, id));
+    }
+    result
+}
+
+fn insert_rows(
+    conn: &mut Connection,
+    id: &str,
+    name: &str,
+    auto_refresh: bool,
+    config: &SourceConfig,
+    raw: Option<&(&str, String, &std::path::Path)>,
 ) -> CoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let position: i64 = tx.query_row(
@@ -132,9 +163,7 @@ pub fn insert(
         "INSERT INTO sources (id, kind, name, position, auto_refresh, created_at, config_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![id, config.kind().as_str(), name, position, auto_refresh, now_rfc3339(), config.to_json()?],
     )?;
-    if let Some(text) = raw_text {
-        use sha2::{Digest, Sha256};
-        let sha = hex::encode(Sha256::digest(text.as_bytes()));
+    if let Some((text, sha, _)) = raw {
         tx.execute(
             "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, ?3, ?4)",
             params![id, text, sha, now_rfc3339()],

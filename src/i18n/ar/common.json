@@ -35,6 +35,9 @@
   "errorTitleInternal": "حدث خطأ",
 
   "errorHintNetwork": "تحقّق من اتصالك ومن عنوان URL الخاص بالمزوّد، ثم أعد المحاولة.",
+  "errorBodyServerUnreachable": "خادم التطبيق نفسه لا يستجيب، لذا تعذّر تحميل أي شيء.",
+  "errorHintServerUnreachable": "تحقّق من أن خادم Tsrust IPTV لا يزال قيد التشغيل، ثم أعد المحاولة.",
+  "errorTechnicalDetails": "التفاصيل التقنية",
   "errorHintTimeout": "قد يكون المزوّد مشغولًا. أعد المحاولة بعد قليل.",
   "errorHintAuth": "تحقّق من اسم المستخدم أو كلمة المرور أو عنوان MAC في إعدادات المصدر.",
   "errorHintNotFound": "ربما أزاله المزوّد. حدّث المصدر لتحديث القائمة.",

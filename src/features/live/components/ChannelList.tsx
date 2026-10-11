@@ -163,46 +163,67 @@ export function ChannelList(props: ChannelListProps) {
   );
 
   return (
-    <div
-      ref={scrollRef}
-      role="list"
-      aria-label={t('channelList')}
-      data-testid="channel-list"
-      onKeyDown={onKeyDown}
-      className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
-    >
-      <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-        {items.map((v) => {
-          const ch = paged.getChannel(v.index);
-          return (
-            <div
-              key={v.key}
-              role="listitem"
-              aria-setsize={count}
-              aria-posinset={v.index + 1}
-              data-index={v.index}
-              style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}
-            >
-              <ChannelRow
-                index={v.index}
-                channel={ch}
-                nowNext={paged.getNowNext(v.index)}
-                favorite={paged.isFavorite(v.index)}
-                playing={!!ch && sameRef(ch.ref, playingRef)}
-                active={v.index === active}
-                compact={props.compact}
-                now={now}
-                sourceKind={props.sourceKind}
-                stripPrefix={prefs.stripCountryPrefix}
-                epgOffsetMinutes={prefs.epgOffsetMinutes}
-                onActivate={activate}
-                onToggleFavorite={props.onToggleFavorite}
-                onContextMenu={onRowContext}
-              />
-            </div>
-          );
-        })}
+    <>
+      {paged.guideUnavailable ? <GuideUnavailableNotice onRetry={paged.retryGuide} /> : null}
+      <div
+        ref={scrollRef}
+        role="list"
+        aria-label={t('channelList')}
+        data-testid="channel-list"
+        onKeyDown={onKeyDown}
+        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+          {items.map((v) => {
+            const ch = paged.getChannel(v.index);
+            return (
+              <div
+                key={v.key}
+                role="listitem"
+                aria-setsize={count}
+                aria-posinset={v.index + 1}
+                data-index={v.index}
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}
+              >
+                <ChannelRow
+                  index={v.index}
+                  channel={ch}
+                  nowNext={paged.getNowNext(v.index)}
+                  favorite={paged.isFavorite(v.index)}
+                  playing={!!ch && sameRef(ch.ref, playingRef)}
+                  active={v.index === active}
+                  compact={props.compact}
+                  now={now}
+                  sourceKind={props.sourceKind}
+                  stripPrefix={prefs.stripCountryPrefix}
+                  epgOffsetMinutes={prefs.epgOffsetMinutes}
+                  guideUnavailable={paged.guideUnavailable}
+                  onActivate={activate}
+                  onToggleFavorite={props.onToggleFavorite}
+                  onContextMenu={onRowContext}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
+    </>
+  );
+}
+
+/** One line above a list or grid whose Stalker guide timed out; the queue retries on its own. */
+export function GuideUnavailableNotice({ onRetry }: { onRetry(): void }) {
+  const { t } = useTranslation('live');
+  return (
+    <div role="status" data-testid="guide-unavailable" className="flex items-center gap-2 border-b border-border bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
+      <span className="min-w-0 flex-1">{t('portalGuideUnavailable')}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        {t('retry')}
+      </button>
     </div>
   );
 }

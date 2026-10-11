@@ -128,11 +128,13 @@ export function VirtualGrid<T>({
     if (e.target !== e.currentTarget) return;
     const cur = active < 0 ? 0 : active;
     const visibleRows = Math.max(1, Math.floor((parentRef.current?.clientHeight ?? rowHeight * 3) / (rowHeight + gap)));
+    // Grid columns mirror in RTL, so the horizontal arrows swap meaning there.
+    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
     switch (e.key) {
-      case 'ArrowRight':
+      case rtl ? 'ArrowLeft' : 'ArrowRight':
         moveTo(active < 0 ? 0 : cur + 1);
         break;
-      case 'ArrowLeft':
+      case rtl ? 'ArrowRight' : 'ArrowLeft':
         moveTo(cur - 1);
         break;
       case 'ArrowDown':

@@ -71,7 +71,7 @@
   "cancel": "取消",
   "resumedAt": "已从 {{time}} 继续播放",
   "externalPlaying": "正在 {{player}} 中播放",
-  "externalStopHint": "关闭 {{player}} 窗口即可停止播放。",
+  "externalStopHint": "在此停止播放，或关闭 {{player}} 窗口。",
   "externalExited": "{{player}} 已关闭",
   "dismiss": "关闭",
   "mpvLoading": "正在 MPV 中打开流",

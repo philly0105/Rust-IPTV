@@ -67,7 +67,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
           )}
         >
           <Search aria-hidden size={15} />
-          <span className="flex-1 truncate text-left">{t('searchEverything')}</span>
+          <span className="flex-1 truncate text-start">{t('searchEverything')}</span>
           <Kbd combo="mod+f" />
         </button>
       )}

@@ -334,7 +334,16 @@ export function buildUpdatePatch(source: Source, draft: SourceDraft, ctx: BuildC
   return { ok: true, value: patch, errors };
 }
 
-/** True when the patch changes how the catalog is fetched (a refresh is advisable). */
-export function patchNeedsRefresh(patch: SourcePatch): boolean {
-  return patch.m3u !== undefined || patch.xtream !== undefined || patch.stalker !== undefined;
+/**
+ * True when the patch changes how the catalog is fetched (a refresh is advisable). Pass the
+ * source as it was before the edit: M3U request headers apply at play time, so a header-only
+ * edit needs no refresh, and a pasted playlist (`origin: 'text'`) cannot refresh at all.
+ */
+export function patchNeedsRefresh(patch: SourcePatch, before?: Pick<Source, 'm3u'>): boolean {
+  if (patch.xtream !== undefined || patch.stalker !== undefined) return true;
+  const m3u = patch.m3u;
+  if (m3u === undefined) return false;
+  if ((m3u.origin ?? before?.m3u?.origin) === 'text') return false;
+  if (!before?.m3u) return true;
+  return !sameConfig({ ...m3u, headers: undefined }, { ...before.m3u, headers: undefined });
 }

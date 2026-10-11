@@ -71,7 +71,7 @@
   "cancel": "إلغاء",
   "resumedAt": "كمّل من {{time}}",
   "externalPlaying": "كيتشغل ف {{player}}",
-  "externalStopHint": "سد النافذة ديال {{player}} باش توقف التشغيل.",
+  "externalStopHint": "وقّف من هنا، ولا سد النافذة ديال {{player}}.",
   "externalExited": "{{player}} تسد",
   "dismiss": "تجاهل",
   "mpvLoading": "كنحلو البث ف MPV",

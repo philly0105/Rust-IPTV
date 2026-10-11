@@ -230,7 +230,15 @@ fn headers_of(v: &Value) -> RequestHeaders {
     }
 }
 
+#[cfg(test)]
 fn parse_entry(v: &Value, index: usize) -> Result<Entry, String> {
+    parse_entry_with(v, index, true)
+}
+
+/// [`parse_entry`]; `probe_files` false (server mode) skips the `is_file`
+/// check on a `file` entry's path, so the result never reveals whether a
+/// path exists on the server ([`keep_text_only`] then always applies).
+fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry, String> {
     if !v.is_object() {
         return Err(format!("playlist #{}: not an object", index + 1));
     }
@@ -268,12 +276,14 @@ fn parse_entry(v: &Value, index: usize) -> Result<Entry, String> {
                         headers: headers.clone(),
                     }
                 }
-                ("file", _, Some(p)) if std::path::Path::new(p).is_file() => M3uSourceConfig {
-                    origin: M3uOrigin::File,
-                    url: None,
-                    file_path: Some(p.clone()),
-                    headers: headers.clone(),
-                },
+                ("file", _, Some(p)) if !probe_files || std::path::Path::new(p).is_file() => {
+                    M3uSourceConfig {
+                        origin: M3uOrigin::File,
+                        url: None,
+                        file_path: Some(p.clone()),
+                        headers: headers.clone(),
+                    }
+                }
                 _ => M3uSourceConfig {
                     origin: M3uOrigin::Text,
                     url: None,
@@ -409,18 +419,26 @@ pub async fn import(
 
     if mode == ImportMode::Replace {
         let _guard = lock.lock().await;
-        state
+        let removed: Vec<String> = state
             .db_call(|c| {
                 let tx = c.transaction()?;
+                let ids = tx
+                    .prepare("SELECT id FROM sources")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<Vec<String>, _>>()?;
                 tx.execute_batch(
                     "DELETE FROM vod_source_pins;
                      DELETE FROM sources;
                      DELETE FROM app_state WHERE key LIKE 'backup_pending:%' OR key LIKE 'stalker_token:%';",
                 )?;
                 tx.commit()?;
-                Ok(())
+                Ok(ids)
             })
             .await?;
+        // Their on-disk playlist copies go too, as with `sources.remove`.
+        for id in &removed {
+            crate::m3u::remove_cached_playlist(state, id);
+        }
         tracing::info!("backup import (replace): existing sources removed");
     }
 
@@ -468,7 +486,7 @@ pub async fn import(
     let server_mode = crate::http::is_server_mode(state);
     let mut seen = HashSet::new();
     for (i, raw_entry) in manifest.playlists.iter().enumerate() {
-        let mut entry = match parse_entry(raw_entry, i) {
+        let mut entry = match parse_entry_with(raw_entry, i, !server_mode) {
             Ok(e) => e,
             Err(msg) => {
                 report.skipped += 1;
@@ -723,14 +741,30 @@ async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Resu
             Err(e) => return Err(e.to_string()),
         }
     };
+    if kind == SourceKind::Stalker {
+        // A replace re-creates the id, maybe against another portal: rows
+        // remembered in memory for the old one must not answer for it.
+        crate::stalker::Runtime::get(state).forget_source(id);
+    }
     match imp.import(state.clone(), &source).await {
         Ok(summary) => {
             tracing::info!(source_id = %id, %kind, channels = summary.channels, movies = summary.movies, series = summary.series, "backup source imported");
             let _ = set_error(state, id, None).await;
+            if kind == SourceKind::Stalker {
+                // Portal VOD is not stored locally; keep its totals, as
+                // `sources::run_import` does.
+                let (sid, movies, series) = (id.to_string(), summary.movies, summary.series);
+                let res = state
+                    .db_call(move |c| crate::catalog::set_remote_counts(c, &sid, movies, series))
+                    .await;
+                if let Err(err) = res {
+                    tracing::warn!(source_id = %id, error = %err, "could not record the portal totals");
+                }
+            }
             Ok(())
         }
         Err(err) => {
-            let msg = err.to_string();
+            let msg = crate::sources::error_text(&err);
             tracing::warn!(source_id = %id, %kind, error = %msg, "backup source import failed");
             let _ = set_error(state, id, Some(&msg)).await;
             Err(msg)

@@ -126,3 +126,79 @@ async fn decompressed_size_cap_is_an_invalid_error() {
     }
     assert!(delta_mb < 64, "peak RSS delta {delta_mb} MB");
 }
+
+/// Writes `head`, `reps` copies of `unit`, then `tail`, gzip-compressed.
+fn write_gz_units(path: &Path, head: &str, unit: &[u8], reps: usize, tail: &str) {
+    let file = BufWriter::new(std::fs::File::create(path).unwrap());
+    let mut gz = GzEncoder::new(file, Compression::fast());
+    gz.write_all(head.as_bytes()).unwrap();
+    for _ in 0..reps {
+        gz.write_all(unit).unwrap();
+    }
+    gz.write_all(tail.as_bytes()).unwrap();
+    gz.finish().unwrap().flush().unwrap();
+}
+
+/// R7-r2 F1: constructs quick-xml reads as one event (a quoted attribute
+/// value, a DOCTYPE internal subset, a processing instruction), each holding
+/// 300 MB of `>`...`<` pairs or small declarations, must stay under the node
+/// cap instead of growing the event buffer to the whole construct.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "RSS check; run with --release (xmltv unit tests cover the sizes in debug)"
+)]
+async fn single_event_bombs_stay_under_the_node_cap() {
+    let now = chrono::Utc::now();
+    let fmt = |d: chrono::DateTime<chrono::Utc>| d.format("%Y%m%d%H%M%S +0000").to_string();
+    let body = format!(
+        r#"<tv><channel id="a"><display-name>A</display-name></channel><programme start="{}" stop="{}" channel="a"><title>T</title></programme>"#,
+        fmt(now - chrono::Duration::hours(1)),
+        fmt(now + chrono::Duration::hours(1)),
+    );
+    let mut angle = vec![b'>'];
+    angle.extend(std::iter::repeat_n(b'y', MB));
+    angle.extend_from_slice(b"<z");
+    let mut decl = b"<!ELEMENT a ANY>".to_vec();
+    decl.extend(std::iter::repeat_n(b' ', MB));
+    let cases: [(&str, String, &[u8], String, bool); 3] = [
+        (
+            "quoted attribute",
+            format!(r#"<?xml version="1.0"?>{body}<programme x=""#),
+            &angle,
+            r#""></programme></tv>"#.to_string(),
+            false,
+        ),
+        (
+            "DOCTYPE subset",
+            r#"<?xml version="1.0"?><!DOCTYPE tv ["#.to_string(),
+            &decl,
+            format!("]>{body}</tv>"),
+            false,
+        ),
+        (
+            "processing instruction",
+            format!(r#"<?xml version="1.0"?>{body}<?pi "#),
+            &angle,
+            "?></tv>".to_string(),
+            true,
+        ),
+    ];
+    for (name, head, unit, tail, parses) in cases {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bomb.xml.gz");
+        write_gz_units(&path, &head, unit, 300, &tail);
+        let gz_kb = std::fs::metadata(&path).unwrap().len() / 1024;
+        let (result, delta_mb, secs) = refresh_measured(tmp.path(), &path).await;
+        println!("epg_limits: 300 MB {name} in {gz_kb} KB gz -> {result:?}, peak RSS delta {delta_mb} MB, {secs:.2} s");
+        match result {
+            Ok(stats) if parses => assert_eq!(stats.channels, 1, "{name}"),
+            Err(CoreError::Invalid(m)) if !parses => assert!(m.contains("larger than"), "{m}"),
+            other => panic!("{name}: unexpected {other:?}"),
+        }
+        assert!(
+            delta_mb < 64,
+            "{name}: peak RSS delta {delta_mb} MB >= 64 MB: the construct was buffered"
+        );
+    }
+}

@@ -125,6 +125,7 @@ fn q(source: &str, ct: ContentType, page: PageQuery) -> CatalogQuery {
         category_id: None,
         page,
         include_hidden: false,
+        min_rating: None,
     }
 }
 
@@ -519,4 +520,85 @@ async fn search_limit_reaches_the_ui_probe_of_1001() {
         assert_eq!(count(res), want, "limit {limit}");
     }
     assert_eq!(iptv_core::catalog::rpc::MAX_SEARCH_LIMIT, 1001);
+}
+
+/// `minRating` filters in SQL: unrated items drop out, `total` counts the
+/// filtered set, paging applies after the filter, and 0 or absent is off.
+#[tokio::test]
+async fn movies_min_rating_filters_in_sql_with_counts() {
+    let env = env().await;
+    seed(&env).await;
+    let page = env
+        .state
+        .db_call(|c| {
+            catalog::query(
+                c,
+                &CatalogQuery {
+                    min_rating: Some(8.5),
+                    ..q("s1", ContentType::Movie, PageQuery::default())
+                },
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].item_id, "m1");
+
+    let r = router();
+    let ids = |v: &serde_json::Value| -> Vec<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["ref"]["itemId"].as_str().unwrap().to_string())
+            .collect()
+    };
+    for (min, total) in [
+        (json!(8.0), 2),
+        (json!(8.3), 2),
+        (json!(9.6), 0),
+        (json!(0), 3),
+        (serde_json::Value::Null, 3),
+    ] {
+        let res = r
+            .dispatch(
+                env.state.clone(),
+                "catalog.movies",
+                json!({"sourceId": "s1", "query": {"offset": 0, "limit": 1, "sort": "rating"}, "minRating": min}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"], total, "minRating {min}");
+        if total > 0 {
+            assert_eq!(ids(&res), vec!["m1"], "minRating {min}");
+        }
+    }
+    // Second page of the filtered set, and the filter combined with search.
+    let res = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.movies",
+            json!({"sourceId": "s1", "query": {"offset": 1, "limit": 1, "sort": "rating"}, "minRating": 8.0}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ids(&res), vec!["m2"]);
+    let res = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.movies",
+            json!({"sourceId": "s1", "query": {"search": "heat"}, "minRating": 8.5}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res["total"], 0);
+    let res = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.series",
+            json!({"sourceId": "s1", "query": {}, "minRating": 5}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res["total"], 0);
 }

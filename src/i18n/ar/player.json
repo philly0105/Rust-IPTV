@@ -71,7 +71,7 @@
   "cancel": "إلغاء",
   "resumedAt": "استُؤنف عند {{time}}",
   "externalPlaying": "قيد التشغيل في {{player}}",
-  "externalStopHint": "أغلق نافذة {{player}} لإيقاف التشغيل.",
+  "externalStopHint": "أوقف التشغيل من هنا، أو أغلق نافذة {{player}}.",
   "externalExited": "أُغلق {{player}}",
   "dismiss": "تجاهل",
   "mpvLoading": "جارٍ فتح البث في MPV",

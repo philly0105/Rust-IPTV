@@ -310,11 +310,15 @@ describe('U4-fix3: minimum rating filter', () => {
   });
   beforeEach(() => {
     rpcMock.handlers['catalog.categories'] = () => [];
-    rpcMock.handlers['catalog.movies'] = (a): Page<VodItem> => {
-      const q = (a as { query: PageQuery }).query;
-      const items = Array.from({ length: Math.max(0, Math.min(q.limit, TOTAL - q.offset)) }, (_, i) => rated(q.offset + i));
-      return { items, total: TOTAL, offset: q.offset, limit: q.limit };
+    // Mirrors the core: `minRating` filters in SQLite and `total` counts the filtered set.
+    const pageOfRated = (a: unknown): Page<VodItem> => {
+      const { query: q, minRating } = a as { query: PageQuery; minRating?: number };
+      const all = Array.from({ length: TOTAL }, (_, i) => rated(i)).filter((i) => !minRating || (i.rating ?? -1) >= minRating);
+      return { items: all.slice(q.offset, q.offset + q.limit), total: all.length, offset: q.offset, limit: q.limit };
     };
+    rpcMock.handlers['catalog.movies'] = pageOfRated;
+    // Stalker pages straight from the portal, which ignores ratings.
+    rpcMock.handlers['stalker.movies'] = (a) => pageOfRated({ query: (a as { query: PageQuery }).query });
   });
   const gridRoute = [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }];
 
@@ -335,13 +339,33 @@ describe('U4-fix3: minimum rating filter', () => {
     expect(screen.queryByText('Rated 3')).toBeNull();
     const note = screen.getByTestId('vod-rating-filter');
     expect(note.textContent).toContain('Showing titles rated 7.0 or higher');
-    // Every page loads in order (50 of 150 pass), so the count is exact.
+    // The core filters (50 of 150 pass): one request, exact count from the first page.
     await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50')).toBeTruthy());
+    const movieCalls = callsOf('catalog.movies');
+    expect(movieCalls).toHaveLength(1);
+    expect(movieCalls[0]!.args).toMatchObject({ sourceId: 'src1', minRating: 7, query: { offset: 0 } });
 
     fireEvent.click(within(note).getByRole('button', { name: 'Show all ratings' }));
     await screen.findByText('Rated 2');
     expect(currentLocation).toBe('/s/src1/movies/c/all?ratings=all');
     expect(screen.getByRole('button', { name: 'Show only titles rated 7.0 or higher' })).toBeTruthy();
+  });
+
+  it('shows the rating empty state after one request when nothing qualifies', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ vodMinRating: 9.6 });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    await screen.findByText('No titles here are rated 9.6 or higher');
+    expect(callsOf('catalog.movies')).toHaveLength(1);
+  });
+
+  it('Stalker portals cannot filter, so the grid filters loaded pages and never sends minRating', async () => {
+    useKind('stalker');
+    rpcMock.handlers['settings.get'] = () => settings({ vodMinRating: 7 });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    await screen.findByText('Rated 1');
+    expect(screen.queryByText('Rated 2')).toBeNull();
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50')).toBeTruthy());
+    expect(callsOf('stalker.movies').every((c) => !('minRating' in (c.args as object)))).toBe(true);
   });
 
   it('shows no note and pages sparsely when the minimum is 0', async () => {

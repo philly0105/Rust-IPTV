@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { cn } from '../cn';
 import { pushStageTarget } from '../stage';
 import { registerStage, usePlayerStore } from '../store';
+import { ExternalStage } from './ExternalStage';
 
 export interface PlayerStageProps {
   className?: string;
@@ -18,6 +19,7 @@ export interface PlayerStageProps {
 export function PlayerStage({ className, children }: PlayerStageProps) {
   const ref = useRef<HTMLDivElement>(null);
   const active = usePlayerStore((s) => !!s.source && s.mode !== 'external');
+  const external = usePlayerStore((s) => !!s.source && s.mode === 'external');
   // Layout effect: the cleanup must run before React detaches this div (see stage.ts setRehome).
   useLayoutEffect(() => {
     const el = ref.current;
@@ -31,7 +33,7 @@ export function PlayerStage({ className, children }: PlayerStageProps) {
   }, []);
   return (
     <div ref={ref} data-player-stage="" className={cn('relative isolate min-h-0 overflow-hidden bg-black', className)}>
-      {!active && children}
+      {external ? <ExternalStage /> : !active && children}
     </div>
   );
 }

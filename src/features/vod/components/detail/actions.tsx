@@ -1,11 +1,12 @@
-import { Check, CircleAlert, Download as DownloadIcon, Heart, LoaderCircle, Pause } from 'lucide-react';
+import { Check, CircleAlert, CircleCheck, Download as DownloadIcon, Heart, LoaderCircle, Pause } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { invalidate, useRpcMutation } from '@/api/query';
 import type { Download, ItemRef, ItemSnapshot } from '@/api/types';
 
-import { Button, IconButton, buttonClass, cn, useToast } from '../../_shim';
+import { useSetWatched } from '../../hooks/queries';
+import { Button, IconButton, buttonClass, cn, useToast } from '@/ui';
 
 export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
   const { t } = useTranslation('vod');
@@ -29,6 +30,46 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { ite
   return (
     <Button size="lg" variant="secondary" icon={icon} aria-pressed={isFavorite} loading={toggle.isPending} onClick={onClick}>
       {isFavorite ? t('inFavorites') : t('addToFavorites')}
+    </Button>
+  );
+}
+
+/** Toggles watched for a movie (no `episodeIds`) or a set of episodes. */
+export function WatchedButton({
+  itemRef,
+  episodeIds,
+  watched,
+  compact,
+  labels,
+}: {
+  itemRef: ItemRef;
+  episodeIds?: string[];
+  watched: boolean;
+  compact?: boolean;
+  /** Overrides for the two button labels (season-level wording). */
+  labels?: { mark: string; unmark: string };
+}) {
+  const { t } = useTranslation('vod');
+  const { toast } = useToast();
+  const setWatched = useSetWatched();
+  const label = watched ? (labels?.unmark ?? t('markUnwatched')) : (labels?.mark ?? t('markWatched'));
+  const onClick = () => {
+    const next = !watched;
+    setWatched.mutate(
+      { ref: itemRef, ...(episodeIds ? { episodeIds } : {}), watched: next },
+      {
+        onSuccess: () => toast({ title: next ? t('markedWatched') : t('markedUnwatched'), variant: 'success' }),
+        onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
+      },
+    );
+  };
+  const icon = <CircleCheck aria-hidden size={18} className={cn(watched && 'text-success')} />;
+  if (compact) {
+    return <IconButton label={label} icon={icon} onClick={onClick} disabled={setWatched.isPending} />;
+  }
+  return (
+    <Button size="lg" variant="ghost" icon={icon} loading={setWatched.isPending} onClick={onClick}>
+      {label}
     </Button>
   );
 }

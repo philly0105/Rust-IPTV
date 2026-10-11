@@ -6,7 +6,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
 
-import { Button, Dialog, ErrorState, Skeleton, useToast } from '../_shim';
+import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
 import { useDebounced } from '../hooks/useDebounced';
 import { ChannelLogo } from './ChannelLogo';
 

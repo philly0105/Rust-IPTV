@@ -16,6 +16,7 @@ import {
   type VodItem,
 } from '@/api/types';
 import { playItem } from '@/features/player';
+import { RpcError } from '@/api/transport';
 import { Badge, Button, EmptyState, ErrorState, Poster, ProgressBar, Skeleton, buttonClass, useToast } from '@/ui';
 
 import { useShell } from '../store';
@@ -61,6 +62,27 @@ export function mergeRecentlyAdded(movies: readonly VodItem[], series: readonly 
   return [...movies, ...series]
     .sort((a, b) => ((a.added ?? '') < (b.added ?? '') ? 1 : (a.added ?? '') > (b.added ?? '') ? -1 : 0))
     .slice(0, limit);
+}
+
+/** Identity of an error for "same failure" checks: its RpcError code and message. */
+function errorSignature(err: unknown): string {
+  const e = RpcError.from(err);
+  return `${e.code}|${e.message}`;
+}
+
+/**
+ * The single error to show instead of per-rail errors, or undefined. When
+ * every rail query on screen failed (two or more) and they all failed the same
+ * way (typically the server is gone), five identical error panels say nothing
+ * one panel would not; the dashboard collapses them into one with one retry.
+ * Any rail still loading or loaded keeps per-rail errors.
+ */
+export function sharedRailError(errors: readonly unknown[]): unknown {
+  if (errors.length < 2) return undefined;
+  const first = errors[0];
+  if (first === null || first === undefined) return undefined;
+  const sig = errorSignature(first);
+  return errors.every((e) => e !== null && e !== undefined && errorSignature(e) === sig) ? first : undefined;
 }
 
 function programmeProgress(start?: string, end?: string): number | undefined {
@@ -223,6 +245,22 @@ function DashboardBody() {
   const nowRefs = useMemo(() => liveFavorites.map((f) => f.ref), [liveFavorites]);
   const nowNext = useRpcQuery('epg.nowNext', { refs: nowRefs }, { enabled: nowRefs.length > 0, staleTime: 60_000 });
 
+  // Rail queries actually on screen (each query once), for the shared-error collapse.
+  const railQueries = [
+    ...(show('hero') || show('continueWatching') ? [continueWatching] : []),
+    ...(show('liveFavorites') || show('favoriteMoviesAndSeries') ? [favorites] : []),
+    ...(show('recentlyWatchedLive') ? [recent] : []),
+    ...(show('recentlyAdded') ? [addedMovies, addedSeries] : []),
+    ...(show('tmdbTrending') && tmdbEnabled ? [trending] : []),
+  ];
+  const sharedError = hasSources ? sharedRailError(railQueries.map((q) => q.error)) : undefined;
+  const anyRailError = railQueries.some((q) => q.isError);
+  /** Per-rail error, hidden when the dashboard shows the shared one. */
+  const railError = (err: unknown) => (sharedError ? undefined : err);
+  const retryAllRails = () => {
+    for (const q of railQueries) if (q.isError) void q.refetch();
+  };
+
   const play = (args: { ref: ItemRef; episodeId?: string; title: string; subtitle?: string; posterUrl?: string }) => {
     const source = sourceById.get(args.ref.sourceId);
     if (!source) {
@@ -285,6 +323,11 @@ function DashboardBody() {
 
   return (
     <div className="flex flex-col gap-10 pt-8 pb-16" data-testid="dashboard">
+      {sharedError !== undefined && (
+        <div className="mx-8 rounded-lg border border-border bg-surface" data-testid="dashboard-error">
+          <ErrorState error={sharedError} onRetry={retryAllRails} />
+        </div>
+      )}
       {show('hero') && (heroLoading ? <HeroSkeleton /> : hero ? (
         <Hero
           position={hero}
@@ -307,7 +350,7 @@ function DashboardBody() {
           title={t('railContinueWatching')}
           items={continueWatching.data}
           loading={continueWatching.isPending}
-          error={continueWatching.error}
+          error={railError(continueWatching.error)}
           onRetry={() => void continueWatching.refetch()}
           getKey={(p) => `${itemKey(p.ref)}|${p.episodeId ?? ''}`}
           cardWidth={168}
@@ -339,7 +382,7 @@ function DashboardBody() {
           title={t('railLiveFavorites')}
           items={liveFavorites}
           loading={favorites.isPending}
-          error={favorites.error}
+          error={railError(favorites.error)}
           onRetry={() => void favorites.refetch()}
           seeAll={{ to: '/favorites' }}
           getKey={(f) => itemKey(f.ref)}
@@ -370,7 +413,7 @@ function DashboardBody() {
           title={t('railRecentLive')}
           items={recentLive}
           loading={recent.isPending}
-          error={recent.error}
+          error={railError(recent.error)}
           onRetry={() => void recent.refetch()}
           seeAll={{ to: '/recent' }}
           getKey={(r) => itemKey(r.ref)}
@@ -396,7 +439,7 @@ function DashboardBody() {
           title={t('railFavoriteVod')}
           items={vodFavorites}
           loading={favorites.isPending}
-          error={favorites.error}
+          error={railError(favorites.error)}
           onRetry={() => void favorites.refetch()}
           seeAll={{ to: '/favorites' }}
           getKey={(f) => itemKey(f.ref)}
@@ -434,7 +477,7 @@ function DashboardBody() {
           title={t('railRecentlyAdded')}
           items={recentlyAdded}
           loading={addedMovies.isPending || addedSeries.isPending}
-          error={addedMovies.error ?? addedSeries.error}
+          error={railError(addedMovies.error ?? addedSeries.error)}
           onRetry={() => {
             void addedMovies.refetch();
             void addedSeries.refetch();
@@ -461,7 +504,7 @@ function DashboardBody() {
           title={t('railTrending')}
           items={trending.data}
           loading={trending.isPending}
-          error={trending.error}
+          error={railError(trending.error)}
           onRetry={() => void trending.refetch()}
           getKey={(b) => `${b.mediaType}-${b.tmdbId}`}
           cardWidth={168}
@@ -482,6 +525,7 @@ function DashboardBody() {
 
       {hasSources &&
         !anyRailVisible &&
+        !anyRailError &&
         !continueWatching.isPending &&
         !favorites.isPending &&
         !recent.isPending && (

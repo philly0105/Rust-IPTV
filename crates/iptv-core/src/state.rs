@@ -84,21 +84,39 @@ impl AppState {
 
     /// Checks out a pooled connection. Blocking: from async code prefer [`Self::db_call`].
     pub fn conn(&self) -> CoreResult<PooledConn> {
-        Ok(self.db.get()?)
+        self.db
+            .get()
+            .map_err(|e| self.note_db_error(CoreError::from(e)))
     }
 
-    /// Runs blocking database work on the blocking thread pool.
+    /// Runs blocking database work on the blocking thread pool. A corruption
+    /// error from the closure flags the next boot for a full integrity check
+    /// (see [`db::note_error`]); the error is returned unchanged.
     pub async fn db_call<T, F>(&self, f: F) -> CoreResult<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> CoreResult<T> + Send + 'static,
     {
         let pool = self.db.clone();
+        let db_path = self.db_path();
         tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get()?;
-            f(&mut conn)
+            pool.get()
+                .map_err(CoreError::from)
+                .and_then(|mut conn| f(&mut conn))
+                .inspect_err(|e| {
+                    db::note_error(&db_path, e);
+                })
         })
         .await?
+    }
+
+    /// Records a database error for boot-time recovery when it is a
+    /// corruption error (see [`db::note_error`]) and hands it back, so any
+    /// pooled-connection path outside [`Self::db_call`] can write
+    /// `.map_err(|e| state.note_db_error(e))`.
+    pub fn note_db_error(&self, err: CoreError) -> CoreError {
+        db::note_error(&self.db_path(), &err);
+        err
     }
 
     /// Fetches a runtime singleton stored with [`Self::set_ext`]; `None` if

@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-import { Dialog } from '../../_shim';
+import { Dialog } from '@/ui';
 
 /** YouTube trailer in a privacy-enhanced embed; the iframe exists only while open. */
 export function TrailerDialog({ open, onClose, youtubeKey, title }: { open: boolean; onClose: () => void; youtubeKey: string; title: string }) {

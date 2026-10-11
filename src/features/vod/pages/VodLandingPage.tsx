@@ -14,7 +14,7 @@ import { useRecentlyAdded, useSource } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
-import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '../_shim';
+import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '@/ui';
 
 export function VodLandingPage({ kind }: { kind: VodKind }) {
   const { t } = useTranslation('vod');

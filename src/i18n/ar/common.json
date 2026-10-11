@@ -32,7 +32,7 @@
   "errorTitleConflict": "تغيّر هذا العنصر في مكان آخر",
   "errorTitleIo": "تعذّرت قراءة ملف أو كتابته",
   "errorTitleDb": "حدثت مشكلة في المكتبة المحلية",
-  "errorTitleInternal": "حدث خطأ ما",
+  "errorTitleInternal": "حدث خطأ",
 
   "errorHintNetwork": "تحقّق من اتصالك ومن عنوان URL الخاص بالمزوّد، ثم أعد المحاولة.",
   "errorHintTimeout": "قد يكون المزوّد مشغولًا. أعد المحاولة بعد قليل.",

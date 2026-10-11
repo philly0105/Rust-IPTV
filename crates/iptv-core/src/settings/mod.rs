@@ -45,6 +45,27 @@ const MAX_ROUTE_LEN: usize = 2048;
 const MAX_WINDOW_DIM: u32 = 32_768;
 const MAX_WINDOW_COORD: i32 = 100_000;
 
+/// Accepted `epgOffsetMinutes` range (12 hours either way).
+pub const EPG_OFFSET_RANGE: std::ops::RangeInclusive<i32> = -720..=720;
+/// Accepted `vodMinRating` range.
+pub const VOD_RATING_RANGE: std::ops::RangeInclusive<f64> = 0.0..=10.0;
+
+/// Fields only the desktop app may change: they name executables, their
+/// arguments, and folders on the machine running the core. In server (PWA)
+/// mode any browser on the network could otherwise point them at an
+/// arbitrary program or folder.
+pub const DESKTOP_ONLY_FIELDS: [&str; 6] = [
+    "mpvPath",
+    "vlcPath",
+    "mpvArgs",
+    "vlcArgs",
+    "downloadsDir",
+    "recordingsDir",
+];
+
+/// Error returned when a server-mode client changes a [`DESKTOP_ONLY_FIELDS`] entry.
+pub const DESKTOP_ONLY_MESSAGE: &str = "player and folder settings apply only to the desktop app";
+
 /// `AppState.extensions` key of the writer lock.
 const LOCK_KEY: &str = "settings_write_lock";
 
@@ -68,7 +89,12 @@ pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings>
     let _guard = lock.lock().await;
 
     let current = state.settings_snapshot();
-    let next = apply_patch(&current, &patch)?;
+    let merged = merge(&current, &patch)?;
+    if !state.is_desktop {
+        // Before validation, so a server client cannot probe which paths exist.
+        check_desktop_only(&current, &merged, &DESKTOP_ONLY_FIELDS)?;
+    }
+    let next = validate(&current, merged)?;
     if next == current {
         // Nothing changed: skip the write and the event.
         return Ok(current);
@@ -92,10 +118,36 @@ pub async fn save(state: &AppState, next: Settings) -> CoreResult<Settings> {
     let _guard = lock.lock().await;
     let current = state.settings_snapshot();
     let next = validate(&current, normalize(next))?;
+    if !state.is_desktop {
+        // `downloadsDir` is exempt here: `downloads.setDir` is the only caller
+        // that changes it through `save`, and it applies its own server rule.
+        let fields: Vec<&str> = DESKTOP_ONLY_FIELDS
+            .into_iter()
+            .filter(|f| *f != "downloadsDir")
+            .collect();
+        check_desktop_only(&current, &next, &fields)?;
+    }
     if next == current {
         return Ok(current);
     }
     store(state, next).await
+}
+
+/// Refuses (Unsupported) when any of `fields` differs between `current` and `next`.
+pub fn check_desktop_only(current: &Settings, next: &Settings, fields: &[&str]) -> CoreResult<()> {
+    let changed = |f: &str| match f {
+        "mpvPath" => current.mpv_path != next.mpv_path,
+        "vlcPath" => current.vlc_path != next.vlc_path,
+        "mpvArgs" => current.mpv_args != next.mpv_args,
+        "vlcArgs" => current.vlc_args != next.vlc_args,
+        "downloadsDir" => current.downloads_dir != next.downloads_dir,
+        "recordingsDir" => current.recordings_dir != next.recordings_dir,
+        _ => false,
+    };
+    if fields.iter().any(|f| changed(f)) {
+        return Err(CoreError::Unsupported(DESKTOP_ONLY_MESSAGE.into()));
+    }
+    Ok(())
 }
 
 async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
@@ -110,13 +162,18 @@ async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
 /// Merges `patch` over `current` and returns validated, normalized settings.
 /// Pure: no I/O besides checking the existence of changed paths.
 pub fn apply_patch(current: &Settings, patch: &Value) -> CoreResult<Settings> {
+    validate(current, merge(current, patch)?)
+}
+
+/// Merges `patch` over `current` and normalizes, without validating.
+fn merge(current: &Settings, patch: &Value) -> CoreResult<Settings> {
     let mut doc = serde_json::to_value(current)?;
     merge_patch(&mut doc, patch);
     let next: Settings = serde_json::from_value(doc).map_err(|e| {
         // serde messages name the offending type, never the full document.
         CoreError::invalid(format!("invalid settings: {e}"))
     })?;
-    validate(current, normalize(next))
+    Ok(normalize(next))
 }
 
 /// RFC 7396 JSON Merge Patch.
@@ -150,6 +207,7 @@ pub fn normalize(mut s: Settings) -> Settings {
     s.mpv_path = trim_opt(s.mpv_path);
     s.vlc_path = trim_opt(s.vlc_path);
     s.downloads_dir = trim_opt(s.downloads_dir);
+    s.recordings_dir = trim_opt(s.recordings_dir);
     s.tmdb.api_key = trim_opt(s.tmdb.api_key);
     s.tmdb.language = trim_opt(s.tmdb.language);
     let mut seen = std::collections::HashSet::new();
@@ -185,6 +243,16 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
             ));
         }
     }
+    if !EPG_OFFSET_RANGE.contains(&next.epg_offset_minutes) {
+        return Err(CoreError::invalid(format!(
+            "epgOffsetMinutes must be between {} and {}",
+            EPG_OFFSET_RANGE.start(),
+            EPG_OFFSET_RANGE.end()
+        )));
+    }
+    if !next.vod_min_rating.is_finite() || !VOD_RATING_RANGE.contains(&next.vod_min_rating) {
+        return Err(CoreError::invalid("vodMinRating must be between 0 and 10"));
+    }
     let changed = |a: &Option<String>, b: &Option<String>| a != b;
     if changed(&current.mpv_path, &next.mpv_path) {
         check_file("mpvPath", next.mpv_path.as_deref())?;
@@ -193,15 +261,23 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
         check_file("vlcPath", next.vlc_path.as_deref())?;
     }
     if changed(&current.downloads_dir, &next.downloads_dir) {
-        if let Some(dir) = next.downloads_dir.as_deref() {
-            if !Path::new(dir).is_dir() {
-                return Err(CoreError::invalid(format!(
-                    "downloadsDir does not exist or is not a folder: {dir}"
-                )));
-            }
-        }
+        check_dir("downloadsDir", next.downloads_dir.as_deref())?;
+    }
+    if changed(&current.recordings_dir, &next.recordings_dir) {
+        check_dir("recordingsDir", next.recordings_dir.as_deref())?;
     }
     Ok(next)
+}
+
+fn check_dir(field: &str, dir: Option<&str>) -> CoreResult<()> {
+    if let Some(dir) = dir {
+        if !Path::new(dir).is_dir() {
+            return Err(CoreError::invalid(format!(
+                "{field} does not exist or is not a folder: {dir}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn check_file(field: &str, path: Option<&str>) -> CoreResult<()> {
@@ -334,6 +410,14 @@ mod tests {
         assert!(apply_patch(&cur, &json!({"mpvPath": "Z:/definitely/missing/mpv.exe"})).is_err());
         assert!(apply_patch(&cur, &json!({"downloadsDir": "Z:/missing/dir"})).is_err());
         assert!(apply_patch(&cur, &json!({"lastRoute": "dashboard"})).is_err());
+        assert!(apply_patch(&cur, &json!({"recordingsDir": "Z:/missing/dir"})).is_err());
+        assert!(apply_patch(&cur, &json!({"epgOffsetMinutes": 720})).is_ok());
+        assert!(apply_patch(&cur, &json!({"epgOffsetMinutes": -720})).is_ok());
+        assert!(apply_patch(&cur, &json!({"epgOffsetMinutes": 721})).is_err());
+        assert!(apply_patch(&cur, &json!({"epgOffsetMinutes": 1.5})).is_err());
+        assert!(apply_patch(&cur, &json!({"vodMinRating": 7.5})).is_ok());
+        assert!(apply_patch(&cur, &json!({"vodMinRating": 10.5})).is_err());
+        assert!(apply_patch(&cur, &json!({"vodMinRating": -1})).is_err());
         // Empty strings normalize to None and pass.
         let n = apply_patch(&cur, &json!({"mpvPath": "  ", "theme": "dark"})).unwrap();
         assert!(n.mpv_path.is_none());

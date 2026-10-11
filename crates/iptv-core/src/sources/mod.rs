@@ -171,6 +171,7 @@ pub struct SourcePatch {
 #[serde(rename_all = "camelCase")]
 pub struct SourceCounts {
     pub channel_count: i64,
+    pub radio_count: i64,
     pub movie_count: i64,
     pub series_count: i64,
 }
@@ -325,11 +326,28 @@ pub fn normalize_mac(mac: &str) -> CoreResult<String> {
 
 /// Validates and normalizes a Stalker config.
 pub fn validate_stalker(cfg: StalkerSourceConfig) -> CoreResult<StalkerSourceConfig> {
+    validate_stalker_keeping(cfg, None)
+}
+
+/// [`validate_stalker`] for an edit: a MAC equal to `stored_mac` (after
+/// trimming) is kept verbatim, so a grandfathered value from an old backup
+/// (e.g. `MAG-0001`) survives edits of other fields. A changed MAC must be
+/// a 12-hex-digit address and is normalized.
+pub fn validate_stalker_keeping(
+    cfg: StalkerSourceConfig,
+    stored_mac: Option<&str>,
+) -> CoreResult<StalkerSourceConfig> {
     let portal = cfg.portal_url.trim().to_string();
     check_http_url(&portal, "the portal URL")?;
+    let mac = match stored_mac.map(str::trim) {
+        Some(stored) if !stored.is_empty() && stored == cfg.mac_address.trim() => {
+            stored.to_string()
+        }
+        _ => normalize_mac(&cfg.mac_address)?,
+    };
     Ok(StalkerSourceConfig {
         portal_url: portal,
-        mac_address: normalize_mac(&cfg.mac_address)?,
+        mac_address: mac,
         is_full_portal: cfg.is_full_portal,
         username: trimmed(cfg.username.as_deref()),
         password: cfg.password.filter(|p| !p.is_empty()),
@@ -544,7 +562,7 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
 /// outcome. A failed import leaves the previous catalog in place.
 pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, ImportSummary)> {
     let lock = lock_for(&state, id);
-    let _guard = lock.lock().await;
+    let guard = lock.lock().await;
     let source = get(&state, id).await?;
     let Some(imp) = importer(&state, source.kind) else {
         let err = CoreError::Unsupported(format!(
@@ -570,6 +588,9 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
                     Ok(())
                 })
                 .await?;
+            // The backup import lock is never taken while this source's
+            // import lock is held (lock order: backup, then source).
+            drop(guard);
             apply_parked_backup(&state, id).await;
             let total = (summary.channels + summary.movies + summary.series).max(0) as u64;
             progress(&state, id, "done", total, Some(total), None);
@@ -680,7 +701,26 @@ fn spawn_guide_refresh(state: &Arc<AppState>, source: &Source) {
 /// Applies user state a backup import parked for this source because its
 /// catalog could not be loaded then (favorites, positions, hidden groups).
 /// A failure is logged and left parked; it never fails the refresh.
+///
+/// Only a source with a parked row (`backup_pending:<id>`) waits for the
+/// global backup import lock, so adding or refreshing an unrelated source never
+/// blocks behind a running `backup.import`.
 async fn apply_parked_backup(state: &Arc<AppState>, id: &str) {
+    let key = format!("{}{id}", crate::backup::PENDING_PREFIX);
+    let parked = state
+        .db_call(move |c| {
+            Ok(c.prepare_cached("SELECT 1 FROM app_state WHERE key = ?1")?
+                .exists([&key])?)
+        })
+        .await;
+    match parked {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(err) => {
+            tracing::warn!(source_id = id, %err, "could not check for parked backup state");
+            return;
+        }
+    }
     match crate::backup::apply_pending_restore(state, id).await {
         Ok(w) if !w.is_empty() => {
             tracing::info!(
@@ -733,7 +773,10 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 "Stalker settings given for a non-Stalker source".into(),
             ));
         }
-        config = Some(SourceConfig::Stalker(validate_stalker(s)?));
+        let stored_mac = current.stalker.as_ref().map(|c| c.mac_address.as_str());
+        config = Some(SourceConfig::Stalker(validate_stalker_keeping(
+            s, stored_mac,
+        )?));
     }
     let name = match patch.name.as_deref().map(str::trim) {
         Some("") => return Err(CoreError::Invalid("the name cannot be empty".into())),
@@ -808,10 +851,27 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     let _guard = lock.lock().await;
     let sid = id.to_string();
     state.db_call(move |c| store::delete(c, &sid)).await?;
+    crate::m3u::remove_cached_playlist(state, id);
     if let Some(locks) = state.ext::<LockMap>(LOCKS_KEY) {
         locks.remove(id);
     }
     tracing::info!(source_id = id, "source removed");
+    emit_changed(state);
+    Ok(())
+}
+
+/// `sources.removeAll`: removes every source through the same path as
+/// [`remove`] (each waits for its running import), then emits one more
+/// `sources.changed`. A source already gone is skipped.
+pub async fn remove_all(state: &AppState) -> CoreResult<()> {
+    let ids: Vec<String> = list(state).await?.into_iter().map(|s| s.id).collect();
+    for id in &ids {
+        match remove(state, id).await {
+            Ok(()) | Err(CoreError::NotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    tracing::info!(count = ids.len(), "all sources removed");
     emit_changed(state);
     Ok(())
 }
@@ -852,6 +912,7 @@ pub async fn counts(state: &AppState, id: &str) -> CoreResult<SourceCounts> {
     let s = get(state, id).await?;
     Ok(SourceCounts {
         channel_count: s.channel_count,
+        radio_count: s.radio_count,
         movie_count: s.movie_count,
         series_count: s.series_count,
     })
@@ -917,6 +978,36 @@ mod tests {
         assert_eq!(ev.payload["sourceId"], "s1");
         assert_eq!(ev.payload["total"], 20);
         assert!(ev.payload.get("message").is_none());
+    }
+
+    #[tokio::test]
+    async fn import_does_not_wait_for_a_running_backup_import() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        register_importer(&state, Arc::new(Fake));
+        let cfg = SourceConfig::Xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: "u".into(),
+            password: "p".into(),
+        });
+        state
+            .db_call(move |c| store::insert(c, "x1", "X", false, &cfg, None))
+            .await
+            .unwrap();
+        // A backup import holds the global lock (e.g. while it syncs its own
+        // sources); a refresh of an unrelated source must not block on it.
+        let lock = crate::backup::import_lock(&state);
+        let _held = lock.lock().await;
+        let done = tokio::time::timeout(Duration::from_secs(5), run_import(state.clone(), "x1"))
+            .await
+            .expect("run_import blocked behind the backup import lock");
+        assert!(done.is_ok());
     }
 
     #[test]

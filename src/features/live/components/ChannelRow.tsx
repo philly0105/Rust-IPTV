@@ -2,9 +2,10 @@ import { History, Star } from 'lucide-react';
 import { memo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Channel, EpgNowNext } from '@/api/types';
+import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
 
-import { formatClock, minutesLeft, ms, programProgress } from '../lib/epgTime';
+import { displayChannelName } from '../lib/channelName';
+import { formatClock, hasUsableArchive, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo } from './ChannelLogo';
 
 export const CHANNEL_ROW_HEIGHT = 64;
@@ -18,6 +19,12 @@ export interface ChannelRowProps {
   active: boolean;
   compact?: boolean;
   now: number;
+  /** Hides the archive icon when the source cannot play this channel's catch-up. */
+  sourceKind?: SourceKind;
+  /** `settings.stripCountryPrefix` */
+  stripPrefix?: boolean;
+  /** `settings.epgOffsetMinutes` */
+  epgOffsetMinutes?: number;
   onActivate(index: number, how: 'click' | 'double' | 'key'): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
@@ -41,10 +48,13 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const { channel, nowNext, favorite, playing, active, index, now, compact } = props;
   if (!channel) return <RowSkeleton />;
 
-  const cur = nowNext?.now;
-  const nxt = nowNext?.next;
+  const shifted = shiftNowNext(nowNext, props.epgOffsetMinutes ?? 0);
+  const cur = shifted?.now;
+  const nxt = shifted?.next;
   const progress = cur ? programProgress(cur, now) : 0;
-  const archive = channel.archive?.enabled;
+  const archive = hasUsableArchive(channel, props.sourceKind);
+  const name = displayChannelName(channel.name, props.stripPrefix);
+  const left = cur ? minutesLeft(cur, now) : 0;
 
   return (
     <div
@@ -53,7 +63,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
       }`}
       onContextMenu={(e) => props.onContextMenu(e, channel, index)}
     >
-      {playing ? <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-r bg-accent" /> : null}
+      {playing ? <span aria-hidden className="absolute inset-y-2 start-0 w-[3px] rounded-e bg-accent" /> : null}
       <button
         type="button"
         data-row-index={index}
@@ -61,7 +71,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         aria-current={playing ? 'true' : undefined}
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
-          channel.name,
+          name,
           cur ? t('nowShowing', { title: cur.title }) : '',
           playing ? t('playingNow') : '',
         ]
@@ -69,22 +79,25 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           .join(', ')}
         onClick={() => props.onActivate(index, 'click')}
         onDoubleClick={() => props.onActivate(index, 'double')}
-        className="flex min-w-0 flex-1 items-center gap-3 py-2 pr-1 pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-3 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       >
-        <span className="w-8 shrink-0 text-right text-xs tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
-        {!compact ? <ChannelLogo src={channel.logoUrl} name={channel.name} /> : null}
+        <span className="w-8 shrink-0 text-end text-xs tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
+        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={`truncate text-sm ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{channel.name}</span>
+          <span className={`truncate text-sm ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
           {cur ? (
             <>
-              <span className="flex min-w-0 items-baseline gap-2 text-xs text-fg-muted">
-                <span className="truncate">{cur.title}</span>
-                <span className="ml-auto shrink-0 tabular-nums text-fg-subtle">
-                  {t('minutesLeft', { count: minutesLeft(cur, now) })}
+              {/* The title takes the width; the remaining time stays a compact "38m" so narrow lists keep the title readable. */}
+              <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-fg-muted">
+                <span className="min-w-0 flex-1 truncate" title={cur.title}>
+                  {cur.title}
+                </span>
+                <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: left })}>
+                  {t('minutesLeftShort', { count: left })}
                 </span>
               </span>
               <span className="relative h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                <span className="absolute inset-y-0 left-0 rounded-full bg-live" style={{ width: `${progress * 100}%` }} />
+                <span data-testid="channel-progress" className="absolute inset-y-0 start-0 rounded-full bg-live" style={{ width: `${progress * 100}%` }} />
               </span>
               {nxt && !compact ? (
                 <span className="truncate text-[11px] text-fg-subtle">
@@ -97,7 +110,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           )}
         </span>
       </button>
-      <span className="flex shrink-0 items-center gap-0.5 pr-2">
+      <span className="flex shrink-0 items-center gap-0.5 pe-2">
         {archive ? (
           <span
             title={

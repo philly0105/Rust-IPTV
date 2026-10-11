@@ -108,7 +108,7 @@ async fn add_list_get_update_reorder_remove_via_rpc() {
         .unwrap();
     assert_eq!(
         counts,
-        json!({"channelCount": 2, "movieCount": 0, "seriesCount": 0})
+        json!({"channelCount": 2, "radioCount": 0, "movieCount": 0, "seriesCount": 0})
     );
 
     r.dispatch(st.clone(), "sources.remove", json!({"id": b}))

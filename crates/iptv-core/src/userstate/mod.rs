@@ -483,6 +483,8 @@ pub struct PositionInput {
     pub snapshot_json: Option<String>,
     /// Explicit timestamp (backup import); `None` = now.
     pub updated_at: Option<String>,
+    /// Store the row as watched (backup import). `false` keeps the stored flag.
+    pub watched: bool,
 }
 
 fn ep_key(episode_id: Option<&str>) -> &str {
@@ -501,11 +503,12 @@ fn position_from_row(row: &Row<'_>) -> rusqlite::Result<PlaybackPosition> {
         duration_seconds: row.get(5)?,
         updated_at: crate::db::to_rfc3339(&updated_at),
         snapshot,
+        watched: row.get::<_, i64>(8)? != 0,
         item_ref: r,
     })
 }
 
-const POSITION_COLS: &str = "source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json";
+const POSITION_COLS: &str = "source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched";
 
 /// One saved position.
 pub fn position_get(
@@ -536,7 +539,8 @@ pub fn is_complete(position_seconds: i64, duration_seconds: Option<i64>) -> bool
 }
 
 /// Saves a position, or deletes it when it reached [`COMPLETE_RATIO`] of the
-/// duration. Returns true when a row is stored afterwards.
+/// duration. Returns true when a row is stored afterwards. A row marked
+/// watched keeps its flag (and is kept when the new position is complete).
 pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
     validate_ref(&p.item_ref)?;
     if p.position_seconds < 0 {
@@ -545,19 +549,25 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
     let duration = p.duration_seconds.filter(|d| *d > 0);
     let r = &p.item_ref;
     let ep = ep_key(p.episode_id.as_deref());
-    if is_complete(p.position_seconds, duration) {
-        position_remove(conn, r, Some(ep))?;
-        return Ok(false);
+    if !p.watched && is_complete(p.position_seconds, duration) {
+        let kept = conn.execute(
+            "DELETE FROM playback_positions
+             WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4 AND watched = 0",
+            params![r.source_id, r.content_type.as_str(), r.item_id, ep],
+        )? == 0
+            && position_get(conn, r, Some(ep))?.is_some();
+        return Ok(kept);
     }
     let updated_at = p.updated_at.clone().unwrap_or_else(now_ts);
     conn.execute(
-        "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(source_id, content_type, item_id, episode_id) DO UPDATE SET
            position_seconds = excluded.position_seconds,
            duration_seconds = COALESCE(excluded.duration_seconds, playback_positions.duration_seconds),
            updated_at = excluded.updated_at,
-           snapshot_json = COALESCE(excluded.snapshot_json, playback_positions.snapshot_json)",
+           snapshot_json = COALESCE(excluded.snapshot_json, playback_positions.snapshot_json),
+           watched = MAX(playback_positions.watched, excluded.watched)",
         params![
             r.source_id,
             r.content_type.as_str(),
@@ -566,11 +576,41 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
             p.position_seconds,
             duration,
             updated_at,
-            p.snapshot_json
+            p.snapshot_json,
+            p.watched as i64
         ],
     )
     .map_err(|e| map_fk(e, &r.source_id))?;
     Ok(true)
+}
+
+/// Marks an item (or one episode) watched or unwatched (`userstate.setWatched`).
+///
+/// Watched upserts the position row with `watched = 1` and the position at the
+/// stored duration when one is known (else the stored position, else 0), so
+/// continue watching drops it. Unwatched deletes the row.
+pub fn set_watched(
+    conn: &Connection,
+    r: &ItemRef,
+    episode_id: Option<&str>,
+    watched: bool,
+) -> CoreResult<()> {
+    validate_ref(r)?;
+    let ep = ep_key(episode_id);
+    if !watched {
+        return position_remove(conn, r, Some(ep));
+    }
+    conn.execute(
+        "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
+         VALUES (?1, ?2, ?3, ?4, 0, NULL, ?5, NULL, 1)
+         ON CONFLICT(source_id, content_type, item_id, episode_id) DO UPDATE SET
+           position_seconds = COALESCE(playback_positions.duration_seconds, playback_positions.position_seconds),
+           updated_at = excluded.updated_at,
+           watched = 1",
+        params![r.source_id, r.content_type.as_str(), r.item_id, ep, now_ts()],
+    )
+    .map_err(|e| map_fk(e, &r.source_id))?;
+    Ok(())
 }
 
 /// Every position stored under a ref (a series: one per episode), newest first.
@@ -587,7 +627,7 @@ pub fn positions_for_series(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<Pl
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Newest unfinished positions, one per item (the latest episode of a series),
+/// Newest unfinished, unwatched positions, one per item (the latest episode of a series),
 /// each with a snapshot: the stored one, else built from the catalog row,
 /// else a minimal fallback.
 pub fn continue_watching(
@@ -603,10 +643,10 @@ pub fn continue_watching(
              PARTITION BY p.source_id, p.content_type, p.item_id
              ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
            FROM playback_positions p
-           WHERE p.position_seconds > 0
+           WHERE p.position_seconds > 0 AND p.watched = 0
          )
          SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
-                k.duration_seconds, k.updated_at, k.snapshot_json,
+                k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
                 i.title, COALESCE(i.poster_url, i.logo_url)
          FROM ranked k
          LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
@@ -617,8 +657,8 @@ pub fn continue_watching(
     let rows = stmt.query_map(params![limit], |row| {
         let mut p = position_from_row(row)?;
         if p.snapshot.is_none() {
-            let title: Option<String> = row.get(8)?;
-            let poster: Option<String> = row.get(9)?;
+            let title: Option<String> = row.get(9)?;
+            let poster: Option<String> = row.get(10)?;
             p.snapshot = Some(match title {
                 Some(title) => ItemSnapshot {
                     title,
@@ -770,6 +810,7 @@ mod tests {
             duration_seconds: dur,
             snapshot_json: None,
             updated_at: None,
+            watched: false,
         };
         assert!(position_set(&c, &p("show", Some("e1"), 100, Some(1000))).unwrap());
         std::thread::sleep(std::time::Duration::from_millis(5));

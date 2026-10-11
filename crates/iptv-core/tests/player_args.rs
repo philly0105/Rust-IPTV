@@ -1,11 +1,14 @@
 //! Argument building for external mpv / VLC and the embedded mpv process.
 
+use iptv_core::error::CoreError;
 use iptv_core::model::{PlayerKind, PlayerSource, RequestHeaders, Settings};
 use iptv_core::player::args::{
     embedded_mpv_args, escape_mpv_list_value, loadfile_options, mpv_external_args,
-    mpv_header_fields, mpv_pipe_name, split_shell_args, vlc_external_args,
+    mpv_header_fields, mpv_pipe_name, split_shell_args, validate_play_url, vlc_external_args,
 };
-use iptv_core::player::embedded::{legacy_options, validate_command};
+use iptv_core::player::embedded::{
+    legacy_options, recording_file_name, stream_record_command, validate_command,
+};
 use iptv_core::player::external::{build_args, ExternalPlayer};
 use serde_json::json;
 
@@ -101,6 +104,7 @@ fn mpv_external_minimal() {
         s(&[
             "--title=News HD",
             "--force-media-title=News HD",
+            "--",
             "http://h/live.m3u8"
         ])
     );
@@ -127,6 +131,7 @@ fn mpv_external_with_headers_and_user_args() {
             "--force-media-title=Sports 1",
             "--fs",
             "--profile=low latency",
+            "--",
             "http://h/live.m3u8",
         ])
     );
@@ -135,7 +140,7 @@ fn mpv_external_with_headers_and_user_args() {
 #[test]
 fn mpv_external_skips_blank_headers_and_title() {
     let src = source("http://h/a.ts", "  ", headers(Some(""), Some("   "), None));
-    assert_eq!(mpv_external_args(&src, ""), s(&["http://h/a.ts"]));
+    assert_eq!(mpv_external_args(&src, ""), s(&["--", "http://h/a.ts"]));
 }
 
 #[test]
@@ -182,16 +187,113 @@ fn vlc_external_args_full() {
         ),
     );
     assert_eq!(
-        vlc_external_args(&src, "--fullscreen --no-video-title-show"),
+        vlc_external_args(&src, "--fullscreen --no-video-title-show", false),
         s(&[
             "--meta-title=Movie",
             "--http-user-agent=UA/1",
             "--http-referrer=http://r/",
             "--fullscreen",
             "--no-video-title-show",
+            "--",
             "http://h/movie.mp4",
         ])
     );
+}
+
+#[test]
+fn vlc_reuse_instance_flags() {
+    let src = source("http://h/a.ts", "", None);
+    assert_eq!(
+        vlc_external_args(&src, "", true),
+        s(&[
+            "--one-instance",
+            "--playlist-enqueue",
+            "--",
+            "http://h/a.ts"
+        ])
+    );
+    let settings = Settings::default();
+    assert!(settings.player_reuse_instance, "reuse is on by default");
+    assert!(build_args(ExternalPlayer::Vlc, &src, &settings).contains(&"--one-instance".into()));
+    let off = Settings {
+        player_reuse_instance: false,
+        ..Settings::default()
+    };
+    assert!(!build_args(ExternalPlayer::Vlc, &src, &off).contains(&"--one-instance".into()));
+    assert!(!build_args(ExternalPlayer::Mpv, &src, &settings).contains(&"--one-instance".into()));
+}
+
+// ---- option injection (R4 F1) ----------------------------------------------
+
+#[test]
+fn url_that_looks_like_an_option_stays_a_url() {
+    // A hostile M3U line: without the separator mpv treats it as an option
+    // (and writes a log file wherever the playlist says).
+    for url in [r"--log-file=C:\x", "--script=//host/share/pwn.lua"] {
+        let src = source(url, "Evil", None);
+        let mpv = mpv_external_args(&src, "--fs");
+        let sep = mpv.iter().position(|a| a == "--").expect("mpv separator");
+        assert_eq!(&mpv[sep + 1..], &[url.to_string()][..], "{mpv:?}");
+        assert!(mpv[..sep].iter().all(|a| a != url));
+        let vlc = vlc_external_args(&src, "", true);
+        let sep = vlc.iter().position(|a| a == "--").expect("vlc separator");
+        assert_eq!(&vlc[sep + 1..], &[url.to_string()][..], "{vlc:?}");
+        // And the scheme allowlist refuses it before any player starts.
+        assert!(matches!(
+            validate_play_url(&src),
+            Err(CoreError::Invalid(_))
+        ));
+    }
+}
+
+#[test]
+fn play_url_scheme_allowlist() {
+    for ok in [
+        "http://h/a.m3u8",
+        "HTTPS://h/a",
+        "rtmp://h/live",
+        "rtmps://h/live",
+        "rtsp://cam/1",
+        "udp://@239.0.0.1:1234",
+        "rtp://239.0.0.1:5000",
+        "mms://h/x",
+        "file:///C:/v/a.mkv",
+    ] {
+        assert!(validate_play_url(&source(ok, "t", None)).is_ok(), "{ok}");
+    }
+    for bad in [
+        "",
+        "   ",
+        "-v",
+        "--script=x.lua",
+        "av://lavfi:testsrc",
+        "edl://a;b",
+        "memory://x",
+        "lavf://x",
+        "ytdl://x",
+        "javascript:alert(1)",
+        "relative/path.ts",
+        r"C:\Videos\a.mkv",
+        "http://h/a\nb",
+    ] {
+        assert!(
+            matches!(
+                validate_play_url(&source(bad, "t", None)),
+                Err(CoreError::Invalid(_))
+            ),
+            "{bad:?} should be refused"
+        );
+    }
+    // Local absolute paths are fine for downloaded files only.
+    let mut file = source(r"C:\Videos\clip, test.mkv", "t", None);
+    file.kind = PlayerKind::File;
+    assert!(validate_play_url(&file).is_ok());
+    file.url = r"\\nas\share\a.mkv".into();
+    assert!(validate_play_url(&file).is_ok());
+    file.url = "relative.mkv".into();
+    assert!(validate_play_url(&file).is_err());
+    file.url = "--log-file=C:/x".into();
+    assert!(validate_play_url(&file).is_err());
 }
 
 #[test]
@@ -202,12 +304,8 @@ fn build_args_uses_settings_strings() {
         ..Settings::default()
     };
     let src = source("u", "t", None);
-    assert_eq!(
-        build_args(ExternalPlayer::Mpv, &src, &settings)
-            .last()
-            .unwrap(),
-        "u"
-    );
+    let mpv = build_args(ExternalPlayer::Mpv, &src, &settings);
+    assert_eq!(&mpv[mpv.len() - 2..], &s(&["--", "u"])[..]);
     assert!(build_args(ExternalPlayer::Mpv, &src, &settings).contains(&"--fs".to_string()));
     assert!(build_args(ExternalPlayer::Vlc, &src, &settings).contains(&"--loop".to_string()));
     assert!(!build_args(ExternalPlayer::Vlc, &src, &settings).contains(&"--fs".to_string()));
@@ -229,7 +327,7 @@ fn external_player_serde() {
 fn embedded_args_contain_c4_flags_after_user_args() {
     let pipe = mpv_pipe_name(4242);
     assert_eq!(pipe, r"\\.\pipe\tsrust-iptv-mpv-4242");
-    let args = embedded_mpv_args(0x1234, &pipe, "--wid=999 --vo=gpu-next", 80.4);
+    let args = embedded_mpv_args(0x1234, &pipe, "--wid=999 --vo=gpu-next", 80.4, true);
     assert_eq!(&args[..2], &s(&["--wid=999", "--vo=gpu-next"])[..]);
     for flag in [
         "--wid=4660",
@@ -241,6 +339,7 @@ fn embedded_args_contain_c4_flags_after_user_args() {
         "--force-window=yes",
         "--hwdec=auto-safe",
         "--volume=80",
+        "--mute=yes",
     ] {
         assert!(
             args.contains(&flag.to_string()),
@@ -250,6 +349,65 @@ fn embedded_args_contain_c4_flags_after_user_args() {
     // Our --wid comes after the user's, so mpv uses ours.
     let ours = args.iter().position(|a| a == "--wid=4660").unwrap();
     assert!(ours > 0);
+    let unmuted = embedded_mpv_args(1, &pipe, "", 35.0, false);
+    assert!(unmuted.contains(&"--volume=35".to_string()));
+    assert!(unmuted.contains(&"--mute=no".to_string()));
+}
+
+// ---- recording -----------------------------------------------------------------
+
+#[test]
+fn stream_record_ipc_framing() {
+    use iptv_core::player::ipc::encode_command;
+    let path = std::path::Path::new(r"C:\Rec\News HD-20261011-0230.ts");
+    let start = stream_record_command(Some(path));
+    assert_eq!(
+        start,
+        vec![
+            json!("set_property"),
+            json!("stream-record"),
+            json!(r"C:\Rec\News HD-20261011-0230.ts")
+        ]
+    );
+    let line = encode_command(7, &start);
+    assert_eq!(*line.last().unwrap(), b'\n');
+    assert_eq!(line.iter().filter(|b| **b == b'\n').count(), 1);
+    let v: serde_json::Value = serde_json::from_slice(&line).unwrap();
+    assert_eq!(
+        v,
+        json!({"command": ["set_property", "stream-record", r"C:\Rec\News HD-20261011-0230.ts"], "request_id": 7})
+    );
+    // Stopping clears the property with an empty string.
+    assert_eq!(
+        stream_record_command(None),
+        vec![json!("set_property"), json!("stream-record"), json!("")]
+    );
+}
+
+#[test]
+fn recording_file_names() {
+    use chrono::TimeZone;
+    let at = chrono::Utc
+        .with_ymd_and_hms(2026, 10, 11, 2, 30, 59)
+        .unwrap();
+    assert_eq!(
+        recording_file_name("News HD", at),
+        "News HD-20261011-0230.ts"
+    );
+    assert_eq!(
+        recording_file_name(r#"A/B: "C" <D>|E?*\F"#, at),
+        "A_B_ _C_ _D__E___F-20261011-0230.ts"
+    );
+    assert_eq!(
+        recording_file_name("  ...  ", at),
+        "recording-20261011-0230.ts"
+    );
+    assert_eq!(recording_file_name("", at), "recording-20261011-0230.ts");
+    let long = "x".repeat(300);
+    assert_eq!(
+        recording_file_name(&long, at).len(),
+        80 + "-20261011-0230.ts".len()
+    );
 }
 
 #[test]

@@ -2,8 +2,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { sameRef, type Channel, type EpgNowNext, type ItemRef } from '@/api/types';
+import { sameRef, type Channel, type EpgNowNext, type ItemRef, type SourceKind } from '@/api/types';
 
+import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { CHANNEL_ROW_HEIGHT, ChannelRow } from './ChannelRow';
 
@@ -15,6 +16,7 @@ export interface ChannelListProps {
   openOnDoubleClick: boolean;
   now: number;
   compact?: boolean;
+  sourceKind?: SourceKind;
   /** Initial-height hint for tests and SSR-less environments. */
   initialHeight?: number;
   onPlay(channel: Channel, nowNext: EpgNowNext | undefined): void;
@@ -33,6 +35,7 @@ export function ChannelList(props: ChannelListProps) {
   const [active, setActive] = useState(0);
   const focusPending = useRef(false);
   const count = paged.total ?? 0;
+  const prefs = useDisplayPrefs();
 
   const virtualizer = useVirtualizer({
     count,
@@ -189,6 +192,9 @@ export function ChannelList(props: ChannelListProps) {
                 active={v.index === active}
                 compact={props.compact}
                 now={now}
+                sourceKind={props.sourceKind}
+                stripPrefix={prefs.stripCountryPrefix}
+                epgOffsetMinutes={prefs.epgOffsetMinutes}
                 onActivate={activate}
                 onToggleFavorite={props.onToggleFavorite}
                 onContextMenu={onRowContext}

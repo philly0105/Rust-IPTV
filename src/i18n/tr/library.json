@@ -19,7 +19,7 @@
   "statusFailed": "Başarısız",
   "statusCanceled": "İptal edildi",
   "actionPause": "Duraklat",
-  "actionResume": "Sürdür",
+  "actionResume": "Devam Et",
   "actionCancel": "İndirmeyi iptal et",
   "actionRetry": "Yeniden dene",
   "actionRemove": "Kaldır",
@@ -193,5 +193,6 @@
   "openFailed": "{{title}} açılamadı",
   "removeFailed": "Öğe kaldırılamadı",
   "sourceRemoved": "Kaynak kaldırıldı",
-  "sourceRemovedHint": "Bu öğenin kaynağı kaldırıldı. Öğeyi açmak için kaynağı yeniden ekleyin."
+  "sourceRemovedHint": "Bu öğenin kaynağı kaldırıldı. Öğeyi açmak için kaynağı yeniden ekleyin.",
+  "tryAgain": "Yeniden dene"
 }

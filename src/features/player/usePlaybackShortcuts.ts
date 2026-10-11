@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-import { useShortcut } from './_shim';
+import { useShortcut } from '@/shell/shortcuts';
 import { targetOwnsKey, type KeyKind } from './format';
 import { showOsd, useMediaStore } from './media';
 import { usePlayerStore, zap } from './store';

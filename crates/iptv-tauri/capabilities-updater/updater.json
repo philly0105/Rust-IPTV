@@ -1,0 +1,6 @@
+{
+  "identifier": "updater",
+  "description": "Updater permission, added at runtime only in builds with the `updater` feature (a static capability would not resolve without the plugin).",
+  "windows": ["main"],
+  "permissions": ["updater:default"]
+}

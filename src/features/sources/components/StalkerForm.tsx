@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 
-import { Input, Toggle } from '../_shim';
+import { Input, Toggle } from '@/ui';
 import { buildStalkerConfig, type DraftErrors, type StalkerDraft } from '../lib/draft';
 import { INFOMIR_MAC_OUI, formatMacInput, hasInfomirOui, looksLikeFullPortal, normalizeMac } from '../lib/validate';
 import { ConnectionTest } from './ConnectionTest';

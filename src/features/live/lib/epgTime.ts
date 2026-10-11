@@ -1,4 +1,6 @@
-import type { Channel, EpgProgram, SourceKind } from '@/api/types';
+import type { Channel, EpgNowNext, EpgProgram, SourceKind } from '@/api/types';
+
+import { type CatchupChannel, isM3uCatchupSupported } from './catchup';
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -56,22 +58,37 @@ export function formatRange(p: EpgProgram, locale?: string): string {
   return `${formatClock(ms(p.start), locale)} – ${formatClock(ms(p.end), locale)}`;
 }
 
-/** Catch-up works for xtream and stalker archives, for ended and airing programmes inside the archive window. */
-export function canCatchUp(p: EpgProgram, channel: Pick<Channel, 'archive'>, kind: SourceKind | undefined, now: number): boolean {
-  if (!channel.archive?.enabled) return false;
-  if (kind !== 'xtream' && kind !== 'stalker') return false;
+/**
+ * True when the channel's archive can actually be played: xtream and stalker archives, and M3U
+ * channels whose `catchup` attributes resolve to a URL builder.
+ */
+export function hasUsableArchive(channel: CatchupChannel | undefined, kind: SourceKind | undefined): boolean {
+  if (!channel?.archive?.enabled) return false;
+  if (kind === 'xtream' || kind === 'stalker') return true;
+  if (kind === 'm3u') return isM3uCatchupSupported(channel);
+  // Kind unknown (the source is still loading): only M3U rows carry `catchup`.
+  return channel.catchup ? isM3uCatchupSupported(channel) : true;
+}
+
+/** Catch-up works for ended and airing programmes inside the archive window of a usable archive. */
+export function canCatchUp(p: EpgProgram, channel: CatchupChannel, kind: SourceKind | undefined, now: number): boolean {
+  if (kind !== 'xtream' && kind !== 'stalker' && kind !== 'm3u') return false;
+  if (!hasUsableArchive(channel, kind)) return false;
   const when = programWhen(p, now);
   if (when === 'future') return false;
-  const hours = channel.archive.durationHours ?? 0;
+  const hours = channel.archive?.durationHours ?? 0;
   if (hours > 0 && ms(p.start) < now - hours * HOUR) return false;
   return true;
 }
 
-/** How far back the ribbon looks for a channel: its archive window (max 3 days) or 3 h. */
+/** Longest archive window the ribbon looks back over. */
+export const MAX_LOOKBACK_HOURS = 7 * 24;
+
+/** How far back the ribbon looks for a channel: its archive window (max 7 days, 24 h when unknown) or 3 h. */
 export function lookbackMs(channel: Pick<Channel, 'archive'> | undefined): number {
   if (channel?.archive?.enabled) {
     const h = channel.archive.durationHours && channel.archive.durationHours > 0 ? channel.archive.durationHours : 24;
-    return Math.min(h, 72) * HOUR;
+    return Math.min(h, MAX_LOOKBACK_HOURS) * HOUR;
   }
   return 3 * HOUR;
 }
@@ -123,4 +140,24 @@ export function programIndexAt(programs: EpgProgram[], t: number): number {
     if (ms(p.end) > t) return i;
   }
   return programs.length - 1;
+}
+
+/** Moves a programme by `settings.epgOffsetMinutes` (guides published in the wrong time zone). */
+export function shiftProgram(p: EpgProgram, offsetMinutes: number): EpgProgram {
+  if (!offsetMinutes) return p;
+  const d = offsetMinutes * MINUTE;
+  return { ...p, start: new Date(ms(p.start) + d).toISOString(), end: new Date(ms(p.end) + d).toISOString() };
+}
+
+export function shiftPrograms(list: EpgProgram[], offsetMinutes: number): EpgProgram[] {
+  return offsetMinutes ? list.map((p) => shiftProgram(p, offsetMinutes)) : list;
+}
+
+export function shiftNowNext(nn: EpgNowNext | undefined, offsetMinutes: number): EpgNowNext | undefined {
+  if (!nn || !offsetMinutes) return nn;
+  return {
+    ...nn,
+    now: nn.now ? shiftProgram(nn.now, offsetMinutes) : nn.now,
+    next: nn.next ? shiftProgram(nn.next, offsetMinutes) : nn.next,
+  };
 }

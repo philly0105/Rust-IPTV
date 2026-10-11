@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { isDesktop } from '@/api/transport';
 
-import { cn } from '../_shim';
+import { cn } from '@/ui';
 
 export const TMDB_HOME = 'https://www.themoviedb.org';
 

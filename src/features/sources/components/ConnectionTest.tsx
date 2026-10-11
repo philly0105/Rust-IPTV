@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { ConnectionTestResult } from '@/api/rpc';
 import { RpcError } from '@/api/transport';
 
-import { Button } from '../_shim';
+import { Button } from '@/ui';
 import { redactText } from '../lib/redact';
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: ConnectionTestResult } | { status: 'failed'; error: RpcError };

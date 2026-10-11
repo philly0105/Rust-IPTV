@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-import { Skeleton } from '../_shim';
+import { Skeleton } from '@/ui';
 import { formatCount } from '../lib/format';
 import { redactText, redactUrl } from '../lib/redact';
 import type { PreviewState } from '../lib/usePreview';

@@ -7,7 +7,7 @@ import type { ItemRef, Source, VodItem } from '@/api/types';
 import { formatRating } from '../../lib/format';
 import { isPinned, type SourcePin } from '../../lib/pins';
 import { detailHref } from '../../lib/search';
-import { Button, Dialog, IconButton, Poster, buttonClass, cn } from '../../_shim';
+import { Button, Dialog, IconButton, Poster, buttonClass, cn } from '@/ui';
 
 export interface OtherSourcesDialogProps {
   open: boolean;

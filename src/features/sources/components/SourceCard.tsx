@@ -1,18 +1,19 @@
 import { clsx } from 'clsx';
-import { CircleAlert, GripVertical, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { CircleAlert, GripVertical, IdCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Source, SourceKind } from '@/api/types';
 
-import { Badge, Button, IconButton } from '../_shim';
+import { Badge, Button, IconButton } from '@/ui';
 import { baseName } from '../lib/files';
 import { absoluteTime, formatCount, relativeTime } from '../lib/format';
 import { useSourceGuide } from '../lib/epgRefresh';
 import type { ProgressEntry } from '../lib/progress';
 import { redactText } from '../lib/redact';
 import { displayHost } from '../lib/validate';
+import { hasAccountInfo } from './AccountPanel';
 import { GuideProgressView } from './GuideProgressView';
 import { ImportProgressView } from './ImportProgressView';
 
@@ -33,6 +34,12 @@ export function sourceOrigin(s: Source, t: (k: string, o?: Record<string, unknow
   return s.stalker?.macAddress ? t('originAccount', { host, user: s.stalker.macAddress }) : host;
 }
 
+/** Radio stations in the source; 0 when an older core omits `radioCount`. */
+export function radioCount(s: Source): number {
+  const n: unknown = s.radioCount;
+  return typeof n === 'number' && n > 0 ? n : 0;
+}
+
 export interface SourceCardProps {
   source: Source;
   index: number;
@@ -43,7 +50,11 @@ export interface SourceCardProps {
   dropTarget: 'before' | 'after' | null;
   onRefresh: () => void;
   onEdit: () => void;
+  /** Opens the subscription details (Xtream and Stalker only). */
+  onAccount?: () => void;
   onRemove: () => void;
+  /** False while the list is sorted or filtered: order only changes in the manual view. */
+  reorderable?: boolean;
   onMove: (to: number) => void;
   onDragStart: (e: DragEvent<HTMLElement>) => void;
   onDragOver: (e: DragEvent<HTMLElement>) => void;
@@ -52,22 +63,24 @@ export interface SourceCardProps {
 }
 
 export function SourceCard(props: SourceCardProps) {
-  const { source: s, index, total, progress, refreshing } = props;
+  const { source: s, index, total, progress, refreshing, reorderable = true } = props;
   const { t, i18n } = useTranslation('sources');
   const lang = i18n.language;
   const busy = refreshing || (progress !== undefined && progress.phase !== 'done' && progress.phase !== 'error');
   const guide = useSourceGuide(s.epg);
 
-  const stats: { key: string; value: number; label: string }[] = [
-    { key: 'channels', value: s.channelCount, label: t('statChannels', { count: s.channelCount }) },
-  ];
+  // `channelCount` is live channels only; radio gets its own stat when the source has any.
+  const radio = radioCount(s);
+  const live = s.channelCount;
+  const stats: { key: string; value: number; label: string }[] = [{ key: 'channels', value: live, label: t('statChannels', { count: live }) }];
+  if (radio > 0) stats.push({ key: 'radio', value: radio, label: t('statRadio', { count: radio }) });
   if (s.kind !== 'm3u' || s.movieCount > 0) stats.push({ key: 'movies', value: s.movieCount, label: t('statMovies', { count: s.movieCount }) });
   if (s.kind !== 'm3u' || s.seriesCount > 0) stats.push({ key: 'series', value: s.seriesCount, label: t('statSeries', { count: s.seriesCount }) });
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     // Alt+Arrow anywhere on the card, or plain arrows on the grip, move it.
     const onGrip = (e.target as HTMLElement).dataset.grip === 'true';
-    if (!(e.altKey || onGrip)) return;
+    if (!reorderable || !(e.altKey || onGrip)) return;
     if (e.key === 'ArrowUp' && index > 0) {
       e.preventDefault();
       props.onMove(index - 1);
@@ -105,6 +118,7 @@ export function SourceCard(props: SourceCardProps) {
         />
       ) : null}
       <div className="flex items-center gap-2 p-3 @2xl:gap-4 @2xl:p-4">
+        {reorderable ? (
         <button
           type="button"
           draggable
@@ -117,6 +131,7 @@ export function SourceCard(props: SourceCardProps) {
         >
           <GripVertical aria-hidden className="size-4" />
         </button>
+        ) : null}
 
         <span
           aria-hidden
@@ -175,6 +190,14 @@ export function SourceCard(props: SourceCardProps) {
             onClick={props.onRefresh}
             data-testid="source-refresh"
           />
+          {hasAccountInfo(s) && props.onAccount ? (
+            <IconButton
+              label={t('accountFor', { name: s.name })}
+              icon={<IdCard aria-hidden className="size-4" />}
+              onClick={props.onAccount}
+              data-testid="source-account"
+            />
+          ) : null}
           <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden className="size-4" />} onClick={props.onEdit} data-testid="source-edit" />
           <IconButton
             label={t('removeSource', { name: s.name })}

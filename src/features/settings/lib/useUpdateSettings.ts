@@ -6,7 +6,7 @@ import { rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { Settings } from '@/api/types';
 
-import { useToast } from '../../sources/_shim';
+import { useToast } from '@/ui';
 import { applyPatch, revertPatch, type SettingsPatch } from './patch';
 
 const KEY = rpcKey('settings.get');

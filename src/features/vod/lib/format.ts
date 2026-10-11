@@ -1,4 +1,12 @@
 import type { PlaybackPosition } from '@/api/types';
+import { formatDurationParts, resetDurationFormatCache, type DurationFormatOptions } from '@/lib/duration';
+
+type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched'>>;
+
+/** True when the row was marked watched (`userstate.setWatched`). */
+export function isWatched(pos: Partial<Pick<PlaybackPosition, 'watched'>> | undefined | null): boolean {
+  return pos?.watched === true;
+}
 
 /** `1:02:03` / `4:05`. */
 export function formatClock(totalSeconds: number): string {
@@ -10,25 +18,33 @@ export function formatClock(totalSeconds: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(sec).padStart(2, '0')}`;
 }
 
-/** `1h 52m` / `48m`. Undefined for missing or zero durations. */
-export function formatRuntime(totalSeconds: number | undefined): string | undefined {
-  if (!totalSeconds || totalSeconds <= 0) return undefined;
-  const mins = Math.round(totalSeconds / 60);
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h === 0) return `${m}m`;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+export type { RuntimeKey, RuntimeTranslate } from '@/lib/duration';
+export type RuntimeFormatOptions = DurationFormatOptions;
+
+/** Test hook: forget cached `Intl.DurationFormat` instances. */
+export const resetRuntimeFormatCache = resetDurationFormatCache;
+
+/**
+ * Localized runtime, `1h 52m` / `48m` in English. Undefined for missing or
+ * zero durations. Order of preference: `Intl.DurationFormat` for `locale`,
+ * then the `t` keys, then the English short form (see `@/lib/duration`).
+ */
+export function formatRuntime(totalSeconds: number | undefined, opts: RuntimeFormatOptions = {}): string | undefined {
+  if (!totalSeconds || !Number.isFinite(totalSeconds) || totalSeconds <= 0) return undefined;
+  const mins = Math.max(1, Math.round(totalSeconds / 60));
+  return formatDurationParts({ hours: Math.floor(mins / 60), minutes: mins % 60 }, opts);
 }
 
 /** 0..1 watched fraction, or 0 when the duration is unknown. */
-export function progressFraction(pos: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> | undefined | null): number {
+export function progressFraction(pos: ProgressInput | undefined | null): number {
+  if (isWatched(pos)) return 1;
   if (!pos || !pos.durationSeconds || pos.durationSeconds <= 0) return 0;
   return Math.min(1, Math.max(0, pos.positionSeconds / pos.durationSeconds));
 }
 
 /** A saved position worth offering "Resume" for (past 10 s, before 95 %). */
-export function isResumable(pos: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> | undefined | null): boolean {
-  if (!pos || pos.positionSeconds < 10) return false;
+export function isResumable(pos: ProgressInput | undefined | null): boolean {
+  if (!pos || isWatched(pos) || pos.positionSeconds < 10) return false;
   if (!pos.durationSeconds) return true;
   return pos.positionSeconds < pos.durationSeconds * 0.95;
 }

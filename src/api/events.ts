@@ -86,6 +86,7 @@ function startWeb(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
   let stopped = false;
+  let opened = false;
 
   const schedule = (): void => {
     setState('closed');
@@ -110,6 +111,10 @@ function startWeb(): () => void {
     socket.onopen = () => {
       attempt = 0;
       setState('open');
+      // Events sent while the socket was down are lost; treat a reconnect
+      // like a lagged receiver so every cached query is refetched.
+      if (opened) dispatch({ type: 'events.lagged', payload: { skipped: 0 } } as AppEvent);
+      opened = true;
     };
     socket.onmessage = (msg: MessageEvent) => {
       if (typeof msg.data !== 'string') return;

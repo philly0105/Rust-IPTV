@@ -338,14 +338,14 @@ impl Tmdb {
                 if verdict(&details, title, year, media) != ProviderIdVerdict::Contradicted {
                     return Ok(Some(details));
                 }
-                // Stale-id signature: let the search try to beat it, best-effort.
-                let searched = match self.resolve(db, &ctx, media, title, year).await {
-                    Ok(Some(sid)) if sid != pid => {
-                        self.details(db, &ctx, media, sid).await.ok().flatten()
-                    }
-                    _ => None,
-                };
-                return Ok(Some(searched.unwrap_or(details)));
+                // Stale-id signature: only a confident title search may answer.
+                // When it finds nothing, the contradicted details are wrong
+                // data, so show none rather than another film's metadata.
+                return Ok(match self.resolve(db, &ctx, media, title, year).await {
+                    Ok(Some(sid)) if sid == pid => Some(details),
+                    Ok(Some(sid)) => self.details(db, &ctx, media, sid).await.ok().flatten(),
+                    Ok(None) | Err(_) => None,
+                });
             }
         }
         if title.is_empty() {

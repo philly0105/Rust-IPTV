@@ -6,8 +6,11 @@
 //! - State-changing requests and WebSocket upgrades carrying an `Origin` must
 //!   come from the same host (blocks CSRF via `text/plain` form posts and
 //!   cross-site WebSocket hijacking). `Sec-Fetch-Site: cross-site` is refused.
-//! - When bound to loopback, the `Host` header must be a loopback name, which
-//!   defeats DNS rebinding (`evil.example` resolving to 127.0.0.1).
+//! - The `Host` header must be an allowed name ([`AllowedHosts`]) whatever
+//!   the bind address, which defeats DNS rebinding (`evil.example` resolving
+//!   to 127.0.0.1 or to the server's LAN address). IP literals are always
+//!   accepted: a page can only reach the server under an IP literal when the
+//!   user opened it there, so the browser treats it as its own origin.
 
 use crate::api::error_response_with;
 use crate::Server;
@@ -19,14 +22,90 @@ use axum::response::Response;
 use iptv_core::RpcError;
 use std::net::IpAddr;
 
+/// CSP of the app's own responses (the SPA). Proxy and file responses carry
+/// [`crate::proxy::SANDBOX_CSP`] instead.
+pub const SITE_CSP: &str = "default-src 'self'; img-src 'self' data: blob: https: http:; media-src 'self' blob: data: https: http:; connect-src 'self' ws: wss: https: http:; frame-src https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'";
+
+/// Host names the `Host` header of an `/api` request may carry.
+///
+/// Always allowed: `localhost`, `*.localhost` and every IP literal. Extra
+/// names come from `--allowed-hosts` / `IPTV_ALLOWED_HOSTS` (comma list; `*`
+/// turns the check off) and, when the server binds beyond loopback, the
+/// machine's host name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AllowedHosts {
+    names: Vec<String>,
+    any: bool,
+}
+
+impl AllowedHosts {
+    /// Parses a comma-separated list (`tv.example.com, nas.local`, or `*`).
+    /// Ports are ignored; only the host part is compared.
+    pub fn parse(list: &str) -> Self {
+        let mut out = Self::default();
+        for item in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            if item == "*" {
+                out.any = true;
+            } else {
+                out.add(item);
+            }
+        }
+        out
+    }
+
+    /// Adds one host name.
+    pub fn add(&mut self, name: &str) {
+        let (host, _) = split_host_port(name);
+        let host = host.trim_end_matches('.').to_owned();
+        if !host.is_empty() && !self.names.contains(&host) {
+            self.names.push(host);
+        }
+    }
+
+    /// True when the check is off (`*`).
+    pub fn allows_any(&self) -> bool {
+        self.any
+    }
+
+    /// Extra names (beyond loopback and IP literals).
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    /// True when a request with this `Host` header may use the API.
+    pub fn allows(&self, authority: &str) -> bool {
+        if self.any || is_loopback_host(authority) {
+            return true;
+        }
+        let (host, _) = split_host_port(authority);
+        let host = host.trim_end_matches('.');
+        !host.is_empty() && (host.parse::<IpAddr>().is_ok() || self.names.iter().any(|n| n == host))
+    }
+
+    /// Adds this machine's host name (and its `.local` mDNS form), read from
+    /// `HOSTNAME`, `COMPUTERNAME` or `/etc/hostname`.
+    pub fn add_machine_hostname(&mut self) {
+        let name = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .ok()
+            .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+            .map(|n| n.trim().to_ascii_lowercase())
+            .filter(|n| !n.is_empty());
+        if let Some(n) = name {
+            self.add(&format!("{n}.local"));
+            self.add(&n);
+        }
+    }
+}
+
 /// Middleware applied to every `/api` route.
 pub async fn api_guard(State(s): State<Server>, req: Request, next: Next) -> Response {
     let headers = req.headers();
     let host = request_host(headers, req.uri());
 
-    if s.opts.loopback_host_only && !is_loopback_host(host.unwrap_or("")) {
+    if !s.opts.allowed_hosts.allows(host.unwrap_or("")) {
         return forbidden(
-            "Host header is not a loopback name; open the app via localhost or 127.0.0.1",
+            "This host name is not allowed. Open the app via localhost or the server's IP address, or add the name to --allowed-hosts (IPTV_ALLOWED_HOSTS) on the server.",
         );
     }
 
@@ -112,13 +191,18 @@ pub fn origin_matches_host(origin: &str, host_header: &str) -> bool {
     host == origin_host && port.unwrap_or(origin_port) == origin_port
 }
 
-/// Adds hardening headers to every response that lacks them.
+/// Adds hardening headers to every response that lacks them, including the
+/// site CSP (proxy and file responses already carry the sandbox CSP).
 pub async fn security_headers(mut res: Response) -> Response {
     let h = res.headers_mut();
     h.entry("x-content-type-options")
         .or_insert(HeaderValue::from_static("nosniff"));
     h.entry("x-frame-options")
         .or_insert(HeaderValue::from_static("SAMEORIGIN"));
+    h.entry("content-security-policy")
+        .or_insert(HeaderValue::from_static(SITE_CSP));
+    h.entry("referrer-policy")
+        .or_insert(HeaderValue::from_static("same-origin"));
     res
 }
 
@@ -145,6 +229,25 @@ mod tests {
         assert!(is_loopback_host("[::1]:7180"));
         assert!(!is_loopback_host("evil.example:7180"));
         assert!(!is_loopback_host("192.168.1.5"));
+    }
+
+    #[test]
+    fn allowed_hosts() {
+        let none = AllowedHosts::default();
+        assert!(none.allows("localhost:7180"));
+        assert!(none.allows("127.0.0.1:7180"));
+        assert!(none.allows("192.168.1.20:7180"));
+        assert!(none.allows("[fd00::1]:7180"));
+        assert!(!none.allows("rebind.evil.example:7180"));
+        assert!(!none.allows(""));
+
+        let list = AllowedHosts::parse(" TV.Example.com:443 , nas.local ,");
+        assert_eq!(list.names(), ["tv.example.com", "nas.local"]);
+        assert!(list.allows("tv.example.com"));
+        assert!(list.allows("NAS.local.:7180"));
+        assert!(!list.allows("example.com"));
+
+        assert!(AllowedHosts::parse("*").allows("anything.example"));
     }
 
     #[test]

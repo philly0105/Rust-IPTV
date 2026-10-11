@@ -28,7 +28,7 @@
   "railMovies": "Películas",
   "railSeries": "Series",
   "railFavorites": "Favoritos",
-  "railRecent": "Recientes",
+  "railRecent": "Reciente",
 
   "searchEverything": "Buscar en todo",
   "hideDetails": "Ocultar detalles",
@@ -134,7 +134,7 @@
   "play": "Reproducir",
   "resume": "Reanudar",
   "details": "Detalles",
-  "watchedPercent": "{{percent}} % visto",
+  "watchedPercent": "{{percent}}% visto",
   "minutesLeft_one": "Queda {{count}} minuto",
   "minutesLeft_many": "Quedan {{count}} minutos",
   "minutesLeft_other": "Quedan {{count}} minutos",

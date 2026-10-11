@@ -80,7 +80,18 @@ describe('format', () => {
   it('formats bytes, durations and clocks', () => {
     expect(formatBytes(1536, 'en')).toBe('1.5 KB');
     expect(formatBytes(undefined)).toBe('');
-    expect(formatDuration(185)).toBe('3m 05s');
+    expect(formatDuration(185)).toBe('3m 5s');
+    expect(formatDuration(185, { locale: 'en' })).toBe('3m 5s');
+    expect(formatDuration(45)).toBe('45s');
+    expect(formatDuration(3720)).toBe('1h 2m');
+    expect(formatDuration(3600)).toBe('1h');
+    expect(formatDuration(52 * 3600)).toBe('2d 4h');
+    expect(formatDuration(0)).toBe('0s');
+    // Localized units, not hardcoded English letters (shared with the VOD runtimes).
+    expect(formatDuration(185, { locale: 'ja' })).toContain('分');
+    expect(formatDuration(3720, { locale: 'de' })).toContain('Min');
+    // No CLDR data: hours/minutes come from the vod runtime keys.
+    expect(formatDuration(3720, { locale: 'ary', t: (k, v) => `${k}:${v.h ?? ''}:${v.m ?? ''}` })).toBe('runtimeHoursMinutes:1:2');
     expect(formatClock(3729)).toBe('1:02:09');
     expect(etaSeconds(500, 1000, 100)).toBe(5);
     expect(etaSeconds(500, undefined, 100)).toBeUndefined();

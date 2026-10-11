@@ -193,5 +193,6 @@
   "openFailed": "Kan {{title}} niet openen",
   "removeFailed": "Kan het item niet verwijderen",
   "sourceRemoved": "Bron verwijderd",
-  "sourceRemovedHint": "De bron van dit item is verwijderd. Voeg de bron opnieuw toe om het item te openen."
+  "sourceRemovedHint": "De bron van dit item is verwijderd. Voeg de bron opnieuw toe om het item te openen.",
+  "tryAgain": "Opnieuw proberen"
 }

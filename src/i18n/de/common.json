@@ -32,7 +32,7 @@
   "errorTitleConflict": "Das wurde an anderer Stelle geändert",
   "errorTitleIo": "Datei konnte nicht gelesen oder geschrieben werden",
   "errorTitleDb": "Problem mit der lokalen Bibliothek",
-  "errorTitleInternal": "Etwas ist schiefgelaufen",
+  "errorTitleInternal": "Etwas ist schief gelaufen",
 
   "errorHintNetwork": "Prüfen Sie Ihre Verbindung und die URL des Anbieters und versuchen Sie es dann erneut.",
   "errorHintTimeout": "Der Anbieter ist möglicherweise ausgelastet. Versuchen Sie es gleich noch einmal.",

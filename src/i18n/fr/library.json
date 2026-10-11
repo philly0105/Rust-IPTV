@@ -17,12 +17,12 @@
   "summaryAttention_many": "{{count}} nécessitent votre attention",
   "summaryAttention_other": "{{count}} nécessitent votre attention",
   "statusQueued": "En attente",
-  "statusDownloading": "Téléchargement",
+  "statusDownloading": "En cours",
   "statusPaused": "En pause",
   "statusCompleted": "Terminé",
   "statusFailed": "Échec",
   "statusCanceled": "Annulé",
-  "actionPause": "Pause",
+  "actionPause": "Mettre en pause",
   "actionResume": "Reprendre",
   "actionCancel": "Annuler le téléchargement",
   "actionRetry": "Réessayer",
@@ -160,7 +160,7 @@
   "groupLive": "Direct et radio",
   "groupMovies": "Films",
   "groupSeries": "Séries",
-  "favoritesEmptyTitle": "Aucun favori pour l'instant",
+  "favoritesEmptyTitle": "Aucun favori pour le moment",
   "favoritesEmptyBody": "Marquez des chaînes, films et séries de n'importe quelle source pour les retrouver ici.",
   "favoritesEmptySourceBody": "Marquez des chaînes, films et séries de cette source pour les retrouver ici.",
   "favoriteRemoved": "{{title}} retiré des favoris",
@@ -196,7 +196,7 @@
   "continueWatching": "Reprendre la lecture",
   "continueTitle": "Reprendre {{title}} à {{time}}",
   "removeContinue": "Retirer {{title}} de Reprendre la lecture",
-  "watchedPercent": "{{percent}} % regardé",
+  "watchedPercent": "{{percent}}% regardé",
 
   "typeLive": "Chaîne en direct",
   "typeMovie": "Film",
@@ -207,5 +207,6 @@
   "openFailed": "Impossible d'ouvrir {{title}}",
   "removeFailed": "Impossible de supprimer l'élément",
   "sourceRemoved": "Source supprimée",
-  "sourceRemovedHint": "La source de cet élément a été supprimée. Ajoutez-la de nouveau pour ouvrir l'élément."
+  "sourceRemovedHint": "La source de cet élément a été supprimée. Ajoutez-la de nouveau pour ouvrir l'élément.",
+  "tryAgain": "Réessayer"
 }

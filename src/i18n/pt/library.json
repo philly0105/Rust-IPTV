@@ -137,7 +137,7 @@
   "downloadedEpisodes": "Episódios baixados",
   "otherEpisodes": "Outros episódios",
   "seasonN": "Temporada {{season}}",
-  "nowPlaying": "Em reprodução",
+  "nowPlaying": "Reproduzindo agora",
   "backToDetails": "Voltar aos detalhes",
   "backToLibrary": "Voltar a Meus vídeos",
   "detailNotFoundTitle": "Este vídeo não está na sua biblioteca",
@@ -207,5 +207,6 @@
   "openFailed": "Não foi possível abrir {{title}}",
   "removeFailed": "Não foi possível remover o item",
   "sourceRemoved": "Fonte removida",
-  "sourceRemovedHint": "A fonte deste item foi removida. Adicione-a novamente para abrir o item."
+  "sourceRemovedHint": "A fonte deste item foi removida. Adicione-a novamente para abrir o item.",
+  "tryAgain": "Tentar novamente"
 }

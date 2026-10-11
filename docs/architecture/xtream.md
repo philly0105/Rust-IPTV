@@ -55,10 +55,10 @@ Mapping notes: the category is `category_id`, else the first of `category_ids`, 
 
 ## Playback URLs
 
-- Live and radio: `{server}/live/{user}/{pass}/{id}.{ext}`. `ext` is `settings.streamFormat` when the panel allows it (`allowed_output_formats`) or lists no formats, otherwise the first allowed m3u8 or ts, else the first allowed format. m3u8 maps to `hls`, mpd to `dash`, everything else to `direct`.
-- Movie: `{server}/movie/{user}/{pass}/{id}.{ext}`. The extension comes from the catalog row, then `get_vod_info`, then `mp4`. The resume position comes from `playback_positions`.
-- Episode: `{server}/series/{user}/{pass}/{episodeId}.{ext}`. A series ref without `episodeId` is `Invalid` ("Choose an episode to play.").
-- Catch-up: `{server}/timeshift/{user}/{pass}/{minutes}/{YYYY-MM-DD:HH-mm}/{id}.ts`. The start is converted to server local time with the stored clock offset (`server_info.time_now` minus `timestamp_now`, rounded to 15 minutes). Starts in the future are rejected; duration is clamped to 1 minute through 7 days.
+- Live and radio: `{server}/live/{user}/{pass}/{id}.{ext}`. `ext` is `settings.streamFormat` when the panel allows it (`allowed_output_formats`, lowercased and trimmed) or lists no formats, otherwise the first allowed format in the order m3u8 > ts > the panel's first listed format. The formats come from `ServerMeta`, captured on every sync, `xtream.accountInfo` and `xtream.test`, and persisted, so URLs built offline still respect them. `xtream.accountInfo` also returns them as `allowedOutputFormats` (empty when the panel lists none). The old app's "auto" format preferred ts over m3u8 and, for an explicit format the panel rejects, took the panel's first format; Tsrust has no "auto" setting and prefers m3u8 because HLS plays in the inline player. m3u8 maps to `hls`, mpd to `dash`, everything else to `direct`.
+- Movie: `{server}/movie/{user}/{pass}/{id}.{ext}`. The extension comes from the catalog row, then `get_vod_info`, then `mp4`. The resume position comes from `playback_positions`. A movie ref whose id has no movie row but matches a series row is `NotFound`, naming the series and pointing to the series list.
+- Episode: `{server}/series/{user}/{pass}/{episodeId}.{ext}`. A series ref without `episodeId` is `Invalid` ("Choose an episode to play."). When series info loads but has no such episode (after one refetch past the cache), the call is `NotFound`; the `mp4` fallback applies only when series info itself fails.
+- Catch-up: `{server}/timeshift/{user}/{pass}/{minutes}/{YYYY-MM-DD:HH-mm}/{id}.ts`. The start is converted to server local time with the stored clock offset (`server_info.time_now` minus `timestamp_now`, rounded to 15 minutes). Starts in the future are rejected; duration is clamped to 1 minute through 7 days. When the channel row is synced, a channel without archive is rejected ("This channel has no catch-up.") and so is a start older than its `tv_archive_duration` window (the message names the window).
 
 Username and password are percent-encoded as path segments.
 
@@ -69,8 +69,12 @@ Username and password are percent-encoded as path segments.
 ## Errors, retries, secrets
 
 - Requests go through `http::with_retry` (3 attempts; 1 for `xtream.test`) and retry only Network and Timeout errors, which include 5xx responses.
-- `From<reqwest::Error>` strips URLs, so error messages never contain the query string. Logs carry the server, username and action only. `XtreamClient` and `XtreamSourceConfig` redact the password in `Debug`.
+- `From<reqwest::Error>` strips URLs, so error messages never contain the query string. Logs carry the server, a masked username (first character and `***`) and the action only. `XtreamClient` and `XtreamSourceConfig` redact the password in `Debug`.
 - `xtream.test` turns every error into a sentence naming the next step (check credentials, check the URL, try later).
+
+## Detail pages
+
+`vodDetail` / `seriesDetail` merge the catalog row with `get_vod_info` / `get_series_info`. When the provider call fails with anything but `Auth` and the catalog row exists, the page is built from the row alone with `providerDetailsUnavailable: true` and `providerError` set (the UI shows a hint). `NotFound` is returned only when neither the row nor a provider payload exists.
 
 ## Caches
 

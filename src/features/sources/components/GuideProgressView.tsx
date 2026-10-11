@@ -1,7 +1,7 @@
 import { CalendarClock, CalendarX2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { ProgressBar } from '../_shim';
+import { ProgressBar } from '@/ui';
 import type { SourceGuideSummary } from '../lib/epgRefresh';
 import { formatCount } from '../lib/format';
 import { redactText } from '../lib/redact';
@@ -22,7 +22,7 @@ export function GuideProgressView({ guide }: { guide: SourceGuideSummary }) {
         </span>
         {programs ? <span className="shrink-0 font-display tabular-nums text-fg-muted">{programs}</span> : null}
       </div>
-      {guide.active ? <ProgressBar value={undefined} max={100} label={label} /> : null}
+      {guide.active ? <ProgressBar value={0} indeterminate max={100} label={label} /> : null}
       {failed && guide.error ? <p className="truncate text-xs text-fg-subtle" title={redactText(guide.error)}>{redactText(guide.error)}</p> : null}
     </div>
   );

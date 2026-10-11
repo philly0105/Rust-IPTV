@@ -12,7 +12,63 @@ import type { CatalogSearchResult } from '@/api/rpc';
 import { itemKey, type Channel, type ItemRef, type SeriesItem, type Source, type SourceKind, type VodItem } from '@/api/types';
 
 export const MIN_QUERY_LENGTH = 2;
+/**
+ * Per-type result caps the "Show more" control steps through. `catalog.search`
+ * applies `limit` to live, movies, and series separately and clamps it to
+ * `SEARCH_SERVER_MAX`, so steps above that are skipped (see `searchLimitSteps`).
+ */
+export const SEARCH_LIMIT_STEPS: readonly number[] = [60, 200, 1000];
+/** Server-side clamp on `catalog.search` `limit` (crates/iptv-core/src/catalog/rpc.rs `search`). */
+export const SEARCH_SERVER_MAX = 1001;
+/** First step: results per type before the user asks for more. */
 export const SEARCH_LIMIT = 60;
+
+/**
+ * Steps reachable under the server clamp, each with room for its probe row
+ * (`n + 1 <= max`); ends at the clamp only when the clamp lies past the last
+ * step's probe, so a 1001 clamp gives `[60, 200, 1000]`.
+ */
+export function searchLimitSteps(max = SEARCH_SERVER_MAX): number[] {
+  const steps = SEARCH_LIMIT_STEPS.filter((n) => n + 1 <= max);
+  if (steps.length === 0 || (steps[steps.length - 1] ?? 0) < max - 1) steps.push(max);
+  return steps;
+}
+
+/** The next cap after `limit`, or undefined at the last reachable step. */
+export function nextSearchLimit(limit: number, max = SEARCH_SERVER_MAX): number | undefined {
+  return searchLimitSteps(max).find((n) => n > limit);
+}
+
+/** `limit` to send: one extra row per type reveals whether more exist, within the server clamp. */
+export function searchRequestLimit(limit: number, max = SEARCH_SERVER_MAX): number {
+  return Math.min(limit + 1, max);
+}
+
+export type SearchMore = Record<SearchGroupKind, boolean>;
+
+/**
+ * Trims each type to `limit` and reports which types have more matches than
+ * shown. Below the clamp the extra probe row decides; at the clamp a full page
+ * means "probably more" (the server cannot say).
+ */
+export function capSearchResult(
+  result: CatalogSearchResult | undefined,
+  limit: number,
+  max = SEARCH_SERVER_MAX,
+): { result: CatalogSearchResult | undefined; more: SearchMore } {
+  const more: SearchMore = { live: false, movies: false, series: false };
+  if (!result) return { result, more };
+  const atClamp = limit >= max;
+  const cap = <T>(kind: SearchGroupKind, list: T[] | undefined): T[] => {
+    const items = list ?? [];
+    more[kind] = atClamp ? items.length >= max : items.length > limit;
+    return items.length > limit ? items.slice(0, limit) : items;
+  };
+  return {
+    result: { live: cap('live', result.live), movies: cap('movies', result.movies), series: cap('series', result.series) },
+    more,
+  };
+}
 
 export type SearchGroupKind = 'live' | 'movies' | 'series';
 export const SEARCH_GROUP_ORDER: readonly SearchGroupKind[] = ['movies', 'series', 'live'];

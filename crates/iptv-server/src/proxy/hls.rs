@@ -3,7 +3,9 @@
 //! Every URI line and every `URI="..."` attribute (EXT-X-KEY, EXT-X-MAP,
 //! EXT-X-MEDIA, EXT-X-I-FRAME-STREAM-INF, EXT-X-SESSION-KEY, EXT-X-PART,
 //! EXT-X-PRELOAD-HINT, EXT-X-RENDITION-REPORT, ...) is resolved against the
-//! playlist's final URL and replaced with `/api/proxy?url=<abs>&sourceId=<id>`.
+//! playlist's final URL and replaced with `/api/proxy?url=<abs>&sourceId=<id>`
+//! (plus the request's `ua` / `referer` / `origin` overrides, so every
+//! segment and key is fetched with the same headers).
 //! Non-HTTP URIs (`data:`, `skd:`) are left alone. The rewriter works line by
 //! line on chunks as they arrive, so a playlist is never buffered whole.
 
@@ -25,13 +27,26 @@ pub const MAX_LINE: usize = 1024 * 1024;
 
 /// `/api/proxy?url=<abs>[&sourceId=<id>]`.
 pub fn proxy_path(absolute: &str, source_id: Option<&str>) -> String {
-    let mut out = format!(
-        "/api/proxy?url={}",
-        utf8_percent_encode(absolute, QUERY_VALUE)
-    );
-    if let Some(id) = source_id.filter(|s| !s.is_empty()) {
-        out.push_str("&sourceId=");
-        out.extend(utf8_percent_encode(id, QUERY_VALUE));
+    let params: Vec<(&str, &str)> = source_id
+        .filter(|s| !s.is_empty())
+        .map(|id| ("sourceId", id))
+        .into_iter()
+        .collect();
+    format!(
+        "/api/proxy?url={}{}",
+        utf8_percent_encode(absolute, QUERY_VALUE),
+        query_suffix(&params)
+    )
+}
+
+/// `&k=v` pairs (values encoded) for the non-empty values.
+pub fn query_suffix(params: &[(&str, &str)]) -> String {
+    let mut out = String::new();
+    for (k, v) in params.iter().filter(|(_, v)| !v.is_empty()) {
+        out.push('&');
+        out.push_str(k);
+        out.push('=');
+        out.extend(utf8_percent_encode(v, QUERY_VALUE));
     }
     out
 }
@@ -55,16 +70,23 @@ pub fn looks_like_playlist(prefix: &[u8]) -> bool {
 /// Incremental playlist rewriter.
 pub struct HlsRewriter {
     base: Url,
-    source_id: Option<String>,
+    /// Query parameters after `url=`: `&sourceId=..&ua=..`.
+    suffix: String,
     pending: Vec<u8>,
 }
 
 impl HlsRewriter {
     /// `base` is the URL the playlist was finally fetched from (after redirects).
     pub fn new(base: Url, source_id: Option<String>) -> Self {
+        Self::with_params(base, &[("sourceId", source_id.as_deref().unwrap_or(""))])
+    }
+
+    /// Like [`Self::new`] with arbitrary query parameters carried to every
+    /// rewritten URI (empty values are dropped).
+    pub fn with_params(base: Url, params: &[(&str, &str)]) -> Self {
         Self {
             base,
-            source_id: source_id.filter(|s| !s.is_empty()),
+            suffix: query_suffix(params),
             pending: Vec::new(),
         }
     }
@@ -166,7 +188,11 @@ impl HlsRewriter {
         if !matches!(abs.scheme(), "http" | "https") {
             return None;
         }
-        Some(proxy_path(abs.as_str(), self.source_id.as_deref()))
+        Some(format!(
+            "/api/proxy?url={}{}",
+            utf8_percent_encode(abs.as_str(), QUERY_VALUE),
+            self.suffix
+        ))
     }
 }
 
@@ -212,6 +238,30 @@ mod tests {
         assert_eq!(decode(lines[5]), "http://cdn.example.com/live/chan/seg1.ts");
         assert_eq!(decode(lines[7]), "https://other.example/seg2.ts?x=1&y=2");
         assert_eq!(lines[8], "#EXT-X-ENDLIST");
+    }
+
+    #[test]
+    fn carries_header_overrides() {
+        let mut rw = HlsRewriter::with_params(
+            base(),
+            &[
+                ("sourceId", "s"),
+                ("ua", "VLC/3.0 x"),
+                ("referer", ""),
+                ("origin", "https://o.example"),
+            ],
+        );
+        let out = rw
+            .push(
+                b"seg.ts
+",
+            )
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&out).unwrap(),
+            "/api/proxy?url=http%3A%2F%2Fcdn.example.com%2Flive%2Fchan%2Fseg.ts&sourceId=s&ua=VLC%2F3.0%20x&origin=https%3A%2F%2Fo.example
+"
+        );
     }
 
     #[test]

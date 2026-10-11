@@ -251,6 +251,57 @@ describe('mpegts.js engine recovery', () => {
     expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'media' }));
   });
 
+  it('keeps the displayed live position monotonic across reconnects', async () => {
+    vi.useFakeTimers();
+    const el = video();
+    let t = 0;
+    let ready = 4;
+    Object.defineProperty(el, 'currentTime', { get: () => t, set: (v: number) => (t = v), configurable: true });
+    Object.defineProperty(el, 'readyState', { get: () => ready, configurable: true });
+    const engine = await createEngine(el, src('http://h/a.ts'), 'http://h/a.ts', cb(), { captions: false });
+    const shown = (): number => t + (engine.timeOffset?.() ?? 0);
+
+    t = 30;
+    el.dispatchEvent(new Event('timeupdate'));
+    expect(shown()).toBe(30);
+
+    // The server drops the connection; the element ends and the pipeline is rebuilt at time 0.
+    el.dispatchEvent(new Event('ended'));
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
+    t = 0;
+    ready = 0;
+    el.dispatchEvent(new Event('timeupdate'));
+    expect(shown()).toBe(30); // held while reconnecting
+
+    ready = 4;
+    t = 0.4;
+    el.dispatchEvent(new Event('timeupdate'));
+    expect(shown()).toBe(30);
+    t = 5.4;
+    el.dispatchEvent(new Event('timeupdate'));
+    expect(shown()).toBeCloseTo(35);
+
+    // A second drop keeps accumulating.
+    el.dispatchEvent(new Event('ended'));
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(2));
+    t = 1;
+    el.dispatchEvent(new Event('timeupdate'));
+    expect(shown()).toBeCloseTo(35);
+    t = 3;
+    el.dispatchEvent(new Event('timeupdate'));
+    expect(shown()).toBeCloseTo(37);
+  });
+
+  it('VOD reconnects do not offset the position', async () => {
+    vi.useFakeTimers();
+    const el = video();
+    const engine = await createEngine(el, src('http://h/v.ts', { isLive: false }), 'http://h/v.ts', cb(), { captions: false });
+    FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
+    expect(FakeTsPlayer.created).toHaveLength(2);
+    expect(engine.timeOffset?.()).toBe(0);
+  });
+
   it('destroy cancels a pending restart', async () => {
     vi.useFakeTimers();
     const el = video();
@@ -259,5 +310,54 @@ describe('mpegts.js engine recovery', () => {
     engine.destroy();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(FakeTsPlayer.created).toHaveLength(1);
+  });
+});
+
+describe('server refusal reasons', () => {
+  const { isOwnServerUrl, reasonFromBody, withReason, fetchFailureReason } = engines;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('only treats our own server routes as having readable bodies', () => {
+    expect(isOwnServerUrl('/api/proxy?url=x')).toBe(true);
+    expect(isOwnServerUrl(`${window.location.origin}/api/files/abc`)).toBe(true);
+    expect(isOwnServerUrl('http://127.0.0.1:51234/api/proxy?url=x')).toBe(true); // desktop loopback proxy
+    expect(isOwnServerUrl('http://provider.example/live/1.ts')).toBe(false);
+    expect(isOwnServerUrl('http://provider.example/api/stream')).toBe(false);
+  });
+
+  it('reads an RpcError message, plain text or bytes, and skips HTML and empty bodies', () => {
+    expect(reasonFromBody('{"code":"invalid","message":"blocked: private address 10.0.0.1"}')).toBe('blocked: private address 10.0.0.1');
+    expect(reasonFromBody(' the media proxy only serves the Tsrust IPTV window \n')).toBe('the media proxy only serves the Tsrust IPTV window');
+    expect(reasonFromBody(new TextEncoder().encode('denied').buffer)).toBe('denied');
+    expect(reasonFromBody('<!DOCTYPE html><p>x</p>')).toBeNull();
+    expect(reasonFromBody('   ')).toBeNull();
+    expect(reasonFromBody(undefined)).toBeNull();
+    expect(reasonFromBody('x'.repeat(1000))!.length).toBe(300);
+    expect(withReason('fallback', null, 403)).toBe('fallback');
+    expect(withReason('fallback', 'blocked', 403)).toBe('blocked (HTTP 403)');
+  });
+
+  it('asks our own server once and returns the reason of a non-2xx answer', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"code":"invalid","message":"blocked: loopback address"}', { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchFailureReason('/api/proxy?url=http%3A%2F%2F127.0.0.1')).resolves.toEqual({ status: 403, reason: 'blocked: loopback address' });
+    await expect(fetchFailureReason('http://provider.example/a.ts')).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    await expect(fetchFailureReason('/api/proxy?url=x')).resolves.toBeNull();
+  });
+
+  it('shows the proxy guard reason when mpegts.js gets a 403 from /api/proxy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"code":"invalid","message":"blocked: private address"}', { status: 403 })));
+    const callbacks = cb();
+    await createEngine(video(), src('http://10.0.0.1/a.ts'), '/api/proxy?url=http%3A%2F%2F10.0.0.1%2Fa.ts', callbacks, { captions: false });
+    FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 403 });
+    await vi.waitFor(() => expect(callbacks.onError).toHaveBeenCalled());
+    expect(callbacks.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'network', fatal: true, message: 'blocked: private address (HTTP 403)' }),
+    );
   });
 });

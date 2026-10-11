@@ -31,11 +31,16 @@ import { isResumable } from './format';
 
 export interface DetailModel {
   title: string;
+  /** Title without the year/tags the provider appends ("Black Harbor" for "Black Harbor (2026)"); the year shows as its own chip. */
+  titleBase?: string;
+  mediaType: 'movie' | 'tv';
   year?: number;
   rating?: number;
   plot?: string;
   genres: string[];
   posterUrl?: string;
+  /** TMDB poster to try when the provider poster fails to load. */
+  posterFallbackUrl?: string;
   backdropUrl?: string;
   backdrops: string[];
   cast: Person[];
@@ -107,6 +112,8 @@ function mergeCast(provider: Person[], tmdb: Person[] | undefined): Person[] {
 
 interface CommonInput {
   title: string;
+  titleBase?: string;
+  mediaType: 'movie' | 'tv';
   year?: number;
   rating?: number;
   plot?: string;
@@ -131,6 +138,7 @@ function mergeCommon(
   const providerGenres = (p.genres ?? []).filter((g) => !isBlank(g));
   const model: DetailModel = {
     title: p.title,
+    mediaType: p.mediaType,
     genres: providerGenres.length > 0 ? providerGenres : (t?.genres ?? []),
     backdrops,
     cast: mergeCast(p.cast, t?.cast),
@@ -146,6 +154,10 @@ function mergeCommon(
   if (plot !== undefined) model.plot = plot;
   const poster = firstText(p.posterUrl, t?.posterUrl);
   if (poster !== undefined) model.posterUrl = poster;
+  const tmdbPoster = firstText(t?.posterUrl);
+  if (tmdbPoster !== undefined && tmdbPoster !== poster) model.posterFallbackUrl = tmdbPoster;
+  const titleBase = firstText(p.titleBase);
+  if (titleBase !== undefined) model.titleBase = titleBase;
   if (backdrops[0] !== undefined) model.backdropUrl = backdrops[0];
   const director = firstText(p.director, tmdbDirector);
   if (director !== undefined) model.director = director;
@@ -162,6 +174,7 @@ export function mergeMovieDetail(detail: VodDetail, tmdb?: TmdbMovie | null): De
   return mergeCommon(
     {
       title: item.title,
+      titleBase: item.titleBase,
       year: item.year,
       rating: item.rating,
       plot: item.plot,
@@ -174,6 +187,7 @@ export function mergeMovieDetail(detail: VodDetail, tmdb?: TmdbMovie | null): De
       trailerUrl: detail.trailerUrl,
       durationSeconds: item.durationSeconds,
       tmdbId: item.tmdbId,
+      mediaType: 'movie',
     },
     tmdb,
     tmdb?.director,
@@ -187,6 +201,7 @@ export function mergeSeriesDetail(detail: SeriesDetail, tmdb?: TmdbTv | null): D
   const model = mergeCommon(
     {
       title: item.title,
+      titleBase: item.titleBase,
       year: item.year,
       rating: item.rating,
       plot: item.plot,
@@ -198,6 +213,7 @@ export function mergeSeriesDetail(detail: SeriesDetail, tmdb?: TmdbTv | null): D
       director: detail.director,
       trailerUrl: detail.trailerUrl,
       tmdbId: item.tmdbId,
+      mediaType: 'tv',
     },
     tmdb,
     creators || undefined,

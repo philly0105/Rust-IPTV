@@ -9,7 +9,7 @@ import { TmdbAttribution } from '../components/TmdbAttribution';
 import { TmdbRail } from '../components/TmdbRail';
 import { useSettings } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { EmptyState, ErrorState, Poster, Skeleton, buttonClass, cn } from '../_shim';
+import { EmptyState, ErrorState, Poster, Skeleton, buttonClass, cn } from '@/ui';
 
 const BIO_CLAMP = 600;
 

@@ -6,7 +6,7 @@ import { NavLink } from 'react-router';
 
 import type { Category } from '@/api/types';
 
-import { Button, ErrorState, IconButton, Skeleton } from '../_shim';
+import { Button, ErrorState, IconButton, Skeleton } from '@/ui';
 
 const ROW = 36;
 

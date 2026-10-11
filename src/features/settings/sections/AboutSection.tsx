@@ -5,9 +5,11 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, ErrorState, Skeleton, useToast } from '../../sources/_shim';
+import { Button, ErrorState, Skeleton, useToast } from '@/ui';
 import { SettingsGroup, SettingsSection } from '../components';
+import { updaterAvailable } from '../lib/updater';
 import type { SectionProps } from './types';
+import { UpdatesPanel } from './UpdatesPanel';
 
 export function AboutSection(_props: SectionProps) {
   const { t } = useTranslation('settings');
@@ -70,6 +72,7 @@ export function AboutSection(_props: SectionProps) {
               ))}
             </dl>
           </SettingsGroup>
+          <UpdatesPanel available={isDesktop && updaterAvailable(info.data)} />
           <div className="flex flex-wrap gap-2">
             {isDesktop ? (
               <>

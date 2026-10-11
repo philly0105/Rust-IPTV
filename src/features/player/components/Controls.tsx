@@ -1,6 +1,7 @@
 import {
   Captions,
   CaptionsOff,
+  CircleDot,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -22,6 +23,9 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isDesktop, rpc } from '@/api/transport';
+
+import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import { formatTime } from '../format';
 import { useMediaStore } from '../media';
@@ -89,6 +93,77 @@ function VolumeControl() {
         style={{ ['--fill' as string]: `${Math.round(shown * 100)}%` }}
       />
     </div>
+  );
+}
+
+/** Embedded mpv live recording: a toggle plus a red REC timer while `mpv.record` writes to disk. */
+export function RecordControl({ compact }: { compact?: boolean }) {
+  const { t } = useTranslation('player');
+  const { toast } = useToast();
+  const recording = useMediaStore((s) => !!s.mpv?.recording);
+  const startedAt = useMediaStore((s) => s.recordStartedAt);
+  const recordPath = useMediaStore((s) => s.mpv?.recordPath ?? null);
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!recording) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  const toggle = (): void => {
+    if (busy) return;
+    const start = !recording;
+    const lastPath = useMediaStore.getState().mpv?.recordPath ?? null;
+    setBusy(true);
+    rpc('mpv.record', { start })
+      .then((res) => {
+        const mpv = useMediaStore.getState().mpv;
+        if (mpv) useMediaStore.setState({ mpv: { ...mpv, recording: res.recording, recordPath: res.path } });
+        if (res.recording) {
+          if (!useMediaStore.getState().recordStartedAt) useMediaStore.setState({ recordStartedAt: Date.now() });
+          return;
+        }
+        useMediaStore.setState({ recordStartedAt: undefined });
+        const path = res.path ?? lastPath;
+        if (!start) toast({ title: t('recordSaved'), description: path ?? undefined, variant: 'success' });
+      })
+      .catch((err: unknown) => {
+        toast({
+          title: start ? t('recordStartFailed') : t('recordStopFailed'),
+          description: err instanceof Error ? err.message : String(err),
+          variant: 'error',
+        });
+      })
+      .finally(() => setBusy(false));
+  };
+
+  const elapsed = recording && startedAt ? Math.max(0, (now - startedAt) / 1000) : 0;
+  return (
+    <>
+      {recording && (
+        <span
+          data-testid="rec-indicator"
+          title={recordPath ? t('recordingTo', { path: recordPath }) : undefined}
+          className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-[#ff4d4d]/15 px-2 py-0.5 font-display text-xs font-semibold text-[#ff7a7a] tabular-nums ring-1 ring-[#ff4d4d]/45"
+        >
+          <span className="size-2 rounded-full bg-[#ff4d4d] motion-safe:animate-live-pulse" aria-hidden />
+          {t('rec')} {formatTime(elapsed)}
+        </span>
+      )}
+      {!compact && (
+        <CtlButton
+          label={recording ? t('recordStop') : t('recordStart')}
+          pressed={recording}
+          disabled={busy}
+          onClick={toggle}
+          className={recording ? 'text-[#ff7a7a]!' : undefined}
+        >
+          <CircleDot />
+        </CtlButton>
+      )}
+    </>
   );
 }
 
@@ -250,6 +325,8 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
   const position = usePlayerStore((s) => s.positionSeconds);
   const duration = usePlayerStore((s) => s.durationSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const mode = usePlayerStore((s) => s.mode);
+  const mpvAttached = useMediaStore((s) => !!s.mpv?.attached);
   const ended = usePlayerStore(selectEnded);
   usePlayerStore((s) => s.queue);
   const buffered = useMediaStore((s) => s.buffered);
@@ -282,6 +359,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
   const liveWindow = isLive && seekable && seekable.end - seekable.start >= 30 ? seekable : undefined;
   const atLiveEdge = !liveWindow || liveWindow.end - position < 6;
   const showSeek = isVod ? !!duration : !!liveWindow;
+  // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
+  const showTime = !!duration || position > 0 || status !== 'loading';
+  const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
 
   const store = usePlayerStore.getState();
 
@@ -370,12 +450,13 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
                 <Radio className="size-4" aria-hidden />
                 {t('radio')}
               </span>
-            ) : (
+            ) : showTime ? (
               <span className="ml-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
                 {formatTime(position)}
                 <span className="text-white/70"> / {formatTime(duration)}</span>
               </span>
-            )}
+            ) : null}
+            {canRecord && <RecordControl compact={compact} />}
 
             <div className="flex-1" />
 

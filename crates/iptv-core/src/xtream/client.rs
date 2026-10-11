@@ -3,7 +3,7 @@
 //! Every request: `GET {server}/player_api.php?username&password[&action..]`
 //! with the VLC User-Agent some panels require, retried by
 //! [`crate::http::with_retry`] on Network/Timeout. The password lives only in
-//! the request query; logs carry the server, username and action, never the
+//! the request query; logs carry the server, masked username and action, never the
 //! URL, and errors come from reqwest with the URL stripped.
 
 use super::raw::{RawAccount, RawUserInfo};
@@ -75,6 +75,11 @@ impl XtreamClient {
         &self.password
     }
 
+    /// The username for logs: first character and `***`.
+    pub fn masked_username(&self) -> String {
+        mask_username(&self.username)
+    }
+
     /// Fetches `player_api.php` with `action` (None = account info) and extra
     /// query params, and decodes the JSON body into `T`. An empty body decodes
     /// as JSON `null`.
@@ -121,7 +126,7 @@ impl XtreamClient {
         })
         .await
         .inspect_err(|err| {
-            tracing::warn!(server = %self.server, user = %self.username, action = label, error = %err, "xtream request failed");
+            tracing::warn!(server = %self.server, user = %self.masked_username(), action = label, error = %err, "xtream request failed");
         })?;
         tracing::debug!(
             server = %self.server,
@@ -171,9 +176,23 @@ pub fn check_auth(user_info: Option<&RawUserInfo>) -> CoreResult<()> {
     Ok(())
 }
 
+/// Masks an account name for logs: first character and `***` (`***` alone
+/// when empty).
+pub fn mask_username(user: &str) -> String {
+    let first: String = user.trim().chars().take(1).collect();
+    format!("{first}***")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usernames_are_masked_for_logs() {
+        assert_eq!(mask_username("alice"), "a***");
+        assert_eq!(mask_username("Ünïcode"), "Ü***");
+        assert_eq!(mask_username(""), "***");
+    }
 
     #[test]
     fn debug_hides_password() {

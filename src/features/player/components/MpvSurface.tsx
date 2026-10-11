@@ -5,7 +5,7 @@ import { onAppEvent } from '@/api/events';
 import { rpc } from '@/api/transport';
 import type { Bounds, MpvState, MpvTrack } from '@/api/types';
 
-import { useToast } from '../_shim';
+import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import type { EngineTracks, TrackOption } from '../engines';
 import { modalOpen } from '../format';
@@ -34,6 +34,13 @@ export function surfaceBounds(el: Element): Bounds {
   if (modalOpen() || el.getClientRects().length === 0) return HIDDEN_BOUNDS;
   return measureMpvBounds(el) ?? HIDDEN_BOUNDS;
 }
+
+/**
+ * One token per attach. A stale attach (StrictMode's first run, a quick remount) that
+ * resolves after a newer one started must not detach: there is one mpv session per window,
+ * and that detach would kill the newer one.
+ */
+let attachSeq = 0;
 
 export function boundsEqual(a: Bounds | null, b: Bounds): boolean {
   return !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
@@ -79,6 +86,10 @@ export function MpvSurface({ className }: { className?: string }) {
     const el = ref.current;
     if (!el) return;
     let disposed = false;
+    const session = ++attachSeq;
+    /** False until `mpv.attach` resolved and its state was applied: earlier events describe a session not yet configured. */
+    let ready = false;
+    let unController: () => void = () => undefined;
     let lastSent: Bounds | null = null;
     let raf = 0;
 
@@ -103,6 +114,9 @@ export function MpvSurface({ className }: { className?: string }) {
     const poll = setInterval(schedule, 400);
     const mo = new MutationObserver(schedule);
     mo.observe(document.body, { childList: true, subtree: false, attributes: true, attributeFilter: ['aria-modal', 'open'] });
+    // Toasts come and go inside their own portal: re-measure as soon as one appears or leaves.
+    const toastViewport = document.querySelector('[data-toast-viewport]');
+    if (toastViewport) mo.observe(toastViewport, { childList: true, subtree: true });
     let dpr = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
     const onDpr = (): void => {
       dpr.removeEventListener('change', onDpr);
@@ -114,21 +128,23 @@ export function MpvSurface({ className }: { className?: string }) {
     dpr.addEventListener('change', onDpr);
 
     const unState = onAppEvent('mpv.state', (st) => {
-      if (disposed) return;
+      if (disposed || !ready) return;
       applyState(st);
     });
 
-    const applyState = (st: MpvState): void => {
+    const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
       useMediaStore.setState({
         mpv: st,
         tracks: mpvTracks(st, { audio: (i) => t('audioFallback', { index: i }), sub: (i) => t('subtitleFallback', { index: i }) }),
         captionsOn: st.tracks.some((x) => x.type === 'sub' && x.selected),
         waiting: !st.loaded,
+        recordStartedAt: st.recording ? (prev?.recording ? useMediaStore.getState().recordStartedAt : undefined) ?? Date.now() : undefined,
       });
       const src = usePlayerStore.getState().source;
       reportProgress(st.timePos, src?.isLive ? undefined : st.duration);
-      reportVolume(st.volume / 100, st.muted);
+      // The attach reply may predate the volume/mute we sent with it; the store keeps the saved values.
+      if (!initial) reportVolume(st.volume / 100, st.muted);
       if (st.error) reportStatus('error', st.error);
       else if (st.loaded) reportStatus(st.paused ? 'paused' : 'playing');
       // keep-open pauses at EOF instead of ending: treat "paused at the end" as ended, once.
@@ -137,13 +153,6 @@ export function MpvSurface({ className }: { className?: string }) {
       if (src && !src.isLive && atEnd && !wasAtEnd) handleEnded();
     };
 
-    const unController = setController({
-      play: () => void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined),
-      pause: () => void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined),
-      seekTo: (s) => void rpc('mpv.command', { cmd: ['seek', s, 'absolute'] }).catch(() => undefined),
-      setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
-      setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
-    });
     const unCommands = setMediaCommands({
       setQuality: () => undefined,
       setAudio: (id) => void rpc('mpv.setProperty', { name: 'aid', value: Number(id) }).catch(() => undefined),
@@ -161,14 +170,26 @@ export function MpvSurface({ className }: { className?: string }) {
     useMediaStore.setState({ canPip: false });
 
     const initial = surfaceBounds(el);
-    rpc('mpv.attach', { bounds: initial })
+    const { volume, muted } = usePlayerStore.getState();
+    // The session starts at the saved volume instead of mpv's 100 %.
+    rpc('mpv.attach', { bounds: initial, volume: Math.round(volume * 100), muted })
       .then((st) => {
         if (disposed) {
-          void rpc('mpv.detach').catch(() => undefined);
+          // Unmounted while attaching: make sure the session goes, unless a newer attach owns it.
+          if (session === attachSeq) void rpc('mpv.detach').catch(() => undefined);
           return;
         }
         lastSent = initial;
-        applyState(st);
+        applyState(st, true);
+        ready = true;
+        // Only now can property writes reach mpv (before attach they fail with "not attached").
+        unController = setController({
+          play: () => void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined),
+          pause: () => void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined),
+          seekTo: (s) => void rpc('mpv.command', { cmd: ['seek', s, 'absolute'] }).catch(() => undefined),
+          setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
+          setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
+        });
         setAttached(true);
         schedule();
       })
@@ -196,8 +217,8 @@ export function MpvSurface({ className }: { className?: string }) {
       unState();
       unController();
       unCommands();
-      useMediaStore.setState({ mpv: undefined });
-      void rpc('mpv.detach').catch(() => undefined);
+      useMediaStore.setState({ mpv: undefined, recordStartedAt: undefined });
+      if (session === attachSeq) void rpc('mpv.detach').catch(() => undefined);
     };
     // Attach once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -225,8 +246,17 @@ export function MpvSurface({ className }: { className?: string }) {
     <div ref={ref} data-mpv-surface="" className={cn('relative h-full w-full bg-black', className)}>
       {/* Only before the native window exists: once attached it paints over this element. */}
       {!attached && (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-white/70" aria-live="polite">
-          {t('mpvLoading')}
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="mpv-connecting"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-white/70"
+        >
+          <svg viewBox="0 0 48 48" className="size-10 text-accent motion-safe:animate-spin" style={{ animationDuration: '1.4s' }} aria-hidden>
+            <circle cx="24" cy="24" r="20" fill="none" stroke="rgb(255 255 255 / 0.15)" strokeWidth="3" />
+            <path d="M24 4 a20 20 0 0 1 20 20" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          {t('mpvConnecting')}
         </div>
       )}
     </div>

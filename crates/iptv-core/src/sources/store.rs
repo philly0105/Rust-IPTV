@@ -8,7 +8,7 @@ use crate::model::{
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
-const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0) FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
+const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio') FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
 
 /// Kind-specific configuration of a source.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +54,7 @@ fn read_source(r: &Row<'_>) -> rusqlite::Result<(Source, String)> {
             last_refresh_at: r.get::<_, Option<String>>(7)?.map(|s| to_rfc3339(&s)),
             last_error: r.get(8)?,
             channel_count: r.get(11)?,
+            radio_count: r.get(14)?,
             movie_count: r.get(12)?,
             series_count: r.get(13)?,
             epg,

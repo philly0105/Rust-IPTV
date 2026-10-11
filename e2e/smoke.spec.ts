@@ -4,7 +4,7 @@ import { listSources, removeAllSources, resetApp, rpc } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
 import { expectNoHorizontalScroll, settle } from './helpers/layout';
-import { addXtream, channelList, gotoLive } from './helpers/ui';
+import { addXtream, channelList, expectCardStat, gotoLive } from './helpers/ui';
 
 // Check 16: fresh data dir onboarding, dashboard rails after adding the mock
 // Xtream portal, theme persistence, backup export + import. Plus shell smoke:
@@ -50,11 +50,13 @@ test.describe.serial('smoke', () => {
   test('adding the mock Xtream portal fills the dashboard rails', async ({ page }) => {
     const source = await addXtream(page, XT);
     expect(source.channelCount).toBe(MOCK_FACTS.xtreamLive);
+    expect(source.radioCount).toBe(MOCK_FACTS.xtreamRadio);
     expect(source.movieCount).toBe(MOCK_FACTS.xtreamMovies);
     expect(source.seriesCount).toBe(MOCK_FACTS.xtreamSeries);
 
     // The source card and the rail entry appear.
     await expect(page.getByTestId('source-card').filter({ hasText: XT })).toBeVisible();
+    await expectCardStat(page, XT, /^radio$/, MOCK_FACTS.xtreamRadio);
     await expect(page.getByTestId('rail-sources').getByRole('button', { name: new RegExp(XT) })).toBeVisible();
 
     await page.goto('/dashboard');

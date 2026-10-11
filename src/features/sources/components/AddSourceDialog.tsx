@@ -4,14 +4,15 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
+import type { SourcesAddArgs } from '@/api/rpc';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
-import { Button, Dialog, Input, Tabs, Toggle, useToast } from '../_shim';
-import { buildAddArgs, emptyDraft, type DraftErrors, type SourceDraft } from '../lib/draft';
+import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
+import { buildAddArgs, buildUpdatePatch, emptyDraft, type DraftErrors, type SourceDraft } from '../lib/draft';
 import { enabledEpgUrls, refreshGuides, useGuideProgressFeed } from '../lib/epgRefresh';
-import { nextStepKey } from '../lib/errors';
-import { useImportProgressFeed, useNewSourceProgress } from '../lib/progress';
+import { claimImportErrors, failedSourceId, nextStepKey, summaryKey } from '../lib/errors';
+import { useImportProgressFeed, useImportProgressStore, useNewSourceProgress, useSourceProgress } from '../lib/progress';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
 import { parseXtreamLink, suggestName } from '../lib/validate';
@@ -70,11 +71,23 @@ export function AddSourceDialog({
   const [draft, setDraft] = useState<SourceDraft>(() => initialDraft(initial));
   const [errors, setErrors] = useState<DraftErrors>({});
   const [nameTouched, setNameTouched] = useState(Boolean(initial?.name));
+  // A name derived from the URL or file. It shows as the placeholder and is used only when the name is left empty,
+  // so it never lands in the middle of what the user is typing.
+  const [suggested, setSuggested] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<RpcError | null>(null);
+  // Set once `sources.add` created a source whose import failed. Further submits retry that source
+  // (update + re-import, or replace it when the kind or origin changed) instead of adding another.
+  const [failed, setFailed] = useState<{ id: string; name: string } | null>(null);
   const bodyRef = useRef<HTMLFormElement>(null);
   const nextFrame = useNextFrame();
+  /**
+   * Import errors this dialog reports itself, so the shell does not toast them as well:
+   * the source a failed add left behind, and, from the first submit until one succeeds,
+   * any source that was not in the list when it started (the one `sources.add` creates).
+   */
+  const claimRef = useRef<{ failedId: string | null; knownAtSubmit: Set<string> | null }>({ failedId: null, knownAtSubmit: null });
 
   // Reset whenever the dialog opens with a (possibly new) initial request.
   const initialKey = JSON.stringify(initial ?? null);
@@ -82,20 +95,29 @@ export function AddSourceDialog({
     if (!open) return;
     setDraft(initialDraft(initial));
     setErrors({});
-    setNameTouched(Boolean(initial?.name) || Boolean(initial?.url));
+    setNameTouched(Boolean(initial?.name));
+    setSuggested('');
     setSubmitError(null);
     setStartedAt(null);
+    setFailed(null);
+    claimRef.current = { failedId: null, knownAtSubmit: null };
   }, [open, initialKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    return claimImportErrors((id) => {
+      const c = claimRef.current;
+      return id === c.failedId || (c.knownAtSubmit !== null && !c.knownAtSubmit.has(id));
+    });
+  }, [open]);
 
   const sources = useRpcQuery('sources.list', undefined, { enabled: open });
   const knownIds = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
-  const progress = useNewSourceProgress(knownIds, startedAt);
+  const newProgress = useNewSourceProgress(knownIds, startedAt);
+  const retryProgress = useSourceProgress(failed?.id);
+  const progress = failed ? retryProgress : newProgress;
 
-  const suggest = (input: string) => {
-    if (nameTouched) return;
-    const name = suggestName(input);
-    if (name) setDraft((d) => ({ ...d, name }));
-  };
+  const suggest = (input: string) => setSuggested(suggestName(input));
 
   const setKind = (kind: SourceKind) => {
     setDraft((d) => ({ ...d, kind }));
@@ -111,7 +133,8 @@ export function AddSourceDialog({
 
   const submit = async () => {
     setSubmitError(null);
-    const built = buildAddArgs(draft, { isDesktop });
+    const named = draft.name.trim() ? draft : { ...draft, name: suggested };
+    const built = buildAddArgs(named, { isDesktop });
     setErrors(built.errors);
     if (!built.ok) {
       focusFirstInvalid();
@@ -119,8 +142,13 @@ export function AddSourceDialog({
     }
     setSubmitting(true);
     setStartedAt(Date.now());
+    claimRef.current.knownAtSubmit ??= new Set(knownIds);
     try {
-      const source = await rpc('sources.add', built.value);
+      const source = failed ? await retry(failed.id, named, built.value) : await rpc('sources.add', built.value);
+      if (!source) {
+        focusFirstInvalid();
+        return;
+      }
       // Load the guide right away (playlist url-tvg, Xtream xmltv.php). It runs in the
       // background; the source card shows its progress.
       const guides = enabledEpgUrls(source.epg);
@@ -133,16 +161,53 @@ export function AddSourceDialog({
         description: t(guides.length > 0 ? 'addedDescriptionGuide' : 'addedDescription', { count: total }),
         action: { label: t('open'), onClick: () => navigate(`/s/${source.id}/live`) },
       });
+      claimRef.current = { failedId: null, knownAtSubmit: null };
       onAdded?.(source);
       onClose();
     } catch (e) {
       const err = RpcError.from(e);
       setSubmitError(err);
-      // The core keeps a source whose import failed (with lastError); show it in the list.
+      // The core keeps a source whose import failed (with lastError) and names it in the error.
+      // Remember it so the next submit retries it rather than adding a duplicate.
+      const id = failedSourceId(err);
+      if (id) claimRef.current.failedId = id;
+      if (id) setFailed({ id, name: built.value.name });
+      else setFailed((f) => (f ? { ...f, name: built.value.name } : f));
       void invalidate('sources.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /**
+   * Retries the source a failed add left behind. Same kind and M3U origin: save the edited details
+   * and re-import it. Otherwise (or when it is gone) the config cannot be patched, so it is replaced.
+   */
+  const retry = async (id: string, named: SourceDraft, args: SourcesAddArgs): Promise<Source | null> => {
+    let existing: Source | null = null;
+    try {
+      existing = await rpc('sources.get', { id });
+    } catch (e) {
+      if (RpcError.from(e).code !== 'not_found') throw e;
+    }
+    const patchable =
+      existing !== null &&
+      existing.kind === args.kind &&
+      (args.kind !== 'm3u' || (existing.m3u?.origin === args.m3u?.origin && args.m3u?.origin !== 'text'));
+    if (existing && patchable) {
+      const patch = buildUpdatePatch(existing, named, { isDesktop });
+      if (!patch.ok) {
+        setErrors(patch.errors);
+        return null;
+      }
+      if (Object.keys(patch.value).length > 0) await rpc('sources.update', { id, patch: patch.value });
+      // Drop the previous attempt's error entry so the progress view starts fresh.
+      useImportProgressStore.getState().clear(id);
+      return rpc('sources.refresh', { id });
+    }
+    if (existing) await rpc('sources.remove', { id });
+    setFailed(null);
+    return rpc('sources.add', args);
   };
 
   const kinds: { id: SourceKind; label: string }[] = [
@@ -165,7 +230,7 @@ export function AddSourceDialog({
             {submitting ? t('closeKeepImporting') : t('cancel')}
           </Button>
           <Button variant="primary" loading={submitting} onClick={() => void submit()} data-testid="add-source-submit">
-            {submitting ? t('adding') : t('addSourceSubmit')}
+            {submitting ? t(failed ? 'retrying' : 'adding') : t(failed ? 'retryImport' : 'addSourceSubmit')}
           </Button>
         </>
       }
@@ -188,8 +253,12 @@ export function AddSourceDialog({
               autoComplete="off"
               disabled={submitting}
               maxLength={120}
-              placeholder={t('sourceNamePlaceholder')}
+              placeholder={suggested || t('sourceNamePlaceholder')}
               value={draft.name}
+              // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
+              onFocus={(e) => {
+                if (!nameTouched && draft.name) e.currentTarget.select();
+              }}
               onChange={(e) => {
                 setNameTouched(e.target.value.length > 0);
                 setDraft((d) => ({ ...d, name: e.target.value }));
@@ -208,7 +277,8 @@ export function AddSourceDialog({
             disabled={submitting}
             onSuggestName={suggest}
             onUseXtream={(xtream) => {
-              setDraft((d) => ({ ...d, kind: 'xtream', xtream, name: nameTouched ? d.name : suggestName(xtream.serverUrl) }));
+              setDraft((d) => ({ ...d, kind: 'xtream', xtream }));
+              setSuggested(suggestName(xtream.serverUrl));
               setErrors({});
             }}
           />
@@ -249,8 +319,17 @@ export function AddSourceDialog({
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
             <div className="flex min-w-0 flex-col gap-1">
               <p className="font-medium text-fg">{t('addFailed')}</p>
-              <p className="break-words text-fg-muted">{redactText(submitError.message)}</p>
+              <p className="text-fg">{t(summaryKey(submitError))}</p>
               <p className="text-fg-muted">{t(nextStepKey(submitError))}</p>
+              {failed ? (
+                <p className="text-fg-muted" data-testid="add-source-retry-note">
+                  {t('addRetryNote', { name: failed.name })}
+                </p>
+              ) : null}
+              <details className="text-fg-muted">
+                <summary className="cursor-pointer select-none text-xs">{t('technicalDetails')}</summary>
+                <p className="mt-1 break-words font-mono text-xs">{redactText(submitError.message)}</p>
+              </details>
             </div>
           </div>
         ) : null}

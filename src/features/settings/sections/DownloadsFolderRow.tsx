@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, Skeleton, useToast } from '../../sources/_shim';
+import { Button, Skeleton, useToast } from '@/ui';
 import { redactText } from '../../sources/lib/redact';
 import { CommitInput, SettingsRow } from '../components';
 import { cleanPath } from '../lib/patch';

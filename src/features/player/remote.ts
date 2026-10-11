@@ -20,8 +20,29 @@ export function remoteStatusOf(s: ReturnType<typeof usePlayerStore.getState>): R
   return status;
 }
 
+/**
+ * Number of mounted views (the live page's remote bridge) that apply channel commands
+ * themselves. While one is mounted, `bindRemote` leaves channel commands to it so a remote
+ * press plays the channel once.
+ */
+let channelCommandClaims = 0;
+
+/** Claims `channelUp` / `channelDown` / `selectNumber` / `selectId`; returns the release function. */
+export function claimRemoteChannelCommands(): () => void {
+  channelCommandClaims++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    channelCommandClaims--;
+  };
+}
+
+const CHANNEL_COMMANDS = new Set(['channelUp', 'channelDown', 'selectNumber', 'selectId']);
+
 export function bindRemote(): () => void {
   const unCmd = onAppEvent('remote.command', (ev) => {
+    if (channelCommandClaims > 0 && CHANNEL_COMMANDS.has(ev.command)) return;
     const s = usePlayerStore.getState();
     switch (ev.command) {
       case 'channelUp':

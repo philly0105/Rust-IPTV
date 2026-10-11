@@ -34,6 +34,12 @@ pnpm install
 
 Server flags: `iptv-server --port 7180 --data-dir ./.data --static ./dist`. It binds 127.0.0.1 unless you pass `--host`. Details are in `docs/architecture/server.md`.
 
+- The API answers only when the browser uses localhost, an IP address, or a name listed in `--allowed-hosts` / `IPTV_ALLOWED_HOSTS` (comma list). Behind a reverse proxy at `tv.example.com`, set `IPTV_ALLOWED_HOSTS=tv.example.com`.
+- The stream proxy and downloads only reach LAN addresses that belong to the source's own host and port. Pass `--allow-private-targets` (`IPTV_ALLOW_PRIVATE_TARGETS=true`) on a trusted network to lift that.
+- In the browser, playlists cannot be opened from the server's disk (upload the text instead), and downloads always go to `<data dir>/downloads`.
+- `iptv-server --health` checks a running server; the Docker image uses it as its HEALTHCHECK.
+- The web build can be installed as an app (PWA manifest and service worker).
+
 To try the app without a real provider, run `pnpm mock` and add a source:
 
 - M3U URL: `http://127.0.0.1:7290/m3u/sample.m3u`
@@ -97,6 +103,16 @@ The UI ships in 19 languages (Settings > General > Language; English is the fall
 
 Start at `docs/README.md`. It links the build spec (`docs/SPEC.md`) and one document per subsystem under `docs/architecture/`.
 
+## Recording
+
+In the desktop app, embedded mpv can record the playing stream (`mpv.record`). Files go to the folder set in Settings > General (Recordings folder), or `<downloads folder>/recordings` when that is not set, named `<title>-YYYYMMDD-HHMM.ts`. mpv copies the stream as is and starts at the next keyframe; its recorder is marked experimental upstream.
+
+## Updates
+
+The updater is off unless the app is built with `--features updater` (for example `pnpm tauri build --features updater`). `tauri.conf.json` carries `plugins.updater` with a placeholder endpoint (`https://example.invalid/...`) and an empty `pubkey`, so an updater build cannot install anything until both are replaced: generate a key pair with `pnpm tauri signer generate`, put the public key in `pubkey`, point `endpoints` at your `latest.json`, set `bundle.createUpdaterArtifacts`, and sign releases with the private key. `app.info` reports `updaterAvailable`. No signing key or feed exists in this repository.
+
 ## Licence
 
 Licence not chosen yet. The workspace manifests say MIT as a placeholder; confirm before publishing.
+
+The mpv build bundled by `pnpm tauri:build:mpv` is GPL-2.0-or-later and ships with its licence and source notice in `vendor/mpv/LICENSE.txt`, which is installed beside `mpv.exe`. Tsrust IPTV runs mpv as a separate process and does not link it.

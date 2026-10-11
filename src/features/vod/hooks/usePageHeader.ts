@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-import { useShell, type HeaderSearch } from '../_shim';
+import { useShell, type HeaderSearch } from '@/shell';
 
 export interface PageHeader {
   title: string;

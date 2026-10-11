@@ -9,6 +9,11 @@
  * language is active; main.tsx awaits it before the first render, so there
  * is no English flash. The shell applies `settings.language` at runtime via
  * `applyLanguage`, which also loads first.
+ *
+ * A fresh profile has nothing in localStorage, so the language is unknown
+ * until `settings.get` answers. `languageUnresolved()` reports that window;
+ * the shell shows a text-free skeleton until the first `applyLanguage`
+ * resolves, so a German user never sees an English first frame either.
  */
 
 import i18next, { type Resource } from 'i18next';
@@ -111,14 +116,30 @@ export function languageInfo(code: string): LanguageInfo {
   return LANGUAGES.find((l) => l.code === code || l.bcp47 === code) ?? LANGUAGES[0]!;
 }
 
-function storedLanguage(): string {
+/** The remembered language code, or null when none (or an unknown one) is stored. */
+function rememberedLanguage(): string | null {
   try {
     const v = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     if (v && LANGUAGES.some((l) => l.code === v)) return v;
   } catch {
     // storage blocked
   }
-  return DEFAULT_LANGUAGE;
+  return null;
+}
+
+function storedLanguage(): string {
+  return rememberedLanguage() ?? DEFAULT_LANGUAGE;
+}
+
+/** False until a language is known: remembered at startup, or applied from settings since. */
+let languageKnown = rememberedLanguage() !== null;
+
+/**
+ * True while the UI language is still unknown: nothing was remembered in
+ * localStorage at startup and `applyLanguage` has not completed yet.
+ */
+export function languageUnresolved(): boolean {
+  return !languageKnown;
 }
 
 function syncDocument(code: string): void {
@@ -190,6 +211,7 @@ export async function applyLanguage(code: string | undefined | null): Promise<vo
     // storage blocked
   }
   await activate(next);
+  languageKnown = true;
 }
 
 export const i18n = i18next;

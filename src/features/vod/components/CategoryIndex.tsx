@@ -6,7 +6,7 @@ import type { Category } from '@/api/types';
 
 import { columnsFor, useElementWidth, useScrollMargin } from '../hooks/useContainerColumns';
 import { handleGridKeyDown } from '../lib/gridNav';
-import { cn } from '../_shim';
+import { cn } from '@/ui';
 
 export interface CategoryEntry {
   id: string;

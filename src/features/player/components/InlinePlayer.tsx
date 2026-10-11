@@ -5,13 +5,15 @@ import { useTranslation } from 'react-i18next';
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
 import type { PlayerSource } from '@/api/types';
 
-import { useToast } from '../_shim';
+import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import {
   createEngine,
   EMPTY_TRACKS,
+  fetchFailureReason,
   looksLikeMpegTs,
   mseSupported,
+  withReason,
   worthSniffingAsMpegTs,
   type Engine,
   type EngineError,
@@ -34,9 +36,9 @@ function mediaKey(s: PlayerSource | undefined): string {
   return s ? `${s.kind}|${s.url}` : '';
 }
 
-function rangesOf(tr: TimeRanges): TimeRange[] {
+function rangesOf(tr: TimeRanges, offset = 0): TimeRange[] {
   const out: TimeRange[] = [];
-  for (let i = 0; i < tr.length; i++) out.push({ start: tr.start(i), end: tr.end(i) });
+  for (let i = 0; i < tr.length; i++) out.push({ start: tr.start(i) + offset, end: tr.end(i) + offset });
   return out;
 }
 
@@ -152,14 +154,19 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
     if (!el) return;
     let lastBufferedAt = 0;
     const isLive = (): boolean => !!usePlayerStore.getState().source?.isLive;
+    /** Non-zero after an mpegts.js live reconnect restarted the element clock. */
+    const offset = (): number => engineRef.current?.timeOffset?.() ?? 0;
     const onTime = (): void => {
       const dur = Number.isFinite(el.duration) && !isLive() ? el.duration : undefined;
-      reportProgress(el.currentTime, dur);
+      const off = offset();
+      reportProgress(el.currentTime + off, dur);
       const now = performance.now();
       if (now - lastBufferedAt > 1000) {
         lastBufferedAt = now;
-        const seek = el.seekable.length ? { start: el.seekable.start(0), end: el.seekable.end(el.seekable.length - 1) } : undefined;
-        useMediaStore.setState({ buffered: rangesOf(el.buffered), seekable: isLive() ? seek : undefined });
+        const seek = el.seekable.length
+          ? { start: el.seekable.start(0) + off, end: el.seekable.end(el.seekable.length - 1) + off }
+          : undefined;
+        useMediaStore.setState({ buffered: rangesOf(el.buffered, off), seekable: isLive() ? seek : undefined });
       }
     };
     const onPlaying = (): void => {
@@ -190,7 +197,17 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
         return;
       }
       const kind = code === 2 ? 'network' : code === 4 ? 'unsupported' : 'media';
-      failRef.current(s, { kind, fatal: true, message: el.error.message || `Media error ${code}` });
+      const message = el.error.message || `Media error ${code}`;
+      if (code !== 2 && code !== 4) {
+        failRef.current(s, { kind, fatal: true, message });
+        return;
+      }
+      // The element hides HTTP status and body: when our own server (proxy guard, files) refused
+      // the request, its answer says why and is shown instead of the generic media error.
+      void fetchFailureReason(proxiedUrl(s)).then((r) => {
+        if (usePlayerStore.getState().source !== s) return;
+        failRef.current(s, r ? { kind: 'network', fatal: true, message: withReason(message, r.reason, r.status) } : { kind, fatal: true, message });
+      });
     };
     const onEnterPip = (): void => useMediaStore.setState({ inPip: true });
     const onLeavePip = (): void => useMediaStore.setState({ inPip: false });
@@ -212,7 +229,7 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
       play: () => void el.play().catch(() => undefined),
       pause: () => el.pause(),
       seekTo: (s) => {
-        if (Number.isFinite(s)) el.currentTime = s;
+        if (Number.isFinite(s)) el.currentTime = Math.max(0, s - offset());
       },
       setVolume: (v) => {
         el.volume = v;

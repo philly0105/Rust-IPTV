@@ -64,7 +64,21 @@ describe('proxiedUrl (web)', () => {
       headers: { userAgent: 'UA' },
       ref: { sourceId: 's1', contentType: 'live', itemId: '1' },
     });
-    expect(url).toBe(`/api/proxy?url=${encodeURIComponent(base.url)}&sourceId=s1`);
+    expect(url).toBe(`/api/proxy?url=${encodeURIComponent(base.url)}&sourceId=s1&ua=UA`);
+  });
+
+  it('sends the merged headers as ua / referer / origin params', () => {
+    const url = proxiedUrl({
+      ...base,
+      headers: { userAgent: 'VLC/3', referrer: 'http://ref.example/', origin: 'http://o.example' },
+      ref: { sourceId: 's1', contentType: 'live', itemId: '1' },
+    });
+    const params = new URLSearchParams(url.split('?')[1]);
+    expect(params.get('url')).toBe(base.url);
+    expect(params.get('sourceId')).toBe('s1');
+    expect(params.get('ua')).toBe('VLC/3');
+    expect(params.get('referer')).toBe('http://ref.example/');
+    expect(params.get('origin')).toBe('http://o.example');
   });
 
   it('leaves relative urls alone', () => {

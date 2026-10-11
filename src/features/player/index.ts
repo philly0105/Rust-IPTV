@@ -15,3 +15,4 @@ export { PlayerDock } from './components/PlayerDock';
 export { PlayerStage, type PlayerStageProps } from './components/PlayerStage';
 export { RadioPlayer } from './components/RadioPlayer';
 export { ExternalPlaybackFooter } from './components/ExternalPlaybackFooter';
+export { stopExternalPlayback } from './external';

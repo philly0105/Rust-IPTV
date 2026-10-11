@@ -437,7 +437,7 @@ async fn refresh_inner(state: &Arc<AppState>, cfg: &ConfiguredUrl) -> CoreResult
     })
     .await;
     body.cleanup();
-    result?
+    result?.map_err(|e| state.note_db_error(e))
 }
 
 /// True when the scheduler should refresh a url with this row now.

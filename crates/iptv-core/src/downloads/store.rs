@@ -233,6 +233,20 @@ pub fn transition(
     Ok(conn.execute(&sql, rusqlite::params_from_iter(values))? > 0)
 }
 
+/// Stores a re-resolved stream URL and its headers (Xtream/Stalker).
+pub fn set_source(
+    conn: &Connection,
+    id: i64,
+    url: &str,
+    headers: &RequestHeaders,
+) -> CoreResult<()> {
+    conn.execute(
+        "UPDATE downloads SET url = ?2, headers_json = ?3, updated_at = ?4 WHERE id = ?1",
+        params![id, url, headers_json(headers), now_rfc3339()],
+    )?;
+    Ok(())
+}
+
 /// Persists the reserved destination before the transfer starts.
 pub fn set_destination(
     conn: &Connection,

@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import type { Person } from '@/api/types';
 
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { cn } from '../../_shim';
+import { cn } from '@/ui';
 
 const MAX_CAST = 16;
 

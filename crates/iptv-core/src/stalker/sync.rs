@@ -66,15 +66,19 @@ async fn list(client: &StalkerClient, req: Req) -> CoreResult<Vec<Value>> {
     Ok(into_list(client.call(req).await?))
 }
 
-/// First-page `total_items` of a VOD/series listing (best effort).
-async fn remote_total(client: &StalkerClient, kind: &str) -> i64 {
+/// First-page `total_items` of a VOD/series listing; `None` when the portal
+/// did not answer (or answered without a total).
+async fn remote_total(client: &StalkerClient, kind: &str) -> Option<i64> {
     let req = Req::new(kind, "get_ordered_list")
         .p("category", "*")
         .p("sortby", "added")
         .p("p", 1);
     match client.call(req).await {
-        Ok(js) => n(&js, "total_items").unwrap_or(0),
-        Err(_) => 0,
+        Ok(js) => n(&js, "total_items"),
+        Err(err) => {
+            tracing::info!(kind, error = %err, "stalker portal total unavailable; keeping the previous count");
+            None
+        }
     }
 }
 
@@ -225,8 +229,20 @@ async fn run(
     emit("parsing", total, Some(total), None);
 
     // Totals for the summary (VOD is not stored, so ask the portal).
+    // An unanswered total keeps the stored count: `sources::run_import`
+    // records whatever the summary carries.
     let (movies, series) =
         tokio::join!(remote_total(client, "vod"), remote_total(client, "series"));
+    let (movies, series) = if movies.is_none() || series.is_none() {
+        let sid = source_id.to_string();
+        let (_, old_movies, old_series) = state
+            .db_call(move |conn| catalog::source_counts(conn, &sid))
+            .await
+            .unwrap_or((0, 0, 0));
+        (movies.unwrap_or(old_movies), series.unwrap_or(old_series))
+    } else {
+        (movies.unwrap_or(0), series.unwrap_or(0))
+    };
 
     emit("saving", 0, Some(total), Some("Saving the catalog"));
     let sid = source_id.to_string();
@@ -264,7 +280,8 @@ async fn run(
             Ok((live, radio))
         })
         .await?;
-    Runtime::get(state).forget_source(source_id);
+    // Plans and page sizes may have changed; listed rows stay usable.
+    Runtime::get(state).forget_listings(source_id);
 
     Ok(ImportSummary {
         channels: (channel_count + radio_count) as i64,

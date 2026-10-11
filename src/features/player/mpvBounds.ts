@@ -90,8 +90,16 @@ export function boundsClear(b: Bounds, reserved: Rect[]): boolean {
 export const RESERVED_SELECTOR = '[data-player-controls], [data-mpv-reserved], [role="menu"]';
 
 /**
- * Measure the live DOM: the surface, every clipping ancestor up to the viewport, and the
- * reserved chrome inside the player host. Kept separate from the math so tests can stub rects.
+ * App-level chrome outside the player host that the native window must not cover either:
+ * the toast stack (bottom-right, where the mini dock also sits) and anything tagged
+ * `data-mpv-reserved-global`.
+ */
+export const GLOBAL_RESERVED_SELECTOR = '[data-toast-viewport] [data-toast-id], [data-mpv-reserved-global]';
+
+/**
+ * Measure the live DOM: the surface, every clipping ancestor up to the viewport, the
+ * reserved chrome inside the player host, and app-level overlays (toasts) anywhere in the
+ * document. Kept separate from the math so tests can stub rects.
  */
 export function measureMpvBounds(surface: Element): Bounds | null {
   const clip: Rect[] = [{ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }];
@@ -101,7 +109,8 @@ export function measureMpvBounds(surface: Element): Bounds | null {
   }
   const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
   const reserved: Rect[] = [];
-  for (const node of Array.from(host.querySelectorAll(RESERVED_SELECTOR))) {
+  const nodes = [...Array.from(host.querySelectorAll(RESERVED_SELECTOR)), ...Array.from(document.querySelectorAll(GLOBAL_RESERVED_SELECTOR))];
+  for (const node of nodes) {
     if (node === surface || surface.contains(node)) continue;
     const b = node.getBoundingClientRect();
     if (b.width > 0 && b.height > 0) reserved.push(rectOf(b));

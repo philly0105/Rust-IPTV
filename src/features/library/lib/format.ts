@@ -1,5 +1,7 @@
 /** Number formatting for the library pages. Locale-aware, never throws. */
 
+import { formatDurationParts, type DurationFormatOptions } from '@/lib/duration';
+
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
 
 /** `1536` -> `1.5 KB`. Binary multiples, one decimal above KB, none below. */
@@ -30,16 +32,19 @@ export function etaSeconds(bytesDownloaded: number, totalBytes: number | undefin
   return Math.ceil(remaining / bytesPerSecond);
 }
 
-/** Compact duration: `45s`, `3m 05s`, `1h 02m`, `2d 4h`. */
-export function formatDuration(seconds: number | undefined | null): string {
+/**
+ * Compact, localized duration with the two largest units: `45s`, `3m 5s`, `1h 2m`,
+ * `2d 4h` in English; `Intl.DurationFormat` units elsewhere (see `@/lib/duration`).
+ */
+export function formatDuration(seconds: number | undefined | null, opts: DurationFormatOptions = {}): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '';
   const s = Math.round(seconds);
-  if (s < 60) return `${s}s`;
+  if (s < 60) return formatDurationParts({ seconds: s }, opts);
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  if (m < 60) return formatDurationParts({ minutes: m, seconds: s % 60 }, opts);
   const h = Math.floor(m / 60);
-  if (h < 48) return `${h}h ${String(m % 60).padStart(2, '0')}m`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
+  if (h < 48) return formatDurationParts({ hours: h, minutes: m % 60 }, opts);
+  return formatDurationParts({ days: Math.floor(h / 24), hours: h % 24 }, opts);
 }
 
 /** Media clock for resume points: `4:05`, `1:02:09`. */

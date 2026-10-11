@@ -1,21 +1,38 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, RefreshCw } from 'lucide-react';
+import { ListFilter, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
-import { Button, Dialog, ErrorState, Skeleton, useShell, useShortcut, useToast } from './_shim';
+import { Button, Dialog, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
+import { useShell, useShortcut } from '@/shell';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
-import { EditSourceDialog } from './components/EditSourceDialog';
+import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
+import { RemoveAllDialog } from './components/RemoveAllDialog';
 import { SourceCard } from './components/SourceCard';
 import { newlyEnabledEpgUrls, refreshGuides, useGuideProgressFeed } from './lib/epgRefresh';
 import { nextStepKey } from './lib/errors';
+import {
+  DEFAULT_VIEW,
+  KIND_FILTERS,
+  SORTS,
+  STATUS_FILTERS,
+  applyView,
+  isFiltered,
+  isManualView,
+  loadView,
+  saveView,
+  type KindFilter,
+  type ListView,
+  type SourceSort,
+  type StatusFilter,
+} from './lib/listView';
 import { useImportProgressFeed, useImportProgressStore } from './lib/progress';
 import { redactText } from './lib/redact';
 import { applyOrder, moveItem } from './lib/reorder';
@@ -41,7 +58,7 @@ function SourcesSkeleton() {
 }
 
 export function SourcesPage() {
-  const { t } = useTranslation('sources');
+  const { t, i18n } = useTranslation('sources');
   const { setHeader } = useShell();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -56,11 +73,27 @@ export function SourcesPage() {
   const [refreshing, setRefreshing] = useState<ReadonlySet<string>>(new Set());
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [editing, setEditing] = useState<Source | null>(null);
+  const [editTab, setEditTab] = useState<EditTab>('details');
+  const [view, setViewState] = useState<ListView>(() => loadView());
+  const [removeAllOpen, setRemoveAllOpen] = useState(false);
+  const [removeAllBusy, setRemoveAllBusy] = useState(false);
   const [removing, setRemoving] = useState<Source | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const [drag, setDrag] = useState<{ id: string; overId?: string; pos?: 'before' | 'after' } | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const setView = (patch: Partial<ListView>) =>
+    setViewState((prev) => {
+      const next = { ...prev, ...patch };
+      saveView(next);
+      return next;
+    });
+  const manual = isManualView(view);
+  const shown = useMemo(() => applyView(sources, view, i18n.language), [sources, view, i18n.language]);
+  const openEdit = (s: Source, tab: EditTab = 'details') => {
+    setEditTab(tab);
+    setEditing(s);
+  };
   const nextFrame = useNextFrame();
 
   // `?add=<url>&kind=<kind>` opens the dialog (deep links, onboarding links from other pages).
@@ -228,6 +261,28 @@ export function SourcesPage() {
     }
   };
 
+  const confirmRemoveAll = async () => {
+    const before = sources;
+    setRemoveAllBusy(true);
+    try {
+      await rpcRaw('sources.removeAll');
+      setCache([]);
+      for (const s of before) useImportProgressStore.getState().clear(s.id);
+      setRemoveAllOpen(false);
+      toast({ variant: 'success', title: t('removedAllTitle', { count: before.length }) });
+      await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
+    } catch (e) {
+      toast({ variant: 'error', title: t('removeAllFailed'), description: RpcError.from(e).message });
+      void invalidate('sources.');
+    } finally {
+      setRemoveAllBusy(false);
+    }
+  };
+
+  const sortOptions = SORTS.map((v) => ({ value: v, label: t(`sort_${v}`) }));
+  const kindOptions = KIND_FILTERS.map((v) => ({ value: v, label: v === 'all' ? t('filterKindAll') : t(`kindLabel_${v}`) }));
+  const statusOptions = STATUS_FILTERS.map((v) => ({ value: v, label: t(`filterStatus_${v}`) }));
+
   let body: ReactNode;
   if (query.isPending) body = <SourcesSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
@@ -236,7 +291,30 @@ export function SourcesPage() {
     body = (
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-fg-muted">{t('reorderHint')}</p>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('viewControls')} data-testid="sources-view">
+            <ListFilter aria-hidden className="size-4 text-fg-subtle" />
+            <Select
+              aria-label={t('sortLabel')}
+              value={view.sort}
+              options={sortOptions}
+              onValueChange={(v) => setView({ sort: v as SourceSort })}
+              data-testid="sources-sort"
+            />
+            <Select
+              aria-label={t('filterKindLabel')}
+              value={view.kind}
+              options={kindOptions}
+              onValueChange={(v) => setView({ kind: v as KindFilter })}
+              data-testid="sources-filter-kind"
+            />
+            <Select
+              aria-label={t('filterStatusLabel')}
+              value={view.status}
+              options={statusOptions}
+              onValueChange={(v) => setView({ status: v as StatusFilter })}
+              data-testid="sources-filter-status"
+            />
+          </div>
           <div className="flex gap-2">
             <Button
               variant="secondary"
@@ -250,21 +328,68 @@ export function SourcesPage() {
             <Button variant="primary" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
               {t('addSource')}
             </Button>
+            <Menu
+              label={t('moreActions')}
+              items={[
+                {
+                  id: 'remove-all',
+                  label: t('removeAllMenu'),
+                  icon: <Trash2 aria-hidden className="size-4" />,
+                  danger: true,
+                  onSelect: () => setRemoveAllOpen(true),
+                },
+              ]}
+            />
           </div>
         </div>
+        <p className="text-sm text-fg-muted" data-testid="sources-view-hint">
+          {manual
+            ? t('reorderHint')
+            : isFiltered(view)
+              ? t('filteredHint', { shown: shown.length, total: sources.length })
+              : t('sortedHint')}
+          {!manual ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="font-medium text-accent underline-offset-2 hover:underline"
+                onClick={() => setView(DEFAULT_VIEW)}
+                data-testid="sources-view-reset"
+              >
+                {t('showYourOrder')}
+              </button>
+            </>
+          ) : null}
+        </p>
+        {shown.length === 0 ? (
+          <EmptyState
+            size="inline"
+            icon={<ListFilter aria-hidden className="size-6" />}
+            title={t('filteredEmptyTitle')}
+            description={t('filteredEmptyBody')}
+            action={
+              <Button variant="secondary" onClick={() => setView({ kind: 'all', status: 'all' })}>
+                {t('clearFilters')}
+              </Button>
+            }
+          />
+        ) : null}
         <ul ref={listRef} className="flex flex-col gap-3" aria-label={t('listLabel')} data-testid="sources-list">
-          {sources.map((s, i) => (
+          {shown.map((s, i) => (
             <SourceCard
               key={s.id}
               source={s}
               index={i}
-              total={sources.length}
+              total={shown.length}
+              reorderable={manual}
               progress={progress[s.id]}
               refreshing={refreshing.has(s.id)}
               dragging={drag?.id === s.id}
               dropTarget={drag && drag.id !== s.id && drag.overId === s.id ? (drag.pos ?? null) : null}
               onRefresh={() => void refreshOne(s)}
-              onEdit={() => setEditing(s)}
+              onEdit={() => openEdit(s)}
+              onAccount={() => openEdit(s, 'account')}
               onRemove={() => setRemoving(s)}
               onMove={(to) => moveTo(s.id, to)}
               onDragStart={onDragStart(s.id)}
@@ -291,7 +416,15 @@ export function SourcesPage() {
 
       <AddSourceDialog open={addInitial !== undefined} initial={addInitial} onClose={closeAdd} />
 
-      <EditSourceDialog source={editing} onClose={() => setEditing(null)} onRefresh={(s) => void refreshOne(s)} />
+      <EditSourceDialog source={editing} initialTab={editTab} onClose={() => setEditing(null)} onRefresh={(s) => void refreshOne(s)} />
+
+      <RemoveAllDialog
+        open={removeAllOpen}
+        count={sources.length}
+        busy={removeAllBusy}
+        onClose={() => setRemoveAllOpen(false)}
+        onConfirm={() => void confirmRemoveAll()}
+      />
 
       <Dialog
         open={removing !== null}

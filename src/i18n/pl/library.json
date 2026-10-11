@@ -103,7 +103,7 @@
   "openQueue": "Otwórz kolejkę pobierania",
   "searchLibrary": "Szukaj w Moich wideo",
   "filterLabel": "Filtruj Moje wideo",
-  "filterAll": "Wszystko",
+  "filterAll": "Wszystkie",
   "filterMovies": "Filmy",
   "filterSeries": "Seriale",
   "filterMissing": "Brakujące pliki",
@@ -221,5 +221,6 @@
   "openFailed": "Nie udało się otworzyć: {{title}}",
   "removeFailed": "Nie udało się usunąć elementu",
   "sourceRemoved": "Usunięto źródło",
-  "sourceRemovedHint": "Źródło tego elementu zostało usunięte. Dodaj je ponownie, aby otworzyć element."
+  "sourceRemovedHint": "Źródło tego elementu zostało usunięte. Dodaj je ponownie, aby otworzyć element.",
+  "tryAgain": "Spróbuj ponownie"
 }

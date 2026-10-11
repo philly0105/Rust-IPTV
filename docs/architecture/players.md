@@ -1,6 +1,6 @@
 # Players: detection, external launch, embedded mpv
 
-Code: `crates/iptv-core/src/player/` (core) and `crates/iptv-tauri/src/mpv_window.rs` (Windows child window). RPC: `player.capabilities`, `player.detect`, `player.openExternal`, `mpv.attach`, `mpv.load`, `mpv.command`, `mpv.setProperty`, `mpv.setBounds`, `mpv.detach`, `mpv.state` (SPEC C4). Events: `player.external`, `mpv.state`.
+Code: `crates/iptv-core/src/player/` (core) and `crates/iptv-tauri/src/mpv_window.rs` (Windows child window). RPC: `player.capabilities`, `player.detect`, `player.openExternal`, `player.stopExternal`, `mpv.attach`, `mpv.load`, `mpv.command`, `mpv.setProperty`, `mpv.setBounds`, `mpv.detach`, `mpv.state`, `mpv.record` (SPEC C4 plus fix wave 1). Events: `player.external`, `mpv.state`.
 
 | File | Role |
 | --- | --- |
@@ -33,8 +33,12 @@ The first existing file wins. mpv and VLC are searched separately:
 
 `player.openExternal {player, source}` resolves the player through detection and builds argv as in C4:
 
-- mpv: `--title=<t> [--user-agent=<ua>] [--referrer=<ref>] [--http-header-fields=Origin:<o>] --force-media-title=<t> <mpvArgs...> <url>`
-- VLC: `--meta-title=<t> [--http-user-agent=<ua>] [--http-referrer=<ref>] <vlcArgs...> <url>` (VLC has no Origin option)
+- mpv: `--title=<t> [--user-agent=<ua>] [--referrer=<ref>] [--http-header-fields=Origin:<o>] --force-media-title=<t> <mpvArgs...> -- <url>`
+- VLC: `--meta-title=<t> [--http-user-agent=<ua>] [--http-referrer=<ref>] [--one-instance --playlist-enqueue] <vlcArgs...> -- <url>` (VLC has no Origin option)
+
+`--` ends option parsing in both players, so a playlist URL such as `--script=...` stays a URL. Before anything is spawned, `args::validate_play_url` checks the URL for `player.openExternal` and `mpv.load`. It rejects with `Invalid` a URL that is empty, starts with `-`, contains control characters, or has a scheme outside `http`, `https`, `rtmp`, `rtmps`, `rtsp`, `udp`, `rtp`, `mms` and `file`. Sources of kind `file` may also be local absolute paths (`C:\...`, `C:/...`, UNC, or `/...` on Unix).
+
+`settings.playerReuseInstance` (default true): before spawning, the app closes the external player it started last (if that player is still running, it is killed and the app waits up to 3 s for it to exit). VLC also gets `--one-instance --playlist-enqueue`. `player.stopExternal` (no args, returns `{stopped}`) ends that player on demand. Players the user started outside the app are never touched.
 
 Header flags appear only when they are set and not blank. Each flag is a single argv element, and `std::process::Command` quotes it for the platform, so titles that contain quotes or spaces arrive intact. The `Origin` value is escaped for mpv's string-list syntax (`,` becomes `\,` and `\` becomes `\\`), which is what the old app did for the MAG user agent `(KHTML, like Gecko)`.
 
@@ -46,7 +50,7 @@ Header flags appear only when they are set and not blank. Each flag is a single 
 - Outside quotes, a backslash escapes only whitespace or a quote. `C:\path` and `\\server\share` stay intact.
 - Quotes can appear mid-argument (`--title="A B"`), and `""` produces an empty argument.
 
-The process runs with null stdio, `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` on Windows (its own process group on Unix), its working directory set to the player's folder, and no kill-on-drop, so it outlives the app. `player.external {state: 'started', player, title, pid}` is emitted right away. A watcher task then emits `{state: 'exited', ..., exitCode}`. The URL is never logged because it can contain Xtream credentials.
+The process runs with null stdio, `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` on Windows (its own process group on Unix), its working directory set to the player's folder, and no kill-on-drop, so it outlives the app. `player.external {state: 'started', player, title, pid}` is emitted right away, and the pid is kept for reuse and `player.stopExternal`. A watcher task then emits `{state: 'exited', ..., exitCode}`. The URL is never logged because it can contain Xtream credentials.
 
 ## Embedded mpv (Windows)
 
@@ -71,7 +75,7 @@ The old Electron app loaded `libmpv-2.dll` through a native Node addon and passe
 3. Bounds arrive in CSS px relative to the webview, which fills the client area. The factory multiplies them by `window.scale_factor()`, rounds, and clamps width and height to at least 1.
 4. mpv is started with the user's `mpvArgs` first, then the C4 flags, so the C4 flags always win:
    `--wid=<hwnd> --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<our pid> --idle=yes --keep-open=yes --no-osc --no-input-default-bindings --force-window=yes --hwdec=auto-safe --input-vo-keyboard=no --no-terminal --volume=<last volume>`
-   mpv creates its own video window inside ours, so moving or destroying our window moves or removes the video. The process runs with `CREATE_NO_WINDOW`, null stdio, and kill-on-drop.
+   mpv creates its own video window inside ours, so moving or destroying our window moves or removes the video. The process runs with `CREATE_NO_WINDOW`, null stdio, and kill-on-drop. It is also assigned to a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; the job handle is never closed, so Windows ends mpv when the app process dies, even after a crash or a Task Manager kill.
 5. The video window is native and sits above the web content. HTML cannot draw on top of it, so player controls must sit outside the reported bounds, or the UI must shrink the bounds while an overlay is open. The old app used a fixed dock for the same reason.
 
 Verified on Windows 11 with a scratch Tauri app that hosts the real factory and plays a 60 s test clip encoded with mpv: the video covered the requested 640x360 CSS rect above the web content, followed `mpv.setBounds`, and disappeared on `mpv.detach`.
@@ -94,15 +98,17 @@ Behaviour:
 
 ### Commands
 
-- `mpv.attach`: idempotent. With a live session it only moves the window.
+- `mpv.attach {bounds, volume?, muted?}`: idempotent. With a live session it only moves the window. The optional volume (clamped to 0..100) and mute are passed as `--volume` and `--mute` and stored before mpv starts, so the first `mpv.state` already carries them.
 - `mpv.load {source}`: sends `["loadfile", url, "replace", -1, {force-media-title, user-agent, referrer, http-header-fields: "Origin:<o>", start: "+<resumeSeconds>"}]`. Live sources never seek. If mpv older than 0.38 rejects the 5-argument form, the command is retried as `["loadfile", url, "replace", "k=%len%v,..."]`, where `%len%` quoting keeps commas safe.
 - `mpv.command {cmd}`: passes a raw command through. `quit`, `run`, `subprocess`, `load-script` and similar commands are rejected, and object or array arguments are rejected.
 - `mpv.setProperty {name, value}`: `set_property`.
 - `mpv.setBounds {bounds}`: `factory.set_bounds`.
 - `mpv.detach`: sends `quit`, waits 2 s, kills the process if it is still running, destroys the window, and emits a final `{attached: false}` state. It is idempotent.
+- `mpv.record {start}`: sets mpv's `stream-record` property to `<dir>/<title>-YYYYMMDD-HHMM.ts` (unsafe filename characters removed, a ` (n)` suffix when the name is taken), or to `""` to stop. `<dir>` is `settings.recordingsDir`, else `<downloadsDir>/recordings`, and is created when missing. Returns `{recording, path}` and updates `MpvState.recording` and `recordPath`. Loading another source or detaching stops the recording. mpv copies packets without re-encoding and starts writing at the next keyframe.
 - `mpv.state`: returns the live state, or the last detached state, which keeps volume, mute, and the last error.
 - Crash handling: a watcher notices when mpv exits or the pipe closes without a detach. It waits up to 1 s for the exit code, then sets `error: "mpv stopped unexpectedly (exit code N). Start playback again to restart it."`, tears the session down, destroys the window, and emits the result.
 - On other OSes every `mpv.*` command returns `Unsupported`, and the external players still work.
+- Server mode (`iptv-server`): `player.detect`, `player.openExternal`, `player.stopExternal` and every `mpv.*` command return `Unsupported` ("Players run only in the desktop app"), because a browser client must not start processes on the server. `player.capabilities` still answers.
 - App exit: call `player::shutdown(&state).await` (graceful) or `player::kill_embedded(&state)` (synchronous) from the Tauri exit hook, so mpv never outlives the app.
 
 ## Dropping mpv into vendor/mpv
@@ -127,4 +133,5 @@ A system mpv works too (WinGet, scoop, choco, or `PATH`), and so does a path set
 - `tests/player_args.rs`: shell splitting (quotes, escapes, Windows paths), mpv and VLC argv with and without headers, header escaping, embedded flags and their order, `loadfile` options, legacy `%len%` options, raw-command validation.
 - `tests/player_ipc.rs`: framing (partial writes, several lines per write), reply and event parsing, concurrent `request_id` correlation, error and timeout paths, observer registration, `property-change` handling, track parsing, close handling, emitter throttling (50 updates produce at most 4 emits and the last state wins). It uses a fake mpv on `tokio::io::duplex`.
 - `tests/player_detect.rs`: every search location against temp-dir layouts, plus precedence and fallbacks.
-- `tests/player_rpc.rs`: exactly the 10 C4 names are registered; capabilities reasons; errors without a session; `player.openExternal` with `whoami.exe` as a stand-in player (the `started` then `exited` events); and, when an mpv is detectable, a real embedded end-to-end run with `--vo=null --ao=null`. That run covers attach, attach again, loading an mpv-encoded clip with resume and headers, pause, volume, seek, a blocked `quit`, an unknown property, setBounds, a crash via `taskkill` (error state, window destroyed), re-attach, and an idempotent detach.
+- `tests/player_rpc.rs`: exactly the 12 player names are registered; server mode refuses every player command; non-media schemes are refused; `player.stopExternal` with nothing running; reuse closing the previous external mpv; capabilities reasons; errors without a session; `player.openExternal` with `whoami.exe` as a stand-in player (the `started` then `exited` events); and, when an mpv is detectable, a real embedded end-to-end run with `--vo=null --ao=null`. That run covers attach, attach again, loading an mpv-encoded clip with resume and headers, pause, volume, seek, a blocked `quit`, an unknown property, setBounds, a crash via `taskkill` (error state, window destroyed), re-attach, attach with volume and mute, recording to `recordingsDir` (file name, state, `stream-record` property, non-empty file), and an idempotent detach.
+- `tests/player_args.rs` also covers the `--` separator, the URL allowlist, VLC reuse flags, the `stream-record` IPC command, and recording file names.

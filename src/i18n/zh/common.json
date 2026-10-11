@@ -8,7 +8,7 @@
   "edit": "编辑",
   "back": "返回",
   "confirm": "确认",
-  "loading": "正在加载",
+  "loading": "加载中",
   "retry": "重试",
   "live": "直播",
   "moreActions": "更多操作",
@@ -32,7 +32,7 @@
   "errorTitleConflict": "此内容已在别处更改",
   "errorTitleIo": "无法读取或写入文件",
   "errorTitleDb": "本地媒体库出现问题",
-  "errorTitleInternal": "出错了",
+  "errorTitleInternal": "出了点问题",
 
   "errorHintNetwork": "请检查网络连接和提供商 URL，然后重试。",
   "errorHintTimeout": "提供商可能正忙，请稍后重试。",

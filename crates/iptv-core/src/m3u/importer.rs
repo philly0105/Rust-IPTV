@@ -34,6 +34,81 @@ pub const M3U_TYPES: [ContentType; 4] = [
 pub const FETCH_ATTEMPTS: u32 = 3;
 /// Read buffer for parsing files.
 const READ_BUF: usize = 256 * 1024;
+/// Largest playlist whose text is also stored inline in `m3u_raw.raw`.
+/// Bigger file / URL playlists keep only the sha there (raw = '') and a copy
+/// on disk at [`cached_playlist_path`], so an import never holds the whole
+/// file in memory. Read the text with [`stored_text`].
+pub const RAW_INLINE_MAX: u64 = 8 * 1024 * 1024;
+
+/// On-disk copy of a large playlist (see [`RAW_INLINE_MAX`]).
+pub fn cached_playlist_path(data_dir: &Path, source_id: &str) -> PathBuf {
+    data_dir.join("playlists").join(format!("{source_id}.m3u"))
+}
+
+/// Stores playlist text that arrived in memory (a backup restore) the way an
+/// import stores a downloaded playlist: inline when it fits in
+/// [`RAW_INLINE_MAX`], otherwise written to [`cached_playlist_path`].
+/// Returns what belongs in `m3u_raw.raw`: the text itself, or `""` when it
+/// went to disk. The write goes through a temp file and a rename, so a
+/// failure never leaves a truncated copy behind.
+pub fn place_raw_text<'a>(data_dir: &Path, source_id: &str, text: &'a str) -> CoreResult<&'a str> {
+    if text.len() as u64 <= RAW_INLINE_MAX {
+        return Ok(text);
+    }
+    let dest = cached_playlist_path(data_dir, source_id);
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let part = dest.with_extension("m3u.part");
+    std::fs::write(&part, text.as_bytes())
+        .and_then(|()| std::fs::rename(&part, &dest))
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&part);
+            CoreError::Io(std::io::Error::new(
+                e.kind(),
+                format!("cannot store the playlist at {}: {e}", dest.display()),
+            ))
+        })?;
+    Ok("")
+}
+
+/// Deletes the on-disk playlist copy of a source, if any.
+pub fn remove_cached_playlist(state: &AppState, source_id: &str) {
+    let p = cached_playlist_path(&state.data_dir, source_id);
+    if let Err(err) = std::fs::remove_file(&p) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(%err, source_id, "could not remove cached playlist copy");
+        }
+    }
+}
+
+/// The stored playlist of a source: `(text, sha256, fetched_at)`. The text
+/// comes from `m3u_raw.raw`, or from the on-disk copy when the playlist was
+/// too large to store inline. `None` when the source was never imported.
+pub fn stored_text(
+    conn: &Connection,
+    data_dir: &Path,
+    source_id: &str,
+) -> CoreResult<Option<(String, String, String)>> {
+    let row: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT raw, sha256, fetched_at FROM m3u_raw WHERE source_id = ?1",
+            [source_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((raw, sha, fetched_at)) = row else {
+        return Ok(None);
+    };
+    if !raw.is_empty() {
+        return Ok(Some((raw, sha, fetched_at)));
+    }
+    let cached = cached_playlist_path(data_dir, source_id);
+    if cached.is_file() {
+        return Ok(Some((read_text_lossy(&cached)?, sha, fetched_at)));
+    }
+    Ok(Some((raw, sha, fetched_at)))
+}
 
 /// First 16 hex chars of sha256(s).
 pub fn hash16(s: &str) -> String {
@@ -72,12 +147,13 @@ pub fn classify(e: &M3uEntry) -> ContentType {
 
 /// Turns parser entries into catalog rows: stable ids (with a suffix for exact
 /// duplicates), categories in first-seen order per content type, channel
-/// numbers (tvg-chno, else running index per type).
+/// numbers (tvg-chno, else one running index shared by live and radio, so a
+/// radio number never repeats a live one).
 pub struct RowBuilder {
     source_id: String,
     seen_ids: HashSet<String>,
     categories: HashMap<ContentType, (Vec<CategoryRow>, HashSet<String>)>,
-    counters: HashMap<ContentType, i64>,
+    channel_counter: i64,
     position: i64,
 }
 
@@ -87,7 +163,7 @@ impl RowBuilder {
             source_id: source_id.to_string(),
             seen_ids: HashSet::new(),
             categories: HashMap::new(),
-            counters: HashMap::new(),
+            channel_counter: 0,
             position: 0,
         }
     }
@@ -125,10 +201,11 @@ impl RowBuilder {
             });
         }
 
-        let counter = self.counters.entry(ct).or_default();
-        *counter += 1;
         let number = match ct {
-            ContentType::Live | ContentType::Radio => Some(e.tvg_chno.unwrap_or(*counter)),
+            ContentType::Live | ContentType::Radio => {
+                self.channel_counter += 1;
+                Some(e.tvg_chno.unwrap_or(self.channel_counter))
+            }
             _ => None,
         };
 
@@ -140,12 +217,16 @@ impl RowBuilder {
             extra.insert("tvgShift".into(), v.clone().into());
         }
         let has_catchup = e.catchup.is_some() || e.catchup_source.is_some();
+        let catchup_type = e
+            .catchup
+            .as_deref()
+            .map(|t| t.trim().to_ascii_lowercase())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "default".into());
+        let catchup_ok = has_catchup && catalog::catchup_usable(&catchup_type);
         if has_catchup {
             let mut c = serde_json::Map::new();
-            c.insert(
-                "type".into(),
-                e.catchup.clone().unwrap_or_else(|| "default".into()).into(),
-            );
+            c.insert("type".into(), catchup_type.into());
             if let Some(d) = e.catchup_days {
                 c.insert("days".into(), d.into());
             }
@@ -190,8 +271,8 @@ impl RowBuilder {
         } else {
             (None, None)
         };
-        let archive_hours = if has_catchup || e.catchup_days.is_some() {
-            e.catchup_days.map(|d| d * 24)
+        let archive_hours = if catchup_ok {
+            e.catchup_days.filter(|d| *d > 0).map(|d| d * 24)
         } else {
             None
         };
@@ -254,8 +335,9 @@ impl RowBuilder {
 
 /// Where the playlist bytes are for one import.
 enum Payload {
-    /// A file on disk (user file or downloaded temp file).
-    File(PathBuf),
+    /// A file on disk: the user's file (`temp: false`) or a downloaded temp
+    /// file that may be moved into the playlist cache (`temp: true`).
+    File { path: PathBuf, temp: bool },
     /// Pasted text (already stored in `m3u_raw`).
     Text(String),
 }
@@ -320,6 +402,18 @@ fn is_file_url(cfg: &M3uSourceConfig) -> bool {
             .unwrap_or(false)
 }
 
+/// Server mode never reads playlists from the server's disk: the path comes
+/// from the browser, so it would expose any readable file.
+fn refuse_server_files(state: &AppState) -> CoreResult<()> {
+    if crate::http::is_server_mode(state) {
+        return Err(CoreError::Unsupported(SERVER_FILE_MESSAGE.into()));
+    }
+    Ok(())
+}
+
+/// Why file playlists are refused in server mode.
+pub const SERVER_FILE_MESSAGE: &str = "Playlist files on the server's disk cannot be opened from the browser. Upload the playlist text instead.";
+
 /// Full m3u import for `source` (see module docs).
 pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<ImportSummary> {
     let cfg = source
@@ -349,18 +443,33 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                             .into(),
                     )
                 })?;
-            let sha = hex::encode(Sha256::digest(raw.as_bytes()));
-            (Payload::Text(raw), sha)
+            // A large pasted / restored playlist lives on disk (raw = '').
+            let cached = cached_playlist_path(&state.data_dir, &source_id);
+            if raw.is_empty() && cached.is_file() {
+                let sha = hash_file(cached.clone()).await?;
+                (
+                    Payload::File {
+                        path: cached,
+                        temp: false,
+                    },
+                    sha,
+                )
+            } else {
+                let sha = hex::encode(Sha256::digest(raw.as_bytes()));
+                (Payload::Text(raw), sha)
+            }
         }
         M3uOrigin::File => {
+            refuse_server_files(&state)?;
             let path = file_path_of(&cfg)?;
             let sha = hash_file(path.clone()).await?;
-            (Payload::File(path), sha)
+            (Payload::File { path, temp: false }, sha)
         }
         M3uOrigin::Url if is_file_url(&cfg) => {
+            refuse_server_files(&state)?;
             let path = file_path_of(&cfg)?;
             let sha = hash_file(path.clone()).await?;
-            (Payload::File(path), sha)
+            (Payload::File { path, temp: false }, sha)
         }
         M3uOrigin::Url => {
             let url = cfg.url.clone().unwrap_or_default();
@@ -373,7 +482,13 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
             ));
             _tmp_guard = TempFile(tmp.clone());
             let sha = fetch_to_file(&state, &source_id, &url, &cfg, &tmp).await?;
-            (Payload::File(tmp), sha)
+            (
+                Payload::File {
+                    path: tmp,
+                    temp: true,
+                },
+                sha,
+            )
         }
     };
 
@@ -419,6 +534,7 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         write_catalog(&st, &mut conn, &source_id, payload, &sha, origin)
     })
     .await?
+    .map_err(|e| state.note_db_error(e))
 }
 
 /// Streams `payload` through the parser into the catalog inside one IMMEDIATE
@@ -438,7 +554,7 @@ fn write_catalog(
     let (header, stats, summary) = {
         let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES)?;
         let reader: Box<dyn std::io::BufRead + '_> = match &payload {
-            Payload::File(p) => Box::new(BufReader::with_capacity(
+            Payload::File { path: p, .. } => Box::new(BufReader::with_capacity(
                 READ_BUF,
                 std::fs::File::open(p).map_err(|e| file_error(p, e))?,
             )),
@@ -476,16 +592,25 @@ fn write_catalog(
     };
 
     // Raw playlist (needed by m3u.raw, backups, and the unchanged check).
+    // Small playlists are stored inline; large ones keep only the sha and an
+    // on-disk copy, written after the commit (see RAW_INLINE_MAX).
     let now = now_rfc3339();
-    match payload {
+    let mut keep_copy: Option<(PathBuf, bool)> = None;
+    match &payload {
         Payload::Text(_) => {
             tx.execute(
                 "UPDATE m3u_raw SET sha256 = ?2, fetched_at = ?3 WHERE source_id = ?1",
                 params![source_id, sha, now],
             )?;
         }
-        Payload::File(p) => {
-            let raw = read_text_lossy(&p)?;
+        Payload::File { path: p, temp } => {
+            let size = std::fs::metadata(p).map_err(|e| file_error(p, e))?.len();
+            let raw = if size <= RAW_INLINE_MAX {
+                read_text_lossy(p)?
+            } else {
+                keep_copy = Some((p.clone(), *temp));
+                String::new()
+            };
             tx.execute(
                 "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(source_id) DO UPDATE SET raw = excluded.raw, sha256 = excluded.sha256, fetched_at = excluded.fetched_at",
@@ -516,6 +641,17 @@ fn write_catalog(
         )?;
     }
     tx.commit()?;
+    let cache = cached_playlist_path(&state.data_dir, source_id);
+    match keep_copy {
+        // Already the cached copy (a large text playlist): nothing to move.
+        Some((p, _)) if p == cache => {}
+        Some((p, temp)) => {
+            if let Err(err) = store_copy(&p, &cache, temp) {
+                tracing::warn!(%err, source_id, "could not keep a copy of the playlist; m3u.raw will be empty");
+            }
+        }
+        None => remove_cached_playlist(state, source_id),
+    }
     tracing::info!(
         source_id,
         origin = origin.as_str(),
@@ -533,6 +669,18 @@ fn write_catalog(
         );
     }
     Ok(summary)
+}
+
+/// Moves (downloaded temp file) or copies (user file) `src` to `dest`
+/// without reading it into memory.
+fn store_copy(src: &Path, dest: &Path, temp: bool) -> std::io::Result<()> {
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if temp && std::fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(src, dest).map(|_| ())
 }
 
 fn file_error(p: &Path, e: std::io::Error) -> CoreError {
@@ -606,8 +754,15 @@ async fn fetch_to_file(
 ) -> CoreResult<String> {
     let safe_url = crate::logging::redact_url(url);
     sources::progress(state, source_id, "fetching", 0, None, None);
+    // The playlist URL is the source's own address, so its host:port is
+    // trusted; redirects elsewhere stay guarded in server mode.
+    let own = url::Url::parse(url.trim())
+        .ok()
+        .and_then(|u| crate::http::Authority::of(&u));
+    crate::http::check_fetch(state, url, own.as_ref()).await?;
+    let client = crate::http::client_for(state);
     crate::http::with_retry(FETCH_ATTEMPTS, || async {
-        let req = crate::http::apply_source_headers(state.http.get(url), &cfg.headers);
+        let req = crate::http::apply_source_headers(client.get(url), &cfg.headers);
         let resp = crate::http::send_checked(req, "playlist download")
             .await
             .map_err(|e| {

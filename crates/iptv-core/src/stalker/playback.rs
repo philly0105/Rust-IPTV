@@ -9,6 +9,8 @@ use crate::catalog;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgProgram, ItemRef, PlayerSource, StalkerSourceConfig};
 use crate::state::AppState;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
+use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
@@ -194,7 +196,7 @@ pub async fn stream_url(
                 episode.cmd.clone()
             };
             let url = create_link(&client, "vod", &cmd, episode.series).await?;
-            let series_title = cached_title(state, r);
+            let series_title = cached_title(state, r).await;
             let mut src = source(
                 &client,
                 &endpoint,
@@ -216,15 +218,15 @@ pub async fn stream_url(
     }
 }
 
-fn cached_title(state: &AppState, r: &ItemRef) -> Option<String> {
-    let rt = super::Runtime::get(state);
-    let hit = rt.items.get(&r.key())?;
+async fn cached_title(state: &AppState, r: &ItemRef) -> Option<String> {
+    let hit = super::cached_item(state, r).await?;
     s(&hit.raw, "name").or_else(|| s(&hit.raw, "o_name"))
 }
 
 /// `stalker.catchupUrl`: finds the archived program starting at `start` and
 /// asks `tv_archive/create_link` for it. The program defines the length, so
-/// `durationMinutes` is accepted but not sent.
+/// `durationMinutes` is accepted but not sent. `start` must lie in the past
+/// and inside the channel's archive window.
 pub async fn catchup_url(
     state: &Arc<AppState>,
     r: &ItemRef,
@@ -236,23 +238,28 @@ pub async fn catchup_url(
             "catch-up is only available for live channels",
         ));
     }
-    let start_at = chrono::DateTime::parse_from_rfc3339(start)
+    let start_at = DateTime::parse_from_rfc3339(start)
         .map_err(|_| CoreError::invalid("start must be an RFC 3339 timestamp"))?
-        .with_timezone(&chrono::Utc);
+        .with_timezone(&Utc);
     let row = catalog_row(state, r).await?;
-    if row.archive_hours.unwrap_or(0) <= 0 {
+    let archive_hours = row.archive_hours.unwrap_or(0);
+    if archive_hours <= 0 {
         return Err(CoreError::Unsupported(
             "This channel has no archive on the portal.".into(),
         ));
     }
+    check_archive_window(start_at, Utc::now(), archive_hours)?;
     let client = StalkerClient::for_source(state, &r.source_id).await?;
     let endpoint = client.endpoint().await?;
 
-    let program_id = find_archive_program(&client, &r.item_id, start_at)
-        .await
+    let program = find_archive_program(&client, &r.item_id, start_at)
+        .await?
         .ok_or_else(|| {
             CoreError::not_found("The portal archive has no program at that time for this channel.")
         })?;
+    let program_id = s(&program, "id").ok_or_else(|| {
+        CoreError::not_found("The portal archive has no program at that time for this channel.")
+    })?;
     let url = create_link(
         &client,
         "tv_archive",
@@ -260,20 +267,96 @@ pub async fn catchup_url(
         None,
     )
     .await?;
+    let aired = n(&program, "start_timestamp")
+        .and_then(|ts| DateTime::from_timestamp(ts, 0))
+        .unwrap_or(start_at);
     let mut src = source(&client, &endpoint, url, row.title.clone(), r);
     src.is_live = false;
-    src.subtitle = Some(start_at.format("%Y-%m-%d %H:%M UTC").to_string());
+    src.subtitle = Some(match s(&program, "name") {
+        Some(name) => format!("{} {name}", aired.format("%Y-%m-%d %H:%M UTC")),
+        None => aired.format("%Y-%m-%d %H:%M UTC").to_string(),
+    });
     src.poster_url = row.logo_url;
     Ok(src)
 }
 
+/// Rejects catch-up starts in the future or older than the archive window.
+fn check_archive_window(
+    start: DateTime<Utc>,
+    now: DateTime<Utc>,
+    archive_hours: i64,
+) -> CoreResult<()> {
+    if start >= now {
+        return Err(CoreError::invalid(
+            "This programme has not started yet, so there is nothing to catch up on.",
+        ));
+    }
+    if start < now - Duration::hours(archive_hours) {
+        let window = if archive_hours % 24 == 0 {
+            let days = archive_hours / 24;
+            format!("{days} day{}", if days == 1 { "" } else { "s" })
+        } else {
+            format!(
+                "{archive_hours} hour{}",
+                if archive_hours == 1 { "" } else { "s" }
+            )
+        };
+        return Err(CoreError::invalid(format!(
+            "The portal keeps {window} of archive for this channel; this programme is older."
+        )));
+    }
+    Ok(())
+}
+
+/// Every row of one day's programme table (`get_simple_data_table`), or
+/// `None` when the portal serves no table. Ministra serves it under `epg`;
+/// some builds only under `itv`. Auth failures propagate.
+async fn day_table(
+    client: &StalkerClient,
+    channel_id: &str,
+    date: NaiveDate,
+) -> CoreResult<Option<Vec<Value>>> {
+    let date = date.format("%Y-%m-%d").to_string();
+    for table_type in ["epg", "itv"] {
+        let mut rows: Vec<Value> = Vec::new();
+        for page in 1..=10 {
+            let req = Req::new(table_type, "get_simple_data_table")
+                .p("ch_id", channel_id)
+                .p("date", &date)
+                .p("p", page);
+            let js = match client.call(req).await {
+                Ok(js) => js,
+                Err(err @ CoreError::Auth(_)) => return Err(err),
+                Err(_) => break,
+            };
+            let total = n(&js, "total_items");
+            let got = into_list(js);
+            if got.is_empty() {
+                break;
+            }
+            let per = got.len() as i64;
+            rows.extend(got);
+            if total.is_none_or(|t| page * per >= t) {
+                break;
+            }
+        }
+        if !rows.is_empty() {
+            return Ok(Some(rows));
+        }
+    }
+    Ok(None)
+}
+
+/// The archived program airing at `start`. Ministra builds day tables in
+/// the session's cookie timezone (Europe/Paris), not UTC, so a programme
+/// late in the UTC day can sit in the next day's table: the adjacent days
+/// are asked when the UTC day has no match.
 async fn find_archive_program(
     client: &StalkerClient,
     channel_id: &str,
-    start: chrono::DateTime<chrono::Utc>,
-) -> Option<String> {
+    start: DateTime<Utc>,
+) -> CoreResult<Option<Value>> {
     let ts = start.timestamp();
-    let date = start.format("%Y-%m-%d").to_string();
     let matches = |v: &Value| -> bool {
         let st = n(v, "start_timestamp");
         let en = n(v, "stop_timestamp");
@@ -283,44 +366,66 @@ async fn find_archive_program(
             _ => false,
         }
     };
-    // Ministra serves the day table under `epg`; some builds only under `itv`.
-    for table_type in ["epg", "itv"] {
-        for page in 1..=10 {
-            let req = Req::new(table_type, "get_simple_data_table")
-                .p("ch_id", channel_id)
-                .p("date", &date)
-                .p("p", page);
-            let Ok(js) = client.call(req).await else {
-                break;
-            };
-            let total = n(&js, "total_items");
-            let rows = into_list(js);
-            if rows.is_empty() {
-                break;
-            }
-            if let Some(hit) = rows.iter().find(|v| matches(v)) {
-                return s(hit, "id");
-            }
-            let per = rows.len() as i64;
-            if total.is_none_or(|t| page * per >= t) {
-                // The table answered; the program is not in it.
-                return None;
+    let day = start.date_naive();
+    for date in [day, day + Duration::days(1), day - Duration::days(1)] {
+        if let Some(rows) = day_table(client, channel_id, date).await? {
+            if let Some(hit) = rows.into_iter().find(|v| matches(v)) {
+                return Ok(Some(hit));
             }
         }
     }
-    None
+    Ok(None)
 }
 
-/// `stalker.epg`: short EPG, falling back to the bulk `get_epg_info`.
+/// Furthest `stalker.epg` looks back with `from`.
+const MAX_PAST_DAYS: i64 = 7;
+
+/// Past programmes from `from` up to now, read from the day tables.
+async fn past_programmes(
+    client: &StalkerClient,
+    channel_id: &str,
+    from: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> CoreResult<Vec<Value>> {
+    let first = from.max(now - Duration::days(MAX_PAST_DAYS)).date_naive();
+    let last = now.date_naive();
+    let days: Vec<NaiveDate> = first.iter_days().take_while(|d| *d <= last).collect();
+    let tables: Vec<CoreResult<Option<Vec<Value>>>> = stream::iter(days)
+        .map(|d| day_table(client, channel_id, d))
+        .buffered(3)
+        .collect()
+        .await;
+    let mut out = Vec::new();
+    for t in tables {
+        if let Some(rows) = t? {
+            out.extend(rows);
+        }
+    }
+    Ok(out)
+}
+
+/// `stalker.epg`: short EPG, falling back to the bulk `get_epg_info`. With
+/// `from`, the archived programmes since `from` (day tables, at most
+/// [`MAX_PAST_DAYS`] back) come first; `limit` caps the airing and upcoming
+/// ones.
 pub async fn epg(
     state: &Arc<AppState>,
     r: &ItemRef,
     limit: Option<i64>,
+    from: Option<&str>,
 ) -> CoreResult<Vec<EpgProgram>> {
     if !matches!(r.content_type, ContentType::Live | ContentType::Radio) {
         return Err(CoreError::invalid("EPG is only available for channels"));
     }
     let limit = limit.unwrap_or(10).clamp(1, 50);
+    let from = match from.map(str::trim).filter(|f| !f.is_empty()) {
+        Some(f) => Some(
+            DateTime::parse_from_rfc3339(f)
+                .map_err(|_| CoreError::invalid("from must be an RFC 3339 timestamp"))?
+                .with_timezone(&Utc),
+        ),
+        None => None,
+    };
     let row = catalog_row(state, r).await.ok();
     let channel_id = row
         .as_ref()
@@ -356,7 +461,8 @@ pub async fn epg(
             };
         }
     }
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now_at = Utc::now();
+    let now = now_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut programs: Vec<EpgProgram> = entries
         .iter()
         .filter_map(|v| mapping::epg_program(&channel_id, v))
@@ -365,6 +471,26 @@ pub async fn epg(
     programs.sort_by(|a, b| a.start.cmp(&b.start));
     programs.dedup_by(|a, b| a.start == b.start);
     programs.truncate(limit as usize);
+
+    if let Some(from_at) = from.filter(|f| *f < now_at) {
+        let from_s = from_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let past = match past_programmes(&client, &r.item_id, from_at, now_at).await {
+            Ok(rows) => rows,
+            Err(err @ CoreError::Auth(_)) => return Err(err),
+            Err(_) => Vec::new(),
+        };
+        let earliest_upcoming = programs.first().map(|p| p.start.clone());
+        programs.extend(
+            past.iter()
+                .filter_map(|v| mapping::epg_program(&channel_id, v))
+                .filter(|p| p.end > from_s && p.end > p.start)
+                // Past only: the short EPG owns the airing and upcoming part.
+                .filter(|p| earliest_upcoming.as_ref().is_none_or(|e| p.start < *e))
+                .filter(|p| p.start < now),
+        );
+        programs.sort_by(|a, b| a.start.cmp(&b.start));
+        programs.dedup_by(|a, b| a.start == b.start);
+    }
     Ok(programs)
 }
 
@@ -463,6 +589,11 @@ pub async fn test(state: &Arc<AppState>, config: StalkerSourceConfig) -> Connect
             name: None,
         };
     }
+    // A typed MAC is tested the way `sources.add` will store it.
+    let mut config = config;
+    if let Some(mac) = p::normalize_mac(&config.mac_address) {
+        config.mac_address = mac;
+    }
     let client = match StalkerClient::ephemeral(state, config) {
         Ok(c) => c,
         Err(err) => {
@@ -519,5 +650,26 @@ pub fn user_message(err: &CoreError) -> String {
         | CoreError::Conflict(m)
         | CoreError::Unsupported(m) => m.clone(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_window_rejects_future_and_too_old_starts() {
+        let now = Utc::now();
+        assert!(check_archive_window(now - Duration::hours(2), now, 168).is_ok());
+        let err = check_archive_window(now + Duration::minutes(5), now, 168).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)));
+        assert!(check_archive_window(now, now, 168).is_err());
+        let err = check_archive_window(now - Duration::hours(200), now, 168).unwrap_err();
+        assert_eq!(
+            user_message(&err),
+            "The portal keeps 7 days of archive for this channel; this programme is older."
+        );
+        let err = check_archive_window(now - Duration::hours(5), now, 3).unwrap_err();
+        assert!(user_message(&err).contains("3 hours"), "{err}");
     }
 }

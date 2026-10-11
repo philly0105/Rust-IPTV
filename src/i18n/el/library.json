@@ -12,7 +12,7 @@
   "summaryPaused_other": "{{count}} σε παύση",
   "summaryAttention_one": "{{count}} χρειάζεται προσοχή",
   "summaryAttention_other": "{{count}} χρειάζονται προσοχή",
-  "statusQueued": "Σε αναμονή",
+  "statusQueued": "Σε ουρά",
   "statusDownloading": "Λήψη",
   "statusPaused": "Σε παύση",
   "statusCompleted": "Ολοκληρώθηκε",
@@ -193,5 +193,6 @@
   "openFailed": "Δεν ήταν δυνατό το άνοιγμα: {{title}}",
   "removeFailed": "Δεν ήταν δυνατή η αφαίρεση του στοιχείου",
   "sourceRemoved": "Η πηγή αφαιρέθηκε",
-  "sourceRemovedHint": "Η πηγή αυτού του στοιχείου αφαιρέθηκε. Προσθέστε την ξανά για να ανοίξετε το στοιχείο."
+  "sourceRemovedHint": "Η πηγή αυτού του στοιχείου αφαιρέθηκε. Προσθέστε την ξανά για να ανοίξετε το στοιχείο.",
+  "tryAgain": "Δοκιμή ξανά"
 }

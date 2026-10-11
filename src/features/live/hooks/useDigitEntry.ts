@@ -5,7 +5,7 @@ const MAX_DIGITS = 5;
 
 /**
  * Collects channel-number digits and commits them after a pause (C16: 0-9 with a 1.5 s commit).
- * `commitNow` flushes immediately (Enter).
+ * Enter, or `commitNow`, flushes immediately.
  */
 export function useDigitEntry(onCommit: (n: number) => void, delayMs = DIGIT_COMMIT_MS) {
   const [buffer, setBuffer] = useState('');
@@ -39,6 +39,21 @@ export function useDigitEntry(onCommit: (n: number) => void, delayMs = DIGIT_COM
     },
     [commitNow, delayMs],
   );
+
+  // Enter while digits are pending commits at once. Capture phase, so a focused list row
+  // does not also treat the Enter as "play this row".
+  const pending = buffer !== '';
+  useEffect(() => {
+    if (!pending) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return;
+      e.preventDefault();
+      e.stopPropagation();
+      commitNow();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [pending, commitNow]);
 
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);

@@ -5,6 +5,16 @@
 //! follow redirects manually (each hop re-validated), then either stream the
 //! body through untouched (status, type, length, range headers preserved) or,
 //! for HLS playlists, stream it through [`hls::HlsRewriter`].
+//!
+//! `ua`, `referer` and `origin` query parameters override the source's
+//! headers (per-channel `#EXTVLCOPT` headers) and are carried into rewritten
+//! playlists.
+//!
+//! Responses are served from the app's origin, so upstream content must never
+//! run as a page: every response carries `Content-Security-Policy: sandbox;
+//! default-src 'none'` and `nosniff`, and a content type outside the media
+//! allowlist ([`is_media_type`]) is replaced by `application/octet-stream`
+//! with `Content-Disposition: attachment`.
 
 pub mod hls;
 pub mod target;
@@ -19,7 +29,7 @@ use axum::response::Response;
 use bytes::Bytes;
 use futures::stream::{self, BoxStream, StreamExt};
 use iptv_core::http::{
-    backoff_delay, default_user_agent, status_error, CONNECT_TIMEOUT, READ_TIMEOUT,
+    backoff_delay, default_user_agent, status_error, CONNECT_TIMEOUT, HEADER_TIMEOUT, READ_TIMEOUT,
 };
 use iptv_core::model::RequestHeaders;
 use iptv_core::{AppState, CoreResult, RpcError};
@@ -27,8 +37,11 @@ use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use std::io;
 use std::sync::Arc;
-use target::{check_target, find_blocked, GuardedResolver, TargetError, TrustedHosts};
+use target::{find_blocked, Authority, NetGuard, TargetError};
 use url::Url;
+
+/// CSP of every proxy and file response: never a document with script.
+pub const SANDBOX_CSP: &str = "sandbox; default-src 'none'";
 
 /// Redirect hops followed per request.
 pub const MAX_REDIRECTS: usize = 5;
@@ -37,16 +50,14 @@ pub const ATTEMPTS: u32 = 3;
 /// Bytes read before deciding whether an untyped response is a playlist.
 const SNIFF_BYTES: usize = 16;
 
-/// Proxy client and the hosts trusted to resolve privately.
+/// Proxy client and the guard policy (shared with the core's guarded client).
 pub struct Proxy {
     client: reqwest::Client,
-    trusted: Arc<TrustedHosts>,
-    allow_private: bool,
+    guard: Arc<NetGuard>,
 }
 
 impl Proxy {
-    pub fn new(allow_private: bool) -> Self {
-        let trusted = Arc::new(TrustedHosts::default());
+    pub fn new(guard: Arc<NetGuard>) -> Self {
         let client = reqwest::Client::builder()
             .user_agent(default_user_agent())
             .connect_timeout(CONNECT_TIMEOUT)
@@ -56,17 +67,10 @@ impl Proxy {
             // Pass bytes through as-is: decompression would break Range and lengths.
             .gzip(false)
             .brotli(false)
-            .dns_resolver(Arc::new(GuardedResolver {
-                trusted: trusted.clone(),
-                allow_private,
-            }))
+            .dns_resolver(guard.resolver())
             .build()
             .expect("proxy HTTP client builds with static configuration");
-        Self {
-            client,
-            trusted,
-            allow_private,
-        }
+        Self { client, guard }
     }
 }
 
@@ -76,14 +80,36 @@ pub struct ProxyQuery {
     pub url: Option<String>,
     #[serde(rename = "sourceId")]
     pub source_id: Option<String>,
+    /// User-Agent override (per-channel headers).
+    pub ua: Option<String>,
+    /// Referer override.
+    pub referer: Option<String>,
+    /// Origin override.
+    pub origin: Option<String>,
+}
+
+/// Source headers with the non-empty query overrides applied.
+pub fn merge_headers(source: &RequestHeaders, q: &ProxyQuery) -> RequestHeaders {
+    let pick = |o: &Option<String>, base: &Option<String>| {
+        o.as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+            .or_else(|| base.clone())
+    };
+    RequestHeaders {
+        user_agent: pick(&q.ua, &source.user_agent),
+        referrer: pick(&q.referer, &source.referrer),
+        origin: pick(&q.origin, &source.origin),
+    }
 }
 
 /// What the proxy needs from a source row.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SourceAccess {
     pub headers: RequestHeaders,
-    /// Host of the M3U URL, Xtream server or Stalker portal.
-    pub host: Option<String>,
+    /// `host:port` of the M3U URL, Xtream server or Stalker portal.
+    pub authority: Option<Authority>,
 }
 
 /// Extracts headers and host from a `sources.config_json` value (C3).
@@ -93,17 +119,10 @@ pub fn source_access(kind: &str, config_json: &str) -> SourceAccess {
         .get("headers")
         .and_then(|h| serde_json::from_value(h.clone()).ok())
         .unwrap_or_default();
-    let url_key = match kind {
-        "m3u" => "url",
-        "xtream" => "serverUrl",
-        "stalker" => "portalUrl",
-        _ => "",
-    };
-    let host = v
-        .get(url_key)
-        .and_then(|u| u.as_str())
-        .and_then(target::source_host);
-    SourceAccess { headers, host }
+    SourceAccess {
+        headers,
+        authority: iptv_core::http::source_config_authority(kind, config_json),
+    }
 }
 
 async fn load_source(app: &AppState, id: String) -> CoreResult<Option<SourceAccess>> {
@@ -147,13 +166,15 @@ pub async fn handler(
     headers: HeaderMap,
     Query(q): Query<ProxyQuery>,
 ) -> Response {
-    match proxy(&s, method, &headers, q).await {
+    let mut res = match proxy(&s, method, &headers, q).await {
         Ok(r) => r,
         Err(Fail(status, err)) => {
             tracing::debug!(%status, message = %err.message, "proxy request refused or failed");
             error_response_with(status, err)
         }
-    }
+    };
+    harden(&mut res);
+    res
 }
 
 async fn proxy(
@@ -173,7 +194,7 @@ async fn proxy(
             "url is not a valid absolute URL: {e}"
         )))
     })?;
-    let source_id = q.source_id.filter(|s| !s.trim().is_empty());
+    let source_id = q.source_id.clone().filter(|s| !s.trim().is_empty());
 
     let access = match &source_id {
         Some(id) => load_source(&s.app, id.clone())
@@ -182,10 +203,11 @@ async fn proxy(
             .ok_or_else(|| Fail::coded(RpcError::not_found(format!("source {id} not found"))))?,
         None => SourceAccess::default(),
     };
-    let trusted_host = access.host.as_deref();
-    if let Some(h) = trusted_host {
-        s.proxy.trusted.insert(h);
+    let trusted = access.authority.as_ref();
+    if let Some(a) = trusted {
+        s.proxy.guard.trust(a);
     }
+    let headers_out = merge_headers(&access.headers, &q);
 
     // Playlists are rewritten whole; never ask for a slice of one.
     let path = url.path().to_ascii_lowercase();
@@ -194,16 +216,8 @@ async fn proxy(
     let mut current = url;
     let mut hops = 0;
     let resp = loop {
-        check_target(&current, trusted_host, s.proxy.allow_private)?;
-        let resp = send(
-            s,
-            &method,
-            &current,
-            &access.headers,
-            headers,
-            forward_range,
-        )
-        .await?;
+        s.proxy.guard.check(&current, trusted).await?;
+        let resp = send(s, &method, &current, &headers_out, headers, forward_range).await?;
         let location = resp
             .status()
             .is_redirection()
@@ -238,7 +252,14 @@ async fn proxy(
         return Err(Fail(code, err));
     }
 
-    respond(resp, current, source_id, method == Method::HEAD).await
+    let params = [
+        ("sourceId", source_id.as_deref().unwrap_or("")),
+        ("ua", q.ua.as_deref().unwrap_or("").trim()),
+        ("referer", q.referer.as_deref().unwrap_or("").trim()),
+        ("origin", q.origin.as_deref().unwrap_or("").trim()),
+    ];
+    let rewriter = hls::HlsRewriter::with_params(current.clone(), &params);
+    respond(resp, current, rewriter, method == Method::HEAD).await
 }
 
 /// Sends one request, retrying connect failures and timeouts with backoff.
@@ -266,7 +287,22 @@ async fn send(
                 }
             }
         }
-        match req.send().await {
+        let host = url.host_str().unwrap_or("the stream server").to_owned();
+        let sent = match tokio::time::timeout(HEADER_TIMEOUT, req.send()).await {
+            Ok(r) => r,
+            Err(_) if attempt + 1 < ATTEMPTS => {
+                tokio::time::sleep(backoff_delay(attempt)).await;
+                attempt += 1;
+                continue;
+            }
+            Err(_) => {
+                return Err(Fail::coded(RpcError::timeout(format!(
+                    "{host} accepted the connection but did not answer within {} s. Check the stream address and that the server is online, then try again.",
+                    HEADER_TIMEOUT.as_secs()
+                ))))
+            }
+        };
+        match sent {
             Ok(r) => return Ok(r),
             Err(e) => {
                 if let Some(blocked) = find_blocked(&e) {
@@ -280,10 +316,12 @@ async fn send(
                 }
                 let e = e.without_url();
                 return Err(if e.is_timeout() {
-                    Fail::coded(RpcError::timeout(format!("upstream timed out: {e}")))
+                    Fail::coded(RpcError::timeout(format!(
+                        "{host} did not respond in time. Check the stream address and that the server is online, then try again."
+                    )))
                 } else {
                     Fail::coded(RpcError::network(format!(
-                        "upstream unreachable: {e}; check the stream URL and that the server is online"
+                        "Could not reach {host}. Check the address and that the server is online, then try again. ({e})"
                     )))
                 });
             }
@@ -291,9 +329,9 @@ async fn send(
     }
 }
 
-/// Headers copied from upstream for pass-through responses.
-const PASS_HEADERS: [HeaderName; 8] = [
-    header::CONTENT_TYPE,
+/// Headers copied from upstream for pass-through responses (the content
+/// type goes through [`safe_content_type`]).
+const PASS_HEADERS: [HeaderName; 7] = [
     header::CONTENT_LENGTH,
     header::CONTENT_RANGE,
     header::ACCEPT_RANGES,
@@ -302,6 +340,50 @@ const PASS_HEADERS: [HeaderName; 8] = [
     header::CACHE_CONTROL,
     header::EXPIRES,
 ];
+
+/// Content types the proxy passes through: media, playlists, manifests,
+/// segments, keys (octet-stream) and images (channel logos).
+pub fn is_media_type(ct: &str) -> bool {
+    let essence = ct
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    essence.starts_with("video/")
+        || essence.starts_with("audio/")
+        || essence.starts_with("image/")
+        || matches!(
+            essence.as_str(),
+            "application/vnd.apple.mpegurl"
+                | "application/x-mpegurl"
+                | "application/dash+xml"
+                | "application/octet-stream"
+                | "application/x-mpegts"
+        )
+}
+
+/// Upstream content type when it is a media type; otherwise
+/// `application/octet-stream` and `true` (serve as an attachment).
+pub fn safe_content_type(upstream: Option<&HeaderValue>) -> (HeaderValue, bool) {
+    match upstream {
+        Some(v) if v.to_str().is_ok_and(is_media_type) => (v.clone(), false),
+        _ => (HeaderValue::from_static("application/octet-stream"), true),
+    }
+}
+
+/// Adds the sandbox CSP and `nosniff` to a proxy or file response.
+pub fn harden(res: &mut Response) {
+    let h = res.headers_mut();
+    h.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(SANDBOX_CSP),
+    );
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+}
 
 fn is_generic_type(ct: &str) -> bool {
     let ct = ct.trim().to_ascii_lowercase();
@@ -315,7 +397,7 @@ fn is_generic_type(ct: &str) -> bool {
 async fn respond(
     resp: reqwest::Response,
     final_url: Url,
-    source_id: Option<String>,
+    rewriter: hls::HlsRewriter,
     head: bool,
 ) -> Result<Response, Fail> {
     let status = resp.status();
@@ -378,14 +460,16 @@ async fn respond(
             Body::empty()
         } else {
             let input = stream::iter(prefix.into_iter().map(Ok)).chain(body).boxed();
-            Body::from_stream(rewrite_stream(
-                input,
-                hls::HlsRewriter::new(final_url, source_id),
-            ))
+            Body::from_stream(rewrite_stream(input, rewriter))
         };
         builder.body(body)
     } else {
         builder = builder.status(status_code);
+        let (ct_out, attachment) = safe_content_type(upstream.get(header::CONTENT_TYPE));
+        builder = builder.header(header::CONTENT_TYPE, ct_out);
+        if attachment {
+            builder = builder.header(header::CONTENT_DISPOSITION, "attachment");
+        }
         for name in PASS_HEADERS {
             if let Some(v) = upstream.get(&name) {
                 builder = builder.header(name, v.clone());

@@ -1,12 +1,13 @@
 # Keep the server image build context small and free of local data and secrets.
 .git/
-target/
+**/target/
 node_modules/
 dist/
 .data/
 .e2e-data/
 .b10-data/
 .i-data/
+.*-data/
 vendor/
 .env
 .env.*

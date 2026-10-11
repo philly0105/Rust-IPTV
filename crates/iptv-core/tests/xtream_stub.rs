@@ -9,7 +9,10 @@
 //! numbers as strings, `category_ids` arrays, `backdrop_path` as a string,
 //! `rating` "N/A", `info: []`. User `flaky` / `secret` answers 503 to the
 //! first account request (retry test). User `slow` / `secret` answers
-//! `get_vod_streams` after [`SLOW_DELAY`] (import-lock tests).
+//! `get_vod_streams` after [`SLOW_DELAY`] (import-lock tests). Users
+//! `nodetail404` / `nodetail500` (pass `secret`) answer `get_vod_info` and
+//! `get_series_info` with that HTTP status (detail fallback tests). User
+//! `tsonly` / `secret` reports `allowed_output_formats: ["TS", " rtmp "]`.
 //!
 //! Included by the other test files with `#[path = "xtream_stub.rs"] mod stub;`.
 #![allow(dead_code)]
@@ -158,13 +161,23 @@ async fn player_api(
 ) -> Response {
     let user = q.get("username").map(String::as_str).unwrap_or("");
     let pass = q.get("password").map(String::as_str).unwrap_or("");
-    let valid = (user == USER || user == "flaky" || user == "slow") && pass == PASS;
+    let valid = matches!(
+        user,
+        USER | "flaky" | "slow" | "nodetail404" | "nodetail500" | "tsonly"
+    ) && pass == PASS;
     if !valid {
         return Json(json!({"user_info": {"auth": 0}})).into_response();
     }
     let action = q.get("action").map(String::as_str).unwrap_or("");
     if user == "flaky" && action.is_empty() && st.flaky_hits.fetch_add(1, Ordering::SeqCst) == 0 {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    if matches!(action, "get_vod_info" | "get_series_info") {
+        match user {
+            "nodetail404" => return StatusCode::NOT_FOUND.into_response(),
+            "nodetail500" => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            _ => {}
+        }
     }
     if user == "slow" && action == "get_vod_streams" {
         tokio::time::sleep(SLOW_DELAY).await;
@@ -325,6 +338,11 @@ async fn player_api(
 }
 
 fn account(user: &str) -> Value {
+    let formats = if user == "tsonly" {
+        json!(["TS", " rtmp "])
+    } else {
+        json!(["m3u8", "ts"])
+    };
     let ts = now();
     let local = chrono::DateTime::from_timestamp(ts + 3600, 0)
         .unwrap()
@@ -334,7 +352,7 @@ fn account(user: &str) -> Value {
         "user_info": {
             "username": user, "password": PASS, "message": "", "auth": 1, "status": "Active",
             "exp_date": (ts + 30 * 86400).to_string(), "is_trial": "0", "active_cons": "0",
-            "created_at": "1600000000", "max_connections": "2", "allowed_output_formats": ["m3u8", "ts"]
+            "created_at": "1600000000", "max_connections": "2", "allowed_output_formats": formats
         },
         "server_info": {
             "url": "127.0.0.1", "port": "80", "https_port": "443", "server_protocol": "http",

@@ -1,26 +1,36 @@
-import { Clapperboard, ListVideo, Play, MonitorPlay } from 'lucide-react';
+import { ListVideo, Play, MonitorPlay } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router';
+import { Navigate, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Episode, ItemRef } from '@/api/types';
 
-import { FavoriteButton } from '../components/detail/actions';
+import { FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
 import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
 import { WatchStage } from '../components/detail/WatchStage';
-import { TmdbAttribution } from '../components/TmdbAttribution';
-import { TmdbRail } from '../components/TmdbRail';
-import { useIsFavorite, useSeriesDetail, useSettings, useSource, useTmdbSimilar, useTmdbTv } from '../hooks/queries';
+import { SimilarSection } from '../components/SimilarSection';
+import {
+  useIsFavorite,
+  useSeriesDetail,
+  useSetWatched,
+  useSettings,
+  useSource,
+  useTmdbKeyMissing,
+  useTmdbSimilar,
+  useTmdbTv,
+  useTwinProbe,
+} from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
-import { cleanEpisodeTitle, episodeCode, episodeSubtitle } from '../lib/format';
+import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState } from '../_shim';
+import { Button, EmptyState, ErrorState, useToast } from '@/ui';
+import { detailHref } from '../lib/search';
 
 export function SeriesDetailPage() {
   const { t } = useTranslation('vod');
@@ -31,6 +41,10 @@ export function SeriesDetailPage() {
   const tmdbOn = settings.tmdb.enabled;
   const source = useSource(sourceId);
   const detail = useSeriesDetail(source.data, ref);
+  // A failed lookup may be a movie id on the series route (cold link): look it up as a movie.
+  const probeTwin = detail.isError && detail.error.code !== 'auth' && !!source.data;
+  const twin = useTwinProbe(source.data, ref, probeTwin);
+  const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
   const tmdb = useTmdbTv(item, tmdbOn);
   const model = useMemo(() => (detail.data ? mergeSeriesDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
@@ -49,6 +63,18 @@ export function SeriesDetailPage() {
   const positionsQ = useRpcQuery('positions.forSeries', { ref }, { staleTime: 5_000 });
   const positionList = useMemo(() => positionsQ.data ?? [], [positionsQ.data]);
   const positions = useMemo(() => new Map(positionList.filter((p) => p.episodeId).map((p) => [p.episodeId!, p])), [positionList]);
+  const setWatched = useSetWatched();
+  const { toast } = useToast();
+  const toggleEpisodeWatched = (ep: Episode) => {
+    const next = !isWatched(positions.get(ep.id));
+    setWatched.mutate(
+      { ref, episodeIds: [ep.id], watched: next },
+      {
+        onSuccess: () => toast({ title: next ? t('markedWatched') : t('markedUnwatched'), variant: 'success' }),
+        onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
+      },
+    );
+  };
   const start = resumeTarget(order, positionList);
 
   const watch = useWatchState(ref);
@@ -93,7 +119,10 @@ export function SeriesDetailPage() {
   const showNextCard = watch.ended && !!next && dismissedFor !== watch.episodeId;
   const playing = order.find((e) => e.id === watch.episodeId);
 
-  if (source.isError || detail.isError) {
+  if (twin.data) {
+    return <Navigate replace to={detailHref(twin.data) ?? '/'} />;
+  }
+  if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
       <div className="h-full overflow-y-auto">
         <h1 className="sr-only">{pageTitle}</h1>
@@ -117,6 +146,8 @@ export function SeriesDetailPage() {
   }
 
   const trailer = youtubeKey(model.trailerKey ?? model.trailerUrl);
+  const seasonEpisodeIds = episodes.map((e) => e.id);
+  const seasonWatched = episodes.length > 0 && episodes.every((e) => isWatched(positions.get(e.id)));
   const favorite = (
     <FavoriteButton
       itemRef={ref}
@@ -127,7 +158,7 @@ export function SeriesDetailPage() {
   );
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto pb-12" data-testid="vod-series-detail">
+    <div ref={scrollRef} className="isolate h-full overflow-y-auto pb-12" data-testid="vod-series-detail">
       {watch.active ? (
         <WatchStage
           title={model.title}
@@ -144,6 +175,7 @@ export function SeriesDetailPage() {
           model={model}
           sourceId={sourceId}
           chips={model.status ? <span>{model.status}</span> : undefined}
+          notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           actions={
             <>
               {start && (
@@ -174,12 +206,29 @@ export function SeriesDetailPage() {
         )}
         {watch.active && <div className="flex flex-wrap items-center gap-2">{favorite}</div>}
 
-        <section aria-labelledby="vod-episodes-heading" className="flex flex-col gap-4">
-          <h2 id="vod-episodes-heading" className="text-lg text-fg">
-            {t('episodes')}
-          </h2>
+        <section aria-labelledby="vod-episodes-heading" className="relative flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="vod-episodes-heading" className="text-lg text-fg">
+              {t('episodes')}
+            </h2>
+            {episodes.length > 0 && (
+              <WatchedButton
+                key={selectedSeason}
+                itemRef={ref}
+                episodeIds={seasonEpisodeIds}
+                watched={seasonWatched}
+                compact={watch.active}
+                labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
+              />
+            )}
+          </div>
           {seasons.length === 0 ? (
-            <EmptyState size="inline" icon={<ListVideo size={20} />} title={t('noEpisodesTitle')} description={t('noEpisodesHint')} />
+            <EmptyState
+              size="inline"
+              icon={<ListVideo size={20} />}
+              title={t('noEpisodesTitle')}
+              description={source.data?.kind === 'm3u' ? t('noEpisodesHint') : t('noEpisodesHintProvider')}
+            />
           ) : (
             <>
               {seasons.length > 1 && selectedSeason !== undefined && <SeasonTabs seasons={seasons} value={selectedSeason} onChange={setSeason} />}
@@ -192,6 +241,7 @@ export function SeriesDetailPage() {
                 canDownload={playback.canDownload}
                 pendingDownload={playback.pendingDownload}
                 onDownload={downloadEpisode}
+                onToggleWatched={toggleEpisodeWatched}
                 scrollRef={scrollRef}
                 layoutKey={`${selectedSeason}|${watch.active}|${showNextCard}`}
               />
@@ -200,30 +250,18 @@ export function SeriesDetailPage() {
         </section>
 
         {tmdbOn && (
-          <div className="flex flex-col gap-4">
-            <TmdbRail
-              title={t('similar')}
-              items={similar}
-              loading={tmdb.isPending || similarFallback.isFetching}
-              sourceId={sourceId}
-              empty={
-                tmdb.isError || similarFallback.isError ? (
-                  <ErrorState
-                    size="inline"
-                    title={t('tmdbUnavailable')}
-                    error={tmdb.error ?? similarFallback.error}
-                    onRetry={() => {
-                      void tmdb.refetch();
-                      void similarFallback.refetch();
-                    }}
-                  />
-                ) : (
-                  <EmptyState size="inline" icon={<Clapperboard size={20} />} title={t('noSimilar')} />
-                )
-              }
-            />
-            <TmdbAttribution />
-          </div>
+          <SimilarSection
+            items={similar}
+            loading={tmdb.isPending || similarFallback.isFetching}
+            sourceId={sourceId}
+            error={tmdb.isError || similarFallback.isError ? (tmdb.error ?? similarFallback.error) : undefined}
+            onRetry={() => {
+              void tmdb.refetch();
+              void similarFallback.refetch();
+            }}
+            keyMissing={keyMissing}
+            enriched={model.enriched}
+          />
         )}
       </div>
 

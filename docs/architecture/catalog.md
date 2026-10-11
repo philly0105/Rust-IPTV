@@ -47,8 +47,8 @@ Duplicate `(content_type, item_id)` rows keep the first one (`INSERT OR IGNORE`)
 | `genres` | string array (a comma string is split) | `genres` |
 | `durationSeconds` | number | `VodItem.durationSeconds` |
 | `tmdbId` | number | `tmdbId` |
-| `catchup` | object `{type, days?, source?}` | presence turns on `Channel.archive` (as does `archive_hours > 0`) |
-| `headers` | object `{userAgent?, referrer?, origin?}` | per-channel request headers |
+| `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`: default, append, shift, xc, flussonic, flussonic-hls, flussonic-ts, fs), as does `archive_hours > 0` |
+| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped); the player merges them over the source-level headers |
 
 The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`. Readers pass unknown keys through untouched.
 
@@ -56,11 +56,11 @@ The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`. R
 
 - `query` / `query_named(conn, &CatalogQuery)` returns a `Page`. Limit is capped at 1000. Without a `category_id`, items in hidden categories are left out unless `include_hidden`; with one, that category is listed even if hidden. Sort keys: `name`, `number`, `added`, `rating`, `year`; NULLs sort last. Default direction is ascending for name and number, descending for added, rating and year. Without a sort key the order is item position (playlist order).
 - `search` with `PageQuery.search` or `catalog.search` tries FTS5 first. Each word becomes a quoted prefix term, so user input cannot inject FTS syntax. When FTS returns nothing, a `LIKE '%text%'` substring search runs instead. FTS results are ordered by rank, then by title length.
-- `channel_by_number` checks live before radio and skips hidden categories. `neighbors` wraps around within the category (or the whole visible list). `recently_added` needs `added` set. `same_title` matches other sources by `title_base` (case-insensitive) with a compatible year, up to 50 rows. `all_live_channels` is capped at 20,000.
+- `channel_by_number(conn, source, number, content_type)` skips hidden categories. `content_type` `Some(Live)` / `Some(Radio)` restricts the lookup (any other type is Invalid); `None` checks live before radio. `neighbors` wraps around within the category (or the whole visible list). `recently_added` needs `added` set. `same_title` matches other sources by `title_base` (case-insensitive) with a compatible year, up to 50 rows. `all_live_channels` is capped at 20,000.
 
 ## Counts
 
-`source_counts(source_id, channel_count, movie_count, series_count)` is a cache refreshed by `update_counts` after every write. Channels are live plus radio. `sources.list` reads it with a join instead of counting large catalogs on every call.
+`source_counts(source_id, channel_count, movie_count, series_count)` is a cache refreshed by `update_counts` after every write. `channel_count` is live channels only. The radio count is not cached: `radio_count` and the source readers count `items` rows of type radio (an index range scan on the primary key). `sources.list` reads it with a join instead of counting large catalogs on every call.
 
 Stalker sources are the exception: their VOD and series are not stored, so `update_counts` leaves their `movie_count` and `series_count` alone, and `set_remote_counts(conn, source_id, movies, series)` records the portal totals (called by `sources::run_import` from the stalker `ImportSummary`).
 
@@ -72,4 +72,4 @@ Stalker sources are the exception: their VOD and series are not stored, so `upda
 
 ## rpc
 
-`catalog.categories`, `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type), `channelByNumber` (null when none), `neighbors`, `search` (default 30 per type, max 200; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.
+`catalog.categories`, `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type), `channelByNumber` (`contentType?: 'live' | 'radio'`; null when none), `neighbors`, `search` (default 30 per type, max 1001 so the UI can probe its 1000-row step with one extra row; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.

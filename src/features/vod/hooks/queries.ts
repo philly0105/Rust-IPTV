@@ -4,7 +4,7 @@
  * reaches them.
  */
 
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 
 import { onAppEvent } from '@/api/events';
@@ -61,6 +61,31 @@ export function useVodPage(
   });
 }
 
+/**
+ * Sequential pages for a rating-filtered grid. A minimum rating hides an
+ * unknown number of items per page, so sparse index paging cannot work; the
+ * grid loads pages in order instead and filters them as they arrive.
+ */
+export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: boolean) {
+  const first = input ? buildPageRequest(input, 0) : undefined;
+  return useInfiniteQuery<Page<VodItem | SeriesItem>, RpcError>({
+    queryKey: first ? [first.cmd, { ...first.args, query: { ...first.args.query, offset: undefined }, inOrder: true }] : ['catalog.movies', 'disabled-in-order'],
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      if (!input) throw new RpcError('invalid', 'No source');
+      const req = buildPageRequest(input, pageParam as number);
+      return (await rpcRaw(req.cmd, req.args)) as Page<VodItem | SeriesItem>;
+    },
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
+      return last.items.length > 0 && loaded < last.total ? pages.length : undefined;
+    },
+    enabled: enabled && !!input,
+    staleTime: PAGE_CACHE_MS,
+    gcTime: PAGE_CACHE_MS,
+  });
+}
+
 /** Recently added rail. Stalker VOD is not in SQLite, so it reads the portal's first page sorted by added. */
 export function useRecentlyAdded(
   source: Source | undefined,
@@ -100,7 +125,7 @@ export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQue
     queryKey: [cmd, { ref }],
     queryFn: async () => {
       const res = await rpcRaw(cmd, { ref });
-      if (cmd === 'catalog.item') return { item: res as VodItem, cast: [], backdrops: [] };
+      if (cmd === 'catalog.item') return { item: res as VodItem, cast: [], backdrops: [], providerDetailsUnavailable: false };
       return res as VodDetail;
     },
     enabled: !!source,
@@ -116,7 +141,7 @@ export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQu
       if (cmd === 'catalog.item') {
         // m3u playlists have no series metadata; show the row with no episodes.
         const item = (await rpcRaw(cmd, { ref })) as SeriesItem;
-        return { item, seasons: [], cast: [], backdrops: [] };
+        return { item, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
       }
       return (await rpcRaw(cmd, { ref })) as SeriesDetail;
     },
@@ -186,4 +211,77 @@ export function useDownloads(enabled = true) {
 export function useSourceMap(): Map<string, Source> {
   const q = useSourcesList();
   return useMemo(() => new Map((q.data ?? []).map((s) => [s.id, s])), [q.data]);
+}
+
+/**
+ * A cold link can name the wrong kind (`/movie/<id>` for a series). When the
+ * detail lookup fails, ask whether the id exists as the other kind: the
+ * SQLite catalog row for m3u and Xtream, the portal detail for Stalker (its
+ * VOD is not in SQLite, and VOD-as-series rows are listed as series).
+ * Resolves to the twin ref, or null.
+ */
+export function useTwinProbe(source: Source | undefined, ref: ItemRef, enabled: boolean): UseQueryResult<ItemRef | null, RpcError> {
+  const twin: ItemRef = { ...ref, contentType: ref.contentType === 'movie' ? 'series' : 'movie' };
+  return useQuery<ItemRef | null, RpcError>({
+    queryKey: ['vod.twin', { ref: twin, kind: source?.kind }],
+    queryFn: async () => {
+      if (!source) return null;
+      const cmd = source.kind === 'stalker' ? detailCommand('stalker', twin.contentType === 'movie' ? 'movie' : 'series') : 'catalog.item';
+      try {
+        await rpcRaw(cmd, { ref: twin });
+        return twin;
+      } catch {
+        return null;
+      }
+    },
+    enabled: enabled && !!source,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * True when TMDB is on but no API key resolves (settings or `.env`). With no
+ * key in settings it asks `tmdb.testKey` once with a blank key, which checks
+ * the `.env` fallback; any other outcome counts as "a key exists".
+ */
+export function useTmdbKeyMissing(settings: Settings): boolean {
+  const on = settings.tmdb.enabled;
+  const inSettings = !!settings.tmdb.apiKey?.trim();
+  const q = useQuery<{ ok: boolean; message?: string }, RpcError>({
+    queryKey: ['tmdb.testKey', { apiKey: '' }],
+    queryFn: async () => (await rpcRaw('tmdb.testKey', { apiKey: '' })) as { ok: boolean; message?: string },
+    enabled: on && !inSettings,
+    staleTime: Infinity,
+    retry: false,
+  });
+  return on && !inSettings && q.data?.ok === false && /no api key/i.test(q.data.message ?? '');
+}
+
+export interface SetWatchedArgs {
+  ref: ItemRef;
+  episodeIds?: string[];
+  watched: boolean;
+}
+
+/**
+ * Marks a movie, or a set of episodes, watched or unwatched through
+ * `userstate.setWatched` (B2-fix1), then refreshes positions.
+ */
+export function useSetWatched() {
+  const qc = useQueryClient();
+  return useMutation<void, RpcError, SetWatchedArgs>({
+    mutationFn: async ({ ref, episodeIds, watched }) => {
+      if (!episodeIds) {
+        await rpcRaw('userstate.setWatched', { ref, watched });
+        return;
+      }
+      await Promise.all(episodeIds.map((episodeId) => rpcRaw('userstate.setWatched', { ref, episodeId, watched })));
+    },
+    onSettled: async () => {
+      await qc.invalidateQueries({
+        predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0].startsWith('positions.') || q.queryKey[0].startsWith('userstate.')),
+      });
+    },
+  });
 }

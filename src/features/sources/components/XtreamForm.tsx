@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 
-import { Input } from '../_shim';
+import { Input } from '@/ui';
 import { buildXtreamConfig, type DraftErrors, type XtreamDraft } from '../lib/draft';
 import { parseXtreamLink } from '../lib/validate';
 import { ConnectionTest } from './ConnectionTest';

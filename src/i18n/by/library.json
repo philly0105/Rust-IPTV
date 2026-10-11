@@ -22,11 +22,11 @@
   "summaryAttention_other": "Патрабуюць увагі: {{count}}",
   "statusQueued": "У чарзе",
   "statusDownloading": "Спампоўваецца",
-  "statusPaused": "Прыпынена",
+  "statusPaused": "На паўзе",
   "statusCompleted": "Завершана",
   "statusFailed": "Памылка",
   "statusCanceled": "Скасавана",
-  "actionPause": "Прыпыніць",
+  "actionPause": "Паўза",
   "actionResume": "Працягнуць",
   "actionCancel": "Скасаваць спампоўванне",
   "actionRetry": "Паўтарыць",
@@ -173,7 +173,7 @@
   "groupLive": "Эфір і радыё",
   "groupMovies": "Фільмы",
   "groupSeries": "Серыялы",
-  "favoritesEmptyTitle": "Пакуль нічога няма ў выбраным",
+  "favoritesEmptyTitle": "Пакуль няма выбранага",
   "favoritesEmptyBody": "Адзначайце зоркай каналы, фільмы і серыялы з любой крыніцы, каб сабраць іх тут.",
   "favoritesEmptySourceBody": "Адзначайце зоркай каналы, фільмы і серыялы ў гэтай крыніцы, каб сабраць іх тут.",
   "favoriteRemoved": "{{title}} выдалены з выбранага",
@@ -185,7 +185,7 @@
   "shortcutMoveUp": "Перамясціць выбраны элемент вышэй",
   "shortcutMoveDown": "Перамясціць выбраны элемент ніжэй",
   "addedAgo": "Дададзена {{time}}",
-  "undo": "Адрабіць",
+  "undo": "Вярнуць",
 
   "recentTitle": "Нядаўна прагледжанае",
   "sourceRecentTitle": "Нядаўна прагледжанае ў {{source}}",
@@ -221,5 +221,6 @@
   "openFailed": "Не ўдалося адкрыць {{title}}",
   "removeFailed": "Не ўдалося выдаліць элемент",
   "sourceRemoved": "Крыніца выдалена",
-  "sourceRemovedHint": "Крыніцу гэтага элемента выдалілі. Дадайце яе зноў, каб адкрыць элемент."
+  "sourceRemovedHint": "Крыніцу гэтага элемента выдалілі. Дадайце яе зноў, каб адкрыць элемент.",
+  "tryAgain": "Паўтарыць"
 }

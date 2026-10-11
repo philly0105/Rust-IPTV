@@ -16,9 +16,19 @@ fn router() -> RpcRouter {
     r
 }
 
+/// Server-mode state (`is_desktop = false`).
 async fn app(dir: &Path) -> (Arc<AppState>, Receiver<AppEvent>) {
+    app_mode(dir, false).await
+}
+
+/// Desktop-mode state: player paths and folders are editable.
+async fn desktop(dir: &Path) -> (Arc<AppState>, Receiver<AppEvent>) {
+    app_mode(dir, true).await
+}
+
+async fn app_mode(dir: &Path, is_desktop: bool) -> (Arc<AppState>, Receiver<AppEvent>) {
     let (sink, rx) = BroadcastSink::channel(256);
-    let state = AppState::new(dir.to_path_buf(), Arc::new(sink), false)
+    let state = AppState::new(dir.to_path_buf(), Arc::new(sink), is_desktop)
         .await
         .unwrap();
     (state, rx)
@@ -111,7 +121,7 @@ async fn update_merges_persists_and_emits() {
 #[tokio::test]
 async fn update_validates() {
     let dir = tempfile::tempdir().unwrap();
-    let (s, mut rx) = app(dir.path()).await;
+    let (s, mut rx) = desktop(dir.path()).await;
     let r = router();
     for patch in [
         json!({"remoteControl": {"port": 80}}),
@@ -119,8 +129,14 @@ async fn update_validates() {
         json!({"language": "xx"}),
         json!({"mpvPath": dir.path().join("missing-mpv.exe").to_string_lossy()}),
         json!({"downloadsDir": dir.path().join("missing-dir").to_string_lossy()}),
+        json!({"recordingsDir": dir.path().join("missing-rec").to_string_lossy()}),
         json!({"lastRoute": "no-slash"}),
         json!({"theme": 5}),
+        json!({"epgOffsetMinutes": 721}),
+        json!({"epgOffsetMinutes": -721}),
+        json!({"vodMinRating": 11}),
+        json!({"vodMinRating": -0.5}),
+        json!({"stripCountryPrefix": "yes"}),
     ] {
         let err = call(&r, &s, "settings.update", json!({ "patch": patch.clone() }))
             .await
@@ -228,7 +244,7 @@ async fn detect_players_returns_shape() {
 #[tokio::test]
 async fn empty_string_paths_clear_without_validation() {
     let dir = tempfile::tempdir().unwrap();
-    let (s, _rx) = app(dir.path()).await;
+    let (s, _rx) = desktop(dir.path()).await;
     let r = router();
     let exe = dir.path().join("mpv.exe");
     std::fs::write(&exe, b"").unwrap();
@@ -259,7 +275,7 @@ async fn empty_string_paths_clear_without_validation() {
 #[tokio::test]
 async fn save_validates_persists_and_emits() {
     let dir = tempfile::tempdir().unwrap();
-    let (s, mut rx) = app(dir.path()).await;
+    let (s, mut rx) = desktop(dir.path()).await;
     let downloads = dir.path().join("videos");
     std::fs::create_dir_all(&downloads).unwrap();
 
@@ -283,4 +299,111 @@ async fn save_validates_persists_and_emits() {
     drop(s);
     let (s, _rx) = app(dir.path()).await;
     assert_eq!(s.settings_snapshot().downloads_dir, next.downloads_dir);
+}
+
+#[tokio::test]
+async fn new_fields_have_documented_defaults_and_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = router();
+    {
+        let (s, _rx) = desktop(dir.path()).await;
+        let got = call(&r, &s, "settings.get", Value::Null).await.unwrap();
+        assert_eq!(got["stripCountryPrefix"], false);
+        assert_eq!(got["epgOffsetMinutes"], 0);
+        assert_eq!(got["playerReuseInstance"], true);
+        assert_eq!(got["showExternalBar"], true);
+        assert_eq!(got["vodMinRating"], 0.0);
+        assert!(
+            got.get("recordingsDir").is_some_and(Value::is_null),
+            "{got}"
+        );
+
+        let rec = dir.path().join("rec");
+        std::fs::create_dir_all(&rec).unwrap();
+        let got = call(
+            &r,
+            &s,
+            "settings.update",
+            json!({"patch": {
+                "stripCountryPrefix": true,
+                "epgOffsetMinutes": -90,
+                "playerReuseInstance": false,
+                "showExternalBar": false,
+                "vodMinRating": 6.5,
+                "recordingsDir": format!("  {}  ", rec.to_string_lossy()),
+            }}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(got["recordingsDir"], json!(rec.to_string_lossy()));
+        assert_eq!(got["epgOffsetMinutes"], -90);
+    }
+    // Persisted across a restart.
+    let (s, _rx) = desktop(dir.path()).await;
+    let snap = s.settings_snapshot();
+    assert!(snap.strip_country_prefix);
+    assert_eq!(snap.epg_offset_minutes, -90);
+    assert!(!snap.player_reuse_instance);
+    assert!(!snap.show_external_bar);
+    assert_eq!(snap.vod_min_rating, 6.5);
+    assert!(snap.recordings_dir.is_some());
+
+    // Older stored JSON without the new keys reads with the defaults.
+    let old: iptv_core::model::Settings =
+        serde_json::from_value(json!({"language": "de"})).unwrap();
+    assert!(old.player_reuse_instance && old.show_external_bar);
+    assert_eq!(old.recordings_dir, None);
+}
+
+#[tokio::test]
+async fn server_mode_refuses_player_and_folder_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let (s, mut rx) = app(dir.path()).await;
+    let r = router();
+    let exe = dir.path().join("evil.exe");
+    std::fs::write(&exe, b"").unwrap();
+    let folder = dir.path().join("f");
+    std::fs::create_dir_all(&folder).unwrap();
+    for patch in [
+        json!({"mpvPath": exe.to_string_lossy()}),
+        json!({"vlcPath": exe.to_string_lossy()}),
+        json!({"mpvArgs": "--script=evil.lua"}),
+        json!({"vlcArgs": "--extraintf=lua"}),
+        json!({"downloadsDir": folder.to_string_lossy()}),
+        json!({"recordingsDir": folder.to_string_lossy()}),
+        // Refused before validation: no hint whether the path exists.
+        json!({"mpvPath": dir.path().join("missing.exe").to_string_lossy()}),
+        json!({"theme": "dark", "vlcArgs": "x"}),
+    ] {
+        let err = call(&r, &s, "settings.update", json!({ "patch": patch.clone() }))
+            .await
+            .expect_err(&format!("{patch} should be refused in server mode"));
+        assert_eq!(err.code, RpcErrorCode::Unsupported, "{patch}");
+        assert!(
+            err.message.contains("only to the desktop app"),
+            "{}",
+            err.message
+        );
+    }
+    assert!(changed_events(&mut rx).is_empty());
+    assert_eq!(s.settings_snapshot(), iptv_core::model::Settings::default());
+
+    // Other fields, and echoing the current (unchanged) values back, still work.
+    let mut full = call(&r, &s, "settings.get", Value::Null).await.unwrap();
+    full["theme"] = json!("light");
+    full["vodMinRating"] = json!(4);
+    let got = call(&r, &s, "settings.update", json!({ "patch": full }))
+        .await
+        .unwrap();
+    assert_eq!(got["theme"], "light");
+    assert_eq!(got["vodMinRating"], 4.0);
+
+    // `save` refuses the player fields and recordings folder as well.
+    let mut next = s.settings_snapshot();
+    next.mpv_args = "--evil".into();
+    let err = iptv_core::settings::save(&s, next).await.unwrap_err();
+    assert!(matches!(err, iptv_core::CoreError::Unsupported(_)), "{err}");
+    let mut next = s.settings_snapshot();
+    next.recordings_dir = Some(folder.to_string_lossy().into_owned());
+    assert!(iptv_core::settings::save(&s, next).await.is_err());
 }

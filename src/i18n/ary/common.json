@@ -32,7 +32,7 @@
   "errorTitleConflict": "هادشي تبدّل من بلاصة أخرى",
   "errorTitleIo": "ما قدرناش نقراو ولا نكتبو الملف",
   "errorTitleDb": "المكتبة المحلية فيها مشكل",
-  "errorTitleInternal": "وقع شي مشكل",
+  "errorTitleInternal": "وقع شي خطأ",
 
   "errorHintNetwork": "شوف الاتصال ديالك والـURL ديال المزود، ومن بعد عاود جرّب.",
   "errorHintTimeout": "يقدر المزود يكون مشغول. عاود جرّب من بعد شوية.",

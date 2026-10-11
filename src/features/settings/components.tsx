@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 
-import { ErrorState, Skeleton } from '../sources/_shim';
+import { ErrorState, Skeleton } from '@/ui';
 
 /** One settings page: heading, optional lead, and grouped rows. */
 export function SettingsSection({ title, description, children, testId }: { title: string; description?: string; children: ReactNode; testId?: string }) {

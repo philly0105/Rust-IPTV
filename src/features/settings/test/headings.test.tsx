@@ -6,7 +6,7 @@
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { installDomStubs, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
+import { eagerRoutes, installDomStubs, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
 import { SECTION_IDS } from '../sections/types';
 
 vi.mock('@/api/transport', async (orig) => ({
@@ -21,7 +21,7 @@ vi.mock('@/api/events', () => ({
   onConnectionState: () => () => undefined,
 }));
 
-const { settingsRoutes } = await import('../routes');
+const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRoutes);
 const { RpcError } = await import('@/api/transport');
 const { useShellStore } = await import('@/shell');
 

@@ -32,7 +32,10 @@ vi.mock('@/api/events', () => ({
   onAppEvent: () => () => undefined,
   onAnyAppEvent: () => () => undefined,
 }));
-vi.mock('../_shim', async () => await import('./fakes'));
+vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('./fakes')) }));
+vi.mock('@/shell', async () => await import('./fakes'));
+vi.mock('@/features/player', async () => await import('./fakes'));
+vi.mock('@/features/player/remote', async () => await import('./fakes'));
 
 const fakes = await import('./fakes');
 
@@ -107,9 +110,80 @@ describe('LivePage', () => {
     expect(rpcMock.calls.some((c) => c.cmd === 'catalog.channelByNumber')).toBe(false);
 
     await waitFor(() => expect(rpcMock.calls.find((c) => c.cmd === 'catalog.channelByNumber')).toBeTruthy(), { timeout: 3000 });
-    expect(rpcMock.calls.find((c) => c.cmd === 'catalog.channelByNumber')!.args).toEqual({ sourceId: 'src1', number: 12 });
+    expect(rpcMock.calls.find((c) => c.cmd === 'catalog.channelByNumber')!.args).toEqual({ sourceId: 'src1', number: 12, contentType: 'live' });
     await waitFor(() => expect(fakes.recorded.playItem.length).toBe(1));
     expect(fakes.recorded.playItem[0]).toMatchObject({ title: 'Channel 11', isLive: true, sourceKind: 'xtream' });
+  });
+
+  it('Enter commits the pending digits at once', async () => {
+    rpcMock.handlers['catalog.channelByNumber'] = (a) => makeChannel((a as { number: number }).number - 1);
+    renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    // focus sits on a channel row: Enter must commit the number, not play the row
+    (document.querySelector('[data-row-index="0"]') as HTMLButtonElement).focus();
+    act(() => {
+      fireEvent.keyDown(window, { key: '4' });
+    });
+    await screen.findByTestId('digit-osd');
+    const t0 = Date.now();
+    act(() => {
+      fireEvent.keyDown(document.activeElement ?? window, { key: 'Enter' });
+    });
+    await waitFor(() => expect(fakes.recorded.playItem.length).toBe(1));
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.channelByNumber')).toHaveLength(1);
+    expect(fakes.recorded.playItem[0]).toMatchObject({ title: 'Channel 3' });
+  });
+
+  it('radio digit zap asks for the radio station with that number', async () => {
+    rpcMock.handlers['catalog.channelByNumber'] = (a) => ({ ...makeChannel(2), name: 'Radio Three', isRadio: true, ref: { sourceId: 'src1', contentType: 'radio', itemId: 'r3' }, number: (a as { number: number }).number });
+    renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
+    await screen.findByText('Channel 0');
+    act(() => {
+      fireEvent.keyDown(window, { key: '3' });
+    });
+    await screen.findByTestId('digit-osd');
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Enter' });
+    });
+    await waitFor(() => expect(rpcMock.calls.find((c) => c.cmd === 'catalog.channelByNumber')).toBeTruthy());
+    expect(rpcMock.calls.find((c) => c.cmd === 'catalog.channelByNumber')!.args).toEqual({ sourceId: 'src1', number: 3, contentType: 'radio' });
+    await waitFor(() => expect(fakes.recorded.playItem[0]).toMatchObject({ title: 'Radio Three' }));
+  });
+
+  it('applies stripCountryPrefix and epgOffsetMinutes to the channel list', async () => {
+    const now = Date.now();
+    rpcMock.handlers['settings.get'] = () => ({ ...settings(), stripCountryPrefix: true, epgOffsetMinutes: 60 });
+    rpcMock.handlers['catalog.channels'] = (a) => {
+      const q = (a as { query: PageQuery }).query;
+      const items = [{ ...makeChannel(0), name: 'UK: BBC One' }];
+      return { items, total: 1, offset: q.offset, limit: q.limit };
+    };
+    rpcMock.handlers['epg.nowNext'] = () => ({ 'src1|live|c0': { now: program('Breakfast', now - 70 * MINUTE, now + 20 * MINUTE) } });
+    renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
+    expect(await screen.findByText('BBC One')).toBeTruthy();
+    expect(screen.queryByText('UK: BBC One')).toBeNull();
+    // +60 min: the programme now ends in 80 minutes; the label is the compact form
+    await screen.findByText('Breakfast');
+    expect(screen.getByText('80m')).toBeTruthy();
+    expect(screen.getByTitle('80 min left')).toBeTruthy();
+  });
+
+  it('hides the archive icon when an M3U channel cannot play its catch-up', async () => {
+    rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'List', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
+    rpcMock.handlers['catalog.channels'] = (a) => {
+      const q = (a as { query: PageQuery }).query;
+      const items = [
+        { ...makeChannel(0), name: 'Usable', url: 'http://l/a.m3u8', catchup: { type: 'append', source: '?utc={utc}' } },
+        { ...makeChannel(1), name: 'Broken', url: 'http://l/b.m3u8', catchup: { type: 'append' } },
+      ];
+      return { items, total: 2, offset: q.offset, limit: q.limit };
+    };
+    renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
+    await screen.findByText('Broken');
+    await waitFor(() => expect(screen.getAllByLabelText('Catch-up available')).toHaveLength(1));
+    const usableRow = document.querySelector('[data-testid="channel-list"] [aria-posinset="1"]')!;
+    expect(usableRow.querySelector('[aria-label="Catch-up available"]')).toBeTruthy();
   });
 
   it('shows the empty state when the source has no channels', async () => {
@@ -170,6 +244,20 @@ describe('EpgRibbon', () => {
     const args = rpcMock.calls.find((c) => c.cmd === 'xtream.catchupUrl')!.args as { durationMinutes: number };
     expect(args.durationMinutes).toBe(90);
     expect(fakes.recorded.playSource[0]).toMatchObject({ url: 'http://x/timeshift.ts', subtitle: 'Morning News', isLive: false });
+  });
+
+  it('plays M3U catch-up through the channel catchup attributes', async () => {
+    const now = Date.now();
+    const start = now - 2 * HOUR;
+    rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'List', m3u: { origin: 'url', headers: { userAgent: 'UA/1' } } });
+    rpcMock.handlers['epg.programs'] = () => [program('Morning News', start, now - 30 * MINUTE), program('Now', now - 30 * MINUTE, now + HOUR)];
+    const ch = { ...makeChannel(0), url: 'http://mock/live/demo/secret/104.m3u8', catchup: { type: 'append', days: 3, source: '?utc={utc}&lutc={lutc}' } };
+    renderAt('/', [{ path: '/', element: <EpgRibbon channel={ch} sourceKind="m3u" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: /Morning News.*catch-up available/ }));
+    await waitFor(() => expect(fakes.recorded.playSource.length).toBe(1));
+    const src = fakes.recorded.playSource[0]!;
+    expect(src.url.startsWith(`http://mock/live/demo/secret/104.m3u8?utc=${Math.floor(start / 1000)}&lutc=`)).toBe(true);
+    expect(src).toMatchObject({ kind: 'hls', isLive: false, subtitle: 'Morning News', headers: { userAgent: 'UA/1' } });
   });
 
   it('list mode follows settings.epgViewMode', async () => {

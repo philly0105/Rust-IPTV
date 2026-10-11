@@ -87,3 +87,21 @@ export function readGridParams(params: URLSearchParams): { sort: VodSortKey; dir
   const dir: SortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : defaultDir(sort);
   return { sort, dir, search: params.get('q') ?? '' };
 }
+
+/** Search param that switches the minimum-rating filter off for one grid. */
+export const ALL_RATINGS_PARAM = 'ratings';
+
+/**
+ * Items rated at least `min` (0..10). Unrated items are hidden while a
+ * minimum is set, as in the old app; `min <= 0` keeps everything.
+ */
+export function filterByRating<T extends { rating?: number }>(items: readonly T[], min: number): T[] {
+  if (!(min > 0)) return [...items];
+  return items.filter((i) => typeof i.rating === 'number' && Number.isFinite(i.rating) && i.rating >= min);
+}
+
+/** The effective minimum rating for a grid: the setting, unless the URL asks for all ratings. */
+export function effectiveMinRating(setting: number | undefined, params: URLSearchParams): number {
+  const min = typeof setting === 'number' && Number.isFinite(setting) ? Math.min(10, Math.max(0, setting)) : 0;
+  return params.get(ALL_RATINGS_PARAM) === 'all' ? 0 : min;
+}

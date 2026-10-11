@@ -5,6 +5,12 @@ import { Link } from 'react-router';
 
 import { ErrorState, Skeleton, cn } from '@/ui';
 
+/** Arrow scrolls jump instantly under prefers-reduced-motion, like the CSS animations. */
+export function railScrollBehavior(): ScrollBehavior {
+  const reduced = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return reduced ? 'auto' : 'smooth';
+}
+
 export interface RailCardProps {
   tabIndex: number;
   'data-rail-card': '';
@@ -98,7 +104,7 @@ export function DashboardRail<T>({
     const el = trackRef.current;
     if (!el) return;
     const rtl = getComputedStyle(el).direction === 'rtl';
-    el.scrollBy({ left: dir * (rtl ? -1 : 1) * el.clientWidth * 0.85, behavior: 'smooth' });
+    el.scrollBy({ left: dir * (rtl ? -1 : 1) * el.clientWidth * 0.85, behavior: railScrollBehavior() });
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {

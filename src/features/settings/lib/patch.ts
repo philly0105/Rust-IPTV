@@ -8,7 +8,21 @@ import type { DashboardRails, RemoteControlSettings, Settings, TmdbSettings } fr
 
 import { checkHttpUrl } from '../../sources/lib/validate';
 
-export type SettingsPatch = Partial<Settings>;
+/** `Partial<Settings>` plus the fix-wave-1 fields. */
+export type SettingsPatch = Partial<Settings> & Partial<ParitySettings>;
+
+/**
+ * Settings fields added in fix wave 1 (fixwave1-common.md). Typed here so the UI
+ * compiles before and after they land in `Settings`; `parity()` fills defaults.
+ */
+export interface ParitySettings {
+  stripCountryPrefix: boolean;
+  epgOffsetMinutes: number;
+  playerReuseInstance: boolean;
+  showExternalBar: boolean;
+  vodMinRating: number;
+  recordingsDir: string | null;
+}
 
 export function railsPatch(s: Settings, key: keyof DashboardRails, value: boolean): SettingsPatch {
   return { dashboardRails: { ...s.dashboardRails, [key]: value } };
@@ -47,6 +61,21 @@ export function revertPatch(current: Settings, before: Settings, patch: Settings
     (out as unknown as Record<string, unknown>)[k] = before[k];
   }
   return out;
+}
+
+/** Guide time shift in minutes: a whole number within +/- 12 hours. */
+export function validateEpgOffset(raw: string): { ok: true; minutes: number } | { ok: false; error: string } {
+  const v = raw.trim();
+  if (!/^[+-]?\d+$/.test(v)) return { ok: false, error: 'errorOffsetNumber' };
+  const minutes = Number(v);
+  if (minutes < -720 || minutes > 720) return { ok: false, error: 'errorOffsetRange' };
+  return { ok: true, minutes };
+}
+
+/** Minimum VOD rating, clamped to 0..10 in half steps. */
+export function clampRating(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(10, Math.max(0, Math.round(n * 2) / 2));
 }
 
 // ---- edge validation (return an i18n key in the `settings` namespace, or null) ----

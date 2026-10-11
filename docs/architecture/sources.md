@@ -26,7 +26,7 @@ m3u registers in `m3u::init`, xtream in B3's init and stalker in B4's init. An i
 
 1. Takes a per-source async lock, so concurrent refreshes and a remove of the same source run one after another.
 2. Calls the importer.
-3. On success it sets `last_refresh_at`, clears `last_error`, refreshes `source_counts` (for stalker, the movie and series totals come from the importer's `ImportSummary`; see Counts), applies user state a backup import parked for this source (`backup::apply_pending_restore`, so restored favorites and positions appear right away rather than on the next start; a failure there is logged and never fails the refresh), and emits `import.progress {phase: "done"}` and `sources.changed`. It then starts the source's guides in the background (see Guides after import).
+3. On success it sets `last_refresh_at`, clears `last_error`, refreshes `source_counts` (for stalker, the movie and series totals come from the importer's `ImportSummary`; see Counts), releases the per-source lock and applies user state a backup import parked for this source (`backup::apply_pending_restore`, so restored favorites and positions appear right away rather than on the next start; a failure there is logged and never fails the refresh). The global backup import lock is only taken when a `backup_pending:<id>` row exists, so adding or refreshing an unrelated source never waits behind a running `backup.import`, and that lock is never acquired while a source lock is held, and emits `import.progress {phase: "done"}` and `sources.changed`. It then starts the source's guides in the background (see Guides after import).
 4. On failure it stores the error text in `last_error` and emits `import.progress {phase: "error", message}` and `sources.changed`. The importer must leave the previous catalog in place, and both catalog write paths do (see catalog.md).
 
 ### Guides after import
@@ -56,7 +56,8 @@ The importer then runs. If it fails, the source is kept with `last_error` set, a
 
 - `sources.update {id, patch}` validates a config patch the same way. The patch must match the source's kind. `position` moves the source and renumbers the rest. `epg` lists are trimmed and de-duplicated, and only the given lists change. Config changes do not re-import; the UI calls `sources.refresh` for that. When the stored config actually changes (URL, MAC, credentials, headers), the cached portal session `stalker_token:<id>` in `app_state` is deleted in the same transaction, so the next portal call handshakes with the new settings. A rename or an identical config keeps it.
 - `sources.reorder {ids}` puts the listed ids first in the given order. Unknown ids are ignored, and unlisted sources keep their relative order after them. Positions are renumbered from 0.
-- `sources.remove {id}` waits for a running import of that source, then deletes it. Items, categories, `m3u_raw`, `source_counts`, favorites, recent entries, positions and EPG mappings cascade. The `stalker_token:<id>` and `backup_pending:<id>` keys in `app_state` are removed too.
+- `sources.remove {id}` waits for a running import of that source, then deletes it. Items, categories, `m3u_raw`, `source_counts`, favorites, recent entries, positions and EPG mappings cascade. The `stalker_token:<id>` and `backup_pending:<id>` keys in `app_state` are removed too, and so is the on-disk playlist copy of a large m3u (`data_dir/playlists/<id>.m3u`).
+- `sources.removeAll` removes every source through the same path as `sources.remove` (one at a time, each waiting for its import), then emits `sources.changed`. Returns null.
 
 ## refresh
 
@@ -66,6 +67,6 @@ The importer then runs. If it fails, the source is kept with `last_error` set, a
 
 ## Counts
 
-`sources.list` and `sources.get` return `channelCount` (live plus radio), `movieCount` and `seriesCount` from the `source_counts` cache. `sources.counts {id}` returns the same three numbers.
+`sources.list` and `sources.get` return `channelCount` (live only), `radioCount`, `movieCount` and `seriesCount`. All but `radioCount` come from the `source_counts` cache; `radioCount` is counted from `items`. `sources.counts {id}` returns the same four numbers.
 
 Stalker portals serve VOD and series live; only their categories are stored. For stalker sources `catalog::update_counts` therefore refreshes only `channelCount`, and `run_import` records the portal's movie and series totals from the importer's `ImportSummary` with `catalog::set_remote_counts`. A direct `stalker.sync` (not through `run_import`) must call `set_remote_counts` itself to refresh those two numbers.

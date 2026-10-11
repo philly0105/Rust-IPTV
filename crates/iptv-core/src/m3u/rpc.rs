@@ -4,7 +4,6 @@ use super::parser::M3uReader;
 use crate::error::RpcError;
 use crate::rpc::RpcRouter;
 use crate::state::AppState;
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -42,20 +41,18 @@ pub struct PreviewResult {
 
 pub async fn raw(state: Arc<AppState>, a: RawArgs) -> Result<RawResult, RpcError> {
     let sid = a.source_id.clone();
+    let data_dir = state.data_dir.clone();
     let row = state
         .db_call(move |c| {
-            Ok(c.query_row(
-                "SELECT raw, sha256, fetched_at FROM m3u_raw WHERE source_id = ?1",
-                [&sid],
-                |r| {
-                    Ok(RawResult {
-                        text: r.get(0)?,
-                        sha256: r.get(1)?,
-                        fetched_at: r.get(2)?,
-                    })
-                },
+            Ok(
+                super::stored_text(c, &data_dir, &sid)?.map(|(text, sha256, fetched_at)| {
+                    RawResult {
+                        text,
+                        sha256,
+                        fetched_at,
+                    }
+                }),
             )
-            .optional()?)
         })
         .await?;
     row.ok_or_else(|| RpcError::not_found("no stored playlist for this source; refresh it first"))

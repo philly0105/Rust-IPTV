@@ -1,4 +1,4 @@
-import { Clapperboard, Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
+import { Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate, useParams } from 'react-router';
@@ -8,22 +8,31 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef, VodItem } from '@/api/types';
 
-import { DownloadButton, FavoriteButton } from '../components/detail/actions';
+import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
 import { OtherSourcesDialog } from '../components/detail/OtherSourcesDialog';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { WatchStage } from '../components/detail/WatchStage';
-import { TmdbAttribution } from '../components/TmdbAttribution';
-import { TmdbRail } from '../components/TmdbRail';
-import { useIsFavorite, useMovieDetail, useSettings, useSource, useSourceMap, useTmdbMovie, useTmdbSimilar } from '../hooks/queries';
+import { SimilarSection } from '../components/SimilarSection';
+import {
+  useIsFavorite,
+  useMovieDetail,
+  useSettings,
+  useSource,
+  useSourceMap,
+  useTmdbKeyMissing,
+  useTmdbMovie,
+  useTmdbSimilar,
+  useTwinProbe,
+} from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useSourcePin } from '../hooks/useSourcePin';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
-import { formatClock, isResumable } from '../lib/format';
+import { formatClock, isResumable, isWatched } from '../lib/format';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
 import { detailHref, isCachedStalkerSeries } from '../lib/search';
-import { Button, EmptyState, ErrorState } from '../_shim';
+import { Button, ErrorState } from '@/ui';
 
 export function MovieDetailPage() {
   const { t } = useTranslation('vod');
@@ -42,6 +51,10 @@ export function MovieDetailPage() {
     return isCachedStalkerSeries(cached, sourceId, itemId);
   }, [qc, source.data?.kind, sourceId, itemId]);
   const detail = useMovieDetail(seriesTwin ? undefined : source.data, ref);
+  // A failed lookup may be a series id on the movie route (cold link, Stalker VOD-as-series): look it up as a series.
+  const probeTwin = detail.isError && detail.error.code !== 'auth' && !!source.data;
+  const twin = useTwinProbe(source.data, ref, probeTwin);
+  const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
   const tmdb = useTmdbMovie(item, tmdbOn);
   const model = useMemo(() => (detail.data ? mergeMovieDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
@@ -49,6 +62,7 @@ export function MovieDetailPage() {
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 
   const position = useRpcQuery('positions.get', { ref }, { staleTime: 5_000 });
+  const watched = isWatched(position.data);
   const isFavorite = useIsFavorite(ref);
   const sameTitle = useRpcQuery('catalog.sameTitle', { ref }, { enabled: !!item, staleTime: 5 * 60_000 });
   const others = useMemo(() => (sameTitle.data ?? []).filter((o) => o.ref.sourceId !== sourceId || o.ref.itemId !== itemId), [sameTitle.data, sourceId, itemId]);
@@ -92,7 +106,10 @@ export function MovieDetailPage() {
   if (seriesTwin) {
     return <Navigate replace to={detailHref({ sourceId, contentType: 'series', itemId }) ?? '/'} />;
   }
-  if (source.isError || detail.isError) {
+  if (twin.data) {
+    return <Navigate replace to={detailHref(twin.data) ?? '/'} />;
+  }
+  if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
       <div className="h-full overflow-y-auto">
         <h1 className="sr-only">{pageTitle}</h1>
@@ -122,6 +139,7 @@ export function MovieDetailPage() {
   const secondary = (
     <>
       <FavoriteButton itemRef={ref} snapshot={{ title: model.title, posterUrl: model.posterUrl, contentType: 'movie' }} isFavorite={isFavorite} compact={watching} />
+      <WatchedButton itemRef={ref} watched={watched} compact={watching} />
       {playback.canDownload && (
         <DownloadButton
           download={download}
@@ -139,7 +157,7 @@ export function MovieDetailPage() {
   );
 
   return (
-    <div className="h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
+    <div className="isolate h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
       {watching ? (
         <>
           <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
@@ -153,6 +171,7 @@ export function MovieDetailPage() {
           model={model}
           sourceId={sourceId}
           note={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
+          notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           actions={
             <>
               <Button size="lg" variant="primary" icon={<Play aria-hidden size={18} className="fill-current" />} onClick={() => play(false)}>
@@ -178,30 +197,18 @@ export function MovieDetailPage() {
 
       <div className="mx-auto mt-8 flex w-full max-w-[1800px] flex-col gap-8 px-4 md:px-8">
         {tmdbOn && (
-          <div className="flex flex-col gap-4">
-            <TmdbRail
-              title={t('similar')}
-              items={similar}
-              loading={tmdb.isPending || similarFallback.isFetching}
-              sourceId={sourceId}
-              empty={
-                tmdb.isError || similarFallback.isError ? (
-                  <ErrorState
-                    size="inline"
-                    title={t('tmdbUnavailable')}
-                    error={tmdb.error ?? similarFallback.error}
-                    onRetry={() => {
-                      void tmdb.refetch();
-                      void similarFallback.refetch();
-                    }}
-                  />
-                ) : (
-                  <EmptyState size="inline" icon={<Clapperboard size={20} />} title={t('noSimilar')} />
-                )
-              }
-            />
-            <TmdbAttribution />
-          </div>
+          <SimilarSection
+            items={similar}
+            loading={tmdb.isPending || similarFallback.isFetching}
+            sourceId={sourceId}
+            error={tmdb.isError || similarFallback.isError ? (tmdb.error ?? similarFallback.error) : undefined}
+            onRetry={() => {
+              void tmdb.refetch();
+              void similarFallback.refetch();
+            }}
+            keyMissing={keyMissing}
+            enriched={model.enriched}
+          />
         )}
       </div>
 

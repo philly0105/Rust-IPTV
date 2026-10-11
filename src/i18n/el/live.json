@@ -18,7 +18,7 @@
   "backToLive": "Επιστροφή στο ζωντανό",
   "cancel": "Ακύρωση",
   "close": "Κλείσιμο",
-  "retry": "Δοκιμάστε ξανά",
+  "retry": "Δοκιμή ξανά",
   "catchupAvailable": "διαθέσιμο catch-up",
   "catchupFailed": "Δεν ήταν δυνατό το άνοιγμα της εγγραφής. Η πύλη ίσως δεν διατηρεί πλέον αυτό το πρόγραμμα.",
   "channelCount_one": "{{formatted}} κανάλι",
@@ -65,7 +65,7 @@
   "guideNoSources": "Δεν υπάρχουν ακόμα πηγές",
   "guideNoSourcesHint": "Προσθέστε μια λίστα αναπαραγωγής ή πύλη για να δείτε τον οδηγό προγράμματός της.",
   "previousDay": "Προηγούμενη ημέρα",
-  "nextDay": "Επόμενη ημέρα",
+  "nextDay": "Επόμενη μέρα",
   "earlier": "3 ώρες νωρίτερα",
   "later": "3 ώρες αργότερα",
   "jumpToNow": "Τώρα",
@@ -73,6 +73,7 @@
   "onNow": "τώρα",
   "minutesLeft_one": "απομένει {{count}} λεπτό",
   "minutesLeft_other": "απομένουν {{count}} λεπτά",
+  "minutesLeftShort": "{{count}} λεπ.",
   "mapEpg": "Αντιστοίχιση καναλιού οδηγού",
   "mappingAutomatic": "Αυτόματη αντιστοίχιση",
   "mappingNone": "Χωρίς οδηγό",
@@ -88,7 +89,7 @@
   "mappingSearch": "Αναζήτηση καναλιών οδηγού",
   "mappingResults": "Κανάλια οδηγού",
   "mappingNoResults": "Κανένα κανάλι οδηγού δεν ταιριάζει με «{{query}}»",
-  "mappingSelected": "Επιλεγμένο",
+  "mappingSelected": "Επιλεγμένα",
   "noCatchup": "Αυτό το πρόγραμμα είναι εκτός του χρονικού παραθύρου catch-up.",
   "noChannelNumber": "Δεν υπάρχει κανάλι {{number}}",
   "zapFailed": "Δεν ήταν δυνατή η αλλαγή καναλιού",
@@ -124,5 +125,5 @@
   "stationNumber": "Σταθμός {{number}}",
   "watch": "Παρακολούθηση",
   "watchCatchup": "Παρακολούθηση εγγραφής",
-  "watchLive": "Ζωντανή παρακολούθηση"
+  "watchLive": "Παρακολούθηση ζωντανά"
 }

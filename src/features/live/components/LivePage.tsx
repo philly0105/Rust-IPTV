@@ -19,27 +19,17 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { sameRef, type Channel, type ContentType, type EpgNowNext, type ItemRef } from '@/api/types';
 
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  IconButton,
-  PlayerStage,
-  RadioPlayer,
-  registerCommands,
-  Skeleton,
-  useChannelZap,
-  usePlayerStore,
-  useShell,
-  useShortcut,
-  useToast,
-} from '../_shim';
+import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast } from '@/ui';
+import { PlayerStage, RadioPlayer, useChannelZap, usePlayerStore } from '@/features/player';
+import { registerCommands, useShell, useShortcut } from '@/shell';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDigitEntry } from '../hooks/useDigitEntry';
+import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
+import { displayChannelName } from '../lib/channelName';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { playChannel, resolveChannelSource } from '../lib/playback';
 import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
@@ -65,6 +55,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const categoryId = (isRadio ? searchParams.get('category') : params.categoryId) ?? undefined;
   const contentType: ContentType = isRadio ? 'radio' : 'live';
   const now = useNow(30_000);
+  const prefs = useDisplayPrefs();
 
   // ---- data ---------------------------------------------------------------
   const source = useRpcQuery('sources.get', { id: sourceId }, { enabled: !!sourceId });
@@ -136,9 +127,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const selectNumber = useCallback(
     async (n: number) => {
       try {
-        const ch = await rpc('catalog.channelByNumber', { sourceId, number: n });
+        // The number belongs to the list on screen: radio numbers never zap to the live channel with that number.
+        const ch = await rpc('catalog.channelByNumber', { sourceId, number: n, contentType: isRadio ? 'radio' : 'live' });
         if (ch) {
-          flashOsd({ kind: 'found', number: n, name: ch.name });
+          flashOsd({ kind: 'found', number: n, name: displayChannelName(ch.name, prefs.stripCountryPrefix) });
           play(ch);
         } else {
           flashOsd({ kind: 'missing', number: n });
@@ -148,7 +140,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         toast({ title: t('zapFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
       }
     },
-    [sourceId, flashOsd, play, t, toast],
+    [sourceId, isRadio, prefs.stripCountryPrefix, flashOsd, play, t, toast],
   );
   const digits = useDigitEntry((n) => void selectNumber(n));
   useEffect(() => {
@@ -416,6 +408,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         openOnDoubleClick={settings.data?.openStreamOnDoubleClick ?? false}
         now={now}
         compact={false}
+        sourceKind={kind}
         onPlay={play}
         onToggleFavorite={onToggleFavorite}
         onContextMenu={onContextMenu}
@@ -496,7 +489,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       {/* stage */}
       <section aria-label={t('stage')} className="flex min-w-0 flex-1 flex-col">
         {isRadio ? (
-          <RadioStage channel={playingChannel} />
+          <RadioStage channel={playingChannel} stripPrefix={prefs.stripCountryPrefix} />
         ) : (
           <>
             <div className="relative min-h-0 flex-1 bg-black">
@@ -522,14 +515,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         {isRadio ? <DigitOsd state={osd} /> : null}
       </section>
 
-      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu?.channel.name ?? ''} onClose={closeMenu} />
+      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
       <ManageCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
       <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
     </div>
   );
 }
 
-function RadioStage({ channel }: { channel?: Channel }) {
+function RadioStage({ channel, stripPrefix }: { channel?: Channel; stripPrefix: boolean }) {
   const { t } = useTranslation('live');
   const source = usePlayerStore((st) => st.source);
   const playingRadio = !!source?.isRadio;
@@ -540,7 +533,7 @@ function RadioStage({ channel }: { channel?: Channel }) {
       ) : (
         <div className="flex flex-1 items-center justify-center bg-surface">
           <EmptyState
-            icon={channel ? <ChannelLogo src={channel.logoUrl} name={channel.name} size={72} /> : <RadioIcon className="size-8" />}
+            icon={channel ? <ChannelLogo src={channel.logoUrl} name={displayChannelName(channel.name, stripPrefix)} size={72} /> : <RadioIcon className="size-8" />}
             title={t('radioIdle')}
             description={t('radioIdleHint')}
           />

@@ -42,7 +42,7 @@ export function useDownloadActions() {
   const { pending, run } = usePending<number>();
 
   const perform = useCallback(
-    async (action: DownloadCommand, d: Download, opts?: { deleteFile?: boolean }): Promise<boolean> => {
+    async function perform(action: DownloadCommand, d: Download, opts?: { deleteFile?: boolean }): Promise<boolean> {
       let ok = false;
       await run(d.id, async () => {
         try {
@@ -55,6 +55,8 @@ export function useDownloadActions() {
             title: t(k('actionFailed', action), { title: d.title }),
             description: e.code === 'not_found' ? t('notFoundHint') : e.message,
             variant: 'error',
+            // A timeout or dropped connection may succeed on a second attempt.
+            action: e.retryable ? { label: t('tryAgain'), onClick: () => void perform(action, d, opts) } : undefined,
           });
         } finally {
           await Promise.all([invalidate('downloads.'), invalidate('myvideos.')]);

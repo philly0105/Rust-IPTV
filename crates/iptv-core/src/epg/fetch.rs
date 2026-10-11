@@ -163,11 +163,15 @@ async fn download(
     dir: &Path,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> CoreResult<Fetched> {
-    let mut req = crate::http::apply_source_headers(state.http.get(url), headers);
+    // Server mode: guarded client; an XMLTV URL on a private host needs
+    // --allow-private-targets.
+    crate::http::check_fetch(state, url, None).await?;
+    let mut req =
+        crate::http::apply_source_headers(crate::http::client_for(state).get(url), headers);
     if let Some(tag) = etag {
         req = req.header(reqwest::header::IF_NONE_MATCH, tag);
     }
-    let resp = req.send().await?;
+    let resp = crate::http::send(req).await?;
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_MODIFIED {
         return Ok(Fetched::NotModified);

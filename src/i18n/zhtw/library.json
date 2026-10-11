@@ -12,7 +12,7 @@
   "summaryPaused_other": "{{count}} 個已暫停",
   "summaryAttention_one": "{{count}} 個需要處理",
   "summaryAttention_other": "{{count}} 個需要處理",
-  "statusQueued": "排隊中",
+  "statusQueued": "佇列中",
   "statusDownloading": "下載中",
   "statusPaused": "已暫停",
   "statusCompleted": "已完成",
@@ -125,7 +125,7 @@
   "downloadedEpisodes": "已下載的集數",
   "otherEpisodes": "其他集數",
   "seasonN": "第 {{season}} 季",
-  "nowPlaying": "正在播放",
+  "nowPlaying": "現正播放",
   "backToDetails": "返回詳細資訊",
   "backToLibrary": "返回我的影片",
   "detailNotFoundTitle": "此影片不在您的媒體庫中",
@@ -193,5 +193,6 @@
   "openFailed": "無法開啟 {{title}}",
   "removeFailed": "無法移除此項目",
   "sourceRemoved": "播放來源已移除",
-  "sourceRemovedHint": "此項目的播放來源已被移除。請重新新增該播放來源以開啟此項目。"
+  "sourceRemovedHint": "此項目的播放來源已被移除。請重新新增該播放來源以開啟此項目。",
+  "tryAgain": "重試"
 }

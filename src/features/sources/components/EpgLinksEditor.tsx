@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { EpgLinks } from '@/api/types';
 
-import { Badge, Button, IconButton, Input, Toggle } from '../_shim';
+import { Badge, Button, IconButton, Input, Toggle } from '@/ui';
 import { addManualEpgUrl, epgRows, removeManualEpgUrl, setEpgUrlEnabled } from '../lib/epgLinks';
 import { redactUrl } from '../lib/redact';
 import { Field } from './Field';

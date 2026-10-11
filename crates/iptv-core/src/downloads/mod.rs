@@ -58,6 +58,12 @@ pub fn set_rate_limit(state: &AppState, bytes_per_second: Option<u64>) {
     manager::manager(state).set_rate_limit(bytes_per_second);
 }
 
+/// Overrides how long pause/cancel/remove wait for a running transfer to stop
+/// before answering `Timeout` (`None` = 15 s). Test hook; not a C4 command.
+pub fn set_stop_timeout(state: &AppState, timeout: Option<std::time::Duration>) {
+    manager::manager(state).set_stop_timeout(timeout);
+}
+
 /// Public view of a row: live byte count for running transfers and derived
 /// `fileAvailable`.
 fn present(state: &AppState, mut d: Download) -> Download {
@@ -105,15 +111,24 @@ pub struct StartRequest {
     pub file_name_hint: Option<String>,
 }
 
-fn validate_url(url: &str) -> CoreResult<()> {
+/// Scheme check everywhere; in server mode also the SSRF guard, trusting
+/// only the item's source's own `host:port`.
+async fn validate_url(state: &AppState, url: &str, source_id: &str) -> CoreResult<()> {
     let parsed = url::Url::parse(url.trim())
         .map_err(|_| CoreError::Invalid("The download URL is not a valid address.".into()))?;
     match parsed.scheme() {
-        "http" | "https" => Ok(()),
-        other => Err(CoreError::Invalid(format!(
-            "Only http and https downloads are supported (got {other})."
-        ))),
+        "http" | "https" => {}
+        other => {
+            return Err(CoreError::Invalid(format!(
+                "Only http and https downloads are supported (got {other})."
+            )))
+        }
     }
+    if crate::http::is_server_mode(state) {
+        let trusted = crate::http::source_authority(state, source_id).await?;
+        crate::http::check_fetch(state, url, trusted.as_ref()).await?;
+    }
+    Ok(())
 }
 
 /// Starts (or reuses) the download for an item.
@@ -130,7 +145,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
         .item_ref
         .clone()
         .ok_or_else(|| CoreError::Invalid("ref is required".into()))?;
-    validate_url(&req.url)?;
+    validate_url(state, &req.url, &item_ref.source_id).await?;
     let title = req.title.trim().to_string();
     if title.is_empty() {
         return Err(CoreError::Invalid("A download needs a title.".into()));
@@ -215,7 +230,7 @@ pub async fn pause(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         _ => return Err(conflict(&d, "pause")),
     }
     match manager::manager(state).stop(id, StopReason::Pause) {
-        Stopped::Running(rx) => manager::wait_stopped(rx).await?,
+        Stopped::Running(rx) => manager::wait_stopped(state, rx).await?,
         Stopped::Dequeued | Stopped::Idle => {
             state
                 .db_call(move |c| {
@@ -320,7 +335,7 @@ pub async fn cancel(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         _ => {}
     }
     if let Stopped::Running(rx) = manager::manager(state).stop(id, StopReason::Cancel) {
-        manager::wait_stopped(rx).await?;
+        manager::wait_stopped(state, rx).await?;
         return Ok(());
     }
     cleanup_part(state, &d).await?;
@@ -359,7 +374,7 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
     if let Stopped::Running(rx) = manager::manager(state).stop(id, StopReason::Detach) {
         // On timeout the row and its files stay: deleting them under a
         // still-running task could orphan a recreated `.part`.
-        manager::wait_stopped(rx).await?;
+        manager::wait_stopped(state, rx).await?;
         d = get(state, id).await?;
     }
     let path = d.file_path.clone();
@@ -398,7 +413,7 @@ pub async fn completed_file(state: &Arc<AppState>, id: i64) -> CoreResult<PathBu
     match (d.file_available, d.file_path) {
         (Some(true), Some(p)) => Ok(PathBuf::from(p)),
         _ => Err(CoreError::NotFound(
-            "The downloaded file is missing. Download it again from the queue.".into(),
+            "The downloaded file is missing. Download it again from My Videos.".into(),
         )),
     }
 }
@@ -433,10 +448,17 @@ pub fn dir(state: &AppState) -> PathBuf {
     state.downloads_dir()
 }
 
-/// Validates that `path` is an absolute, existing, writable directory, then
+/// Why the downloads folder cannot change in server mode.
+pub const SERVER_DIR_MESSAGE: &str = "The downloads folder cannot be changed from the browser. Set IPTV_DATA_DIR on the server instead (downloads go to <data dir>/downloads).";
+
+/// Refuses in server mode (the folder is fixed to the data dir). Otherwise
+/// validates that `path` is an absolute, existing, writable directory, then
 /// stores it as `settings.downloadsDir` through [`crate::settings::save`]
 /// (an empty path resets to the default folder inside the data dir).
 pub async fn set_dir(state: &Arc<AppState>, path: &str) -> CoreResult<()> {
+    if crate::http::is_server_mode(state) {
+        return Err(CoreError::Unsupported(SERVER_DIR_MESSAGE.into()));
+    }
     let trimmed = path.trim().to_string();
     let value = if trimmed.is_empty() {
         None

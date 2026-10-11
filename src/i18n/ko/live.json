@@ -1,6 +1,6 @@
 {
   "addFavorite": "즐겨찾기에 추가",
-  "removeFavorite": "즐겨찾기에서 삭제",
+  "removeFavorite": "즐겨찾기에서 삭제하기",
   "toggleFavorite": "즐겨찾기 추가/삭제",
   "favoriteAdded": "{{name}}을(를) 즐겨찾기에 추가했습니다",
   "favoriteRemoved": "{{name}}을(를) 즐겨찾기에서 삭제했습니다",
@@ -27,7 +27,7 @@
   "channelNumber": "채널",
   "channels": "채널",
   "stations": "방송국",
-  "clearSearch": "검색어 지우기",
+  "clearSearch": "검색 지우기",
   "copyUrl": "스트림 주소 복사",
   "urlCopied": "스트림 주소를 복사했습니다",
   "copyFailed": "스트림 주소를 복사할 수 없습니다",
@@ -64,8 +64,8 @@
   "guideNoData": "이 채널들의 가이드 데이터가 아직 없습니다. XMLTV 주소를 추가하거나 EPG 소스를 새로 고치세요.",
   "guideNoSources": "아직 소스가 없습니다",
   "guideNoSourcesHint": "TV 가이드를 보려면 재생목록이나 포털을 추가하세요.",
-  "previousDay": "이전 날",
-  "nextDay": "다음 날",
+  "previousDay": "전날",
+  "nextDay": "다음날",
   "earlier": "3시간 전",
   "later": "3시간 후",
   "jumpToNow": "지금",
@@ -73,6 +73,7 @@
   "onNow": "방송 중",
   "minutesLeft_one": "{{count}}분 남음",
   "minutesLeft_other": "{{count}}분 남음",
+  "minutesLeftShort": "{{count}}분",
   "mapEpg": "가이드 채널 연결",
   "mappingAutomatic": "자동으로 연결",
   "mappingNone": "가이드 없음",
@@ -99,7 +100,7 @@
   "noGuideFor": "{{name}}의 가이드 데이터가 없습니다",
   "noGuideHint": "이 채널을 가이드 채널과 연결하거나 EPG 설정에서 XMLTV 주소를 추가하세요.",
   "noGuideShort": "가이드 데이터 없음",
-  "noSearchResults": "\"{{query}}\"와(과) 일치하는 채널이 없습니다",
+  "noSearchResults": "“{{query}}”와 일치하는 채널이 없습니다",
   "noSearchResultsInGroup": "{{group}} 안에서만 검색합니다.",
   "nowShowing": "방송 중: {{title}}",
   "play": "재생",
@@ -124,5 +125,5 @@
   "stationNumber": "{{number}}번 방송국",
   "watch": "시청",
   "watchCatchup": "아카이브 시청",
-  "watchLive": "실시간 시청"
+  "watchLive": "라이브 시청"
 }

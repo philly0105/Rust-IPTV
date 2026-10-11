@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcMutation, useRpcQuery } from '@/api/query';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useToast } from '../_shim';
+import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useToast } from '@/ui';
 
 export interface HiddenCategoriesDialogProps {
   open: boolean;

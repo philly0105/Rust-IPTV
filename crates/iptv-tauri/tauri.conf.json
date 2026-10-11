@@ -21,7 +21,9 @@
         "minHeight": 600,
         "resizable": true,
         "center": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msSmartScreenProtection,msWebOOUI,msPdfOOUI,msEdgeCollections,CalculateNativeWinOcclusion --renderer-process-limit=1 --disable-extensions --no-pre-read-main-dll --disable-background-networking"
       }
     ],
     "security": {
@@ -38,13 +40,17 @@
       },
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$DOWNLOAD/**", "$VIDEO/**"]
+        "scope": [
+          "$APPDATA/downloads/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "philly",
     "category": "Video",
     "shortDescription": "IPTV player with a Rust core",
@@ -64,8 +70,16 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["iptv"]
+        "schemes": [
+          "iptv"
+        ]
       }
+    },
+    "updater": {
+      "endpoints": [
+        "https://example.invalid/tsrust-iptv/latest.json"
+      ],
+      "pubkey": ""
     }
   }
 }

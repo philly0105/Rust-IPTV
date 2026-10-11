@@ -22,10 +22,10 @@ export interface ChannelPrograms {
 /**
  * Programmes for one channel's guide ribbon.
  * - xtream / m3u: the XMLTV guide (`epg.programs`).
- * - stalker: the portal's own guide (`stalker.epg`: the airing programme onwards), merged with
- *   the XMLTV guide when one resolves for the channel (a global EPG URL or a manual mapping).
- *   The portal wins where both cover the same time; XMLTV fills the rest, notably the past
- *   hours that catch-up needs.
+ * - stalker: the portal's own guide (`stalker.epg`: the airing programme onwards, plus the
+ *   archived programmes since `from` for a channel with an archive), merged with the XMLTV guide
+ *   when one resolves for the channel (a global EPG URL or a manual mapping). The portal wins
+ *   where both cover the same time; XMLTV fills the rest.
  */
 export function useChannelPrograms(channel: Channel | undefined, kind: SourceKind | undefined, from: number, to: number): ChannelPrograms {
   const ref = channel?.ref ?? EMPTY_REF;
@@ -35,7 +35,13 @@ export function useChannelPrograms(channel: Channel | undefined, kind: SourceKin
     { ref, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
     { enabled: !!channel, staleTime: 5 * 60_000 },
   );
-  const portal = useRpcQuery('stalker.epg', { ref, limit: STALKER_RIBBON_LIMIT }, { enabled: !!channel && isStalker, staleTime: 5 * 60_000 });
+  // `from` is the ribbon's floored window start, so the query key stays stable between renders.
+  const past = channel?.archive?.enabled ? { from: new Date(from).toISOString() } : {};
+  const portal = useRpcQuery(
+    'stalker.epg',
+    { ref, limit: STALKER_RIBBON_LIMIT, ...past },
+    { enabled: !!channel && isStalker, staleTime: 5 * 60_000 },
+  );
 
   const programs = useMemo(() => {
     const inWindow = (p: EpgProgram) => ms(p.end) > from && ms(p.start) < to;

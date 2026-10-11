@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { ImportPhase } from '@/api/types';
 
-import { ProgressBar } from '../_shim';
+import { ProgressBar } from '@/ui';
 import { formatCount } from '../lib/format';
 import { progressFraction, type ProgressEntry } from '../lib/progress';
 import { redactText } from '../lib/redact';
@@ -34,7 +34,7 @@ export function ImportProgressView({ entry, compact }: { entry: ProgressEntry | 
         <span className={phase === 'error' ? 'text-danger' : 'text-fg'}>{label}</span>
         {counts ? <span className="font-display tabular-nums text-fg-muted">{counts}</span> : null}
       </div>
-      <ProgressBar value={fraction === undefined ? undefined : fraction * 100} max={100} label={label} />
+      <ProgressBar value={(fraction ?? 0) * 100} indeterminate={fraction === undefined} max={100} label={label} />
       {entry?.message && !compact ? <p className="truncate text-xs text-fg-subtle">{redactText(entry.message)}</p> : null}
     </div>
   );

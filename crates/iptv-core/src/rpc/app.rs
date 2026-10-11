@@ -1,4 +1,5 @@
-//! `app.*` commands (C4): `app.info`, `app.openLogDir`, `app.openPath`, `app.ping`.
+//! `app.*` commands (C4): `app.info`, `app.openLogDir`, `app.openPath`, `app.ping`,
+//! `app.pendingDeepLinks`.
 
 use super::RpcRouter;
 use crate::error::RpcError;
@@ -31,6 +32,10 @@ pub fn register(r: &mut RpcRouter) {
     r.add("app.ping", |_s: Arc<AppState>, _: ()| async move {
         Ok(Pong { ok: true })
     });
+    r.add(
+        "app.pendingDeepLinks",
+        |s: Arc<AppState>, _: ()| async move { Ok(take_pending_deep_links(&s)) },
+    );
     r.add("app.openLogDir", |s: Arc<AppState>, _: ()| async move {
         ensure_desktop(&s)?;
         let dir = s.logs_dir();
@@ -49,6 +54,7 @@ pub fn register(r: &mut RpcRouter) {
 
 /// Builds the `app.info` payload.
 pub fn info(s: &AppState) -> AppInfo {
+    let desktop = s.ext::<DesktopInfo>(DESKTOP_INFO_KEY);
     AppInfo {
         version: AppState::version().to_string(),
         data_dir: s.data_dir.display().to_string(),
@@ -57,7 +63,70 @@ pub fn info(s: &AppState) -> AppInfo {
         log_file: crate::logging::current_log_file(&s.logs_dir())
             .display()
             .to_string(),
+        proxy_base: desktop
+            .as_ref()
+            .and_then(|d| d.proxy_base.clone())
+            .filter(|_| s.is_desktop),
+        updater_available: s.is_desktop && desktop.is_some_and(|d| d.updater_available),
     }
+}
+
+/// `AppState.extensions` key of [`DesktopInfo`].
+pub const DESKTOP_INFO_KEY: &str = "app.desktop_info";
+
+/// Facts only the desktop shell knows, reported by `app.info`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopInfo {
+    /// Loopback media proxy base (`http://127.0.0.1:<port>/api/proxy`).
+    pub proxy_base: Option<String>,
+    /// Built with the `updater` feature.
+    pub updater_available: bool,
+}
+
+/// Registers the desktop shell's facts (called by iptv-tauri at boot).
+pub fn set_desktop_info(s: &AppState, info: DesktopInfo) {
+    s.set_ext(DESKTOP_INFO_KEY, Arc::new(info));
+}
+
+/// `AppState.extensions` key of [`PendingDeepLinks`].
+pub const PENDING_DEEPLINKS_KEY: &str = "app.pending_deeplinks";
+
+/// Deep links that arrived before the UI asked for them.
+#[derive(Default)]
+pub struct PendingDeepLinks {
+    inner: parking_lot::Mutex<(bool, Vec<String>)>,
+}
+
+fn pending(s: &AppState) -> Arc<PendingDeepLinks> {
+    s.ext_or_insert_with(PENDING_DEEPLINKS_KEY, || {
+        Arc::new(PendingDeepLinks::default())
+    })
+}
+
+/// Hands deep links to the UI. Until the UI has called
+/// `app.pendingDeepLinks` once they are queued (the webview is not listening
+/// yet on a cold start); afterwards they go out live as `deeplink.open`.
+pub fn deliver_deep_links(s: &AppState, urls: Vec<String>) {
+    if urls.is_empty() {
+        return;
+    }
+    let p = pending(s);
+    let mut g = p.inner.lock();
+    if g.0 {
+        drop(g);
+        s.emit("deeplink.open", serde_json::json!({ "urls": urls }));
+    } else {
+        g.1.extend(urls);
+    }
+}
+
+/// `app.pendingDeepLinks`: returns and clears the queue and switches
+/// [`deliver_deep_links`] to live delivery.
+pub fn take_pending_deep_links(s: &AppState) -> Vec<String> {
+    let p = pending(s);
+    let mut g = p.inner.lock();
+    g.0 = true;
+    std::mem::take(&mut g.1)
 }
 
 fn ensure_desktop(s: &AppState) -> Result<(), RpcError> {
@@ -126,6 +195,41 @@ fn open_with_os(path: &Path) -> Result<(), RpcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn deep_links_queue_until_pulled_then_go_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sink, mut rx) = crate::events::BroadcastSink::channel(16);
+        let s = AppState::new(dir.path().to_path_buf(), Arc::new(sink), true)
+            .await
+            .unwrap();
+        deliver_deep_links(&s, vec!["iptv://a".into()]);
+        deliver_deep_links(&s, vec!["iptv://b".into()]);
+        assert!(rx.try_recv().is_err(), "queued links must not be emitted");
+        assert_eq!(take_pending_deep_links(&s), ["iptv://a", "iptv://b"]);
+        assert!(take_pending_deep_links(&s).is_empty());
+        deliver_deep_links(&s, vec!["iptv://c".into()]);
+        let ev = rx.recv().await.unwrap();
+        assert_eq!(ev.kind, "deeplink.open");
+        assert_eq!(ev.payload["urls"][0], "iptv://c");
+        assert!(take_pending_deep_links(&s).is_empty());
+
+        // app.info reports the shell's facts only on desktop.
+        assert_eq!(info(&s).proxy_base, None);
+        set_desktop_info(
+            &s,
+            DesktopInfo {
+                proxy_base: Some("http://127.0.0.1:1/api/proxy".into()),
+                updater_available: true,
+            },
+        );
+        let i = info(&s);
+        assert_eq!(
+            i.proxy_base.as_deref(),
+            Some("http://127.0.0.1:1/api/proxy")
+        );
+        assert!(i.updater_available);
+    }
 
     #[test]
     fn open_path_validation() {

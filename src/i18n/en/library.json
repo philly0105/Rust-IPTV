@@ -193,5 +193,6 @@
   "openFailed": "Could not open {{title}}",
   "removeFailed": "Could not remove the item",
   "sourceRemoved": "Source removed",
-  "sourceRemovedHint": "The source for this item was removed. Add it again to open the item."
+  "sourceRemovedHint": "The source for this item was removed. Add it again to open the item.",
+  "tryAgain": "Try again"
 }

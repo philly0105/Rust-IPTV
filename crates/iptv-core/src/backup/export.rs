@@ -1,41 +1,143 @@
 //! Manifest v1 export (C15).
 
 use super::{load_sources, ExportResult, BACKUP_KIND, BACKUP_VERSION};
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, M3uOrigin, Source, SourceKind};
 use crate::state::AppState;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde_json::{json, Map, Value};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 /// Builds the export for `backup.export`.
-pub async fn export(state: &AppState, include_secrets: bool) -> CoreResult<ExportResult> {
-    let epg_urls = state.settings_snapshot().epg_urls;
-    let manifest = state
-        .db_call(move |c| build_manifest(c, &epg_urls, include_secrets))
+///
+/// Without `path` the manifest comes back as `json` for the UI to download.
+/// With `path` (desktop only, from the native save dialog) the core writes the
+/// file itself, atomically, and returns `json: ""` plus the saved `path`.
+pub async fn export(
+    state: &AppState,
+    include_secrets: bool,
+    path: Option<&str>,
+) -> CoreResult<ExportResult> {
+    let target = match path {
+        Some(p) => Some(validate_target(state, p)?),
+        None => None,
+    };
+    let settings = state.settings_snapshot();
+    let epg_urls = settings.epg_urls.clone();
+    let data_dir = state.data_dir.clone();
+    let mut manifest = state
+        .db_call(move |c| build_manifest(c, &data_dir, &epg_urls, include_secrets))
         .await?;
+    add_app_settings(&mut manifest, &serde_json::to_value(&settings)?);
     let json = serde_json::to_string_pretty(&manifest)?;
     let date = chrono::Utc::now().format("%Y-%m-%d");
-    tracing::info!(
-        playlists = manifest["playlists"].as_array().map_or(0, Vec::len),
-        include_secrets,
-        "backup exported"
-    );
+    let playlists = manifest["playlists"].as_array().map_or(0, Vec::len);
+    let Some(target) = target else {
+        tracing::info!(playlists, include_secrets, "backup exported");
+        return Ok(ExportResult {
+            json,
+            file_name: format!("tsrust-iptv-backup-{date}.json"),
+            path: None,
+        });
+    };
+    let t = target.clone();
+    tokio::task::spawn_blocking(move || write_atomic(&t, json.as_bytes()))
+        .await
+        .map_err(|e| CoreError::Other(anyhow::anyhow!("backup write task failed: {e}")))??;
+    tracing::info!(playlists, include_secrets, path = %target.display(), "backup written");
     Ok(ExportResult {
-        json,
-        file_name: format!("tsrust-iptv-backup-{date}.json"),
+        json: String::new(),
+        file_name: target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path: Some(target.to_string_lossy().into_owned()),
     })
+}
+
+/// Checks a `backup.export` target: desktop only, absolute, inside an
+/// existing folder outside the app data dir, not a folder itself. Returns the
+/// path with its parent canonicalized (symlinks and `..` resolved).
+fn validate_target(state: &AppState, raw: &str) -> CoreResult<PathBuf> {
+    if !state.is_desktop {
+        return Err(CoreError::Unsupported(
+            "Saving a backup to a file path is only available in the desktop app. Download the backup instead.".into(),
+        ));
+    }
+    let raw = raw.trim();
+    let p = Path::new(raw);
+    if raw.is_empty() || !p.is_absolute() {
+        return Err(CoreError::invalid(
+            "The backup path must be an absolute file path.",
+        ));
+    }
+    let (Some(parent), Some(name)) = (p.parent(), p.file_name()) else {
+        return Err(CoreError::invalid("The backup path must name a file."));
+    };
+    let parent = std::fs::canonicalize(parent).map_err(|_| {
+        CoreError::invalid(format!(
+            "The folder {} does not exist. Choose another location.",
+            parent.display()
+        ))
+    })?;
+    let target = parent.join(name);
+    if target.is_dir() {
+        return Err(CoreError::invalid(
+            "The backup path points at a folder. Choose a file name.",
+        ));
+    }
+    let data_dir =
+        std::fs::canonicalize(&state.data_dir).unwrap_or_else(|_| state.data_dir.clone());
+    if target.starts_with(&data_dir) || state.is_in_data_dir(p) {
+        return Err(CoreError::invalid(
+            "Backups cannot be saved inside the app's data folder. Choose another location.",
+        ));
+    }
+    Ok(target)
+}
+
+/// Writes `bytes` to a hidden temp file next to `target`, flushes it to disk
+/// and renames it over `target`, so a crash never leaves a half-written
+/// backup. The temp file is removed when any step fails.
+fn write_atomic(target: &Path, bytes: &[u8]) -> CoreResult<()> {
+    let dir = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "backup.json".into());
+    let tmp = dir.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let res = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, target)
+    })();
+    if let Err(err) = res {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(CoreError::Io(std::io::Error::new(
+            err.kind(),
+            format!("Could not write the backup to {}: {err}", target.display()),
+        )));
+    }
+    Ok(())
 }
 
 /// The manifest as JSON (one entry per source, in `sources.list` order).
 pub fn build_manifest(
     conn: &Connection,
+    data_dir: &Path,
     epg_urls: &[String],
     include_secrets: bool,
 ) -> CoreResult<Value> {
     let mut playlists = Vec::new();
     for s in load_sources(conn)? {
         let entry = match s.kind {
-            SourceKind::M3u => m3u_entry(conn, &s)?,
+            SourceKind::M3u => m3u_entry(conn, data_dir, &s)?,
             SourceKind::Xtream => xtream_entry(conn, &s, include_secrets)?,
             SourceKind::Stalker => stalker_entry(conn, &s, include_secrets)?,
         };
@@ -52,6 +154,24 @@ pub fn build_manifest(
     }
     m.insert("playlists".into(), Value::Array(playlists));
     Ok(Value::Object(m))
+}
+
+/// Adds [`super::APP_SETTING_KEYS`] to the manifest's `settings` object
+/// (created with an empty `epgUrls`, which IPTVnator requires, when absent).
+fn add_app_settings(manifest: &mut Value, settings: &Value) {
+    let Some(m) = manifest.as_object_mut() else {
+        return;
+    };
+    let target = m
+        .entry("settings")
+        .or_insert_with(|| json!({ "epgUrls": [] }));
+    if let Some(t) = target.as_object_mut() {
+        for k in super::APP_SETTING_KEYS {
+            if let Some(v) = settings.get(k) {
+                t.insert(k.into(), v.clone());
+            }
+        }
+    }
 }
 
 fn base(s: &Source, portal_type: &str) -> Map<String, Value> {
@@ -83,15 +203,12 @@ fn ts(v: &str) -> String {
 // m3u
 // ---------------------------------------------------------------------------
 
-fn m3u_entry(conn: &Connection, s: &Source) -> CoreResult<Value> {
+fn m3u_entry(conn: &Connection, data_dir: &Path, s: &Source) -> CoreResult<Value> {
     let cfg = s.m3u.clone();
-    let raw: String = conn
-        .query_row(
-            "SELECT raw FROM m3u_raw WHERE source_id = ?1",
-            [&s.id],
-            |r| r.get(0),
-        )
-        .optional()?
+    // Large playlists live on disk with an empty `m3u_raw.raw`; `stored_text`
+    // reads whichever copy holds the text.
+    let raw = crate::m3u::stored_text(conn, data_dir, &s.id)?
+        .map(|(text, _, _)| text)
         .unwrap_or_default();
     if raw.is_empty() {
         tracing::warn!(source_id = %s.id, "m3u source has no stored playlist text; exported entry will be empty");
@@ -287,7 +404,7 @@ fn xtream_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRes
     let mut positions = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json
+            "SELECT content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched
              FROM playback_positions WHERE source_id = ?1 ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([&s.id], |r| {
@@ -299,10 +416,11 @@ fn xtream_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRes
                 r.get::<_, Option<i64>>(4)?,
                 r.get::<_, String>(5)?,
                 r.get::<_, Option<String>>(6)?,
+                r.get::<_, i64>(7)? != 0,
             ))
         })?;
         for row in rows {
-            let (ct, item, ep, pos, dur, updated_at, snap) = row?;
+            let (ct, item, ep, pos, dur, updated_at, snap, watched) = row?;
             let mut m = Map::new();
             match (ct.as_str(), ep.is_empty()) {
                 ("movie", true) => {
@@ -336,6 +454,11 @@ fn xtream_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRes
             }
             m.insert("playlistId".into(), json!(s.id));
             m.insert("updatedAt".into(), json!(ts(&updated_at)));
+            // Tsrust extension (IPTVnator ignores unknown keys); only when set
+            // so unwatched entries keep the old app's exact shape.
+            if watched {
+                m.insert("watched".into(), json!(true));
+            }
             positions.push(Value::Object(m));
         }
     }

@@ -30,7 +30,24 @@ vi.mock('@/features/player', () => ({
 
 const { ShellLayout } = await import('../ShellLayout');
 const { shellRoutes } = await import('../routes');
-const { useShellStore } = await import('../store');
+const { useShell, useShellStore } = await import('../store');
+const { sharedRailError } = await import('../dashboard/DashboardPage');
+const { RpcError } = await import('@/api/transport');
+const { useEffect } = await import('react');
+
+/** A page that fills the context panel with two links. */
+function PanelPage() {
+  const shell = useShell();
+  useEffect(() => {
+    shell.setContextPanel(
+      <div>
+        <a href="#one">Panel link one</a>
+        <a href="#two">Panel link two</a>
+      </div>,
+    );
+  }, [shell]);
+  return <Page>panel page</Page>;
+}
 const { useThemeStore } = await import('../theme');
 const { useToastStore } = await import('@/ui');
 
@@ -42,6 +59,7 @@ function routes() {
       children: [
         ...shellRoutes,
         { path: 'favorites', element: <Page>favorites page</Page> },
+        { path: 'panel', element: <PanelPage /> },
         { path: 'recent', element: <Page>recent page</Page> },
         { path: 'search', element: <Page>search page</Page> },
         { path: 'sources', element: <Page>sources page</Page> },
@@ -61,7 +79,7 @@ function baseHandlers(opts: { sources?: number } = {}) {
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   h['sources.list'] = () => sources;
   h['positions.continueWatching'] = (): PlaybackPosition[] => [
-    { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('The Long Signal') },
+    { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('The Long Signal') },
   ];
   h['favorites.list'] = (): FavoriteEntry[] => [
     { ref: { sourceId: 's1', contentType: 'live', itemId: '1' }, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: snapshot('Harbor News', 'live') },
@@ -256,6 +274,78 @@ describe('ShellLayout', () => {
     act(() => events.handlers.get('import.progress')!({ sourceId: 's1', phase: 'done', done: 200 }));
     expect(await screen.findByText('Night Portal is ready')).toBeTruthy();
   });
+
+  it('import errors toast a translated summary, and stay quiet while the Add Source dialog shows them', async () => {
+    useToastStore.setState({ toasts: [] });
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('Night Portal');
+    await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
+    const emit = events.handlers.get('import.progress')!;
+
+    act(() => emit({ sourceId: 's1', phase: 'error', done: 0, message: 'error sending request for url (http://127.0.0.1:7399/x.m3u)' }));
+    const err = useToastStore.getState().toasts.find((t) => t.id === 'import-s1');
+    expect(err?.title).toBe("Night Portal didn't import");
+    expect(err?.description).toBe("Couldn't reach the server. Check the source URL and sign-in details, then refresh it.");
+    expect(String(err?.description)).not.toContain('error sending request');
+
+    // Unknown (just-created) source: the generic name, never a blank one.
+    act(() => emit({ sourceId: 'new-one', phase: 'error', done: 0, message: 'boom' }));
+    expect(useToastStore.getState().toasts.find((t) => t.id === 'import-new-one')?.title).toBe("This source didn't import");
+
+    // The open Add Source dialog claims the source it created: no second error surface.
+    const { claimImportErrors } = await import('@/features/sources/lib/errors');
+    const release = claimImportErrors((id) => id === 'claimed');
+    act(() => emit({ sourceId: 'claimed', phase: 'error', done: 0, message: 'HTTP 404 not found' }));
+    expect(useToastStore.getState().toasts.some((t) => t.id === 'import-claimed')).toBe(false);
+    release();
+    act(() => emit({ sourceId: 'claimed', phase: 'error', done: 0, message: 'HTTP 404 not found' }));
+    expect(useToastStore.getState().toasts.find((t) => t.id === 'import-claimed')?.description).toMatch(/^The server has no playlist at that address\./);
+  });
+});
+
+describe('ContextPanel drawer (below 1440 px)', () => {
+  it('is a modal dialog that traps focus, and the toggle exposes aria-expanded', async () => {
+    renderRoutes(routes(), '/panel');
+    await screen.findByText('panel page');
+    const toggle = await screen.findByTestId('panel-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(toggle.hasAttribute('aria-pressed')).toBe(false);
+    toggle.focus();
+    fireEvent.click(toggle);
+
+    const drawer = await screen.findByRole('dialog', { name: 'Details' });
+    expect(drawer.getAttribute('aria-modal')).toBe('true');
+    expect(drawer.getAttribute('data-testid')).toBe('context-panel');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(within(drawer).getByText('Panel link one'));
+
+    // Tab past the last link wraps inside the drawer instead of reaching the page behind the scrim.
+    const last = within(drawer).getByText('Panel link two');
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(drawer.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Details' })).toBeNull());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(toggle);
+  });
+});
+
+describe('sharedRailError', () => {
+  const down = new RpcError('network', 'server unreachable');
+  it('collapses two or more identical failures', () => {
+    expect(sharedRailError([down, new RpcError('network', 'server unreachable'), { code: 'network', message: 'server unreachable' }])).toBe(down);
+  });
+  it('keeps per-rail errors when any rail succeeded, is loading, or failed differently', () => {
+    expect(sharedRailError([down])).toBeUndefined();
+    expect(sharedRailError([down, null])).toBeUndefined();
+    expect(sharedRailError([null, down])).toBeUndefined();
+    expect(sharedRailError([down, new RpcError('network', 'other')])).toBeUndefined();
+    expect(sharedRailError([down, new RpcError('timeout', 'server unreachable')])).toBeUndefined();
+    expect(sharedRailError([])).toBeUndefined();
+  });
 });
 
 describe('DashboardPage', () => {
@@ -315,6 +405,51 @@ describe('DashboardPage', () => {
     fail = false;
     fireEvent.click(within(rail).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull());
+  });
+
+  it('collapses identical failures of every rail into one dashboard error with one retry', async () => {
+    let fail = true;
+    const failing = (ok: (args: unknown) => unknown) => (args: unknown) => {
+      if (fail) throw { code: 'network', message: 'down' };
+      return ok(args);
+    };
+    const h = rpcMock.handlers;
+    h['positions.continueWatching'] = failing(h['positions.continueWatching']!);
+    h['favorites.list'] = failing(h['favorites.list']!);
+    h['recent.list'] = failing(h['recent.list']!);
+    h['catalog.recentlyAdded'] = failing(() => []);
+    renderRoutes(routes(), '/dashboard');
+
+    const banner = await screen.findByTestId('dashboard-error');
+    expect(within(banner).getByText("Can't reach the server")).toBeTruthy();
+    expect(screen.getAllByText("Can't reach the server")).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+    for (const id of ['continue-watching', 'live-favorites', 'recent-live', 'favorite-vod', 'recently-added']) {
+      expect(screen.queryByTestId(`dashboard-rail-${id}`)).toBeNull();
+    }
+    // Not "nothing to watch yet": the dashboard failed, it is not empty.
+    expect(screen.queryByText('Nothing to show yet')).toBeNull();
+    // Sources still loaded, so their rail stays.
+    expect(screen.getByTestId('dashboard-rail-recent-sources')).toBeTruthy();
+
+    fail = false;
+    fireEvent.click(within(banner).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByTestId('dashboard-rail-live-favorites')).toBeTruthy();
+    expect(screen.queryByTestId('dashboard-error')).toBeNull();
+    expect(await screen.findByTestId('dashboard-hero')).toBeTruthy();
+  });
+
+  it('keeps per-rail errors when rails fail differently', async () => {
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'network', message: 'down' };
+    };
+    rpcMock.handlers['recent.list'] = () => {
+      throw { code: 'internal', message: 'database is locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(await within(live).findByText("Can't reach the server")).toBeTruthy();
+    expect(screen.queryByTestId('dashboard-error')).toBeNull();
   });
 
   it('arrow keys move between cards and rails', async () => {

@@ -67,6 +67,7 @@ beforeEach(() => {
   h['xtream.vodDetail'] = (): VodDetail => ({
     item: { ...movie(7), title: 'Dune: Part Two', containerExtension: 'mkv' },
     cast: [],
+    providerDetailsUnavailable: false,
     backdrops: ['http://img/backdrop.jpg'],
   });
   h['xtream.seriesDetail'] = (): SeriesDetail => ({
@@ -77,6 +78,7 @@ beforeEach(() => {
       { number: 3, episodes: [ep('e31', 3, 1)] },
     ],
     cast: [],
+    providerDetailsUnavailable: false,
     backdrops: ['http://img/backdrop.jpg'],
   });
   h['tmdb.movie'] = () => null;

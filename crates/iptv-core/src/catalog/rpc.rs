@@ -11,6 +11,10 @@ use std::sync::Arc;
 /// Default per-type limit of `catalog.search`.
 pub const DEFAULT_SEARCH_LIMIT: usize = 30;
 
+/// Largest per-type limit of `catalog.search`. The UI steps 60/200/1000 and
+/// asks for one extra row to learn whether more exist, hence 1000 + 1.
+pub const MAX_SEARCH_LIMIT: usize = 1001;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CategoriesArgs {
@@ -73,6 +77,9 @@ pub struct RefArgs {
 pub struct ChannelByNumberArgs {
     pub source_id: String,
     pub number: i64,
+    /// `live` or `radio`; omitted searches both, live first.
+    #[serde(default)]
+    pub content_type: Option<ContentType>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,7 +249,7 @@ pub async fn channel_by_number(
     a: ChannelByNumberArgs,
 ) -> Result<Option<Channel>, RpcError> {
     let row = state
-        .db_call(move |c| super::channel_by_number(c, &a.source_id, a.number))
+        .db_call(move |c| super::channel_by_number(c, &a.source_id, a.number, a.content_type))
         .await?;
     Ok(row.map(NamedRow::into_channel))
 }
@@ -267,7 +274,10 @@ pub async fn neighbors(
 }
 
 pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult, RpcError> {
-    let limit = a.limit.unwrap_or(DEFAULT_SEARCH_LIMIT).clamp(1, 200);
+    let limit = a
+        .limit
+        .unwrap_or(DEFAULT_SEARCH_LIMIT)
+        .clamp(1, MAX_SEARCH_LIMIT);
     let wanted = a.content_types.unwrap_or_else(|| ContentType::ALL.to_vec());
     state
         .db_call(move |c| {

@@ -111,7 +111,7 @@ pub async fn sync_source(
     plan: SyncPlan,
 ) -> CoreResult<ImportSummary> {
     let client = XtreamClient::new(state.http.clone(), cfg)?;
-    tracing::info!(source_id, server = %client.server, user = %client.username, ?plan, "xtream sync start");
+    tracing::info!(source_id, server = %client.server, user = %client.masked_username(), ?plan, "xtream sync start");
     progress(&state, source_id, "fetching", 0, None, Some("account"));
     let account = client.account().await?;
     let server_meta = ServerMeta::from_account(&account);

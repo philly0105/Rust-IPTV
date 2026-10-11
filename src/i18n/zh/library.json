@@ -13,7 +13,7 @@
   "summaryAttention_one": "{{count}} 个需要处理",
   "summaryAttention_other": "{{count}} 个需要处理",
   "statusQueued": "排队中",
-  "statusDownloading": "正在下载",
+  "statusDownloading": "下载中",
   "statusPaused": "已暂停",
   "statusCompleted": "已完成",
   "statusFailed": "失败",
@@ -193,5 +193,6 @@
   "openFailed": "无法打开 {{title}}",
   "removeFailed": "无法移除该项目",
   "sourceRemoved": "播放源已移除",
-  "sourceRemovedHint": "此项目的播放源已被移除。请重新添加该播放源以打开此项目。"
+  "sourceRemovedHint": "此项目的播放源已被移除。请重新添加该播放源以打开此项目。",
+  "tryAgain": "重试"
 }

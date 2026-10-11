@@ -6,7 +6,18 @@ import { favorites, resetApp, rpc } from './helpers/api';
 import { MOCK, MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
 import { expectPlaying, resumeRecord } from './helpers/media';
-import { addM3uFromFile, addM3uFromText, addM3uFromUrl, blurFocus, channelButton, channelList, channelRow, gotoLive, playerRegion } from './helpers/ui';
+import {
+  addM3uFromFile,
+  addM3uFromText,
+  addM3uFromUrl,
+  blurFocus,
+  channelButton,
+  channelList,
+  channelRow,
+  expectCardStat,
+  gotoLive,
+  playerRegion,
+} from './helpers/ui';
 
 // Check 7 (SC5): M3U from URL, pasted text and file upload; groups; search;
 // number zap; favorites; EPG ribbon now/next from the playlist's XMLTV.
@@ -36,12 +47,15 @@ test.describe.serial('m3u flow', () => {
     source = await addM3uFromUrl(page, URL_NAME);
     expect(source.kind).toBe('m3u');
     expect(source.channelCount).toBe(MOCK_FACTS.m3uChannels);
+    expect(source.radioCount).toBe(MOCK_FACTS.m3uRadio);
     // The playlist header's url-tvg becomes a detected EPG url.
     expect(source.epg.detectedUrls.some((u) => u.includes('/xmltv/sample.xml'))).toBe(true);
+    await expectCardStat(page, URL_NAME, /^channels$/, MOCK_FACTS.m3uChannels);
+    await expectCardStat(page, URL_NAME, /^radio$/, MOCK_FACTS.m3uRadio);
 
     await gotoLive(page, source.id);
     const groups = page.getByRole('navigation', { name: 'Groups' });
-    await expect(groups.getByRole('link', { name: new RegExp(`^All channels ${MOCK_FACTS.m3uLiveChannels}$`) })).toBeVisible();
+    await expect(groups.getByRole('link', { name: new RegExp(`^All channels ${MOCK_FACTS.m3uChannels}$`) })).toBeVisible();
     for (const g of MOCK_FACTS.m3uGroups) {
       await expect(groups.getByRole('link', { name: new RegExp(`^${g} \\d+$`) })).toBeVisible();
     }
@@ -82,12 +96,12 @@ test.describe.serial('m3u flow', () => {
 
     const ribbon = page.getByTestId('epg-ribbon');
     await expect(ribbon).toBeVisible();
-    const now = ribbon.getByRole('button', { name: /, on now$/ });
+    const now = ribbon.getByRole('button', { name: /, on now(, start over available)?$/ });
     await expect(now).toHaveCount(1);
     // The programme after "now" is in the timeline too.
     const blocks = ribbon.getByRole('group', { name: 'Timeline' }).getByRole('button');
     const labels = await blocks.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? e.textContent ?? ''));
-    const nowIndex = labels.findIndex((l) => /on now$/.test(l));
+    const nowIndex = labels.findIndex((l) => /, on now(, start over available)?$/.test(l));
     expect(nowIndex).toBeGreaterThanOrEqual(0);
     expect(labels.length, 'a next programme follows the current one').toBeGreaterThan(nowIndex + 1);
 
@@ -139,6 +153,7 @@ test.describe.serial('m3u flow', () => {
     const text = (await readFile(resolve(import.meta.dirname, '../fixtures/sample.m3u'), 'utf8')).replaceAll('http://127.0.0.1:7290', MOCK);
     const fromFile = await addM3uFromFile(page, 'M3U from file', { name: 'sample.m3u', buffer: Buffer.from(text, 'utf8') });
     expect(fromFile.channelCount).toBe(MOCK_FACTS.m3uChannels);
+    expect(fromFile.radioCount).toBe(MOCK_FACTS.m3uRadio);
     await gotoLive(page, fromFile.id);
     await expect(channelButton(page, 'BBC One')).toBeVisible();
   });

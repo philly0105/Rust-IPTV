@@ -147,7 +147,7 @@
   "groupLive": "ライブとラジオ",
   "groupMovies": "映画",
   "groupSeries": "シリーズ",
-  "favoritesEmptyTitle": "お気に入りはまだありません",
+  "favoritesEmptyTitle": "まだお気に入りがありません",
   "favoritesEmptyBody": "どのソースのチャンネル、映画、シリーズでも、星を付けるとここにまとめられます。",
   "favoritesEmptySourceBody": "このソースのチャンネル、映画、シリーズに星を付けると、ここにまとめられます。",
   "favoriteRemoved": "{{title}}をお気に入りから削除しました",
@@ -182,7 +182,7 @@
   "continueWatching": "視聴を再開",
   "continueTitle": "{{title}}を{{time}}から再開",
   "removeContinue": "{{title}}を「視聴を再開」から削除",
-  "watchedPercent": "{{percent}}%視聴済み",
+  "watchedPercent": "{{percent}}% 視聴済み",
 
   "typeLive": "ライブチャンネル",
   "typeMovie": "映画",
@@ -193,5 +193,6 @@
   "openFailed": "{{title}}を開けませんでした",
   "removeFailed": "項目を削除できませんでした",
   "sourceRemoved": "ソースが削除されました",
-  "sourceRemovedHint": "この項目のソースは削除されています。開くには、ソースを再度追加してください。"
+  "sourceRemovedHint": "この項目のソースは削除されています。開くには、ソースを再度追加してください。",
+  "tryAgain": "再試行"
 }

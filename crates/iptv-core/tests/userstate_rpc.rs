@@ -85,6 +85,7 @@ async fn registers_every_command() {
         "positions.forSeries",
         "positions.continueWatching",
         "positions.remove",
+        "userstate.setWatched",
     ] {
         assert!(r.contains(name), "{name} not registered");
     }
@@ -368,4 +369,121 @@ async fn positions_complete_series_and_continue_watching() {
         .await
         .unwrap_err();
     assert_eq!(err.code, RpcErrorCode::Invalid);
+}
+
+#[tokio::test]
+async fn set_watched_marks_clears_and_hides_from_continue_watching() {
+    let (_d, s) = app().await;
+    let r = router();
+    let show = rf("s1", "series", "301");
+    let movie = rf("s1", "movie", "201");
+
+    call(
+        &r,
+        &s,
+        "positions.set",
+        json!({"ref": show, "episodeId": "e1", "positionSeconds": 120, "durationSeconds": 1500}),
+    )
+    .await;
+    call(
+        &r,
+        &s,
+        "positions.set",
+        json!({"ref": movie, "positionSeconds": 60, "durationSeconds": 6000}),
+    )
+    .await;
+    let cw = call(&r, &s, "positions.continueWatching", json!({"limit": 10})).await;
+    assert_eq!(cw.as_array().unwrap().len(), 2);
+    assert_eq!(cw[0]["watched"], false);
+
+    // Mark the episode watched: position jumps to the duration, card disappears.
+    call(
+        &r,
+        &s,
+        "userstate.setWatched",
+        json!({"ref": show, "episodeId": "e1", "watched": true}),
+    )
+    .await;
+    let p = call(
+        &r,
+        &s,
+        "positions.get",
+        json!({"ref": show, "episodeId": "e1"}),
+    )
+    .await;
+    assert_eq!(p["watched"], true);
+    assert_eq!(p["positionSeconds"], 1500);
+    let cw = call(&r, &s, "positions.continueWatching", json!({"limit": 10})).await;
+    assert_eq!(ids(&cw), vec!["201"]);
+
+    // An episode without any row yet: inserted as watched.
+    call(
+        &r,
+        &s,
+        "userstate.setWatched",
+        json!({"ref": show, "episodeId": "e2", "watched": true}),
+    )
+    .await;
+    let series = call(&r, &s, "positions.forSeries", json!({"ref": show})).await;
+    let watched: Vec<bool> = series
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["watched"].as_bool().unwrap())
+        .collect();
+    assert_eq!(watched, vec![true, true]);
+
+    // Progress reported later keeps the flag; finishing does not drop the row.
+    call(
+        &r,
+        &s,
+        "positions.set",
+        json!({"ref": show, "episodeId": "e1", "positionSeconds": 1490, "durationSeconds": 1500}),
+    )
+    .await;
+    let p = call(
+        &r,
+        &s,
+        "positions.get",
+        json!({"ref": show, "episodeId": "e1"}),
+    )
+    .await;
+    assert_eq!(p["watched"], true);
+
+    // Unwatched clears the row.
+    call(
+        &r,
+        &s,
+        "userstate.setWatched",
+        json!({"ref": show, "episodeId": "e1", "watched": false}),
+    )
+    .await;
+    let p = call(
+        &r,
+        &s,
+        "positions.get",
+        json!({"ref": show, "episodeId": "e1"}),
+    )
+    .await;
+    assert!(p.is_null());
+
+    // Item-level (movie) mark; unknown source is NotFound.
+    call(
+        &r,
+        &s,
+        "userstate.setWatched",
+        json!({"ref": movie, "watched": true}),
+    )
+    .await;
+    let cw = call(&r, &s, "positions.continueWatching", json!({"limit": 10})).await;
+    assert!(cw.as_array().unwrap().is_empty());
+    let err = r
+        .dispatch(
+            s.clone(),
+            "userstate.setWatched",
+            json!({"ref": rf("nope", "movie", "1"), "watched": true}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::NotFound);
 }

@@ -3,7 +3,7 @@ import { resetApp } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
 import { favoriteFromDetail, openCatchup, openMovieFromGrid, playFirstEpisode, playFirstLiveChannel, playMovieOnDetail, searchFindsMovie } from './helpers/portal';
-import { addXtream } from './helpers/ui';
+import { addXtream, expectCardStat } from './helpers/ui';
 
 // Check 6 (SC4), Xtream half: add the mock portal through the UI, browse
 // live/movies/series, open details, play, favorite, search, catch-up.
@@ -21,11 +21,13 @@ test.describe.serial('xtream flow', () => {
     source = await addXtream(page, NAME);
     expect(source.kind).toBe('xtream');
     expect(source.channelCount).toBe(MOCK_FACTS.xtreamLive);
+    expect(source.radioCount).toBe(MOCK_FACTS.xtreamRadio);
     expect(source.movieCount).toBe(MOCK_FACTS.xtreamMovies);
     expect(source.seriesCount).toBe(MOCK_FACTS.xtreamSeries);
     // Sync records the portal's XMLTV endpoint as a detected guide.
     expect(source.epg.detectedUrls.some((u) => u.includes('/xtream/xmltv.php'))).toBe(true);
-    await expect(page.getByTestId('source-card').filter({ hasText: NAME })).toContainText('40');
+    await expectCardStat(page, NAME, /^channels$/, MOCK_FACTS.xtreamLive);
+    await expectCardStat(page, NAME, /^radio$/, MOCK_FACTS.xtreamRadio);
   });
 
   test('live: browse groups and play a channel', async ({ page }) => {

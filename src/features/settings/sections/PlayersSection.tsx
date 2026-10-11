@@ -5,11 +5,11 @@ import { useTranslation } from 'react-i18next';
 import { invalidate } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, IconButton } from '../../sources/_shim';
+import { Button, IconButton } from '@/ui';
 import { pickExecutableDesktop } from '../../sources/lib/files';
-import { CommitInput, SettingsGroup, SettingsRow, SettingsSection } from '../components';
+import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { cleanPath, optionalStringPatch, validateArgs } from '../lib/patch';
-import type { SectionProps } from './types';
+import { parity, type SectionProps } from './types';
 
 type DetectState = { status: 'idle' } | { status: 'running' } | { status: 'done'; mpv?: string; vlc?: string } | { status: 'failed'; message: string };
 
@@ -120,6 +120,23 @@ export function PlayersSection({ settings, update }: SectionProps) {
         ) : null}
         {pathRow('mpvPath', t('mpvPath'), 'C:\\Program Files\\mpv\\mpv.exe')}
         {pathRow('vlcPath', t('vlcPath'), 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe')}
+      </SettingsGroup>
+
+      <SettingsGroup title={t('externalBehavior')} description={t('externalBehaviorHint')}>
+        <SwitchRow
+          label={t('playerReuseInstance')}
+          description={t('playerReuseInstanceHint')}
+          checked={parity(settings).playerReuseInstance}
+          onChange={(playerReuseInstance) => void update({ playerReuseInstance })}
+          testId="toggle-playerReuseInstance"
+        />
+        <SwitchRow
+          label={t('showExternalBar')}
+          description={t('showExternalBarHint')}
+          checked={parity(settings).showExternalBar}
+          onChange={(showExternalBar) => void update({ showExternalBar })}
+          testId="toggle-showExternalBar"
+        />
       </SettingsGroup>
 
       <SettingsGroup title={t('extraArgs')}>

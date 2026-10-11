@@ -7,20 +7,26 @@
 //! and (feature `updater`) the updater. A tray icon offers Show / Quit.
 //!
 //! On Windows, `mpv_window` provides the child window embedded mpv renders
-//! into. On exit the shell kills embedded mpv and stops the remote control
-//! server so neither outlives the app.
+//! into. `proxy` serves a loopback media proxy so inline playback can send
+//! per-playlist headers, and `memory` trims idle memory. On exit the shell
+//! kills embedded mpv, stops the remote control server, and checkpoints the
+//! SQLite WAL.
 
 #[cfg(windows)]
+mod memory;
+#[cfg(windows)]
 mod mpv_window;
+mod proxy;
 
 use iptv_core::events::{AppEvent, EventSink};
 use iptv_core::logging::LogGuard;
+use iptv_core::rpc::app::{deliver_deep_links, set_desktop_info, DesktopInfo};
 use iptv_core::rpc::{build_router, init_all, RpcRouter};
 use iptv_core::{AppState, RpcError};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Name of the webview event carrying `AppEvent` JSON.
@@ -32,8 +38,10 @@ struct TauriSink(AppHandle);
 impl EventSink for TauriSink {
     fn emit(&self, event: AppEvent) {
         if event.kind == "settings.changed" {
-            if let Some(dir) = event.payload.get("downloadsDir").and_then(|v| v.as_str()) {
-                allow_media_dir(&self.0, std::path::Path::new(dir));
+            for key in ["downloadsDir", "recordingsDir"] {
+                if let Some(dir) = event.payload.get(key).and_then(|v| v.as_str()) {
+                    allow_media_dir(&self.0, std::path::Path::new(dir));
+                }
             }
         }
         if let Err(err) = self.0.emit(APP_EVENT, &event) {
@@ -64,7 +72,9 @@ async fn rpc(
 
 /// Lets the webview play files from `dir` through the asset protocol
 /// (`convertFileSrc`), so My Videos works from a custom downloads folder.
-/// The scope only grows: files completed in an earlier folder stay playable.
+/// The static scope covers only `$APPDATA/downloads`; everything else is
+/// granted here. The scope only grows: files completed in an earlier folder
+/// stay playable.
 fn allow_media_dir(app: &AppHandle, dir: &std::path::Path) {
     let dir = dir.as_os_str().to_string_lossy();
     let dir = dir.trim();
@@ -73,6 +83,39 @@ fn allow_media_dir(app: &AppHandle, dir: &std::path::Path) {
     }
     if let Err(err) = app.asset_protocol_scope().allow_directory(dir, true) {
         tracing::warn!(%err, "could not add the downloads folder to the asset scope");
+    }
+}
+
+/// Grants the asset scope the app needs at startup: the downloads and
+/// recordings folders, plus the folder of every file recorded in the
+/// `downloads` table (downloads finished under an earlier downloads folder).
+async fn allow_known_media_dirs(app: AppHandle, state: Arc<AppState>) {
+    allow_media_dir(&app, &iptv_core::downloads::dir(&state));
+    allow_media_dir(&app, &iptv_core::player::embedded::recordings_dir(&state));
+    let parents = state
+        .db_call(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT file_path FROM downloads WHERE file_path IS NOT NULL AND file_path <> ''",
+            )?;
+            let paths = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(Result::ok)
+                .filter_map(|p| {
+                    std::path::Path::new(&p)
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            Ok(paths)
+        })
+        .await;
+    match parents {
+        Ok(dirs) => {
+            for dir in dirs {
+                allow_media_dir(&app, &dir);
+            }
+        }
+        Err(err) => tracing::warn!(%err, "could not read download folders for the asset scope"),
     }
 }
 
@@ -161,34 +204,49 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(crate::mpv_window::MpvWindowFactory::new(handle.clone())),
     );
 
-    allow_media_dir(&handle, &iptv_core::downloads::dir(&state));
+    tauri::async_runtime::spawn(allow_known_media_dirs(handle.clone(), Arc::clone(&state)));
+
+    // Loopback media proxy for inline playback with per-playlist headers.
+    let proxy_base = match proxy::start(Arc::clone(&state)) {
+        Ok(base) => Some(base),
+        Err(err) => {
+            tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
+            None
+        }
+    };
+    set_desktop_info(
+        &state,
+        DesktopInfo {
+            proxy_base,
+            updater_available: cfg!(feature = "updater"),
+        },
+    );
 
     app.manage(Arc::clone(&state));
     app.manage(Arc::new(build_router()));
 
     // Deep links (`iptv://...`) arrive here on first launch and, through
-    // single-instance, from later launches. The UI listens for `deeplink.open`.
-    // Scheme registration happens in the NSIS installer; we deliberately do not
-    // call `register_all()` at runtime (it writes to the registry).
+    // single-instance, from later launches. Until the UI has pulled
+    // `app.pendingDeepLinks` once they are queued in AppState; after that they
+    // go out live as `deeplink.open`. Scheme registration happens in the NSIS
+    // installer; we deliberately do not call `register_all()` at runtime (it
+    // writes to the registry).
     {
         let state = Arc::clone(&state);
         app.deep_link().on_open_url(move |event| {
             let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
-            state.emit("deeplink.open", serde_json::json!({ "urls": urls }));
+            deliver_deep_links(&state, urls);
         });
     }
-    // Cold start through a link: the webview is not listening yet during
-    // setup, so re-emit the launch URLs once the shell has had time to mount.
     if let Ok(Some(urls)) = app.deep_link().get_current() {
-        let urls: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
-        if !urls.is_empty() {
-            let state = Arc::clone(&state);
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
-                state.emit("deeplink.open", serde_json::json!({ "urls": urls }));
-            });
-        }
+        deliver_deep_links(&state, urls.iter().map(|u| u.to_string()).collect());
     }
+
+    #[cfg(all(
+        feature = "updater",
+        not(any(target_os = "android", target_os = "ios"))
+    ))]
+    app.add_capability(include_str!("../capabilities-updater/updater.json"))?;
 
     tauri::async_runtime::spawn(async move {
         if let Err(err) = init_all(state).await {
@@ -197,7 +255,47 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     build_tray(app)?;
+
+    // The window is created hidden (tauri.conf.json `visible: false`) so the
+    // window-state plugin can restore its size and position first; showing it
+    // now avoids the visible jump from the default geometry.
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+
+    // Release pages touched only while booting.
+    #[cfg(windows)]
+    tauri::async_runtime::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        memory::trim_working_set();
+    });
     Ok(())
+}
+
+/// Background windows ask WebView2 for its low memory target and trim the
+/// app's working set; focus restores the normal target.
+fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
+    #[cfg(windows)]
+    {
+        let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
+            return;
+        };
+        match event {
+            WindowEvent::Focused(false) => {
+                memory::set_webview_memory_low(&webview, true);
+                memory::trim_working_set();
+            }
+            WindowEvent::Focused(true) => memory::set_webview_memory_low(&webview, false),
+            WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
+                memory::set_webview_memory_low(&webview, true);
+                memory::trim_working_set();
+            }
+            _ => {}
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (window, event);
 }
 
 /// Entry point used by `main.rs`.
@@ -224,11 +322,11 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
     }
 
-    // I: updater. Enable with `--features updater` only after adding to
-    // tauri.conf.json: "plugins": { "updater": { "pubkey": "<minisign public key>",
-    // "endpoints": ["https://<host>/latest.json"] } } and
-    // "bundle": { "createUpdaterArtifacts": true }, plus "updater:default" in
-    // capabilities/default.json. Signed feeds are a non-goal for v1.
+    // Updater (feature `updater`): tauri.conf.json carries `plugins.updater`
+    // with a placeholder endpoint and an empty pubkey. Before enabling, put the
+    // real minisign public key and feed URL there (see README "Updates"). The
+    // `updater:default` permission is added at runtime in `setup` because a
+    // static capability would not resolve when the feature is off.
     #[cfg(all(
         feature = "updater",
         not(any(target_os = "android", target_os = "ios"))
@@ -239,6 +337,7 @@ pub fn run() {
 
     let app = builder
         .invoke_handler(tauri::generate_handler![rpc])
+        .on_window_event(on_window_event)
         .setup(setup)
         .build(tauri::generate_context!())
         .expect("error while building Tsrust IPTV");
@@ -253,9 +352,10 @@ pub fn run() {
 }
 
 /// Exit cleanup: kill embedded mpv (synchronously, so it never outlives the
-/// app) and stop the remote control server. Downloads need no flush: every
-/// state change is already in SQLite and `downloads::init` re-queues
-/// interrupted transfers on the next start.
+/// app), stop the remote control server, and fold the SQLite WAL back into
+/// the database file. Downloads need no flush: every state change is already
+/// in SQLite and `downloads::init` re-queues interrupted transfers on the
+/// next start.
 fn shutdown(app: &AppHandle) {
     let Some(state) = app.try_state::<Arc<AppState>>() else {
         return;
@@ -269,5 +369,34 @@ fn shutdown(app: &AppHandle) {
     if !matches!(stopped, Ok(Ok(()))) {
         tracing::warn!("remote control did not stop cleanly on exit");
     }
+    checkpoint_wal(&state);
     tracing::info!("shutdown complete");
+}
+
+/// `PRAGMA wal_checkpoint(TRUNCATE)` on a pooled connection, so the next
+/// start opens a compact database and a copied data folder is complete
+/// without its `-wal` file. The pool itself closes with the process (it lives
+/// in `AppState`, which Tauri's managed state owns until exit).
+fn checkpoint_wal(state: &AppState) {
+    let result = state.conn().and_then(|conn| {
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(Into::into)
+    });
+    match result {
+        Ok((busy, log, done)) => {
+            tracing::info!(
+                busy,
+                log_frames = log,
+                checkpointed = done,
+                "WAL checkpointed"
+            )
+        }
+        Err(err) => tracing::warn!(%err, "WAL checkpoint on exit failed"),
+    }
 }

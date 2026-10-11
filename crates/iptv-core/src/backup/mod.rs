@@ -44,6 +44,16 @@ pub const BACKUP_KIND: &str = "iptvnator-playlist-backup";
 pub const BACKUP_VERSION: i64 = 1;
 /// `app_state` key prefix of parked user state.
 pub const PENDING_PREFIX: &str = "backup_pending:";
+/// App-level settings carried in the manifest's `settings` object next to
+/// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
+/// specific values (player paths, folders) are deliberately not exported.
+pub const APP_SETTING_KEYS: [&str; 5] = [
+    "stripCountryPrefix",
+    "epgOffsetMinutes",
+    "playerReuseInstance",
+    "showExternalBar",
+    "vodMinRating",
+];
 
 /// `backup.import` mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,8 +83,12 @@ pub struct ImportReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportResult {
+    /// The manifest; empty when the core wrote it to `path`.
     pub json: String,
     pub file_name: String,
+    /// Where the backup was written (desktop `backup.export` with `path`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +119,7 @@ fn source_from_row(row: &Row<'_>) -> rusqlite::Result<(Source, String)> {
             channel_count: 0,
             movie_count: 0,
             series_count: 0,
+            radio_count: 0,
             epg: serde_json::from_str::<EpgLinks>(&epg).unwrap_or_default(),
             m3u: None,
             xtream: None,
@@ -215,7 +230,11 @@ pub(crate) fn fp_stalker(portal: &str, mac: &str) -> String {
 }
 
 /// Fingerprint of an existing source, as the importer computes it for entries.
-pub(crate) fn source_fingerprint(conn: &Connection, s: &Source) -> CoreResult<Option<String>> {
+pub(crate) fn source_fingerprint(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    s: &Source,
+) -> CoreResult<Option<String>> {
     Ok(match s.kind {
         SourceKind::Xtream => s
             .xtream
@@ -227,21 +246,26 @@ pub(crate) fn source_fingerprint(conn: &Connection, s: &Source) -> CoreResult<Op
             .map(|x| fp_stalker(&x.portal_url, &x.mac_address)),
         SourceKind::M3u => match s.m3u.as_ref().and_then(|m| m.url.clone()) {
             Some(url) if !url.trim().is_empty() => Some(fp_m3u_url(&url)),
-            _ => conn
-                .query_row(
-                    "SELECT raw FROM m3u_raw WHERE source_id = ?1",
-                    [&s.id],
-                    |r| r.get::<_, String>(0),
-                )
-                .optional()?
-                .map(|raw| fp_m3u_raw(&raw)),
+            _ => {
+                crate::m3u::stored_text(conn, data_dir, &s.id)?.map(|(raw, _, _)| fp_m3u_raw(&raw))
+            }
         },
     })
 }
 
-/// Serializes concurrent imports (and pending-restore application).
+/// Guards backup database writes (and pending-restore application). Held
+/// only around database work, never across a catalog sync, so a refresh or
+/// `sources.add` that applies parked state waits milliseconds at most.
 pub(crate) fn import_lock(state: &AppState) -> Arc<tokio::sync::Mutex<()>> {
     state.ext_or_insert_with("backup_import_lock", || {
+        Arc::new(tokio::sync::Mutex::new(()))
+    })
+}
+
+/// Serializes whole `backup.import` runs against each other (two imports of
+/// the same file must not both create the same sources). Only imports take it.
+pub(crate) fn run_lock(state: &AppState) -> Arc<tokio::sync::Mutex<()>> {
+    state.ext_or_insert_with("backup_import_run_lock", || {
         Arc::new(tokio::sync::Mutex::new(()))
     })
 }

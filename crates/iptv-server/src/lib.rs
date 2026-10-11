@@ -7,9 +7,11 @@
 //! - `GET /api/events`: WebSocket broadcast of [`AppEvent`]s with ping/pong
 //!   keepalive and a per-client lag policy.
 //! - `GET /api/health`: `{ok, version}`.
-//! - `GET /api/proxy?url=&sourceId=`: streaming media proxy that injects the
-//!   source's request headers, passes Range through, refuses private targets,
-//!   and rewrites HLS playlists so every URI goes back through the proxy.
+//! - `GET /api/proxy?url=&sourceId=[&ua=&referer=&origin=]`: streaming media
+//!   proxy that injects the source's (or the overridden) request headers,
+//!   passes Range through, refuses private targets, rewrites HLS playlists so
+//!   every URI goes back through the proxy, and serves only media types
+//!   (anything else as a sandboxed attachment).
 //! - `GET /api/files/{downloadId}`: Range-capable serving of completed downloads.
 //! - Everything else: the built UI (`dist/`) with SPA fallback and cache headers.
 //!
@@ -28,6 +30,7 @@ use axum::middleware;
 use axum::routing::{any, get, post};
 use axum::Router;
 use iptv_core::events::AppEvent;
+use iptv_core::http::NetGuard;
 use iptv_core::rpc::RpcRouter;
 use iptv_core::AppState;
 use std::path::PathBuf;
@@ -50,13 +53,13 @@ pub const BODY_LIMIT: usize = 256 * 1024 * 1024;
 pub struct ServerOptions {
     /// Built UI directory (contains `index.html` and `assets/`).
     pub static_dir: PathBuf,
-    /// Let `/api/proxy` reach loopback, private and link-local addresses for
-    /// any source. Off by default; a source's own host is always reachable.
+    /// Let `/api/proxy` and the core's fetches (downloads, playlists, XMLTV)
+    /// reach loopback, private and link-local addresses for any source. Off
+    /// by default; a source's own `host:port` is always reachable.
     pub allow_private_targets: bool,
-    /// Reject `/api` requests whose `Host` is not a loopback name. Set when
-    /// the server binds a loopback interface, which blocks DNS-rebinding
-    /// attacks from web pages.
-    pub loopback_host_only: bool,
+    /// `Host` names accepted on `/api` besides loopback names and IP
+    /// literals (blocks DNS rebinding whatever the bind address).
+    pub allowed_hosts: guard::AllowedHosts,
 }
 
 impl ServerOptions {
@@ -65,7 +68,7 @@ impl ServerOptions {
         Self {
             static_dir: static_dir.into(),
             allow_private_targets: false,
-            loopback_host_only: false,
+            allowed_hosts: guard::AllowedHosts::default(),
         }
     }
 }
@@ -84,7 +87,8 @@ pub struct Server {
 
 impl Server {
     /// Builds the server state. `events` must be the sender wrapped by the
-    /// `BroadcastSink` handed to `AppState::new`.
+    /// `BroadcastSink` handed to `AppState::new`. Installs server mode on
+    /// the core ([`install_server_mode`]) unless the caller already did.
     pub fn new(
         app: Arc<AppState>,
         rpc: Arc<RpcRouter>,
@@ -92,8 +96,9 @@ impl Server {
         opts: ServerOptions,
     ) -> Self {
         let (shutdown, _) = watch::channel(false);
+        let guard = install_server_mode(&app, opts.allow_private_targets);
         Self {
-            proxy: Arc::new(proxy::Proxy::new(opts.allow_private_targets)),
+            proxy: Arc::new(proxy::Proxy::new(guard)),
             app,
             rpc,
             events,
@@ -122,6 +127,20 @@ impl Server {
     /// Number of connected event sockets.
     pub fn event_clients(&self) -> usize {
         self.events.receiver_count()
+    }
+}
+
+/// Marks `app` as running in server mode (guarded fetches, no file paths,
+/// fixed downloads folder) and returns the SSRF guard shared with the proxy.
+/// Idempotent; call it before `init_all` so restored downloads are guarded.
+pub fn install_server_mode(app: &AppState, allow_private_targets: bool) -> Arc<NetGuard> {
+    if let Some(mode) = iptv_core::http::server_mode(app) {
+        return mode.guard.clone();
+    }
+    match iptv_core::http::ServerMode::install(app, allow_private_targets) {
+        Some(mode) => mode.guard.clone(),
+        // A desktop state (never in the binary): guard the proxy only.
+        None => Arc::new(NetGuard::new(allow_private_targets)),
     }
 }
 

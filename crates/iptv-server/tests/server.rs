@@ -189,6 +189,35 @@ async fn spawn_stub() -> String {
             }),
         )
         .route("/bytes", get(serve_bytes))
+        .route(
+            "/page.html",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/html")],
+                    "<script>alert(1)</script>",
+                )
+            }),
+        )
+        .route(
+            "/headers.ts",
+            get(|h: HeaderMap| async move {
+                let get = |n: header::HeaderName| {
+                    h.get(n)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_owned()
+                };
+                (
+                    [(header::CONTENT_TYPE, "video/mp2t")],
+                    format!(
+                        "{}|{}|{}",
+                        get(header::USER_AGENT),
+                        get(header::REFERER),
+                        get(header::ORIGIN)
+                    ),
+                )
+            }),
+        )
         .route("/gone", get(|| async { StatusCode::NOT_FOUND }));
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -684,30 +713,6 @@ async fn cross_origin_writes_are_refused() {
     assert_eq!(r.status(), 200);
 }
 
-#[tokio::test]
-async fn loopback_bind_rejects_foreign_host_headers() {
-    let h = start_with(|o| o.loopback_host_only = true).await;
-    let url = format!("{}/api/health", h.base);
-    let r = h
-        .http
-        .get(&url)
-        .header(header::HOST, "rebind.evil.example")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 403);
-    let r = h.http.get(&url).send().await.unwrap();
-    assert_eq!(r.status(), 200);
-    let r = h
-        .http
-        .get(&url)
-        .header(header::HOST, "localhost:7180")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(r.status(), 200);
-}
-
 /// Minimal WebSocket client: handshake, then read one server text frame.
 async fn ws_connect(
     addr: std::net::SocketAddr,
@@ -784,4 +789,395 @@ async fn events_socket_broadcasts_and_guards_origin() {
         .unwrap()
         .unwrap();
     assert_eq!(hdr[0] & 0x0f, 8, "expected a close frame");
+}
+
+// ---------------------------------------------------------------------------
+// Fix wave 1 (B10-fix1): CSP, Host allowlist, server-mode guard, overrides.
+// ---------------------------------------------------------------------------
+
+async fn rpc(h: &Harness, cmd: &str, args: serde_json::Value) -> (u16, serde_json::Value) {
+    let r = h
+        .http
+        .post(format!("{}/api/rpc/{cmd}", h.base))
+        .json(&args)
+        .send()
+        .await
+        .unwrap();
+    let status = r.status().as_u16();
+    (status, r.json().await.unwrap_or(serde_json::Value::Null))
+}
+
+#[tokio::test]
+async fn proxy_and_files_never_serve_active_content() {
+    let stub = spawn_stub().await;
+    let h = start_with(|o| o.allow_private_targets = true).await;
+
+    let r = h
+        .http
+        .get(h.proxy_url(&format!("{stub}/page.html"), None))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.headers()[header::CONTENT_TYPE],
+        "application/octet-stream"
+    );
+    assert_eq!(r.headers()[header::CONTENT_DISPOSITION], "attachment");
+    assert_eq!(
+        r.headers()[header::CONTENT_SECURITY_POLICY],
+        "sandbox; default-src 'none'"
+    );
+    assert_eq!(r.headers()["x-content-type-options"], "nosniff");
+
+    // Media keeps its type and is still sandboxed.
+    let r = h
+        .http
+        .get(h.proxy_url(&format!("{stub}/bytes"), None))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp4");
+    assert!(r.headers().get(header::CONTENT_DISPOSITION).is_none());
+    assert_eq!(
+        r.headers()[header::CONTENT_SECURITY_POLICY],
+        "sandbox; default-src 'none'"
+    );
+
+    // A downloaded HTML page is an attachment with the sandbox CSP.
+    let dir = h.server.app.downloads_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("page.html"), "<script>alert(1)</script>").unwrap();
+    std::fs::write(dir.join("clip.mp4"), bytes_1000()).unwrap();
+    let page = dir.join("page.html").to_string_lossy().into_owned();
+    let clip = dir.join("clip.mp4").to_string_lossy().into_owned();
+    h.server
+        .app
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO downloads(id, source_id, content_type, item_id, title, url, file_name, file_path, status)
+                 VALUES (7, 's', 'movie', '7', 'Page', 'http://x/p', 'page.html', ?1, 'completed'),
+                        (8, 's', 'movie', '8', 'Clip', 'http://x/c', 'clip.mp4', ?2, 'completed')",
+                [&page, &clip],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let r = h
+        .http
+        .get(format!("{}/api/files/7", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let cd = r.headers()[header::CONTENT_DISPOSITION].to_str().unwrap();
+    assert!(cd.starts_with("attachment"), "{cd}");
+    assert_eq!(
+        r.headers()[header::CONTENT_SECURITY_POLICY],
+        "sandbox; default-src 'none'"
+    );
+    let r = h
+        .http
+        .get(format!("{}/api/files/8", h.base))
+        .send()
+        .await
+        .unwrap();
+    let cd = r.headers()[header::CONTENT_DISPOSITION].to_str().unwrap();
+    assert!(cd.starts_with("inline"), "{cd}");
+    assert!(r.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+
+    // The SPA carries the site CSP.
+    let r = h.http.get(format!("{}/", h.base)).send().await.unwrap();
+    let csp = r.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap();
+    assert!(csp.starts_with("default-src 'self'"), "{csp}");
+    assert!(csp.contains("script-src 'self'"), "{csp}");
+}
+
+#[tokio::test]
+async fn rebinding_host_is_refused_on_any_bind() {
+    // Bound to every interface, as in Docker.
+    let tmp = tempfile::tempdir().unwrap();
+    let (tx, _) = broadcast::channel::<AppEvent>(8);
+    let app = AppState::new(
+        tmp.path().join("data"),
+        Arc::new(BroadcastSink(tx.clone())),
+        false,
+    )
+    .await
+    .unwrap();
+    let mut opts = ServerOptions::new(tmp.path().join("dist"));
+    opts.allowed_hosts = iptv_server::guard::AllowedHosts::parse("tv.example.com");
+    let server = Server::new(app, Arc::new(build_router()), tx, opts);
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let router = iptv_server::router(server);
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let url = format!("http://127.0.0.1:{port}/api/health");
+    let http = reqwest::Client::new();
+    for (host, status) in [
+        ("rebind.evil.example", 403),
+        ("rebind.evil.example:7180", 403),
+        ("localhost:7180", 200),
+        ("192.168.1.20:7180", 200),
+        ("tv.example.com", 200),
+    ] {
+        let r = http
+            .get(&url)
+            .header(header::HOST, host)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), status, "Host: {host}");
+    }
+    let r = http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+#[tokio::test]
+async fn proxy_refusal_explains_allow_private_targets() {
+    let h = start().await;
+    let r = h
+        .http
+        .get(h.proxy_url("http://192.168.1.5/stream.ts", None))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    let v: serde_json::Value = r.json().await.unwrap();
+    assert!(
+        v["message"]
+            .as_str()
+            .unwrap()
+            .contains("--allow-private-targets"),
+        "{v}"
+    );
+}
+
+#[tokio::test]
+async fn proxy_query_headers_override_source_headers() {
+    let stub = spawn_stub().await;
+    let h = start().await;
+    h.add_source(
+        "plain",
+        "m3u",
+        serde_json::json!({ "origin": "url", "url": format!("{stub}/list.m3u"),
+            "headers": { "userAgent": "SourceUA/1", "referrer": "http://source.example/" } }),
+    )
+    .await;
+
+    // Source headers alone.
+    let r = h
+        .http
+        .get(h.proxy_url(&format!("{stub}/headers.ts"), Some("plain")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        r.text().await.unwrap(),
+        "SourceUA/1|http://source.example/|"
+    );
+
+    // Query overrides win; an empty value keeps the source's.
+    let url = format!(
+        "{}&ua=ChannelUA%2F2&referer=&origin=https%3A%2F%2Fchan.example",
+        h.proxy_url(&format!("{stub}/headers.ts"), Some("plain"))
+    );
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(
+        r.text().await.unwrap(),
+        "ChannelUA/2|http://source.example/|https://chan.example"
+    );
+
+    // Overrides are carried into rewritten playlists and used by segments.
+    let url = format!(
+        "{}&ua=TestUA%2F1&referer=http%3A%2F%2Fref.example%2F",
+        h.proxy_url(&format!("{stub}/live/index.m3u8"), Some("plain"))
+    );
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let text = r.text().await.unwrap();
+    let seg = text
+        .lines()
+        .find(|l| l.contains("seg1.ts"))
+        .unwrap()
+        .to_owned();
+    assert!(seg.contains("ua=TestUA%2F1"), "{seg}");
+    assert!(seg.contains("referer=http%3A%2F%2Fref.example%2F"), "{seg}");
+    let r = h.http.get(format!("{}{seg}", h.base)).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+fn download_args(source_id: &str, url: &str) -> serde_json::Value {
+    serde_json::json!({
+        "ref": { "sourceId": source_id, "contentType": "movie", "itemId": "1" },
+        "title": "Probe",
+        "url": url,
+    })
+}
+
+#[tokio::test]
+async fn server_mode_downloads_are_guarded() {
+    let stub = spawn_stub().await;
+    let h = start().await;
+
+    // A loopback download for an unknown source is refused.
+    let (status, v) = rpc(
+        &h,
+        "downloads.start",
+        download_args("nope", &format!("{stub}/bytes")),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    assert!(
+        v["message"]
+            .as_str()
+            .unwrap()
+            .contains("--allow-private-targets"),
+        "{v}"
+    );
+
+    // The source's own host:port is trusted.
+    h.add_source(
+        "lan",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let (status, v) = rpc(
+        &h,
+        "downloads.start",
+        download_args("lan", &format!("{stub}/bytes")),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+
+    // ...but not another port on the same host.
+    let other = format!("http://127.0.0.1:{}/x.mp4", h.addr.port());
+    let (status, v) = rpc(&h, "downloads.start", download_args("lan2", &other)).await;
+    assert_eq!(status, 400, "{v}");
+}
+
+#[tokio::test]
+async fn desktop_downloads_may_reach_loopback() {
+    let stub = spawn_stub().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let app = AppState::new(
+        tmp.path().to_path_buf(),
+        Arc::new(iptv_core::NoopSink),
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(!iptv_core::http::is_server_mode(&app));
+    let d = iptv_core::downloads::start(
+        &app,
+        iptv_core::downloads::StartRequest {
+            item_ref: Some(iptv_core::model::ItemRef::new(
+                "nope",
+                iptv_core::model::ContentType::Movie,
+                "1",
+            )),
+            title: "Probe".into(),
+            url: format!("{stub}/bytes"),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(d.file_name.as_deref(), Some("Probe.mp4"));
+    let _ = iptv_core::downloads::cancel(&app, d.id).await;
+}
+
+#[tokio::test]
+async fn server_mode_refuses_server_paths() {
+    let h = start().await;
+    let (status, v) = rpc(
+        &h,
+        "downloads.setDir",
+        serde_json::json!({ "path": "/tmp/elsewhere" }),
+    )
+    .await;
+    assert_eq!(status, 501, "{v}");
+    assert!(v["message"].as_str().unwrap().contains("IPTV_DATA_DIR"));
+
+    let (status, v) = rpc(
+        &h,
+        "settings.update",
+        serde_json::json!({ "patch": { "downloadsDir": "/etc" } }),
+    )
+    .await;
+    assert_eq!(status, 501, "{v}");
+    // Leaving it unchanged passes.
+    let (status, v) = rpc(
+        &h,
+        "settings.update",
+        serde_json::json!({ "patch": { "downloadsDir": null } }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+
+    for m3u in [
+        serde_json::json!({ "origin": "file", "filePath": "/etc/passwd" }),
+        serde_json::json!({ "origin": "url", "url": "file:///etc/passwd" }),
+    ] {
+        let (status, v) = rpc(
+            &h,
+            "sources.add",
+            serde_json::json!({ "kind": "m3u", "name": "x", "m3u": m3u }),
+        )
+        .await;
+        assert_eq!(status, 501, "{v}");
+        assert!(v["message"]
+            .as_str()
+            .unwrap()
+            .contains("Upload the playlist text"));
+    }
+    let (status, _) = rpc(
+        &h,
+        "sources.update",
+        serde_json::json!({ "id": "x", "patch": { "m3u": { "origin": "file", "filePath": "/x" } } }),
+    )
+    .await;
+    assert_eq!(status, 501);
+
+    // A backup's filePathHint is ignored; the embedded text is imported.
+    let hint = h._tmp.path().join("list.m3u");
+    std::fs::write(&hint, "#EXTM3U\n").unwrap();
+    let backup = serde_json::json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "m3u", "exportedId": "file-one", "title": "File",
+            "source": { "kind": "file",
+                        "rawM3u": "#EXTM3U\n#EXTINF:-1,One\nhttp://a.example/1.ts\n",
+                        "filePathHint": hint.to_string_lossy() }
+        }]
+    });
+    let (status, v) = rpc(
+        &h,
+        "backup.import",
+        serde_json::json!({ "json": backup.to_string(), "mode": "merge" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert!(
+        v["warnings"].to_string().contains("file path was ignored"),
+        "{v}"
+    );
+    let origin: String = h
+        .server
+        .app
+        .db_call(|c| {
+            Ok(c.query_row(
+                "SELECT json_extract(config_json, '$.origin') FROM sources",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(origin, "text");
 }

@@ -58,7 +58,7 @@ pub struct SessionState {
 pub fn identity_fingerprint(c: &StalkerSourceConfig) -> String {
     json!([
         c.portal_url.trim(),
-        p::normalize_mac(&c.mac_address).unwrap_or_else(|| c.mac_address.trim().to_string()),
+        c.mac_address.trim(),
         p::normalize_serial(c.serial_number.as_deref()),
         p::identity_value(c.device_id1.as_deref()),
         p::identity_value(c.device_id2.as_deref()),
@@ -71,18 +71,48 @@ pub fn identity_fingerprint(c: &StalkerSourceConfig) -> String {
 }
 
 /// Validates a config before any request is made.
+///
+/// The MAC only has to be present and cookie-safe: the 12-hex form is
+/// enforced where a MAC is typed (`sources.add`, a changed MAC in
+/// `sources.update`), while a stored value (a grandfathered MAC from an old
+/// backup such as `MAG-0001`) is sent exactly as stored.
 pub fn validate_config(c: &StalkerSourceConfig) -> CoreResult<()> {
     if p::endpoint_candidates(&c.portal_url).is_empty() {
         return Err(CoreError::invalid(
             "Portal URL must be an http(s) address, for example http://portal.example/c/",
         ));
     }
-    if p::normalize_mac(&c.mac_address).is_none() {
+    let mac = c.mac_address.trim();
+    if mac.is_empty()
+        || mac
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace() || matches!(ch, ';' | ','))
+    {
         return Err(CoreError::invalid(
-            "MAC address must have 12 hex digits, for example 00:1A:79:12:34:56",
+            "Enter the MAC address of the portal subscription, for example 00:1A:79:12:34:56",
         ));
     }
     Ok(())
+}
+
+/// User-facing error for a portal that could not be reached at all.
+pub fn unreachable_error(portal_url: &str) -> CoreError {
+    CoreError::network(format!(
+        "{UNREACHABLE_PREFIX}{}. Check the URL and your connection, then try again.",
+        portal_host(portal_url)
+    ))
+}
+
+/// `host[:port]` of a URL, or the trimmed input when it does not parse.
+fn portal_host(u: &str) -> String {
+    match url::Url::parse(u.trim()) {
+        Ok(parsed) => match (parsed.host_str(), parsed.port()) {
+            (Some(h), Some(port)) => format!("{h}:{port}"),
+            (Some(h), None) => h.to_string(),
+            _ => u.trim().to_string(),
+        },
+        Err(_) => u.trim().to_string(),
+    }
 }
 
 /// A request in flight: query params plus timeout.
@@ -188,7 +218,8 @@ impl StalkerClient {
         session: Arc<tokio::sync::Mutex<SessionState>>,
     ) -> CoreResult<Self> {
         validate_config(&config)?;
-        let mac = p::normalize_mac(&config.mac_address).unwrap_or_default();
+        // The stored value goes on the wire verbatim (see `validate_config`).
+        let mac = config.mac_address.trim().to_string();
         let serial = p::normalize_serial(config.serial_number.as_deref());
         Ok(Self {
             state: Arc::clone(state),
@@ -200,7 +231,7 @@ impl StalkerClient {
         })
     }
 
-    /// Canonical MAC (for `accountInfo`; never log it).
+    /// The MAC as sent to the portal (for `accountInfo`; never log it).
     pub fn mac(&self) -> &str {
         &self.mac
     }
@@ -266,15 +297,17 @@ impl StalkerClient {
             let label = label.clone();
             async move {
                 tracing::trace!(%label, "stalker request");
-                let resp = self
+                let request = self
                     .state
                     .http
                     .get(&url)
                     .headers(headers)
-                    .timeout(req.timeout)
-                    .send()
+                    .timeout(req.timeout);
+                // The head deadline is the request's own deadline: portals
+                // build big replies (get_all_channels) before answering.
+                let resp = crate::http::send_within(request, req.timeout)
                     .await
-                    .map_err(CoreError::from)?;
+                    .map_err(|e| send_error(e, &url))?;
                 let status = resp.status();
                 if status.as_u16() == 401 || status.as_u16() == 403 {
                     return Ok(Body::AuthFailure(format!("HTTP {}", status.as_u16())));
@@ -397,13 +430,19 @@ impl StalkerClient {
                 Err(err @ CoreError::Auth(_)) => return Err(err),
                 Err(err) => {
                     tracing::debug!(error = %err, "stalker endpoint candidate rejected");
+                    // Every candidate lives on the same host: when it did not
+                    // answer at all, the other paths will not either.
+                    let host_down = is_unreachable(&err);
                     let better = match (&first_err, &err) {
                         (None, _) => true,
                         (Some(CoreError::NotFound(_)), e) => !matches!(e, CoreError::NotFound(_)),
                         _ => false,
                     };
-                    if better {
+                    if better || host_down {
                         first_err = Some(err);
+                    }
+                    if host_down {
+                        break;
                     }
                 }
             }
@@ -412,6 +451,10 @@ impl StalkerClient {
             Some(CoreError::NotFound(_)) | Some(CoreError::Invalid(_)) | None => CoreError::NotFound(
                 "No Stalker portal answered at this address. Check the portal URL (it usually ends in /c/).".into(),
             ),
+            // Nothing answered at all (refused, DNS, timeout): say so plainly.
+            Some(CoreError::Network(_)) | Some(CoreError::Timeout(_)) => {
+                unreachable_error(&self.config.portal_url)
+            }
             Some(other) => other,
         })
     }
@@ -578,6 +621,32 @@ impl StalkerClient {
     }
 }
 
+const UNREACHABLE_PREFIX: &str = "Could not reach the portal at ";
+const SLOW_PREFIX: &str = "The portal at ";
+
+/// Maps a failed send (no HTTP answer, from [`crate::http::send_within`]) to
+/// a portal-specific message; the URL is reduced to its host. A request the
+/// server-mode guard refused (`Invalid`) keeps its own explanation.
+fn send_error(err: CoreError, url: &str) -> CoreError {
+    match err {
+        CoreError::Timeout(_) => CoreError::Timeout(format!(
+            "{SLOW_PREFIX}{} did not answer in time. Try again later.",
+            portal_host(url)
+        )),
+        CoreError::Network(_) => unreachable_error(url),
+        other => other,
+    }
+}
+
+/// True for [`send_error`] results: the host gave no HTTP answer at all.
+fn is_unreachable(err: &CoreError) -> bool {
+    match err {
+        CoreError::Network(m) => m.starts_with(UNREACHABLE_PREFIX),
+        CoreError::Timeout(m) => m.starts_with(SLOW_PREFIX),
+        _ => false,
+    }
+}
+
 /// Reads and parses a stalker source's config.
 pub async fn load_config(state: &AppState, source_id: &str) -> CoreResult<StalkerSourceConfig> {
     let id = source_id.to_string();
@@ -628,25 +697,45 @@ fn profile_status(profile: &Value) -> Option<i64> {
     profile.get("status").and_then(p::int_of)
 }
 
+/// True when `text` spells out `mac` (any separator, or verbatim).
+fn mentions_mac(text: &str, mac: &str) -> bool {
+    let mac = mac.trim();
+    (!mac.is_empty() && text.to_lowercase().contains(&mac.to_lowercase()))
+        || redact_mac(text, mac) != text
+}
+
 /// Turns a refusing profile (status 1, or a block message) into an Auth error.
-/// The MAC inside portal messages is replaced so it never reaches logs.
+///
+/// Portal sentences that spell out the MAC are left out of the message (it
+/// travels into `lastError`, events and logs); the rest of the portal's text
+/// follows our own explanation.
 pub fn check_profile(profile: &Value, mac: &str) -> CoreResult<()> {
-    let message = p::combine_messages(
-        profile.get("msg").and_then(Value::as_str),
-        profile.get("block_msg").and_then(Value::as_str),
-    );
+    let msg = profile.get("msg").and_then(Value::as_str);
+    let block_msg = profile.get("block_msg").and_then(Value::as_str);
+    let message = p::combine_messages(msg, block_msg);
     let status = profile_status(profile);
     if status == Some(1) || (message.is_some() && status != Some(0)) {
-        let text = redact_mac(
-            &message.unwrap_or_else(|| "The portal blocked this device.".into()),
-            mac,
+        let full = message.unwrap_or_default();
+        let portal_text = p::combine_messages(
+            msg.filter(|t| !mentions_mac(t, mac)),
+            block_msg.filter(|t| !mentions_mac(t, mac)),
         );
-        if p::is_device_conflict(&text) {
+        if p::is_device_conflict(&full) {
             return Err(CoreError::Auth(format!(
-                "{text} (the portal has this MAC bound to other device ids; set the matching device ids or ask the provider to reset the binding)"
+                "{} (the portal has this MAC bound to other device ids; set the matching device ids or ask the provider to reset the binding)",
+                portal_text.unwrap_or_else(|| "The portal refused this device.".into())
             )));
         }
-        return Err(CoreError::Auth(text));
+        if status == Some(1) {
+            let lead = "This MAC address is not registered on the portal. Check the MAC or contact your provider.";
+            return Err(CoreError::Auth(match portal_text {
+                Some(t) => format!("{lead} Portal message: {t}"),
+                None => lead.to_string(),
+            }));
+        }
+        return Err(CoreError::Auth(
+            portal_text.unwrap_or_else(|| "The portal blocked this device.".into()),
+        ));
     }
     Ok(())
 }
@@ -674,9 +763,40 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "auth: MAC address this MAC is not registered"
+            "auth: This MAC address is not registered on the portal. Check the MAC or contact your provider."
+        );
+        // The mock/real wording: the MAC sentence is dropped, the rest follows.
+        let err = check_profile(
+            &json!({"status": 1, "msg": "MAC address 00:1A:79:00:00:01 is not registered",
+                    "block_msg": "Your STB is not registered.<br/> Call the provider."}),
+            mac,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "auth: This MAC address is not registered on the portal. Check the MAC or contact your provider. Portal message: Your STB is not registered. Call the provider."
+        );
+        // A grandfathered non-hex MAC is recognised verbatim too.
+        let err = check_profile(
+            &json!({"status": 1, "msg": "Unknown device mag-0001"}),
+            "MAG-0001",
+        )
+        .unwrap_err();
+        assert!(
+            !err.to_string().to_lowercase().contains("mag-0001"),
+            "{err}"
         );
         assert_eq!(redact_mac("x 001A79000001 y", mac), "x this MAC y");
+    }
+
+    #[test]
+    fn unreachable_message_names_the_host() {
+        let err = unreachable_error("http://127.0.0.1:9/stalker/c/");
+        assert!(err.is_retryable());
+        assert_eq!(
+            err.to_string(),
+            "network: Could not reach the portal at 127.0.0.1:9. Check the URL and your connection, then try again."
+        );
     }
 
     #[test]
@@ -710,7 +830,12 @@ mod tests {
         c.device_id1 = Some("abc".into());
         assert_ne!(a, identity_fingerprint(&c));
         assert!(validate_config(&c).is_ok());
-        c.mac_address = "zz".into();
+        // Grandfathered stored MACs are accepted verbatim; blanks are not.
+        c.mac_address = "MAG-0001".into();
+        assert!(validate_config(&c).is_ok());
+        c.mac_address = "  ".into();
+        assert!(validate_config(&c).is_err());
+        c.mac_address = "00:1A; x=1".into();
         assert!(validate_config(&c).is_err());
     }
 }

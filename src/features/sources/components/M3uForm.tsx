@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { M3uOrigin } from '@/api/types';
 
-import { Button, Input, Tabs, Textarea } from '../_shim';
+import { Button, Input, Tabs, Textarea } from '@/ui';
 import type { DraftErrors, M3uDraft } from '../lib/draft';
 import { PLAYLIST_EXTENSIONS, baseName, pickPathDesktop, readFileText } from '../lib/files';
 import { usePlaylistPreview } from '../lib/usePreview';
@@ -170,7 +170,13 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
         </div>
       ) : null}
 
-      {value.origin === 'text' ? (
+      {value.origin === 'text' && mode === 'edit' ? (
+        <p className="rounded-md border border-border bg-surface-2/60 p-3 text-sm text-fg-muted" data-testid="m3u-text-origin-note">
+          {t('textOriginNotEditable')}
+        </p>
+      ) : null}
+
+      {value.origin === 'text' && mode === 'add' ? (
         <Field label={t('playlistText')} error={err('m3u.text')} hint={t('playlistTextHint')}>
           {(p) => (
             <Textarea
@@ -187,7 +193,7 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
         </Field>
       ) : null}
 
-      {value.origin !== 'url' ? <PreviewPanel state={preview} /> : null}
+      {value.origin === 'file' || (value.origin === 'text' && mode === 'add') ? <PreviewPanel state={preview} /> : null}
 
       <HeadersFields
         value={value.headers}

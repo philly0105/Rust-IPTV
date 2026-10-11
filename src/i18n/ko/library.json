@@ -22,7 +22,7 @@
   "actionResume": "재개",
   "actionCancel": "다운로드 취소",
   "actionRetry": "다시 시도",
-  "actionRemove": "삭제",
+  "actionRemove": "제거",
   "actionReveal": "폴더에서 보기",
   "actionPauseAria": "{{title}} 일시정지",
   "actionResumeAria": "{{title}} 재개",
@@ -133,7 +133,7 @@
   "episodePlay": "재생",
   "episodeRedownload": "다시 다운로드",
   "episodeReveal": "폴더에서 보기",
-  "episodeRemove": "삭제",
+  "episodeRemove": "제거",
   "episodePlayAria": "{{title}} 재생",
   "episodeRedownloadAria": "{{title}} 다시 다운로드",
   "episodeRevealAria": "폴더에서 {{title}} 보기",
@@ -193,5 +193,6 @@
   "openFailed": "{{title}}을(를) 열 수 없습니다",
   "removeFailed": "항목을 삭제할 수 없습니다",
   "sourceRemoved": "소스가 삭제됨",
-  "sourceRemovedHint": "이 항목의 소스가 삭제되었습니다. 항목을 열려면 소스를 다시 추가하세요."
+  "sourceRemovedHint": "이 항목의 소스가 삭제되었습니다. 항목을 열려면 소스를 다시 추가하세요.",
+  "tryAgain": "다시 시도"
 }

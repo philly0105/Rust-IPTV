@@ -114,8 +114,10 @@ The year is `args.year`, else the release-tag year (`Title (1999)`), else none.
 A leading number such as in `2001: A Space Odyssey` is not treated as a year.
 
 A provider `tmdbId` is trusted unless its details contradict the provider's
-title and year (`assess_provider_id`). In that case the title search may
-replace it, and if the search finds nothing else the id's details are kept. An
+title and year (`assess_provider_id`). In that case only a confident title
+search answers: a different id's details replace it, the same id keeps them,
+and when the search finds nothing (or fails) the call returns null rather than
+another title's metadata. An
 id that returns 404 is negatively cached and the call falls through to the
 search.
 
@@ -160,7 +162,7 @@ fetched value. Expired rows are ignored on read and purged by `tmdb::init`.
 
 ## Rate limits and retries
 
-- At most 8 requests are in flight, each with a 15 s timeout.
+- At most 8 requests are in flight, each with a 15 s timeout. Requests go through `http::send` (15 s response-head deadline, URL stripped from errors so the api key never leaks); a transport failure reads "Could not reach api.themoviedb.org. ..." and a timeout "TMDB did not answer in time. ...".
 - `http::with_retry(4, ..)` retries Network and Timeout errors with backoff.
 - A 429 reads `Retry-After` (seconds or an HTTP date, capped at 10 s, default
   1 s). Every later request waits it out before sending, so one 429 slows all

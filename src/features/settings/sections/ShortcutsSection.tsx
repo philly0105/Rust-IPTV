@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Kbd, comboKeys, useShortcutList } from '../../sources/_shim';
+import { Kbd, comboKeys } from '@/ui';
+import { useShortcutList } from '@/shell';
 import { SettingsGroup, SettingsSection } from '../components';
 import type { SectionProps } from './types';
 

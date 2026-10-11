@@ -173,8 +173,9 @@ pub async fn category_names(
         .unwrap_or_default()
 }
 
-/// Remembers listed rows for details/playback and maps them.
-pub fn remember_rows(
+/// Remembers listed rows for details/playback, in memory and in
+/// `stalker_items` (so they survive resyncs and restarts).
+pub async fn remember_rows(
     state: &AppState,
     source_id: &str,
     kind: Kind,
@@ -182,6 +183,7 @@ pub fn remember_rows(
     names: &std::collections::HashMap<String, String>,
 ) {
     let runtime = Runtime::get(state);
+    let mut persisted: Vec<(ItemRef, CachedItem)> = Vec::with_capacity(rows.len());
     for row in rows {
         let Some(id) = mapping::vod_id(&row.raw) else {
             continue;
@@ -196,27 +198,28 @@ pub fn remember_rows(
             // Mark the origin so detail lookups use the series API.
             raw["__kind"] = Value::from("series");
         }
-        runtime.remember(
-            &ItemRef::new(source_id, ct, id),
-            CachedItem {
-                raw,
-                category_name: names.get(&row.category_id).cloned(),
-            },
-        );
+        let r = ItemRef::new(source_id, ct, id);
+        let item = CachedItem {
+            raw,
+            category_name: names.get(&row.category_id).cloned(),
+        };
+        runtime.remember(&r, item.clone());
+        persisted.push((r, item));
     }
+    super::persist_items(state, persisted).await;
 }
 
-/// Finds a VOD/series row: in-memory cache, then a portal search by the
-/// title remembered in favorites/recent/positions.
+/// Finds a VOD/series row: memory, then `stalker_items`, then a portal
+/// search by the title remembered in favorites/recent/positions.
 pub async fn lookup(
     state: &Arc<AppState>,
     client: &StalkerClient,
     r: &ItemRef,
 ) -> CoreResult<CachedItem> {
-    let runtime = Runtime::get(state);
-    if let Some(hit) = runtime.items.get(&r.key()) {
-        return Ok(hit.clone());
+    if let Some(hit) = super::cached_item(state, r).await {
+        return Ok(hit);
     }
+    let runtime = Runtime::get(state);
     let title = snapshot_title(state, r).await;
     if let Some(title) = title {
         let query = PageQuery {
@@ -233,9 +236,10 @@ pub async fn lookup(
         for kind in kinds {
             match list_page(state, client, &r.source_id, *kind, None, &query).await {
                 Ok(page) => {
-                    remember_rows(state, &r.source_id, *kind, &page.items, &Default::default());
+                    remember_rows(state, &r.source_id, *kind, &page.items, &Default::default())
+                        .await;
                     if let Some(hit) = runtime.items.get(&r.key()) {
-                        return Ok(hit.clone());
+                        return Ok(hit);
                     }
                 }
                 Err(err @ CoreError::Auth(_)) => return Err(err),
@@ -244,7 +248,7 @@ pub async fn lookup(
         }
     }
     Err(CoreError::not_found(
-        "This title is no longer cached. Open it again from the movies or series list.",
+        "This title is no longer listed by the portal. Open it again from the movies or series list.",
     ))
 }
 
@@ -294,6 +298,8 @@ pub async fn vod_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<VodDet
         director: s(&cached.raw, "director"),
         trailer_url: None,
         backdrops: Vec::new(),
+        provider_details_unavailable: false,
+        provider_error: None,
         item,
     })
 }
@@ -527,10 +533,10 @@ pub async fn season_plan(
 ) -> CoreResult<Arc<Vec<SeasonPlan>>> {
     let runtime = Runtime::get(state);
     if let Some(plan) = runtime.plans.get(&r.key()) {
-        return Ok(plan.clone());
+        return Ok(plan);
     }
     let endpoint = client.endpoint().await?;
-    let raw = runtime.items.get(&r.key()).map(|c| c.raw.clone());
+    let raw = super::cached_item(state, r).await.map(|c| c.raw);
     let id = r.item_id.as_str();
 
     let mut plans: Vec<SeasonPlan> = if raw.as_ref().is_some_and(|v| !series_numbers(v).is_empty())
@@ -632,6 +638,8 @@ pub async fn series_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Ser
         director: s(&cached.raw, "director"),
         trailer_url: None,
         backdrops: Vec::new(),
+        provider_details_unavailable: false,
+        provider_error: None,
         seasons,
         item,
     })

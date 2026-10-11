@@ -47,7 +47,21 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0003_epg_program_url_index",
         sql: include_str!("migrations/0003_epg_program_url_index.sql"),
     },
+    Migration {
+        version: 4,
+        name: "0004_position_watched",
+        sql: include_str!("migrations/0004_position_watched.sql"),
+    },
 ];
+
+/// Message shown when the database was written by a newer build.
+pub const NEWER_SCHEMA_MESSAGE: &str =
+    "This data was created by a newer Tsrust IPTV; update the app";
+
+/// Suffix of the flag file written next to the database when a query reports
+/// corruption at runtime (`iptv.db.needs-recovery`). The next boot runs a full
+/// integrity check and quarantines the file when it fails.
+pub const RECOVERY_FLAG_SUFFIX: &str = ".needs-recovery";
 
 /// Latest schema version known to this build.
 pub fn latest_version() -> i64 {
@@ -99,13 +113,12 @@ pub fn migrate(conn: &mut Connection) -> CoreResult<()> {
     } else {
         0
     };
-    let latest = MIGRATIONS.last().map(|m| m.version).unwrap_or(0);
+    let latest = latest_version();
     if current > latest {
-        tracing::warn!(
-            current,
-            latest,
-            "database schema is newer than this build; continuing"
-        );
+        // Never write to (or "fix") a database a newer build created: its
+        // tables may carry columns and rules this build does not know.
+        tracing::error!(current, latest, "database schema is newer than this build");
+        return Err(newer_schema_error());
     }
     for m in MIGRATIONS.iter().filter(|m| m.version > current) {
         tracing::info!(version = m.version, name = m.name, "applying migration");
@@ -139,13 +152,47 @@ pub fn schema_version(conn: &Connection) -> CoreResult<i64> {
     )?)
 }
 
-fn try_open_and_migrate(path: &Path) -> CoreResult<DbPool> {
+fn newer_schema_error() -> CoreError {
+    CoreError::Other(anyhow::anyhow!(NEWER_SCHEMA_MESSAGE))
+}
+
+/// A corruption error carrying the integrity check's first finding.
+fn corrupt_error(detail: &str) -> CoreError {
+    CoreError::Db(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+        Some(format!("database integrity check failed: {detail}")),
+    ))
+}
+
+/// Runs `PRAGMA quick_check` (or the slower `integrity_check`, which also
+/// verifies index contents) and turns any finding into a corruption error.
+/// A file with a valid header but garbage pages opens fine and only fails on
+/// the first query that touches a bad page, so this runs on every boot.
+fn check_integrity(conn: &Connection, full: bool) -> CoreResult<()> {
+    let pragma = if full {
+        "PRAGMA integrity_check(1)"
+    } else {
+        "PRAGMA quick_check(1)"
+    };
+    let first: String = conn.query_row(pragma, [], |r| r.get(0))?;
+    if first.eq_ignore_ascii_case("ok") {
+        Ok(())
+    } else {
+        Err(corrupt_error(&first))
+    }
+}
+
+fn try_open_and_migrate(path: &Path, full_check: bool) -> CoreResult<DbPool> {
     // Validate and migrate on a dedicated connection first: a corrupt file fails
     // fast here instead of stalling inside the pool builder.
     {
         let mut conn = Connection::open(path)?;
         configure(&mut conn)?;
         conn.query_row("PRAGMA schema_version", [], |r| r.get::<_, i64>(0))?;
+        check_integrity(&conn, full_check)?;
+        if schema_version(&conn)? > latest_version() {
+            return Err(newer_schema_error());
+        }
         migrate(&mut conn)?;
     }
     open(path)
@@ -178,21 +225,65 @@ pub fn quarantine(path: &Path) -> CoreResult<PathBuf> {
     Ok(target)
 }
 
-/// Boot path: open + migrate; when the file is corrupt or not a database,
-/// quarantine it (see [`quarantine`]), log a warning, and recreate an empty one.
+/// Path of the runtime-corruption flag for the database at `path`.
+pub fn recovery_flag_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| DB_FILE.to_string());
+    path.with_file_name(format!("{name}{RECOVERY_FLAG_SUFFIX}"))
+}
+
+/// Call with any error a query on the database at `db_path` returned. When it
+/// is a corruption error (`SQLITE_CORRUPT` / `SQLITE_NOTADB`), writes the
+/// recovery flag so the next boot checks the whole file and quarantines it.
+/// Returns true when the flag was written.
+pub fn note_error(db_path: &Path, err: &CoreError) -> bool {
+    if !is_corruption(err) {
+        return false;
+    }
+    let flag = recovery_flag_path(db_path);
+    match std::fs::write(&flag, chrono::Utc::now().to_rfc3339().as_bytes()) {
+        Ok(()) => {
+            tracing::error!(error = %err, flag = %flag.display(), "database reported corruption; it will be checked and recovered at the next start");
+            true
+        }
+        Err(io) => {
+            tracing::error!(error = %err, %io, "database reported corruption and the recovery flag could not be written");
+            false
+        }
+    }
+}
+
+/// Boot path: open, check integrity (`quick_check`; the full `integrity_check`
+/// when a previous run flagged corruption, see [`note_error`]), refuse a
+/// schema newer than this build, and migrate. When the file is corrupt or not
+/// a database, quarantine it (see [`quarantine`]), log a warning, and recreate
+/// an empty one.
 pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    match try_open_and_migrate(path) {
+    let flag = recovery_flag_path(path);
+    let flagged = flag.exists();
+    if flagged {
+        tracing::warn!("previous run reported database corruption; running a full integrity check");
+    }
+    let result = match try_open_and_migrate(path, flagged) {
         Ok(pool) => Ok(pool),
         Err(err) if is_corruption(&err) => {
             let moved = quarantine(path)?;
             tracing::warn!(error = %err, backup = %moved.display(), "database was corrupt; moved aside and recreating");
-            try_open_and_migrate(path)
+            try_open_and_migrate(path, false)
         }
         Err(err) => Err(err),
+    };
+    if flagged && result.is_ok() {
+        if let Err(err) = std::fs::remove_file(&flag) {
+            tracing::warn!(%err, "could not remove the database recovery flag");
+        }
     }
+    result
 }
 
 /// Current UTC time as RFC 3339 with second precision (`2026-10-11T02:30:00Z`).

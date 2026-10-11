@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { PlayerStage } from '@/features/player';
 
-import { IconButton } from '../../_shim';
+import { IconButton } from '@/ui';
 
 /**
  * Watch-state top of a detail page: the docked player stage at full content

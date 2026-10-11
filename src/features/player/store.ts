@@ -228,7 +228,7 @@ export function modeForSettings(player: VideoPlayer | undefined, source: PlayerS
   return 'inline';
 }
 
-function errorMessage(err: unknown): string {
+export function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === 'string') return err;
   return 'Playback failed';
@@ -644,8 +644,15 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
     const url = 'url' in item ? item.url : undefined;
     if (!url) throw new Error('This item has no stream URL');
     resolved = { url, kind: kindFromUrl(url), title: args.title, isLive: args.isLive, isRadio: !!args.isRadio };
-    const headers = src?.m3u?.headers;
-    if (headers && Object.values(headers).some(Boolean)) resolved.headers = headers;
+    // Per-channel headers (#EXTVLCOPT / url|Header=) override the playlist's, field by field.
+    const itemHeaders = 'headers' in item ? item.headers : undefined;
+    const headers: NonNullable<PlayerSource['headers']> = {};
+    for (const h of [src?.m3u?.headers, itemHeaders]) {
+      if (h?.userAgent) headers.userAgent = h.userAgent;
+      if (h?.referrer) headers.referrer = h.referrer;
+      if (h?.origin) headers.origin = h.origin;
+    }
+    if (Object.keys(headers).length > 0) resolved.headers = headers;
   }
   sourceKindCache.set(ref.sourceId, args.sourceKind);
 

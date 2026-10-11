@@ -6,20 +6,21 @@ import { invalidate } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 import type { EpgLinks, Source } from '@/api/types';
 
-import { Button, Dialog, Input, Tabs, Toggle, useToast } from '../_shim';
+import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
 import { buildUpdatePatch, draftFromSource, patchNeedsRefresh, type DraftErrors, type SourceDraft } from '../lib/draft';
 import { epgPatch } from '../lib/epgLinks';
 import { newlyEnabledEpgUrls, refreshGuides } from '../lib/epgRefresh';
 import { nextStepKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
+import { AccountPanel, hasAccountInfo } from './AccountPanel';
 import { EpgLinksEditor } from './EpgLinksEditor';
 import { Field } from './Field';
 import { M3uForm } from './M3uForm';
 import { StalkerForm } from './StalkerForm';
 import { XtreamForm } from './XtreamForm';
 
-type EditTab = 'details' | 'epg';
+export type EditTab = 'details' | 'epg' | 'account';
 
 export function EditSourceDialog({
   source,
@@ -50,9 +51,9 @@ export function EditSourceDialog({
     setEpg(source.epg);
     setErrors({});
     setSaveError(null);
-    setTab(initialTab);
+    setTab(initialTab === 'account' && !hasAccountInfo(source) ? 'details' : initialTab);
     // Only re-seed when a different source opens, not on background refetches.
-  }, [sourceId]);
+  }, [sourceId, initialTab]);
 
   if (!source || !draft || !epg) return null;
 
@@ -97,6 +98,7 @@ export function EditSourceDialog({
     { id: 'details', label: t('tabDetails') },
     { id: 'epg', label: t('tabEpg') },
   ];
+  if (hasAccountInfo(source)) tabs.push({ id: 'account', label: t('tabAccount') });
 
   return (
     <Dialog
@@ -140,18 +142,15 @@ export function EditSourceDialog({
               )}
             </Field>
             {source.kind === 'm3u' ? (
-              source.m3u?.origin === 'text' ? (
-                <p className="rounded-md border border-border bg-surface-2/60 p-3 text-sm text-fg-muted">{t('textOriginNotEditable')}</p>
-              ) : (
-                <M3uForm
-                  mode="edit"
-                  value={draft.m3u}
-                  onChange={(m3u) => setDraft({ ...draft, m3u })}
-                  errors={errors}
-                  isDesktop={isDesktop}
-                  disabled={saving}
-                />
-              )
+              // Pasted playlists hide the content inputs inside the form but keep the headers editable.
+              <M3uForm
+                mode="edit"
+                value={draft.m3u}
+                onChange={(m3u) => setDraft({ ...draft, m3u })}
+                errors={errors}
+                isDesktop={isDesktop}
+                disabled={saving}
+              />
             ) : null}
             {source.kind === 'xtream' ? (
               <XtreamForm value={draft.xtream} onChange={(xtream) => setDraft({ ...draft, xtream })} errors={errors} onErrors={setErrors} disabled={saving} />
@@ -174,8 +173,10 @@ export function EditSourceDialog({
               description={source.m3u?.origin === 'text' ? t('autoRefreshUnavailable') : t('autoRefreshHint')}
             />
           </>
-        ) : (
+        ) : tab === 'epg' ? (
           <EpgLinksEditor value={epg} onChange={setEpg} disabled={saving} />
+        ) : (
+          <AccountPanel source={source} />
         )}
 
         {saveError ? (

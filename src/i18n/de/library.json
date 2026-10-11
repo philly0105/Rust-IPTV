@@ -125,7 +125,7 @@
   "downloadedEpisodes": "Heruntergeladene Folgen",
   "otherEpisodes": "Weitere Folgen",
   "seasonN": "Staffel {{season}}",
-  "nowPlaying": "Läuft gerade",
+  "nowPlaying": "Wird wiedergegeben",
   "backToDetails": "Zurück zu den Details",
   "backToLibrary": "Zurück zu „Meine Videos“",
   "detailNotFoundTitle": "Dieses Video ist nicht in Ihrer Bibliothek",
@@ -182,7 +182,7 @@
   "continueWatching": "Weiterschauen",
   "continueTitle": "{{title}} bei {{time}} fortsetzen",
   "removeContinue": "{{title}} aus „Weiterschauen“ entfernen",
-  "watchedPercent": "{{percent}} % angesehen",
+  "watchedPercent": "{{percent}}% angesehen",
 
   "typeLive": "Live-Sender",
   "typeMovie": "Film",
@@ -193,5 +193,6 @@
   "openFailed": "{{title}} konnte nicht geöffnet werden",
   "removeFailed": "Der Eintrag konnte nicht entfernt werden",
   "sourceRemoved": "Quelle entfernt",
-  "sourceRemovedHint": "Die Quelle dieses Eintrags wurde entfernt. Fügen Sie sie erneut hinzu, um den Eintrag zu öffnen."
+  "sourceRemovedHint": "Die Quelle dieses Eintrags wurde entfernt. Fügen Sie sie erneut hinzu, um den Eintrag zu öffnen.",
+  "tryAgain": "Erneut versuchen"
 }

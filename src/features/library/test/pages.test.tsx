@@ -103,6 +103,40 @@ describe('DownloadsPage', () => {
     await waitFor(() => expect(rpc.callsOf('downloads.retry')).toEqual([{ id: 14 }]));
   });
 
+  it('offers Try again on a retryable failure and re-issues the command', async () => {
+    const { useToastStore } = await import('@/ui');
+    const { RpcError } = await import('@/api/transport');
+    useToastStore.getState().clear();
+    rpc.handlers['downloads.list'] = () => list;
+    let attempts = 0;
+    rpc.handlers['downloads.pause'] = () => {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new RpcError('timeout', 'timed out'), { code: 'timeout', retryable: true });
+      return undefined;
+    };
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause Title downloading' }));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    const toast = useToastStore.getState().toasts[0]!;
+    expect(toast.action?.label).toBe('Try again');
+    toast.action!.onClick();
+    await waitFor(() => expect(rpc.callsOf('downloads.pause')).toEqual([{ id: 11 }, { id: 11 }]));
+  });
+
+  it('shows no Try again when the failure is not retryable', async () => {
+    const { useToastStore } = await import('@/ui');
+    const { RpcError } = await import('@/api/transport');
+    useToastStore.getState().clear();
+    rpc.handlers['downloads.list'] = () => list;
+    rpc.handlers['downloads.pause'] = () => {
+      throw Object.assign(new RpcError('invalid', 'bad'), { code: 'invalid', retryable: false });
+    };
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause Title downloading' }));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]!.action).toBeUndefined();
+  });
+
   it('confirms before canceling a partial download', async () => {
     rpc.handlers['downloads.list'] = () => list;
     rpc.handlers['downloads.cancel'] = () => undefined;

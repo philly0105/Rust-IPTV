@@ -1,5 +1,5 @@
 {
-  "addFavorite": "Añadir a favoritos",
+  "addFavorite": "Agregar a favoritos",
   "removeFavorite": "Quitar de favoritos",
   "toggleFavorite": "Añadir o quitar de favoritos",
   "favoriteAdded": "Se añadió {{name}} a favoritos",
@@ -29,7 +29,7 @@
   "channelNumber": "Canal",
   "channels": "Canales",
   "stations": "Emisoras",
-  "clearSearch": "Borrar búsqueda",
+  "clearSearch": "Borrar la búsqueda",
   "copyUrl": "Copiar dirección del stream",
   "urlCopied": "Dirección del stream copiada",
   "copyFailed": "No se pudo copiar la dirección del stream",
@@ -57,7 +57,7 @@
   "loadingGuide": "Cargando guía",
   "guide": "Guía de TV",
   "openGuide": "Guía de TV",
-  "guideView": "Vista de guía",
+  "guideView": "Vista de la guía",
   "timelineView": "Cronología",
   "listView": "Lista",
   "guideGroup": "Grupo",
@@ -77,6 +77,7 @@
   "minutesLeft_one": "Queda {{count}} min",
   "minutesLeft_many": "Quedan {{count}} min",
   "minutesLeft_other": "Quedan {{count}} min",
+  "minutesLeftShort": "{{count}} min",
   "mapEpg": "Asignar canal de guía",
   "mappingAutomatic": "Asignar automáticamente",
   "mappingNone": "Sin guía",
@@ -92,7 +93,7 @@
   "mappingSearch": "Buscar canales de guía",
   "mappingResults": "Canales de guía",
   "mappingNoResults": "Ningún canal de guía coincide con «{{query}}»",
-  "mappingSelected": "Seleccionado",
+  "mappingSelected": "Seleccionados",
   "noCatchup": "Este programa está fuera del periodo de catch-up.",
   "noChannelNumber": "No existe el canal {{number}}",
   "zapFailed": "No se pudo cambiar de canal",
@@ -103,7 +104,7 @@
   "noGuideFor": "No hay datos de guía para {{name}}",
   "noGuideHint": "Asigna este canal a un canal de guía o añade una dirección XMLTV en los ajustes de EPG.",
   "noGuideShort": "Sin datos de guía",
-  "noSearchResults": "Ningún canal coincide con «{{query}}»",
+  "noSearchResults": "Ningún canal coincide con “{{query}}”",
   "noSearchResultsInGroup": "Solo se busca dentro de {{group}}.",
   "nowShowing": "ahora: {{title}}",
   "play": "Reproducir",
@@ -128,5 +129,5 @@
   "stationNumber": "Emisora {{number}}",
   "watch": "Ver",
   "watchCatchup": "Ver grabación",
-  "watchLive": "Ver en vivo"
+  "watchLive": "Ver en directo"
 }

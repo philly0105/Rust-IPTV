@@ -23,7 +23,7 @@ describe('epgTime', () => {
     expect(canCatchUp(ended, {}, 'xtream', NOW)).toBe(false);
     expect(canCatchUp(p('old', NOW - 30 * HOUR, NOW - 29 * HOUR), archive, 'xtream', NOW)).toBe(false);
     expect(canCatchUp(p('later', NOW + HOUR, NOW + 2 * HOUR), archive, 'xtream', NOW)).toBe(false);
-    expect(lookbackMs({ archive: { enabled: true, durationHours: 168 } })).toBe(72 * HOUR);
+    expect(lookbackMs({ archive: { enabled: true, durationHours: 400 } })).toBe(168 * HOUR);
     expect(lookbackMs(undefined)).toBe(3 * HOUR);
   });
 

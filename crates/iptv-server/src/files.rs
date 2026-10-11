@@ -4,6 +4,11 @@
 //! row must be `completed`, and the path must be a regular file (no
 //! directories, no symlinks). Range, `If-Range`, `If-Modified-Since` and HEAD
 //! are handled by `tower_http::services::ServeFile`.
+//!
+//! Only video, audio and image files are served `inline` (for the player);
+//! everything else is an `attachment`. Every response carries the sandbox
+//! CSP and `nosniff`, so a downloaded HTML or SVG page never runs with the
+//! app's origin.
 
 use crate::api::error_response;
 use crate::Server;
@@ -99,8 +104,13 @@ pub async fn handler(State(s): State<Server>, Path(id): Path<String>, req: Reque
             }
         })
         .collect();
+    let inline = h
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(is_inline_type);
     let disposition = format!(
-        "inline; filename=\"{ascii}\"; filename*=UTF-8''{}",
+        "{}; filename=\"{ascii}\"; filename*=UTF-8''{}",
+        if inline { "inline" } else { "attachment" },
         utf8_percent_encode(&name, NON_ALPHANUMERIC)
     );
     if let Ok(v) = HeaderValue::from_str(&disposition) {
@@ -110,5 +120,18 @@ pub async fn handler(State(s): State<Server>, Path(id): Path<String>, req: Reque
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, no-cache"),
     );
+    crate::proxy::harden(&mut res);
     res.into_response()
+}
+
+/// Video, audio and raster/vector images may render inline; the sandbox CSP
+/// keeps an SVG from running script.
+pub fn is_inline_type(ct: &str) -> bool {
+    let essence = ct
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    essence.starts_with("video/") || essence.starts_with("audio/") || essence.starts_with("image/")
 }

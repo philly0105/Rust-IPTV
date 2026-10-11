@@ -42,6 +42,12 @@ export interface Engine {
   setText(id: string | null): void;
   /** Recover after a non-fatal stall: hls.js `recoverMediaError`/`startLoad`. */
   recover(): void;
+  /**
+   * Seconds to add to `el.currentTime` (and buffered/seekable ranges) for display, and to
+   * subtract when seeking. Non-zero only after mpegts.js reconnected a live stream: the new
+   * pipeline restarts the element clock at 0, the shown position must not jump back.
+   */
+  timeOffset?(): number;
   destroy(): void;
 }
 
@@ -105,6 +111,91 @@ export function proxyRewrite(source: PlayerSource, loadUrl: string): ((url: stri
     if (sourceId) params.set('sourceId', sourceId);
     return `/api/proxy?${params.toString()}`;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Server/proxy failure reasons
+// ---------------------------------------------------------------------------
+
+/** Longest server reason shown in the error overlay. */
+const MAX_REASON = 300;
+
+/**
+ * A URL answered by our own server: the web `/api/...` routes (proxy, files) or the
+ * desktop loopback proxy (`http://127.0.0.1:<port>/api/proxy`). Their non-2xx bodies
+ * carry a readable reason (an RpcError JSON or plain text); upstream bodies do not.
+ */
+export function isOwnServerUrl(url: string): boolean {
+  try {
+    const u = new URL(url, window.location.href);
+    if (u.pathname === '/api/proxy') return true;
+    return u.origin === window.location.origin && u.pathname.startsWith('/api/');
+  } catch {
+    return false;
+  }
+}
+
+/** The reason in a non-2xx body: an RpcError's `message`, else the trimmed text. Null when empty or HTML. */
+export function reasonFromBody(body: unknown): string | null {
+  let text: string | null = null;
+  if (typeof body === 'string') text = body;
+  // Tag check rather than instanceof: worker and test realms have their own ArrayBuffer.
+  else if (Object.prototype.toString.call(body) === '[object ArrayBuffer]' || ArrayBuffer.isView(body)) {
+    try {
+      text = new TextDecoder().decode(body as ArrayBuffer | ArrayBufferView);
+    } catch {
+      text = null;
+    }
+  }
+  text = text?.trim() ?? '';
+  if (!text || /^<(!doctype|html)/i.test(text)) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string') {
+      text = (parsed as { message: string }).message.trim();
+    }
+  } catch {
+    // plain text
+  }
+  if (!text) return null;
+  return text.length > MAX_REASON ? `${text.slice(0, MAX_REASON - 1)}…` : text;
+}
+
+/** The body of a failed XMLHttpRequest (hls.js `networkDetails`), when it is readable. */
+function xhrBody(details: unknown): unknown {
+  if (typeof XMLHttpRequest === 'undefined' || !(details instanceof XMLHttpRequest)) return undefined;
+  try {
+    return details.responseType === '' || details.responseType === 'text' ? details.responseText : details.response;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `<reason> (HTTP <status>)`, or the engine's own message when the server gave no reason. */
+export function withReason(fallback: string, reason: string | null, status?: number): string {
+  if (!reason) return fallback;
+  return status && status > 0 ? `${reason} (HTTP ${status})` : reason;
+}
+
+/**
+ * Asks our own server why `url` failed: one GET, and the body text of a non-2xx answer.
+ * Engines that hide response bodies (mpegts.js, the media element, hls.js binary loads) use it.
+ * Never contacts anything but our own server; null on 2xx, network failure or timeout.
+ */
+export async function fetchFailureReason(url: string): Promise<{ status: number; reason: string } | null> {
+  if (!isOwnServerUrl(url)) return null;
+  try {
+    const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(5000) : undefined;
+    const res = await fetch(url, { signal, cache: 'no-store' });
+    if (res.ok) {
+      void res.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const reason = reasonFromBody(await res.text());
+    return reason ? { status: res.status, reason } : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +313,7 @@ async function hlsEngine(
 
   let manualLevel = -1;
   let mediaRecoveries = 0;
+  let destroyed = false;
   const emit = (): void => {
     const levels = hls.levels ?? [];
     const labels = qualityLabels(levels.map((l) => ({ height: l.height, width: l.width, bitrate: l.bitrate })));
@@ -260,8 +352,24 @@ async function hlsEngine(
       return;
     }
     const kind = data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network' : data.type === Hls.ErrorTypes.MEDIA_ERROR ? 'media' : 'other';
-    const status = data.response?.code ? ` (HTTP ${data.response.code})` : '';
-    cb.onError({ message: `${data.details}${status}`, fatal: true, kind });
+    const code = data.response?.code ?? 0;
+    const fallback = `${data.details}${code ? ` (HTTP ${code})` : ''}`;
+    const report = (message: string): void => {
+      if (!destroyed) cb.onError({ message, fatal: true, kind });
+    };
+    // A refusal from our own server (proxy SSRF guard, upstream 4xx relayed) says why in its body.
+    const rawUrl = data.url ?? data.response?.url ?? data.context?.url ?? url;
+    const failedUrl = rewrite ? rewrite(rawUrl) : rawUrl;
+    if (kind === 'network' && code >= 400 && isOwnServerUrl(failedUrl)) {
+      const inline = reasonFromBody(xhrBody(data.networkDetails) ?? data.response?.data);
+      if (inline) {
+        report(withReason(fallback, inline, code));
+        return;
+      }
+      void fetchFailureReason(failedUrl).then((r) => report(withReason(fallback, r?.reason ?? null, r?.status ?? code)));
+      return;
+    }
+    report(fallback);
   });
 
   hls.subtitleDisplay = wantCaptions;
@@ -295,6 +403,7 @@ async function hlsEngine(
       hls.recoverMediaError();
     },
     destroy() {
+      destroyed = true;
       hls.destroy();
       el.removeAttribute('src');
     },
@@ -304,6 +413,22 @@ async function hlsEngine(
 // ---------------------------------------------------------------------------
 // shaka (DASH)
 // ---------------------------------------------------------------------------
+
+interface ShakaErrorLike {
+  severity?: number;
+  code?: number;
+  category?: number;
+  data?: unknown[];
+}
+
+/** shaka BAD_HTTP_STATUS (1001) carries `[uri, status, responseText, ...]`: the reason from our own server. */
+function shakaHttpFailure(err: ShakaErrorLike | undefined): { status: number; reason: string } | null {
+  if (err?.code !== 1001 || !Array.isArray(err.data)) return null;
+  const [uri, status, body] = err.data;
+  if (typeof uri !== 'string' || typeof status !== 'number' || !isOwnServerUrl(uri)) return null;
+  const reason = reasonFromBody(body);
+  return reason ? { status, reason } : null;
+}
 
 async function shakaEngine(
   el: HTMLMediaElement,
@@ -369,11 +494,12 @@ async function shakaEngine(
   player.addEventListener('adaptation', emit);
   player.addEventListener('texttrackvisibility', emit);
   player.addEventListener('error', (e) => {
-    const detail = (e as unknown as { detail?: { severity?: number; code?: number; category?: number } }).detail;
+    const detail = (e as unknown as { detail?: ShakaErrorLike }).detail;
     const fatal = detail?.severity === shaka.util.Error.Severity.CRITICAL;
     if (!fatal) return;
     const kind = detail?.category === shaka.util.Error.Category.NETWORK ? 'network' : 'media';
-    cb.onError({ message: `Shaka error ${detail?.code ?? ''}`.trim(), fatal: true, kind });
+    const http = shakaHttpFailure(detail);
+    cb.onError({ message: withReason(`Shaka error ${detail?.code ?? ''}`.trim(), http?.reason ?? null, http?.status), fatal: true, kind });
   });
 
   await player.attach(el as HTMLMediaElement);
@@ -383,8 +509,10 @@ async function shakaEngine(
     emit();
   } catch (err) {
     if (!destroyed) {
-      const code = (err as { code?: number }).code;
-      cb.onError({ message: `Could not load the DASH manifest${code ? ` (${code})` : ''}`, fatal: true, kind: 'network' });
+      const code = (err as ShakaErrorLike).code;
+      const http = shakaHttpFailure(err as ShakaErrorLike);
+      const fallback = `Could not load the DASH manifest${code ? ` (${code})` : ''}`;
+      cb.onError({ message: withReason(fallback, http?.reason ?? null, http?.status), fatal: true, kind: 'network' });
     }
   }
 
@@ -503,6 +631,10 @@ async function mpegtsEngine(
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stableTimer: ReturnType<typeof setTimeout> | null = null;
   let loadComplete = false;
+  /** Live only: element time lost to reconnects, so the displayed position keeps running. */
+  let offset = 0;
+  /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
+  let anchor: number | null = null;
 
   const config: Parameters<typeof mpegts.createPlayer>[1] = {
     enableWorker: true,
@@ -552,8 +684,15 @@ async function mpegtsEngine(
       const message = `${detail || type}${http}`;
       if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
         // A 4xx will not fix itself; anything else gets bounded restarts.
-        if (info?.code && info.code >= 400 && info.code < 500) fail({ message, fatal: true, kind: 'network' });
-        else restart({ message, fatal: true, kind: 'network' });
+        if (info?.code && info.code >= 400 && info.code < 500) {
+          const status = info.code;
+          // mpegts.js drops the body; our own server (proxy guard, relayed 4xx) is asked once for the reason.
+          if (isOwnServerUrl(absolute)) {
+            void fetchFailureReason(absolute).then((r) => {
+              if (player === p) fail({ message: withReason(message, r?.reason ?? null, r?.status ?? status), fatal: true, kind: 'network' });
+            });
+          } else fail({ message, fatal: true, kind: 'network' });
+        } else restart({ message, fatal: true, kind: 'network' });
         return;
       }
       if (type === mpegts.ErrorTypes.MEDIA_ERROR) {
@@ -579,6 +718,8 @@ async function mpegtsEngine(
       return;
     }
     restarts++;
+    // Remember where the display stood; the first media time of the new pipeline is rebased onto it.
+    if (isLive && anchor === null) anchor = offset + (Number.isFinite(el.currentTime) ? el.currentTime : 0);
     if (stableTimer) {
       clearTimeout(stableTimer);
       stableTimer = null;
@@ -601,6 +742,15 @@ async function mpegtsEngine(
   };
   el.addEventListener('ended', onEnded);
   el.addEventListener('waiting', onWaiting);
+  /** The new pipeline produced media: fix the offset so its clock continues from the anchor. */
+  const rebase = (): void => {
+    if (anchor === null || player === null || el.readyState < 1 || restartTimer) return;
+    offset = anchor - el.currentTime;
+    anchor = null;
+  };
+  // Listener order does not matter: until rebased, `timeOffset()` holds the display at the anchor.
+  el.addEventListener('timeupdate', rebase);
+  el.addEventListener('loadedmetadata', rebase);
   el.addEventListener('timeupdate', markStable);
   start();
 
@@ -615,6 +765,10 @@ async function mpegtsEngine(
       restartTimer = null;
       restart({ message: 'Recovery failed', fatal: true, kind: 'other' });
     },
+    timeOffset() {
+      // While reconnecting the display holds at the anchor whatever the element reports.
+      return anchor !== null ? anchor - (Number.isFinite(el.currentTime) ? el.currentTime : 0) : offset;
+    },
     destroy() {
       destroyed = true;
       if (restartTimer) clearTimeout(restartTimer);
@@ -622,6 +776,8 @@ async function mpegtsEngine(
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('waiting', onWaiting);
       el.removeEventListener('timeupdate', markStable);
+      el.removeEventListener('timeupdate', rebase);
+      el.removeEventListener('loadedmetadata', rebase);
       if (player) teardown(player);
       player = null;
       el.removeAttribute('src');

@@ -28,6 +28,9 @@ User state lives in the C3 tables `favorites`, `recent` and `playback_positions`
 | `positions.forSeries {ref}` | Every episode row of one series. |
 | `positions.continueWatching {limit?}` | One row per item (the newest episode for a series), position > 0, newest first. Default 20, max 200. A missing snapshot is filled in from `items` and `categories`, or from a minimal fallback, so every row has one. |
 | `positions.remove {ref, episodeId?}` | |
+| `userstate.setWatched {ref, episodeId?, watched}` | `watched: true` upserts the row with `watched = 1` and the position set to the stored duration (else the stored position, else 0). `watched: false` deletes the row. |
+
+Every position carries `watched` (column added by migration 0004, default 0). `positions.continueWatching` skips watched rows. `positions.set` never clears the flag, and a watched row is kept (not deleted) when a later position reaches 95%.
 
 `episode_id` is stored as `''` when absent (C3 primary key) and returned as `null`.
 
@@ -39,4 +42,4 @@ Rows are written in RFC 3339 UTC with milliseconds, so ordering by text matches 
 
 ## Helpers used by `backup`
 
-`favorite_upsert_json`, `recent_upsert_json` (keeps the newer `viewed_at` on conflict, then trims), `position_set` with `PositionInput.updated_at`, `normalize_ts`, `now_ts`. They take a `&Connection` so an import applies a whole source in one transaction.
+`favorite_upsert_json`, `recent_upsert_json` (keeps the newer `viewed_at` on conflict, then trims), `position_set` with `PositionInput.updated_at` and `PositionInput.watched`, `normalize_ts`, `now_ts`. They take a `&Connection` so an import applies a whole source in one transaction.

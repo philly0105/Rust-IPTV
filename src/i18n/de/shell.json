@@ -3,7 +3,7 @@
   "skipToContent": "Zum Inhalt springen",
   "mainNavigation": "Hauptnavigation",
 
-  "navDashboard": "Start",
+  "navDashboard": "Startseite",
   "navSearch": "Suche",
   "navGuide": "Programmführer",
   "navFavorites": "Favoriten",
@@ -28,7 +28,7 @@
   "railMovies": "Filme",
   "railSeries": "Serien",
   "railFavorites": "Favoriten",
-  "railRecent": "Zuletzt",
+  "railRecent": "Zuletzt angesehen",
 
   "searchEverything": "Alles durchsuchen",
   "hideDetails": "Details ausblenden",
@@ -130,7 +130,7 @@
   "play": "Abspielen",
   "resume": "Fortsetzen",
   "details": "Details",
-  "watchedPercent": "{{percent}} % angesehen",
+  "watchedPercent": "{{percent}}% angesehen",
   "minutesLeft_one": "Noch {{count}} Minute",
   "minutesLeft_other": "Noch {{count}} Minuten",
   "resumeTitle": "{{title}} fortsetzen",

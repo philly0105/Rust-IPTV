@@ -1,19 +1,19 @@
 import { clsx } from 'clsx';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Eraser, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import type { EpgProgressEvent, EpgSourceStatus, EpgViewMode } from '@/api/types';
 
-import { Badge, Button, ErrorState, IconButton, Input, SkeletonList, useToast } from '../../sources/_shim';
+import { Badge, Button, Dialog, ErrorState, IconButton, Input, SkeletonList, useToast } from '@/ui';
 import { absoluteTime, formatCount, relativeTime } from '../../sources/lib/format';
 import { redactText, redactUrl } from '../../sources/lib/redact';
-import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import { addEpgUrl } from '../lib/patch';
-import type { SectionProps } from './types';
+import { CommitInput, Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
+import { addEpgUrl, validateEpgOffset } from '../lib/patch';
+import { parity, type SectionProps } from './types';
 
 const STATUS_CLASS: Record<EpgSourceStatus['status'], string> = {
   idle: 'text-fg-muted',
@@ -29,6 +29,9 @@ export function EpgSection({ settings, update }: SectionProps) {
   const [draft, setDraft] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [live, setLive] = useState<Record<string, EpgProgressEvent>>({});
+  const [offsetError, setOffsetError] = useState<string | null>(null);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const statuses = useRpcQuery('epg.sources', undefined, { staleTime: 5_000 });
   const sources = useRpcQuery('sources.list', undefined);
@@ -87,7 +90,23 @@ export function EpgSection({ settings, update }: SectionProps) {
     }
   };
 
+  const clearAll = async () => {
+    setClearing(true);
+    try {
+      await rpcRaw('epg.clearAll');
+      setLive({});
+      setClearOpen(false);
+      toast({ variant: 'success', title: t('epgClearDone') });
+      await Promise.all([invalidate('epg.'), invalidate('sources.')]);
+    } catch (e) {
+      toast({ variant: 'error', title: t('epgClearFailed'), description: RpcError.from(e).message });
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const lang = i18n.language;
+  const offset = parity(settings).epgOffsetMinutes;
 
   return (
     <SettingsSection title={t('sectionEpg')} description={t('sectionEpgLead')} testId="settings-epg">
@@ -233,7 +252,60 @@ export function EpgSection({ settings, update }: SectionProps) {
             />
           )}
         </SettingsRow>
+        <SettingsRow label={t('epgOffset')} description={t('epgOffsetHint')} error={offsetError ? t(offsetError) : null}>
+          {({ id, describedBy }) => (
+            <div className="flex items-center gap-2">
+              <CommitInput
+                id={id}
+                describedBy={describedBy}
+                type="text"
+                inputMode="numeric"
+                value={String(offset)}
+                className="w-24 text-right tabular-nums"
+                onError={setOffsetError}
+                validate={(v) => {
+                  const r = validateEpgOffset(v);
+                  return r.ok ? null : r.error;
+                }}
+                onCommit={(v) => {
+                  const r = validateEpgOffset(v);
+                  if (r.ok) void update({ epgOffsetMinutes: r.minutes });
+                }}
+                testId="input-epgOffsetMinutes"
+              />
+              <span className="text-sm text-fg-muted">{t('epgOffsetUnit')}</span>
+            </div>
+          )}
+        </SettingsRow>
       </SettingsGroup>
+
+      <SettingsGroup title={t('epgClearTitle')}>
+        <div className="flex flex-col gap-3 px-4 py-4 @2xl:flex-row @2xl:items-center @2xl:justify-between">
+          <p className="max-w-xl text-sm text-fg-muted">{t('epgClearHint')}</p>
+          <Button variant="danger" icon={<Eraser aria-hidden className="size-4" />} onClick={() => setClearOpen(true)} data-testid="epg-clear-all">
+            {t('epgClearButton')}
+          </Button>
+        </div>
+      </SettingsGroup>
+
+      <Dialog
+        open={clearOpen}
+        onClose={() => (clearing ? undefined : setClearOpen(false))}
+        title={t('epgClearConfirmTitle')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setClearOpen(false)} disabled={clearing}>
+              {t('cancel')}
+            </Button>
+            <Button variant="danger" loading={clearing} onClick={() => void clearAll()} data-testid="epg-clear-confirm">
+              {t('epgClearConfirm')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-fg-muted">{t('epgClearConfirmBody')}</p>
+      </Dialog>
     </SettingsSection>
   );
 }

@@ -112,4 +112,14 @@ pub fn register(r: &mut RpcRouter) {
             .await
             .map_err(RpcError::from)
     });
+    r.add("epg.clearAll", |s, _a: ()| async move {
+        let deleted = s
+            .db_call(super::store::clear_all)
+            .await
+            .map_err(RpcError::from)?;
+        super::ingest::runtime(&s).bump();
+        tracing::info!(programs = deleted, "EPG data cleared");
+        s.emit("epg.changed", serde_json::json!({}));
+        Ok::<(), RpcError>(())
+    });
 }

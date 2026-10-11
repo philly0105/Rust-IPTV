@@ -487,6 +487,7 @@ fn all_catalog_commands_registered() {
         "sources.add",
         "sources.update",
         "sources.remove",
+        "sources.removeAll",
         "sources.reorder",
         "sources.refresh",
         "sources.refreshAll",
@@ -496,4 +497,26 @@ fn all_catalog_commands_registered() {
     ] {
         assert!(r.contains(name), "{name} missing");
     }
+}
+
+/// `catalog.search` honours limits up to 1001 (the UI's 1000 step plus one
+/// probe row) and clamps anything larger there.
+#[tokio::test]
+async fn search_limit_reaches_the_ui_probe_of_1001() {
+    let env = env().await;
+    let r = router();
+    add_text(&env.state, "Many", &gen_m3u(1100, 4)).await;
+    let count = |res: serde_json::Value| res["live"].as_array().unwrap().len();
+    for (limit, want) in [(201, 201), (1001, 1001), (5000, 1001)] {
+        let res = r
+            .dispatch(
+                env.state.clone(),
+                "catalog.search",
+                json!({"query": "channel", "contentTypes": ["live"], "limit": limit}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(count(res), want, "limit {limit}");
+    }
+    assert_eq!(iptv_core::catalog::rpc::MAX_SEARCH_LIMIT, 1001);
 }

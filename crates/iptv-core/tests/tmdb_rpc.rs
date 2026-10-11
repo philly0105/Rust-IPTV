@@ -523,6 +523,27 @@ async fn dead_provider_id_is_negatively_cached_and_falls_back_to_search() {
 }
 
 #[tokio::test]
+async fn contradicted_provider_id_without_search_match_returns_null() {
+    let e = env().await;
+    e.stub.route("/3/search/movie", Route::ok(matrix_search()));
+    e.stub.route("/3/movie/603", Route::ok(matrix_details()));
+    e.enable(Some("abc123"));
+    // Provider says 603 (The Matrix, 1999) for a 1985 film; the search has
+    // no confident match, so the contradicted details must not be shown.
+    let m = e
+        .call(
+            "tmdb.movie",
+            json!({"title": "Zzyzx Road Trip", "year": 1985, "tmdbId": 603}),
+        )
+        .await;
+    assert_eq!(m, Value::Null);
+    assert!(
+        !e.stub.hits("/3/search/movie").is_empty(),
+        "search was tried"
+    );
+}
+
+#[tokio::test]
 async fn expired_rows_are_refetched() {
     let e = env().await;
     e.stub.route("/3/movie/603", Route::ok(matrix_details()));

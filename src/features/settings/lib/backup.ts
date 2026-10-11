@@ -44,3 +44,15 @@ export function inspectBackup(text: string): BackupCheck {
     },
   };
 }
+
+/** Default file name for a new backup. */
+export function backupFileName(now = new Date()): string {
+  return `tsrust-iptv-backup-${now.toISOString().slice(0, 10)}.json`;
+}
+
+/** Desktop only: native save dialog. Null when canceled. */
+export async function chooseBackupSavePath(title: string, defaultName: string, filterName: string): Promise<string | null> {
+  const { save } = await import('@tauri-apps/plugin-dialog');
+  const picked = await save({ title, defaultPath: defaultName, filters: [{ name: filterName, extensions: ['json'] }] });
+  return typeof picked === 'string' && picked.length > 0 ? picked : null;
+}

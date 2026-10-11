@@ -12,11 +12,11 @@ import {
   Smartphone,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, type ComponentType } from 'react';
+import { useEffect, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, NavLink, useNavigate, useParams } from 'react-router';
+import { Navigate, NavLink, useParams } from 'react-router';
 
-import { Select, useShell } from '../sources/_shim';
+import { useShell } from '@/shell';
 import { SectionError, SectionSkeleton } from './components';
 import { useSettingsQuery, useUpdateSettings } from './lib/useUpdateSettings';
 import { AboutSection } from './sections/AboutSection';
@@ -44,24 +44,41 @@ const SECTIONS: Record<SectionId, { icon: LucideIcon; label: string; component: 
   about: { icon: Info, label: 'sectionAbout', component: AboutSection },
 };
 
-/** Section list rendered in the shell's context panel. */
-export function SettingsNav({ current }: { current: SectionId }) {
+/**
+ * Section list. `panel` is the vertical list in the shell's context panel;
+ * `inline` is the wrapping row the page shows itself while the shell keeps the
+ * panel in a drawer (under 1440 px, the shell's inline-panel breakpoint).
+ */
+export function SettingsNav({ current, variant = 'panel' }: { current: SectionId; variant?: 'panel' | 'inline' }) {
   const { t } = useTranslation('settings');
+  const inline = variant === 'inline';
   return (
-    <nav aria-label={t('navLabel')} className="flex flex-col gap-0.5 p-3" data-testid="settings-nav">
+    <nav
+      aria-label={t('navLabel')}
+      className={inline ? 'flex flex-wrap gap-1.5' : 'flex flex-col gap-0.5 p-3'}
+      data-testid={inline ? 'settings-nav-inline' : 'settings-nav'}
+    >
       {SECTION_IDS.map((id) => {
         const { icon: Icon, label } = SECTIONS[id];
+        const active = id === current;
         return (
           <NavLink
             key={id}
             to={`/settings/${id}`}
-            aria-current={id === current ? 'page' : undefined}
+            aria-current={active ? 'page' : undefined}
             className={clsx(
-              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium motion-safe:transition-colors',
-              id === current ? 'bg-surface-3 text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
+              'flex items-center font-medium motion-safe:transition-colors',
+              inline ? 'gap-2 rounded-full border px-3 py-1.5 text-sm' : 'gap-3 rounded-md px-3 py-2 text-sm',
+              inline
+                ? active
+                  ? 'border-accent/60 bg-accent/10 text-fg'
+                  : 'border-border text-fg-muted hover:border-fg-subtle hover:bg-surface-2 hover:text-fg'
+                : active
+                  ? 'bg-surface-3 text-fg'
+                  : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
             )}
           >
-            <Icon aria-hidden className={clsx('size-4', id === current && 'text-accent')} />
+            <Icon aria-hidden className={clsx('size-4', active && 'text-accent')} />
             {t(label)}
           </NavLink>
         );
@@ -73,7 +90,6 @@ export function SettingsNav({ current }: { current: SectionId }) {
 export function SettingsPage() {
   const { section } = useParams();
   const { t } = useTranslation('settings');
-  const navigate = useNavigate();
   const { setHeader, setContextPanel } = useShell();
   const query = useSettingsQuery();
   const update = useUpdateSettings();
@@ -92,8 +108,6 @@ export function SettingsPage() {
 
   useEffect(() => () => setContextPanel(null), [setContextPanel]);
 
-  const navOptions = useMemo(() => SECTION_IDS.map((id) => ({ value: id, label: t(SECTIONS[id].label) })), [t]);
-
   if (!valid) return <Navigate to="/settings/general" replace />;
 
   const Section = SECTIONS[current].component;
@@ -102,9 +116,12 @@ export function SettingsPage() {
     <div className="@container mx-auto w-full max-w-4xl px-4 py-6 @2xl:px-8" data-testid="settings-page">
       {/* The page's single h1 (C16) matches the header title; each section's own title is its h2. */}
       <h1 className="sr-only">{t('title')}</h1>
-      {/* The context panel holds the nav; this picker covers windows under 1024px, where the shell turns the panel into a drawer. */}
-      <div className="mb-6 lg:hidden">
-        <Select aria-label={t('navLabel')} value={current} options={navOptions} onChange={(v) => navigate(`/settings/${v}`)} className="w-full" />
+      {/*
+        At 1440 px and up the shell shows the context panel (and its section list) beside the page.
+        Below that the panel lives in a drawer, so the page lists the sections itself.
+      */}
+      <div className="mb-8 border-b border-border pb-5 min-[1440px]:hidden" data-testid="settings-nav-inline-wrap">
+        <SettingsNav current={current} variant="inline" />
       </div>
       {query.isPending ? (
         <SectionSkeleton />

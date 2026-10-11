@@ -7,6 +7,8 @@ import { cn } from './cn';
 import { focusableIn } from './focus';
 
 export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+/** `center`: floating card. `end`: full-height drawer on the inline-end edge (right in LTR, left in RTL). */
+export type DialogPlacement = 'center' | 'end';
 
 export interface DialogProps {
   open: boolean;
@@ -30,6 +32,8 @@ export interface DialogProps {
   initialFocus?: RefObject<HTMLElement | null>;
   /** Extra attributes for e2e. */
   testId?: string;
+  /** Where the panel sits. Default `center`. `end` ignores `size`; set the width through `className`. */
+  placement?: DialogPlacement;
 }
 
 const sizes: Record<DialogSize, string> = {
@@ -61,7 +65,9 @@ export function Dialog({
   bodyClassName,
   initialFocus,
   testId,
+  placement = 'center',
 }: DialogProps) {
+  const drawer = placement === 'end';
   const { t } = useTranslation('common');
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -78,7 +84,7 @@ export function Dialog({
       const target =
         initialFocus?.current ??
         panel.querySelector<HTMLElement>('[data-autofocus]') ??
-        focusableIn(panel).find((el) => !el.dataset['dialogClose']) ??
+        focusableIn(panel).find((el) => el.dataset['dialogClose'] === undefined) ??
         panel;
       target.focus({ preventScroll: true });
     }
@@ -142,7 +148,10 @@ export function Dialog({
   return createPortal(
     <div
       data-dialog-layer=""
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-6 pt-[8vh]"
+      className={cn(
+        'fixed inset-0 z-50 flex',
+        drawer ? 'items-stretch justify-end' : 'items-start justify-center overflow-y-auto p-6 pt-[8vh]',
+      )}
       onKeyDown={onKeyDown}
     >
       <div
@@ -160,13 +169,22 @@ export function Dialog({
         tabIndex={-1}
         data-testid={testId}
         className={cn(
-          'relative flex w-full flex-col rounded-lg border border-border bg-surface text-fg shadow-2',
-          'max-h-[calc(100vh-12vh-24px)] motion-safe:animate-pop-in',
-          sizes[size],
+          'relative flex flex-col border-border bg-surface text-fg shadow-2',
+          drawer
+            ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-fade-in'
+            : 'w-full max-h-[calc(100vh-12vh-24px)] rounded-lg border motion-safe:animate-pop-in',
+          !drawer && sizes[size],
           className,
         )}
       >
-        <div className={cn('flex items-start gap-4 px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4')}>
+        <div
+          className={cn(
+            'flex gap-4',
+            drawer
+              ? 'h-(--header-height) shrink-0 items-center border-b border-border ps-5 pe-3'
+              : cn('items-start px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4'),
+          )}
+        >
           <div className={cn('min-w-0 flex-1', hideTitle && 'sr-only')}>
             <h2 id={titleId} className="text-lg">
               {title}
@@ -183,7 +201,10 @@ export function Dialog({
               data-dialog-close=""
               aria-label={t('close')}
               onClick={() => onCloseRef.current()}
-              className="-mr-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg"
+              className={cn(
+                drawer ? 'ms-auto' : '-mr-2',
+                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg',
+              )}
             >
               <X aria-hidden size={18} />
             </button>

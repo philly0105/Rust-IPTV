@@ -49,6 +49,7 @@ export function makePosition(itemId: string, positionSeconds: number, durationSe
   const p: PlaybackPosition = {
     ref: { sourceId, contentType: 'movie', itemId },
     positionSeconds,
+    watched: false,
     updatedAt: '2026-10-10T20:00:00Z',
     snapshot: { title: `Continue ${itemId}`, contentType: 'movie' },
   };

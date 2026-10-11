@@ -61,6 +61,10 @@ pub async fn refresh_all(state: Arc<AppState>, _a: NoArgs) -> Result<RefreshAllR
     Ok(super::refresh_all(state).await?)
 }
 
+pub async fn remove_all(state: Arc<AppState>, _a: NoArgs) -> Result<(), RpcError> {
+    Ok(super::remove_all(&state).await?)
+}
+
 pub async fn counts(state: Arc<AppState>, a: IdArgs) -> Result<SourceCounts, RpcError> {
     Ok(super::counts(&state, &a.id).await?)
 }
@@ -72,6 +76,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("sources.add", add);
     r.add("sources.update", update);
     r.add("sources.remove", remove);
+    r.add("sources.removeAll", remove_all);
     r.add("sources.reorder", reorder);
     r.add("sources.refresh", refresh);
     r.add("sources.refreshAll", refresh_all);

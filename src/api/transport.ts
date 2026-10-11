@@ -138,19 +138,61 @@ function hasHeaders(source: PlayerSource): boolean {
 }
 
 /**
+ * Desktop: base of the loopback media proxy inside the Tauri process
+ * (`app.info.proxyBase`), fetched once at startup. Null until known or when
+ * the proxy could not start.
+ */
+let desktopProxyBase: string | null = null;
+
+/** Sets the desktop proxy base (exported for tests). */
+export function setDesktopProxyBase(base: string | null): void {
+  desktopProxyBase = base;
+}
+
+if (isDesktop) {
+  callDesktop('app.info', null)
+    .then((info) => {
+      const base = (info as { proxyBase?: unknown } | null)?.proxyBase;
+      setDesktopProxyBase(typeof base === 'string' && base ? base : null);
+    })
+    .catch(() => undefined);
+}
+
+/** Query string for a proxy request: the target plus the per-item header overrides. */
+function proxyParams(source: PlayerSource, url: string): URLSearchParams {
+  const params = new URLSearchParams({ url });
+  if (source.ref?.sourceId) params.set('sourceId', source.ref.sourceId);
+  const h = source.headers;
+  if (h?.userAgent) params.set('ua', h.userAgent);
+  if (h?.referrer) params.set('referer', h.referrer);
+  if (h?.origin) params.set('origin', h.origin);
+  return params;
+}
+
+/**
  * URL a player element should load.
- * Desktop: the source url as is; a local `file` path goes through the asset protocol.
+ * Desktop: a local `file` path goes through the asset protocol; an http(s)
+ * stream that needs request headers goes through the loopback proxy
+ * (`app.info.proxyBase`), everything else loads directly.
  * Web: through `/api/proxy` when source headers are needed or the page would block mixed content.
  */
 export function proxiedUrl(source: PlayerSource): string {
   const { url } = source;
   if (isDesktop) {
     if (source.kind === 'file' && !/^(https?|asset):/i.test(url)) return convertFileSrc(url);
+    if (desktopProxyBase && /^https?:/i.test(url) && (hasHeaders(source) || isMixedContent(url))) {
+      return `${desktopProxyBase}?${proxyParams(source, url).toString()}`;
+    }
     return url;
   }
   if (!/^https?:/i.test(url)) return url; // relative (/api/files/..) or blob/data
   if (!hasHeaders(source) && !isMixedContent(url)) return url;
   const params = new URLSearchParams({ url });
   if (source.ref?.sourceId) params.set('sourceId', source.ref.sourceId);
+  // Explicit headers (source-level merged with per-channel) override the server's stored ones.
+  const h = source.headers;
+  if (h?.userAgent) params.set('ua', h.userAgent);
+  if (h?.referrer) params.set('referer', h.referrer);
+  if (h?.origin) params.set('origin', h.origin);
   return `${API_BASE}/proxy?${params.toString()}`;
 }

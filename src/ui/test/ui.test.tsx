@@ -5,7 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { RpcError } from '@/api/transport';
 
-import { Dialog, ErrorState, Menu, Tabs, ToastViewport, VirtualList, toast, useToastStore } from '..';
+import { Dialog, ErrorState, Menu, SearchInput, Tabs, ToastViewport, VirtualList, toast, useToastStore } from '..';
 import { pageWindow } from '../Pagination';
 import { aspectRatio, gridLayout } from '../VirtualGrid';
 
@@ -64,6 +64,57 @@ describe('Dialog', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe('Dialog placement="end" (drawer)', () => {
+  function Drawer() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>details</button>
+        <Dialog open={open} onClose={() => setOpen(false)} title="Details" hideTitle placement="end" bodyClassName="p-0">
+          <a href="#a">first link</a>
+          <a href="#b">last link</a>
+        </Dialog>
+      </>
+    );
+  }
+  it('is a modal, edge-anchored drawer that traps Tab and restores focus', () => {
+    render(<Drawer />);
+    const opener = screen.getByText('details');
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole('dialog', { name: 'Details' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.className).toContain('h-full');
+    expect(dialog.className).toContain('w-[min(var(--panel-width),90vw)]');
+    expect(dialog.className).not.toContain('rounded-lg');
+    expect(dialog.parentElement!.className).toContain('justify-end');
+    // Focus starts on the first item that is not the close button.
+    expect(document.activeElement).toBe(screen.getByText('first link'));
+    // Tab from the last focusable wraps inside instead of escaping to the page.
+    const last = screen.getByText('last link');
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe('SearchInput', () => {
+  it('clear button is a 28 px touch target and clears the value', () => {
+    const onChange = vi.fn();
+    render(<SearchInput value="news" onChange={onChange} size="sm" />);
+    const clear = screen.getByRole('button', { name: 'Clear search' });
+    // 28 px regardless of the 15 px root font size (h-6 was 22.5 px, under WCAG 2.5.8's 24 px).
+    expect(clear.className).toContain('size-[28px]');
+    expect(clear.className).not.toMatch(/h-6|w-6/);
+    fireEvent.click(clear);
+    expect(onChange).toHaveBeenCalledWith('');
   });
 });
 

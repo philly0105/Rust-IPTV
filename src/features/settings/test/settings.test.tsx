@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Settings } from '@/api/types';
 
-import { installDomStubs, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
+import { eagerRoutes, installDomStubs, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -17,7 +17,7 @@ vi.mock('@/api/events', () => ({
   onConnectionState: () => () => undefined,
 }));
 
-const { settingsRoutes } = await import('../routes');
+const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRoutes);
 const { RpcError } = await import('@/api/transport');
 const { useToastStore } = await import('@/ui');
 const { useShellStore } = await import('@/shell');

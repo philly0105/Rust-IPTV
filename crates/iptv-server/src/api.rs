@@ -60,6 +60,10 @@ pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) 
             }
         }
     };
+    if let Err(e) = server_policy(&s.app, &cmd, &args) {
+        tracing::info!(%cmd, message = %e.message, "rpc refused in server mode");
+        return error_response(e);
+    }
     let started = Instant::now();
     let result = s.rpc.dispatch(s.app.clone(), &cmd, args).await;
     let ms = started.elapsed().as_millis() as u64;
@@ -73,6 +77,52 @@ pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) 
             tracing::info!(%cmd, ms, code = ?e.code, message = %e.message, "rpc error");
             error_response(e)
         }
+    }
+}
+
+/// Server-mode rules applied before dispatch. The browser must not make the
+/// server read files by path or move where it writes:
+///
+/// - `sources.add` / `sources.update` with an m3u `origin: 'file'` or a
+///   `file://` URL are refused (upload the playlist text instead);
+/// - `settings.update` changing `downloadsDir` is refused (the folder is
+///   `<data dir>/downloads`; `downloads.setDir` refuses in the core).
+pub fn server_policy(app: &AppState, cmd: &str, args: &serde_json::Value) -> Result<(), RpcError> {
+    match cmd {
+        "sources.add" | "sources.update" => {
+            let m3u = if cmd == "sources.add" {
+                args.get("m3u")
+            } else {
+                args.get("patch").and_then(|p| p.get("m3u"))
+            };
+            let Some(m3u) = m3u else { return Ok(()) };
+            let file_origin = m3u.get("origin").and_then(|o| o.as_str()) == Some("file");
+            let file_url = m3u
+                .get("url")
+                .and_then(|u| u.as_str())
+                .is_some_and(|u| u.trim().to_ascii_lowercase().starts_with("file:"));
+            if file_origin || file_url {
+                return Err(RpcError::unsupported(
+                    iptv_core::m3u::importer::SERVER_FILE_MESSAGE,
+                ));
+            }
+            Ok(())
+        }
+        "settings.update" => {
+            let Some(next) = args.get("patch").and_then(|p| p.get("downloadsDir")) else {
+                return Ok(());
+            };
+            let next = next.as_str().map(str::trim).filter(|d| !d.is_empty());
+            let current = app.settings_snapshot().downloads_dir;
+            let current = current.as_deref().map(str::trim).filter(|d| !d.is_empty());
+            if next != current {
+                return Err(RpcError::unsupported(
+                    iptv_core::downloads::SERVER_DIR_MESSAGE,
+                ));
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 

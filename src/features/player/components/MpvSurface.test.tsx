@@ -1,22 +1,40 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
 
 import type { Bounds, MpvState } from '@/api/types';
 
+/** When set, `mpv.attach` waits for the test to resolve it. */
+let attachGate: Promise<void> | null = null;
 const rpcMock = vi.fn(async (name: string, _args?: unknown): Promise<unknown> => {
-  if (name === 'mpv.attach') return mpvState;
+  if (name === 'mpv.attach') {
+    if (attachGate) await attachGate;
+    return mpvState;
+  }
+  if (name === 'mpv.record') return recordReply;
   return undefined;
 });
 let mpvState: MpvState;
+let recordReply: { recording: boolean; path: string | null } = { recording: true, path: null };
+const stateListeners = new Set<(st: MpvState) => void>();
+const emitState = (st: MpvState): void => {
+  for (const l of stateListeners) l(st);
+};
 
 vi.mock('@/api/transport', () => ({
   rpc: (name: string, args?: unknown) => rpcMock(name, args),
   isDesktop: true,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
-vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
+vi.mock('@/api/events', () => ({
+  onAppEvent: (type: string, l: (st: MpvState) => void) => {
+    if (type !== 'mpv.state') return () => undefined;
+    stateListeners.add(l);
+    return () => stateListeners.delete(l);
+  },
+}));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore } = await import('../media');
@@ -62,7 +80,20 @@ const tick = async (ms = 50): Promise<void> => {
 beforeEach(() => {
   __resetPlayerForTests();
   rpcMock.mockClear();
-  mpvState = { attached: true, loaded: false, paused: false, timePos: 0, volume: 100, muted: false, fullscreen: false, tracks: [] };
+  attachGate = null;
+  stateListeners.clear();
+  mpvState = {
+    attached: true,
+    loaded: false,
+    paused: false,
+    timePos: 0,
+    volume: 100,
+    muted: false,
+    fullscreen: false,
+    tracks: [],
+    recording: false,
+    recordPath: null,
+  };
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -111,8 +142,8 @@ describe('MpvSurface bounds', () => {
     // At attach time only the control bar exists below the surface.
     expect((attach?.[1] as { bounds: Bounds }).bounds).toEqual({ x: 0, y: 0, width: 800, height: 440 });
 
-    // Attached but not loaded: the "Starting MPV" notice strip is laid out in flow, outside the surface.
-    expect(screen.getByText('Starting MPV').closest('[data-mpv-reserved]')).toBeTruthy();
+    // Attached but not loaded: the "opening" notice strip is laid out in flow, outside the surface.
+    expect(screen.getByText('Opening the stream in MPV').closest('[data-mpv-reserved]')).toBeTruthy();
     await tick(100);
     expect(sent().at(-1)).toEqual({ x: 0, y: 0, width: 800, height: 400 });
 
@@ -156,5 +187,109 @@ describe('MpvSurface bounds', () => {
     const alert = screen.getByRole('alert');
     expect(alert.hasAttribute('data-mpv-reserved')).toBe(true);
     expect(surface.contains(alert)).toBe(false);
+  });
+});
+
+const surfaceTree = (
+  <div data-player-host="">
+    <PlayerSurface compact={false} channelPanelAvailable={false} />
+  </div>
+);
+
+const calls = (name: string): unknown[][] => rpcMock.mock.calls.filter((c) => c[0] === name);
+
+describe('MpvSurface attach', () => {
+  it('starts mpv at the saved volume and writes no properties before attach resolves', async () => {
+    let open!: () => void;
+    attachGate = new Promise((r) => (open = r));
+    act(() => usePlayerStore.setState({ volume: 0.35, muted: true }));
+    render(surfaceTree);
+    await tick();
+
+    expect(calls('mpv.attach')[0]?.[1]).toMatchObject({ volume: 35, muted: true });
+    expect(calls('mpv.setProperty')).toHaveLength(0);
+    // Connecting: a designed state in the surface, no "0:00 / 0:00" readout yet.
+    expect(screen.getByTestId('mpv-connecting').textContent).toContain('Connecting to MPV');
+    expect(screen.queryByText(/0:00/)).toBeNull();
+
+    // A state event from before the session was configured must not reset the saved volume.
+    act(() => emitState({ ...mpvState, volume: 100, muted: false }));
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.35, muted: true });
+
+    // The reply itself may still say 100 %: the saved values win and are pushed to mpv.
+    await act(async () => {
+      open();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.35, muted: true });
+    expect(calls('mpv.setProperty').map((c) => c[1])).toEqual(
+      expect.arrayContaining([
+        { name: 'volume', value: 35 },
+        { name: 'mute', value: true },
+      ]),
+    );
+    expect(screen.queryByTestId('mpv-connecting')).toBeNull();
+
+    // After attach, state events flow (user changed volume in mpv).
+    act(() => emitState({ ...mpvState, volume: 50, muted: false }));
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.5, muted: false });
+  });
+
+  it('a StrictMode double mount never detaches the live session', async () => {
+    let open!: () => void;
+    attachGate = new Promise((r) => (open = r));
+    render(<StrictMode>{surfaceTree}</StrictMode>);
+    await tick();
+    expect(calls('mpv.attach')).toHaveLength(2);
+    const detachesBefore = calls('mpv.detach').length; // the cleanup of mount 1
+    expect(detachesBefore).toBe(1);
+
+    await act(async () => {
+      open();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    // attach 1 resolving late must not send a second detach that would kill session 2.
+    expect(calls('mpv.detach')).toHaveLength(detachesBefore);
+    expect(screen.queryByTestId('mpv-connecting')).toBeNull();
+
+    cleanup();
+    expect(calls('mpv.detach')).toHaveLength(detachesBefore + 1);
+  });
+});
+
+describe('MpvSurface recording', () => {
+  it('records live embedded playback with a REC timer and reports the file on stop', async () => {
+    act(() =>
+      usePlayerStore.setState({
+        source: { url: 'http://h/live/1.ts', kind: 'direct', title: 'News', isLive: true, isRadio: false },
+        status: 'playing',
+      }),
+    );
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Record this stream' }));
+    await tick();
+    expect(calls('mpv.record')[0]?.[1]).toEqual({ start: true });
+    expect(screen.getByTestId('rec-indicator').textContent).toMatch(/REC\s*0:00/);
+
+    act(() => emitState({ ...mpvState, loaded: true, recording: true, recordPath: 'C:/rec/News-20261011-0630.ts' }));
+    expect(screen.getByTestId('rec-indicator')).toBeTruthy();
+
+    recordReply = { recording: false, path: 'C:/rec/News-20261011-0630.ts' };
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    await tick();
+    expect(calls('mpv.record')[1]?.[1]).toEqual({ start: false });
+    expect(screen.queryByTestId('rec-indicator')).toBeNull();
+    const { useToastStore } = await import('@/ui/Toast');
+    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({ title: 'Recording saved', description: 'C:/rec/News-20261011-0630.ts' });
+    recordReply = { recording: true, path: null };
+  });
+
+  it('offers no record control for VOD', async () => {
+    render(surfaceTree);
+    await tick();
+    expect(screen.queryByRole('button', { name: 'Record this stream' })).toBeNull();
   });
 });

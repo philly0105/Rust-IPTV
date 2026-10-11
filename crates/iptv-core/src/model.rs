@@ -188,8 +188,11 @@ pub struct Source {
     pub last_refresh_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Live channels only (radio stations are counted in `radio_count`).
     #[serde(default)]
     pub channel_count: i64,
+    #[serde(default)]
+    pub radio_count: i64,
     #[serde(default)]
     pub movie_count: i64,
     #[serde(default)]
@@ -288,6 +291,28 @@ pub struct Channel {
     pub is_radio: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive: Option<ArchiveInfo>,
+    /// Per-channel request headers (m3u `#EXTVLCOPT` / `url|Header=` values);
+    /// they override the source-level headers for this channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<RequestHeaders>,
+    /// m3u catch-up attributes (`catchup`, `catchup-days`, `catchup-source`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catchup: Option<CatchupInfo>,
+}
+
+/// m3u catch-up attributes of a channel. `kind` is the lowercased `catchup`
+/// attribute (`default`, `append`, `shift`, `xc`, `flussonic`, ...); `source`
+/// is the `catchup-source` template. `default` / `append` without a source
+/// use the standard `?utc={utc}&lutc={lutc}` convention.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatchupInfo {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// A movie.
@@ -414,6 +439,13 @@ pub struct VodDetail {
     pub trailer_url: Option<String>,
     #[serde(default)]
     pub backdrops: Vec<String>,
+    /// The provider's detail call failed; the page is built from the
+    /// catalog row alone (the UI shows a hint).
+    #[serde(default)]
+    pub provider_details_unavailable: bool,
+    /// Why the provider's detail call failed, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_error: Option<String>,
 }
 
 /// Series detail page payload.
@@ -431,6 +463,13 @@ pub struct SeriesDetail {
     pub trailer_url: Option<String>,
     #[serde(default)]
     pub backdrops: Vec<String>,
+    /// The provider's detail call failed; the page is built from the
+    /// catalog row alone (the UI shows a hint).
+    #[serde(default)]
+    pub provider_details_unavailable: bool,
+    /// Why the provider's detail call failed, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_error: Option<String>,
 }
 
 /// One page of a paged list.
@@ -617,6 +656,9 @@ pub struct PlaybackPosition {
     pub updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<ItemSnapshot>,
+    /// Marked watched (`userstate.setWatched`); excluded from continue watching.
+    #[serde(default)]
+    pub watched: bool,
 }
 
 /// A favorite.
@@ -917,6 +959,19 @@ pub struct Settings {
     pub vod_auto_failover: bool,
     pub epg_view_mode: EpgViewMode,
     pub cover_size: CoverSize,
+    /// Launching an external player first closes the previous external
+    /// player this app started (VLC also gets `--one-instance`).
+    pub player_reuse_instance: bool,
+    /// Where `mpv.record` writes; `null` = `<downloadsDir>/recordings`.
+    pub recordings_dir: Option<String>,
+    /// UI strips a leading `XX: ` / `XX | ` / `[XX] ` country tag from channel names.
+    pub strip_country_prefix: bool,
+    /// Minutes added to displayed programme times (-720..=720).
+    pub epg_offset_minutes: i32,
+    /// Show the external-playback footer.
+    pub show_external_bar: bool,
+    /// VOD grids hide items rated below this (0..=10; 0 shows everything).
+    pub vod_min_rating: f64,
 }
 
 impl Default for Settings {
@@ -947,6 +1002,12 @@ impl Default for Settings {
             vod_auto_failover: false,
             epg_view_mode: EpgViewMode::Timeline,
             cover_size: CoverSize::Medium,
+            player_reuse_instance: true,
+            recordings_dir: None,
+            strip_country_prefix: false,
+            epg_offset_minutes: 0,
+            show_external_bar: true,
+            vod_min_rating: 0.0,
         }
     }
 }
@@ -974,6 +1035,13 @@ pub struct AppInfo {
     pub platform: String,
     pub is_desktop: bool,
     pub log_file: String,
+    /// Desktop only: base URL of the in-process loopback media proxy
+    /// (`http://127.0.0.1:<port>/api/proxy`); `null` in server mode.
+    #[serde(default)]
+    pub proxy_base: Option<String>,
+    /// True only in a desktop build compiled with the `updater` feature.
+    #[serde(default)]
+    pub updater_available: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,6 +1089,12 @@ pub struct MpvState {
     pub fullscreen: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// True while `mpv.record` is writing the stream to disk.
+    #[serde(default)]
+    pub recording: bool,
+    /// File being recorded, `null` when not recording.
+    #[serde(default)]
+    pub record_path: Option<String>,
 }
 
 impl Default for MpvState {
@@ -1036,6 +1110,8 @@ impl Default for MpvState {
             tracks: Vec::new(),
             fullscreen: false,
             error: None,
+            recording: false,
+            record_path: None,
         }
     }
 }
@@ -1277,6 +1353,8 @@ mod tests {
             url: None,
             is_radio: false,
             archive: None,
+            headers: None,
+            catchup: None,
         };
         let v = serde_json::to_value(&ch).unwrap();
         assert_eq!(v["ref"]["sourceId"], "s1");

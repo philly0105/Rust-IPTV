@@ -4,7 +4,7 @@ import { Outlet, useNavigate } from 'react-router';
 
 import { ExternalPlaybackFooter, PlayerDock, restorePlayback } from '@/features/player';
 import '@/i18n';
-import { focusToasts, ToastViewport } from '@/ui';
+import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
 
 import { CommandPalette } from './CommandPalette';
 import { ContextPanel } from './ContextPanel';
@@ -98,6 +98,48 @@ function GlobalShortcuts() {
 }
 
 /**
+ * Text-free stand-in for the shell, shown on a fresh profile while the
+ * server's language loads (no English first frame). Same geometry as the
+ * real rail and header, so nothing jumps when it swaps out.
+ */
+function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
+  return (
+    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell-skeleton" aria-busy="true">
+      <div
+        aria-hidden
+        className={cn(
+          'flex h-full shrink-0 flex-col gap-3 border-e border-border bg-surface px-3 pt-5',
+          collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
+        )}
+      >
+        <Skeleton className="mb-4 h-8 w-8 rounded-md" />
+        {Array.from({ length: 7 }, (_, i) => (
+          <Skeleton key={i} className={cn('h-8 rounded-md', collapsed ? 'w-10' : 'w-4/5')} />
+        ))}
+      </div>
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-border px-5">
+          <Skeleton className="h-6 w-40" />
+          <div className="flex-1" />
+          <Skeleton className="h-8 w-[clamp(160px,22vw,300px)] rounded-md" />
+          <Skeleton className="h-8 w-8 rounded-md" />
+          <Skeleton className="h-8 w-8 rounded-md" />
+        </div>
+        <div aria-hidden className="flex flex-col gap-6 p-8">
+          <Skeleton className="h-48 w-full rounded-lg" />
+          <Skeleton className="h-5 w-48" />
+          <div className="flex gap-4 overflow-hidden">
+            {Array.from({ length: 6 }, (_, i) => (
+              <Skeleton key={i} className="aspect-[2/3] w-[168px] shrink-0 rounded-md" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Layout route (C7): rail, header, context panel, outlet, player dock, and
  * the external playback footer, plus palette, shortcut overlay, and toasts.
  */
@@ -110,7 +152,7 @@ export function ShellLayout() {
   const collapsed = railPref || narrow;
 
   useShellEvents();
-  useLanguageSync(settings.data?.language);
+  const languageSettled = useLanguageSync(settings.data?.language, settings.isError);
   useLastRoutePersistence(settings.isSuccess, settings.data?.lastRoute);
   useWindowStatePersistence();
 
@@ -121,6 +163,15 @@ export function ShellLayout() {
       .then(() => restorePlayback())
       .catch(() => {});
   }, []);
+
+  if (!languageSettled) {
+    return (
+      <>
+        <ThemeSync settingsTheme={settings.data?.theme} />
+        <ShellSkeleton collapsed={collapsed} />
+      </>
+    );
+  }
 
   return (
     <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell">

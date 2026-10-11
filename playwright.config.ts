@@ -84,7 +84,7 @@ export default defineConfig({
       stderr: 'pipe',
     },
     {
-      command: `cargo run -p iptv-server -- --port ${port} --data-dir ${dataDir} --static ./dist`,
+      command: `cargo run -p iptv-server -- --port ${port} --data-dir ${dataDir} --static ./dist --allow-private-targets`,
       url: `http://127.0.0.1:${port}/api/health`,
       // Never reuse: a running server would keep its own (stale) data dir.
       reuseExistingServer: false,

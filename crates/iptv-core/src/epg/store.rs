@@ -390,3 +390,30 @@ pub fn prune(conn: &Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize> {
     }
     Ok(stale.len())
 }
+
+/// `epg.clearAll`: deletes every stored programme and guide channel in one
+/// transaction and resets each configured url's status (idle, zero counts, no
+/// error, no etag so the next refresh downloads the full feed). Urls,
+/// enabled flags, `last_fetch_at` (so the scheduler does not immediately
+/// re-download) and manual channel mappings are kept. Staging rows of a
+/// refresh that is running right now are left alone. Returns the number of
+/// programmes deleted.
+pub fn clear_all(conn: &mut Connection) -> CoreResult<usize> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let live = "SELECT url FROM epg_sources WHERE origin <> ?1";
+    let programs = tx.execute(
+        &format!("DELETE FROM epg_programs WHERE epg_url IN ({live})"),
+        [STAGING_ORIGIN],
+    )?;
+    tx.execute(
+        &format!("DELETE FROM epg_channels WHERE epg_url IN ({live})"),
+        [STAGING_ORIGIN],
+    )?;
+    tx.execute(
+        "UPDATE epg_sources SET status = 'idle', error = NULL, etag = NULL, channel_count = 0,
+         program_count = 0 WHERE origin <> ?1",
+        [STAGING_ORIGIN],
+    )?;
+    tx.commit()?;
+    Ok(programs)
+}

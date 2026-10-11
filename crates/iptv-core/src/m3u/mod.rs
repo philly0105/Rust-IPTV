@@ -5,7 +5,10 @@ pub mod importer;
 pub mod parser;
 pub mod rpc;
 
-pub use importer::{classify, group_id, import_source, item_id, M3uImporter, RowBuilder};
+pub use importer::{
+    cached_playlist_path, classify, group_id, import_source, item_id, place_raw_text,
+    remove_cached_playlist, stored_text, M3uImporter, RowBuilder,
+};
 pub use parser::{parse_str, M3uEntry, M3uHeader, M3uReader, ParseStats};
 
 use crate::error::CoreResult;

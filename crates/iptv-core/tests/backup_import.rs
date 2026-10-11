@@ -808,3 +808,277 @@ async fn rejects_invalid_files() {
     .await;
     assert_eq!(ok, json!({"imported": 0, "skipped": 0, "warnings": []}));
 }
+
+/// Xtream importer that blocks until released, standing in for a portal that
+/// accepts the connection and never answers.
+struct HangingImporter {
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl Importer for HangingImporter {
+    fn kind(&self) -> SourceKind {
+        SourceKind::Xtream
+    }
+    async fn import(&self, _state: Arc<AppState>, _source: &Source) -> CoreResult<ImportSummary> {
+        self.started.notify_one();
+        self.release.notified().await;
+        Ok(ImportSummary {
+            channels: 0,
+            movies: 0,
+            series: 0,
+        })
+    }
+}
+
+/// R7 F3: a restore whose portal hangs must not block unrelated work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hanging_portal_restore_does_not_block_sources_add() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sink, _rx) = BroadcastSink::channel(4096);
+    let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    iptv_core::m3u::init(state.clone()).await.unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    register_importer(
+        &state,
+        Arc::new(HangingImporter {
+            started: started.clone(),
+            release: release.clone(),
+        }),
+    );
+
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "xtream",
+            "exportedId": "hang",
+            "title": "Hanging portal",
+            "connection": { "serverUrl": "http://127.0.0.1:9/xtream", "username": "u", "password": "p" },
+            "userState": { "favorites": [], "recentlyViewed": [], "playbackPositions": [] }
+        }]
+    })
+    .to_string();
+    let restore = {
+        let state = state.clone();
+        tokio::spawn(
+            async move { backup::import(&state, &manifest, backup::ImportMode::Merge).await },
+        )
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), started.notified())
+        .await
+        .expect("restore reached the portal sync");
+
+    let mut r = RpcRouter::new();
+    iptv_core::sources::rpc::register(&mut r);
+    let t0 = std::time::Instant::now();
+    let added = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        r.dispatch(
+            state.clone(),
+            "sources.add",
+            json!({"kind": "m3u", "name": "Unrelated", "m3u": {"origin": "text", "text": INLINE_M3U}}),
+        ),
+    )
+    .await
+    .expect("sources.add returned within 5 s while the restore hangs")
+    .expect("sources.add succeeded");
+    assert_eq!(added["name"], "Unrelated");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+
+    // The restore is still parked on the portal until it answers.
+    assert!(!restore.is_finished());
+    release.notify_one();
+    let report = tokio::time::timeout(std::time::Duration::from_secs(10), restore)
+        .await
+        .expect("restore finished once the portal answered")
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.imported, 1, "{report:?}");
+}
+
+/// Watched positions and app-level settings survive export and import; an old
+/// manifest without them still imports (watched defaults to false).
+#[tokio::test]
+async fn watched_positions_and_app_settings_round_trip() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    iptv_core::settings::update(
+        &st,
+        json!({"stripCountryPrefix": true, "epgOffsetMinutes": 60, "vodMinRating": 5.5, "showExternalBar": false}),
+    )
+    .await
+    .unwrap();
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "xtream",
+            "exportedId": "xt-w",
+            "title": "Watched Xtream",
+            "connection": { "serverUrl": "http://127.0.0.1:9/xtream", "username": "w", "password": "p" },
+            "userState": {
+                "favorites": [], "recentlyViewed": [], "hiddenCategories": [],
+                "playbackPositions": [
+                    { "contentXtreamId": 201, "contentType": "vod", "positionSeconds": 6000, "durationSeconds": 6000, "watched": true },
+                    { "contentXtreamId": 202, "contentType": "vod", "positionSeconds": 30, "durationSeconds": 6000 }
+                ]
+            }
+        }]
+    })
+    .to_string();
+    import(&r, &st, &manifest, "merge").await;
+    let rows: Vec<(String, i64, i64)> = st
+        .db_call(|c| {
+            let mut s = c.prepare(
+                "SELECT item_id, position_seconds, watched FROM playback_positions ORDER BY item_id",
+            )?;
+            let rows = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![("201".to_string(), 6000, 1), ("202".to_string(), 30, 0)],
+        "a complete watched position is kept; the old-shape entry is unwatched"
+    );
+
+    let out = export(&r, &st, true).await;
+    let settings = &out["settings"];
+    assert_eq!(settings["stripCountryPrefix"], true);
+    assert_eq!(settings["epgOffsetMinutes"], 60);
+    assert_eq!(settings["vodMinRating"], 5.5);
+    assert_eq!(settings["showExternalBar"], false);
+    assert!(settings["epgUrls"].is_array(), "IPTVnator needs epgUrls");
+    assert!(settings.get("recordingsDir").is_none() && settings.get("mpvPath").is_none());
+    let positions = out["playlists"][0]["userState"]["playbackPositions"]
+        .as_array()
+        .unwrap();
+    let w: Vec<(i64, bool)> = positions
+        .iter()
+        .map(|p| {
+            (
+                p["contentXtreamId"].as_i64().unwrap(),
+                p.get("watched").and_then(Value::as_bool).unwrap_or(false),
+            )
+        })
+        .collect();
+    assert!(
+        w.contains(&(201, true)) && w.contains(&(202, false)),
+        "{w:?}"
+    );
+    assert!(
+        positions
+            .iter()
+            .all(|p| p.get("watched") != Some(&json!(false))),
+        "unwatched entries keep the old app's shape"
+    );
+
+    // Into a fresh app: settings and the watched flag come back.
+    let (_d2, st2) = app(false).await;
+    import(&r, &st2, &out.to_string(), "replace").await;
+    let s2 = st2.settings_snapshot();
+    assert!(s2.strip_country_prefix && !s2.show_external_bar);
+    assert_eq!((s2.epg_offset_minutes, s2.vod_min_rating), (60, 5.5));
+    let watched: i64 = st2
+        .db_call(|c| {
+            Ok(c.query_row(
+                "SELECT watched FROM playback_positions WHERE item_id = '201'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(watched, 1);
+}
+
+/// A restored playlist over `RAW_INLINE_MAX` is stored like an imported large
+/// file: `m3u_raw.raw = ''` plus `playlists/<id>.m3u`, and it still parses,
+/// refreshes, exports, and re-imports unchanged.
+#[tokio::test]
+async fn large_raw_m3u_is_stored_on_disk_not_inline() {
+    let (dir, st) = app(false).await;
+    let r = router();
+    let logo = "x".repeat(1000);
+    let mut text = String::from("#EXTM3U\n");
+    let mut n = 0usize;
+    while text.len() as u64 <= iptv_core::m3u::importer::RAW_INLINE_MAX {
+        text.push_str(&format!(
+            "#EXTINF:-1 tvg-id=\"c{n}\" tvg-logo=\"http://127.0.0.1:9/{logo}.png\" group-title=\"G{}\",Channel {n}\nhttp://127.0.0.1:9/live/{n}.ts\n",
+            n % 20
+        ));
+        n += 1;
+    }
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "m3u",
+            "exportedId": "big",
+            "title": "Big Playlist",
+            "source": { "kind": "text", "rawM3u": text },
+            "userState": { "favorites": [], "recentlyViewed": [], "hiddenCategories": [], "playbackPositions": [] }
+        }]
+    })
+    .to_string();
+    import(&r, &st, &manifest, "merge").await;
+
+    let (sid, raw, sha, channels) = st
+        .db_call(|c| {
+            let sid = source_id(c, "m3u", "Big Playlist");
+            let (raw, sha): (String, String) = c.query_row(
+                "SELECT raw, sha256 FROM m3u_raw WHERE source_id = ?1",
+                [&sid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let channels: i64 = c.query_row(
+                "SELECT count(*) FROM items WHERE source_id = ?1 AND content_type = 'live'",
+                [&sid],
+                |r| r.get(0),
+            )?;
+            Ok((sid, raw, sha, channels))
+        })
+        .await
+        .unwrap();
+    assert!(raw.is_empty(), "large playlist must not be stored inline");
+    assert!(!sha.is_empty(), "the import recorded the playlist sha");
+    assert_eq!(channels, n as i64);
+    let cached = iptv_core::m3u::cached_playlist_path(dir.path(), &sid);
+    assert_eq!(std::fs::read_to_string(&cached).unwrap(), text);
+
+    // A refresh of the text source reads the cached copy (unchanged shortcut).
+    let (src, _) = iptv_core::sources::run_import(st.clone(), &sid)
+        .await
+        .unwrap();
+    assert!(src.last_error.is_none(), "{:?}", src.last_error);
+    assert!(cached.is_file(), "the refresh keeps the cached copy");
+
+    // Export carries the full text; re-importing it keeps the sha (no re-parse needed).
+    let exported = export(&r, &st, true).await;
+    let entry = exported["playlists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["title"] == "Big Playlist")
+        .unwrap();
+    assert_eq!(entry["source"]["rawM3u"].as_str().unwrap(), text);
+    import(&r, &st, &manifest, "merge").await;
+    let sha_after: String = st
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT sha256 FROM m3u_raw WHERE source_id = ?1",
+                [&sid],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(sha_after, sha);
+    assert_eq!(std::fs::read_to_string(&cached).unwrap(), text);
+}

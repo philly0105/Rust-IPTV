@@ -9,7 +9,7 @@ import { sameRef, type Download, type ItemRef, type SourceKind } from '@/api/typ
 import { playItem, usePlayerStore } from '@/features/player';
 
 import { downloadFileName } from '../lib/format';
-import { useToast } from '../_shim';
+import { useToast } from '@/ui';
 import { useDownloads } from './queries';
 
 export interface PlayTarget {

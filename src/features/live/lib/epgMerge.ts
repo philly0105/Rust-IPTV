@@ -11,8 +11,8 @@ function valid(p: EpgProgram): boolean {
  * programme that a primary one mostly covers is dropped, and one that only grazes a primary
  * programme (guides from two providers often disagree by a minute or two) is trimmed to the
  * free time. Used to lay a Stalker portal's own guide (primary) over an XMLTV guide (secondary),
- * so the portal's now/next stays exact and XMLTV fills the hours the portal does not return
- * (the past, which catch-up needs).
+ * so the portal's now/next and its archived past (`stalker.epg` with `from`) stay exact and
+ * XMLTV fills the hours the portal does not return.
  */
 export function mergePrograms(primary: readonly EpgProgram[], secondary: readonly EpgProgram[]): EpgProgram[] {
   const main = primary.filter(valid);

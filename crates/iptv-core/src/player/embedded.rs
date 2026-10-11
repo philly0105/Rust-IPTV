@@ -12,7 +12,7 @@
 //! Every operation is serialized by the manager's op lock, so attach, load,
 //! and detach never interleave.
 
-use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name};
+use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name, validate_play_url};
 use super::detect::{find_mpv, DetectEnv};
 use super::ipc::MpvClient;
 use super::mpv_state::OBSERVED_PROPERTIES;
@@ -21,7 +21,9 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{MpvState, PlayerSource};
 use crate::state::AppState;
 use parking_lot::Mutex;
+use serde::Serialize;
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -71,6 +73,8 @@ struct Session {
     detaching: AtomicBool,
     emitter: Mutex<Option<JoinHandle<()>>>,
     watcher: Mutex<Option<JoinHandle<()>>>,
+    /// Title of the loaded item (names recordings).
+    title: Mutex<String>,
 }
 
 impl Session {
@@ -134,9 +138,21 @@ pub fn state(state: &AppState) -> MpvState {
     }
 }
 
+/// Optional `mpv.attach` arguments: the UI's saved volume (0..100) and mute
+/// state, applied before mpv plays anything and before the first state event.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct AttachOptions {
+    pub volume: Option<f64>,
+    pub muted: Option<bool>,
+}
+
 /// `mpv.attach`: creates the child window and starts mpv; when a session is
 /// already running it only moves the window.
-pub async fn attach(state: &Arc<AppState>, bounds: Bounds) -> CoreResult<MpvState> {
+pub async fn attach(
+    state: &Arc<AppState>,
+    bounds: Bounds,
+    opts: AttachOptions,
+) -> CoreResult<MpvState> {
     ensure_platform()?;
     let mgr = manager(state);
     let _op = mgr.op.lock().await;
@@ -170,8 +186,23 @@ pub async fn attach(state: &Arc<AppState>, bounds: Bounds) -> CoreResult<MpvStat
     };
 
     let pipe = mpv_pipe_name(std::process::id());
-    let initial_volume = mgr.last.lock().volume;
-    let args = embedded_mpv_args(hwnd, &pipe, &settings.mpv_args, initial_volume);
+    let (initial_volume, initial_muted) = {
+        let mut last = mgr.last.lock();
+        if let Some(v) = opts.volume.filter(|v| v.is_finite()) {
+            last.volume = v.clamp(0.0, 100.0);
+        }
+        if let Some(m) = opts.muted {
+            last.muted = m;
+        }
+        (last.volume, last.muted)
+    };
+    let args = embedded_mpv_args(
+        hwnd,
+        &pipe,
+        &settings.mpv_args,
+        initial_volume,
+        initial_muted,
+    );
     let started = platform::start(&mpv, &args, &pipe).await;
     let (child, stream) = match started {
         Ok(v) => v,
@@ -205,6 +236,7 @@ pub async fn attach(state: &Arc<AppState>, bounds: Bounds) -> CoreResult<MpvStat
         detaching: AtomicBool::new(false),
         emitter: Mutex::new(None),
         watcher: Mutex::new(None),
+        title: Mutex::new(String::new()),
     });
 
     if let Err(e) = client.observe(OBSERVED_PROPERTIES).await {
@@ -238,12 +270,15 @@ pub async fn attach(state: &Arc<AppState>, bounds: Bounds) -> CoreResult<MpvStat
 /// `mpv.load`: `loadfile <url> replace -1 {per-file options}`.
 pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()> {
     ensure_platform()?;
-    if source.url.trim().is_empty() {
-        return Err(CoreError::invalid("this item has no stream URL to play"));
-    }
+    validate_play_url(source)?;
     let mgr = manager(state);
     let _op = mgr.op.lock().await;
     let s = current(&mgr).ok_or_else(not_attached)?;
+    // A recording belongs to the item it started on.
+    if s.client.state().recording {
+        stop_recording(&s).await;
+    }
+    *s.title.lock() = source.title.trim().to_string();
     s.client.update_state(|st| {
         st.loaded = false;
         st.error = None;
@@ -318,6 +353,140 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
         ));
     }
     Ok(())
+}
+
+/// `mpv.record` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordResult {
+    pub recording: bool,
+    pub path: Option<String>,
+}
+
+/// The IPC command that starts (`Some(path)`) or stops (`None`) mpv's
+/// `stream-record`: mpv writes the demuxed stream to the file as it plays,
+/// without re-encoding.
+pub fn stream_record_command(path: Option<&Path>) -> Vec<Value> {
+    let value = path.map(|p| p.display().to_string()).unwrap_or_default();
+    vec![json!("set_property"), json!("stream-record"), json!(value)]
+}
+
+/// Recording file name: `<title>-<yyyyMMdd-HHmm>.ts`, with characters that
+/// are invalid in Windows file names replaced and the title shortened.
+pub fn recording_file_name<Tz: chrono::TimeZone>(title: &str, now: chrono::DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let clean: String = title
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .take(80)
+        .collect();
+    let clean = clean.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let clean = if clean.is_empty() { "recording" } else { clean };
+    format!("{clean}-{}.ts", now.format("%Y%m%d-%H%M"))
+}
+
+/// `settings.recordingsDir`, else `<downloadsDir>/recordings`.
+pub fn recordings_dir(state: &AppState) -> PathBuf {
+    let settings = state.settings_snapshot();
+    match settings
+        .recordings_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        Some(d) => PathBuf::from(d),
+        None => crate::downloads::dir(state).join("recordings"),
+    }
+}
+
+/// First free path for `name` in `dir` (`name (1).ts`, ...).
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, "ts"));
+    (1..1000)
+        .map(|i| dir.join(format!("{stem} ({i}).{ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
+}
+
+/// `mpv.record`: starts or stops writing the playing stream to disk.
+pub async fn record(state: &Arc<AppState>, start: bool) -> CoreResult<RecordResult> {
+    ensure_platform()?;
+    let mgr = manager(state);
+    let _op = mgr.op.lock().await;
+    let s = current(&mgr).ok_or_else(not_attached)?;
+    let st = s.client.state();
+    if !start {
+        if st.recording {
+            stop_recording(&s).await;
+            tracing::info!("recording stopped");
+        }
+        return Ok(RecordResult {
+            recording: false,
+            path: None,
+        });
+    }
+    if st.recording {
+        return Ok(RecordResult {
+            recording: true,
+            path: st.record_path,
+        });
+    }
+    if !st.loaded {
+        return Err(CoreError::Conflict(
+            "Nothing is playing in the embedded player, so there is nothing to record.".into(),
+        ));
+    }
+    let dir = recordings_dir(state);
+    let title = s.title.lock().clone();
+    let path = {
+        let target = dir.clone();
+        tokio::task::spawn_blocking(move || -> std::io::Result<PathBuf> {
+            std::fs::create_dir_all(&target)?;
+            Ok(unique_path(
+                &target,
+                &recording_file_name(&title, chrono::Local::now()),
+            ))
+        })
+        .await?
+        .map_err(|e| {
+            CoreError::Io(std::io::Error::new(
+                e.kind(),
+                format!("cannot create the recordings folder {}: {e}", dir.display()),
+            ))
+        })?
+    };
+    s.client.command(stream_record_command(Some(&path))).await?;
+    let shown = path.display().to_string();
+    s.client.update_state(|st| {
+        st.recording = true;
+        st.record_path = Some(shown.clone());
+    });
+    tracing::info!(dir = %dir.display(), "recording started");
+    Ok(RecordResult {
+        recording: true,
+        path: Some(shown),
+    })
+}
+
+async fn stop_recording(s: &Session) {
+    if let Err(e) = s.client.command(stream_record_command(None)).await {
+        tracing::warn!(error = %e, "stopping the recording failed");
+    }
+    s.client.update_state(|st| {
+        st.recording = false;
+        st.record_path = None;
+    });
 }
 
 /// `mpv.setProperty`.
@@ -409,6 +578,8 @@ async fn teardown(
     final_state.duration = None;
     final_state.tracks.clear();
     final_state.fullscreen = false;
+    final_state.recording = false;
+    final_state.record_path = None;
     final_state.error = error;
     *mgr.last.lock() = final_state.clone();
     {
@@ -532,6 +703,11 @@ mod platform {
                 format!("could not start mpv ({}): {e}", mpv.display()),
             ))
         })?;
+        if let Some(handle) = child.raw_handle() {
+            if let Err(e) = job::assign(handle) {
+                tracing::warn!(error = %e, "could not tie embedded mpv to the app's lifetime");
+            }
+        }
 
         match connect(pipe, &mut child, super::PIPE_CONNECT_TIMEOUT).await {
             Ok(client) => Ok((child, client)),
@@ -572,6 +748,106 @@ mod platform {
                 ));
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// A kill-on-close Job Object that holds embedded mpv. Its handle is
+    /// never closed, so Windows closes it when this process ends, however it
+    /// ends (crash, Task Manager), and that kills mpv with it.
+    pub mod job {
+        use std::ffi::c_void;
+        use std::sync::OnceLock;
+
+        const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
+        const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct BasicLimitInformation {
+            per_process_user_time_limit: i64,
+            per_job_user_time_limit: i64,
+            limit_flags: u32,
+            minimum_working_set_size: usize,
+            maximum_working_set_size: usize,
+            active_process_limit: u32,
+            affinity: usize,
+            priority_class: u32,
+            scheduling_class: u32,
+        }
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct IoCounters {
+            counters: [u64; 6],
+        }
+
+        #[repr(C)]
+        #[derive(Default)]
+        struct ExtendedLimitInformation {
+            basic: BasicLimitInformation,
+            io: IoCounters,
+            process_memory_limit: usize,
+            job_memory_limit: usize,
+            peak_process_memory_used: usize,
+            peak_job_memory_used: usize,
+        }
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateJobObjectW(attributes: *const c_void, name: *const u16) -> *mut c_void;
+            fn SetInformationJobObject(
+                job: *mut c_void,
+                class: i32,
+                info: *const c_void,
+                len: u32,
+            ) -> i32;
+            fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        }
+
+        /// The job handle as an integer (raw pointers are not `Sync`).
+        static JOB: OnceLock<Option<usize>> = OnceLock::new();
+
+        fn job() -> Option<*mut c_void> {
+            let h = JOB.get_or_init(|| {
+                // SAFETY: null attributes and name are allowed; the returned
+                // handle is checked before use and intentionally never closed.
+                let h = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+                if h.is_null() {
+                    return None;
+                }
+                let info = ExtendedLimitInformation {
+                    basic: BasicLimitInformation {
+                        limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                // SAFETY: `info` is a valid JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+                // (repr(C), same layout) that outlives the call.
+                let ok = unsafe {
+                    SetInformationJobObject(
+                        h,
+                        JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                        (&info as *const ExtendedLimitInformation).cast(),
+                        std::mem::size_of::<ExtendedLimitInformation>() as u32,
+                    )
+                };
+                (ok != 0).then_some(h as usize)
+            });
+            h.map(|h| h as *mut c_void)
+        }
+
+        /// Puts the process behind `process` into the kill-on-close job.
+        pub fn assign(process: std::os::windows::io::RawHandle) -> std::io::Result<()> {
+            let Some(job) = job() else {
+                return Err(std::io::Error::last_os_error());
+            };
+            // SAFETY: `job` is a live job handle and `process` a live process
+            // handle owned by the caller's `Child`.
+            if unsafe { AssignProcessToJobObject(job, process) } == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
         }
     }
 

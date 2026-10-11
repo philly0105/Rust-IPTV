@@ -6,13 +6,16 @@ use super::naming::{self, Reservation};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay, status_error};
+use crate::model::SourceKind;
 use crate::state::AppState;
 use futures::StreamExt;
 use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE,
 };
 use reqwest::StatusCode;
+use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -72,7 +75,7 @@ enum AttemptEnd {
 
 /// Runs the transfer for `id` until it completes, stops, or fails.
 pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadManager) -> Outcome {
-    let row = match state.db_call(move |c| store::get(c, id)).await {
+    let mut row = match state.db_call(move |c| store::get(c, id)).await {
         Ok(r) => r,
         Err(e) => return failed(format!("Download record unavailable: {e}"), 0, true, None),
     };
@@ -89,6 +92,18 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
             )
         }
     };
+    // Xtream URLs embed credentials that can change and Stalker links expire,
+    // so every run (start, resume, retry, restart) resolves a fresh URL.
+    tokio::select! {
+        _ = ctl.token.cancelled() => {
+            return Outcome::Stopped {
+                reason: ctl.reason(),
+                bytes: row.download.bytes_downloaded,
+                part: Some(dest.part_path.clone()),
+            }
+        }
+        _ = refresh_url(state, &mut row) => {}
+    }
     let mut rep = Representation {
         total: row.download.total_bytes,
         validator: row.resume_validator.clone(),
@@ -133,6 +148,60 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 );
             }
         }
+    }
+}
+
+/// Replaces the row's URL (and headers) with a freshly resolved one for
+/// Xtream and Stalker sources and persists it. M3U/file sources, removed
+/// sources, and resolution failures keep the stored URL; the transfer then
+/// reports whatever the server says about it.
+async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
+    let item_ref = row.download.item_ref.clone();
+    let episode_id = row.download.episode_id.clone();
+    let sid = item_ref.source_id.clone();
+    let kind = state
+        .db_call(move |c| {
+            Ok(
+                c.query_row("SELECT kind FROM sources WHERE id = ?1", [&sid], |r| {
+                    r.get::<_, String>(0)
+                })
+                .optional()?,
+            )
+        })
+        .await;
+    let resolved = match kind.ok().flatten().as_deref().map(SourceKind::from_str) {
+        Some(Ok(SourceKind::Xtream)) => {
+            crate::xtream::service::stream_url(state, &item_ref, episode_id.as_deref()).await
+        }
+        Some(Ok(SourceKind::Stalker)) => {
+            crate::stalker::playback::stream_url(state, &item_ref, episode_id.as_deref()).await
+        }
+        _ => return,
+    };
+    let src = match resolved {
+        Ok(src) => src,
+        Err(err) => {
+            tracing::warn!(id = row.download.id, error = %err, "could not re-resolve download URL; using the stored one");
+            return;
+        }
+    };
+    if src.url == row.download.url && src.headers.as_ref().is_none_or(|h| *h == row.headers) {
+        return;
+    }
+    row.download.url = src.url;
+    if let Some(h) = src.headers {
+        row.headers = h;
+    }
+    let (id, url, headers) = (
+        row.download.id,
+        row.download.url.clone(),
+        row.headers.clone(),
+    );
+    if let Err(err) = state
+        .db_call(move |c| store::set_source(c, id, &url, &headers))
+        .await
+    {
+        tracing::warn!(id, error = %err, "could not persist the re-resolved download URL");
     }
 }
 
@@ -282,8 +351,11 @@ async fn attempt(
 
     // `identity`: byte ranges and Content-Length must describe the file itself,
     // and a manual Accept-Encoding also turns off reqwest's transparent decoding.
-    let mut req = apply_source_headers(state.http.get(&row.download.url), &row.headers)
-        .header(ACCEPT_ENCODING, "identity");
+    let mut req = apply_source_headers(
+        crate::http::client_for(state).get(&row.download.url),
+        &row.headers,
+    )
+    .header(ACCEPT_ENCODING, "identity");
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
         if let Some(v) = &rep.validator {

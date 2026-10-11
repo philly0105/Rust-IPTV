@@ -7,11 +7,14 @@ import { Link, useSearchParams } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type EpgProgram, type ItemKey, type SourceKind } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, Skeleton, useShell, useToast } from '../_shim';
+import { Button, EmptyState, ErrorState, Skeleton, useToast } from '@/ui';
+import { useShell } from '@/shell';
+import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
+import { displayChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
 import {
   DAY,
@@ -22,12 +25,15 @@ import {
   formatClock,
   formatDay,
   formatRange,
+  hasUsableArchive,
   layoutBlocks,
   ms,
   programIndexAt,
   programWhen,
+  shiftPrograms,
 } from '../lib/epgTime';
 import { playCatchup, playChannel } from '../lib/playback';
+import { inlineStart, scrollLeftFor, timeStep, useIsRtl } from '../lib/rtl';
 import { ChannelLogo } from './ChannelLogo';
 
 export const GRID_ROW = 56;
@@ -47,7 +53,7 @@ function defaultStart(now: number): number {
 interface Selection {
   channel: Channel;
   program: EpgProgram;
-  rect: { left: number; top: number; bottom: number };
+  rect: { left: number; right: number; top: number; bottom: number };
 }
 
 /** Multi-channel guide: virtualized channel rows x 30-minute columns over a 6 h window. */
@@ -56,8 +62,10 @@ export function EpgGridPage() {
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const now = useNow(30_000);
+  const prefs = useDisplayPrefs();
   const wide = useMediaQuery('(min-width: 1024px)');
   const channelCol = wide ? 220 : 168;
+  const rtl = useIsRtl();
 
   const sources = useRpcQuery('sources.list', undefined);
   const sourceId = params.get('source') ?? sources.data?.[0]?.id ?? '';
@@ -128,11 +136,11 @@ export function EpgGridPage() {
       const k: ItemKey = itemKey(ch.ref);
       const list = gridA.data?.[k] ?? gridB.data?.[k];
       const portal = isStalker ? portalPrograms(ch.ref) : undefined;
-      if (portal && portal.length > 0) return mergePrograms(portal, list ?? []);
-      if (list) return [...list].sort((a, b) => ms(a.start) - ms(b.start));
+      if (portal && portal.length > 0) return shiftPrograms(mergePrograms(portal, list ?? []), prefs.epgOffsetMinutes);
+      if (list) return shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), prefs.epgOffsetMinutes);
       return gridA.data || gridB.data ? [] : undefined;
     },
-    [gridA.data, gridB.data, isStalker, portalPrograms],
+    [gridA.data, gridB.data, isStalker, portalPrograms, prefs.epgOffsetMinutes],
   );
   const gridError = gridA.error ?? gridB.error;
   const noEpgAnywhere =
@@ -153,9 +161,9 @@ export function EpgGridPage() {
   // ---- keyboard cursor ------------------------------------------------------
   const [cursor, setCursor] = useState<{ row: number; time: number }>({ row: 0, time: now });
   const focusPending = useRef(false);
+  const windowPrograms = (row: number) => (programsFor(paged.getChannel(row)) ?? []).filter((p) => ms(p.end) > start && ms(p.start) < end);
   const cursorProgram = (row: number, time: number) => {
-    const list = programsFor(paged.getChannel(row)) ?? [];
-    const inWindow = list.filter((p) => ms(p.end) > start && ms(p.start) < end);
+    const inWindow = windowPrograms(row);
     const i = programIndexAt(inWindow, time);
     return i >= 0 ? inWindow[i] : undefined;
   };
@@ -170,24 +178,46 @@ export function EpgGridPage() {
     if (el) {
       el.focus({ preventScroll: true });
       focusPending.current = false;
+      // The sticky channel column covers the track at its inline start: left in LTR, right in RTL.
+      // scrollLeft deltas are physical in both directions, so only the visible span flips.
       const r = el.getBoundingClientRect();
       const box = root.getBoundingClientRect();
-      if (r.left < box.left + channelCol) root.scrollLeft -= box.left + channelCol - r.left + 8;
-      else if (r.right > box.right) root.scrollLeft += Math.min(r.right - box.right + 8, r.left - box.left - channelCol);
+      const trackLeft = rtl ? box.left : box.left + channelCol;
+      const trackRight = rtl ? box.right - channelCol : box.right;
+      if (r.left < trackLeft) root.scrollLeft -= trackLeft - r.left + 8;
+      else if (r.right > trackRight) root.scrollLeft += Math.min(r.right - trackRight + 8, r.left - trackLeft);
     }
   });
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  /** The cell that opened the popover; focus returns to it when the popover closes. */
+  const invoker = useRef<HTMLElement | null>(null);
   const open = (channel: Channel, program: EpgProgram, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
-    setSelection({ channel, program, rect: { left: r.left, top: r.top, bottom: r.bottom } });
+    invoker.current = el;
+    setSelection({ channel, program, rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } });
+  };
+  const closePopover = () => {
+    setSelection(null);
+    const el = invoker.current;
+    invoker.current = null;
+    if (el?.isConnected) {
+      el.focus({ preventScroll: true });
+    } else {
+      // The cell left the virtual window: refocus the cursor cell once it renders.
+      focusPending.current = true;
+      setCursor((c) => ({ ...c }));
+    }
   };
 
   const onGridKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (count === 0 || selection) return;
     let { row, time } = cursor;
     const cur = cursorProgram(row, time);
-    switch (e.key) {
+    // Arrow keys follow the screen, so in RTL ArrowLeft moves later in time.
+    const step = timeStep(e.key, rtl);
+    const key = step > 0 ? 'later' : step < 0 ? 'earlier' : e.key;
+    switch (key) {
       case 'ArrowDown':
         row = Math.min(count - 1, row + 1);
         break;
@@ -200,22 +230,31 @@ export function EpgGridPage() {
       case 'PageUp':
         row = Math.max(0, row - 8);
         break;
-      case 'ArrowRight': {
+      case 'later': {
         const nextT = cur ? ms(cur.end) : time + GRID_SLOT_MIN * MINUTE;
         if (nextT >= end) shift(3 * HOUR);
         time = nextT;
         break;
       }
-      case 'ArrowLeft': {
+      case 'earlier': {
         const prevT = cur ? ms(cur.start) - 1 : time - GRID_SLOT_MIN * MINUTE;
         if (prevT < start) shift(-3 * HOUR);
         time = Math.max(prevT, start - 3 * HOUR);
         break;
       }
       case 'Home':
+        // Home: back to now on this row; Ctrl+Home also goes to the first channel.
+        if (e.ctrlKey || e.metaKey) row = 0;
         toNow();
         time = Date.now();
         break;
+      case 'End': {
+        // End: the last programme of this row in the window; Ctrl+End also goes to the last channel.
+        if (e.ctrlKey || e.metaKey) row = count - 1;
+        const last = windowPrograms(row).at(-1);
+        time = last ? Math.max(ms(last.start), start) : end - 1;
+        break;
+      }
       default:
         return;
     }
@@ -225,19 +264,21 @@ export function EpgGridPage() {
     virtualizer.scrollToIndex(row, { align: 'auto' });
   };
 
-  // When the window moves, keep the scroll at its left edge (or at now).
+  // When the window moves (or the grid first mounts after loading), keep the scroll at the
+  // track's inline-start edge, or just before now. RTL scrollers count scrollLeft down from 0.
+  const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
-    el.scrollLeft = now > start && now < end ? Math.max(0, nowX - GRID_SLOT_PX) : 0;
-  }, [start]);
+    el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - GRID_SLOT_PX) : 0, rtl);
+  }, [start, rtl, gridMounted]);
 
   // ---- actions --------------------------------------------------------------
   const playLive = (channel: Channel) => {
     if (!kind) return;
     playChannel(channel, kind).catch((err: unknown) =>
-      toast({ title: t('playFailed', { name: channel.name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
     );
   };
   const catchup = (channel: Channel, program: EpgProgram) => {
@@ -307,14 +348,14 @@ export function EpgGridPage() {
             </option>
           ))}
         </select>
-        <div className="ml-auto flex items-center gap-1" role="group" aria-label={t('guideTime')}>
-          <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4" />} onClick={() => shift(-DAY)} aria-label={t('previousDay')} title={t('previousDay')} />
-          <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4" />} onClick={() => shift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
+        <div className="ms-auto flex items-center gap-1" role="group" aria-label={t('guideTime')}>
+          <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => shift(-DAY)} aria-label={t('previousDay')} title={t('previousDay')} />
+          <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => shift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
           <span className="min-w-36 px-1 text-center text-sm tabular-nums text-fg" aria-live="polite">
             {formatDay(start, i18n.language)} {formatClock(start, i18n.language)}–{formatClock(end, i18n.language)}
           </span>
-          <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4" />} onClick={() => shift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
-          <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4" />} onClick={() => shift(DAY)} aria-label={t('nextDay')} title={t('nextDay')} />
+          <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => shift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
+          <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => shift(DAY)} aria-label={t('nextDay')} title={t('nextDay')} />
           <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} onClick={toNow}>
             {t('jumpToNow')}
           </Button>
@@ -363,14 +404,14 @@ export function EpgGridPage() {
           <div style={{ width: channelCol + trackWidth, height: virtualizer.getTotalSize() + HEADER_H, position: 'relative' }}>
             {/* time header */}
             <div role="row" className="sticky top-0 z-20 flex border-b border-border bg-surface" style={{ height: HEADER_H, width: channelCol + trackWidth }}>
-              <div role="columnheader" className="sticky left-0 z-10 flex items-center border-r border-border bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
+              <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-border bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
                 {t('channels')}
               </div>
               {slots.map((s) => (
                 <div
                   role="columnheader"
                   key={s}
-                  className="flex items-center border-l border-border/50 px-2 text-xs tabular-nums text-fg-muted"
+                  className="flex items-center border-s border-border/50 px-2 text-xs tabular-nums text-fg-muted"
                   style={{ width: GRID_SLOT_PX }}
                 >
                   {new Date(s).getHours() === 0 && new Date(s).getMinutes() === 0 ? formatDay(s, i18n.language) : formatClock(s, i18n.language)}
@@ -381,28 +422,29 @@ export function EpgGridPage() {
             {vItems.map((v) => {
               const ch = paged.getChannel(v.index);
               const programs = programsFor(ch);
+              const chName = displayChannelName(ch?.name, prefs.stripCountryPrefix);
               return (
                 <div
                   key={v.key}
                   role="row"
                   aria-rowindex={v.index + 2}
-                  className="absolute left-0 flex border-b border-border/60"
+                  className="absolute start-0 flex border-b border-border/60"
                   style={{ top: HEADER_H + v.start, height: GRID_ROW, width: channelCol + trackWidth }}
                 >
-                  <div role="rowheader" className="sticky left-0 z-10 border-r border-border bg-surface" style={{ width: channelCol }}>
+                  <div role="rowheader" className="sticky start-0 z-10 border-e border-border bg-surface" style={{ width: channelCol }}>
                     {ch ? (
                       <button
                         type="button"
                         data-channel-row={v.index}
                         tabIndex={v.index === cursor.row && (!programs || programs.length === 0) ? 0 : -1}
                         onClick={() => playLive(ch)}
-                        title={t('playChannel', { name: ch.name })}
-                        className="flex h-full w-full items-center gap-2 px-2 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+                        title={t('playChannel', { name: chName })}
+                        className="flex h-full w-full items-center gap-2 px-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
                       >
-                        <span className="w-7 shrink-0 text-right text-[11px] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
-                        <ChannelLogo src={ch.logoUrl} name={ch.name} size={30} />
-                        <span className="min-w-0 flex-1 truncate text-sm text-fg">{ch.name}</span>
-                        {ch.archive?.enabled ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
+                        <span className="w-7 shrink-0 text-end text-[11px] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
+                        <ChannelLogo src={ch.logoUrl} name={chName} size={30} />
+                        <span className="min-w-0 flex-1 truncate text-sm text-fg">{chName}</span>
+                        {hasUsableArchive(ch, kind) ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
                       </button>
                     ) : (
                       <div className="flex h-full items-center gap-2 px-2">
@@ -435,14 +477,14 @@ export function EpgGridPage() {
                               if (ch) open(ch, b.program, e.currentTarget);
                             }}
                             onFocus={() => setCursor((c) => (c.row === v.index && c.time >= ms(b.program.start) && c.time < ms(b.program.end) ? c : { row: v.index, time: Math.max(ms(b.program.start), start) }))}
-                            className={`absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                            className={`absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                               b.when === 'now'
                                 ? 'border-accent/60 bg-accent/12 text-fg'
                                 : b.when === 'past'
                                   ? 'border-border/60 bg-surface-2/60 text-fg-muted'
                                   : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
                             }`}
-                            style={{ left: b.left + 1, width: Math.max(2, b.width - 2) }}
+                            style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
                           >
                             <span className="flex items-center gap-1 truncate text-xs font-medium">
                               {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
@@ -461,10 +503,11 @@ export function EpgGridPage() {
             {nowInWindow ? (
               <div
                 aria-hidden
+                data-testid="epg-now-line"
                 className="pointer-events-none absolute z-10 w-0.5 bg-live"
-                style={{ left: channelCol + nowX - 1, top: HEADER_H - 6, height: virtualizer.getTotalSize() + 6 }}
+                style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: HEADER_H - 6, height: virtualizer.getTotalSize() + 6 }}
               >
-                <span className="sticky top-[30px] -ml-[3px] block size-2 rounded-full bg-live" />
+                <span className="sticky top-[30px] -ms-[3px] block size-2 rounded-full bg-live" />
               </div>
             ) : null}
           </div>
@@ -476,18 +519,15 @@ export function EpgGridPage() {
           selection={selection}
           kind={kind}
           now={now}
-          onClose={() => {
-            setSelection(null);
-            focusPending.current = true;
-            setCursor((c) => ({ ...c }));
-          }}
+          rtl={rtl}
+          onClose={closePopover}
           onLive={() => {
             playLive(selection.channel);
-            setSelection(null);
+            closePopover();
           }}
           onCatchup={() => {
             catchup(selection.channel, selection.program);
-            setSelection(null);
+            closePopover();
           }}
         />
       ) : null}
@@ -499,6 +539,7 @@ function ProgramPopover({
   selection,
   kind,
   now,
+  rtl,
   onClose,
   onLive,
   onCatchup,
@@ -506,6 +547,7 @@ function ProgramPopover({
   selection: Selection;
   kind?: SourceKind;
   now: number;
+  rtl: boolean;
   onClose(): void;
   onLive(): void;
   onCatchup(): void;
@@ -515,17 +557,21 @@ function ProgramPopover({
   const { program, channel, rect } = selection;
   const when = programWhen(program, now);
   const catchupOk = canCatchUp(program, channel, kind, now);
-  const [pos, setPos] = useState({ left: rect.left, top: rect.bottom + 6 });
+  const { stripCountryPrefix } = useDisplayPrefs();
+  const channelName = displayChannelName(channel.name, stripCountryPrefix);
+  const [pos, setPos] = useState({ left: rtl ? rect.right - 360 : rect.left, top: rect.bottom + 6 });
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - r.width - 8));
+    // Align with the cell's inline-start edge: its left in LTR, its right in RTL.
+    const anchor = rtl ? rect.right - r.width : rect.left;
+    const left = Math.max(8, Math.min(anchor, window.innerWidth - r.width - 8));
     const top = rect.bottom + 6 + r.height > window.innerHeight - 8 ? Math.max(8, rect.top - r.height - 6) : rect.bottom + 6;
     setPos({ left, top });
     el.querySelector<HTMLElement>('button')?.focus();
-  }, [rect]);
+  }, [rect, rtl]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -539,11 +585,29 @@ function ProgramPopover({
     <div
       ref={ref}
       role="dialog"
+      aria-modal="true"
       aria-label={program.title}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
           onClose();
+          return;
+        }
+        if (e.key === 'Tab') {
+          // Tab cycles inside the popover; Escape or Close hands focus back to the cell.
+          const items = [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]') ?? [])];
+          const first = items[0];
+          const last = items[items.length - 1];
+          if (!first || !last) return;
+          const active = document.activeElement;
+          const inside = !!active && !!ref.current?.contains(active);
+          if (e.shiftKey && (active === first || !inside)) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && (active === last || !inside)) {
+            e.preventDefault();
+            first.focus();
+          }
         }
       }}
       style={{ left: pos.left, top: pos.top }}
@@ -553,7 +617,7 @@ function ProgramPopover({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-xs text-fg-muted">
-            {channel.name} · <span className="tabular-nums">{formatRange(program, i18n.language)}</span>
+            {channelName} · <span className="tabular-nums">{formatRange(program, i18n.language)}</span>
           </p>
           <h3 className="mt-0.5 text-base font-semibold">{program.title}</h3>
           {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}
@@ -576,7 +640,7 @@ function ProgramPopover({
         ) : null}
         {when !== 'now' ? (
           <Button size="sm" variant="ghost" icon={<Play className="size-3.5" />} onClick={onLive}>
-            {t('playChannel', { name: channel.name })}
+            {t('playChannel', { name: channelName })}
           </Button>
         ) : null}
         {when === 'past' && !catchupOk ? <p className="w-full text-xs text-fg-subtle">{t('noCatchup')}</p> : null}

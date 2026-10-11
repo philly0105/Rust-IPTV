@@ -16,6 +16,15 @@ use std::path::{Path, PathBuf};
 pub const PART_SUFFIX: &str = ".part";
 /// Extension used when neither the hint nor the URL carries one.
 pub const DEFAULT_EXTENSION: &str = "mp4";
+/// Extensions a download may keep. Anything else is saved as `.bin`, so a
+/// download can never become an executable, script, or HTML page on disk
+/// (or be served as one by the server's `/api/files`).
+pub const MEDIA_EXTENSIONS: &[&str] = &[
+    "mp4", "m4v", "mkv", "ts", "m3u8", "avi", "mov", "webm", "mpg", "mpeg", "wmv", "flv", "mp3",
+    "aac", "flac", "m4a", "ogg", "opus", "wav", "srt", "vtt", "jpg", "png",
+];
+/// Extension used for downloads whose extension is not in [`MEDIA_EXTENSIONS`].
+pub const FALLBACK_EXTENSION: &str = "bin";
 /// Stem length cap in characters. Leaves room for ` (999)`, the extension, and
 /// `.part` inside the 255-character component limit of NTFS and ext4.
 pub const MAX_STEM_CHARS: usize = 150;
@@ -107,7 +116,8 @@ fn split_name(name: &str) -> (String, Option<String>) {
 /// Builds the requested final file name for a download.
 ///
 /// `hint` (only its last path component is used) wins over the title. The
-/// extension comes from the hint, else the URL path, else `mp4`.
+/// extension comes from the hint, else the URL path, else `mp4`; one outside
+/// [`MEDIA_EXTENSIONS`] becomes `bin`.
 pub fn build_file_name(
     title: &str,
     subtitle: Option<&str>,
@@ -131,6 +141,11 @@ pub fn build_file_name(
         }
     };
     let ext = ext.unwrap_or_else(|| DEFAULT_EXTENSION.to_string());
+    let ext = if MEDIA_EXTENSIONS.contains(&ext.as_str()) {
+        ext
+    } else {
+        FALLBACK_EXTENSION.to_string()
+    };
     format!("{}.{ext}", sanitize_stem(&stem))
 }
 
@@ -349,6 +364,18 @@ mod tests {
         assert_eq!(
             build_file_name("a:b", None, "http://h/x.m:p4", None),
             "a_b.mp4"
+        );
+        assert_eq!(
+            build_file_name("Evil", None, "http://h/x.exe", None),
+            "Evil.bin"
+        );
+        assert_eq!(
+            build_file_name("t", None, "http://h/x.mp4", Some("page.HTML")),
+            "page.bin"
+        );
+        assert_eq!(
+            build_file_name("Sub", None, "http://h/x.SRT", None),
+            "Sub.srt"
         );
         assert_eq!(extension_from_url("http://h/a%20b.MKV"), Some("mkv".into()));
         assert_eq!(extension_from_url("not a url"), None);

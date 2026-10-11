@@ -73,6 +73,7 @@
   "onNow": "放送中",
   "minutesLeft_one": "残り{{count}}分",
   "minutesLeft_other": "残り{{count}}分",
+  "minutesLeftShort": "{{count}}分",
   "mapEpg": "番組表のチャンネルを対応付け",
   "mappingAutomatic": "自動で対応付け",
   "mappingNone": "番組表なし",
@@ -88,7 +89,7 @@
   "mappingSearch": "番組表のチャンネルを検索",
   "mappingResults": "番組表のチャンネル",
   "mappingNoResults": "「{{query}}」に一致する番組表チャンネルはありません",
-  "mappingSelected": "選択中",
+  "mappingSelected": "選択済み",
   "noCatchup": "この番組はアーカイブ期間外です。",
   "noChannelNumber": "チャンネル{{number}}はありません",
   "zapFailed": "チャンネルを切り替えられませんでした",
@@ -111,7 +112,7 @@
   "radioIdleHint": "一覧から局を選ぶか、番号を入力してください。",
   "ribbonPickChannel": "チャンネルを選ぶと放送中の番組が表示されます",
   "searchChannels": "チャンネルを検索",
-  "searchInGroup": "{{group}}内を検索",
+  "searchInGroup": "{{group}} 内を検索",
   "shortcutArea": "ライブTV",
   "shortcutDigits": "チャンネル番号を入力（1.5秒後に確定）",
   "shortcutToggleSidebar": "グループのサイドバーを表示／非表示",
@@ -124,5 +125,5 @@
   "stationNumber": "局{{number}}",
   "watch": "視聴",
   "watchCatchup": "アーカイブを視聴",
-  "watchLive": "ライブで視聴"
+  "watchLive": "ライブを視聴"
 }

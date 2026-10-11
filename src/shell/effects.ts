@@ -5,7 +5,7 @@
  * tauri-plugin-window-state).
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
 
@@ -13,7 +13,8 @@ import { onAppEvent, onConnectionState } from '@/api/events';
 import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, WindowState } from '@/api/types';
-import { applyLanguage } from '@/i18n';
+import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
+import { applyLanguage, languageUnresolved } from '@/i18n';
 import { dismissToast, toast } from '@/ui';
 
 /** Query prefixes invalidated per event type. */
@@ -52,8 +53,9 @@ export function isSourcesRoute(pathname: string): boolean {
  * The Sources page shows per-card import progress, and its add dialog and
  * refresh flow toast their own success, so while it is the active route the
  * shell stays quiet for progress and `done` (and clears any toast it showed
- * before the user arrived). Errors always toast, because a refresh that
- * returns `lastError` gets no toast from the page. Everywhere else (auto
+ * before the user arrived). Errors toast there too, because a refresh that
+ * returns `lastError` gets no toast from the page, unless the open Add Source
+ * dialog already shows that error (`importErrorClaimed`). Everywhere else (auto
  * refresh, deep links, imports still running after the user left the page)
  * the shell toasts every phase.
  */
@@ -64,8 +66,10 @@ export function importToastPolicy(phase: ImportProgressEvent['phase'], onSources
   return onSourcesRoute ? 'dismiss' : 'toast';
 }
 
+/** The cached name of a source; undefined when unknown or blank (a just-added source is not cached yet). */
 function sourceName(sourceId: string): string | undefined {
-  return queryClient.getQueryData<Source[]>(rpcKey('sources.list'))?.find((s) => s.id === sourceId)?.name;
+  const name = queryClient.getQueryData<Source[]>(rpcKey('sources.list'))?.find((s) => s.id === sourceId)?.name;
+  return name?.trim() || undefined;
 }
 
 /** Wires app events to the query cache, toasts, and navigation. Mount once. */
@@ -117,15 +121,20 @@ export function useShellEvents(): void {
           return;
         }
         if (p.phase === 'error') {
+          void invalidate('sources.');
+          if (importErrorClaimed(p.sourceId)) {
+            dismissToast(id);
+            return;
+          }
+          // A translated summary; the raw core text stays on the source card as technical detail.
           toast({
             id,
             variant: 'error',
             title: tr('importFailed', { name }),
-            description: p.message ?? tr('importFailedHint'),
+            description: p.message ? `${tr(`sources:${importSummaryKey(p.message)}`)} ${tr('importFailedHint')}` : tr('importFailedHint'),
             duration: 0,
             action: onSources ? undefined : { label: tr('openSources'), onClick: () => navRef.current('/sources') },
           });
-          void invalidate('sources.');
           return;
         }
         const phaseLabel = tr(`importPhase_${p.phase}`);
@@ -144,17 +153,23 @@ export function useShellEvents(): void {
       }),
     );
 
-    offs.push(
-      onAppEvent('deeplink.open', ({ urls }) => {
-        for (const u of urls) {
-          const path = deepLinkToPath(u);
-          if (path) {
-            navRef.current(path);
-            break;
-          }
+    const openDeepLinks = (urls: readonly string[]) => {
+      for (const u of urls) {
+        const path = deepLinkToPath(u);
+        if (path) {
+          navRef.current(path);
+          break;
         }
-      }),
-    );
+      }
+    };
+    offs.push(onAppEvent('deeplink.open', ({ urls }) => openDeepLinks(urls)));
+    // Cold start through a link: the desktop shell queued it before this
+    // listener existed. Pull the queue once; later links arrive as events.
+    if (isDesktop) {
+      rpc('app.pendingDeepLinks')
+        .then((urls) => openDeepLinks(urls))
+        .catch(() => undefined);
+    }
 
     // Web mode: tell the user when the live event stream drops, once.
     if (!isDesktop) {
@@ -184,11 +199,43 @@ export function useShellEvents(): void {
   }, []);
 }
 
-/** Applies settings.language whenever settings load or change. */
-export function useLanguageSync(language: string | undefined): void {
+/** Longest the shell waits for the server's language before showing English anyway. */
+export const LANGUAGE_HOLD_MAX_MS = 4000;
+
+/**
+ * Applies settings.language whenever settings load or change.
+ *
+ * Returns whether the UI language is settled. It starts false only on a fresh
+ * profile (nothing remembered in localStorage), and turns true once the
+ * server's language is loaded and active, once the settings fetch fails
+ * (`settingsFailed`), or after LANGUAGE_HOLD_MAX_MS, so a hung request never
+ * leaves the shell blank. It never goes back to false.
+ */
+export function useLanguageSync(language: string | undefined, settingsFailed = false): boolean {
+  const [settled, setSettled] = useState(() => !languageUnresolved());
+
   useEffect(() => {
-    if (language) void applyLanguage(language);
+    if (!language) return;
+    let live = true;
+    void applyLanguage(language).then(() => {
+      if (live) setSettled(true);
+    });
+    return () => {
+      live = false;
+    };
   }, [language]);
+
+  useEffect(() => {
+    if (settingsFailed) setSettled(true);
+  }, [settingsFailed]);
+
+  useEffect(() => {
+    if (settled) return;
+    const timer = setTimeout(() => setSettled(true), LANGUAGE_HOLD_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [settled]);
+
+  return settled;
 }
 
 const LAST_ROUTE_DEBOUNCE_MS = 1200;

@@ -217,7 +217,13 @@ async fn rpc_sync_records_remote_totals_and_emits_one_done() {
         .find(|s| s["id"] == SID)
         .expect("source listed")
         .clone();
-    assert_eq!(src["channelCount"], 35, "{src}");
+    // channelCount is live only; radio stations are in radioCount.
+    assert_eq!(
+        src["channelCount"].as_i64().unwrap() + src["radioCount"].as_i64().unwrap(),
+        35,
+        "{src}"
+    );
+    assert!(src["radioCount"].as_i64().unwrap() > 0, "{src}");
     assert_eq!(src["movieCount"], 30, "{src}");
     assert_eq!(src["seriesCount"], 10, "{src}");
     assert!(src["lastRefreshAt"].is_string(), "{src}");

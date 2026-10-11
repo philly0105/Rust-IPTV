@@ -7,7 +7,8 @@
 
 use super::{
     fp_m3u_raw, fp_m3u_url, fp_stalker, fp_xtream, import_lock, invalid, load_source, load_sources,
-    source_fingerprint, ImportMode, ImportReport, BACKUP_KIND, BACKUP_VERSION, PENDING_PREFIX,
+    run_lock, source_fingerprint, ImportMode, ImportReport, APP_SETTING_KEYS, BACKUP_KIND,
+    BACKUP_VERSION, PENDING_PREFIX,
 };
 use crate::error::CoreResult;
 use crate::model::{
@@ -20,6 +21,7 @@ use crate::userstate::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -125,6 +127,8 @@ impl Misses {
 
 struct Manifest {
     epg_urls: Option<Vec<String>>,
+    /// [`APP_SETTING_KEYS`] present in `settings` (Tsrust extension).
+    app_settings: Map<String, Value>,
     playlists: Vec<Value>,
 }
 
@@ -161,8 +165,19 @@ fn parse_manifest(json: &str) -> CoreResult<Manifest> {
         .and_then(|s| s.get("epgUrls"))
         .and_then(Value::as_array)
         .map(|a| unique_strings(a));
+    let app_settings = v
+        .get("settings")
+        .and_then(Value::as_object)
+        .map(|s| {
+            s.iter()
+                .filter(|(k, _)| APP_SETTING_KEYS.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(Manifest {
         epg_urls,
+        app_settings,
         playlists: playlists.clone(),
     })
 }
@@ -306,7 +321,9 @@ fn parse_entry(v: &Value, index: usize) -> Result<Entry, String> {
                 SourceKind::Stalker,
                 Config::Stalker(StalkerSourceConfig {
                     portal_url,
-                    mac_address: mac.to_uppercase(),
+                    // Verbatim: the MAC is the account key, and old backups
+                    // may hold grandfathered non-standard values.
+                    mac_address: mac.trim().to_string(),
                     is_full_portal: b_field(&c, "isFullStalkerPortal"),
                     username: s_field(&c, "username"),
                     password: s_field(&c, "password"),
@@ -340,6 +357,29 @@ fn parse_entry(v: &Value, index: usize) -> Result<Entry, String> {
     })
 }
 
+/// Server mode never reads files from the server's disk (`filePathHint` or a
+/// `file://` URL come from the uploaded backup): such playlists keep the raw
+/// text stored in the backup instead. Returns a warning when it changed.
+fn keep_text_only(entry: &mut Entry) -> Option<String> {
+    let Config::M3u { final_cfg, .. } = &mut entry.config else {
+        return None;
+    };
+    let file_url = final_cfg
+        .url
+        .as_deref()
+        .is_some_and(|u| u.trim().to_ascii_lowercase().starts_with("file://"));
+    if final_cfg.origin != M3uOrigin::File && !file_url {
+        return None;
+    }
+    final_cfg.origin = M3uOrigin::Text;
+    final_cfg.url = None;
+    final_cfg.file_path = None;
+    Some(format!(
+        "{}: the playlist file path was ignored (server mode cannot read files on the server); the playlist text from the backup was imported instead",
+        entry.label
+    ))
+}
+
 fn usable_id(id: &str) -> bool {
     (1..=128).contains(&id.len())
         && id
@@ -358,11 +398,17 @@ pub async fn import(
     mode: ImportMode,
 ) -> CoreResult<ImportReport> {
     let manifest = parse_manifest(json)?;
+    // One import at a time. The shared write lock (`import_lock`) is taken
+    // only around database writes so a portal that hangs during its catalog
+    // sync never blocks refreshes or `sources.add` (they take it to apply
+    // parked state).
+    let run = run_lock(state);
+    let _run = run.lock().await;
     let lock = import_lock(state);
-    let _guard = lock.lock().await;
     let mut report = ImportReport::default();
 
     if mode == ImportMode::Replace {
+        let _guard = lock.lock().await;
         state
             .db_call(|c| {
                 let tx = c.transaction()?;
@@ -393,14 +439,24 @@ pub async fn import(
                 .push(format!("EPG URLs could not be restored: {err}"));
         }
     }
+    // Settings: app-level preferences (Tsrust extension).
+    if !manifest.app_settings.is_empty() {
+        let patch = Value::Object(manifest.app_settings.clone());
+        if let Err(err) = crate::settings::update(state, patch).await {
+            report
+                .warnings
+                .push(format!("App settings could not be restored: {err}"));
+        }
+    }
 
     // Existing sources by fingerprint (merge mode).
+    let data_dir = state.data_dir.clone();
     let (fingerprints, mut existing_ids) = state
-        .db_call(|c| {
+        .db_call(move |c| {
             let mut map = HashMap::new();
             let mut ids = HashSet::new();
             for s in load_sources(c)? {
-                if let Some(fp) = source_fingerprint(c, &s)? {
+                if let Some(fp) = source_fingerprint(c, &data_dir, &s)? {
                     map.entry(fp).or_insert_with(|| s.id.clone());
                 }
                 ids.insert(s.id);
@@ -409,9 +465,10 @@ pub async fn import(
         })
         .await?;
 
+    let server_mode = crate::http::is_server_mode(state);
     let mut seen = HashSet::new();
     for (i, raw_entry) in manifest.playlists.iter().enumerate() {
-        let entry = match parse_entry(raw_entry, i) {
+        let mut entry = match parse_entry(raw_entry, i) {
             Ok(e) => e,
             Err(msg) => {
                 report.skipped += 1;
@@ -419,6 +476,11 @@ pub async fn import(
                 continue;
             }
         };
+        if server_mode {
+            if let Some(w) = keep_text_only(&mut entry) {
+                report.warnings.push(w);
+            }
+        }
         if !seen.insert(entry.fingerprint.clone()) {
             report.skipped += 1;
             report
@@ -436,6 +498,7 @@ pub async fn import(
         };
         match import_entry(
             state,
+            &lock,
             &entry,
             &target_id,
             matched.is_some(),
@@ -467,6 +530,7 @@ pub async fn import(
 
 async fn import_entry(
     state: &Arc<AppState>,
+    lock: &tokio::sync::Mutex<()>,
     entry: &Entry,
     id: &str,
     is_merge: bool,
@@ -495,8 +559,20 @@ async fn import_entry(
             Config::M3u { raw, .. } => Some(raw.clone()),
             _ => None,
         };
+        let _guard = lock.lock().await;
+        let data_dir = state.data_dir.clone();
+        let sid = id.clone();
         state
             .db_call(move |c| {
+                // Over RAW_INLINE_MAX the text goes to the playlist cache
+                // with raw = '', exactly as an import of a large file does.
+                let raw = match &raw {
+                    Some(text) => Some((
+                        crate::m3u::place_raw_text(&data_dir, &sid, text)?,
+                        text.as_str(),
+                    )),
+                    None => None,
+                };
                 let tx = c.transaction()?;
                 let now = crate::db::now_rfc3339();
                 let pos = match position {
@@ -516,16 +592,22 @@ async fn import_entry(
                        updated_at = excluded.updated_at, config_json = excluded.config_json",
                     params![id, kind, name, pos, auto_refresh as i64, now, config_json, position.is_some()],
                 )?;
-                if let Some(raw) = raw {
+                if let Some((stored, text)) = raw {
                     // sha256 stays empty unless the text is unchanged, so the
                     // m3u importer's "unchanged since last import" shortcut
                     // only fires when the catalog really matches the text.
+                    // Inline text compares directly; a cached copy (raw = '')
+                    // compares by the sha the importer recorded for it.
+                    let sha = hex::encode(Sha256::digest(text.as_bytes()));
                     tx.execute(
                         "INSERT INTO m3u_raw(source_id, raw, sha256, fetched_at) VALUES (?1, ?2, '', ?3)
                          ON CONFLICT(source_id) DO UPDATE SET
-                           sha256 = CASE WHEN m3u_raw.raw = excluded.raw THEN m3u_raw.sha256 ELSE '' END,
+                           sha256 = CASE
+                             WHEN excluded.raw <> '' AND m3u_raw.raw = excluded.raw THEN m3u_raw.sha256
+                             WHEN excluded.raw = '' AND m3u_raw.sha256 = ?4 THEN m3u_raw.sha256
+                             ELSE '' END,
                            raw = excluded.raw, fetched_at = excluded.fetched_at",
-                        params![id, raw, now],
+                        params![id, stored, now, sha],
                     )?;
                 }
                 tx.commit()?;
@@ -548,7 +630,11 @@ async fn import_entry(
             warnings.push(format!("{}: catalog not loaded: {msg}", entry.label));
             false
         }
-        _ => match run_importer(state, id, entry.kind).await {
+        // Through the per-source lock (never the global one): the same
+        // serialization `sources.refresh` uses, without blocking other sources.
+        _ => match crate::sources::run_import_with(state, id, run_importer(state, id, entry.kind))
+            .await
+        {
             Ok(()) => true,
             Err(msg) => {
                 warnings.push(format!(
@@ -561,6 +647,7 @@ async fn import_entry(
     };
 
     // 3. Final m3u origin (url / file) now that the text is imported.
+    let _guard = lock.lock().await;
     if let Config::M3u { final_cfg, .. } = &entry.config {
         if final_cfg.origin != M3uOrigin::Text {
             let cfg = serde_json::to_string(final_cfg)?;
@@ -668,6 +755,18 @@ pub async fn apply_pending_restore(
     state: &Arc<AppState>,
     source_id: &str,
 ) -> CoreResult<Vec<String>> {
+    // Nothing parked (the common case after every refresh): return without
+    // touching the import lock.
+    let key = format!("{PENDING_PREFIX}{source_id}");
+    let parked = state
+        .db_call(move |c| {
+            Ok(c.prepare_cached("SELECT 1 FROM app_state WHERE key = ?1")?
+                .exists([&key])?)
+        })
+        .await?;
+    if !parked {
+        return Ok(Vec::new());
+    }
     let lock = import_lock(state);
     let _guard = lock.lock().await;
     let id = source_id.to_string();
@@ -984,6 +1083,8 @@ fn apply_xtream(conn: &Connection, id: &str, us: &Value, misses: &mut Misses) ->
         };
         let duration = i_field(p, "durationSeconds");
         let updated_at = p.get("updatedAt").and_then(normalize_ts);
+        // Tsrust extension; absent in IPTVnator files (= not watched).
+        let watched = p.get("watched").and_then(Value::as_bool).unwrap_or(false);
         let kind = s_field(p, "contentType").unwrap_or_default();
         let (ct, item_id, episode_id, subtitle, extra) = match kind.as_str() {
             "vod" | "movie" => (ContentType::Movie, content_id.to_string(), None, None, None),
@@ -1029,6 +1130,7 @@ fn apply_xtream(conn: &Connection, id: &str, us: &Value, misses: &mut Misses) ->
                         duration_seconds: duration,
                         snapshot_json: Some(snapshot_json(&info, subtitle, extra)),
                         updated_at,
+                        watched,
                     },
                 )?;
             }

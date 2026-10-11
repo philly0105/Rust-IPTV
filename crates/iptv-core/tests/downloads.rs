@@ -805,3 +805,193 @@ async fn rate_limit_change_applies_to_running_transfer() {
     );
     c.ok("downloads.cancel", json!({"id": e.id})).await;
 }
+
+/// Holds the SQLite write lock from a separate connection for `hold`, so a
+/// stopping transfer cannot persist its final state until it is released.
+fn hold_write_lock(state: &AppState, hold: Duration) -> std::thread::JoinHandle<()> {
+    let path = state.db_path();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let h = std::thread::spawn(move || {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        tx.send(()).unwrap();
+        std::thread::sleep(hold);
+        conn.execute_batch("COMMIT").unwrap();
+    });
+    rx.recv().unwrap();
+    h
+}
+
+async fn add_xtream_source(c: &Ctx, password: &str) -> String {
+    iptv_core::xtream::init(c.state.clone()).await.unwrap();
+    let id = "xt-dl".to_string();
+    let cfg = json!({
+        "serverUrl": c.srv.xtream_url(),
+        "username": iptv_fixtures::XTREAM_USERNAME,
+        "password": password,
+    })
+    .to_string();
+    let id2 = id.clone();
+    c.state
+        .db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES (?1, 'xtream', 'Mock Xtream', ?2)",
+                rusqlite::params![id2, cfg],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    id
+}
+
+async fn set_xtream_password(c: &Ctx, sid: &str, password: &str) {
+    let cfg = json!({
+        "serverUrl": c.srv.xtream_url(),
+        "username": iptv_fixtures::XTREAM_USERNAME,
+        "password": password,
+    })
+    .to_string();
+    let sid = sid.to_string();
+    c.state
+        .db_call(move |conn| {
+            conn.execute(
+                "UPDATE sources SET config_json = ?2 WHERE id = ?1",
+                rusqlite::params![sid, cfg],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn xtream_retry_after_password_edit_re_resolves_url() {
+    let c = ctx().await;
+    let sid = add_xtream_source(&c, "old-password").await;
+    let user = iptv_fixtures::XTREAM_USERNAME;
+    let stale = c
+        .srv
+        .url(&format!("/xtream/movie/{user}/old-password/101.mp4"));
+    let d: Download = serde_json::from_value(
+        c.ok(
+            "downloads.start",
+            json!({
+                "ref": {"sourceId": sid, "contentType": "movie", "itemId": "101"},
+                "title": "Movie 101",
+                "url": stale,
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let failed = c.wait_status(d.id, DownloadStatus::Failed).await;
+    assert!(
+        failed
+            .error_message
+            .as_deref()
+            .unwrap_or("")
+            .contains("credentials"),
+        "{:?}",
+        failed.error_message
+    );
+
+    // The user fixes the password on the source; the row still holds the old URL.
+    set_xtream_password(&c, &sid, iptv_fixtures::XTREAM_PASSWORD).await;
+    assert_eq!(c.get(d.id).await.url, stale);
+    c.ok("downloads.retry", json!({"id": d.id})).await;
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    assert_eq!(done.file_available, Some(true));
+    assert!(done.bytes_downloaded > 0);
+    let pass = iptv_fixtures::XTREAM_PASSWORD;
+    assert!(
+        done.url.contains(&format!("/{user}/{pass}/101.")),
+        "re-resolved URL persisted: {}",
+        done.url
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn xtream_start_with_stale_url_uses_current_credentials() {
+    let c = ctx().await;
+    let sid = add_xtream_source(&c, iptv_fixtures::XTREAM_PASSWORD).await;
+    let user = iptv_fixtures::XTREAM_USERNAME;
+    let d: Download = serde_json::from_value(
+        c.ok(
+            "downloads.start",
+            json!({
+                "ref": {"sourceId": sid, "contentType": "movie", "itemId": "7"},
+                "title": "Movie 7",
+                "url": c.srv.url(&format!("/xtream/movie/{user}/expired/7.mp4")),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    assert_eq!(done.file_available, Some(true));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pause_timeout_leaves_row_consistent_and_second_pause_succeeds() {
+    let mut c = ctx().await;
+    iptv_core::downloads::set_rate_limit(&c.state, Some(2 * 1024 * 1024));
+    iptv_core::downloads::set_stop_timeout(&c.state, Some(Duration::from_millis(300)));
+    let d = c.start("1", "video", "/files/video.bin").await;
+    let file_path = d.file_path.clone().unwrap();
+    c.wait_progress(d.id, 256 * 1024).await;
+
+    let lock = hold_write_lock(&c.state, Duration::from_millis(1500));
+    let err = c
+        .call("downloads.pause", json!({"id": d.id}))
+        .await
+        .expect_err("pause must time out while the final state cannot be written");
+    assert_eq!(err.code, RpcErrorCode::Timeout);
+    // Not reported as paused before it is; the .part is untouched.
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Downloading);
+    assert!(part_of(&file_path).is_file());
+    lock.join().unwrap();
+
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    let paused = c.wait_status(d.id, DownloadStatus::Paused).await;
+    assert!(paused.bytes_downloaded > 0);
+    assert_eq!(
+        file_len(&part_of(&file_path)),
+        Some(paused.bytes_downloaded as u64)
+    );
+    // Pausing again is a no-op; resume still works.
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    iptv_core::downloads::set_rate_limit(&c.state, None);
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    c.wait_status(d.id, DownloadStatus::Completed).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancel_after_timed_out_pause_ends_canceled() {
+    let mut c = ctx().await;
+    iptv_core::downloads::set_rate_limit(&c.state, Some(2 * 1024 * 1024));
+    iptv_core::downloads::set_stop_timeout(&c.state, Some(Duration::from_millis(300)));
+    let d = c.start("1", "video", "/files/video.bin").await;
+    let file_path = d.file_path.clone().unwrap();
+    c.wait_progress(d.id, 256 * 1024).await;
+
+    let lock = hold_write_lock(&c.state, Duration::from_millis(1500));
+    let err = c
+        .call("downloads.pause", json!({"id": d.id}))
+        .await
+        .expect_err("pause times out");
+    assert_eq!(err.code, RpcErrorCode::Timeout);
+    // A cancel issued while the pause is still pending times out too...
+    let err = c
+        .call("downloads.cancel", json!({"id": d.id}))
+        .await
+        .expect_err("cancel times out while the lock is held");
+    assert_eq!(err.code, RpcErrorCode::Timeout);
+    lock.join().unwrap();
+
+    // ...and wins over the pause: the row ends canceled, not paused.
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    let canceled = c.wait_status(d.id, DownloadStatus::Canceled).await;
+    assert_eq!(canceled.file_path, None);
+    assert!(!part_of(&file_path).exists(), ".part deleted on cancel");
+}

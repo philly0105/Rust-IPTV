@@ -84,6 +84,18 @@ export function installDomStubs(): void {
   Element.prototype.scrollIntoView ??= function scrollIntoView() {};
 }
 
+/**
+ * Resolves `lazy` route modules up front, so a test's first render is the
+ * page itself (loading states included) rather than the router's pending tick.
+ */
+export async function eagerRoutes(routes: RouteObject[]): Promise<RouteObject[]> {
+  return Promise.all(
+    routes.map(async ({ lazy, ...route }) =>
+      typeof lazy === 'function' ? ({ ...route, ...(await lazy()) } as RouteObject) : ({ ...route, lazy } as RouteObject),
+    ),
+  );
+}
+
 export function renderAt(routes: RouteObject[], path: string) {
   queryClient.clear();
   queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity } });

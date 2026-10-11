@@ -5,7 +5,8 @@
 //! intact. The only parsing here is [`split_shell_args`], which turns the
 //! free-text `settings.mpvArgs` / `settings.vlcArgs` into argv elements.
 
-use crate::model::{PlayerSource, RequestHeaders};
+use crate::error::{CoreError, CoreResult};
+use crate::model::{PlayerKind, PlayerSource, RequestHeaders};
 
 /// Splits a user-entered argument string shell-style.
 ///
@@ -113,10 +114,66 @@ pub fn mpv_header_fields(headers: Option<&RequestHeaders>) -> Option<String> {
     Some(format!("Origin:{}", escape_mpv_list_value(origin)))
 }
 
+/// URL schemes a player may be handed. Anything else (`av://`, `edl://`,
+/// `memory://`, a bare `--option`, ...) is refused before mpv or VLC sees it.
+pub const ALLOWED_URL_SCHEMES: &[&str] = &[
+    "http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "file",
+];
+
+/// Refuses stream URLs a player could misread as an option or as one of its
+/// special protocols (playlist lines are untrusted input). Accepts the
+/// [`ALLOWED_URL_SCHEMES`] and, for `kind: file`, a local absolute path.
+pub fn validate_play_url(source: &PlayerSource) -> CoreResult<()> {
+    let url = source.url.trim();
+    if url.is_empty() {
+        return Err(CoreError::invalid("this item has no stream URL to play"));
+    }
+    let refuse = || {
+        CoreError::invalid(format!(
+            "refusing to hand this stream to a player: only {} URLs (or a local file) can be played",
+            ALLOWED_URL_SCHEMES.join(", ")
+        ))
+    };
+    if url.starts_with('-') || url.chars().any(char::is_control) {
+        return Err(refuse());
+    }
+    if source.kind == PlayerKind::File && is_local_absolute_path(url) {
+        return Ok(());
+    }
+    let scheme = url
+        .split_once(':')
+        .map(|(s, _)| s)
+        .filter(|s| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        })
+        .ok_or_else(refuse)?
+        .to_ascii_lowercase();
+    if ALLOWED_URL_SCHEMES.contains(&scheme.as_str()) {
+        Ok(())
+    } else {
+        Err(refuse())
+    }
+}
+
+/// `C:\x`, `C:/x`, `\\server\share\x` (Windows) or `/x` (Unix).
+fn is_local_absolute_path(s: &str) -> bool {
+    let b = s.as_bytes();
+    let drive = b.len() >= 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b[2] == b'\\' || b[2] == b'/');
+    let unc = s.len() > 2 && s.starts_with(r"\\");
+    drive || unc || (cfg!(unix) && s.starts_with('/'))
+}
+
 /// Arguments for an external mpv (SPEC C4):
 /// `--title=<title> --user-agent=<ua> --referrer=<ref>
 /// --http-header-fields=Origin:<o> --force-media-title=<title>`, then the
-/// user's `mpvArgs`, then the URL. Header flags appear only when set.
+/// user's `mpvArgs`, then `--` and the URL (the separator keeps a playlist
+/// URL such as `--script=...` from being read as an option). Header flags
+/// appear only when set.
 pub fn mpv_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> {
     let mut args = Vec::new();
     let title = source.title.trim();
@@ -138,14 +195,20 @@ pub fn mpv_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> 
         args.push(format!("--force-media-title={title}"));
     }
     args.extend(split_shell_args(user_args));
+    args.push("--".to_string());
     args.push(source.url.clone());
     args
 }
 
 /// Arguments for an external VLC (SPEC C4):
-/// `--meta-title=<t> --http-user-agent=<ua> --http-referrer=<ref>`, then the
-/// user's `vlcArgs`, then the URL. VLC has no Origin option.
-pub fn vlc_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> {
+/// `--meta-title=<t> --http-user-agent=<ua> --http-referrer=<ref>`, then
+/// `--one-instance --playlist-enqueue` when `reuse_instance`, then the
+/// user's `vlcArgs`, then `--` and the URL. VLC has no Origin option.
+pub fn vlc_external_args(
+    source: &PlayerSource,
+    user_args: &str,
+    reuse_instance: bool,
+) -> Vec<String> {
     let mut args = Vec::new();
     let title = source.title.trim();
     if !title.is_empty() {
@@ -159,7 +222,12 @@ pub fn vlc_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> 
             args.push(format!("--http-referrer={r}"));
         }
     }
+    if reuse_instance {
+        args.push("--one-instance".to_string());
+        args.push("--playlist-enqueue".to_string());
+    }
     args.extend(split_shell_args(user_args));
+    args.push("--".to_string());
     args.push(source.url.clone());
     args
 }
@@ -171,8 +239,15 @@ pub fn mpv_pipe_name(pid: u32) -> String {
 
 /// Arguments for the embedded mpv process. The user's `mpvArgs` go first so
 /// the embedding flags (SPEC C4) always win (mpv lets later options
-/// override earlier ones).
-pub fn embedded_mpv_args(hwnd: isize, pipe: &str, user_args: &str, volume: f64) -> Vec<String> {
+/// override earlier ones). `volume` and `muted` are the UI's saved values,
+/// applied at startup so mpv never plays a frame at the wrong level.
+pub fn embedded_mpv_args(
+    hwnd: isize,
+    pipe: &str,
+    user_args: &str,
+    volume: f64,
+    muted: bool,
+) -> Vec<String> {
     let mut args = split_shell_args(user_args);
     args.extend([
         format!("--wid={hwnd}"),
@@ -187,6 +262,7 @@ pub fn embedded_mpv_args(hwnd: isize, pipe: &str, user_args: &str, volume: f64) 
         "--input-vo-keyboard=no".to_string(),
         "--no-terminal".to_string(),
         format!("--volume={}", volume.clamp(0.0, 130.0).round()),
+        format!("--mute={}", if muted { "yes" } else { "no" }),
     ]);
     args
 }

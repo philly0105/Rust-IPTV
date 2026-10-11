@@ -42,6 +42,8 @@ export interface MediaState {
   inPip: boolean;
   waiting: boolean;
   mpv?: MpvState;
+  /** Embedded mpv: when the current `mpv.record` began (ms epoch), for the REC timer. */
+  recordStartedAt?: number;
   upNext?: { source: PlayerSource; deadline: number };
   osd?: { primary: string; secondary?: string; key: number };
   channelPanelOpen: boolean;

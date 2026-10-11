@@ -140,6 +140,13 @@ export function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** The named source card's visible stat whose label matches `label` (`channels`, `radio`) reads `value`. */
+export async function expectCardStat(page: Page, name: string, label: RegExp, value: number): Promise<void> {
+  const stats = page.getByTestId('source-card').filter({ hasText: name }).locator('dl:visible');
+  const stat = stats.locator('div').filter({ has: page.locator('dt').filter({ hasText: label }) });
+  await expect(stat.locator('dd')).toContainText(String(value));
+}
+
 /**
  * Adds a global XMLTV address in Settings > EPG and waits until the server
  * has parsed programmes from it.

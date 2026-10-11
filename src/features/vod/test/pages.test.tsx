@@ -10,7 +10,7 @@ import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
 import { vodRoutes } from '../routes';
-import { installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
+import { i18n, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -89,6 +89,7 @@ function baseHandlers(sourceKind: 'xtream' | 'stalker' = 'xtream') {
   h['xtream.vodDetail'] = (): VodDetail => ({
     item: { ...movie(7), title: 'Dune: Part Two', containerExtension: 'mkv' },
     cast: [{ name: 'Timothee Chalamet' }],
+    providerDetailsUnavailable: false,
     backdrops: [],
   });
   h['tmdb.movie'] = () => tmdbMovie;
@@ -206,6 +207,7 @@ describe('SeriesDetailPage', () => {
         { number: 2, episodes: [ep('e21', 2, 1)] },
       ],
       cast: [],
+      providerDetailsUnavailable: false,
       backdrops: [],
     });
     rpcMock.handlers['positions.forSeries'] = () => [
@@ -265,7 +267,7 @@ describe('SearchPage', () => {
     expect(screen.getByRole('heading', { name: /Movies/ })).toBeTruthy();
     expect(await screen.findByText('Portal Show')).toBeTruthy();
     expect(screen.getAllByText('Beta Portal').length).toBeGreaterThan(0);
-    expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'dune', limit: 60 });
+    expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'dune', limit: 61 });
     fireEvent.click(screen.getByRole('button', { name: /Dune TV/ }));
     await waitFor(() => expect(played).toHaveLength(1));
   });
@@ -276,7 +278,7 @@ describe('SearchPage', () => {
     rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
     renderAt('/s/src1/search?q=dune', [{ path: '/s/:sourceId/search', element: <SearchPage scoped /> }]);
     await screen.findByText('No results for "dune"');
-    expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'dune', sourceId: 'src1', limit: 60 });
+    expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'dune', sourceId: 'src1', limit: 61 });
     expect(callsOf('stalker.search').map((c) => (c.args as { contentType: string }).contentType).sort()).toEqual(['movie', 'series']);
   });
 
@@ -293,6 +295,7 @@ describe('U4-fix1: stalker VOD-as-series, episode downloads, TMDB attribution', 
     item: { ref: sref, title: 'Severance', categoryId: 'c1' },
     seasons: [{ number: 1, episodes: [{ id: 's|7001:1|2', seriesRef: sref, season: 1, episode: 2, title: 'Half Loop', containerExtension: 'mkv' }] }],
     cast: [],
+    providerDetailsUnavailable: false,
     backdrops: [],
   });
 
@@ -351,7 +354,7 @@ describe('U4-fix1: stalker VOD-as-series, episode downloads, TMDB attribution', 
 
     rpcMock.handlers['xtream.seriesDetail'] = seriesDetail;
     rpcMock.handlers['positions.forSeries'] = () => [];
-    rpcMock.handlers['tmdb.tv'] = () => null;
+    rpcMock.handlers['tmdb.tv'] = () => ({ tmdbId: 95396, mediaType: 'tv', title: 'Severance', genres: [], cast: [], crew: [], creators: ['Dan Erickson'], seasons: [], similar: [] });
     renderAt('/s/src1/series/7001', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     expect((await screen.findByTestId('tmdb-attribution')).textContent).toContain(notice);
     cleanup();
@@ -376,5 +379,117 @@ describe('U4-fix1: stalker VOD-as-series, episode downloads, TMDB attribution', 
     renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
     await screen.findByText('TMDB could not be reached');
     expect(screen.queryByText('TMDB has no similar titles for this one.')).toBeNull();
+  });
+});
+
+describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => {
+  const sref = { sourceId: 'src1', contentType: 'series' as const, itemId: 's1' };
+  const seriesWithSeasons = (): SeriesDetail => ({
+    item: { ref: sref, title: 'Severance', categoryId: 'c1', backdropUrl: 'http://img/bd.jpg' } as SeriesDetail['item'],
+    seasons: [
+      { number: 1, episodes: [{ id: 'e11', seriesRef: sref, season: 1, episode: 1, title: 'Good News', durationSeconds: 5580 }] },
+      { number: 2, episodes: [{ id: 'e21', seriesRef: sref, season: 2, episode: 1, title: 'Hello', durationSeconds: 2700 }] },
+    ],
+    cast: [],
+    providerDetailsUnavailable: false,
+    backdrops: [],
+  });
+
+  /** Nearest ancestor that creates a stacking context through Tailwind `isolate`. */
+  const stackingRoot = (el: Element | null): Element | null => {
+    let cur = el?.parentElement ?? null;
+    while (cur && !cur.classList.contains('isolate')) cur = cur.parentElement;
+    return cur;
+  };
+
+  it('F1: the series backdrop paints in the page stacking context, under the season tabs', async () => {
+    rpcMock.handlers['xtream.seriesDetail'] = seriesWithSeasons;
+    rpcMock.handlers['positions.forSeries'] = () => [];
+    rpcMock.handlers['tmdb.tv'] = () => null;
+    renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
+    const tab = await screen.findByRole('tab', { name: /Season 1/ });
+    const page = screen.getByTestId('vod-series-detail');
+    const backdrop = screen.getByTestId('vod-detail-backdrop');
+    expect(backdrop.className).toContain('-z-10');
+    // The hero must not isolate: its -z-10 bleed would then paint over later in-flow content.
+    expect(backdrop.closest('section')?.classList.contains('isolate')).toBe(false);
+    expect(stackingRoot(backdrop)).toBe(page);
+    expect(stackingRoot(tab)).toBe(page);
+  });
+
+  it('F1: the movie backdrop also resolves against the page root', async () => {
+    renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
+    await screen.findByRole('heading', { name: 'Dune: Part Two', level: 1 });
+    expect(stackingRoot(screen.getByTestId('vod-detail-backdrop'))).toBe(screen.getByTestId('vod-movie-detail'));
+  });
+
+  it('F11: episode and hero runtimes follow the active language', async () => {
+    rpcMock.handlers['xtream.seriesDetail'] = seriesWithSeasons;
+    rpcMock.handlers['positions.forSeries'] = () => [];
+    rpcMock.handlers['tmdb.tv'] = () => null;
+    renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
+    await screen.findByRole('tab', { name: /Season 1/ });
+    expect(await screen.findByText('1h 33m')).toBeTruthy();
+    cleanup();
+    await i18n.changeLanguage('ja');
+    try {
+      renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
+      await screen.findByRole('tab', { name: /Season 1/ });
+      expect(await screen.findByText(/1\s*時間\s*33\s*分/)).toBeTruthy();
+      expect(screen.queryByText('1h 33m')).toBeNull();
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+
+  describe('F9: search beyond the first page', () => {
+    const many = (n: number, offset = 0) => Array.from({ length: n }, (_, i) => movie(i + offset));
+    const liveMany = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ref: { sourceId: 'src1', contentType: 'live' as const, itemId: `c${i}` }, name: `News ${i}`, categoryId: 'g', isRadio: false }));
+
+    it('requests limit + 1, shows "60+" and steps to the server clamp with Show more', async () => {
+      rpcMock.handlers['catalog.search'] = (a) => {
+        const limit = (a as { limit: number }).limit;
+        // 1500 matching channels, 5 movies: the server returns at most `limit` per type.
+        return { live: liveMany(Math.min(limit, 1500)), movies: many(5), series: [] };
+      };
+      rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
+      renderAt('/search?q=news', [{ path: '/search', element: <SearchPage /> }]);
+      await screen.findByText('News 0');
+      expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'news', limit: 61 });
+      // Capped at 60 on screen; the 61st probe row is not rendered.
+      expect(within(screen.getByTestId('vod-search-channels')).getAllByRole('listitem')[0]!.getAttribute('aria-setsize')).toBe('60');
+      expect(screen.queryByText('News 60')).toBeNull();
+      expect(screen.getByRole('heading', { name: /Channels\s*60\+/ })).toBeTruthy();
+      expect(screen.getByRole('heading', { name: /Movies\s*5$/ })).toBeTruthy();
+      const notice = screen.getByTestId('vod-search-capped');
+      expect(within(notice).getByText(/Showing the first 60 results of each type/)).toBeTruthy();
+
+      fireEvent.click(within(notice).getByRole('button', { name: 'Show up to 200' }));
+      await screen.findByRole('heading', { name: /Channels\s*200\+/ });
+      expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'news', limit: 201 });
+
+      fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 1000' }));
+      await screen.findByRole('heading', { name: /Channels\s*1000\+/ });
+      // The 1000 step still probes one row past the cap, which the 1001 server clamp allows.
+      expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'news', limit: 1001 });
+      // Rows are virtualized: a thousand channels mount only a window of buttons.
+      const grid = screen.getByTestId('vod-search-channels');
+      const mounted = grid.querySelectorAll('[data-grid-index]').length;
+      expect(mounted).toBeGreaterThan(0);
+      expect(mounted).toBeLessThan(200);
+      // Last reachable step: no button, ask for a narrower query.
+      const last = screen.getByTestId('vod-search-capped');
+      expect(within(last).queryByRole('button')).toBeNull();
+      expect(within(last).getByText(/Showing the first 1,?000 results of each type\. Refine your search to find the rest\./)).toBeTruthy();
+    });
+
+    it('shows no cap notice when every type fits', async () => {
+      rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: many(60), series: [] });
+      rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
+      renderAt('/search?q=dune', [{ path: '/search', element: <SearchPage /> }]);
+      await screen.findByRole('heading', { name: /Movies\s*60$/ });
+      expect(screen.queryByTestId('vod-search-capped')).toBeNull();
+    });
   });
 });

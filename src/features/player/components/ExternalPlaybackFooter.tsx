@@ -1,11 +1,14 @@
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, Square, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { Settings } from '@/api/types';
+
 import { cn } from '../cn';
-import { bindExternalEvents } from '../external';
+import { bindExternalEvents, stopExternalPlayback } from '../external';
 import { useMediaStore } from '../media';
 import { usePlayerStore } from '../store';
+import { usePlayerSettings } from '../useSettings';
 
 const PLAYER_NAMES = { mpv: 'MPV', vlc: 'VLC' } as const;
 
@@ -20,12 +23,16 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
   const status = usePlayerStore((s) => s.status);
   const pending = usePlayerStore((s) => (s.mode === 'external' ? s.source : undefined));
   const [dismissed, setDismissed] = useState<number | null>(null);
+  const [stopping, setStopping] = useState(false);
+  // `showExternalBar` (default true) lets the user hide this footer entirely.
+  const settings = usePlayerSettings() as (Settings & { showExternalBar?: boolean }) | null;
 
   useEffect(() => bindExternalEvents(), []);
 
   const latest = runs[runs.length - 1];
   // Before the started event arrives, show the launch from the store.
   const shown = latest ?? (mode === 'external' && pending && status !== 'error' ? { player: null, title: pending.title, startedAt: 0 } : undefined);
+  if (settings?.showExternalBar === false) return null;
   if (!shown || (latest && dismissed === latest.startedAt)) return null;
   const name = shown.player ? PLAYER_NAMES[shown.player] : 'MPV';
 
@@ -44,6 +51,19 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
       </span>
       {runs.length > 1 && <span className="shrink-0 rounded-sm bg-surface-3 px-1.5 text-xs text-fg-muted tabular-nums">{runs.length}</span>}
       <span className="ml-auto hidden shrink-0 text-xs text-fg-subtle md:inline">{t('externalStopHint', { player: name })}</span>
+      <button
+        type="button"
+        onClick={() => {
+          setStopping(true);
+          void stopExternalPlayback().finally(() => setStopping(false));
+        }}
+        disabled={stopping}
+        aria-busy={stopping || undefined}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-fg hover:bg-surface-3 disabled:opacity-50"
+      >
+        <Square className="size-3 fill-current" aria-hidden />
+        {t('externalStop', { player: name })}
+      </button>
       {latest && (
         <button
           type="button"

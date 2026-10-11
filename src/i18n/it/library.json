@@ -196,7 +196,7 @@
   "continueWatching": "Continua a guardare",
   "continueTitle": "Continua {{title}} da {{time}}",
   "removeContinue": "Rimuovi {{title}} da Continua a guardare",
-  "watchedPercent": "Visto al {{percent}}%",
+  "watchedPercent": "{{percent}}% visto",
 
   "typeLive": "Canale in diretta",
   "typeMovie": "Film",
@@ -207,5 +207,6 @@
   "openFailed": "Impossibile aprire {{title}}",
   "removeFailed": "Impossibile rimuovere l'elemento",
   "sourceRemoved": "Sorgente rimossa",
-  "sourceRemovedHint": "La sorgente di questo elemento è stata rimossa. Aggiungila di nuovo per aprire l'elemento."
+  "sourceRemovedHint": "La sorgente di questo elemento è stata rimossa. Aggiungila di nuovo per aprire l'elemento.",
+  "tryAgain": "Riprova"
 }

@@ -18,9 +18,10 @@ async fn text_import_classifies_and_counts() {
         #EXTINF:-1 group-title=\"News\",Alpha\nhttp://h/a.ts\n";
     let src = add_text(&env.state, "T", text).await;
     assert_eq!(
-        src.channel_count, 3,
-        "live + radio, duplicate kept with a distinct id"
+        src.channel_count, 2,
+        "live only, duplicate kept with a distinct id"
     );
+    assert_eq!(src.radio_count, 1);
     assert_eq!(src.movie_count, 1);
     assert!(src.last_refresh_at.is_some());
     assert!(src.last_error.is_none());

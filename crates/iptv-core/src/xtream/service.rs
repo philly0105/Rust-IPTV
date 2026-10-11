@@ -183,10 +183,23 @@ async fn resume_seconds(
 pub async fn vod_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<VodDetail> {
     expect_type(r, &[ContentType::Movie], "xtream.vodDetail")?;
     let cx = ctx(state, r).await?;
-    let raw: RawVodInfo = cx
+    let raw: RawVodInfo = match cx
         .client
         .get(Some("get_vod_info"), &[("vod_id", r.item_id.clone())])
-        .await?;
+        .await
+    {
+        Ok(raw) => raw,
+        Err(err @ CoreError::Auth(_)) => return Err(err),
+        // The catalog row still has title, poster, plot and rating.
+        Err(err) if cx.item.is_some() => {
+            tracing::debug!(error = %err, "vod info unavailable; detail from the catalog row");
+            let mut d = build_vod_detail(r, cx.item, RawVodInfo::default());
+            d.provider_details_unavailable = true;
+            d.provider_error = Some(error_text(&err));
+            return Ok(d);
+        }
+        Err(err) => return Err(err),
+    };
     if cx.item.is_none() && raw.info.is_none() && raw.movie_data.is_none() {
         return Err(CoreError::not_found(
             "This movie is no longer offered by the provider.",
@@ -251,6 +264,22 @@ pub fn build_vod_detail(r: &ItemRef, item: Option<NamedRow>, raw: RawVodInfo) ->
         director: non_empty(info.director),
         trailer_url: trailer_url(info.youtube_trailer.as_deref()),
         backdrops,
+        provider_details_unavailable: false,
+        provider_error: None,
+    }
+}
+
+/// User-facing text of a provider error (no `network:` prefix).
+fn error_text(err: &CoreError) -> String {
+    match err {
+        CoreError::NotFound(m)
+        | CoreError::Invalid(m)
+        | CoreError::Network(m)
+        | CoreError::Auth(m)
+        | CoreError::Timeout(m)
+        | CoreError::Conflict(m)
+        | CoreError::Unsupported(m) => m.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -276,7 +305,19 @@ pub async fn series_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Ser
     let cx = ctx(state, r).await?;
     // The detail page always shows fresh episodes.
     meta::invalidate_series(&meta::runtime(state), &r.source_id, &r.item_id);
-    let raw = series_info(state, &cx.client, r).await?;
+    let raw = match series_info(state, &cx.client, r).await {
+        Ok(raw) => raw,
+        Err(err @ CoreError::Auth(_)) => return Err(err),
+        // The catalog row still has title, poster, plot and rating.
+        Err(err) if cx.item.is_some() => {
+            tracing::debug!(error = %err, "series info unavailable; detail from the catalog row");
+            let mut d = build_series_detail(r, cx.item, &RawSeriesInfo::default());
+            d.provider_details_unavailable = true;
+            d.provider_error = Some(error_text(&err));
+            return Ok(d);
+        }
+        Err(err) => return Err(err),
+    };
     if cx.item.is_none() && raw.info.is_none() && raw.episodes.is_empty() {
         return Err(CoreError::not_found(
             "This series is no longer offered by the provider.",
@@ -404,6 +445,8 @@ pub fn build_series_detail(
         trailer_url: trailer_url(info.and_then(|i| i.youtube_trailer.as_deref())),
         backdrops,
         item: s,
+        provider_details_unavailable: false,
+        provider_error: None,
     }
 }
 
@@ -411,18 +454,21 @@ pub fn build_series_detail(
 // Playback
 // ---------------------------------------------------------------------------
 
-/// Live extension: the configured format unless the panel's
-/// `allowed_output_formats` excludes it (then the first allowed one).
+/// Live extension: `settings.streamFormat` when the panel's
+/// `allowed_output_formats` lists it or lists nothing (unknown); otherwise the
+/// first allowed format in the order `m3u8` > `ts` > whatever the panel lists
+/// first (`allowed` is lowercased by [`ServerMeta::from_account`]).
 pub fn live_extension(pref: StreamFormat, allowed: &[String]) -> String {
     let want = pref.as_str();
-    if allowed.is_empty() || allowed.iter().any(|f| f == want) {
+    let has = |f: &str| allowed.iter().any(|a| a == f);
+    if allowed.is_empty() || has(want) {
         return want.to_string();
     }
-    allowed
-        .iter()
-        .find(|f| f.as_str() == "m3u8" || f.as_str() == "ts")
-        .or_else(|| allowed.first())
-        .and_then(|f| clean_extension(Some(f)))
+    ["m3u8", "ts"]
+        .into_iter()
+        .find(|f| has(f))
+        .map(str::to_string)
+        .or_else(|| allowed.iter().find_map(|f| clean_extension(Some(f))))
         .unwrap_or_else(|| want.to_string())
 }
 
@@ -458,6 +504,21 @@ pub async fn stream_url(
             })
         }
         ContentType::Movie => {
+            if row.is_none() {
+                let as_series = ItemRef {
+                    content_type: ContentType::Series,
+                    ..r.clone()
+                };
+                let series = state
+                    .db_call(move |c| catalog::get_named(c, &as_series))
+                    .await?;
+                if let Some(s) = series {
+                    return Err(CoreError::not_found(format!(
+                        "\"{}\" is a series, not a movie. Open it from the series list.",
+                        s.row.title
+                    )));
+                }
+            }
             let mut ext = row.and_then(|r| clean_extension(r.container_extension.as_deref()));
             if ext.is_none() {
                 match cx
@@ -493,11 +554,27 @@ pub async fn stream_url(
             let Some(ep_id) = episode_id.map(str::trim).filter(|e| !e.is_empty()) else {
                 return Err(CoreError::invalid("Choose an episode to play."));
             };
-            let episode = match series_info(state, &cx.client, r).await {
-                Ok(info) => build_seasons(r, &info)
+            let find = |info: &RawSeriesInfo| {
+                build_seasons(r, info)
                     .into_iter()
                     .flat_map(|s| s.episodes)
-                    .find(|e| e.id == ep_id),
+                    .find(|e| e.id == ep_id)
+            };
+            let mut loaded = series_info(state, &cx.client, r).await;
+            if loaded.as_ref().is_ok_and(|info| find(info).is_none()) {
+                // The cached list may predate the episode: refetch once.
+                meta::invalidate_series(&meta::runtime(state), &r.source_id, &r.item_id);
+                loaded = series_info(state, &cx.client, r).await;
+            }
+            let episode = match loaded {
+                Ok(info) => match find(&info) {
+                    Some(e) => Some(e),
+                    None => {
+                        return Err(CoreError::not_found(
+                            "This episode is no longer offered by the provider.",
+                        ))
+                    }
+                },
                 Err(err @ CoreError::Auth(_)) => return Err(err),
                 Err(err) => {
                     tracing::debug!(error = %err, "series info unavailable; assuming mp4");
@@ -550,6 +627,22 @@ pub async fn catchup_url(
     }
     let duration = (duration_minutes.round() as i64).clamp(1, MAX_CATCHUP_MINUTES);
     let mut cx = ctx(state, r).await?;
+    if let Some(n) = &cx.item {
+        let Some(hours) = n.row.archive_hours.filter(|h| *h > 0) else {
+            return Err(CoreError::invalid("This channel has no catch-up."));
+        };
+        if start_at < chrono::Utc::now() - chrono::Duration::hours(hours) {
+            let days = (hours + 23) / 24;
+            let window = if days == 1 {
+                "day".to_string()
+            } else {
+                format!("{days} days")
+            };
+            return Err(CoreError::invalid(format!(
+                "That programme is older than this channel's catch-up window (the last {window})."
+            )));
+        }
+    }
     if cx.meta.is_none() {
         // First contact since install: learn the server clock, best effort.
         if let Ok(acc) = cx.client.account().await {
@@ -719,6 +812,8 @@ pub struct XtreamAccountInfo {
     pub server_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// Lowercased `user_info.allowed_output_formats` (empty = not reported).
+    pub allowed_output_formats: Vec<String>,
 }
 
 /// `xtream.test` result (TS `ConnectionTestResult`).
@@ -738,6 +833,7 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
     let client = XtreamClient::new(state.http.clone(), &source.config)?;
     let acc = client.account().await?;
     let m = ServerMeta::from_account(&acc);
+    let allowed_output_formats = m.allowed_output_formats.clone();
     let rt = meta::runtime(state);
     let sid = source_id.to_string();
     state
@@ -758,6 +854,7 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
             .and_then(unix_to_rfc3339)
             .or_else(|| non_empty(s.time_now)),
         timezone: non_empty(s.timezone),
+        allowed_output_formats,
     })
 }
 
@@ -772,6 +869,8 @@ pub fn test_message(err: &CoreError) -> String {
         CoreError::Timeout(_) => {
             "The server did not answer in time. Check the URL and port, then try again.".into()
         }
+        // Transport failures already name the host (http::transport_error).
+        CoreError::Network(m) if m.starts_with("Could not reach ") => m.clone(),
         CoreError::Network(m) => format!(
             "Could not reach the server ({m}). Check the URL and your connection, then try again."
         ),
@@ -869,6 +968,11 @@ mod tests {
             live_extension(StreamFormat::Ts, &["rtmp".into(), "m3u8".into()]),
             "m3u8"
         );
+        assert_eq!(
+            live_extension(StreamFormat::M3u8, &["rtmp".into(), "ts".into()]),
+            "ts"
+        );
+        assert_eq!(live_extension(StreamFormat::M3u8, &["rtmp".into()]), "rtmp");
     }
 
     #[test]
@@ -942,6 +1046,9 @@ mod tests {
     #[test]
     fn test_messages_name_next_action() {
         assert!(test_message(&CoreError::Network("refused".into())).contains("try again"));
+        // Already host-naming transport messages are not wrapped twice.
+        let named = "Could not reach 127.0.0.1. Check the address and that the server is online, then try again. (refused)";
+        assert_eq!(test_message(&CoreError::Network(named.into())), named);
         assert!(test_message(&CoreError::NotFound("x".into())).contains("server URL"));
     }
 }

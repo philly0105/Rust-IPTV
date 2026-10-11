@@ -75,6 +75,9 @@ pub struct EpgArgs {
     pub item_ref: ItemRef,
     #[serde(default)]
     pub limit: Option<i64>,
+    /// RFC 3339; also return the archived programmes since then.
+    #[serde(default)]
+    pub from: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,7 +123,9 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
         )
     });
     r.add("stalker.epg", |s, a: EpgArgs| async move {
-        Ok::<Vec<EpgProgram>, RpcError>(playback::epg(&s, &a.item_ref, a.limit).await?)
+        Ok::<Vec<EpgProgram>, RpcError>(
+            playback::epg(&s, &a.item_ref, a.limit, a.from.as_deref()).await?,
+        )
     });
     r.add("stalker.search", |s, a: SearchArgs| async move {
         Ok::<Page<Value>, RpcError>(search(&s, a).await?)
@@ -168,7 +173,7 @@ async fn movies(state: &Arc<AppState>, a: ListArgs) -> Result<Page<VodItem>, Cor
     )
     .await?;
     let names = vod::category_names(state, &a.source_id, ContentType::Movie).await;
-    vod::remember_rows(state, &a.source_id, Kind::Vod, &page.items, &names);
+    vod::remember_rows(state, &a.source_id, Kind::Vod, &page.items, &names).await;
     let sid = a.source_id.clone();
     Ok(page
         .map(|l| {
@@ -196,7 +201,7 @@ async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, 
     )
     .await?;
     let names = vod::category_names(state, &a.source_id, ContentType::Series).await;
-    vod::remember_rows(state, &a.source_id, Kind::Series, &page.items, &names);
+    vod::remember_rows(state, &a.source_id, Kind::Series, &page.items, &names).await;
     let sid = a.source_id.clone();
     Ok(page
         .map(|l| {

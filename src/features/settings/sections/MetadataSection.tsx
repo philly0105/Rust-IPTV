@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 
-import { Button, IconButton, Select, useToast } from '../../sources/_shim';
+import { Button, IconButton, Select, useToast } from '@/ui';
 import { SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { TMDB_LANGUAGES } from '../lib/languages';
 import { tmdbPatch } from '../lib/patch';
@@ -142,7 +142,7 @@ export function MetadataSection({ settings, update }: SectionProps) {
               disabled={!enabled}
               value={settings.tmdb.language ?? ''}
               options={languageOptions}
-              onChange={(language) => void update(tmdbPatch(settings, { language })).then((ok) => (ok ? invalidate('tmdb.') : undefined))}
+              onValueChange={(language) => void update(tmdbPatch(settings, { language })).then((ok) => (ok ? invalidate('tmdb.') : undefined))}
             />
           )}
         </SettingsRow>

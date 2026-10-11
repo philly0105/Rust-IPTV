@@ -3,8 +3,31 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { useTranslation } from 'react-i18next';
 
 import { handleGridKeyDown } from '../lib/gridNav';
-import { IconButton, cn } from '../_shim';
+import { IconButton, cn } from '@/ui';
 import { PosterCardSkeleton } from './PosterCard';
+
+/** True when the user asked the OS to reduce motion. */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * Horizontal scroll delta for a step toward the inline end (`dir = 1`) or
+ * start (`dir = -1`). RTL scrollers count `scrollLeft` from 0 down to
+ * negative values, so the sign flips there.
+ */
+export function railScrollDelta(dir: 1 | -1, rtl: boolean, clientWidth: number, cardWidth: number): number {
+  return dir * (rtl ? -1 : 1) * Math.max(cardWidth, clientWidth - cardWidth);
+}
+
+/**
+ * Whether the rail sits at its inline start / end. Uses `|scrollLeft|` so it
+ * holds in RTL, where `scrollLeft` runs from 0 to `-(scrollWidth - clientWidth)`.
+ */
+export function railEdges(scrollLeft: number, clientWidth: number, scrollWidth: number): { start: boolean; end: boolean } {
+  const pos = Math.abs(scrollLeft);
+  return { start: pos <= 2, end: pos + clientWidth >= scrollWidth - 2 };
+}
 
 export interface PosterRailProps<T> {
   title: ReactNode;
@@ -33,7 +56,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
   const updateEdges = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
-    setEdges({ start: el.scrollLeft <= 2, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2 });
+    setEdges(railEdges(el.scrollLeft, el.clientWidth, el.scrollWidth));
   }, []);
 
   useEffect(() => {
@@ -48,7 +71,9 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
   const page = (dir: 1 | -1) => {
     const el = scroller.current;
     if (!el) return;
-    el.scrollBy({ left: dir * Math.max(cardWidth, el.clientWidth - cardWidth), behavior: 'smooth' });
+    const rtl = getComputedStyle(el).direction === 'rtl';
+    // 'auto' defers to CSS scroll-behavior, which is smooth only under motion-safe.
+    el.scrollBy({ left: railScrollDelta(dir, rtl, el.clientWidth, cardWidth), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
   if (!loading && items.length === 0 && !empty) return null;
@@ -66,14 +91,14 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
               <IconButton
                 size="sm"
                 label={t('railPrevious')}
-                icon={<ChevronLeft aria-hidden size={18} />}
+                icon={<ChevronLeft aria-hidden size={18} className="rtl:rotate-180" />}
                 disabled={edges.start}
                 onClick={() => page(-1)}
               />
               <IconButton
                 size="sm"
                 label={t('railNext')}
-                icon={<ChevronRight aria-hidden size={18} />}
+                icon={<ChevronRight aria-hidden size={18} className="rtl:rotate-180" />}
                 disabled={edges.end}
                 onClick={() => page(1)}
               />

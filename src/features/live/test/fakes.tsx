@@ -1,5 +1,5 @@
 /**
- * Test doubles for `../_shim` (the live feature's seam to @/ui, @/shell, @/features/player).
+ * Test doubles for the live feature's imports from @/ui, @/shell, @/features/player and @/features/player/remote.
  * Signatures follow C8, C11 and C16; `playItem` and `playSource` are spies-friendly no-ops.
  */
 import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
@@ -310,6 +310,14 @@ export function useChannelZap(): { up(): void; down(): void; selectNumber(n: num
       const ctx = usePlayerStore.getState().zapContext;
       if (ctx) void rpc('catalog.channelByNumber', { sourceId: ctx.sourceId, number: n });
     },
+  };
+}
+
+export const remoteClaims = { count: 0 };
+export function claimRemoteChannelCommands(): () => void {
+  remoteClaims.count++;
+  return () => {
+    remoteClaims.count--;
   };
 }
 

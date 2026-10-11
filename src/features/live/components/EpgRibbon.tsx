@@ -8,9 +8,11 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast } from '../_shim';
+import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
+import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
+import { displayChannelName } from '../lib/channelName';
 import {
   HOUR,
   MINUTE,
@@ -25,9 +27,11 @@ import {
   ms,
   programProgress,
   programWhen,
+  shiftPrograms,
   type Block,
 } from '../lib/epgTime';
 import { playCatchup } from '../lib/playback';
+import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 
 export const RIBBON_PX_PER_MIN = 4;
 const AHEAD = 12 * HOUR;
@@ -60,7 +64,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const to = anchor + AHEAD;
   // XMLTV for every kind; a Stalker portal's own guide on top (see useChannelPrograms).
   const programs = useChannelPrograms(channel, sourceKind, from, to);
-  const list = programs.programs;
+  const prefs = useDisplayPrefs();
+  const list = useMemo(() => shiftPrograms(programs.programs, prefs.epgOffsetMinutes), [programs.programs, prefs.epgOffsetMinutes]);
+  const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
   const [focused, setFocused] = useState<EpgProgram | undefined>(undefined);
   useEffect(() => setFocused(undefined), [channel?.ref.itemId]);
@@ -102,19 +108,28 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className="min-w-0 flex-1">
         {shown ? (
           <>
-            <p className="flex items-center gap-2 text-xs text-fg-muted">
+            <p className="flex min-w-0 items-center gap-2 text-xs text-fg-muted">
               {programWhen(shown, now) === 'now' ? (
                 <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px text-[10px] font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
               ) : null}
-              <span className="tabular-nums">{formatRange(shown, i18n.language)}</span>
-              {programWhen(shown, now) === 'now' ? <span>{t('minutesLeft', { count: minutesLeft(shown, now) })}</span> : null}
-              {shown.category ? <span className="truncate text-fg-subtle">{shown.category}</span> : null}
+              <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">{formatRange(shown, i18n.language)}</span>
+              {programWhen(shown, now) === 'now' ? (
+                <span className="shrink-0 whitespace-nowrap" data-testid="ribbon-remaining">
+                  {t('minutesLeft', { count: minutesLeft(shown, now) })}
+                </span>
+              ) : null}
+              {/* The category is the first thing to go: below 1440 px the pane is too narrow for it to be more than "Ne…". */}
+              {shown.category ? (
+                <span className="hidden min-w-0 truncate text-fg-subtle min-[1440px]:block" data-testid="ribbon-category">
+                  {shown.category}
+                </span>
+              ) : null}
             </p>
             <p className="truncate text-sm font-semibold text-fg">{shown.title}</p>
             {shown.description ? <p className="line-clamp-1 text-xs text-fg-muted">{shown.description}</p> : null}
           </>
         ) : (
-          <p className="truncate text-sm font-semibold text-fg">{channel?.name ?? t('guide')}</p>
+          <p className="truncate text-sm font-semibold text-fg">{channelName || t('guide')}</p>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -174,7 +189,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
     body = (
       <EmptyState
         icon={<CalendarClock className="size-6" />}
-        title={t('noGuideFor', { name: channel.name })}
+        title={t('noGuideFor', { name: channelName })}
         description={t('noGuideHint')}
         action={
           <div className="flex flex-wrap justify-center gap-2">
@@ -232,6 +247,8 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
   const { t, i18n } = useTranslation('live');
   const { programs, from, to, now, channel, kind } = props;
   const scroller = useRef<HTMLDivElement>(null);
+  const rtl = useIsRtl();
+  // `view.left` is the distance from the track's inline start (time `from`), in both directions.
   const [view, setView] = useState({ left: 0, width: 1200 });
   const blocks = useMemo(() => layoutBlocks(programs, from, to, RIBBON_PX_PER_MIN, now), [programs, from, to, now]);
   const width = ((to - from) / MINUTE) * RIBBON_PX_PER_MIN;
@@ -244,19 +261,19 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
       const w = el.clientWidth || 1200;
       const left = Math.max(0, nowX - w * 0.25);
       const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      el.scrollTo({ left, behavior: smooth && !reduced ? 'smooth' : 'auto' });
+      el.scrollTo({ left: scrollLeftFor(left, rtl), behavior: smooth && !reduced ? 'smooth' : 'auto' });
       setView({ left, width: w });
     },
-    [nowX],
+    [nowX, rtl],
   );
 
   useLayoutEffect(() => {
     scrollToNow(false);
-  }, [props.resetKey, programs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [props.resetKey, programs.length, rtl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = () => {
     const el = scroller.current;
-    if (el) setView({ left: el.scrollLeft, width: el.clientWidth || 1200 });
+    if (el) setView({ left: scrollStart(el), width: el.clientWidth || 1200 });
   };
 
   // Window the blocks: only those near the viewport are in the DOM.
@@ -269,8 +286,10 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
     const btns = [...(scroller.current?.querySelectorAll<HTMLButtonElement>('button[data-start]') ?? [])];
     const i = btns.indexOf(document.activeElement as HTMLButtonElement);
     let target: HTMLButtonElement | undefined;
-    if (e.key === 'ArrowRight') target = btns[Math.min(btns.length - 1, i + 1)];
-    else if (e.key === 'ArrowLeft') target = btns[Math.max(0, i - 1)];
+    // Arrow keys follow the screen, so in RTL ArrowLeft moves later in time.
+    const step = timeStep(e.key, rtl);
+    if (step > 0) target = btns[Math.min(btns.length - 1, i + 1)];
+    else if (step < 0) target = btns[Math.max(0, i - 1)];
     else if (e.key === 'Home') {
       scrollToNow(true);
       target = btns.find((b) => b.dataset.when === 'now');
@@ -290,8 +309,8 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
             const x = ((tt - from) / MINUTE) * RIBBON_PX_PER_MIN;
             const midnight = new Date(tt).getHours() === 0;
             return (
-              <div key={tt} className="absolute top-0 bottom-0" style={{ left: x }}>
-                <span className="absolute top-0 left-1 text-[11px] whitespace-nowrap text-fg-subtle tabular-nums">
+              <div key={tt} className="absolute top-0 bottom-0" style={inlineStart(x, rtl)}>
+                <span className="absolute top-0 start-1 text-[11px] whitespace-nowrap text-fg-subtle tabular-nums">
                   {midnight ? formatDay(tt, i18n.language) : formatClock(tt, i18n.language)}
                 </span>
                 <span className={`absolute top-4 bottom-0 w-px ${midnight ? 'bg-border' : 'bg-border/50'}`} />
@@ -306,13 +325,14 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
               channel={channel}
               kind={kind}
               watchingLive={props.watchingLive}
+              rtl={rtl}
               tabbable={blocks.indexOf(b) === (nowIndex >= 0 ? nowIndex : 0)}
               onActivate={props.onActivate}
               onFocusProgram={props.onFocusProgram}
             />
           ))}
-          <div aria-hidden className="pointer-events-none absolute top-3 bottom-1 z-10 w-0.5 bg-live" style={{ left: nowX - 1 }}>
-            <span className="absolute -top-1 -left-[3px] size-2 rounded-full bg-live" />
+          <div aria-hidden data-testid="ribbon-now-line" className="pointer-events-none absolute top-3 bottom-1 z-10 w-0.5 bg-live" style={inlineStart(nowX - 1, rtl)}>
+            <span className="absolute -top-1 -start-[3px] size-2 rounded-full bg-live" />
           </div>
         </div>
       </div>
@@ -320,7 +340,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         <button
           type="button"
           onClick={() => scrollToNow(true)}
-          className="absolute right-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live px-3 py-1 text-xs font-semibold text-white shadow-2 dark:text-bg"
+          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live px-3 py-1 text-xs font-semibold text-white shadow-2 dark:text-bg"
         >
           <RotateCcw className="size-3" aria-hidden />
           {t('jumpToNow')}
@@ -336,6 +356,7 @@ function TimelineBlock({
   channel,
   kind,
   watchingLive,
+  rtl,
   tabbable,
   onActivate,
   onFocusProgram,
@@ -345,6 +366,7 @@ function TimelineBlock({
   channel: Channel;
   kind?: SourceKind;
   watchingLive: boolean;
+  rtl: boolean;
   tabbable: boolean;
   onActivate(p: EpgProgram): void;
   onFocusProgram(p: EpgProgram | undefined): void;
@@ -381,11 +403,11 @@ function TimelineBlock({
       onClick={() => onActivate(p)}
       onMouseEnter={() => onFocusProgram(p)}
       onFocus={() => onFocusProgram(p)}
-      className={`absolute top-5 bottom-2 overflow-hidden rounded-md border px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent ${tone}`}
-      style={{ left: block.left + 1, width: Math.max(2, block.width - 2) }}
+      className={`absolute top-5 bottom-2 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${tone}`}
+      style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}
     >
       {block.when === 'now' ? (
-        <span aria-hidden className="absolute inset-y-0 left-0 bg-accent/15" style={{ width: `${progress * 100}%` }} />
+        <span aria-hidden className="absolute inset-y-0 start-0 bg-accent/15" style={{ width: `${progress * 100}%` }} />
       ) : null}
       <span className="relative flex items-center gap-1 truncate text-xs font-medium">
         {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
@@ -440,7 +462,7 @@ function ProgramList(props: ViewProps) {
                 tabIndex={v.index === (nowIndex >= 0 ? nowIndex : 0) ? 0 : -1}
                 onClick={() => props.onActivate(p)}
                 onFocus={() => props.onFocusProgram(p)}
-                className={`flex h-full w-full items-center gap-3 border-b border-border/50 px-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
+                className={`flex h-full w-full items-center gap-3 border-b border-border/50 px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
                   when === 'now' ? 'bg-accent/10' : 'hover:bg-surface-2'
                 } ${when === 'past' && !catchup ? 'text-fg-subtle' : 'text-fg'}`}
               >

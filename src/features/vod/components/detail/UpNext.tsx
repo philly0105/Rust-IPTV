@@ -4,8 +4,9 @@ import { useTranslation } from 'react-i18next';
 
 import type { Episode, PlaybackPosition } from '@/api/types';
 
-import { episodeCode, formatRuntime, progressFraction } from '../../lib/format';
-import { Button, IconButton, Poster, ProgressBar, cn } from '../../_shim';
+import { useFormatRuntime } from '../../hooks/useFormatRuntime';
+import { episodeCode, progressFraction } from '../../lib/format';
+import { Button, IconButton, Poster, ProgressBar, cn } from '@/ui';
 
 /** How many upcoming episodes the watch-state rail shows. */
 export const UP_NEXT_LIMIT = 12;
@@ -30,6 +31,7 @@ export function UpNextRail({
   onPlay: (ep: Episode) => void;
 }) {
   const { t } = useTranslation('vod');
+  const formatRuntime = useFormatRuntime();
   if (episodes.length === 0) return null;
   return (
     <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:w-[340px] xl:shrink-0">

@@ -12,6 +12,7 @@ const root = document.getElementById('root');
 if (!root) throw new Error('#root element missing from index.html');
 
 bindWindowFullscreen();
+if (!('__TAURI_INTERNALS__' in window) && import.meta.env.PROD && 'serviceWorker' in navigator) void navigator.serviceWorker.register('/sw.js').catch(() => undefined);
 
 // Render only once the remembered language is loaded and active, so a
 // non-English user never sees an English first frame. initI18n never rejects:

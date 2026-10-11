@@ -1,6 +1,6 @@
 # EPG (XMLTV)
 
-Code: `crates/iptv-core/src/epg/`. Tests: `crates/iptv-core/tests/epg_parser.rs`, `epg_store.rs`, `epg_http.rs`, and `epg_perf.rs` (check 5), plus unit tests in `xmltv.rs` and `ingest.rs`.
+Code: `crates/iptv-core/src/epg/`. Tests: `crates/iptv-core/tests/epg_parser.rs`, `epg_store.rs`, `epg_http.rs`, `epg_perf.rs` (check 5), and `epg_limits.rs` (hostile-size feeds), plus unit tests in `xmltv.rs` and `ingest.rs`.
 
 ## Layout
 
@@ -35,6 +35,13 @@ The list is `settings.epgUrls` (origin `settings`) followed by every source's `e
 ## Parser (`xmltv::parse`)
 
 The parser is a pull parser over `BufRead`. Memory use stays flat whatever the file size or line length, and the read buffer shrinks back once it has grown past 1 MB. Items go to a sink callback, so nothing is collected.
+
+Size limits, enforced by a byte-level guard between the decoded reader and quick-xml (which would otherwise buffer a whole node before the length caps below apply):
+
+- Document: more than `MAX_DOCUMENT_BYTES` (2 GB) read after decompression aborts the ingest with an Invalid error, even if some data was already parsed. Stored data is left alone. This caps gzip bombs.
+- Node: a text, CDATA or comment node passes only its first `MAX_NODE_BYTES` (4 MB) to quick-xml. The rest is read and discarded up to the node's end, and parsing continues. A 300 MB title in a 1.4 MB `.xml.gz` ingests with a peak RSS delta of about 5 MB.
+- Tag: a single tag (attributes included) larger than `MAX_NODE_BYTES` is an Invalid error, because cutting it would corrupt the document.
+- `xmltv::parse_with_limits` takes both limits explicitly; `parse` uses the constants.
 
 - `<channel id>`: the first non-empty `display-name` and the first non-empty `icon src`.
 - `<programme start stop channel>`: the first non-empty `title`, `desc`, `category` and `icon src`, whatever their `lang`. Other children (`sub-title`, `credits`, and so on) are skipped.
@@ -90,6 +97,7 @@ The channel directory is cached and rebuilt when the generation counter changes,
   - At most 3000 programmes are returned per channel.
 - `epg.channelsSearch {query, limit?}` is a LIKE search on display name or id. Results are ordered by name prefix, then id prefix, then length. The default limit is 50 and the maximum is 500.
 - `epg.setMapping {ref, epgChannelId|null}` and `epg.clearMapping {ref}` write or delete the manual row.
+- `epg.clearAll` deletes every programme and guide channel in one transaction and resets each URL to `idle` with zero counts, no error and no ETag (so the next refresh downloads the whole feed). URLs, enabled flags, `last_fetch_at` (so the scheduler does not re-download at once) and manual mappings are kept, as are the staging rows of a refresh that is running. It bumps the runtime generation and emits `epg.changed`.
 
 ## Limits
 

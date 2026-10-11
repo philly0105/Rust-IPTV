@@ -1,11 +1,16 @@
 //! `iptv-server --port 7180 --data-dir <dir> --static <dist>` (SPEC C12).
+//!
+//! `iptv-server --health` checks a running server on the same port
+//! (`GET /api/health`) and exits 0 when it is healthy; the Docker
+//! HEALTHCHECK uses it because the runtime image has no curl.
 
 use clap::Parser;
 use iptv_core::events::{AppEvent, BroadcastSink};
 use iptv_core::rpc::{build_router, init_all};
 use iptv_core::AppState;
+use iptv_server::guard::AllowedHosts;
 use iptv_server::{Server, ServerOptions, DEFAULT_PORT, EVENT_CAPACITY};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -35,14 +40,65 @@ struct Args {
     /// Built UI directory (output of `pnpm build`).
     #[arg(long = "static", env = "IPTV_STATIC_DIR", default_value = "./dist")]
     static_dir: PathBuf,
-    /// Let /api/proxy reach loopback and private-network hosts for every
-    /// source, not only each source's own host.
+    /// Let /api/proxy, downloads, playlist and EPG fetches reach loopback and
+    /// private-network hosts, not only each source's own host:port.
     #[arg(long, env = "IPTV_ALLOW_PRIVATE_TARGETS")]
     allow_private_targets: bool,
+    /// Extra host names the browser may use to reach the API (comma list,
+    /// e.g. `tv.example.com,nas.local`; `*` disables the check). localhost
+    /// and IP addresses always work; on a non-loopback bind the machine's
+    /// host name is added too. Blocks DNS-rebinding attacks.
+    #[arg(long = "allowed-hosts", env = "IPTV_ALLOWED_HOSTS", default_value = "")]
+    allowed_hosts: String,
+    /// Check the server listening on --port (GET /api/health) and exit 0 if
+    /// it is healthy, 1 otherwise. Used by the Docker HEALTHCHECK.
+    #[arg(long)]
+    health: bool,
+}
+
+/// `--health`: probes `/api/health` on the configured port.
+fn health_check(args: &Args) -> ExitCode {
+    let host = match args.host {
+        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ip => ip,
+    };
+    let url = format!(
+        "http://{}/api/health",
+        std::net::SocketAddr::new(host, args.port)
+    );
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("iptv-server --health: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let ok = rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .ok()?;
+        let resp = client.get(&url).send().await.ok()?;
+        let v: serde_json::Value = resp.error_for_status().ok()?.json().await.ok()?;
+        v.get("ok").and_then(serde_json::Value::as_bool)
+    });
+    if ok == Some(true) {
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("iptv-server --health: {url} is not healthy");
+        ExitCode::FAILURE
+    }
 }
 
 fn main() -> ExitCode {
     let args = Args::parse();
+    if args.health {
+        return health_check(&args);
+    }
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -73,6 +129,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         false,
     )
     .await?;
+    // Before init_all: restored downloads must already use the guarded client.
+    iptv_server::install_server_mode(&app, args.allow_private_targets);
     init_all(app.clone()).await?;
 
     let static_dir = std::path::absolute(&args.static_dir).unwrap_or(args.static_dir.clone());
@@ -83,7 +141,18 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!(host = %args.host, "listening beyond loopback: the API has no login, so keep this port on a trusted network or behind an authenticating reverse proxy");
     }
     if args.allow_private_targets {
-        tracing::warn!("--allow-private-targets: /api/proxy may reach any private-network host");
+        tracing::warn!("--allow-private-targets: the proxy, downloads and playlist/EPG fetches may reach any private-network host");
+    }
+    let mut allowed_hosts = AllowedHosts::parse(&args.allowed_hosts);
+    if !args.host.is_loopback() {
+        allowed_hosts.add_machine_hostname();
+    }
+    if allowed_hosts.allows_any() {
+        tracing::warn!(
+            "--allowed-hosts '*': any Host header is accepted, so DNS-rebinding protection is off"
+        );
+    } else {
+        tracing::info!(extra = ?allowed_hosts.names(), "API accepts localhost, IP addresses and these host names");
     }
 
     let server = Server::new(
@@ -93,7 +162,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         ServerOptions {
             static_dir: static_dir.clone(),
             allow_private_targets: args.allow_private_targets,
-            loopback_host_only: args.host.is_loopback(),
+            allowed_hosts,
         },
     );
 

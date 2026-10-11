@@ -1,14 +1,15 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Play } from 'lucide-react';
+import { CircleCheck, CircleDashed, Play } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Download, Episode, PlaybackPosition, Season } from '@/api/types';
 
 import { useScrollMargin } from '../../hooks/useContainerColumns';
-import { episodeCode, formatRuntime, isResumable, progressFraction } from '../../lib/format';
+import { useFormatRuntime } from '../../hooks/useFormatRuntime';
+import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { Poster, ProgressBar, Tabs, cn } from '../../_shim';
+import { Menu, Poster, ProgressBar, Tabs, cn } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
@@ -50,6 +51,8 @@ export interface EpisodeListProps {
   canDownload: boolean;
   pendingDownload: string | null;
   onDownload: (ep: Episode) => void;
+  /** Row menu action: mark the episode watched or unwatched. */
+  onToggleWatched?: (ep: Episode) => void;
   /** Page scroll container (rows are virtualized against it). */
   scrollRef: RefObject<HTMLElement | null>;
   /** Changes when the list above moves (season switch), so the scroll margin is remeasured. */
@@ -66,10 +69,12 @@ export function EpisodeList({
   canDownload,
   pendingDownload,
   onDownload,
+  onToggleWatched,
   scrollRef,
   layoutKey,
 }: EpisodeListProps) {
   const { t } = useTranslation('vod');
+  const formatRuntime = useFormatRuntime();
   const listRef = useRef<HTMLDivElement>(null);
   const margin = useScrollMargin(listRef, scrollRef, [layoutKey, episodes.length]);
   const v = useVirtualizer({
@@ -94,6 +99,7 @@ export function EpisodeList({
         const pos = positions.get(ep.id);
         const fraction = progressFraction(pos);
         const resumable = isResumable(pos);
+        const watched = isWatched(pos);
         const playing = ep.id === playingEpisodeId;
         const runtime = formatRuntime(ep.durationSeconds ?? pos?.durationSeconds);
         const code = episodeCode(ep.season, ep.episode);
@@ -109,7 +115,7 @@ export function EpisodeList({
                 type="button"
                 data-grid-index={row.index}
                 onClick={() => onPlay(ep)}
-                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}`}
+                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
                 className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
@@ -131,6 +137,12 @@ export function EpisodeList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-3">
                     <span className="font-display tabular text-sm text-fg-subtle">{code}</span>
+                    {watched && (
+                      <span className="inline-flex items-center gap-1 self-center text-xs text-success" data-testid="episode-watched">
+                        <CircleCheck aria-hidden size={14} />
+                        {t('watched')}
+                      </span>
+                    )}
                     {playing && <span className="text-xs text-accent">{t('nowPlaying')}</span>}
                     {!playing && resumable && pos && (
                       <span className="tabular text-xs text-accent">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
@@ -141,6 +153,21 @@ export function EpisodeList({
                   {ep.plot && <p className="line-clamp-2 text-sm text-fg-muted">{ep.plot}</p>}
                 </div>
               </button>
+              {onToggleWatched && (
+                <div className="shrink-0">
+                  <Menu
+                    label={t('episodeActions', { code })}
+                    items={[
+                      {
+                        id: 'watched',
+                        label: t(watched ? 'markEpisodeUnwatched' : 'markEpisodeWatched', { code }),
+                        icon: watched ? <CircleDashed aria-hidden size={16} /> : <CircleCheck aria-hidden size={16} />,
+                        onSelect: () => onToggleWatched(ep),
+                      },
+                    ]}
+                  />
+                </div>
+              )}
               {canDownload && (
                 <div className="shrink-0">
                   <DownloadButton

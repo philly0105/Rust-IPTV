@@ -20,6 +20,7 @@ const ref = { sourceId: 's1', contentType: 'movie' as const, itemId: '7' };
 const provider: VodDetail = {
   item: { ref, title: 'Dune: Part Two', titleBase: 'Dune Part Two', categoryId: 'c', posterUrl: 'http://p/poster.jpg', rating: 0, containerExtension: 'mkv' },
   cast: [{ name: 'Timothee Chalamet' }],
+  providerDetailsUnavailable: false,
   backdrops: ['http://p/bd1.jpg'],
 };
 
@@ -99,6 +100,7 @@ describe('mergeSeriesDetail', () => {
       item: { ref: { ...ref, contentType: 'series' }, title: 'Severance', categoryId: 'c' },
       seasons: [],
       cast: [],
+      providerDetailsUnavailable: false,
       backdrops: [],
     };
     const tv: TmdbTv = {
@@ -155,7 +157,7 @@ describe('episodes', () => {
 
   it('picks the resume target from series positions', () => {
     const order = episodeOrder(seasons);
-    const pos = (episodeId: string, positionSeconds: number, updatedAt: string) => ({ ref: sref, episodeId, positionSeconds, durationSeconds: 1000, updatedAt });
+    const pos = (episodeId: string, positionSeconds: number, updatedAt: string) => ({ ref: sref, episodeId, positionSeconds, durationSeconds: 1000, updatedAt, watched: false });
     expect(resumeTarget(order, [])).toEqual({ episode: order[0], resume: false });
     expect(resumeTarget(order, [pos('a2', 300, '2026-10-02'), pos('a1', 990, '2026-10-01')])).toEqual({ episode: order[1], resume: true });
     // latest one finished: start the next

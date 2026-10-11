@@ -2,7 +2,7 @@ import { Eye, EyeOff } from 'lucide-react';
 import { useState, type InputHTMLAttributes } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { IconButton, Input } from '../_shim';
+import { IconButton, Input } from '@/ui';
 
 /** Password-style input with a show/hide toggle. */
 export function SecretInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {

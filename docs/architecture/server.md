@@ -14,7 +14,9 @@ iptv-server --port 7180 --data-dir ./data --static ./dist
 | `--host` | `IPTV_HOST` | 127.0.0.1 | Interface to bind |
 | `--data-dir` | `IPTV_DATA_DIR` | `./data` | Database, logs, downloads |
 | `--static` | `IPTV_STATIC_DIR` | `./dist` | Output of `pnpm build` |
-| `--allow-private-targets` | `IPTV_ALLOW_PRIVATE_TARGETS` | off | Let `/api/proxy` reach any LAN host |
+| `--allow-private-targets` | `IPTV_ALLOW_PRIVATE_TARGETS` | off | Let the proxy, downloads and playlist/EPG fetches reach any LAN host |
+| `--allowed-hosts` | `IPTV_ALLOWED_HOSTS` | empty | Extra `Host` names accepted on `/api` (comma list; `*` turns the check off) |
+| `--health` | | | Probe `/api/health` on `--port` and exit 0 when healthy (Docker HEALTHCHECK) |
 
 Logs go to stderr and to the rotating JSON log under `<data-dir>/logs`
 (`RUST_LOG` sets the filter). Ctrl-C (and SIGTERM on Unix) starts a graceful
@@ -63,7 +65,7 @@ core's broadcast channel (capacity 1024).
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.
 
-### `GET /api/proxy?url=<enc>&sourceId=<id>`
+### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=]`
 Used by the web UI (`proxiedUrl()` in `src/api/transport.ts`) when a stream
 needs source headers or would be mixed content.
 
@@ -73,36 +75,53 @@ needs source headers or would be mixed content.
    stalker carry `headers`; xtream has none) and its own host (m3u `url`,
    xtream `serverUrl`, stalker `portalUrl`).
 3. Address policy (below). Refusals are 403 with an `RpcError` body.
-4. Fetch with the source's User-Agent / Referer / Origin and the client's
+4. Fetch with the source's User-Agent / Referer / Origin (non-empty `ua`,
+   `referer` and `origin` query parameters override them, for per-channel
+   `#EXTVLCOPT` headers) and the client's
    `Range` / `If-Range` (not for `.m3u8`/`.m3u` paths). Redirects are followed by
    hand, up to 5, and each hop is re-validated. Connect failures and timeouts
-   are retried twice with the core's backoff.
+   are retried twice with the core's backoff. Response headers must arrive
+   within 15 s.
 5. Upstream 4xx pass through with their status; 5xx become 502. The body is an
    `RpcError` with `details.upstreamStatus`.
 6. Media responses stream through `reqwest::bytes_stream` with status (200,
-   206, 304), `Content-Type`, `Content-Length`, `Content-Range`, `Accept-Ranges`,
+   206, 304), `Content-Length`, `Content-Range`, `Accept-Ranges`,
    `ETag`, `Last-Modified`, `Cache-Control`, `Expires` preserved. Compression is
    off on the proxy client so lengths and ranges stay byte-exact. HEAD becomes
-   an upstream HEAD.
+   an upstream HEAD. `Content-Type` passes only for media (`video/*`,
+   `audio/*`, `image/*`, HLS/DASH manifests, `application/octet-stream`,
+   `application/x-mpegts`); anything else, such as HTML or JSON, is sent as
+   `application/octet-stream` with `Content-Disposition: attachment`. Every proxy response, errors
+   included, carries `Content-Security-Policy: sandbox; default-src 'none'`
+   and `nosniff`, so upstream content never runs as a page on the app's
+   origin.
 7. HLS playlists are detected by content type (`*mpegurl*`) or, for untyped
    responses (`text/plain`, `application/octet-stream`, none), by sniffing
    `#EXTM3U` in the first bytes. They are rewritten line by line as chunks
    arrive (no whole-body buffering; a single line over 1 MiB aborts): every
    URI line and every `URI="..."` attribute (EXT-X-KEY, EXT-X-MAP,
    EXT-X-MEDIA, EXT-X-I-FRAME-STREAM-INF, EXT-X-PART, ...) is resolved against
-   the final URL and replaced with `/api/proxy?url=<absolute>&sourceId=<id>`.
+   the final URL and replaced with `/api/proxy?url=<absolute>&sourceId=<id>`
+   (plus any `ua`/`referer`/`origin` overrides).
    `data:` and `skd:` URIs are left alone. The response is 200
    `application/vnd.apple.mpegurl` with `Cache-Control: no-cache`.
 
 Address policy. A target must be a public address unless it is the
-requesting source's own host, or the server runs with
-`--allow-private-targets`. Loopback, RFC 1918, link-local (including
+requesting source's own `host:port` (another port on the same LAN host is
+refused), or the server runs with `--allow-private-targets`. The refusal
+message names that flag. Loopback, RFC 1918, link-local (including
 169.254.169.254), CGNAT, multicast, reserved, ULA, and IPv4-mapped or
 NAT64/6to4-embedded private addresses are refused. IP literals are checked
 per hop; host names are checked by the proxy client's own DNS resolver at
 connect time, so a name cannot pass the check and then rebind to a private
-address. Hosts of sources that were used with the proxy are remembered (until
-restart) as trusted to resolve privately.
+address. Source authorities that were used are remembered (until restart) as
+trusted to resolve privately.
+
+The same guard lives in `iptv_core::http` (`NetGuard`, `ServerMode`), and
+`iptv-server` installs it on the core at startup: in server mode downloads,
+M3U URL imports and XMLTV downloads use a guarded client too, each trusting
+only its own source's `host:port`. The desktop app does not install it and
+may fetch from the LAN freely.
 
 Consequence: an M3U playlist fetched from a public URL whose channels live on
 a LAN box will be refused for those channels; run with
@@ -114,8 +133,10 @@ Serves a completed download for the web player (`myvideos.playSource` returns
 never from the request. Not completed: 409. Missing row, missing file, or a
 path that is not a regular file (directories and symlinks are refused): 404.
 Range, `If-Range`, conditional GET and HEAD are handled by
-`tower_http::services::ServeFile`. `Content-Disposition: inline` with an
-RFC 5987 filename.
+`tower_http::services::ServeFile`. `Content-Disposition: inline` (video,
+audio and image types) or `attachment` (anything else) with an RFC 5987
+filename, plus the sandbox CSP and `nosniff`. Downloads whose extension is not
+a media/subtitle type are saved as `.bin`.
 
 ### Everything else: the UI
 `ServeDir` over `--static` with precompressed `.br`/`.gz` support.
@@ -128,13 +149,32 @@ RFC 5987 filename.
 - If `index.html` is missing, a short 503 page says to run `pnpm build`; the
   API keeps working.
 - Only GET and HEAD; other methods 405.
+- PWA: `public/manifest.webmanifest` (icons in `public/icons/`) and
+  `public/sw.js` are copied into `dist/`. The service worker is registered
+  only in the web build (never in Tauri). It serves `/assets/*` cache-first,
+  page navigations network-first with the cached shell as the offline
+  fallback, and never touches `/api/*`.
 
 ## Security
 
 Server mode has no login. Defaults keep it local:
 
-- Binds 127.0.0.1. While bound to loopback, `/api` requires a loopback `Host`
-  (`localhost`, `*.localhost`, `127.x`, `[::1]`), which defeats DNS rebinding.
+- Binds 127.0.0.1.
+- `/api` requires an allowed `Host` whatever the bind address, which defeats
+  DNS rebinding: `localhost`, `*.localhost` and any IP literal always work;
+  other names must be listed in `--allowed-hosts` / `IPTV_ALLOWED_HOSTS`
+  (e.g. `tv.example.com` behind a reverse proxy). On a non-loopback bind the
+  machine's host name (and its `.local` form) is added. Anything else gets 403.
+- Server mode cannot be made to read or write paths on the server: adding or
+  updating an M3U source with `origin: file` or a `file://` URL, changing the
+  downloads folder (`downloads.setDir`, `settings.update` `downloadsDir`) are
+  refused with `unsupported` (501). The downloads folder is
+  `<IPTV_DATA_DIR>/downloads`. A backup's `filePathHint` is ignored and the
+  embedded playlist text is imported instead.
+- The SPA is served with a site CSP (`default-src 'self'`, `script-src
+  'self'`, media/images/connect to any http(s) origin and `blob:`, YouTube
+  nocookie frames for trailers, `object-src 'none'`, `frame-ancestors 'self'`)
+  and `Referrer-Policy: same-origin`.
 - State-changing `/api` requests and WebSocket upgrades are refused (403) when
   `Origin` names another host or `Sec-Fetch-Site` is `cross-site`. This blocks
   CSRF through `text/plain` form posts and cross-site WebSocket hijacking.
@@ -149,17 +189,19 @@ Publish the port on loopback or put an authenticating reverse proxy in front.
 
 ## Docker
 
-`Dockerfile` at the repo root: node 22 builds `dist/` with `pnpm build`, rust
+`Dockerfile` at the repo root: node 24 builds `dist/` with `pnpm build`, rust
 1.96 builds `iptv-server` in release, and a `debian:bookworm-slim` runtime
-runs it as uid 10001 under `tini`, with `VOLUME /data` and `EXPOSE 7180`.
+runs it as uid 10001 under `tini`, with `VOLUME /data`, `EXPOSE 7180` and a
+`HEALTHCHECK` that runs `iptv-server --health`. Set `IPTV_ALLOWED_HOSTS` when
+the app is reached under a host name other than localhost or an IP address.
 
 ```
 docker build -t tsrust-iptv .
 docker run --rm -p 127.0.0.1:7180:7180 -v tsrust-iptv-data:/data tsrust-iptv
 ```
 
-A `.dockerignore` excluding `target/`, `node_modules/`, `dist/` and data dirs
-keeps the build context small.
+A `.dockerignore` excluding `**/target/`, `node_modules/`, `dist/` and data
+dirs (`.*-data/`) keeps the build context small.
 
 ## Tests
 
@@ -179,3 +221,9 @@ with a temp data dir and an in-test axum upstream:
 - `/api/files` Range and the 409/404/400 cases
 - Origin/Host guards; the event socket's broadcast, origin check, and close on
   shutdown
+- sandbox CSP and attachment for non-media proxy and file responses, the site
+  CSP on the SPA; a rebinding `Host` refused on a 0.0.0.0 bind
+- `ua`/`referer`/`origin` overrides, carried into rewritten playlists
+- server-mode downloads refused for loopback outside the source's own
+  `host:port` (allowed on desktop); refusal of file origins, downloads folder
+  changes and backup file paths

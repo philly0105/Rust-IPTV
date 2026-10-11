@@ -79,8 +79,10 @@ export function Header({ panelInline }: { panelInline: boolean }) {
           <IconButton
             label={panelOpen ? t('hideDetails') : t('showDetails')}
             icon={<PanelRight size={18} />}
-            pressed={panelOpen}
+            aria-expanded={panelOpen}
+            aria-haspopup="dialog"
             onClick={() => setPanelOpen(!panelOpen)}
+            data-testid="panel-toggle"
           />
         )}
         <IconButton

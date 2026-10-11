@@ -65,7 +65,9 @@ export interface Source {
   updatedAt?: string;
   lastRefreshAt?: string;
   lastError?: string;
+  /** Live channels only; radio stations are in `radioCount`. */
   channelCount: number;
+  radioCount: number;
   movieCount: number;
   seriesCount: number;
   epg: EpgLinks;
@@ -128,6 +130,20 @@ export interface Channel {
   url?: string;
   isRadio: boolean;
   archive?: ArchiveInfo;
+  /** Per-channel headers (m3u `#EXTVLCOPT` / `url|Header=`); override the source-level headers. */
+  headers?: RequestHeaders;
+  /** m3u catch-up attributes. */
+  catchup?: CatchupInfo;
+}
+
+/**
+ * m3u catch-up attributes. `type` is lowercased. `default` / `append` without a
+ * `source` use the standard `?utc={utc}&lutc={lutc}` convention.
+ */
+export interface CatchupInfo {
+  type: 'default' | 'append' | 'shift' | 'xc' | 'flussonic' | (string & {});
+  days?: number;
+  source?: string;
 }
 
 export interface VodItem {
@@ -197,6 +213,9 @@ export interface VodDetail {
   director?: string;
   trailerUrl?: string;
   backdrops: string[];
+  /** The provider's detail call failed; built from the catalog row alone. */
+  providerDetailsUnavailable: boolean;
+  providerError?: string;
 }
 
 export interface SeriesDetail {
@@ -206,6 +225,9 @@ export interface SeriesDetail {
   director?: string;
   trailerUrl?: string;
   backdrops: string[];
+  /** The provider's detail call failed; built from the catalog row alone. */
+  providerDetailsUnavailable: boolean;
+  providerError?: string;
 }
 
 export interface Page<T> {
@@ -278,6 +300,8 @@ export interface PlaybackPosition {
   durationSeconds?: number;
   updatedAt: string;
   snapshot?: ItemSnapshot;
+  /** Marked watched with `userstate.setWatched`; never in continue watching. */
+  watched: boolean;
 }
 
 export interface FavoriteEntry {
@@ -402,6 +426,18 @@ export interface Settings {
   vodAutoFailover: boolean;
   epgViewMode: EpgViewMode;
   coverSize: CoverSize;
+  /** Strip a leading `XX: ` / `XX | ` / `[XX] ` country tag from channel names. */
+  stripCountryPrefix: boolean;
+  /** Minutes added to displayed programme times (-720..720). */
+  epgOffsetMinutes: number;
+  /** Close the previous external player before launching the next. */
+  playerReuseInstance: boolean;
+  /** Show the external-playback footer. */
+  showExternalBar: boolean;
+  /** VOD grids hide items rated below this (0..10; 0 shows everything). */
+  vodMinRating: number;
+  /** `null` = `<downloadsDir>/recordings`. Desktop only. */
+  recordingsDir: string | null;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -436,6 +472,12 @@ export const DEFAULT_SETTINGS: Settings = {
   vodAutoFailover: false,
   epgViewMode: 'timeline',
   coverSize: 'medium',
+  stripCountryPrefix: false,
+  epgOffsetMinutes: 0,
+  playerReuseInstance: true,
+  showExternalBar: true,
+  vodMinRating: 0,
+  recordingsDir: null,
 };
 
 export interface WindowState {
@@ -452,6 +494,10 @@ export interface AppInfo {
   platform: string;
   isDesktop: boolean;
   logFile: string;
+  /** Desktop: loopback media proxy base (`http://127.0.0.1:<port>/api/proxy`); null in server mode. */
+  proxyBase: string | null;
+  /** True only in a desktop build compiled with the updater feature. */
+  updaterAvailable: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +523,9 @@ export interface MpvState {
   tracks: MpvTrack[];
   fullscreen: boolean;
   error?: string;
+  /** True while `mpv.record` writes the stream to disk. */
+  recording: boolean;
+  recordPath: string | null;
 }
 
 /** Child-window rectangle in CSS pixels (`mpv.attach`, `mpv.setBounds`). */

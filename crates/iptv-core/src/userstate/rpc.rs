@@ -71,6 +71,16 @@ struct SetPositionArgs {
     snapshot: Option<ItemSnapshot>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetWatchedArgs {
+    #[serde(rename = "ref")]
+    item_ref: ItemRef,
+    #[serde(default)]
+    episode_id: Option<String>,
+    watched: bool,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 struct LimitArgs {
@@ -91,7 +101,8 @@ fn secs(v: f64) -> Result<i64, RpcError> {
     Ok(v.floor() as i64)
 }
 
-/// Registers every `favorites.*`, `recent.*`, `positions.*` command.
+/// Registers every `favorites.*`, `recent.*`, `positions.*` command and
+/// `userstate.setWatched`.
 pub fn register(r: &mut RpcRouter) {
     // favorites
     r.add("favorites.list", |state, a: SourceFilter| async move {
@@ -167,6 +178,7 @@ pub fn register(r: &mut RpcRouter) {
             duration_seconds: a.duration_seconds.map(secs).transpose()?,
             snapshot_json,
             updated_at: None,
+            watched: false,
         };
         state
             .db_call(move |c| super::position_set(c, &input).map(|_| ()))
@@ -194,4 +206,15 @@ pub fn register(r: &mut RpcRouter) {
             .await?;
         Ok::<(), RpcError>(())
     });
+    r.add(
+        "userstate.setWatched",
+        |state, a: SetWatchedArgs| async move {
+            state
+                .db_call(move |c| {
+                    super::set_watched(c, &a.item_ref, a.episode_id.as_deref(), a.watched)
+                })
+                .await?;
+            Ok::<(), RpcError>(())
+        },
+    );
 }

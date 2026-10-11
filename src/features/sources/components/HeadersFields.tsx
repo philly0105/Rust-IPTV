@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Input } from '../_shim';
+import { Input } from '@/ui';
 import type { DraftErrors, HeadersDraft } from '../lib/draft';
 import { Field } from './Field';
 

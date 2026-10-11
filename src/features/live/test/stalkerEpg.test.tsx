@@ -34,7 +34,10 @@ vi.mock('@/api/events', () => ({
   onAppEvent: () => () => undefined,
   onAnyAppEvent: () => () => undefined,
 }));
-vi.mock('../_shim', async () => await import('./fakes'));
+vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('./fakes')) }));
+vi.mock('@/shell', async () => await import('./fakes'));
+vi.mock('@/features/player', async () => await import('./fakes'));
+vi.mock('@/features/player/remote', async () => await import('./fakes'));
 
 const fakes = await import('./fakes');
 
@@ -93,7 +96,30 @@ describe('EpgRibbon on a Stalker source', () => {
     expect(await screen.findByRole('button', { name: /^Portal c0,.*on now/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Portal next c0,/ })).toBeTruthy();
     expect(screen.queryByText(/No guide data/)).toBeNull();
-    expect(stalkerCalls()[0]?.args).toEqual({ ref: makeChannel(0).ref, limit: 50 });
+    expect(stalkerCalls()[0]?.args).toMatchObject({ ref: makeChannel(0).ref, limit: 50 });
+  });
+
+  it('asks the portal for the archived past of a catch-up channel and lays it over XMLTV', async () => {
+    const now = Date.now();
+    rpcMock.handlers['stalker.epg'] = (a) => {
+      const { from } = a as { from?: string };
+      const upcoming = [program('Portal c0', now - 10 * MINUTE, now + 20 * MINUTE)];
+      return from ? [program('Portal morning', now - 2 * HOUR, now - 10 * MINUTE), ...upcoming] : upcoming;
+    };
+    rpcMock.handlers['epg.programs'] = () => [program('Xml morning', now - 2 * HOUR, now - 10 * MINUTE)];
+    renderAt('/', [{ path: '/', element: ribbon('stalker') }]);
+    expect(await screen.findByRole('button', { name: /^Portal morning,.*catch-up available/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Xml morning/ })).toBeNull();
+    // `from` is the ribbon's start: the 48 h archive window before the floored now.
+    const from = Date.parse((stalkerCalls()[0]?.args as { from: string }).from);
+    expect(from).toBeLessThanOrEqual(now - 48 * HOUR);
+    expect(from).toBeGreaterThan(now - 48 * HOUR - 15 * MINUTE);
+  });
+
+  it('does not ask for the past on a channel without an archive', async () => {
+    renderAt('/', [{ path: '/', element: <EpgRibbon channel={makeChannel(5)} sourceKind="stalker" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} /> }]);
+    await screen.findByRole('button', { name: /^Portal c5,/ });
+    expect(stalkerCalls()[0]?.args).toEqual({ ref: makeChannel(5).ref, limit: 50 });
   });
 
   it('offers start-over on the airing programme and plays it through stalker.catchupUrl', async () => {

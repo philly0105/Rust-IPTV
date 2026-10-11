@@ -4,13 +4,13 @@ import { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { BackupImportResult } from '@/api/rpc';
-import { RpcError, rpc } from '@/api/transport';
+import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 
-import { Button, Dialog, useToast } from '../../sources/_shim';
+import { Button, Dialog, useToast } from '@/ui';
 import { downloadText, readFileText } from '../../sources/lib/files';
 import { absoluteTime, formatCount } from '../../sources/lib/format';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import { MAX_BACKUP_BYTES, inspectBackup, type BackupSummary } from '../lib/backup';
+import { MAX_BACKUP_BYTES, backupFileName, chooseBackupSavePath, inspectBackup, type BackupSummary } from '../lib/backup';
 import type { SectionProps } from './types';
 
 type Picked = { name: string; size: number; text: string; summary: BackupSummary };
@@ -32,12 +32,34 @@ export function BackupSection(_props: SectionProps) {
   const [importError, setImportError] = useState<RpcError | null>(null);
   const lang = i18n.language;
 
+  /**
+   * Desktop: the native save dialog picks the file and the core writes it
+   * (`backup.export` with `path`). A core that predates `path` answers with the
+   * JSON instead, which then goes through the browser download like the web build.
+   */
+  const exportDesktop = async (): Promise<string | null> => {
+    const path = await chooseBackupSavePath(t('backupSaveTitle'), backupFileName(), t('backupFileFilter'));
+    if (!path) return null;
+    const res = (await rpcRaw('backup.export', { includeSecrets, path })) as { json?: string; fileName?: string };
+    if (res.json) {
+      downloadText(backupFileName(), res.json);
+      return res.fileName || backupFileName();
+    }
+    return path;
+  };
+
+  const exportWeb = async (): Promise<string> => {
+    const { json, fileName } = await rpc('backup.export', { includeSecrets });
+    const name = fileName || backupFileName();
+    downloadText(name, json);
+    return name;
+  };
+
   const exportBackup = async () => {
     setExporting(true);
     try {
-      const { json, fileName } = await rpc('backup.export', { includeSecrets });
-      downloadText(fileName || `tsrust-iptv-backup-${new Date().toISOString().slice(0, 10)}.json`, json);
-      toast({ variant: 'success', title: t('backupExported'), description: fileName });
+      const saved = isDesktop ? await exportDesktop() : await exportWeb();
+      if (saved) toast({ variant: 'success', title: t('backupExported'), description: saved });
     } catch (e) {
       toast({ variant: 'error', title: t('backupExportFailed'), description: RpcError.from(e).message });
     } finally {

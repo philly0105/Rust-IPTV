@@ -5,7 +5,7 @@
 //! counted as skipped), so memory stays flat no matter how large the playlist
 //! is. Edge cases handled (mined from the old app's parser and real lists):
 //!
-//! - UTF-8 BOM, CRLF / CR-less files, blank lines, leading junk before `#EXTM3U`,
+//! - UTF-8 BOM, LF / CRLF / CR-only (classic Mac) line endings, blank lines, leading junk before `#EXTM3U`,
 //!   several `#EXTM3U` lines (concatenated playlists), non-UTF-8 bytes (lossy).
 //! - `#EXTINF:-1`, `#EXTINF:0`, `#EXTINF:-1.000`, `#extinf:` in any case.
 //! - Attribute values quoted with `"` or `'`, unquoted (`tvg-chno=5`), and quoted
@@ -87,6 +87,9 @@ pub struct M3uReader<R: BufRead> {
     pending: Option<M3uEntry>,
     pending_kodi: Vec<(String, String)>,
     first_line: bool,
+    /// The previous line ended with `\r`; a `\n` right after it belongs to
+    /// the same line break (CRLF).
+    after_cr: bool,
     done: bool,
     io_error: Option<std::io::Error>,
 }
@@ -101,6 +104,7 @@ impl<R: BufRead> M3uReader<R> {
             pending: None,
             pending_kodi: Vec::new(),
             first_line: true,
+            after_cr: false,
             done: false,
             io_error: None,
         }
@@ -120,8 +124,9 @@ impl<R: BufRead> M3uReader<R> {
     }
 
     /// Reads one line (without the terminator) into `self.buf`, keeping at
-    /// most `MAX_LINE` bytes. Returns `Ok(None)` at EOF and `Ok(Some(true))`
-    /// when the line was truncated.
+    /// most `MAX_LINE` bytes. `\n`, `\r\n` and a lone `\r` all end a line.
+    /// Returns `Ok(None)` at EOF and `Ok(Some(true))` when the line was
+    /// truncated.
     fn read_line(&mut self) -> std::io::Result<Option<bool>> {
         self.buf.clear();
         let mut truncated = false;
@@ -135,9 +140,20 @@ impl<R: BufRead> M3uReader<R> {
             if available.is_empty() {
                 return Ok(if any { Some(truncated) } else { None });
             }
+            if self.after_cr {
+                self.after_cr = false;
+                if available[0] == b'\n' {
+                    self.reader.consume(1);
+                    self.stats.bytes += 1;
+                    continue;
+                }
+            }
             any = true;
-            let (chunk, found, used) = match memchr::memchr(b'\n', available) {
-                Some(i) => (&available[..i], true, i + 1),
+            let (chunk, found, used) = match memchr::memchr2(b'\n', b'\r', available) {
+                Some(i) => {
+                    self.after_cr = available[i] == b'\r';
+                    (&available[..i], true, i + 1)
+                }
                 None => (available, false, available.len()),
             };
             let room = MAX_LINE.saturating_sub(self.buf.len());

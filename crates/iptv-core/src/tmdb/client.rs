@@ -106,18 +106,14 @@ impl TmdbClient {
         };
 
         let started = Instant::now();
-        let resp = req.send().await.map_err(|e| {
-            // without_url: the URL may carry the api_key query param.
-            let err = CoreError::from(e.without_url());
-            match err {
-                CoreError::Timeout(_) => CoreError::Timeout(
-                    "TMDB did not answer in time. Check your connection and try again.".into(),
-                ),
-                CoreError::Network(m) => CoreError::Network(format!(
-                    "Could not reach TMDB ({m}). Check your connection and try again."
-                )),
-                other => other,
-            }
+        // http::send strips the URL (it may carry the api_key query param)
+        // and names the host in transport failures ("Could not reach
+        // api.themoviedb.org. ..."); statuses are handled below.
+        let resp = crate::http::send(req).await.map_err(|err| match err {
+            CoreError::Timeout(_) => CoreError::Timeout(
+                "TMDB did not answer in time. Check your connection and try again.".into(),
+            ),
+            other => other,
         })?;
         let status = resp.status();
         tracing::debug!(

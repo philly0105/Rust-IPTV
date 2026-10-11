@@ -73,6 +73,7 @@
   "onNow": "on now",
   "minutesLeft_one": "{{count}} min left",
   "minutesLeft_other": "{{count}} min left",
+  "minutesLeftShort": "{{count}}m",
   "mapEpg": "Match guide channel",
   "mappingAutomatic": "Match automatically",
   "mappingNone": "No guide",

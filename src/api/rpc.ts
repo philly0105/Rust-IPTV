@@ -92,7 +92,9 @@ export interface SourcePatch {
 }
 
 export interface SourceCounts {
+  /** Live channels only. */
   channelCount: number;
+  radioCount: number;
   movieCount: number;
   seriesCount: number;
 }
@@ -112,6 +114,8 @@ export interface XtreamAccountInfo {
   createdAt?: string;
   serverTime?: string;
   timezone?: string;
+  /** Lowercased `user_info.allowed_output_formats`; empty when the panel lists none. */
+  allowedOutputFormats: string[];
 }
 
 export interface StalkerAccountInfo {
@@ -193,6 +197,8 @@ export interface RpcMap {
   /** Desktop only; opens a folder or non-executable file with the OS handler. */
   'app.openPath': Cmd<{ path: string }, void>;
   'app.ping': Cmd<void, { ok: true }>;
+  /** Returns and clears deep links queued before the UI was listening (desktop). */
+  'app.pendingDeepLinks': Cmd<void, string[]>;
 
   // ---- sources (B1) -------------------------------------------------------
   /** Ordered by position. */
@@ -202,6 +208,8 @@ export interface RpcMap {
   'sources.add': Cmd<SourcesAddArgs, Source>;
   'sources.update': Cmd<{ id: string; patch: SourcePatch }, Source>;
   'sources.remove': Cmd<{ id: string }, void>;
+  /** Removes every source (same path as `sources.remove`); emits `sources.changed`. */
+  'sources.removeAll': Cmd<void, null>;
   'sources.reorder': Cmd<{ ids: string[] }, void>;
   /** Re-import: m3u refetch, xtream/stalker resync. */
   'sources.refresh': Cmd<{ id: string }, Source>;
@@ -223,7 +231,7 @@ export interface RpcMap {
   'catalog.series': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery }, Page<SeriesItem>>;
   /** Shape by `ref.contentType`. */
   'catalog.item': Cmd<{ ref: ItemRef }, Channel | VodItem | SeriesItem>;
-  'catalog.channelByNumber': Cmd<{ sourceId: string; number: number }, Channel | null>;
+  'catalog.channelByNumber': Cmd<{ sourceId: string; number: number; contentType?: 'live' | 'radio' }, Channel | null>;
   /** Channel up/down inside the current list. */
   'catalog.neighbors': Cmd<{ ref: ItemRef; categoryId?: string }, { prev?: Channel; next?: Channel }>;
   /** FTS prefix match; hidden categories excluded. */
@@ -266,6 +274,8 @@ export interface RpcMap {
   /** Snapshot filled. */
   'positions.continueWatching': Cmd<{ limit: number }, PlaybackPosition[]>;
   'positions.remove': Cmd<{ ref: ItemRef; episodeId?: string }, void>;
+  /** Watched: row kept with watched = true (position = duration when known). Unwatched: row cleared. */
+  'userstate.setWatched': Cmd<{ ref: ItemRef; episodeId?: string; watched: boolean }, void>;
 
   // ---- settings (B2) ------------------------------------------------------
   'settings.get': Cmd<void, Settings>;
@@ -277,7 +287,7 @@ export interface RpcMap {
   'window.setState': Cmd<{ state: WindowState }, void>;
 
   // ---- backup (B2, format C15) --------------------------------------------
-  'backup.export': Cmd<{ includeSecrets: boolean }, { json: string; fileName: string }>;
+  'backup.export': Cmd<{ includeSecrets: boolean; path?: string }, { json: string; fileName: string; path?: string }>;
   'backup.import': Cmd<{ json: string; mode: 'merge' | 'replace' }, BackupImportResult>;
 
   // ---- xtream (B3) --------------------------------------------------------
@@ -301,7 +311,7 @@ export interface RpcMap {
   'stalker.seriesDetail': Cmd<{ ref: ItemRef }, SeriesDetail>;
   'stalker.streamUrl': Cmd<{ ref: ItemRef; episodeId?: string }, PlayerSource>;
   'stalker.catchupUrl': Cmd<{ ref: ItemRef; start: string; durationMinutes: number }, PlayerSource>;
-  'stalker.epg': Cmd<{ ref: ItemRef; limit?: number }, EpgProgram[]>;
+  'stalker.epg': Cmd<{ ref: ItemRef; limit?: number; /** RFC 3339; adds archived programmes since then (at most 7 days back). */ from?: string }, EpgProgram[]>;
   'stalker.search': Cmd<
     { sourceId: string; query: string; contentType: ContentType },
     Page<VodItem | SeriesItem>
@@ -323,6 +333,8 @@ export interface RpcMap {
   'epg.clearMapping': Cmd<{ ref: ItemRef }, void>;
   'epg.resolve': Cmd<{ ref: ItemRef }, EpgResolution>;
   'epg.setEnabled': Cmd<{ url: string; enabled: boolean }, void>;
+  /** Deletes all programmes and guide channels (urls and mappings kept); emits epg.changed. */
+  'epg.clearAll': Cmd<void, void>;
 
   // ---- downloads (B6) -----------------------------------------------------
   'downloads.list': Cmd<void, Download[]>;
@@ -365,8 +377,11 @@ export interface RpcMap {
   'player.detect': Cmd<void, DetectedPlayers>;
   /** Emits player.external on start and exit. */
   'player.openExternal': Cmd<{ player: 'mpv' | 'vlc'; source: PlayerSource }, { pid: number }>;
+  /** Terminates the external mpv/VLC this app launched last (desktop only). */
+  'player.stopExternal': Cmd<void, { stopped: boolean }>;
   /** Windows desktop only; Unsupported elsewhere. Bounds in CSS px. */
-  'mpv.attach': Cmd<{ bounds: Bounds }, MpvState>;
+  /** `volume` (0..100) and `muted` are applied before the first state event. */
+  'mpv.attach': Cmd<{ bounds: Bounds; volume?: number; muted?: boolean }, MpvState>;
   'mpv.load': Cmd<{ source: PlayerSource }, void>;
   /** Raw mpv JSON IPC command. */
   'mpv.command': Cmd<{ cmd: MpvArg[] }, unknown>;
@@ -374,6 +389,8 @@ export interface RpcMap {
   'mpv.setBounds': Cmd<{ bounds: Bounds }, void>;
   'mpv.detach': Cmd<void, void>;
   'mpv.state': Cmd<void, MpvState>;
+  /** Starts/stops writing the live stream to `<recordingsDir>/<title>-<yyyyMMdd-HHmm>.ts`. */
+  'mpv.record': Cmd<{ start: boolean }, { recording: boolean; path: string | null }>;
 }
 
 /** Every command name, for runtime checks and tests. Kept in sync with `RpcMap` by the type below. */
@@ -382,11 +399,13 @@ export const RPC_COMMANDS = [
   'app.openLogDir',
   'app.openPath',
   'app.ping',
+  'app.pendingDeepLinks',
   'sources.list',
   'sources.get',
   'sources.add',
   'sources.update',
   'sources.remove',
+  'sources.removeAll',
   'sources.reorder',
   'sources.refresh',
   'sources.refreshAll',
@@ -420,6 +439,7 @@ export const RPC_COMMANDS = [
   'positions.forSeries',
   'positions.continueWatching',
   'positions.remove',
+  'userstate.setWatched',
   'settings.get',
   'settings.update',
   'settings.reset',
@@ -457,6 +477,7 @@ export const RPC_COMMANDS = [
   'epg.clearMapping',
   'epg.resolve',
   'epg.setEnabled',
+  'epg.clearAll',
   'downloads.list',
   'downloads.get',
   'downloads.start',
@@ -487,6 +508,7 @@ export const RPC_COMMANDS = [
   'player.capabilities',
   'player.detect',
   'player.openExternal',
+  'player.stopExternal',
   'mpv.attach',
   'mpv.load',
   'mpv.command',
@@ -494,6 +516,7 @@ export const RPC_COMMANDS = [
   'mpv.setBounds',
   'mpv.detach',
   'mpv.state',
+  'mpv.record',
 ] as const satisfies readonly (keyof RpcMap)[];
 
 // Compile-time check that RPC_COMMANDS lists every RpcMap key.

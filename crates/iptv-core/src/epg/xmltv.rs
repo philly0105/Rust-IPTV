@@ -15,6 +15,11 @@
 //!   on the same channel, or start + 1 h when none follows;
 //! - mismatched end tags and a truncated tail (data read so far is kept).
 //!
+//! Hostile input is bounded: the document stops with an `Invalid` error once
+//! more than [`MAX_DOCUMENT_BYTES`] (decompressed) were read, a text, CDATA or
+//! comment node keeps only its first [`MAX_NODE_BYTES`] (the rest is read and
+//! discarded), and a single tag larger than that is an `Invalid` error.
+//!
 //! Only the first non-empty `display-name` / `icon` of a channel and the first
 //! non-empty `title` / `desc` / `category` / `icon` of a programme are kept,
 //! whatever their `lang`.
@@ -24,7 +29,7 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::io::BufRead;
+use std::io::{BufRead, BufReader, Read};
 
 /// Seconds in a day.
 pub const DAY: i64 = 86_400;
@@ -40,6 +45,11 @@ const MAX_DESC_CHARS: usize = 8_192;
 const MAX_SHORT_CHARS: usize = 1_024;
 /// The read buffer is shrunk back when one event (a giant text node) grew it past this.
 const BUF_SHRINK_ABOVE: usize = 1 << 20;
+/// Largest decompressed document [`parse`] accepts.
+pub const MAX_DOCUMENT_BYTES: u64 = 2 << 30;
+/// Bytes of one text / CDATA / comment node handed to quick-xml; the rest of
+/// the node is discarded. Also the largest tag accepted.
+pub const MAX_NODE_BYTES: usize = 4 << 20;
 
 /// A `<channel>` element.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,7 +224,24 @@ pub fn parse<R: BufRead>(
     window: Window,
     sink: &mut dyn FnMut(XmltvItem) -> CoreResult<()>,
 ) -> CoreResult<ParseStats> {
-    let mut xml = Reader::from_reader(reader);
+    parse_with_limits(reader, window, MAX_DOCUMENT_BYTES, MAX_NODE_BYTES, sink)
+}
+
+/// [`parse`] with explicit size limits: `max_document` bytes read in total
+/// (exceeding it is an `Invalid` error) and `max_node` bytes kept per text,
+/// CDATA or comment node (also the largest tag accepted).
+pub fn parse_with_limits<R: BufRead>(
+    reader: R,
+    window: Window,
+    max_document: u64,
+    max_node: usize,
+    sink: &mut dyn FnMut(XmltvItem) -> CoreResult<()>,
+) -> CoreResult<ParseStats> {
+    let guard = Guard {
+        inner: reader,
+        f: Filter::new(max_document, max_node.max(16)),
+    };
+    let mut xml = Reader::from_reader(BufReader::with_capacity(64 * 1024, guard));
     {
         let cfg = xml.config_mut();
         cfg.trim_text(false);
@@ -237,6 +264,13 @@ pub fn parse<R: BufRead>(
         let event = match xml.read_event_into(&mut buf) {
             Ok(ev) => ev,
             Err(err) => {
+                // A size limit is fatal even after data was read: the rest of
+                // the feed is not trustworthy and must not replace stored data.
+                if let quick_xml::Error::Io(io) = &err {
+                    if let Some(limit) = io.get_ref().and_then(|e| e.downcast_ref::<LimitError>()) {
+                        return Err(CoreError::Invalid(limit.0.clone()));
+                    }
+                }
                 let pos = xml.buffer_position();
                 if p.stats.channels + p.stats.programmes + p.stats.skipped_window > 0 {
                     let msg = format!("XMLTV ended early at byte {pos}: {err}");
@@ -296,6 +330,13 @@ pub fn parse<R: BufRead>(
         } else {
             buf.clear();
         }
+    }
+    let skipped = xml.get_ref().get_ref().f.skipped_nodes;
+    if skipped > 0 {
+        tracing::warn!(
+            nodes = skipped,
+            "XMLTV text nodes larger than {max_node} bytes were cut"
+        );
     }
     // A programme still open at EOF (truncated file) is finished with what it has.
     if let Ctx::Programme(_) = p.ctx {
@@ -491,6 +532,242 @@ impl Parser<'_> {
         }
         self.stats.programmes += 1;
         (self.sink)(XmltvItem::Programme(p))
+    }
+}
+
+/// Error raised by [`Guard`] when a size limit is passed.
+#[derive(Debug)]
+struct LimitError(String);
+
+impl std::fmt::Display for LimitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for LimitError {}
+
+fn limit_error(msg: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, LimitError(msg))
+}
+
+fn size_text(bytes: u64) -> String {
+    if bytes >= 1 << 20 {
+        format!("{} MB", bytes >> 20)
+    } else {
+        format!("{bytes} bytes")
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Mode {
+    /// Character data, up to the next `<`.
+    Text,
+    /// Just after `<`: matching the `![CDATA[` / `!--` prefixes (bytes matched
+    /// of each, `usize::MAX` once it no longer matches).
+    Open { cdata: usize, comment: usize },
+    /// Inside a tag, up to the next `>`.
+    Tag,
+    /// Inside CDATA or a comment, up to `end`; `m` bytes of `end` matched.
+    Delim { end: &'static [u8], m: usize },
+}
+
+/// Byte-level state of [`Guard`]: a coarse XML lexer that knows where text,
+/// CDATA, comments and tags start and end, enough to cut oversized nodes.
+struct Filter {
+    mode: Mode,
+    /// Bytes of the current node passed through.
+    run: usize,
+    total: u64,
+    max_total: u64,
+    max_node: usize,
+    skipped_nodes: u64,
+    skipping: bool,
+}
+
+impl Filter {
+    fn new(max_total: u64, max_node: usize) -> Self {
+        Self {
+            mode: Mode::Text,
+            run: 0,
+            total: 0,
+            max_total,
+            max_node,
+            skipped_nodes: 0,
+            skipping: false,
+        }
+    }
+
+    fn start_node(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.run = 0;
+        self.skipping = false;
+    }
+
+    fn note_skip(&mut self) {
+        if !self.skipping {
+            self.skipping = true;
+            self.skipped_nodes += 1;
+        }
+    }
+
+    /// Copies the content bytes `src` (no delimiters) of the current node to
+    /// `out` while the node is under the cap, discarding the rest. Returns
+    /// (bytes consumed, bytes written).
+    fn content(&mut self, src: &[u8], out: &mut [u8]) -> (usize, usize) {
+        if self.run < self.max_node {
+            let n = src.len().min(self.max_node - self.run).min(out.len());
+            out[..n].copy_from_slice(&src[..n]);
+            self.run += n;
+            (n, n)
+        } else {
+            self.note_skip();
+            (src.len(), 0)
+        }
+    }
+
+    /// Filters `input` into `out`; returns (bytes consumed, bytes written).
+    /// Makes progress whenever `out.len() >= 3`.
+    fn step(&mut self, input: &[u8], out: &mut [u8]) -> std::io::Result<(usize, usize)> {
+        const CDATA: &[u8] = b"![CDATA[";
+        const COMMENT: &[u8] = b"!--";
+        let (mut i, mut w) = (0, 0);
+        while i < input.len() && w < out.len() {
+            let b = input[i];
+            match self.mode {
+                Mode::Text if b == b'<' => {
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    self.start_node(Mode::Open {
+                        cdata: 0,
+                        comment: 0,
+                    });
+                }
+                Mode::Text => {
+                    let rest = &input[i..];
+                    let end = rest.iter().position(|&c| c == b'<').unwrap_or(rest.len());
+                    let (used, wrote) = self.content(&rest[..end], &mut out[w..]);
+                    (i, w) = (i + used, w + wrote);
+                }
+                Mode::Open { cdata, comment } => {
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    self.run += 1;
+                    let adv = |k: usize, pat: &[u8]| {
+                        if k < pat.len() && pat[k] == b {
+                            k + 1
+                        } else {
+                            usize::MAX
+                        }
+                    };
+                    let (cdata, comment) = (adv(cdata, CDATA), adv(comment, COMMENT));
+                    if b == b'>' {
+                        self.start_node(Mode::Text);
+                    } else if cdata == CDATA.len() {
+                        self.start_node(Mode::Delim { end: b"]]>", m: 0 });
+                    } else if comment == COMMENT.len() {
+                        self.start_node(Mode::Delim { end: b"-->", m: 0 });
+                    } else if cdata == usize::MAX && comment == usize::MAX {
+                        self.mode = Mode::Tag;
+                    } else {
+                        self.mode = Mode::Open { cdata, comment };
+                    }
+                }
+                Mode::Tag if b == b'>' => {
+                    out[w] = b;
+                    (i, w) = (i + 1, w + 1);
+                    self.start_node(Mode::Text);
+                }
+                Mode::Tag => {
+                    let rest = &input[i..];
+                    let end = rest.iter().position(|&c| c == b'>').unwrap_or(rest.len());
+                    let n = end.min(out.len() - w);
+                    if self.run + n > self.max_node {
+                        return Err(limit_error(format!(
+                            "the XMLTV feed has a tag larger than {}",
+                            size_text(self.max_node as u64)
+                        )));
+                    }
+                    out[w..w + n].copy_from_slice(&rest[..n]);
+                    (i, w) = (i + n, w + n);
+                    self.run += n;
+                }
+                Mode::Delim { end, m: 0 } if b != end[0] => {
+                    // Plain content up to the next possible terminator byte.
+                    let rest = &input[i..];
+                    let n = rest.iter().position(|&c| c == end[0]).unwrap_or(rest.len());
+                    let (used, wrote) = self.content(&rest[..n], &mut out[w..]);
+                    (i, w) = (i + used, w + wrote);
+                }
+                Mode::Delim { end, m } => {
+                    let next = if b == end[m] {
+                        m + 1
+                    } else if b == end[0] {
+                        // `]]]>` / `--->`: keep the longest partial match.
+                        if m == 2 && end[1] == end[0] {
+                            2
+                        } else {
+                            1
+                        }
+                    } else {
+                        0
+                    };
+                    if next == end.len() {
+                        if self.skipping {
+                            // The partial match was discarded: write the whole terminator.
+                            if out.len() - w < end.len() {
+                                break;
+                            }
+                            out[w..w + end.len()].copy_from_slice(end);
+                            w += end.len();
+                        } else {
+                            out[w] = b;
+                            w += 1;
+                        }
+                        i += 1;
+                        self.start_node(Mode::Text);
+                        continue;
+                    }
+                    let (used, wrote) = self.content(&input[i..=i], &mut out[w..]);
+                    (i, w) = (i + used, w + wrote);
+                    self.mode = Mode::Delim { end, m: next };
+                }
+            }
+        }
+        Ok((i, w))
+    }
+}
+
+/// Reader adapter enforcing the document and node size limits.
+struct Guard<R> {
+    inner: R,
+    f: Filter,
+}
+
+impl<R: BufRead> Read for Guard<R> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let mut written = 0;
+        while written < out.len() {
+            let input = self.inner.fill_buf()?;
+            if input.is_empty() {
+                break;
+            }
+            let (used, wrote) = self.f.step(input, &mut out[written..])?;
+            self.inner.consume(used);
+            self.f.total += used as u64;
+            if self.f.total > self.f.max_total {
+                return Err(limit_error(format!(
+                    "the XMLTV feed is larger than {} once decompressed",
+                    size_text(self.f.max_total)
+                )));
+            }
+            written += wrote;
+            if used == 0 {
+                // Too little room left in `out` for a terminator.
+                break;
+            }
+        }
+        Ok(written)
     }
 }
 
@@ -846,6 +1123,89 @@ mod tests {
         let two = progs.iter().find(|p| p.title == "Two").unwrap();
         assert_eq!(two.stop - two.start, DEFAULT_DURATION_SECS);
         assert!(progs.iter().any(|p| p.title == "B"));
+    }
+
+    fn collect_limited(xml: &[u8], max_doc: u64, max_node: usize) -> CoreResult<Vec<XmltvItem>> {
+        let mut items = Vec::new();
+        parse_with_limits(xml, Window::unbounded(), max_doc, max_node, &mut |i| {
+            items.push(i);
+            Ok(())
+        })?;
+        Ok(items)
+    }
+
+    fn titles(items: &[XmltvItem]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                XmltvItem::Programme(p) => Some(p.title.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn oversized_nodes_are_cut_and_parsing_continues() {
+        let big = "x".repeat(5_000);
+        let xml = format!(
+            r#"<tv><!-- {big} -- > ]]> --><programme start="20240101120000" stop="20240101130000" channel="a"><title>{big}</title><desc><![CDATA[{big}]]]]]></desc></programme>
+<programme start="20240101130000" stop="20240101140000" channel="a"><title><![CDATA[a]b]]c]]></title><desc>Tom &amp; Jerry</desc></programme></tv>"#
+        );
+        let items = collect_limited(xml.as_bytes(), u64::MAX, 100).unwrap();
+        let t = titles(&items);
+        assert_eq!(t, vec!["x".repeat(100), "a]b]]c".to_string()]);
+        let XmltvItem::Programme(p) = &items[0] else {
+            panic!()
+        };
+        // The cut CDATA keeps its first 100 bytes; stray `]` before `]]>` are content.
+        assert!(p
+            .description
+            .as_deref()
+            .unwrap()
+            .starts_with(&"x".repeat(100)));
+        assert!(p.description.as_deref().unwrap().len() <= 100 + 4);
+        let XmltvItem::Programme(p) = &items[1] else {
+            panic!()
+        };
+        assert_eq!(p.description.as_deref(), Some("Tom & Jerry"));
+        // Same document unlimited parses identically for the small programme.
+        let items = collect_limited(xml.as_bytes(), u64::MAX, MAX_NODE_BYTES).unwrap();
+        assert_eq!(titles(&items)[0].len(), MAX_TITLE_CHARS);
+    }
+
+    #[test]
+    fn filter_is_transparent_under_the_cap() {
+        let xml = r#"<?xml version="1.0"?><!DOCTYPE tv SYSTEM "x.dtd"><tv><channel id="c"><display-name><![CDATA[A <b> ]] > B]]></display-name></channel><!----><!-- a - b --></tv>"#;
+        let mut out = Vec::new();
+        let mut g = Guard {
+            inner: xml.as_bytes(),
+            f: Filter::new(u64::MAX, 1 << 20),
+        };
+        g.read_to_end(&mut out).unwrap();
+        assert_eq!(out, xml.as_bytes());
+        let items = collect_limited(xml.as_bytes(), u64::MAX, 1 << 20).unwrap();
+        let XmltvItem::Channel(c) = &items[0] else {
+            panic!()
+        };
+        assert_eq!(c.display_name, "A <b> ]] > B");
+    }
+
+    #[test]
+    fn document_and_tag_limits_are_invalid_errors() {
+        let mut xml = String::from(r#"<tv><channel id="a"/>"#);
+        xml.push_str(&" ".repeat(10_000));
+        xml.push_str("</tv>");
+        let err = collect_limited(xml.as_bytes(), 4_096, 64).unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("decompressed")),
+            "{err}"
+        );
+        let xml = format!(r#"<tv><channel id="a" x="{}"/></tv>"#, "y".repeat(500));
+        let err = collect_limited(xml.as_bytes(), u64::MAX, 64).unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("tag")),
+            "{err}"
+        );
     }
 
     #[test]

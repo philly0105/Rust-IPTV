@@ -19,9 +19,9 @@ path = "src/main.rs"
 
 [features]
 default = []
-# Auto-update. Off by default: tauri-plugin-updater refuses to start without a
-# signing pubkey and endpoint in tauri.conf.json (plugins.updater). See the
-# `// I: updater` note in src/lib.rs before enabling.
+# Auto-update. Off by default. tauri.conf.json carries `plugins.updater` with a
+# placeholder endpoint and an empty pubkey; put the real minisign public key
+# and feed URL there before building with `--features updater` (README, "Updates").
 updater = ["dep:tauri-plugin-updater"]
 
 [build-dependencies]
@@ -29,6 +29,10 @@ tauri-build = { workspace = true }
 
 [dependencies]
 iptv-core = { workspace = true }
+# Only the `/api/proxy` route is used (loopback media proxy, src/proxy.rs).
+iptv-server = { path = "../iptv-server" }
+axum = { workspace = true }
+tower-http = { workspace = true }
 tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = { workspace = true }
 tauri-plugin-shell = { workspace = true }
@@ -47,4 +51,10 @@ tauri-plugin-window-state = { workspace = true }
 tauri-plugin-updater = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
+windows = { workspace = true, features = ["Win32_System_Threading"] }
+# Same version wry uses; ICoreWebView2_19 memory target level (src/memory.rs).
+webview2-com = "0.39"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tower = { workspace = true }

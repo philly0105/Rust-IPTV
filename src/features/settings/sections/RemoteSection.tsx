@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, IconButton, Skeleton, useToast } from '../../sources/_shim';
+import { Button, IconButton, Skeleton, useToast } from '@/ui';
 import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { remotePatch, validatePort } from '../lib/patch';
 import type { SectionProps } from './types';

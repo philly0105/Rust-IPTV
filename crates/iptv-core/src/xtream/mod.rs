@@ -8,7 +8,8 @@
 //! [`rpc`] (command registration). See `docs/architecture/xtream.md`.
 //!
 //! Secrets: the password only ever appears in request queries and in stream
-//! URLs handed to the player. Logs carry server, username and action; errors
+//! URLs handed to the player. Logs carry server, a masked username (`a***`)
+//! and action; errors
 //! come from reqwest with the URL stripped.
 
 pub mod client;

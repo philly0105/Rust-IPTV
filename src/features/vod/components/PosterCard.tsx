@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { formatRating } from '../lib/format';
-import { Poster, ProgressBar, Skeleton, cn } from '../_shim';
+import { Poster, ProgressBar, Skeleton, cn } from '@/ui';
 
 export interface PosterCardProps {
   title: string;

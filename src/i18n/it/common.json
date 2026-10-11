@@ -32,7 +32,7 @@
   "errorTitleConflict": "Questo elemento è stato modificato altrove",
   "errorTitleIo": "Impossibile leggere o scrivere un file",
   "errorTitleDb": "Si è verificato un problema con la libreria locale",
-  "errorTitleInternal": "Si è verificato un errore",
+  "errorTitleInternal": "Qualcosa è andato storto",
 
   "errorHintNetwork": "Controlla la connessione e l'URL del fornitore, poi riprova.",
   "errorHintTimeout": "Il fornitore potrebbe essere occupato. Riprova tra un momento.",

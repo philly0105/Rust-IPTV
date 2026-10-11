@@ -15,17 +15,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
-const EXPECTED: [&str; 10] = [
+const EXPECTED: [&str; 12] = [
     "mpv.attach",
     "mpv.command",
     "mpv.detach",
     "mpv.load",
+    "mpv.record",
     "mpv.setBounds",
     "mpv.setProperty",
     "mpv.state",
     "player.capabilities",
     "player.detect",
     "player.openExternal",
+    "player.stopExternal",
 ];
 
 fn router() -> RpcRouter {
@@ -34,13 +36,90 @@ fn router() -> RpcRouter {
     r
 }
 
+/// Desktop-mode state (players are desktop-only).
 async fn app() -> (tempfile::TempDir, Arc<AppState>, Receiver<AppEvent>) {
+    app_mode(true).await
+}
+
+async fn app_mode(is_desktop: bool) -> (tempfile::TempDir, Arc<AppState>, Receiver<AppEvent>) {
     let dir = tempfile::tempdir().unwrap();
     let (sink, rx) = BroadcastSink::channel(1024);
-    let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+    let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), is_desktop)
         .await
         .unwrap();
     (dir, state, rx)
+}
+
+/// R5 F1: in server mode a browser (possibly on another machine) must not
+/// be able to start or probe processes on the host.
+#[tokio::test]
+async fn server_mode_refuses_every_player_command() {
+    let (_d, state, _rx) = app_mode(false).await;
+    let r = router();
+    let src =
+        json!({"url": "http://h/x", "kind": "hls", "title": "x", "isLive": true, "isRadio": false});
+    let bounds = json!({"x": 0, "y": 0, "width": 10, "height": 10});
+    for (cmd, args) in [
+        ("player.detect", Value::Null),
+        (
+            "player.openExternal",
+            json!({"player": "mpv", "source": src}),
+        ),
+        (
+            "mpv.attach",
+            json!({"bounds": bounds, "volume": 50, "muted": false}),
+        ),
+        ("mpv.load", json!({"source": src})),
+        ("mpv.command", json!({"cmd": ["get_property", "pause"]})),
+        ("mpv.setProperty", json!({"name": "pause", "value": true})),
+        ("mpv.setBounds", json!({"bounds": bounds})),
+        ("mpv.detach", Value::Null),
+        ("mpv.state", Value::Null),
+        ("mpv.record", json!({"start": true})),
+        ("player.stopExternal", Value::Null),
+    ] {
+        let err = r.dispatch(Arc::clone(&state), cmd, args).await.unwrap_err();
+        assert_eq!(err.code, RpcErrorCode::Unsupported, "{cmd}: {err:?}");
+        assert_eq!(err.message, "Players run only in the desktop app", "{cmd}");
+    }
+    // Capabilities stay readable so the UI can explain why.
+    let caps = r
+        .dispatch(state, "player.capabilities", Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(caps["embeddedMpv"], json!(false));
+}
+
+/// R4 F1: hostile playlist URLs never reach a player.
+#[tokio::test]
+async fn open_external_and_load_refuse_non_media_schemes() {
+    let (_d, state, _rx) = app().await;
+    let r = router();
+    for url in [
+        "--log-file=C:/x",
+        "--script=//host/share/pwn.lua",
+        "av://lavfi:testsrc",
+        "edl://x",
+    ] {
+        let src =
+            json!({"url": url, "kind": "hls", "title": "x", "isLive": true, "isRadio": false});
+        let err = r
+            .dispatch(
+                Arc::clone(&state),
+                "player.openExternal",
+                json!({"player": "mpv", "source": src}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, RpcErrorCode::Invalid, "{url}");
+        if cfg!(windows) {
+            let err = r
+                .dispatch(Arc::clone(&state), "mpv.load", json!({"source": src}))
+                .await
+                .unwrap_err();
+            assert_eq!(err.code, RpcErrorCode::Invalid, "mpv.load {url}");
+        }
+    }
 }
 
 #[test]
@@ -138,6 +217,7 @@ async fn mpv_commands_without_session() {
             ("mpv.command", json!({"cmd": ["get_property", "pause"]})),
             ("mpv.setProperty", json!({"name": "pause", "value": true})),
             ("mpv.setBounds", bounds.clone()),
+            ("mpv.record", json!({"start": true})),
         ] {
             let err = r.dispatch(Arc::clone(&state), cmd, args).await.unwrap_err();
             assert_eq!(err.code, RpcErrorCode::Conflict, "{cmd}: {err:?}");
@@ -286,11 +366,14 @@ async fn embedded_session_end_to_end_with_real_mpv() {
         return;
     };
     // A real, seekable 60 s file encoded by mpv itself.
-    let clip = dir.path().join("clip, test.mkv");
+    // MPEG-TS like a live stream (stream-record needs packet timestamps).
+    let clip = dir.path().join("clip, test.ts");
     let status = std::process::Command::new(&mpv)
         .args([
             "--no-config",
             "av://lavfi:testsrc=duration=60:size=160x120:rate=10",
+            // A keyframe every second: stream-record starts at a keyframe.
+            "--ovcopts=g=10",
         ])
         .arg(format!("--o={}", clip.display()))
         .stdout(std::process::Stdio::null())
@@ -301,7 +384,12 @@ async fn embedded_session_end_to_end_with_real_mpv() {
         eprintln!("skipping: this mpv build cannot encode the test clip");
         return;
     }
-    state.settings.write().mpv_args = "--vo=null --ao=null".into();
+    // Small read-ahead so stream-record sees packets after it starts (the
+    // whole tiny clip would otherwise already sit in the demuxer cache).
+    state.settings.write().mpv_args = format!(
+        "--vo=null --ao=null --cache=no --demuxer-readahead-secs=1 --log-file={}",
+        dir.path().join("mpv.log").display()
+    );
     let factory = Arc::new(FakeFactory::default());
     player::set_window_factory(&state, factory.clone());
     let r = router();
@@ -312,16 +400,38 @@ async fn embedded_session_end_to_end_with_real_mpv() {
         .unwrap();
     assert_eq!(caps["embeddedMpv"], json!(true), "{caps}");
 
-    // Attach, then a second attach only moves the window.
+    // Attach with the UI's saved volume/mute (R4 F4), then a second attach
+    // only moves the window.
     let st = r
         .dispatch(
             Arc::clone(&state),
             "mpv.attach",
-            json!({"bounds": {"x": 1, "y": 2, "width": 320, "height": 180}}),
+            json!({"bounds": {"x": 1, "y": 2, "width": 320, "height": 180}, "volume": 55, "muted": true}),
         )
         .await
         .unwrap();
     assert_eq!(st["attached"], json!(true));
+    assert_eq!(st["volume"], json!(55.0), "{st}");
+    assert_eq!(st["muted"], json!(true), "{st}");
+    assert_eq!(st["recording"], json!(false), "{st}");
+    let vol = r
+        .dispatch(
+            Arc::clone(&state),
+            "mpv.command",
+            json!({"cmd": ["get_property", "volume"]}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(vol, json!(55.0));
+    let mute = r
+        .dispatch(
+            Arc::clone(&state),
+            "mpv.command",
+            json!({"cmd": ["get_property", "mute"]}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mute, json!(true));
     r.dispatch(
         Arc::clone(&state),
         "mpv.attach",
@@ -374,6 +484,89 @@ async fn embedded_session_end_to_end_with_real_mpv() {
         .await
         .unwrap();
     assert_eq!(title, json!("Test, Pattern"));
+
+    // Recording (stream-record) into settings.recordingsDir.
+    let rec_dir = dir.path().join("rec");
+    state.settings.write().recordings_dir = Some(rec_dir.display().to_string());
+    let rec = r
+        .dispatch(Arc::clone(&state), "mpv.record", json!({"start": true}))
+        .await
+        .unwrap();
+    assert_eq!(rec["recording"], json!(true), "{rec}");
+    let rec_path = std::path::PathBuf::from(rec["path"].as_str().unwrap());
+    assert_eq!(rec_path.parent().unwrap(), rec_dir);
+    let name = rec_path.file_name().unwrap().to_string_lossy().to_string();
+    assert!(
+        name.starts_with("Test, Pattern-") && name.ends_with(".ts"),
+        "{name}"
+    );
+    let st = r
+        .dispatch(Arc::clone(&state), "mpv.state", Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(st["recording"], json!(true));
+    assert_eq!(st["recordPath"], rec["path"]);
+    let prop = r
+        .dispatch(
+            Arc::clone(&state),
+            "mpv.command",
+            json!({"cmd": ["get_property", "stream-record"]}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(prop, rec["path"]);
+    // The short clip may already sit fully in the demuxer cache, and the
+    // recorder only sees packets read after it starts: seek back to the
+    // start so packets flow again, then wait for the first bytes.
+    r.dispatch(
+        Arc::clone(&state),
+        "mpv.command",
+        json!({"cmd": ["seek", 0, "absolute+exact"]}),
+    )
+    .await
+    .unwrap();
+    for _ in 0..50 {
+        if std::fs::metadata(&rec_path).map(|m| m.len()).unwrap_or(0) > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let stop = r
+        .dispatch(Arc::clone(&state), "mpv.record", json!({"start": false}))
+        .await
+        .unwrap();
+    assert_eq!(stop, json!({"recording": false, "path": null}));
+    let prop = r
+        .dispatch(
+            Arc::clone(&state),
+            "mpv.command",
+            json!({"cmd": ["get_property", "stream-record"]}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(prop, json!(""));
+    let mut size = 0;
+    for _ in 0..20 {
+        size = std::fs::metadata(&rec_path).map(|m| m.len()).unwrap_or(0);
+        if size > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        size > 0,
+        "recording {} is empty: {}",
+        rec_path.display(),
+        std::fs::read_to_string(dir.path().join("mpv.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("record") || l.contains("rror"))
+            .collect::<Vec<_>>()
+            .join(
+                "
+"
+            )
+    );
 
     // Properties and commands.
     r.dispatch(
@@ -506,4 +699,97 @@ async fn kill_embedded_without_session_is_noop() {
     let (_d, state, _rx) = app().await;
     player::kill_embedded(&state);
     player::shutdown(&state).await;
+}
+
+/// `playerReuseInstance`: a second external launch closes the first player
+/// this app started; with the setting off both keep running.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reuse_instance_closes_previous_external_player() {
+    let (_d, state, mut rx) = app().await;
+    let Some(mpv) = player::detect(&state.settings_snapshot()).mpv_path else {
+        eprintln!("skipping: no mpv found");
+        return;
+    };
+    {
+        let mut s = state.settings.write();
+        s.mpv_path = Some(mpv);
+        // --idle keeps mpv alive after the unreachable URL fails.
+        s.mpv_args = "--no-config --idle=yes --vo=null --ao=null --force-window=no".into();
+        assert!(s.player_reuse_instance);
+    }
+    let r = router();
+    let src = json!({"url": "http://127.0.0.1:9/x.ts", "kind": "direct", "title": "Reuse", "isLive": true, "isRadio": false});
+    let launch = |r: &RpcRouter, state: &Arc<AppState>| {
+        let (r, state, src) = (r.clone(), Arc::clone(state), src.clone());
+        async move {
+            r.dispatch(
+                state,
+                "player.openExternal",
+                json!({"player": "mpv", "source": src}),
+            )
+            .await
+            .unwrap()["pid"]
+                .as_u64()
+                .unwrap()
+        }
+    };
+    let first = launch(&r, &state).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(player::external::running_pid(&state), Some(first as u32));
+    let second = launch(&r, &state).await;
+    assert_ne!(first, second);
+    next_event(&mut rx, "player.external", Duration::from_secs(10), |p| {
+        p["state"] == "exited" && p["pid"] == json!(first)
+    })
+    .await;
+    assert_eq!(player::external::running_pid(&state), Some(second as u32));
+
+    // Reuse off: the next launch leaves the running one alone.
+    state.settings.write().player_reuse_instance = false;
+    let third = launch(&r, &state).await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let alive = |pid: u64| {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
+    };
+    assert!(alive(second), "second player must survive with reuse off");
+    assert!(alive(third));
+
+    // player.stopExternal ends the tracked (last) player and clears it.
+    let out = r
+        .dispatch(Arc::clone(&state), "player.stopExternal", Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(out, json!({"stopped": true}));
+    next_event(&mut rx, "player.external", Duration::from_secs(10), |p| {
+        p["state"] == "exited" && p["pid"] == json!(third)
+    })
+    .await;
+    assert_eq!(player::external::running_pid(&state), None);
+    let out = r
+        .dispatch(Arc::clone(&state), "player.stopExternal", Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(out, json!({"stopped": false}));
+    for pid in [second, third] {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+#[tokio::test]
+async fn stop_external_without_player_reports_false() {
+    let (_d, state, _rx) = app().await;
+    let out = router()
+        .dispatch(state, "player.stopExternal", Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(out, json!({"stopped": false}));
 }

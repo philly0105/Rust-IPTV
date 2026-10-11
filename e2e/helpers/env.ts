@@ -25,11 +25,13 @@ export const M3U_URL = `${MOCK}/m3u/sample.m3u`;
 
 /** Catalog facts the specs rely on (crates/iptv-mock/src/catalog.rs). */
 export const MOCK_FACTS = {
-  /** sample.m3u: 25 entries, one of them radio. */
-  m3uChannels: 25,
-  m3uLiveChannels: 24,
+  /** sample.m3u: 25 entries, one of them radio. `channelCount` is live only; radio is `radioCount`. */
+  m3uChannels: 24,
+  m3uRadio: 1,
   m3uGroups: ['News', 'Sports', 'Entertainment', 'Music'],
-  xtreamLive: 40,
+  /** Xtream live streams: 40, one of them radio (Classic FM). */
+  xtreamLive: 39,
+  xtreamRadio: 1,
   xtreamMovies: 30,
   xtreamSeries: 10,
   /** First Xtream movie: id 201, 60 s sample.mp4. */

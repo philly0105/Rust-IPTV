@@ -1,4 +1,4 @@
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, SearchX } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, SearchX, Star } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -6,16 +6,20 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useRpcQuery } from '@/api/query';
-import type { CoverSize, ItemRef } from '@/api/types';
+import type { CoverSize, ItemRef, SeriesItem, VodItem } from '@/api/types';
 
 import { PosterCard, PosterCardSkeleton } from '../components/PosterCard';
-import { useSettings, useSource, useVodPage } from '../hooks/queries';
+import { useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { formatRating } from '../lib/format';
 import {
   ALL_CATEGORIES,
+  ALL_RATINGS_PARAM,
   VOD_SORT_KEYS,
   buildPageRequest,
   defaultDir,
+  effectiveMinRating,
+  filterByRating,
   pageOf,
   pageSizeFor,
   readGridParams,
@@ -24,10 +28,13 @@ import {
   type VodSortKey,
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
-import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass } from '../_shim';
+import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass } from '@/ui';
 
 export const COVER_WIDTH: Record<CoverSize, number> = { small: 128, medium: 164, large: 212 };
 const SEARCH_DEBOUNCE_MS = 250;
+
+/** Below this many visible titles, a rating-filtered grid keeps loading pages on its own. */
+const FILTERED_MIN_VISIBLE = 60;
 
 /** One grid cell: subscribes to the page that contains `index`, so only pages near the viewport stay loaded. */
 function GridCell({ input, index, pageSize, active }: { input: GridQueryInput; index: number; pageSize: number; active: boolean }) {
@@ -100,8 +107,36 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         : undefined,
     [source.data, kind, sourceId, categoryId, sort, dir, search],
   );
-  const first = useVodPage(input, 0);
-  const total = first.data?.total ?? 0;
+  const settingMinRating = effectiveMinRating(settings.vodMinRating, new URLSearchParams());
+  const minRating = effectiveMinRating(settingMinRating, params);
+  const ratingFilterSet = settingMinRating > 0;
+  const filtered = minRating > 0;
+  const inOrder = useVodPagesInOrder(input, filtered);
+  const filteredItems = useMemo(
+    () => (filtered ? filterByRating((inOrder.data?.pages ?? []).flatMap((p) => p.items), minRating) : []),
+    [filtered, inOrder.data, minRating],
+  );
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = inOrder;
+  // Keep loading while the filter leaves too few titles to fill the view.
+  useEffect(() => {
+    if (filtered && hasNextPage && !isFetchingNextPage && filteredItems.length < FILTERED_MIN_VISIBLE) void fetchNextPage();
+  }, [filtered, hasNextPage, isFetchingNextPage, filteredItems.length, fetchNextPage]);
+  const setAllRatings = (all: boolean) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (all) next.set(ALL_RATINGS_PARAM, 'all');
+        else next.delete(ALL_RATINGS_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+
+  const first = useVodPage(filtered ? undefined : input, 0);
+  // With the rating filter on, the count is known only once every page has arrived.
+  const filteredDone = filtered && inOrder.isSuccess && !hasNextPage;
+  const total = filtered ? filteredItems.length : (first.data?.total ?? 0);
+  const firstReady = filtered ? filteredDone : !!first.data;
   const indices = useMemo(() => Array.from({ length: total }, (_, i) => i), [total]);
   const pageSize = pageSizeFor(source.data?.kind ?? 'xtream');
 
@@ -125,9 +160,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   usePageHeader(
     {
       title: pageTitle,
-      subtitle: source.data ? `${source.data.name}${first.data ? `  ${t('titleCount', { count: total, formatted: fmt.format(total) })}` : ''}` : undefined,
+      subtitle: source.data ? `${source.data.name}${firstReady ? `  ${t('titleCount', { count: total, formatted: fmt.format(total) })}` : ''}` : undefined,
     },
-    [pageTitle, source.data?.name, first.data ? total : -1],
+    [pageTitle, source.data?.name, firstReady ? total : -1],
   );
 
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
@@ -144,7 +179,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         </Link>
         <div className="mr-auto flex min-w-0 items-baseline gap-3">
           <h1 className="min-w-0 truncate text-lg text-fg">{pageTitle}</h1>
-          {first.data && (
+          {firstReady && (
             <span className="tabular shrink-0 text-sm font-normal text-fg-subtle">
               {fmt.format(total)}
             </span>
@@ -173,19 +208,48 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         />
       </div>
 
+      {ratingFilterSet && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
+          <Star aria-hidden size={14} className="fill-current text-accent" />
+          {filtered ? (
+            <>
+              <span>{t('ratingFilterNote', { rating: formatRating(minRating) })}</span>
+              <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(true)}>
+                {t('ratingFilterClear')}
+              </button>
+            </>
+          ) : (
+            <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(false)}>
+              {t('ratingFilterApply', { rating: formatRating(settingMinRating) })}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 px-4 pt-4 md:px-8">
-        {source.isError || first.isError ? (
+        {source.isError || (filtered ? inOrder.isError : first.isError) ? (
           <ErrorState
-            error={source.error ?? first.error}
+            error={source.error ?? (filtered ? inOrder.error : first.error)}
             onRetry={() => {
               void source.refetch();
-              void first.refetch();
+              void (filtered ? inOrder.refetch() : first.refetch());
             }}
           />
-        ) : !input || first.isPending ? (
+        ) : !input || (filtered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
           <SkeletonGrid count={18} minColumnWidth={coverWidth} />
         ) : total === 0 ? (
-          search ? (
+          filtered ? (
+            <EmptyState
+              icon={<Star size={32} />}
+              title={t('ratingFilterEmptyTitle', { rating: formatRating(minRating) })}
+              description={t('ratingFilterEmptyHint')}
+              action={
+                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setAllRatings(true)}>
+                  {t('ratingFilterClear')}
+                </button>
+              }
+            />
+          ) : search ? (
             <EmptyState
               icon={<SearchX size={32} />}
               title={t('noSearchMatchTitle', { query: search })}
@@ -208,6 +272,42 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               }
             />
           )
+        ) : filtered ? (
+          <VirtualGrid<VodItem | SeriesItem>
+            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}`}
+            items={filteredItems}
+            minColumnWidth={coverWidth}
+            aspect="poster"
+            label={categoryName}
+            testId="vod-grid"
+            getKey={(item) => item.ref.itemId}
+            render={(item, _index, state) => (
+              <PosterCard
+                tabIndex={-1}
+                active={state.active}
+                title={item.title}
+                href={detailHref(item.ref) ?? '#'}
+                posterUrl={item.posterUrl}
+                year={item.year}
+                rating={item.rating}
+              />
+            )}
+            onEndReached={() => {
+              if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+            }}
+            footer={
+              isFetchingNextPage ? (
+                <p role="status" className="py-4 text-center text-sm text-fg-subtle">
+                  {t('ratingFilterLoading')}
+                </p>
+              ) : undefined
+            }
+            onSelect={(item) => {
+              const href = detailHref(item.ref);
+              if (href) navigate(href);
+            }}
+            className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          />
         ) : (
           <VirtualGrid<number>
             key={`${categoryId}|${sort}|${dir}|${search}`}

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import type { Settings, StreamFormat, VideoPlayer } from '@/api/types';
 
-import { Button, Skeleton } from '../../sources/_shim';
+import { Button, Skeleton } from '@/ui';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
 

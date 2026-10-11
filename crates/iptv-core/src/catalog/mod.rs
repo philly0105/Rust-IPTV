@@ -15,8 +15,8 @@ pub use title::title_base;
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    ArchiveInfo, Category, Channel, ContentType, ItemRef, Page, PageQuery, SeriesItem, SortDir,
-    SortKey, SourceKind, VodItem,
+    ArchiveInfo, CatchupInfo, Category, Channel, ContentType, ItemRef, Page, PageQuery,
+    RequestHeaders, SeriesItem, SortDir, SortKey, SourceKind, VodItem,
 };
 use crate::state::AppState;
 use rusqlite::types::Value as SqlValue;
@@ -39,8 +39,9 @@ pub const FALLBACK_CATEGORY_NAME: &str = "Uncategorized";
 ///
 /// `extra` holds kind-specific fields. Keys the readers understand (camelCase):
 /// `plot` (string), `genres` (string array), `durationSeconds` (number),
-/// `tmdbId` (number), `catchup` (object, presence enables archive),
-/// `headers` (object with userAgent/referrer/origin; per-channel overrides).
+/// `tmdbId` (number), `catchup` (object `{type, days?, source?}`; enables
+/// archive when [`catchup_usable`]), `headers` (object with
+/// userAgent/referrer/origin; per-channel overrides).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemRow {
     pub source_id: String,
@@ -143,19 +144,84 @@ impl ItemRow {
         }
     }
 
+    /// Per-channel headers from `extra.headers` (blank values dropped).
+    pub fn headers(&self) -> Option<RequestHeaders> {
+        let h = self.extra.get("headers")?;
+        let field = |k: &str| {
+            h.get(k)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        let out = RequestHeaders {
+            user_agent: field("userAgent"),
+            referrer: field("referrer"),
+            origin: field("origin"),
+        };
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// Catch-up attributes from `extra.catchup` (type lowercased).
+    pub fn catchup(&self) -> Option<CatchupInfo> {
+        let c = self.extra.get("catchup")?;
+        if !c.is_object() {
+            return None;
+        }
+        let kind = c
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|t| t.trim().to_ascii_lowercase())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "default".into());
+        let days = c.get("days").and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_f64().map(|f| f as i64))
+                .or_else(|| v.as_str()?.trim().parse().ok())
+        });
+        let source = c
+            .get("source")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned);
+        Some(CatchupInfo { kind, days, source })
+    }
+
     fn archive(&self) -> Option<ArchiveInfo> {
         match self.archive_hours {
             Some(h) if h > 0 => Some(ArchiveInfo {
                 enabled: true,
                 duration_hours: Some(h),
             }),
-            _ if self.extra.get("catchup").is_some_and(|c| !c.is_null()) => Some(ArchiveInfo {
+            _ if self.catchup().is_some_and(|c| catchup_usable(&c.kind)) => Some(ArchiveInfo {
                 enabled: true,
                 duration_hours: None,
             }),
             _ => None,
         }
     }
+}
+
+/// Catch-up types a client can build archive URLs for. `default` and
+/// `append` use `catchup-source` when present and otherwise the standard
+/// `?utc={utc}&lutc={lutc}` convention; `shift` always uses that convention;
+/// `xc` and the flussonic variants derive the URL from the stream URL.
+pub const CATCHUP_TYPES: [&str; 7] = [
+    "default",
+    "append",
+    "shift",
+    "xc",
+    "flussonic",
+    "flussonic-hls",
+    "flussonic-ts",
+];
+
+/// True when a catch-up `type` (case-insensitive) is one clients can play.
+/// `fs` is accepted as the common alias of `flussonic`.
+pub fn catchup_usable(kind: &str) -> bool {
+    let k = kind.trim().to_ascii_lowercase();
+    k == "fs" || CATCHUP_TYPES.contains(&k.as_str())
 }
 
 /// One category to write with [`replace_catalog`] / [`CatalogWriter::finish`].
@@ -183,6 +249,8 @@ pub struct CatalogQuery {
 impl From<ItemRow> for Channel {
     fn from(r: ItemRow) -> Self {
         let archive = r.archive();
+        let headers = r.headers();
+        let catchup = r.catchup();
         let is_radio = r.is_radio || r.content_type == ContentType::Radio;
         Channel {
             item_ref: ItemRef::new(r.source_id, r.content_type, r.item_id),
@@ -195,6 +263,8 @@ impl From<ItemRow> for Channel {
             url: r.url,
             is_radio,
             archive,
+            headers,
+            catchup,
         }
     }
 }
@@ -528,7 +598,8 @@ pub fn replace_catalog(
     Ok(n)
 }
 
-/// Recomputes `source_counts` for one source (channels = live + radio).
+/// Recomputes `source_counts` for one source (channels = live only; the
+/// radio count is read from `items` by the source readers).
 ///
 /// Stalker portals serve VOD and series live (only their categories are
 /// stored), so for stalker sources the movie and series counts are the portal
@@ -560,14 +631,14 @@ pub fn update_counts(conn: &Connection, source_id: &str) -> CoreResult<()> {
         conn.execute(
             "INSERT INTO source_counts (source_id, channel_count, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
              ON CONFLICT(source_id) DO UPDATE SET channel_count = excluded.channel_count, updated_at = excluded.updated_at",
-            params![source_id, get("live") + get("radio")],
+            params![source_id, get("live")],
         )?;
         return Ok(());
     }
     conn.execute(
         "INSERT INTO source_counts (source_id, channel_count, movie_count, series_count, updated_at) VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)
          ON CONFLICT(source_id) DO UPDATE SET channel_count = excluded.channel_count, movie_count = excluded.movie_count, series_count = excluded.series_count, updated_at = excluded.updated_at",
-        params![source_id, get("live") + get("radio"), get("movie"), get("series")],
+        params![source_id, get("live"), get("movie"), get("series")],
     )?;
     Ok(())
 }
@@ -590,7 +661,16 @@ pub fn set_remote_counts(
     Ok(())
 }
 
-/// Cached counts of one source: `(channels, movies, series)`.
+/// Number of radio stations of one source.
+pub fn radio_count(conn: &Connection, source_id: &str) -> CoreResult<i64> {
+    Ok(conn.query_row(
+        "SELECT count(*) FROM items WHERE source_id = ?1 AND content_type = 'radio'",
+        [source_id],
+        |r| r.get(0),
+    )?)
+}
+
+/// Cached counts of one source: `(live channels, movies, series)`.
 pub fn source_counts(conn: &Connection, source_id: &str) -> CoreResult<(i64, i64, i64)> {
     Ok(conn
         .query_row(
@@ -906,7 +986,8 @@ pub fn search_named(
     } else {
         types.to_vec()
     };
-    let limit = limit.min(MAX_PAGE_LIMIT as usize);
+    // Search lists may hold one probe row past the 1000-row UI step.
+    let limit = limit.min(rpc::MAX_SEARCH_LIMIT);
     let fts = fts_query(text);
 
     let mut filter = String::from(" AND COALESCE(c.hidden, 0) = 0");
@@ -953,15 +1034,27 @@ pub fn search_named(
     Ok(rows)
 }
 
-/// First channel (live before radio, playlist order) with `number`, skipping
-/// hidden categories.
+/// First channel with `number` in playlist order, skipping hidden
+/// categories. `content_type` restricts the lookup to live or radio; `None`
+/// searches both, live first.
 pub fn channel_by_number(
     conn: &Connection,
     source_id: &str,
     number: i64,
+    content_type: Option<ContentType>,
 ) -> CoreResult<Option<NamedRow>> {
+    let types = match content_type {
+        None => "'live', 'radio'",
+        Some(ContentType::Live) => "'live'",
+        Some(ContentType::Radio) => "'radio'",
+        Some(other) => {
+            return Err(CoreError::Invalid(format!(
+                "channelByNumber supports contentType 'live' or 'radio', not '{other}'"
+            )))
+        }
+    };
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ('live', 'radio') AND COALESCE(c.hidden, 0) = 0 ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0 ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     Ok(stmt

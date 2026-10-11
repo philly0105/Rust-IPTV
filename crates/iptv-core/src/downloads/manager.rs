@@ -69,6 +69,8 @@ pub struct DownloadManager {
     /// Bytes per second cap per transfer; 0 = unlimited. Read by running
     /// transfers on every chunk, so changes apply in flight.
     rate_limit: AtomicU64,
+    /// Stop wait override in milliseconds; 0 = [`STOP_TIMEOUT`]. Tests only.
+    stop_timeout_ms: AtomicU64,
 }
 
 /// What a stop request found.
@@ -94,6 +96,22 @@ impl DownloadManager {
         self.rate_limit.store(bps.unwrap_or(0), Ordering::Relaxed);
     }
 
+    /// How long an RPC waits for a running transfer to stop.
+    pub fn stop_timeout(&self) -> Duration {
+        match self.stop_timeout_ms.load(Ordering::Relaxed) {
+            0 => STOP_TIMEOUT,
+            ms => Duration::from_millis(ms),
+        }
+    }
+
+    /// Overrides the stop wait (`None` = default). Used by tests.
+    pub fn set_stop_timeout(&self, timeout: Option<Duration>) {
+        let ms = timeout.map_or(0, |t| {
+            u64::try_from(t.as_millis()).unwrap_or(u64::MAX).max(1)
+        });
+        self.stop_timeout_ms.store(ms, Ordering::Relaxed);
+    }
+
     /// Live byte count of a running transfer.
     pub fn live_bytes(&self, id: i64) -> Option<i64> {
         self.inner
@@ -109,11 +127,19 @@ impl DownloadManager {
         inner.active.contains_key(&id) || inner.queue.contains(&id)
     }
 
-    /// Stops a running transfer or drops a queued id, atomically.
+    /// Stops a running transfer or drops a queued id, atomically. A repeated
+    /// request on a transfer that is still winding down (after a `Timeout`)
+    /// can escalate the reason: cancel beats remove beats pause, so a cancel
+    /// issued after a timed-out pause still ends `canceled`.
     pub fn stop(&self, id: i64, reason: StopReason) -> Stopped {
         let mut inner = self.inner.lock();
         if let Some(ctl) = inner.active.get(&id) {
-            ctl.reason.lock().get_or_insert(reason);
+            {
+                let mut current = ctl.reason.lock();
+                if current.is_none_or(|c| rank(reason) > rank(c)) {
+                    *current = Some(reason);
+                }
+            }
             ctl.token.cancel();
             return Stopped::Running(ctl.done.subscribe());
         }
@@ -122,6 +148,14 @@ impl DownloadManager {
             return Stopped::Dequeued;
         }
         Stopped::Idle
+    }
+}
+
+fn rank(r: StopReason) -> u8 {
+    match r {
+        StopReason::Pause => 0,
+        StopReason::Detach => 1,
+        StopReason::Cancel => 2,
     }
 }
 
@@ -164,13 +198,19 @@ fn pump(state: &Arc<AppState>, mgr: &Arc<DownloadManager>) {
 /// `Timeout` (retryable) when it is still winding down after
 /// [`STOP_TIMEOUT`] (for example a disk write stuck on a network share), so
 /// the caller does not report a change that has not happened yet. The stop
-/// request stays in force; the task applies it as soon as it can.
-pub async fn wait_stopped(mut rx: tokio::sync::watch::Receiver<bool>) -> CoreResult<()> {
-    match tokio::time::timeout(STOP_TIMEOUT, rx.wait_for(|done| *done)).await {
+/// request stays in force; the task applies it as soon as it can, and the
+/// row keeps its `downloading` status until then, so calling again either
+/// waits once more or finds the final status.
+pub async fn wait_stopped(
+    state: &AppState,
+    mut rx: tokio::sync::watch::Receiver<bool>,
+) -> CoreResult<()> {
+    let limit = manager(state).stop_timeout();
+    match tokio::time::timeout(limit, rx.wait_for(|done| *done)).await {
         // A closed channel means the control block is gone, i.e. stopped.
         Ok(_) => Ok(()),
         Err(_) => {
-            tracing::warn!("download did not stop within {STOP_TIMEOUT:?}");
+            tracing::warn!("download did not stop within {limit:?}");
             Err(CoreError::Timeout(
                 "The download is still stopping. Try again in a moment.".into(),
             ))

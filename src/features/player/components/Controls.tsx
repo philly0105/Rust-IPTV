@@ -146,7 +146,7 @@ export function RecordControl({ compact }: { compact?: boolean }) {
         <span
           data-testid="rec-indicator"
           title={recordPath ? t('recordingTo', { path: recordPath }) : undefined}
-          className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-[#ff4d4d]/15 px-2 py-0.5 font-display text-xs font-semibold text-[#ff7a7a] tabular-nums ring-1 ring-[#ff4d4d]/45"
+          className="ms-1 inline-flex items-center gap-1.5 rounded-full bg-[#ff4d4d]/15 px-2 py-0.5 font-display text-xs font-semibold text-[#ff7a7a] tabular-nums ring-1 ring-[#ff4d4d]/45"
         >
           <span className="size-2 rounded-full bg-[#ff4d4d] motion-safe:animate-live-pulse" aria-hidden />
           {t('rec')} {formatTime(elapsed)}
@@ -175,12 +175,12 @@ function MenuRow({ label, value, onClick }: { label: string; value?: string; onC
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center justify-between gap-6 rounded-sm px-3 py-2 text-left text-sm text-white hover:bg-white/10"
+      className="flex w-full items-center justify-between gap-6 rounded-sm px-3 py-2 text-start text-sm text-white hover:bg-white/10"
     >
       <span>{label}</span>
       <span className="flex items-center gap-1 text-white/70">
         {value}
-        <ChevronRight className="size-4" aria-hidden />
+        <ChevronRight className="size-4 rtl:rotate-180" aria-hidden />
       </span>
     </button>
   );
@@ -194,7 +194,7 @@ function MenuChoice({ label, selected, onClick }: { label: string; selected: boo
       aria-checked={selected}
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-white/10',
+        'flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-sm hover:bg-white/10',
         selected ? 'text-white dark:text-accent-hover' : 'text-white',
       )}
     >
@@ -224,9 +224,9 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
     <button
       type="button"
       onClick={() => setView('root')}
-      className="mb-1 flex w-full items-center gap-1 rounded-sm border-b border-white/10 px-2 py-2 text-left text-sm font-medium text-white hover:bg-white/10"
+      className="mb-1 flex w-full items-center gap-1 rounded-sm border-b border-white/10 px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
     >
-      <ChevronLeft className="size-4" aria-hidden />
+      <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
       {view === 'quality' ? t('quality') : view === 'audio' ? t('audioTrack') : view === 'text' ? t('subtitles') : t('speed')}
     </button>
   );
@@ -381,7 +381,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
       onDoubleClick={(e) => e.stopPropagation()}
     >
       {menu && variant === 'overlay' && (
-        <div className="absolute right-3 bottom-full z-10 mb-1 sm:right-4">
+        <div className="absolute end-3 bottom-full z-10 mb-1 sm:end-4">
           <OptionsMenu view={menu} setView={setMenu} isVod={isVod} />
         </div>
       )}
@@ -438,7 +438,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
                 disabled={atLiveEdge}
                 aria-label={atLiveEdge ? t('live') : t('goLive')}
                 className={cn(
-                  'ml-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-display text-xs font-semibold tracking-wide',
+                  'ms-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-display text-xs font-semibold tracking-wide',
                   atLiveEdge ? 'text-white' : 'text-white/70 hover:text-white',
                 )}
               >
@@ -446,12 +446,12 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
                 {t('live')}
               </button>
             ) : source.isRadio ? (
-              <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-white/70">
+              <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
                 <Radio className="size-4" aria-hidden />
                 {t('radio')}
               </span>
             ) : showTime ? (
-              <span className="ml-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
+              <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
                 {formatTime(position)}
                 <span className="text-white/70"> / {formatTime(duration)}</span>
               </span>

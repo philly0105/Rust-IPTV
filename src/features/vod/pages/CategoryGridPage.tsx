@@ -47,7 +47,8 @@ function GridCell({ input, index, pageSize, active }: { input: GridQueryInput; i
     <PosterCard
       tabIndex={-1}
       active={active}
-      title={item.title}
+      title={item.titleBase || item.title}
+      fullTitle={item.title}
       href={detailHref(item.ref) ?? '#'}
       posterUrl={item.posterUrl}
       year={item.year}
@@ -157,7 +158,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const category = cats.data?.find((c) => c.id === categoryId);
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
-  const fmt = useMemo(() => new Intl.NumberFormat(), []);
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   // One string for the page h1 and the shell header title (C16), so they always agree.
   const pageTitle = categoryName || (kind === 'movie' ? t('movies') : t('series'));
 
@@ -178,10 +179,10 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 md:px-8">
         <Link to={backHref} className={buttonClass('ghost', 'sm')}>
-          <ArrowLeft aria-hidden size={16} />
+          <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
           {kind === 'movie' ? t('movies') : t('series')}
         </Link>
-        <div className="mr-auto flex min-w-0 items-baseline gap-3">
+        <div className="me-auto flex min-w-0 items-baseline gap-3">
           <h1 className="min-w-0 truncate text-lg text-fg">{pageTitle}</h1>
           {firstReady && (
             <span className="tabular shrink-0 text-sm font-normal text-fg-subtle">
@@ -289,7 +290,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               <PosterCard
                 tabIndex={-1}
                 active={state.active}
-                title={item.title}
+                title={item.titleBase || item.title}
+                fullTitle={item.title}
                 href={detailHref(item.ref) ?? '#'}
                 posterUrl={item.posterUrl}
                 year={item.year}

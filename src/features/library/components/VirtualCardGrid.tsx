@@ -100,9 +100,11 @@ export function VirtualCardGrid<T>({
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, index: number, item: T) => {
     if (e.target !== e.currentTarget) return;
+    // Arrows follow the screen: an RTL grid flows right to left, so ArrowLeft moves forward.
+    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
     const moves: Record<string, number> = {
-      ArrowRight: index + 1,
-      ArrowLeft: index - 1,
+      ArrowRight: rtl ? index - 1 : index + 1,
+      ArrowLeft: rtl ? index + 1 : index - 1,
       ArrowDown: index + columns,
       ArrowUp: index - columns,
       Home: 0,
@@ -131,7 +133,7 @@ export function VirtualCardGrid<T>({
           return (
             <div
               key={vr.key}
-              className="absolute left-0 top-0 grid w-full"
+              className="absolute start-0 top-0 grid w-full"
               style={{
                 transform: `translateY(${vr.start}px)`,
                 gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,

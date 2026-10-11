@@ -35,7 +35,7 @@
   "errorTitleInternal": "Κάτι πήγε στραβά",
 
   "errorHintNetwork": "Ελέγξτε τη σύνδεσή σας και τη διεύθυνση URL του παρόχου και δοκιμάστε ξανά.",
-  "errorBodyServerUnreachable": "Ο ενσωματωμένος διακομιστής της εφαρμογής δεν αποκρίνεται, οπότε δεν φορτώθηκε τίποτα.",
+  "errorBodyServerUnreachable": "Ο διακομιστής του Tsrust IPTV δεν αποκρίνεται, οπότε δεν φορτώθηκε τίποτα.",
   "errorHintServerUnreachable": "Ελέγξτε ότι ο διακομιστής του Tsrust IPTV εξακολουθεί να εκτελείται και δοκιμάστε ξανά.",
   "errorTechnicalDetails": "Τεχνικές λεπτομέρειες",
   "errorHintTimeout": "Ο πάροχος ίσως είναι απασχολημένος. Δοκιμάστε ξανά σε λίγο.",

@@ -37,7 +37,7 @@ function LibraryCardImpl({ entry }: { entry: LibraryEntry }) {
       >
         <Poster src={entry.posterUrl} alt="" label={entry.title} aspect="poster" />
         {entry.kind === 'series' && (
-          <span className="absolute right-2 top-2 rounded-sm bg-bg/85 px-1.5 py-0.5 font-display text-xs font-semibold tabular-nums text-fg">
+          <span className="absolute end-2 top-2 rounded-sm bg-bg/85 px-1.5 py-0.5 font-display text-xs font-semibold tabular-nums text-fg">
             {entry.episodes.length}
           </span>
         )}

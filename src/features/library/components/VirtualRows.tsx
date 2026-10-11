@@ -171,7 +171,7 @@ export function VirtualRows<R extends RowBase>({
               tabIndex={focusable ? (vi.index === tabStop ? 0 : -1) : undefined}
               onFocus={focusable ? () => setActiveKey(row.key) : undefined}
               onKeyDown={focusable ? (e) => onKeyDown(e, vi.index) : undefined}
-              className="absolute left-0 top-0 w-full rounded-md focus-visible:outline-offset-[-2px]"
+              className="absolute start-0 top-0 w-full rounded-md focus-visible:outline-offset-[-2px]"
               style={{ height: vi.size, transform: `translateY(${vi.start - headerHeight}px)` }}
             >
               {renderRow(row, { index: vi.index, active: vi.index === activeIndex })}

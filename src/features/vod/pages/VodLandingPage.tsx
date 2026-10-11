@@ -17,7 +17,7 @@ import { detailHref } from '../lib/search';
 import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '@/ui';
 
 export function VodLandingPage({ kind }: { kind: VodKind }) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const { sourceId = '' } = useParams();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [manageOpen, setManageOpen] = useState(false);
@@ -45,7 +45,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   );
 
   const sourceCount = source.data ? (kind === 'movie' ? source.data.movieCount : source.data.seriesCount) : undefined;
-  const fmt = useMemo(() => new Intl.NumberFormat(), []);
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const hiddenCount = (allCats.data ?? []).filter((c) => c.hidden).length;
 
   const entries = useMemo<CategoryEntry[]>(() => {
@@ -83,7 +83,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
             <p className="min-w-0 truncate text-sm text-fg-muted">
               {source.data.name}
               {sourceCount ? (
-                <span className="tabular ml-2 text-fg-subtle">{t('titleCount', { count: sourceCount, formatted: fmt.format(sourceCount) })}</span>
+                <span className="tabular ms-2 text-fg-subtle">{t('titleCount', { count: sourceCount, formatted: fmt.format(sourceCount) })}</span>
               ) : null}
             </p>
           )}
@@ -109,7 +109,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               render={(item, i) => (
                 <PosterCard
                   index={i}
-                  title={item.title}
+                  title={item.titleBase || item.title}
+                  fullTitle={item.title}
                   href={detailHref(item.ref) ?? '#'}
                   posterUrl={item.posterUrl}
                   year={item.year}
@@ -126,7 +127,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                 {cats.data && (
                   <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: cats.data.length })}</span>
                 )}
-                <div className="ml-auto flex flex-wrap items-center gap-2">
+                <div className="ms-auto flex flex-wrap items-center gap-2">
                   <SearchInput
                     value={filter}
                     onChange={setFilter}

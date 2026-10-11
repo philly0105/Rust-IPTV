@@ -61,7 +61,7 @@
   "guideSource": "播放來源",
   "guideTime": "節目表時間",
   "guideLoadFailed": "部分節目表未能載入。",
-  "portalGuideUnavailable": "入口網站的節目表沒有回應，系統會自動重新要求。",
+  "portalGuideUnavailable": "入口網站的節目表沒有回應，正在自動重試。",
   "guideNotAnswering": "節目表沒有回應",
   "guideNoData": "這些頻道尚無節目表資料。請新增 XMLTV 位址或重新整理 EPG 來源。",
   "guideNoSources": "尚無播放來源",

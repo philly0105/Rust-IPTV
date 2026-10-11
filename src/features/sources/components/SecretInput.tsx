@@ -10,8 +10,8 @@ export function SecretInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, '
   const [shown, setShown] = useState(false);
   return (
     <div className="relative">
-      <Input {...props} type={shown ? 'text' : 'password'} autoComplete="off" spellCheck={false} className="pr-11" />
-      <div className="absolute inset-y-0 right-0.5 flex items-center">
+      <Input {...props} type={shown ? 'text' : 'password'} autoComplete="off" spellCheck={false} className="pe-11" />
+      <div className="absolute inset-y-0 end-0.5 flex items-center">
         <IconButton
           label={shown ? t('hideSecret') : t('showSecret')}
           icon={shown ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}

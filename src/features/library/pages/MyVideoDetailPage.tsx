@@ -146,7 +146,7 @@ export function MyVideoDetailPage() {
   const backAction = useMemo(
     () => (
       <Link to="/my-videos" className={buttonClass('ghost', 'sm')}>
-        <ArrowLeft size={16} aria-hidden />
+        <ArrowLeft size={16} aria-hidden className="rtl:rotate-180" />
         {t('backToLibrary')}
       </Link>
     ),
@@ -358,7 +358,7 @@ export function MyVideoDetailPage() {
             )}
             {facts}
           </div>
-          <Button variant="ghost" icon={<ArrowLeft size={16} aria-hidden />} onClick={() => setPlaying(null)}>
+          <Button variant="ghost" icon={<ArrowLeft size={16} aria-hidden className="rtl:rotate-180" />} onClick={() => setPlaying(null)}>
             {t('backToDetails')}
           </Button>
         </div>

@@ -12,6 +12,7 @@ import { absoluteTime, formatCount, relativeTime } from '../lib/format';
 import { useSourceGuide } from '../lib/epgRefresh';
 import type { ProgressEntry } from '../lib/progress';
 import { redactText } from '../lib/redact';
+import { SOURCE_ERROR_KEYS, classifySourceError, sourceErrorDetail } from '../lib/sourceError';
 import { displayHost } from '../lib/validate';
 import { hasAccountInfo } from './AccountPanel';
 import { GuideProgressView } from './GuideProgressView';
@@ -32,6 +33,49 @@ export function sourceOrigin(s: Source, t: (k: string, o?: Record<string, unknow
   }
   const host = displayHost(s.stalker?.portalUrl) ?? '';
   return s.stalker?.macAddress ? t('originAccount', { host, user: s.stalker.macAddress }) : host;
+}
+
+/** Host of the source's own address, for error messages that do not name one. */
+function sourceHost(s: Source): string | undefined {
+  if (s.kind === 'm3u') return s.m3u?.origin === 'url' ? displayHost(s.m3u.url) : undefined;
+  if (s.kind === 'xtream') return displayHost(s.xtream?.serverUrl);
+  return displayHost(s.stalker?.portalUrl);
+}
+
+/**
+ * The failed-refresh line: a translated message keyed by the error's category,
+ * with the core's raw (English, OS-level) text behind a disclosure. Errors the
+ * app does not recognise keep the raw text in view, since it is the only detail.
+ */
+function SourceErrorText({ source }: { source: Source }) {
+  const { t } = useTranslation('sources');
+  const raw = source.lastError ?? '';
+  const info = classifySourceError(raw);
+  const detail = redactText(sourceErrorDetail(raw));
+  if (info.kind === 'unknown') {
+    return (
+      <p className="min-w-0 flex-1 break-words text-fg">
+        <span className="font-medium">{t('lastRefreshFailed')}</span> <span className="text-fg-muted">{detail}</span>
+      </p>
+    );
+  }
+  const host = info.host ?? sourceHost(source) ?? t('sourceErrorHostFallback');
+  return (
+    <div className="min-w-0 flex-1 text-fg">
+      <p className="break-words">
+        <span className="font-medium">{t('lastRefreshFailed')}</span>{' '}
+        <span className="text-fg-muted" data-testid="source-error-message" data-kind={info.kind}>
+          {t(SOURCE_ERROR_KEYS[info.kind], { host })}
+        </span>
+      </p>
+      <details className="mt-1 text-xs text-fg-subtle">
+        <summary className="w-fit cursor-pointer rounded-sm hover:text-fg-muted">{t('technicalDetails')}</summary>
+        <p className="mt-1 font-mono break-words" dir="ltr">
+          {detail}
+        </p>
+      </details>
+    </div>
+  );
 }
 
 /** Radio stations in the source; 0 when an older core omits `radioCount`. */
@@ -216,9 +260,7 @@ export function SourceCard(props: SourceCardProps) {
       ) : s.lastError ? (
         <div role="alert" className="flex flex-wrap items-center gap-3 border-t border-danger/40 bg-danger/10 px-4 py-2.5 text-sm" data-testid="source-error">
           <CircleAlert aria-hidden className="size-4 shrink-0 text-danger" />
-          <p className="min-w-0 flex-1 break-words text-fg">
-            <span className="font-medium">{t('lastRefreshFailed')}</span> <span className="text-fg-muted">{redactText(s.lastError)}</span>
-          </p>
+          <SourceErrorText source={s} />
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={props.onEdit}>
               {t('checkSettings')}

@@ -73,19 +73,26 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           <GripVertical size={16} />
         </span>
       )}
-      <button type="button" tabIndex={-1} onClick={onOpen} className={cn('shrink-0 overflow-hidden rounded-sm', square ? 'w-12' : 'w-9')}>
+      {/* Artwork is a mouse shortcut only: the title button beside it and the Play button carry the name for keyboard and AT. */}
+      <div aria-hidden data-testid="entry-artwork" onClick={onOpen} className={cn('shrink-0 cursor-pointer overflow-hidden rounded-sm', square ? 'w-12' : 'w-9')}>
         <Poster src={snapshot.posterUrl} alt="" label={snapshot.title} aspect={square ? 'square' : 'poster'} />
-      </button>
-      <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start text-left">
-        <span className="w-full truncate text-sm font-medium text-fg">{snapshot.title}</span>
+      </div>
+      <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start text-start">
+        <span dir="auto" className="w-full truncate text-match-parent text-sm font-medium text-fg">
+          {snapshot.title}
+        </span>
         <span className="flex w-full min-w-0 items-center gap-2 text-xs text-fg-muted">
           <ContentIcon type={type} size={13} className="shrink-0 text-fg-subtle" />
           <span className="shrink-0">{t(k('type', type))}</span>
-          {snapshot.subtitle && <span className="truncate">{snapshot.subtitle}</span>}
+          {snapshot.subtitle && (
+            <span dir="auto" className="truncate text-match-parent">
+              {snapshot.subtitle}
+            </span>
+          )}
         </span>
       </button>
       {showSource && <SourceBadge source={source} className="hidden shrink-0 md:inline-flex" />}
-      <span className="hidden w-28 shrink-0 text-right text-xs text-fg-subtle sm:block">{time}</span>
+      <span className="hidden w-28 shrink-0 text-end text-xs text-fg-subtle sm:block">{time}</span>
       <div className="flex shrink-0 items-center gap-0.5">
         {reorder && (
           <>

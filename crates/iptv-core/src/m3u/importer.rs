@@ -3,6 +3,7 @@
 //! records the header EPG URLs. A failure anywhere rolls the transaction back,
 //! so the previous catalog survives a failed refresh.
 
+use super::body::MinRate;
 use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
@@ -526,6 +527,12 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         return keep_unchanged(&state, &source_id).await;
     }
 
+    // A remove or a settings change cancelled this import while it was
+    // downloading: do not write a catalog for it.
+    if sources::import_cancel().is_some_and(|t| t.is_cancelled()) {
+        return Err(sources::import_cancelled_error());
+    }
+
     // 3. Parse + write in one transaction on the blocking pool.
     sources::progress(&state, &source_id, "parsing", 0, None, None);
     let st = state.clone();
@@ -794,7 +801,9 @@ fn playlist_status_error(status: reqwest::StatusCode, host: &str) -> CoreError {
 
 /// Downloads `url` with the source headers into `dest` (streamed, never held
 /// in memory), retrying transient failures, but not a server that stalled in
-/// the middle of the body. Returns the body's sha256.
+/// the middle of the body or sent it slower than [`MinRate`] allows. Stops
+/// with [`sources::import_cancelled_error`] as soon as the running import is
+/// cancelled ([`sources::import_cancel`]). Returns the body's sha256.
 async fn fetch_to_file(
     state: &Arc<AppState>,
     source_id: &str,
@@ -810,7 +819,7 @@ async fn fetch_to_file(
         .ok()
         .and_then(|u| crate::http::Authority::of(&u));
     crate::http::check_fetch(state, url, own.as_ref()).await?;
-    let client = crate::http::client_for(state);
+    let client = crate::http::guarded_client(state, own.as_ref());
     let host = url::Url::parse(url.trim())
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
@@ -829,6 +838,7 @@ async fn fetch_to_file(
         let mut hasher = Sha256::new();
         let mut done: u64 = 0;
         let mut last_report: u64 = 0;
+        let mut rate = MinRate::standard();
         let mut stream = resp.bytes_stream();
         loop {
             let chunk = match crate::http::next_body_chunk(&mut stream, &host, BODY_IDLE).await {
@@ -839,6 +849,7 @@ async fn fetch_to_file(
                     return Err((e, stalled));
                 }
             };
+            rate.on_bytes(chunk.len(), &host).map_err(|e| (e, true))?;
             hasher.update(&chunk);
             file.write_all(&chunk)
                 .await
@@ -861,16 +872,30 @@ async fn fetch_to_file(
         );
         Ok::<_, (CoreError, bool)>(hex::encode(hasher.finalize()))
     };
+    // Outside `sources::run_import` (tests) nothing cancels.
+    let cancel = sources::import_cancel().unwrap_or_default();
     let mut n = 0;
     loop {
-        match attempt().await {
+        // Dropping the attempt mid-body is safe: it only owns the response
+        // and `dest`, which the caller deletes.
+        let result = tokio::select! {
+            r = attempt() => r,
+            () = cancel.cancelled() => {
+                tracing::info!(url = %safe_url, "playlist download cancelled");
+                return Err(sources::import_cancelled_error());
+            }
+        };
+        match result {
             Ok(sha) => return Ok(sha),
             Err((err, stalled)) => {
                 tracing::warn!(url = %safe_url, error = %err, attempt = n + 1, "playlist download failed");
                 if stalled || !err.is_retryable() || n + 1 >= FETCH_ATTEMPTS {
                     return Err(err);
                 }
-                tokio::time::sleep(crate::http::backoff_delay(n)).await;
+                tokio::select! {
+                    () = tokio::time::sleep(crate::http::backoff_delay(n)) => {}
+                    () = cancel.cancelled() => return Err(sources::import_cancelled_error()),
+                }
                 n += 1;
             }
         }
@@ -941,6 +966,49 @@ mod tests {
         );
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "retried");
         assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    /// R7-r3 F4: a server that drips a byte faster than the idle limit but
+    /// far below the minimum rate fails once a rate window has passed, with
+    /// a next step, and is not retried.
+    #[tokio::test]
+    async fn drip_fed_body_fails_on_the_minimum_rate() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n#EXTM3U\n")
+                        .await;
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        if sock.write_all(b"#").await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let (r, took) = fetch(&format!("http://127.0.0.1:{port}/list.m3u")).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Timeout(ref m) if m.contains("too slowly") && m.contains("try again")),
+            "{err:?}"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "retried");
+        assert!(
+            took >= crate::m3u::body::MIN_RATE_WINDOW && took < std::time::Duration::from_secs(6),
+            "{took:?}"
+        );
     }
 
     /// An HTTP error status names the host and says what to do; 5xx retries.

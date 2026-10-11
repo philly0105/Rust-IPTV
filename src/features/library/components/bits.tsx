@@ -104,7 +104,7 @@ export function SectionHeading({ title, count, hint }: { title: string; count: n
     <div className="flex h-full items-end gap-3 px-1 pb-2">
       <h2 className="font-display text-[15px] font-semibold text-fg">{title}</h2>
       <span className="font-display text-[13px] tabular-nums text-fg-subtle">{count}</span>
-      {hint && <span className="ml-auto truncate text-xs text-fg-subtle">{hint}</span>}
+      {hint && <span className="ms-auto truncate text-xs text-fg-subtle">{hint}</span>}
     </div>
   );
 }

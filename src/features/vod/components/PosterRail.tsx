@@ -91,7 +91,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
         <h2 id={headingId} className="text-base text-fg">
           {title}
         </h2>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ms-auto flex items-center gap-1">
           {action}
           {items.length > 0 && (
             <>

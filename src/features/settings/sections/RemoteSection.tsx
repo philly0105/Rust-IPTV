@@ -86,7 +86,7 @@ export function RemoteSection({ settings, update }: SectionProps) {
               id={id}
               describedBy={describedBy}
               inputMode="numeric"
-              className="w-28 text-right tabular-nums"
+              className="w-28 text-end tabular-nums"
               value={String(settings.remoteControl.port)}
               validate={(v) => {
                 const r = validatePort(v);

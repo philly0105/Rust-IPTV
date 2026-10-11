@@ -305,7 +305,8 @@ describe('zap', () => {
     expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref, categoryId: 'news' }]);
     expect(played?.number).toBe(2);
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
-    expect(usePlayerStore.getState().source?.subtitle).toBe('News');
+    // No guide data: no subtitle (never the category), as on the list click path.
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
     expect(media.useMediaStore.getState().osd).toMatchObject({ primary: '2', secondary: 'Channel 2' });
 
     await zap('up');
@@ -324,6 +325,30 @@ describe('zap', () => {
     await usePlayerStore.getState().play(vod('1'));
     await expect(zap('down')).resolves.toBeUndefined();
     expect(calls('catalog.neighbors')).toHaveLength(0);
+  });
+
+  it('titles player, OSD and resume record with the stripped name and subtitles with the airing programme', async () => {
+    handlers['settings.get'] = () => ({ player: 'html5', stripCountryPrefix: true, epgOffsetMinutes: 30 });
+    handlers['epg.nowNext'] = (a) => {
+      const { refs } = a as { refs: ItemRef[] };
+      const ref = refs[0] as ItemRef;
+      return { [`${ref.sourceId}|${ref.contentType}|${ref.itemId}`]: { now: { title: 'Evening News' } } };
+    };
+    await playItem({ title: 'Alpha One', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    handlers['catalog.neighbors'] = () => ({ next: channel(2, { name: 'UK | Beta Two', categoryName: 'UK' }) });
+    await zap('down');
+    const src = usePlayerStore.getState().source;
+    expect(src?.title).toBe('Beta Two');
+    expect(src?.subtitle).toBe('Evening News');
+    expect(media.useMediaStore.getState().osd).toMatchObject({ primary: '2', secondary: 'Beta Two' });
+    expect(calls('epg.nowNext')).toEqual([{ refs: [channel(2).ref], offsetMinutes: 30 }]);
+    expect(JSON.parse(sessionStorage.getItem(RESUME_KEY) ?? '{}').source?.title).toBe('Beta Two');
+
+    // Number zap with the setting off keeps the raw name.
+    store.setSettingsCache({ player: 'html5', stripCountryPrefix: false } as never);
+    handlers['catalog.channelByNumber'] = () => channel(7, { name: 'UK | Gamma' });
+    await zapToNumber(7);
+    expect(usePlayerStore.getState().source?.title).toBe('UK | Gamma');
   });
 
   it('zapToNumber resolves catalog.channelByNumber', async () => {

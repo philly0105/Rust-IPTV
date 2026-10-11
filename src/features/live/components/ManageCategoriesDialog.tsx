@@ -21,7 +21,8 @@ export function ManageCategoriesDialog({
   sourceId: string;
   contentType: ContentType;
 }) {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const { toast } = useToast();
   const all = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true }, { enabled: open });
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
@@ -144,8 +145,8 @@ export function ManageCategoriesDialog({
                     }
                     className="size-4 accent-[var(--color-accent)]"
                   />
-                  <span className={`flex-1 truncate ${checked ? 'text-fg' : 'text-fg-subtle line-through'}`}>{c.name}</span>
-                  <span className="text-xs tabular-nums text-fg-subtle">{c.itemCount.toLocaleString()}</span>
+                  <span dir="auto" className={`flex-1 truncate text-match-parent ${checked ? 'text-fg' : 'text-fg-subtle line-through'}`}>{c.name}</span>
+                  <span className="text-xs tabular-nums text-fg-subtle">{fmt.format(c.itemCount)}</span>
                 </label>
               );
             })}

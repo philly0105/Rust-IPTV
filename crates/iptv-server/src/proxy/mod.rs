@@ -37,7 +37,7 @@ use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use std::io;
 use std::sync::Arc;
-use target::{find_blocked, Authority, NetGuard, TargetError};
+use target::{find_blocked, Authority, GuardedClients, NetGuard, TargetError};
 use url::Url;
 
 /// CSP of every proxy and file response: never a document with script.
@@ -50,27 +50,32 @@ pub const ATTEMPTS: u32 = 3;
 /// Bytes read before deciding whether an untyped response is a playlist.
 const SNIFF_BYTES: usize = 16;
 
-/// Proxy client and the guard policy (shared with the core's guarded client).
+/// Proxy clients and the guard policy (shared with the core's guarded
+/// clients). Each client trusts only the requesting source's own authority
+/// (or nothing), so one source's trust never carries over to another request.
 pub struct Proxy {
-    client: reqwest::Client,
+    clients: GuardedClients,
     guard: Arc<NetGuard>,
 }
 
 impl Proxy {
     pub fn new(guard: Arc<NetGuard>) -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent(default_user_agent())
-            .connect_timeout(CONNECT_TIMEOUT)
-            .read_timeout(READ_TIMEOUT)
-            // Redirects are followed by hand so every hop is validated.
-            .redirect(reqwest::redirect::Policy::none())
-            // Pass bytes through as-is: decompression would break Range and lengths.
-            .gzip(false)
-            .brotli(false)
-            .dns_resolver(guard.resolver())
-            .build()
-            .expect("proxy HTTP client builds with static configuration");
-        Self { client, guard }
+        let g = guard.clone();
+        let clients = GuardedClients::new(move |trusted| {
+            reqwest::Client::builder()
+                .user_agent(default_user_agent())
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
+                // Redirects are followed by hand so every hop is validated.
+                .redirect(reqwest::redirect::Policy::none())
+                // Pass bytes through as-is: decompression would break Range and lengths.
+                .gzip(false)
+                .brotli(false)
+                .dns_resolver(g.resolver(trusted))
+                .build()
+                .expect("proxy HTTP client builds with static configuration")
+        });
+        Self { clients, guard }
     }
 }
 
@@ -218,9 +223,7 @@ async fn proxy(
         None => SourceAccess::default(),
     };
     let trusted = access.authority.as_ref();
-    if let Some(a) = trusted {
-        s.proxy.guard.trust(a);
-    }
+    let client = s.proxy.clients.get(trusted);
     let headers_out = merge_headers(&access.headers, &q);
 
     // Playlists are rewritten whole; never ask for a slice of one.
@@ -231,7 +234,15 @@ async fn proxy(
     let mut hops = 0;
     let resp = loop {
         s.proxy.guard.check(&current, trusted).await?;
-        let resp = send(s, &method, &current, &headers_out, headers, forward_range).await?;
+        let resp = send(
+            &client,
+            &method,
+            &current,
+            &headers_out,
+            headers,
+            forward_range,
+        )
+        .await?;
         let location = resp
             .status()
             .is_redirection()
@@ -278,7 +289,7 @@ async fn proxy(
 
 /// Sends one request, retrying connect failures and timeouts with backoff.
 async fn send(
-    s: &Server,
+    client: &reqwest::Client,
     method: &Method,
     url: &Url,
     source_headers: &RequestHeaders,
@@ -292,7 +303,7 @@ async fn send(
     };
     let mut attempt = 0;
     loop {
-        let mut req = s.proxy.client.request(upstream_method.clone(), url.clone());
+        let mut req = client.request(upstream_method.clone(), url.clone());
         req = iptv_core::http::apply_source_headers(req, source_headers);
         if forward_range {
             for name in [header::RANGE, header::IF_RANGE] {

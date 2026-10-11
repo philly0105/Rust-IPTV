@@ -501,9 +501,11 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       };
       rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
       renderAt('/search?q=movie', [{ path: '/search', element: <SearchPage /> }]);
+      // Each chip counts its own source's capped search (R6-r3 F8): 60 shown of 100, so "60+",
+      // not the 30 rows each source holds in the interleaved all-sources page.
       const chips = await screen.findByRole('group', { name: 'Filter by source' });
-      expect(within(chips).getByRole('button', { name: /Beta Portal\s*30\+/ })).toBeTruthy();
-      expect(within(chips).getByRole('button', { name: /Alpha IPTV\s*30\+/ })).toBeTruthy();
+      expect(await within(chips).findByRole('button', { name: /Beta Portal\s*60\+/ })).toBeTruthy();
+      expect(within(chips).getByRole('button', { name: /Alpha IPTV\s*60\+/ })).toBeTruthy();
 
       fireEvent.click(within(chips).getByRole('button', { name: /Beta Portal/ }));
       await screen.findByRole('heading', { name: /Movies\s*60\+/ });
@@ -513,8 +515,8 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       expect(document.querySelectorAll('a[href^="/s/src1/movie/"]')).toHaveLength(0);
       expect(document.querySelectorAll('a[href^="/s/src2/movie/"]').length).toBeGreaterThan(30);
       const after = screen.getByRole('group', { name: 'Filter by source' });
-      expect(within(after).getByRole('button', { name: /Alpha IPTV\s*30\+/ }).getAttribute('aria-pressed')).toBe('false');
-      expect(within(after).getByRole('button', { name: /Beta Portal\s*30\+/ }).getAttribute('aria-pressed')).toBe('true');
+      expect(within(after).getByRole('button', { name: /Alpha IPTV\s*60\+/ }).getAttribute('aria-pressed')).toBe('false');
+      expect(within(after).getByRole('button', { name: /Beta Portal\s*60\+/ }).getAttribute('aria-pressed')).toBe('true');
 
       // "Show more" steps the facet's own search.
       fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 200' }));

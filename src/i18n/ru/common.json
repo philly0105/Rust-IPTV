@@ -35,7 +35,7 @@
   "errorTitleInternal": "Что-то пошло не так",
 
   "errorHintNetwork": "Проверьте подключение и URL провайдера, затем повторите попытку.",
-  "errorBodyServerUnreachable": "Встроенный сервер приложения не отвечает, поэтому ничего не загрузилось.",
+  "errorBodyServerUnreachable": "Сервер Tsrust IPTV не отвечает, поэтому ничего не загрузилось.",
   "errorHintServerUnreachable": "Проверьте, что сервер Tsrust IPTV по-прежнему запущен, затем повторите попытку.",
   "errorTechnicalDetails": "Технические подробности",
   "errorHintTimeout": "Возможно, провайдер перегружен. Повторите попытку чуть позже.",

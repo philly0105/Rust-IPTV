@@ -126,8 +126,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
                 </span>
               ) : null}
             </p>
-            <p className="truncate text-sm font-semibold text-fg">{shown.title}</p>
-            {shown.description ? <p className="line-clamp-1 text-xs text-fg-muted">{shown.description}</p> : null}
+            <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg">
+              {shown.title}
+            </p>
+            {shown.description ? (
+              <p dir="auto" className="line-clamp-1 text-match-parent text-xs text-fg-muted">
+                {shown.description}
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="truncate text-sm font-semibold text-fg">{channelName || t('guide')}</p>
@@ -294,6 +300,8 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const btns = [...(scroller.current?.querySelectorAll<HTMLButtonElement>('button[data-start]') ?? [])];
+    // No programme blocks in the window: leave the keys to the browser so the focused scroller scrolls natively.
+    if (btns.length === 0) return;
     const i = btns.indexOf(document.activeElement as HTMLButtonElement);
     let target: HTMLButtonElement | undefined;
     // Arrow keys follow the screen, so in RTL ArrowLeft moves later in time.
@@ -310,10 +318,24 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
   };
 
   const nowIndex = blocks.findIndex((b) => b.when === 'now');
+  const tabStop = blocks[nowIndex >= 0 ? nowIndex : 0];
+  // The tab-stop block can be windowed out (or there are no blocks at all); the
+  // scroller then takes the tab stop itself so keyboard users can still reach and
+  // scroll it (axe scrollable-region-focusable).
+  const scrollerTabbable = !tabStop || !visible.includes(tabStop);
 
   return (
     <div className="relative h-full">
-      <div ref={scroller} onScroll={onScroll} onKeyDown={onKeyDown} className="relative h-full overflow-x-auto overflow-y-hidden pb-2" role="group" aria-label={t('timelineView')}>
+      <div
+        ref={scroller}
+        onScroll={onScroll}
+        onKeyDown={onKeyDown}
+        tabIndex={scrollerTabbable ? 0 : undefined}
+        data-testid="ribbon-timeline"
+        className="relative h-full overflow-x-auto overflow-y-hidden pb-2 outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        role="group"
+        aria-label={t('timelineView')}
+      >
         <div style={{ width, height: '100%', position: 'relative', minHeight: 92 }}>
           {ticks.map((tt) => {
             const x = ((tt - from) / MINUTE) * RIBBON_PX_PER_MIN;
@@ -336,7 +358,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
               kind={kind}
               watchingLive={props.watchingLive}
               rtl={rtl}
-              tabbable={blocks.indexOf(b) === (nowIndex >= 0 ? nowIndex : 0)}
+              tabbable={b === tabStop}
               onActivate={props.onActivate}
               onFocusProgram={props.onFocusProgram}
             />
@@ -421,7 +443,9 @@ function TimelineBlock({
       ) : null}
       <span className="relative flex items-center gap-1 truncate text-xs font-medium">
         {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
-        <span className="truncate">{p.title}</span>
+        <span dir="auto" className="truncate text-match-parent">
+          {p.title}
+        </span>
       </span>
       {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
       <span className={`relative block truncate text-[11px] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
@@ -478,13 +502,17 @@ function ProgramList(props: ViewProps) {
               >
                 <span className="w-24 shrink-0 text-xs tabular-nums text-fg-muted">{formatRange(p, i18n.language)}</span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{p.title}</span>
+                  <span dir="auto" className="truncate text-match-parent text-sm font-medium">
+                    {p.title}
+                  </span>
                   {when === 'now' ? (
                     <span className="mt-1 h-[3px] w-full max-w-48 overflow-hidden rounded-full bg-surface-3" aria-hidden>
                       <span className="block h-full bg-live" style={{ width: `${programProgress(p, now) * 100}%` }} />
                     </span>
                   ) : p.description ? (
-                    <span className="truncate text-xs text-fg-muted">{p.description}</span>
+                    <span dir="auto" className="truncate text-match-parent text-xs text-fg-muted">
+                      {p.description}
+                    </span>
                   ) : null}
                 </span>
                 {when === 'now' && catchup && props.watchingLive ? (

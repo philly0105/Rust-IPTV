@@ -20,6 +20,8 @@ import type {
   SourceKind,
   VideoPlayer,
 } from '@/api/types';
+import { itemKey } from '@/api/types';
+import { displayChannelName } from '@/features/live/lib/channelName';
 
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
 
@@ -739,19 +741,39 @@ export async function restorePlayback(): Promise<boolean> {
 // Channel zapping
 // ---------------------------------------------------------------------------
 
+/** Title of the programme airing now on `ref` (shifted by `epgOffsetMinutes`), if the guide has one. */
+async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined): Promise<string | undefined> {
+  try {
+    const res = await rpc('epg.nowNext', offsetMinutes ? { refs: [ref], offsetMinutes } : { refs: [ref] });
+    return res[itemKey(ref)]?.now?.title || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Zap/remote/fullscreen-panel path. Titles the player, OSD and resume record with the name the
+ * live views show (`settings.stripCountryPrefix`) and subtitles it with the airing programme,
+ * like the list click path.
+ */
 export async function playChannel(channel: Channel, sourceKind?: SourceKind): Promise<void> {
-  const kind = sourceKind ?? (await sourceKindOf(channel.ref.sourceId));
+  const settings = await getSettings();
+  const name = displayChannelName(channel.name, settings?.stripCountryPrefix) || channel.name;
+  // Tuner readout: number big, name below.
+  showOsd(channel.number !== undefined ? String(channel.number) : name, channel.number !== undefined ? name : undefined);
+  const [kind, subtitle] = await Promise.all([
+    sourceKind ?? sourceKindOf(channel.ref.sourceId),
+    nowTitle(channel.ref, settings?.epgOffsetMinutes),
+  ]);
   const args: PlayItemArgs = {
     ref: channel.ref,
-    title: channel.name,
+    title: name,
     isLive: true,
     isRadio: channel.isRadio,
     sourceKind: kind,
   };
   if (channel.logoUrl) args.posterUrl = channel.logoUrl;
-  if (channel.categoryName) args.subtitle = channel.categoryName;
-  // Tuner readout: number big, name below.
-  showOsd(channel.number !== undefined ? String(channel.number) : channel.name, channel.number !== undefined ? channel.name : undefined);
+  if (subtitle) args.subtitle = subtitle;
   await playItem(args);
 }
 

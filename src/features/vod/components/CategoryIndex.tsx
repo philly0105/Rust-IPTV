@@ -1,5 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef, type RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
@@ -40,7 +41,8 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label }: CategoryIn
   const columns = columnsFor(width || MIN_COL, MIN_COL, GAP);
   const rows = Math.ceil(entries.length / columns);
   const margin = useScrollMargin(listRef, scrollRef, [entries.length > 0]);
-  const fmt = useMemo(() => new Intl.NumberFormat(), []);
+  const { i18n } = useTranslation();
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
 
   const v = useVirtualizer({
     count: rows,
@@ -61,7 +63,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label }: CategoryIn
       {v.getVirtualItems().map((row) => (
         <div
           key={row.key}
-          className="absolute left-0 grid w-full"
+          className="absolute start-0 grid w-full"
           style={{
             top: row.start - margin,
             height: ROW_H,
@@ -84,7 +86,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label }: CategoryIn
                     entry.emphasis && 'font-semibold text-fg',
                   )}
                 >
-                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                  <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{entry.name}</span>
                   {entry.count !== undefined && entry.count > 0 && (
                     <span className="tabular font-display text-[13px] text-fg-subtle group-hover:text-accent group-focus-visible:text-accent">
                       {fmt.format(entry.count)}

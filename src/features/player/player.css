@@ -71,9 +71,17 @@
 .player-osd {
   animation: player-osd 2.4s ease-out forwards;
 }
+/*
+ * Reduced motion: no movement, but the readout must still show for 2.4 s and
+ * then hide. The global reduced-motion clamp (globals.css) sets every
+ * animation-duration to 0.01ms !important, which would jump straight to the
+ * last keyframe (opacity 0), so the duration is re-asserted here with a more
+ * specific !important.
+ */
 @media (prefers-reduced-motion: reduce) {
   .player-osd {
     animation: player-osd-still 2.4s step-end forwards;
+    animation-duration: 2.4s !important;
   }
   @keyframes player-osd-still {
     0%,
@@ -87,6 +95,7 @@
 }
 html[data-reduced-motion='true'] .player-osd {
   animation-timing-function: step-end;
+  animation-duration: 2.4s !important;
 }
 
 /* Radio signal meter. */

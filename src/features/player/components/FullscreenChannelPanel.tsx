@@ -142,11 +142,11 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
 
   return (
     <>
-      {/* Hot zone on the left edge */}
+      {/* Hot zone on the inline-start edge (left, or right in RTL), where the panel slides in from */}
       {!open && (
         <div
           aria-hidden
-          className="absolute inset-y-0 left-0 z-30 w-3"
+          className="absolute inset-y-0 start-0 z-30 w-3"
           onPointerEnter={() => {
             dwell.current = setTimeout(() => setOpen(true), OPEN_DWELL_MS);
           }}
@@ -176,9 +176,9 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          'absolute inset-y-0 left-0 z-40 flex w-[min(360px,85vw)] flex-col border-r border-white/10 bg-[rgb(9_13_21/0.92)] text-white shadow-2 backdrop-blur-md',
+          'absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e border-white/10 bg-[rgb(9_13_21/0.92)] text-white shadow-2 backdrop-blur-md',
           'motion-safe:transition-transform motion-safe:duration-200',
-          open ? 'translate-x-0' : '-translate-x-full',
+          open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
         )}
         onPointerEnter={() => {
           if (grace.current) clearTimeout(grace.current);
@@ -244,11 +244,11 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         aria-selected={isCurrent(c)}
                         onClick={() => void playChannel(c).catch(() => undefined)}
                         className={cn(
-                          'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-left hover:bg-white/10',
+                          'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-start hover:bg-white/10',
                           isCurrent(c) && 'bg-white/10 text-white dark:text-accent-hover',
                         )}
                       >
-                        <span className="w-10 shrink-0 text-right font-display text-sm text-white/70 tabular-nums">
+                        <span className="w-10 shrink-0 text-end font-display text-sm text-white/70 tabular-nums">
                           {c.number ?? ''}
                         </span>
                         {safeImageUrl(c.logoUrl) ? (
@@ -256,7 +256,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         ) : (
                           <span className="size-8 shrink-0 rounded-sm bg-white/5" aria-hidden />
                         )}
-                        <span className="truncate text-sm">{c.name}</span>
+                        <span dir="auto" className="truncate text-sm text-match-parent">{c.name}</span>
                       </button>
                     ) : (
                       <div className="mt-1 h-10 rounded-md bg-white/6" aria-hidden />

@@ -178,7 +178,7 @@ export function CommandPalette() {
                     className="flex h-11 cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-fg-muted"
                   >
                     {Icon && <Icon aria-hidden size={16} className="shrink-0" />}
-                    <span className="min-w-0 flex-1 truncate">{it.title}</span>
+                    <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{it.title}</span>
                     {it.shortcut && <Kbd combo={it.shortcut} />}
                   </Cmdk.Item>
                 );

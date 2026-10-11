@@ -25,13 +25,16 @@ export function statusTone(status: string | undefined): Tone {
  * The panel's clock as text. A valid IANA zone formats the time in that zone
  * and names it ("Oct 11, 2026, 5:14 PM, Europe/Berlin"); an unknown zone falls
  * back to the viewer's local time without a label, so the two never disagree.
- * An unparseable time is shown as sent.
+ * Only an RFC3339 instant (with `Z` or an offset) is converted: a bare wall
+ * clock ("2026-10-11 18:00:00", sent when the panel has no `timestamp_now`) is
+ * already in the server zone, so it is shown as sent with the zone name, as is
+ * anything unparseable.
  */
 export function serverTimeText(serverTime: string | undefined, timezone: string | undefined, lang: string): string | undefined {
   const tz = timezone?.trim() || undefined;
   if (!serverTime) return tz;
   const d = new Date(serverTime);
-  if (Number.isNaN(d.getTime())) return [serverTime, tz].filter(Boolean).join(', ');
+  if (!RFC3339_INSTANT.test(serverTime.trim()) || Number.isNaN(d.getTime())) return [serverTime, tz].filter(Boolean).join(', ');
   if (tz) {
     try {
       return `${new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(d)}, ${tz}`;
@@ -41,6 +44,9 @@ export function serverTimeText(serverTime: string | undefined, timezone: string 
   }
   return absoluteTime(serverTime, lang) ?? serverTime;
 }
+
+/** A date-time that names its offset; anything else is a wall clock in an unknown zone. */
+const RFC3339_INSTANT = /^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:?\d{2})$/;
 
 /** Keys in a stalker `raw` reply that never belong on screen. */
 const SECRET_KEY = /pass|token|secret|key|signature|serial|device_?id/i;

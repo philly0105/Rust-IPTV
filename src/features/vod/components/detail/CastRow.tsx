@@ -24,12 +24,12 @@ export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }
             <>
               <Avatar person={p} />
               <span className="flex min-w-0 flex-col leading-tight">
-                <span className="truncate text-[13px] font-medium text-fg">{p.name}</span>
+                <span dir="auto" className="truncate text-[13px] font-medium text-fg text-match-parent">{p.name}</span>
                 {p.role && <span className="truncate text-xs text-fg-subtle">{p.role}</span>}
               </span>
             </>
           );
-          const cls = 'flex max-w-56 shrink-0 items-center gap-2 rounded-full border border-border bg-surface/70 py-1 pr-4 pl-1';
+          const cls = 'flex max-w-56 shrink-0 items-center gap-2 rounded-full border border-border bg-surface/70 py-1 pe-4 ps-1';
           return (
             <li key={`${p.id ?? 'n'}-${p.name}-${i}`}>
               {p.id !== undefined ? (

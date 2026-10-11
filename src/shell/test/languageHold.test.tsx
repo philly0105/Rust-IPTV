@@ -5,10 +5,15 @@
  * remembered. Tests run in order: the language stays unresolved until one of
  * them applies a language.
  */
-import { act, cleanup, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, configure } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { installDomStubs, Page, renderRoutes, rpcMock, settings } from './harness';
+
+// Under CPU load (a cargo build alongside) the 1 s findBy/waitFor default and the 5 s test default
+// time out before the mocked queries settle; these waits only ever succeed, so give them room.
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),

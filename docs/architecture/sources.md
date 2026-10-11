@@ -1,6 +1,6 @@
 # Sources
 
-Code: `crates/iptv-core/src/sources/`. Tests: `crates/iptv-core/tests/sources_crud.rs` plus unit tests in `mod.rs`.
+Code: `crates/iptv-core/src/sources/`. Tests: `crates/iptv-core/tests/sources_crud.rs`, `sources_lifecycle.rs`, `sources_epg.rs`, `sources_last_error.rs` plus unit tests in `mod.rs`.
 
 A source is one playlist provider: an m3u playlist (URL, file or pasted text), an Xtream account or a Stalker portal. Rows live in `sources` (C3). Kind-specific settings are in `config_json`, and EPG links are in `epg_json`.
 
@@ -8,7 +8,7 @@ A source is one playlist provider: an m3u playlist (URL, file or pasted text), a
 
 | File | Role |
 | --- | --- |
-| `mod.rs` | Importer registry and progress (A1), arg types, validation, the service functions (`list`, `get`, `add`, `update`, `remove`, `reorder`, `refresh`, `refresh_all`, `counts`, `run_import`) and `init`. |
+| `mod.rs` | Importer registry and progress (A1), arg types, validation, the service functions (`list`, `get`, `add`, `update`, `remove`, `remove_all`, `reorder`, `refresh`, `refresh_all`, `counts`, `run_import`) and `init`. |
 | `store.rs` | SQL for `sources`: `SourceConfig`, `list`, `find`, `get`, `insert`, `record_import`, `move_to`, `reorder`, `delete`. |
 | `rpc.rs` | Every `sources.*` command in C4. |
 
@@ -27,7 +27,7 @@ m3u registers in `m3u::init`, xtream in B3's init and stalker in B4's init. An i
 1. Takes a per-source async lock, so concurrent refreshes and a remove of the same source run one after another.
 2. Calls the importer.
 3. On success it sets `last_refresh_at`, clears `last_error`, refreshes `source_counts` (for stalker, the movie and series totals come from the importer's `ImportSummary`; see Counts), releases the per-source lock and applies user state a backup import parked for this source (`backup::apply_pending_restore`, so restored favorites and positions appear right away rather than on the next start; a failure there is logged and never fails the refresh). The global backup import lock is only taken when a `backup_pending:<id>` row exists, so adding or refreshing an unrelated source never waits behind a running `backup.import`, and that lock is never acquired while a source lock is held, and emits `import.progress {phase: "done"}` and `sources.changed`. It then starts the source's guides in the background (see Guides after import).
-4. On failure it stores the error text in `last_error` and emits `import.progress {phase: "error", message}` and `sources.changed`. The importer must leave the previous catalog in place, and both catalog write paths do (see catalog.md).
+4. On failure it stores the error text in `last_error` and emits `import.progress {phase: "error", message}` and `sources.changed`. The UI classifies that English text (`src/features/sources/lib/sourceError.ts`) into a translated message and keeps the raw text in a details disclosure, so its wording is matched by pattern (SPEC amendments). The importer must leave the previous catalog in place, and both catalog write paths do (see catalog.md).
 
 ### Guides after import
 
@@ -56,8 +56,8 @@ The importer then runs. If it fails, the source is kept with `last_error` set, a
 
 - `sources.update {id, patch}` validates a config patch the same way. The patch must match the source's kind. `position` moves the source and renumbers the rest. `epg` lists are trimmed and de-duplicated, and only the given lists change. Config changes do not re-import; the UI calls `sources.refresh` for that. When the stored config actually changes (URL, MAC, credentials, headers), the cached portal session `stalker_token:<id>` in `app_state` is deleted in the same transaction, so the next portal call handshakes with the new settings. A rename or an identical config keeps it.
 - `sources.reorder {ids}` puts the listed ids first in the given order. Unknown ids are ignored, and unlisted sources keep their relative order after them. Positions are renumbered from 0.
-- `sources.remove {id}` waits for a running import of that source, then deletes it. Items, categories, `m3u_raw`, `source_counts`, favorites, recent entries, positions and EPG mappings cascade. The `stalker_token:<id>` and `backup_pending:<id>` keys in `app_state` are removed too, and so is the on-disk playlist copy of a large m3u (`data_dir/playlists/<id>.m3u`). `sources.add` stores pasted text over `RAW_INLINE_MAX` (8 MB) in that copy with `m3u_raw.raw = ''` (`store::insert` through `m3u::place_raw_text`), so neither the add nor later refreshes keep it in SQLite.
-- `sources.removeAll` removes every source through the same path as `sources.remove` (one at a time, each waiting for its import), then emits `sources.changed`. Returns null.
+- `sources.remove {id}` cancels a running import of that source (and any queued one), waits for it to stop, then deletes it. Items, categories, `m3u_raw`, `source_counts`, favorites, recent entries, positions and EPG mappings cascade. The `stalker_token:<id>` and `backup_pending:<id>` keys in `app_state` are removed too, and so is the on-disk playlist copy of a large m3u (`data_dir/playlists/<id>.m3u`). `sources.add` stores pasted text over `RAW_INLINE_MAX` (8 MB) in that copy with `m3u_raw.raw = ''` (`store::insert` through `m3u::place_raw_text`), so neither the add nor later refreshes keep it in SQLite.
+- `sources.removeAll` removes every source through the same path as `sources.remove` (one at a time, each cancelling its import), then emits `sources.changed`. Returns null.
 
 ## refresh
 

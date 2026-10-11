@@ -42,15 +42,18 @@ export function measureColumns(container: HTMLElement, cell: HTMLElement): numbe
   return Math.max(1, cols);
 }
 
-/** Pure target computation (exported for tests). */
-export function targetIndex(key: string, index: number, columns: number, count: number, rowsPerPage = 3): number | null {
+/**
+ * Pure target computation (exported for tests). Arrows follow the screen: in
+ * RTL the next item sits to the left, so ArrowLeft moves forward.
+ */
+export function targetIndex(key: string, index: number, columns: number, count: number, rowsPerPage = 3, rtl = false): number | null {
   let next: number;
   switch (key) {
     case 'ArrowRight':
-      next = index + 1;
+      next = rtl ? index - 1 : index + 1;
       break;
     case 'ArrowLeft':
-      next = index - 1;
+      next = rtl ? index + 1 : index - 1;
       break;
     case 'ArrowDown':
       next = index + columns;
@@ -108,7 +111,8 @@ export function handleGridKeyDown(e: ReactKeyboardEvent<HTMLElement>, opts: Grid
   if (horizontal && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'PageUp' || e.key === 'PageDown')) return;
   const count = opts.count ?? container.querySelectorAll('[data-grid-index]').length;
   const columns = horizontal ? Number.MAX_SAFE_INTEGER : measureColumns(container, cell);
-  const next = targetIndex(e.key, index, columns, count);
+  const rtl = getComputedStyle(container).direction === 'rtl';
+  const next = targetIndex(e.key, index, columns, count, 3, rtl);
   if (next === null) return;
   e.preventDefault();
   focusIndex(container, next, Math.sign(next - index));

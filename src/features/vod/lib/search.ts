@@ -167,12 +167,26 @@ export function groupSearchResults(input: GroupInput): SearchGroup[] {
   return SEARCH_GROUP_ORDER.map((kind) => ({ kind, hits: groups[kind] })).filter((g) => g.hits.length > 0);
 }
 
+/** One source searched on its own: the groups its facet view shows, and which of its types hit the cap. */
+export interface SourceSearch {
+  groups: SearchGroup[];
+  more: SearchMore;
+}
+
 /**
  * Per-source hit counts across all groups, largest first, for the source
- * filter chips. `more` (from `capSearchResult`) marks a source partial when it
- * contributes to a type that hit its cap.
+ * filter chips.
+ *
+ * The global search ranks every source together, so when a type hits its cap
+ * (`more`, from `capSearchResult`) a source's share of that list says nothing
+ * about how many of its own hits were cut. `perSource` holds each source
+ * searched alone (the same query its facet runs); where a type is capped,
+ * a source with an entry there takes its count from it, reading "N+" only
+ * when its own search hit the cap (then the larger of the two counts), and a source with no global hits can
+ * still get a chip. A source without an entry yet falls back to its global
+ * share, marked partial when it contributes to a capped type.
  */
-export function sourceFacets(groups: SearchGroup[], more?: SearchMore): SourceFacet[] {
+export function sourceFacets(groups: SearchGroup[], more?: SearchMore, perSource?: ReadonlyMap<string, SourceSearch>): SourceFacet[] {
   const map = new Map<string, SourceFacet>();
   for (const g of groups) {
     for (const h of g.hits) {
@@ -180,6 +194,21 @@ export function sourceFacets(groups: SearchGroup[], more?: SearchMore): SourceFa
       f.count += 1;
       if (more?.[g.kind]) f.partial = true;
       map.set(h.sourceId, f);
+    }
+  }
+  const anyCapped = !!more && (more.live || more.movies || more.series);
+  if (anyCapped && perSource) {
+    for (const [sourceId, own] of perSource) {
+      const count = own.groups.reduce((n, g) => n + g.hits.length, 0);
+      const first = own.groups[0]?.hits[0];
+      if (count === 0 || !first) {
+        map.delete(sourceId);
+        continue;
+      }
+      const partial = own.groups.some((g) => own.more[g.kind]);
+      // A capped own search is a lower bound too; after "Show more" the global share can be the larger one.
+      const shared = map.get(sourceId)?.count ?? 0;
+      map.set(sourceId, { sourceId, sourceName: first.sourceName, count: partial ? Math.max(count, shared) : count, partial });
     }
   }
   return [...map.values()].sort((a, b) => b.count - a.count || a.sourceName.localeCompare(b.sourceName));

@@ -35,7 +35,7 @@
   "errorTitleInternal": "Нешта пайшло не так",
 
   "errorHintNetwork": "Праверце падключэнне і URL правайдара, потым паспрабуйце зноў.",
-  "errorBodyServerUnreachable": "Убудаваны сервер праграмы не адказвае, таму нічога не загрузілася.",
+  "errorBodyServerUnreachable": "Сервер Tsrust IPTV не адказвае, таму нічога не загрузілася.",
   "errorHintServerUnreachable": "Праверце, ці працуе яшчэ сервер Tsrust IPTV, потым паспрабуйце зноў.",
   "errorTechnicalDetails": "Тэхнічныя падрабязнасці",
   "errorHintTimeout": "Магчыма, правайдар перагружаны. Паспрабуйце крыху пазней.",

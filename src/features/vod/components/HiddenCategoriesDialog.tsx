@@ -121,7 +121,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
                   <label
                     key={c.id}
                     className={cn(
-                      'absolute left-0 flex w-full cursor-pointer items-center gap-3 border-b border-border/50 px-3 text-sm',
+                      'absolute start-0 flex w-full cursor-pointer items-center gap-3 border-b border-border/50 px-3 text-sm',
                       'hover:bg-surface-2 has-focus-visible:bg-surface-2',
                       isHidden ? 'text-fg-subtle' : 'text-fg',
                     )}
@@ -143,7 +143,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
                     >
                       {!isHidden && <Check size={14} strokeWidth={3} />}
                     </span>
-                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                    <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{c.name}</span>
                     {isHidden && <EyeOff aria-hidden size={14} />}
                     {c.itemCount > 0 && <span className="tabular text-xs text-fg-subtle">{c.itemCount}</span>}
                   </label>

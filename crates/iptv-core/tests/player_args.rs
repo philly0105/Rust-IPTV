@@ -531,3 +531,72 @@ fn property_commands_cannot_bypass_the_allowlist() {
     ])
     .is_ok());
 }
+
+#[test]
+fn raw_commands_are_an_allowlist() {
+    // Round-3 bypasses: an mpv prefix as the first element, or keybind.
+    for cmd in [
+        vec![
+            json!("no-osd"),
+            json!("set"),
+            json!("stream-record"),
+            json!("C:/p3.ts"),
+        ],
+        vec![
+            json!("async"),
+            json!("dump-cache"),
+            json!(0),
+            json!("no"),
+            json!("C:/p5.ts"),
+        ],
+        vec![
+            json!("no-osd"),
+            json!("run"),
+            json!("cmd.exe"),
+            json!("/c"),
+            json!("copy NUL C:/p6.txt"),
+        ],
+        vec![
+            json!("keybind"),
+            json!("F24"),
+            json!("set stream-record C:/p7.ts"),
+        ],
+        vec![json!("keypress"), json!("F24")],
+        vec![
+            json!("no-osd"),
+            json!("screenshot-to-file"),
+            json!("C:/p8.png"),
+            json!("video"),
+        ],
+        // Every other prefix, even in front of an allowed command.
+        vec![json!("osd-msg"), json!("seek"), json!(1)],
+        vec![json!("osd-auto"), json!("seek"), json!(1)],
+        vec![json!("raw"), json!("seek"), json!(1)],
+        vec![json!("expand-properties"), json!("seek"), json!(1)],
+        vec![json!("sync"), json!("seek"), json!(1)],
+        vec![json!("repeatable"), json!("seek"), json!(1)],
+        vec![json!("nonrepeatable"), json!("seek"), json!(1)],
+        vec![json!("nonscalable"), json!("seek"), json!(1)],
+        // Anything else outside the allowlist.
+        vec![json!("loadfile"), json!("C:/x.mkv")],
+        vec![json!("script-message"), json!("x")],
+        vec![json!("script-binding"), json!("x")],
+        vec![json!("load-script"), json!("C:/evil.lua")],
+        vec![json!("quit-watch-later")],
+        vec![json!("write-watch-later-config")],
+        vec![json!("SEEK"), json!(1)],
+        vec![
+            json!("change-list"),
+            json!("volume"),
+            json!("set"),
+            json!(1),
+        ],
+    ] {
+        let err = validate_command(&cmd).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{cmd:?}: {err:?}");
+    }
+    // What the UI and tests send.
+    assert!(validate_command(&[json!("seek"), json!(42.5), json!("absolute")]).is_ok());
+    assert!(validate_command(&[json!("get_property"), json!("time-pos")]).is_ok());
+    assert!(validate_command(&[json!("multiply"), json!("speed"), json!(2)]).is_ok());
+}

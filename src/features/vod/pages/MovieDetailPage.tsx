@@ -163,7 +163,7 @@ export function MovieDetailPage() {
           <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
           <section className="mx-auto mt-6 flex w-full max-w-[1800px] flex-col gap-3 px-4 md:px-8" aria-label={t('about')}>
             <div className="flex flex-wrap items-center gap-2">{secondary}</div>
-            {model.plot && <p className="max-w-[72ch] text-[15px] leading-relaxed text-fg-muted">{model.plot}</p>}
+            {model.plot && <p dir="auto" className="max-w-[72ch] text-[15px] leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
           </section>
         </>
       ) : (

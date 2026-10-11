@@ -204,6 +204,12 @@ describe('Account panel', () => {
     expect(serverTimeText(undefined, 'Europe/Berlin', 'en')).toBe('Europe/Berlin');
     expect(serverTimeText('yesterday', 'Europe/Berlin', 'en')).toBe('yesterday, Europe/Berlin');
     expect(serverTimeText(undefined, undefined, 'en')).toBeUndefined();
+    // A bare wall clock (no `timestamp_now`) is already server time: shown as sent, never shifted (R2-r3 F3).
+    expect(serverTimeText('2026-10-11 18:00:00', 'Europe/Berlin', 'en')).toBe('2026-10-11 18:00:00, Europe/Berlin');
+    expect(serverTimeText('2026-10-11T18:00:00', 'Europe/Berlin', 'en')).toBe('2026-10-11T18:00:00, Europe/Berlin');
+    expect(serverTimeText('2026-10-11 18:00:00', undefined, 'en')).toBe('2026-10-11 18:00:00');
+    // An offset is an instant: converted into the zone.
+    expect(serverTimeText('2026-10-11T18:00:00+02:00', 'Europe/Berlin', 'en')).toMatch(/6:00\s?PM, Europe\/Berlin$/);
 
     rpcMock.handlers['sources.list'] = () => [xtream('x')];
     rpcMock.handlers['xtream.accountInfo'] = () => ({ status: 'Active', activeCons: 0, maxConnections: 1, isTrial: false, serverTime: at, timezone: 'Europe/Berlin' });

@@ -23,7 +23,7 @@ function Osd() {
     <div
       key={osd.key}
       aria-live="polite"
-      className="player-osd pointer-events-none absolute top-5 right-6 z-20 text-right text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
+      className="player-osd pointer-events-none absolute top-5 end-6 z-20 text-end text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
     >
       <div className={cn('font-display leading-none tabular-nums', /^\d+$/.test(osd.primary) ? 'text-6xl text-accent-hover' : 'text-2xl')}>
         {osd.primary}
@@ -63,7 +63,7 @@ function UpNextCard({ variant = 'overlay' }: { variant?: 'overlay' | 'strip' }) 
       className={cn(
         'overflow-hidden text-white',
         variant === 'overlay'
-          ? 'absolute right-4 bottom-24 z-30 w-72 rounded-lg border border-white/10 bg-[rgb(9_13_21/0.94)] shadow-2 motion-safe:animate-pop-in'
+          ? 'absolute end-4 bottom-24 z-30 w-72 rounded-lg border border-white/10 bg-[rgb(9_13_21/0.94)] shadow-2 motion-safe:animate-pop-in'
           : 'shrink-0 border-t border-white/10 bg-[#070b12]',
       )}
       onClick={(e) => e.stopPropagation()}

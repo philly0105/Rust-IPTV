@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within, configure } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, EpgProgram, ItemRef, Page, PageQuery, Settings } from '@/api/types';
@@ -9,6 +9,11 @@ import { HOUR, MINUTE, ms } from '../lib/epgTime';
 import { playChannel, resolveChannelSource } from '../lib/playback';
 import { StalkerPreviewQueue, isTransientEpgError } from '../lib/stalkerPreviewQueue';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
+
+// Under CPU load (a cargo build alongside) the 1 s findBy/waitFor default and the 5 s test default
+// time out before the mocked queries settle; these waits only ever succeed, so give them room.
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 // Fix wave 5: EPG offset in epg.nowNext, per-channel headers and display names for playback,
 // and a silent Stalker portal (stalker.epg timeout) as a recoverable state.
@@ -248,7 +253,7 @@ describe('Stalker guide timeouts in the views', () => {
     try {
       renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
       const notice = await screen.findByTestId('guide-unavailable');
-      expect(notice.textContent).toContain("The portal's guide is not answering");
+      expect(notice.textContent).toContain("The portal's guide isn't answering");
       await waitFor(() => expect(screen.getAllByTestId('row-guide-unavailable').length).toBeGreaterThan(0));
       const rowCalls = () => callsOf('stalker.epg').filter((c) => (c.args as { limit: number }).limit === 3).length;
       // At most the requests already in flight when the first timed out (two workers).

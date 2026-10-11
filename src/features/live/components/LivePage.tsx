@@ -48,7 +48,8 @@ const SIDEBAR_KEY = 'live.sidebarCollapsed';
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 
 export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const { toast } = useToast();
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -260,6 +261,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     selectNumber: (n) => void selectNumber(n),
     selectRef: (r) => void selectRef(r),
     current: playingChannel,
+    currentName: playingChannel ? displayChannelName(playingChannel.name, prefs.stripCountryPrefix) : undefined,
     currentNowNext,
   });
 
@@ -272,7 +274,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
         });
         await invalidate('favorites.');
-        toast({ title: res.isFavorite ? t('favoriteAdded', { name: channel.name }) : t('favoriteRemoved', { name: channel.name }), variant: 'success' });
+        const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+        toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
       } catch (err) {
         toast({
           title: wasFavorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'),
@@ -281,7 +284,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         });
       }
     },
-    [t, toast],
+    [t, toast, prefs.stripCountryPrefix],
   );
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
   const onContextMenu = useCallback((pos: { x: number; y: number }, channel: Channel) => setMenu({ pos, channel }), []);
@@ -496,7 +499,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         <div className="flex items-baseline justify-between px-3 pt-2 pb-1 text-xs text-fg-subtle">
           <span className="truncate">{subtitle}</span>
           <span className="tabular-nums" aria-live="polite">
-            {paged.total !== undefined ? t('channelCount', { count: paged.total, formatted: paged.total.toLocaleString() }) : ''}
+            {paged.total !== undefined ? t('channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : ''}
           </span>
         </div>
         {listBody}

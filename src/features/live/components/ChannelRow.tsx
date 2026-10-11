@@ -86,12 +86,12 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         <span className="w-8 shrink-0 text-end text-xs tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
         {!compact ? <ChannelLogo src={channel.logoUrl} name={name} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={`truncate text-sm ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
+          <span dir="auto" className={`truncate text-sm text-match-parent ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
           {cur ? (
             <>
               {/* The title takes the width; the remaining time stays a compact "38m" so narrow lists keep the title readable. */}
               <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-fg-muted">
-                <span className="min-w-0 flex-1 truncate" title={cur.title}>
+                <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" title={cur.title}>
                   {cur.title}
                 </span>
                 <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: left })}>
@@ -103,7 +103,8 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
               </span>
               {nxt && !compact ? (
                 <span className="truncate text-[11px] text-fg-subtle">
-                  {formatClock(ms(nxt.start), i18n.language)} {nxt.title}
+                  {formatClock(ms(nxt.start), i18n.language)}{' '}
+                  <bdi>{nxt.title}</bdi>
                 </span>
               ) : null}
             </>

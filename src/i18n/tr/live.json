@@ -61,7 +61,7 @@
   "guideSource": "Kaynak",
   "guideTime": "Rehber saati",
   "guideLoadFailed": "Rehberin bir kısmı yüklenemedi.",
-  "portalGuideUnavailable": "Portalın rehberi yanıt vermiyor. Otomatik olarak yeniden sorgulanacak.",
+  "portalGuideUnavailable": "Portalın rehberi yanıt vermiyor. Otomatik olarak yeniden deneniyor.",
   "guideNotAnswering": "Rehber yanıt vermiyor",
   "guideNoData": "Bu kanallar için henüz rehber verisi yok. Bir XMLTV adresi ekleyin veya EPG kaynaklarını yenileyin.",
   "guideNoSources": "Henüz kaynak yok",

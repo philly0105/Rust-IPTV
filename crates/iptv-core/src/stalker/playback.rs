@@ -10,6 +10,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgProgram, ItemRef, PlayerSource, StalkerSourceConfig};
 use crate::state::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
+use futures::future::{BoxFuture, FutureExt, Shared};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -388,11 +389,97 @@ async fn find_archive_program(
 /// Furthest `stalker.epg` looks back with `from`.
 const MAX_PAST_DAYS: i64 = 7;
 
-/// Overall budget of `stalker.epg` without `from` (short EPG, or the bulk
-/// fallback). Past it the call fails with the slow-portal message.
+/// Budget of the short EPG call in `stalker.epg`. A portal that gives no
+/// answer within it fails the call with the slow-portal message.
 pub const EPG_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
-/// Overall budget of `stalker.epg` with `from` (adds up to nine day tables).
+/// Overall budget of `stalker.epg` with `from`. The day tables read after
+/// the short EPG stop here; the call then returns what it has.
 pub const EPG_PAST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40);
+/// How long a bulk `get_epg_info` answer is reused for a source.
+const BULK_EPG_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// How long a failed bulk `get_epg_info` is remembered before it is asked
+/// again.
+const BULK_EPG_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+/// Longest a row whose short EPG answered empty waits for the bulk guide.
+/// The fetch itself carries on in the background and fills the cache.
+const BULK_EPG_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// One bulk `get_epg_info` answer: programmes keyed by channel id.
+#[derive(Debug)]
+pub struct BulkEpg {
+    by_channel: Map<String, Value>,
+    ok: bool,
+    at: std::time::Instant,
+}
+
+type BulkEpgFuture = Shared<BoxFuture<'static, Arc<BulkEpg>>>;
+
+/// The bulk guide of one source, fetched once and shared by every
+/// `stalker.epg` call (single flight) until it expires. The fetch runs as
+/// its own task, so a caller that stops waiting does not cancel it.
+#[derive(Clone)]
+pub struct BulkEpgEntry {
+    fut: BulkEpgFuture,
+}
+
+impl BulkEpgEntry {
+    fn start(client: &StalkerClient) -> Self {
+        let client = client.clone();
+        let task = tokio::spawn(async move {
+            let req = Req::new("itv", "get_epg_info")
+                .p("period", 6)
+                .timeout(LONG_TIMEOUT);
+            let (by_channel, ok) = match client.call(req).await {
+                Ok(js) => match js.get("data").cloned().unwrap_or(js) {
+                    Value::Object(m) => (m, true),
+                    _ => (Map::new(), true),
+                },
+                Err(err) => {
+                    tracing::debug!(error = %err, "stalker bulk EPG failed");
+                    (Map::new(), false)
+                }
+            };
+            Arc::new(BulkEpg {
+                by_channel,
+                ok,
+                at: std::time::Instant::now(),
+            })
+        });
+        let fut = async move {
+            task.await.unwrap_or_else(|_| {
+                Arc::new(BulkEpg {
+                    by_channel: Map::new(),
+                    ok: false,
+                    at: std::time::Instant::now(),
+                })
+            })
+        }
+        .boxed()
+        .shared();
+        Self { fut }
+    }
+
+    fn expired(&self) -> bool {
+        match self.fut.peek() {
+            Some(b) => b.at.elapsed() >= if b.ok { BULK_EPG_TTL } else { BULK_EPG_RETRY },
+            None => false,
+        }
+    }
+}
+
+/// The source's bulk guide: the cached answer, the fetch in flight, or a
+/// new fetch.
+fn bulk_epg(state: &AppState, client: &StalkerClient, source_id: &str) -> BulkEpgFuture {
+    let rt = super::Runtime::get(state);
+    let mut entry = rt
+        .bulk_epg
+        .entry(source_id.to_string())
+        .or_insert_with(|| BulkEpgEntry::start(client));
+    if entry.expired() {
+        *entry = BulkEpgEntry::start(client);
+    }
+    entry.fut.clone()
+}
 
 /// The day tables [`past_programmes`] reads: the UTC dates from `from`
 /// (at most [`MAX_PAST_DAYS`] back) through the day after `now`, each once.
@@ -402,38 +489,40 @@ fn past_days(from: DateTime<Utc>, now: DateTime<Utc>) -> Vec<NaiveDate> {
     first.iter_days().take_while(|d| *d <= last).collect()
 }
 
-/// Past programmes from `from` up to now, read from the day tables. The
-/// tables follow the portal's timezone (Europe/Paris), not UTC, so the
-/// programmes after local midnight sit in the next UTC date's table: that
-/// one is read too, and the caller drops what has not started yet.
+/// Past programmes from `from` up to now, read from the day tables into
+/// `out` as each table completes (three at a time), so a caller that stops
+/// waiting keeps the finished days. The tables follow the portal's timezone
+/// (Europe/Paris), not UTC, so the programmes after local midnight sit in
+/// the next UTC date's table: that one is read too, and the caller drops
+/// what has not started yet.
 async fn past_programmes(
     client: &StalkerClient,
     channel_id: &str,
     from: DateTime<Utc>,
     now: DateTime<Utc>,
-) -> CoreResult<Vec<Value>> {
-    let tables: Vec<CoreResult<Option<Vec<Value>>>> = stream::iter(past_days(from, now))
+    out: &mut Vec<Value>,
+) -> CoreResult<()> {
+    let mut tables = stream::iter(past_days(from, now))
         .map(|d| day_table(client, channel_id, d))
-        .buffered(3)
-        .collect()
-        .await;
-    let mut out = Vec::new();
-    for t in tables {
+        .buffer_unordered(3);
+    while let Some(t) = tables.next().await {
         if let Some(rows) = t? {
             out.extend(rows);
         }
     }
-    Ok(out)
+    Ok(())
 }
 
-/// `stalker.epg`: short EPG, falling back to the bulk `get_epg_info` when
-/// the portal answers without programmes. With `from`, the archived
-/// programmes since `from` (day tables, at most [`MAX_PAST_DAYS`] back) come
-/// first; `limit` caps the airing and upcoming ones.
+/// `stalker.epg`: short EPG, falling back to the source's bulk
+/// `get_epg_info` (cached per source) when the portal answers without
+/// programmes. With `from`, the archived programmes since `from` (day
+/// tables, at most [`MAX_PAST_DAYS`] back) come first; `limit` caps the
+/// airing and upcoming ones.
 ///
-/// The whole call is bounded by [`EPG_DEADLINE`] ([`EPG_PAST_DEADLINE`] with
-/// a past `from`). A portal that does not answer fails the call with its
-/// own message instead of falling back to slower calls or returning `[]`.
+/// Only the short EPG decides whether the portal is answering: no answer
+/// within [`EPG_DEADLINE`] fails the call with its own message. The bulk
+/// guide is waited for at most [`BULK_EPG_WAIT`] and the day tables until
+/// [`EPG_PAST_DEADLINE`]; past those the call returns what it has.
 pub async fn epg(
     state: &Arc<AppState>,
     r: &ItemRef,
@@ -443,6 +532,7 @@ pub async fn epg(
     if !matches!(r.content_type, ContentType::Live | ContentType::Radio) {
         return Err(CoreError::invalid("EPG is only available for channels"));
     }
+    let started = tokio::time::Instant::now();
     let limit = limit.unwrap_or(10).clamp(1, 50);
     let from = match from.map(str::trim).filter(|f| !f.is_empty()) {
         Some(f) => Some(
@@ -454,27 +544,17 @@ pub async fn epg(
     };
     let client = StalkerClient::for_source(state, &r.source_id).await?;
     let from = from.filter(|f| *f < Utc::now());
-    let budget = if from.is_some() {
-        EPG_PAST_DEADLINE
-    } else {
-        EPG_DEADLINE
-    };
-    match tokio::time::timeout(budget, portal_epg(state, &client, r, limit, from)).await {
-        Ok(res) => res,
-        Err(_) => {
-            tracing::debug!(source_id = %r.source_id, "stalker.epg ran out of time");
-            Err(session::slow_error(&client.config.portal_url))
-        }
-    }
+    portal_epg(state, &client, r, limit, from, started).await
 }
 
-/// The body of [`epg`], without its deadline.
+/// The body of [`epg`].
 async fn portal_epg(
     state: &Arc<AppState>,
     client: &StalkerClient,
     r: &ItemRef,
     limit: i64,
     from: Option<DateTime<Utc>>,
+    started: tokio::time::Instant,
 ) -> CoreResult<Vec<EpgProgram>> {
     let row = catalog_row(state, r).await.ok();
     let channel_id = row
@@ -482,13 +562,17 @@ async fn portal_epg(
         .and_then(|r| r.epg_channel_id.clone())
         .unwrap_or_else(|| r.item_id.clone());
 
-    let short = client
-        .call(
-            Req::new("itv", "get_short_epg")
-                .p("ch_id", &r.item_id)
-                .p("size", limit),
-        )
-        .await;
+    let short_req = Req::new("itv", "get_short_epg")
+        .p("ch_id", &r.item_id)
+        .p("size", limit);
+    let short = match tokio::time::timeout_at(started + EPG_DEADLINE, client.call(short_req)).await
+    {
+        Ok(res) => res,
+        Err(_) => {
+            tracing::debug!(source_id = %r.source_id, "stalker short EPG ran out of time");
+            return Err(session::slow_error(&client.config.portal_url));
+        }
+    };
     let mut entries = match short {
         Ok(js) => into_list(js),
         Err(err @ CoreError::Auth(_)) => return Err(err),
@@ -497,23 +581,18 @@ async fn portal_epg(
         Err(_) => Vec::new(),
     };
     if entries.is_empty() {
-        match client
-            .call(
-                Req::new("itv", "get_epg_info")
-                    .p("period", 6)
-                    .timeout(LONG_TIMEOUT),
-            )
-            .await
-        {
-            Ok(js) => {
-                let data = js.get("data").cloned().unwrap_or(js);
-                entries = match data.get(&r.item_id) {
-                    Some(Value::Array(a)) => a.clone(),
-                    _ => Vec::new(),
-                };
+        // The portal answered: whatever the bulk guide does, this row gets
+        // its (possibly empty) programmes, never an error.
+        let bulk = bulk_epg(state, client, &r.source_id);
+        match tokio::time::timeout(BULK_EPG_WAIT, bulk).await {
+            Ok(bulk) => {
+                if let Some(Value::Array(a)) = bulk.by_channel.get(&r.item_id) {
+                    entries = a.clone();
+                }
             }
-            Err(err) if no_answer(&err) => return Err(err),
-            Err(_) => {}
+            Err(_) => {
+                tracing::debug!(source_id = %r.source_id, "stalker bulk EPG still loading");
+            }
         }
     }
     let now_at = Utc::now();
@@ -529,12 +608,23 @@ async fn portal_epg(
 
     if let Some(from_at) = from.filter(|f| *f < now_at) {
         let from_s = from_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let past = match past_programmes(client, &r.item_id, from_at, now_at).await {
-            Ok(rows) => rows,
-            Err(err @ CoreError::Auth(_)) => return Err(err),
-            Err(err) if no_answer(&err) => return Err(err),
-            Err(_) => Vec::new(),
-        };
+        let mut past = Vec::new();
+        let read = past_programmes(client, &r.item_id, from_at, now_at, &mut past);
+        match tokio::time::timeout_at(started + EPG_PAST_DEADLINE, read).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err @ CoreError::Auth(_))) => return Err(err),
+            // The short EPG answered: keep it and the days read so far.
+            Ok(Err(err)) => {
+                tracing::debug!(source_id = %r.source_id, error = %err, "stalker archive EPG failed");
+            }
+            Err(_) => {
+                tracing::debug!(
+                    source_id = %r.source_id,
+                    rows = past.len(),
+                    "stalker archive EPG ran out of time; returning the days read so far"
+                );
+            }
+        }
         let earliest_upcoming = programs.first().map(|p| p.start.clone());
         programs.extend(
             past.iter()

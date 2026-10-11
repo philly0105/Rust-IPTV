@@ -18,16 +18,18 @@
 //! guarded client ([`client_for`]), whose DNS resolver and redirect
 //! policy refuse loopback, private and link-local addresses, and call
 //! [`check_fetch`] first. A source's own `host:port` is trusted for that
-//! source's fetches; `--allow-private-targets` turns the guard off. The
+//! source's fetches only: each trusted authority gets its own guarded client
+//! ([`guarded_client`]) and nothing is trusted process-wide.
+//! `--allow-private-targets` turns the guard off. The
 //! desktop app and tests without [`ServerMode`] are unaffected.
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::RequestHeaders;
 use crate::state::AppState;
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use rand::Rng;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -446,41 +448,23 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         || (s[0] == 0x2001 && s[1] == 0x0db8)) // documentation
 }
 
-/// Source authorities allowed to reach private addresses (each source's own
-/// `host:port`, recorded when the source is used).
-#[derive(Debug, Default)]
-pub struct TrustedHosts(RwLock<HashSet<Authority>>);
+/// Most guarded clients kept per cache; the cache starts over when full
+/// (clients already handed out keep working).
+const MAX_CACHED_CLIENTS: usize = 64;
 
-impl TrustedHosts {
-    pub fn insert(&self, auth: &Authority) {
-        if !self.0.read().contains(auth) {
-            self.0.write().insert(auth.clone());
-        }
-    }
-
-    /// Exact `host:port` match.
-    pub fn contains(&self, auth: &Authority) -> bool {
-        self.0.read().contains(auth)
-    }
-
-    /// Any port of `host` is trusted (DNS resolution only sees names).
-    pub fn contains_host(&self, host: &str) -> bool {
-        let host = normalize_host(host);
-        self.0.read().iter().any(|a| a.host == host)
-    }
-}
-
-/// DNS resolver of guarded clients: drops non-public addresses unless the
-/// name belongs to a trusted source or private targets are allowed.
+/// DNS resolver of a guarded client: drops non-public addresses unless the
+/// name is the host of the one authority this client trusts or private
+/// targets are allowed. Names carry no port, so the port rule lives in
+/// [`NetGuard::check`] and the redirect policy.
 pub struct GuardedResolver {
-    pub trusted: Arc<TrustedHosts>,
+    pub trusted: Option<Authority>,
     pub allow_private: bool,
 }
 
 impl Resolve for GuardedResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = normalize_host(name.as_str());
-        let trusted = self.allow_private || self.trusted.contains_host(&host);
+        let trusted = self.allow_private || self.trusted.as_ref().is_some_and(|t| t.host == host);
         Box::pin(async move {
             let all: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
             if all.is_empty() {
@@ -514,37 +498,30 @@ pub fn find_blocked(err: &(dyn std::error::Error + 'static)) -> Option<BlockedTa
     None
 }
 
-/// Guard policy shared by the server's proxy and the core's guarded client.
+/// Guard policy shared by the server's proxy and the core's guarded clients.
+/// Trust is per request: every check takes the requesting source's own
+/// authority, and nothing is remembered between requests.
 #[derive(Debug, Default)]
 pub struct NetGuard {
-    pub trusted: Arc<TrustedHosts>,
     pub allow_private: bool,
 }
 
 impl NetGuard {
     pub fn new(allow_private: bool) -> Self {
-        Self {
-            trusted: Arc::default(),
-            allow_private,
-        }
+        Self { allow_private }
     }
 
-    /// Records a source's own authority as trusted.
-    pub fn trust(&self, auth: &Authority) {
-        self.trusted.insert(auth);
-    }
-
-    /// Resolver for a client that follows this policy.
-    pub fn resolver(&self) -> Arc<GuardedResolver> {
+    /// Resolver for a client that trusts only `trusted` (or nothing).
+    pub fn resolver(&self, trusted: Option<&Authority>) -> Arc<GuardedResolver> {
         Arc::new(GuardedResolver {
-            trusted: self.trusted.clone(),
+            trusted: trusted.cloned(),
             allow_private: self.allow_private,
         })
     }
 
-    /// [`check_target`], plus: a host name trusted only on another port
-    /// (the resolver trusts names, not ports) is resolved now and refused
-    /// when it points at a non-public address.
+    /// [`check_target`], plus: the trusted host name on another port (the
+    /// resolver trusts names, not ports) is resolved now and refused when it
+    /// points at a non-public address.
     pub async fn check(&self, url: &Url, trusted: Option<&Authority>) -> Result<(), TargetError> {
         check_target(url, trusted, self.allow_private)?;
         if self.allow_private {
@@ -553,7 +530,7 @@ impl NetGuard {
         let Some(auth) = Authority::of(url) else {
             return Ok(());
         };
-        if !self.needs_port_check(url, &auth, trusted) {
+        if !needs_port_check(url, &auth, trusted) {
             return Ok(());
         }
         let addrs: Vec<SocketAddr> = tokio::net::lookup_host((auth.host.as_str(), auth.port))
@@ -565,7 +542,7 @@ impl NetGuard {
 
     /// The port rule of [`NetGuard::check`] for the synchronous redirect
     /// policy. Resolves with a blocking lookup, which only happens for a
-    /// redirect to a trusted host name on a port that is not trusted.
+    /// redirect to the trusted host name on another port.
     fn check_other_port_blocking(
         &self,
         url: &Url,
@@ -577,7 +554,7 @@ impl NetGuard {
         let Some(auth) = Authority::of(url) else {
             return Ok(());
         };
-        if !self.needs_port_check(url, &auth, trusted) {
+        if !needs_port_check(url, &auth, trusted) {
             return Ok(());
         }
         use std::net::ToSocketAddrs;
@@ -587,14 +564,12 @@ impl NetGuard {
             .unwrap_or_default();
         other_port_verdict(&auth, &addrs)
     }
+}
 
-    /// A host name trusted only on another port.
-    fn needs_port_check(&self, url: &Url, auth: &Authority, trusted: Option<&Authority>) -> bool {
-        matches!(url.host(), Some(Host::Domain(_)))
-            && trusted != Some(auth)
-            && !self.trusted.contains(auth)
-            && self.trusted.contains_host(&auth.host)
-    }
+/// The trusted host name on a port other than the trusted one.
+fn needs_port_check(url: &Url, auth: &Authority, trusted: Option<&Authority>) -> bool {
+    matches!(url.host(), Some(Host::Domain(_)))
+        && trusted.is_some_and(|t| t != auth && t.host == auth.host)
 }
 
 fn other_port_verdict(auth: &Authority, addrs: &[SocketAddr]) -> Result<(), TargetError> {
@@ -606,12 +581,71 @@ fn other_port_verdict(auth: &Authority, addrs: &[SocketAddr]) -> Result<(), Targ
     Ok(())
 }
 
-/// Marker and guarded client installed by the server binary (extension
+type MakeClient = dyn Fn(Option<&Authority>) -> reqwest::Client + Send + Sync;
+
+/// Guarded clients keyed by the one authority each trusts (`None`: trusts
+/// nothing), built on demand. A client's resolver and redirect policy trust
+/// only its own key, so one source's trust never reaches another request.
+pub struct GuardedClients {
+    make: Box<MakeClient>,
+    cache: Mutex<HashMap<Option<Authority>, reqwest::Client>>,
+}
+
+impl GuardedClients {
+    /// `make` builds the client for one key (resolver from
+    /// [`NetGuard::resolver`] with that key).
+    pub fn new(
+        make: impl Fn(Option<&Authority>) -> reqwest::Client + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            make: Box::new(make),
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The client that trusts exactly `trusted` (or nothing).
+    pub fn get(&self, trusted: Option<&Authority>) -> reqwest::Client {
+        let key = trusted.cloned();
+        let mut cache = self.cache.lock();
+        if let Some(c) = cache.get(&key) {
+            return c.clone();
+        }
+        if cache.len() >= MAX_CACHED_CLIENTS {
+            cache.clear();
+        }
+        let c = (self.make)(trusted);
+        cache.insert(key, c.clone());
+        c
+    }
+}
+
+/// Redirect policy of a core guarded client that trusts `trusted`: every hop
+/// is checked against that authority only. IP literals are checked here;
+/// host names by the resolver when the redirect connects, except the trusted
+/// name on another port, which gets [`NetGuard::check`]'s port rule here.
+fn guarded_redirect(guard: Arc<NetGuard>, trusted: Option<Authority>) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            return attempt.error(format!("stopped after {MAX_REDIRECTS} redirects"));
+        }
+        let url = attempt.url();
+        let checked = check_target(url, trusted.as_ref(), guard.allow_private)
+            .and_then(|()| guard.check_other_port_blocking(url, trusted.as_ref()));
+        match checked {
+            Ok(()) => attempt.follow(),
+            Err(TargetError::Invalid(m) | TargetError::Forbidden(m)) => {
+                attempt.error(BlockedTarget(m))
+            }
+        }
+    })
+}
+
+/// Marker and guarded clients installed by the server binary (extension
 /// [`SERVER_MODE_EXT`]). Its presence means "server mode": file access by
 /// path and download-folder changes are refused, and fetches are guarded.
 pub struct ServerMode {
     pub guard: Arc<NetGuard>,
-    client: reqwest::Client,
+    clients: GuardedClients,
 }
 
 /// Extension key of [`ServerMode`].
@@ -624,39 +658,22 @@ impl ServerMode {
             return None;
         }
         let guard = Arc::new(NetGuard::new(allow_private));
-        let policy_guard = guard.clone();
-        let redirect = reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= MAX_REDIRECTS {
-                return attempt.error(format!("stopped after {MAX_REDIRECTS} redirects"));
-            }
-            let url = attempt.url();
-            // IP literals are checked here (exact host:port trust); host
-            // names by the resolver when the redirect connects, except a
-            // name trusted only on another port (the resolver trusts names
-            // on every port), which gets NetGuard::check's port rule here.
-            let trusted = Authority::of(url).filter(|a| policy_guard.trusted.contains(a));
-            let checked = check_target(url, trusted.as_ref(), policy_guard.allow_private)
-                .and_then(|()| policy_guard.check_other_port_blocking(url, trusted.as_ref()));
-            match checked {
-                Ok(()) => attempt.follow(),
-                Err(TargetError::Invalid(m) | TargetError::Forbidden(m)) => {
-                    attempt.error(BlockedTarget(m))
-                }
-            }
+        let g = guard.clone();
+        let clients = GuardedClients::new(move |trusted| {
+            build(
+                builder(None)
+                    .redirect(guarded_redirect(g.clone(), trusted.cloned()))
+                    .dns_resolver(g.resolver(trusted)),
+            )
         });
-        let client = build(
-            builder(None)
-                .redirect(redirect)
-                .dns_resolver(guard.resolver()),
-        );
-        let mode = Arc::new(Self { guard, client });
+        let mode = Arc::new(Self { guard, clients });
         state.set_ext(SERVER_MODE_EXT, mode.clone());
         Some(mode)
     }
 
-    /// The guarded client.
-    pub fn client(&self) -> &reqwest::Client {
-        &self.client
+    /// The guarded client that trusts exactly `trusted` (or nothing).
+    pub fn client(&self, trusted: Option<&Authority>) -> reqwest::Client {
+        self.clients.get(trusted)
     }
 }
 
@@ -673,34 +690,51 @@ pub fn is_server_mode(state: &AppState) -> bool {
     server_mode(state).is_some()
 }
 
-/// Client for fetching user-supplied URLs: the guarded client in server
-/// mode, otherwise `state.http`.
-pub fn client_for(state: &AppState) -> reqwest::Client {
+/// Client for a fetch on behalf of the source whose own authority is
+/// `trusted` (`None`: no source): in server mode the guarded client that
+/// trusts exactly that authority, otherwise `state.http`. Pass the same
+/// `trusted` as to [`check_fetch`].
+pub fn guarded_client(state: &AppState, trusted: Option<&Authority>) -> reqwest::Client {
     match server_mode(state) {
-        Some(mode) => mode.client.clone(),
+        Some(mode) => mode.client(trusted),
         None => state.http.clone(),
     }
+}
+
+/// Client for fetching user-supplied URLs that trusts no source: the guarded
+/// client in server mode, otherwise `state.http`.
+pub fn client_for(state: &AppState) -> reqwest::Client {
+    guarded_client(state, None)
+}
+
+/// [`guarded_client`] trusting the stored source `source_id`'s authority
+/// (nothing when the source does not exist or cannot be read).
+pub async fn source_client(state: &AppState, source_id: &str) -> reqwest::Client {
+    if !is_server_mode(state) {
+        return state.http.clone();
+    }
+    let trusted = source_authority(state, source_id)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "could not read the source's address; fetching untrusted");
+            None
+        });
+    guarded_client(state, trusted.as_ref())
 }
 
 /// Client for a source's own API (Xtream server, Stalker portal). In server
-/// mode this is the guarded client with the `host:port` of `own_url` (the
-/// configured server or portal URL) trusted, so redirects elsewhere stay
-/// guarded; otherwise `state.http`.
+/// mode this is the guarded client that trusts only the `host:port` of
+/// `own_url` (the configured server or portal URL), so redirects elsewhere
+/// stay guarded and no other request gains that trust; otherwise
+/// `state.http`.
 pub fn trusted_client(state: &AppState, own_url: &str) -> reqwest::Client {
-    match server_mode(state) {
-        Some(mode) => {
-            if let Some(a) = Authority::parse_lenient(own_url) {
-                mode.guard.trust(&a);
-            }
-            mode.client.clone()
-        }
-        None => state.http.clone(),
-    }
+    guarded_client(state, Authority::parse_lenient(own_url).as_ref())
 }
 
 /// Validates a URL about to be fetched in server mode (no-op otherwise).
-/// `trusted` is the requesting source's own authority; it is recorded so the
-/// guarded resolver lets that host resolve to a private address.
+/// `trusted` is the requesting source's own authority; fetch with
+/// [`guarded_client`] for the same authority so the connection and its
+/// redirects follow the same trust.
 pub async fn check_fetch(
     state: &AppState,
     url: &str,
@@ -711,9 +745,6 @@ pub async fn check_fetch(
     };
     let parsed = Url::parse(url.trim())
         .map_err(|_| CoreError::Invalid("The address is not a valid URL.".into()))?;
-    if let Some(t) = trusted {
-        mode.guard.trust(t);
-    }
     mode.guard.check(&parsed, trusted).await.map_err(Into::into)
 }
 
@@ -943,7 +974,6 @@ mod tests {
         let g = NetGuard::new(false);
         // localhost names are refused outright unless trusted exactly.
         let lh = a("localhost", 8080);
-        g.trust(&lh);
         assert!(g
             .check(&u("http://localhost:8080/a"), Some(&lh))
             .await

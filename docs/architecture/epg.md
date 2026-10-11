@@ -1,13 +1,13 @@
 # EPG (XMLTV)
 
-Code: `crates/iptv-core/src/epg/`. Tests: `crates/iptv-core/tests/epg_parser.rs`, `epg_store.rs`, `epg_http.rs`, `epg_perf.rs` (check 5), and `epg_limits.rs` (hostile-size feeds), plus unit tests in `xmltv.rs` and `ingest.rs`.
+Code: `crates/iptv-core/src/epg/`. Tests: `crates/iptv-core/tests/epg_parser.rs`, `epg_store.rs`, `epg_http.rs`, `epg_perf.rs` (check 5), `epg_limits.rs` (hostile-size feeds), `epg_clear_all.rs` and `epg_now_next_offset.rs`, plus unit tests in `xmltv.rs` and `ingest.rs`.
 
 ## Layout
 
 | File | Role |
 | --- | --- |
 | `mod.rs` | Public async API behind the RPC commands. `init`. |
-| `rpc.rs` | Registers the ten `epg.*` commands. |
+| `rpc.rs` | Registers the eleven `epg.*` commands. |
 | `fetch.rs` | Classifies a URL as remote or local, downloads remote bodies to a temp file, and opens a decoding reader (gzip, BOM). |
 | `xmltv.rs` | Streaming quick-xml parser and XMLTV date parsing. |
 | `store.rs` | `epg_sources` bookkeeping, the configured-URL merge, the staging writer, the atomic swap, pruning. |
@@ -43,6 +43,7 @@ Size limits, enforced by a byte-level guard between the decoded reader and quick
 - Tag: a single tag (attributes included) larger than `MAX_NODE_BYTES` is an Invalid error, because cutting it would corrupt the document. A `<!DOCTYPE ...>` declaration is capped the same way, and a processing instruction is cut like a text node.
 - The byte filter splits nodes exactly where quick-xml 0.37 splits events (`>` inside a quoted attribute value, `<`/`>` nesting in a DOCTYPE subset, `<?` to the first `?>`, `<![` to `]]>`, `<!-` plus one byte to `-->`), so no single event can grow past the cap (`epg_limits::single_event_bombs_stay_under_the_node_cap`).
 - Download: body chunks are read through `http::next_body_chunk`, so a server that stops mid-body fails after `BODY_IDLE_TIMEOUT` (20 s) with a Timeout that names the host.
+- Nesting, ids and held programmes: past `MAX_OPEN_DEPTH` (256) open elements or 64 KB of open names, quick-xml's stack of open names is dropped and parsing continues, so unclosed tags (a stray `<br>`, or a `<a><a>...` bomb) cost no memory. A channel id or programme `channel` over `MAX_ID_BYTES` (1 KB) skips the element (counted in `skippedInvalid`), and an icon URL over `MAX_URL_BYTES` (4 KB) is dropped. Stop-less programmes starting after the window are skipped at once; at most `MAX_PENDING` (100k, or 64 MB) wait for their next programme, and past that the oldest gets start + 1 h (`fix3_robust_epg`).
 - `xmltv::parse_with_limits` takes both limits explicitly; `parse` uses the constants.
 
 - `<channel id>`: the first non-empty `display-name` and the first non-empty `icon src`.
@@ -97,7 +98,7 @@ The channel directory is cached and rebuilt when the generation counter changes,
   - Programme times are returned as RFC 3339 UTC.
   - Rows from all enabled URLs are merged in start order. Zero-length rows are dropped, equal starts are deduplicated, and overlaps are clipped to the next start.
   - At most 3000 programmes are returned per channel.
-  - `epg.nowNext` also takes `offsetMinutes` (`settings.epgOffsetMinutes`, -720..720). The UI shows every programme moved by the offset, so "now" is the programme airing at `now - offset`; times still come back unshifted and the UI shifts them, so channel rows, the dashboard rail and the ribbon agree. On Stalker sources the UI's row previews treat a `stalker.epg` timeout or network error as a source-wide outage: the preview queue pauses that source (30 s, doubling to 5 min), rows say the guide is not answering, and one "Try again" asks at once.
+  - `epg.nowNext` also takes `offsetMinutes` (`settings.epgOffsetMinutes`, -720..720). The UI shows every programme moved by the offset, so "now" is the programme airing at `now - offset`; times still come back unshifted and the UI shifts them, so channel rows, the dashboard rail and the ribbon agree. On Stalker sources the UI's row previews treat a `stalker.epg` timeout or network error as a source-wide outage: the preview queue pauses that source (30 s, doubling to 5 min), rows say the guide is not answering, and one "Try again" asks at once. The pause and the cached answers belong to the source, not to one view: the live list, the /epg grid and a moved grid window share them (answers keyed by channel, `limit` and `from`). The /epg grid asks `epg.grid` (and the Stalker archive `from`) for its display window moved back by the offset, then shifts the answer for display.
 - `epg.channelsSearch {query, limit?}` is a LIKE search on display name or id. Results are ordered by name prefix, then id prefix, then length. The default limit is 50 and the maximum is 500.
 - `epg.setMapping {ref, epgChannelId|null}` and `epg.clearMapping {ref}` write or delete the manual row.
 - `epg.clearAll` deletes every programme and guide channel in one transaction and resets each URL to `idle` with zero counts, no error and no ETag (so the next refresh downloads the whole feed). URLs, enabled flags, `last_fetch_at` (so the scheduler does not re-download at once) and manual mappings are kept, as are the staging rows of a refresh that is running. It bumps the runtime generation and emits `epg.changed`.

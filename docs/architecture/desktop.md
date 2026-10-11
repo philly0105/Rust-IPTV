@@ -18,12 +18,12 @@ On desktop the webview fetches streams itself (hls.js, Shaka, mpegts.js, `<video
 `proxy::start` binds `127.0.0.1:0` (a random free port on the IPv4 loopback interface only, never `0.0.0.0`) and serves one route on the Tauri async runtime:
 
 ```
-GET|HEAD http://127.0.0.1:<port>/api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=]
+GET|HEAD http://127.0.0.1:<port>/<token>/api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=]
 ```
 
-This is the same handler as the server's `/api/proxy` ([server.md](server.md)): stored source headers plus the `ua`/`referer`/`origin` overrides, Range pass-through, redirect handling, and HLS playlist rewriting (segment and key URIs point back at the proxy). Every other path, including `/api/rpc`, `/api/events` and `/api/files`, answers 404. The proxy builds its own `iptv_server::Server` with an empty `RpcRouter`, so nothing but the stream route is reachable.
+This is the same handler as the server's `/api/proxy` ([server.md](server.md)): stored source headers plus the `ua`/`referer`/`origin` overrides, Range pass-through, redirect handling, and HLS playlist rewriting (segment and key URIs point back at the proxy). A path without the token answers 403 (see Guards); under the token, every other path, including `/<token>/api/rpc`, `/<token>/api/events` and `/<token>/api/files`, answers 404. The proxy builds its own `iptv_server::Server` with an empty `RpcRouter`, so nothing but the stream route is reachable. DASH manifests pass through unrewritten; the inline player (`proxyRewrite` in `src/features/player/engines.ts`) resolves their segment, key and BaseURL URIs against the upstream manifest URL and sends them back through the same proxy base (web `/api/proxy` or this token base) with the same `sourceId`/`ua`/`referer`/`origin` params.
 
-`setup` stores the returned base URL (`http://127.0.0.1:<port>/api/proxy`) in AppState (`DesktopInfo.proxy_base`), and `app.info` returns it as `proxyBase` (`null` in server mode). The UI reads it once at startup (`src/api/transport.ts`). On desktop, `proxiedUrl(source)` routes an `http(s)` URL through `proxyBase` when the source has request headers or when the page is `https:` and the stream is plain `http:` (mixed content); everything else loads directly, and local files go through the asset protocol. If the listener cannot bind, the error is logged, `proxyBase` stays `null`, and header-bearing streams play directly without their headers.
+`setup` stores the returned base URL (`http://127.0.0.1:<port>/<token>/api/proxy`) in AppState (`DesktopInfo.proxy_base`), and `app.info` returns it as `proxyBase` (`null` in server mode). The UI reads it once at startup (`src/api/transport.ts`). On desktop, `proxiedUrl(source)` routes an `http(s)` URL through `proxyBase` when the source has request headers or when the page is `https:` and the stream is plain `http:` (mixed content); everything else loads directly, and local files go through the asset protocol. If the listener cannot bind, the error is logged, `proxyBase` stays `null`, and header-bearing streams play directly without their headers.
 
 ### Guards
 

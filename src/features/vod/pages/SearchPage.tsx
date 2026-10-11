@@ -5,7 +5,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 import { useTranslation } from 'react-i18next';
 import { useParams, useSearchParams } from 'react-router';
 
-import { useRpcQuery } from '@/api/query';
+import { rpcKey, useRpcQuery } from '@/api/query';
+import type { CatalogSearchResult } from '@/api/rpc';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type { Channel, Page, SeriesItem, Source, VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
@@ -27,6 +28,7 @@ import {
   type SearchGroup,
   type SearchHit,
   type SearchMore,
+  type SourceSearch,
 } from '../lib/search';
 import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, cn, gridLayout, useToast } from '@/ui';
 
@@ -138,16 +140,45 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     () => (facet ? capSearchResult(facetBase.data, SEARCH_LIMIT) : capped),
     [facet, facetBase.data, capped],
   );
+  // When a type hits its cap, the global list cannot tell how many hits each
+  // source lost, so every source is also searched alone, with exactly the args
+  // its facet uses (choosing a chip then reads the cache). Chips count from these.
+  const anyCapped = facetCapped.more.live || facetCapped.more.movies || facetCapped.more.series;
+  const perSourceTargets = useMemo(() => (!scoped && !!query && anyCapped ? allSources : []), [scoped, query, anyCapped, allSources]);
+  const perSourceQ = useQueries({
+    queries: perSourceTargets.map((s) => {
+      const args = { query, sourceId: s.id, limit: searchRequestLimit(SEARCH_LIMIT) };
+      return {
+        queryKey: rpcKey('catalog.search', args),
+        queryFn: async () => (await rpcRaw('catalog.search', args)) as CatalogSearchResult,
+        staleTime: 30_000,
+      };
+    }),
+  });
+  const perSourceStamp = perSourceQ.map((r) => r.dataUpdatedAt).join(',');
+  const perSource = useMemo(() => {
+    const map = new Map<string, SourceSearch>();
+    perSourceTargets.forEach((s, i) => {
+      const data = perSourceQ[i]?.data;
+      if (!data) return;
+      const own = capSearchResult(data, SEARCH_LIMIT);
+      map.set(s.id, {
+        groups: groupSearchResults({ result: own.result, extraMovies: stalker.movies, extraSeries: stalker.series, sources: allSources, sourceFilter: s.id }),
+        more: own.more,
+      });
+    });
+    return map;
+  }, [perSourceStamp, perSourceTargets, stalker.movies, stalker.series, allSources]); // eslint-disable-line react-hooks/exhaustive-deps
   const facets = useMemo(
     () =>
       scoped
         ? []
         : sourceFacets(
             groupSearchResults({ result: facetCapped.result, extraMovies: stalker.movies, extraSeries: stalker.series, sources: allSources }),
-            // A source in a capped type counts a lower bound, so its chip reads "N+".
             facetCapped.more,
+            perSource,
           ),
-    [scoped, facetCapped.result, facetCapped.more, stalker.movies, stalker.series, allSources],
+    [scoped, facetCapped.result, facetCapped.more, stalker.movies, stalker.series, allSources, perSource],
   );
 
   const scopeName = scopedSource.data?.name;
@@ -198,6 +229,21 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     body = <SearchSkeleton />;
   } else if (groups.length === 0 && stalker.error) {
     body = <ErrorState error={stalker.error} onRetry={stalker.retry} />;
+  } else if (groups.length === 0 && facet) {
+    // A facet kept from an earlier query: say so, and offer the way out (the chips only render with results).
+    const facetName = allSources.find((s) => s.id === facet)?.name ?? facets.find((f) => f.sourceId === facet)?.sourceName;
+    body = (
+      <EmptyState
+        icon={<SearchX size={28} />}
+        title={facetName ? t('noResultsInSourceTitle', { query, source: facetName }) : t('noResultsTitle', { query })}
+        description={t('noResultsInSourceHint')}
+        action={
+          <Button variant="secondary" onClick={() => setFacet(undefined)}>
+            {t('searchAllSources')}
+          </Button>
+        }
+      />
+    );
   } else if (groups.length === 0) {
     body = <EmptyState icon={<SearchX size={28} />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />;
   } else {
@@ -326,7 +372,7 @@ function ResultGroup({
   const title = (
     <>
       {t(`group_${group.kind}`)}
-      <span className="tabular ml-2 text-sm font-normal text-fg-subtle">
+      <span className="tabular ms-2 text-sm font-normal text-fg-subtle">
         {more ? t('searchCountMore', { count: group.hits.length }) : group.hits.length}
       </span>
     </>
@@ -340,7 +386,8 @@ function ResultGroup({
         render={(h, i) => (
           <PosterCard
             index={i}
-            title={h.title}
+            title={(h.item as VodItem | SeriesItem).titleBase || h.title}
+            fullTitle={h.title}
             href={h.href ?? '#'}
             posterUrl={h.imageUrl}
             meta={h.meta}
@@ -458,13 +505,13 @@ function ChannelGrid({
                     type="button"
                     data-grid-index={i}
                     onClick={() => onPlayChannel(c, h)}
-                    className="flex w-full items-center gap-3 rounded-md border border-border bg-surface p-2 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+                    className="flex w-full items-center gap-3 rounded-md border border-border bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
                   >
                     <div className="w-12 shrink-0">
                       <Poster src={h.imageUrl} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-fg">{h.title}</div>
+                      <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>
                       <div className="tabular truncate text-xs text-fg-subtle">{h.meta}</div>
                     </div>
                     {showBadges && <Badge variant="outline" className="max-w-[110px] shrink-0 truncate">{h.sourceName}</Badge>}

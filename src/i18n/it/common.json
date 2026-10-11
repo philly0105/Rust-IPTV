@@ -35,7 +35,7 @@
   "errorTitleInternal": "Qualcosa è andato storto",
 
   "errorHintNetwork": "Controlla la connessione e l'URL del fornitore, poi riprova.",
-  "errorBodyServerUnreachable": "Il server interno dell'app non risponde, quindi non è stato possibile caricare nulla.",
+  "errorBodyServerUnreachable": "Il server di Tsrust IPTV non risponde, quindi non è stato possibile caricare nulla.",
   "errorHintServerUnreachable": "Verifica che il server di Tsrust IPTV sia ancora in esecuzione, poi riprova.",
   "errorTechnicalDetails": "Dettagli tecnici",
   "errorHintTimeout": "Il fornitore potrebbe essere occupato. Riprova tra un momento.",

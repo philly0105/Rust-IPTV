@@ -15,5 +15,5 @@
 
 pub use iptv_core::http::{
     check_target, find_blocked, is_public_ip, normalize_host, Authority, BlockedTarget,
-    GuardedResolver, NetGuard, TargetError, TrustedHosts,
+    GuardedClients, GuardedResolver, NetGuard, TargetError,
 };

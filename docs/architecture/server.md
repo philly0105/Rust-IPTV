@@ -116,14 +116,16 @@ message names that flag. Loopback, RFC 1918, link-local (including
 NAT64/6to4-embedded private addresses are refused. IP literals are checked
 per hop; host names are checked by the proxy client's own DNS resolver at
 connect time, so a name cannot pass the check and then rebind to a private
-address. Source authorities that were used are remembered (until restart) as
-trusted to resolve privately.
+address. Trust is per request: each request gets a client whose resolver
+trusts only the requesting source's own host (nothing is remembered), so
+using one source never opens its host to requests without a source, to
+another source, or to a redirect from another source.
 
 The same guard lives in `iptv_core::http` (`NetGuard`, `ServerMode`), and
 `iptv-server` installs it on the core at startup: in server mode downloads,
 M3U URL imports, XMLTV downloads and Xtream/Stalker API calls use a guarded
-client too, each trusting only its own source's `host:port` (a guide detected
-from a source trusts that source's `host:port`). Its redirect policy applies
+client too, each trusting only its own source's `host:port` (a guide URL is
+trusted when any source listing it sits on its `host:port`). Its redirect policy applies
 the port rule above: a redirect to another port of a trusted host name that
 resolves privately is refused. No client sends `Referer`, so redirects never
 carry Xtream credentials. Local EPG paths and `file://` guide URLs are

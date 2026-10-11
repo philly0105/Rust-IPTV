@@ -58,7 +58,8 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
           <div className="flex flex-col gap-2">
             <h1
               id="vod-detail-title"
-              className="font-display text-[clamp(28px,3.4vw,56px)] leading-[1.05] font-semibold tracking-[-0.01em] text-fg"
+              dir="auto"
+              className="text-match-parent font-display text-[clamp(28px,3.4vw,56px)] leading-[1.05] font-semibold tracking-[-0.01em] text-fg"
             >
               {model.titleBase ?? model.title}
             </h1>
@@ -86,7 +87,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
           {note && <div className="text-xs text-fg-subtle">{note}</div>}
           {model.plot && (
             <div className="max-w-[72ch]">
-              <p className={cn('text-[15px] leading-relaxed text-fg-muted', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
+              <p dir="auto" className={cn('text-[15px] leading-relaxed text-fg-muted text-match-parent', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
               {plotLong && (
                 <button type="button" className="mt-1 text-sm font-medium text-accent hover:underline" onClick={() => setExpanded((v) => !v)}>
                   {expanded ? t('showLess') : t('showMore')}
@@ -131,7 +132,7 @@ function Backdrop({ url, blurred }: { url?: string; blurred: boolean }) {
         />
       )}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg/10 via-bg/60 to-bg" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-bg/80 via-bg/20 to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-bg/80 rtl:bg-gradient-to-l via-bg/20 to-transparent" />
     </div>
   );
 }

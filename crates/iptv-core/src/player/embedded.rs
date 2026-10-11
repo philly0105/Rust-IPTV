@@ -41,20 +41,12 @@ const PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long `mpv.detach` waits for mpv to quit before killing it.
 const QUIT_GRACE: Duration = Duration::from_secs(2);
 
-/// IPC commands `mpv.command` refuses: process control belongs to
-/// attach/detach, and nothing from the UI may run programs or scripts.
-const BLOCKED_COMMANDS: &[&str] = &[
-    "quit",
-    "quit-watch-later",
-    "run",
-    "subprocess",
-    "load-script",
-    "stop-screensaver",
-    // These write files at a caller-chosen path.
-    "dump-cache",
-    "screenshot-to-file",
-    "write-watch-later-config",
-];
+/// IPC commands `mpv.command` accepts besides [`PROPERTY_COMMANDS`]: what
+/// the player UI sends (`seek`) and read-only property queries. Everything
+/// else is refused, including mpv's command prefixes (`no-osd`, `async`,
+/// `raw`, ...), which would otherwise smuggle any command in as an argument,
+/// and `keybind`, `run`, `loadfile`, `dump-cache`, `screenshot-to-file`.
+const ALLOWED_COMMANDS: &[&str] = &["seek", "get_property", "get_property_string"];
 
 /// Properties `mpv.setProperty` (and property commands sent through
 /// `mpv.command`) may change: the playback controls the UI exposes. Anything
@@ -74,7 +66,8 @@ pub const SETTABLE_PROPERTIES: &[&str] = &[
     "time-pos",
 ];
 
-/// IPC commands whose first argument names a property to change.
+/// IPC commands whose first argument names a property to change; accepted
+/// only for [`SETTABLE_PROPERTIES`].
 const PROPERTY_COMMANDS: &[&str] = &[
     "set",
     "set_property",
@@ -83,7 +76,6 @@ const PROPERTY_COMMANDS: &[&str] = &[
     "multiply",
     "cycle",
     "cycle-values",
-    "change-list",
 ];
 
 /// Refuses property names outside [`SETTABLE_PROPERTIES`].
@@ -383,17 +375,17 @@ pub async fn command(state: &Arc<AppState>, cmd: Vec<Value>) -> CoreResult<Value
     s.client.command(cmd).await
 }
 
-/// Rejects empty commands, non-scalar arguments, [`BLOCKED_COMMANDS`], and
-/// property commands aimed outside [`SETTABLE_PROPERTIES`].
+/// Accepts only [`ALLOWED_COMMANDS`] and [`PROPERTY_COMMANDS`] aimed at
+/// [`SETTABLE_PROPERTIES`], with scalar arguments.
 pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
     let Some(name) = cmd.first().and_then(Value::as_str) else {
         return Err(CoreError::invalid(
             "mpv command must start with a command name",
         ));
     };
-    if BLOCKED_COMMANDS.contains(&name) {
+    if !ALLOWED_COMMANDS.contains(&name) && !PROPERTY_COMMANDS.contains(&name) {
         return Err(CoreError::invalid(format!(
-            "mpv command {name:?} is not allowed here; use mpv.detach to stop the player"
+            "mpv command {name:?} is not allowed here"
         )));
     }
     if cmd.iter().any(|v| v.is_object() || v.is_array()) {

@@ -61,7 +61,7 @@
   "guideSource": "ソース",
   "guideTime": "番組表の時刻",
   "guideLoadFailed": "番組表の一部を読み込めませんでした。",
-  "portalGuideUnavailable": "ポータルの番組表が応答していません。自動的に再取得します。",
+  "portalGuideUnavailable": "ポータルの番組表が応答していません。自動的に再試行しています。",
   "guideNotAnswering": "番組表が応答していません",
   "guideNoData": "これらのチャンネルの番組表データはまだありません。XMLTVのアドレスを追加するか、EPGソースを更新してください。",
   "guideNoSources": "ソースがまだありません",

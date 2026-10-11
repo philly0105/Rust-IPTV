@@ -165,6 +165,19 @@ describe('episodes', () => {
     expect(resumeTarget([], [])).toBeUndefined();
   });
 
+  it('replays a barely-started episode from the start (R2-r3 F2)', () => {
+    const order = episodeOrder(seasons); // a1 a2 b1 b2 sp1
+    const pos = (episodeId: string, positionSeconds: number, updatedAt: string, watched = false) => ({ ref: sref, episodeId, positionSeconds, durationSeconds: 1500, updatedAt, watched });
+    // Played S01E01 for 6 s: Play S01E01 again, not S01E02.
+    expect(resumeTarget(order, [pos('a1', 6, '2026-10-11')])).toEqual({ episode: order[0], resume: false });
+    // Same after an earlier finished episode.
+    expect(resumeTarget(order, [pos('a1', 1500, '2026-10-10', true), pos('a2', 3, '2026-10-11')])).toEqual({ episode: order[1], resume: false });
+    // At 0 s too.
+    expect(resumeTarget(order, [pos('b1', 0, '2026-10-11')])).toEqual({ episode: order[2], resume: false });
+    // Past the resume window still moves on.
+    expect(resumeTarget(order, [pos('a1', 1490, '2026-10-11')])).toEqual({ episode: order[1], resume: false });
+  });
+
   it('skips episodes already marked watched (R2-r2 F3)', () => {
     const order = episodeOrder(seasons); // a1 a2 b1 b2 sp1
     const w = (episodeId: string, updatedAt: string) => ({ ref: sref, episodeId, positionSeconds: 1000, durationSeconds: 1000, updatedAt, watched: true });

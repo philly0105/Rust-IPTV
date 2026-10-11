@@ -107,17 +107,17 @@ export function EpisodeList({
           <div
             key={ep.id}
             role="listitem"
-            className="absolute left-0 w-full"
+            className="absolute start-0 w-full"
             style={{ top: row.start - margin, height: ROW_H }}
           >
-            <div className={cn('group flex h-full items-center gap-4 border-b border-border/60 py-2', playing && 'tuning-tick pl-3')}>
+            <div className={cn('group flex h-full items-center gap-4 border-b border-border/60 py-2', playing && 'tuning-tick ps-3')}>
               <button
                 type="button"
                 data-grid-index={row.index}
                 onClick={() => onPlay(ep)}
                 aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
-                className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-40 shrink-0">
                   <Poster src={ep.posterUrl} alt={ep.title} aspect="wide" rounded="sm">
@@ -147,10 +147,10 @@ export function EpisodeList({
                     {!playing && resumable && pos && (
                       <span className="tabular text-xs text-accent">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
                     )}
-                    {runtime && <span className="tabular ml-auto text-xs text-fg-subtle">{runtime}</span>}
+                    {runtime && <span className="tabular ms-auto text-xs text-fg-subtle">{runtime}</span>}
                   </div>
-                  <div className="truncate text-[15px] font-medium text-fg">{ep.title}</div>
-                  {ep.plot && <p className="line-clamp-2 text-sm text-fg-muted">{ep.plot}</p>}
+                  <div dir="auto" className="truncate text-[15px] font-medium text-fg text-match-parent">{ep.title}</div>
+                  {ep.plot && <p dir="auto" className="line-clamp-2 text-sm text-fg-muted text-match-parent">{ep.plot}</p>}
                 </div>
               </button>
               {onToggleWatched && (

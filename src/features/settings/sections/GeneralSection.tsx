@@ -68,7 +68,7 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
             className="w-44 accent-[var(--color-accent)]"
             data-testid="input-vodMinRating"
           />
-          <output htmlFor={id} className="w-14 text-right text-sm tabular-nums text-fg" data-testid="vodMinRating-value">
+          <output htmlFor={id} className="w-14 text-end text-sm tabular-nums text-fg" data-testid="vodMinRating-value">
             {draft > 0 ? draft.toLocaleString(i18n.language, { minimumFractionDigits: 1 }) : t('vodMinRatingAny')}
           </output>
         </div>

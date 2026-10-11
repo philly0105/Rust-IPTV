@@ -8,6 +8,8 @@ import type { Channel } from '@/api/types';
 
 import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
 import { useDebounced } from '../hooks/useDebounced';
+import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
+import { displayChannelName } from '../lib/channelName';
 import { ChannelLogo } from './ChannelLogo';
 
 /** Strips quality and country decorations so the first search is useful. */
@@ -23,6 +25,7 @@ export function mappingQuery(name: string): string {
 export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null; onClose(): void }) {
   const { t } = useTranslation('live');
   const { toast } = useToast();
+  const prefs = useDisplayPrefs();
   const open = !!channel;
   const [query, setQuery] = useState('');
   const debounced = useDebounced(query.trim(), 250);
@@ -63,7 +66,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
     <Dialog
       open={open}
       onClose={onClose}
-      title={t('epgMappingTitle', { name: channel?.name ?? '' })}
+      title={t('epgMappingTitle', { name: displayChannelName(channel?.name, prefs.stripCountryPrefix) })}
       size="md"
       footer={
         <>

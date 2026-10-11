@@ -61,7 +61,7 @@
   "guideSource": "Bron",
   "guideTime": "Gidstijd",
   "guideLoadFailed": "Een deel van de gids is niet geladen.",
-  "portalGuideUnavailable": "De gids van het portaal reageert niet. Hij wordt automatisch opnieuw opgevraagd.",
+  "portalGuideUnavailable": "De gids van het portaal reageert niet. Er wordt automatisch opnieuw geprobeerd.",
   "guideNotAnswering": "Gids reageert niet",
   "guideNoData": "Nog geen gidsgegevens voor deze kanalen. Voeg een XMLTV-adres toe of vernieuw de EPG-bronnen.",
   "guideNoSources": "Nog geen bronnen",

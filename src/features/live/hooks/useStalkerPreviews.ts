@@ -18,8 +18,10 @@ export interface StalkerPreviews {
  * Row previews from a Stalker portal's own guide (`stalker.epg`) for the channels in `refs`
  * (the visible window, in display order). `get` re-renders as answers arrive; a silent portal
  * (timeout / network error) sets `unavailable` and pauses the source with a growing backoff.
- * With `from` (epoch ms), the portal also returns the archived programmes since then; a new `from`
- * starts a fresh cache, so moving a guide window back refetches the visible rows.
+ * With `from` (epoch ms), the portal also returns the archived programmes since then. Answers are
+ * cached per source by channel, `limit` and `from`, so a guide window moved back to where it was
+ * reuses them; the backoff is per source too, so a new window or page keeps waiting out a silent
+ * portal instead of asking it again at once.
  */
 export function useStalkerPreviews(
   sourceId: string,
@@ -40,8 +42,9 @@ export function useStalkerPreviews(
       new StalkerPreviewQueue(
         (ref) => rpc('stalker.epg', from === undefined ? { ref, limit } : { ref, limit, from: new Date(from).toISOString() }),
         () => bumpRef.current(),
+        { sourceId, scope: `${limit}|${from ?? ''}` },
       ),
-    // One queue (and cache) per source, size and window start.
+    // One queue per source, size and window start; backoff and answers live with the source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sourceId, limit, from],
   );

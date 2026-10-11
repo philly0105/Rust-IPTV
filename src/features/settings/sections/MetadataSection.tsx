@@ -98,10 +98,10 @@ export function MetadataSection({ settings, update }: SectionProps) {
                         void commitKey();
                       }
                     }}
-                    className="h-10 w-full rounded-md border border-border bg-surface-2 px-3 pr-11 font-mono text-sm text-fg placeholder:font-sans placeholder:text-fg-subtle disabled:opacity-50"
+                    className="h-10 w-full rounded-md border border-border bg-surface-2 px-3 pe-11 font-mono text-sm text-fg placeholder:font-sans placeholder:text-fg-subtle disabled:opacity-50"
                     data-testid="input-tmdb-key"
                   />
-                  <div className="absolute inset-y-0 right-0.5 flex items-center">
+                  <div className="absolute inset-y-0 end-0.5 flex items-center">
                     <IconButton
                       label={shown ? t('hideKey') : t('showKey')}
                       aria-pressed={shown}

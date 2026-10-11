@@ -261,7 +261,7 @@ export function EpgSection({ settings, update }: SectionProps) {
                 type="text"
                 inputMode="numeric"
                 value={String(offset)}
-                className="w-24 text-right tabular-nums"
+                className="w-24 text-end tabular-nums"
                 onError={setOffsetError}
                 validate={(v) => {
                   const r = validateEpgOffset(v);

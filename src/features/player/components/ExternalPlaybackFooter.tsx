@@ -50,7 +50,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
         {shown.title}
       </span>
       {runs.length > 1 && <span className="shrink-0 rounded-sm bg-surface-3 px-1.5 text-xs text-fg-muted tabular-nums">{runs.length}</span>}
-      <span className="ml-auto hidden shrink-0 text-xs text-fg-subtle md:inline">{t('externalStopHint', { player: name })}</span>
+      <span className="ms-auto hidden shrink-0 text-xs text-fg-subtle md:inline">{t('externalStopHint', { player: name })}</span>
       <button
         type="button"
         onClick={() => {

@@ -7,7 +7,10 @@ import { formatRating } from '../lib/format';
 import { Poster, ProgressBar, Skeleton, cn } from '@/ui';
 
 export interface PosterCardProps {
+  /** Caption; pass `titleBase` so a year already in `year`/`meta` is not shown twice. */
   title: string;
+  /** Full title for the tooltip when the caption is shortened (defaults to `title`). */
+  fullTitle?: string;
   href: string;
   posterUrl?: string;
   year?: number;
@@ -16,6 +19,8 @@ export interface PosterCardProps {
   progress?: number;
   /** Small overlay in the top-left corner (source badge, "New"). */
   badge?: ReactNode;
+  /** Text of `badge` for the card's accessible name (the overlay itself is decorative). */
+  badgeLabel?: string;
   /** Secondary line under the title (overrides year). */
   meta?: ReactNode;
   index?: number;
@@ -28,17 +33,42 @@ export interface PosterCardProps {
 }
 
 /**
+ * Accessible name for a poster card: the full title, the year once (unless the
+ * title already carries it), a plain-text secondary line, the badge text, and
+ * the rating as a sentence. Without it the name read "8.2Black Harbor (2026)2026".
+ */
+export function posterCardLabel(parts: {
+  title: string;
+  year?: number | undefined;
+  meta?: ReactNode;
+  badgeLabel?: string | undefined;
+  rating?: string | undefined;
+  ratedLabel: (rating: string) => string;
+}): string {
+  const yearText = parts.year !== undefined ? String(parts.year) : undefined;
+  const name = yearText && !parts.title.includes(yearText) ? `${parts.title} (${yearText})` : parts.title;
+  const out = [name];
+  const meta = typeof parts.meta === 'string' || typeof parts.meta === 'number' ? String(parts.meta).trim() : '';
+  if (meta && !name.includes(meta)) out.push(meta);
+  if (parts.badgeLabel) out.push(parts.badgeLabel);
+  if (parts.rating) out.push(parts.ratedLabel(parts.rating));
+  return out.join(', ');
+}
+
+/**
  * Poster tile used by grids and rails. The poster carries the identity; the
  * caption is quiet. Focus draws the amber ring around the artwork only.
  */
 export function PosterCard({
   title,
+  fullTitle,
   href,
   posterUrl,
   year,
   rating,
   progress,
   badge,
+  badgeLabel,
   meta,
   index,
   onClick,
@@ -46,8 +76,9 @@ export function PosterCard({
   tabIndex,
   active,
 }: PosterCardProps) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation('vod');
   const r = formatRating(rating, i18n.language);
+  const label = posterCardLabel({ title: fullTitle ?? title, year, meta, badgeLabel, rating: r ?? undefined, ratedLabel: (v) => t('posterRated', { rating: v }) });
   return (
     <Link
       to={href}
@@ -55,7 +86,8 @@ export function PosterCard({
       data-grid-index={index}
       tabIndex={tabIndex}
       className={cn('group flex min-w-0 flex-col gap-2 rounded-md outline-none', className)}
-      title={title}
+      title={fullTitle ?? title}
+      aria-label={label}
     >
       <div
         className={cn(
@@ -66,9 +98,13 @@ export function PosterCard({
         )}
       >
         <Poster src={posterUrl} alt="" label={title} aspect="poster" />
-        {badge && <div className="pointer-events-none absolute top-1.5 left-1.5 flex gap-1">{badge}</div>}
+        {badge && (
+          <div aria-hidden className="pointer-events-none absolute start-1.5 top-1.5 flex gap-1">
+            {badge}
+          </div>
+        )}
         {r && (
-          <div className="tabular pointer-events-none absolute top-1.5 right-1.5 inline-flex items-center gap-1 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold text-white">
+          <div aria-hidden className="tabular pointer-events-none absolute end-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold text-white">
             <Star aria-hidden size={11} className="fill-current text-accent" />
             {r}
           </div>
@@ -80,7 +116,9 @@ export function PosterCard({
         )}
       </div>
       <div className="min-w-0 px-0.5">
-        <div className="line-clamp-2 text-[13px] leading-snug font-medium text-fg group-hover:text-fg">{title}</div>
+        <div dir="auto" className="line-clamp-2 text-match-parent text-[13px] leading-snug font-medium text-fg group-hover:text-fg">
+          {title}
+        </div>
         <div className="tabular truncate text-xs text-fg-subtle">{meta ?? year ?? ' '}</div>
       </div>
     </Link>

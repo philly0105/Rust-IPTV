@@ -35,7 +35,7 @@
   "errorTitleInternal": "Une erreur s'est produite",
 
   "errorHintNetwork": "Vérifiez votre connexion et l'URL du fournisseur, puis réessayez.",
-  "errorBodyServerUnreachable": "Le serveur interne de l'application ne répond pas, rien n'a pu être chargé.",
+  "errorBodyServerUnreachable": "Le serveur Tsrust IPTV ne répond pas, rien n'a pu être chargé.",
   "errorHintServerUnreachable": "Vérifiez que le serveur Tsrust IPTV est toujours en cours d'exécution, puis réessayez.",
   "errorTechnicalDetails": "Détails techniques",
   "errorHintTimeout": "Le fournisseur est peut-être occupé. Réessayez dans un instant.",

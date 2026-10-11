@@ -61,7 +61,7 @@
   "guideSource": "播放源",
   "guideTime": "节目指南时间",
   "guideLoadFailed": "部分节目指南未能加载。",
-  "portalGuideUnavailable": "门户的节目指南没有响应，系统会自动重新请求。",
+  "portalGuideUnavailable": "门户的节目指南没有响应，正在自动重试。",
   "guideNotAnswering": "节目指南无响应",
   "guideNoData": "这些频道暂无节目指南数据。请添加 XMLTV 地址或刷新 EPG 来源。",
   "guideNoSources": "暂无播放源",

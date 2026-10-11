@@ -127,6 +127,9 @@ pub struct Runtime {
     pub plans: Lru<Arc<Vec<vod::SeasonPlan>>>,
     /// Portal page size keyed by `<sourceId>|<type>`.
     pub page_sizes: DashMap<String, i64>,
+    /// Bulk `get_epg_info` answer per source id (shared, short-lived; see
+    /// [`playback::BulkEpgEntry`]).
+    pub bulk_epg: DashMap<String, playback::BulkEpgEntry>,
     /// `stalker_items` exists in this database.
     table_ready: AtomicBool,
 }
@@ -138,6 +141,7 @@ impl Default for Runtime {
             items: Lru::new(ITEM_CACHE_CAP),
             plans: Lru::new(PLAN_CACHE_CAP),
             page_sizes: DashMap::new(),
+            bulk_epg: DashMap::new(),
             table_ready: AtomicBool::new(false),
         }
     }
@@ -172,6 +176,7 @@ impl Runtime {
     pub fn forget_source(&self, source_id: &str) {
         self.items.remove_prefix(&format!("{source_id}|"));
         self.forget_listings(source_id);
+        self.bulk_epg.remove(source_id);
     }
 }
 

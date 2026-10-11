@@ -35,7 +35,7 @@
   "errorTitleInternal": "Coś poszło nie tak",
 
   "errorHintNetwork": "Sprawdź połączenie i URL dostawcy, a potem spróbuj ponownie.",
-  "errorBodyServerUnreachable": "Wbudowany serwer aplikacji nie odpowiada, więc nic nie zostało załadowane.",
+  "errorBodyServerUnreachable": "Serwer Tsrust IPTV nie odpowiada, więc nic nie zostało załadowane.",
   "errorHintServerUnreachable": "Sprawdź, czy serwer Tsrust IPTV nadal działa, a potem spróbuj ponownie.",
   "errorTechnicalDetails": "Szczegóły techniczne",
   "errorHintTimeout": "Dostawca może być przeciążony. Spróbuj ponownie za chwilę.",

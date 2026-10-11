@@ -1,6 +1,6 @@
 # M3U
 
-Code: `crates/iptv-core/src/m3u/`. Tests: `crates/iptv-core/tests/m3u_parse.rs`, `m3u_import.rs`, `m3u_perf.rs` (check 4), with helpers in `m3u_support.rs`.
+Code: `crates/iptv-core/src/m3u/`. Tests: `crates/iptv-core/tests/m3u_parse.rs`, `m3u_import.rs`, `m3u_disk_text.rs`, `m3u_channel_fields.rs`, `m3u_perf.rs` (check 4), with helpers in `m3u_support.rs`.
 
 ## Layout
 
@@ -33,7 +33,7 @@ The reader works on any `BufRead` and holds one line at a time. Lines are capped
 1. Get the bytes and their sha256:
    - `text`: read `m3u_raw.raw`.
    - `file` and `file://` URLs: hashed in a streaming pass.
-   - `http(s)` URLs: `fetch_to_file` sends the request with the source's headers through `http::apply_source_headers` and retries network errors, timeouts and 5xx (3 attempts), but not a body that stalls after the head: body chunks are read through `http::next_body_chunk` with `BODY_IDLE_TIMEOUT` (20 s), and the stall fails once with a Timeout naming the host. A non-2xx status names the host and adds a next step (`playlist_status_error`). It streams `bytes_stream()` into `data_dir/tmp/m3u-<id>-<uuid>.part` and hashes as it writes. A drop guard deletes the temp file. URLs are redacted in logs.
+   - `http(s)` URLs: `fetch_to_file` sends the request with the source's headers through `http::apply_source_headers` and retries network errors, timeouts and 5xx (3 attempts), but not a body that stalls after the head: body chunks are read through `http::next_body_chunk` with `BODY_IDLE_TIMEOUT` (20 s), and the stall fails once with a Timeout naming the host. A body that averages under 1 KB/s over a 60 s window (`m3u/body.rs` `MinRate`) fails the same way, so a drip-fed server cannot hold the import open. `sources.remove`, and a `sources.update` that changes the source's settings, cancel the running import through the per-source token `sources::import_cancel` (no waiting behind the import lock), and the cancelled download deletes its temp file. A non-2xx status names the host and adds a next step (`playlist_status_error`). It streams `bytes_stream()` into `data_dir/tmp/m3u-<id>-<uuid>.part` and hashes as it writes. A drop guard deletes the temp file. URLs are redacted in logs.
 2. If the sha256 matches `m3u_raw.sha256` and the source has been imported before, only `fetched_at` is updated and the cached counts are returned. Hidden categories, favorites and positions are untouched.
 3. Otherwise `write_catalog` runs on the blocking pool in one IMMEDIATE transaction:
    - A `CatalogWriter` covers live, radio, movie and series.

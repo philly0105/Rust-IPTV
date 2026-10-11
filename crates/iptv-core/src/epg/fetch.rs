@@ -159,10 +159,20 @@ pub async fn fetch(
         Location::Remote(u) => {
             let dir = temp_dir(state);
             tokio::fs::create_dir_all(&dir).await?;
-            crate::http::with_retry(ATTEMPTS, || {
-                download(state, &u, headers, etag, &dir, on_bytes)
-            })
-            .await
+            // Transient failures are retried like `with_retry`, except a body
+            // below the minimum rate: a server that slow will not get faster.
+            let mut n = 0;
+            loop {
+                let mut too_slow = false;
+                match download(state, &u, headers, etag, &dir, on_bytes, &mut too_slow).await {
+                    Ok(f) => return Ok(f),
+                    Err(err) if !too_slow && err.is_retryable() && n + 1 < ATTEMPTS => {
+                        tokio::time::sleep(crate::http::backoff_delay(n)).await;
+                        n += 1;
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
         }
     }
 }
@@ -174,14 +184,17 @@ async fn download(
     etag: Option<&str>,
     dir: &Path,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
+    too_slow: &mut bool,
 ) -> CoreResult<Fetched> {
     // Server mode: guarded client; an XMLTV URL on a private host needs
     // --allow-private-targets, unless it is a guide detected from a source
     // and sits on that source's own host:port (trusted like the playlist).
     let own = owning_source_authority(state, url).await?;
     crate::http::check_fetch(state, url, own.as_ref()).await?;
-    let mut req =
-        crate::http::apply_source_headers(crate::http::client_for(state).get(url), headers);
+    let mut req = crate::http::apply_source_headers(
+        crate::http::guarded_client(state, own.as_ref()).get(url),
+        headers,
+    );
     if let Some(tag) = etag {
         req = req.header(reqwest::header::IF_NONE_MATCH, tag);
     }
@@ -212,9 +225,20 @@ async fn download(
         let mut stream = resp.bytes_stream();
         let mut total: u64 = 0;
         let mut reported: u64 = 0;
+        // A drip-fed body keeps resetting the idle timeout; fail it on rate.
+        let mut rate = crate::m3u::body::MinRate::standard();
         while let Some(chunk) =
             crate::http::next_body_chunk(&mut stream, &host, crate::http::BODY_IDLE_TIMEOUT).await?
         {
+            if let Err(err) = rate.on_bytes(chunk.len(), &host) {
+                *too_slow = true;
+                return Err(match err {
+                    CoreError::Timeout(m) => {
+                        CoreError::Timeout(m.replace("the playlist", "the guide"))
+                    }
+                    other => other,
+                });
+            }
             total += chunk.len() as u64;
             if total > MAX_DOWNLOAD_BYTES {
                 return Err(CoreError::Invalid("EPG file is larger than 2 GB".into()));
@@ -243,8 +267,8 @@ async fn download(
     }
 }
 
-/// In server mode, the `host:port` of the source that owns `url` when the
-/// URL comes from that source (`origin: source`); `None` otherwise.
+/// In server mode, the URL's own `host:port` when any source that lists
+/// `url` (detected or manual) sits on that `host:port`; `None` otherwise.
 async fn owning_source_authority(
     state: &AppState,
     url: &str,
@@ -252,15 +276,22 @@ async fn owning_source_authority(
     if !crate::http::is_server_mode(state) {
         return Ok(None);
     }
-    let Some(cfg) = super::ingest::configured(state, url).await? else {
+    let Some(target) = url::Url::parse(url.trim())
+        .ok()
+        .and_then(|u| crate::http::Authority::of(&u))
+    else {
         return Ok(None);
     };
-    match (cfg.origin, cfg.source_id) {
-        (crate::model::EpgOrigin::Source, Some(id)) => {
-            crate::http::source_authority(state, &id).await
+    let u = url.to_owned();
+    let owners = state
+        .db_call(move |c| super::store::sources_listing(c, &u))
+        .await?;
+    for id in owners {
+        if crate::http::source_authority(state, &id).await?.as_ref() == Some(&target) {
+            return Ok(Some(target));
         }
-        _ => Ok(None),
     }
+    Ok(None)
 }
 
 /// Opens a body for streaming: gzip (magic `1f 8b`) is decompressed on the
@@ -316,5 +347,69 @@ mod tests {
             Location::Local(_)
         ));
         assert!(classify("  ").is_err());
+    }
+
+    /// A server that drips a byte faster than the idle limit but far below
+    /// the minimum rate fails once a rate window has passed (2 s in unit
+    /// tests, 60 s in builds) with a next step, and is not retried.
+    #[tokio::test]
+    async fn drip_fed_guide_fails_on_the_minimum_rate() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(AtomicU32::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                h.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n<tv>")
+                        .await;
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        if sock.write_all(b" ").await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let started = std::time::Instant::now();
+        let Err(err) = fetch(
+            &state,
+            &format!("http://127.0.0.1:{port}/guide.xml"),
+            &RequestHeaders::default(),
+            None,
+            &|_| {},
+        )
+        .await
+        else {
+            panic!("drip-fed guide was accepted");
+        };
+        let took = started.elapsed();
+        assert!(
+            matches!(err, CoreError::Timeout(ref m) if m.contains("sending the guide too slowly") && m.contains("try again")),
+            "{err:?}"
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "retried");
+        assert!(
+            took >= crate::m3u::body::MIN_RATE_WINDOW && took < std::time::Duration::from_secs(10),
+            "{took:?}"
+        );
     }
 }

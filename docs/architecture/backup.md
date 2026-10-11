@@ -79,7 +79,7 @@ Secrets (the Xtream password, and the Stalker password and signatures) are writt
    - xtream: categories are matched by `(type, xtreamId)`. The listed types are unhidden first, so the backup is authoritative. Favorites keep their saved order. Positions map `vod` to the movie, and `episode` to the series row with `episode_id`, with a snapshot subtitle `S{n} E{m}`. `watched` (optional, default false) restores the flag; a watched position is kept even when complete. `sourcePins`, when present, replace the source's pins; when absent they are left alone.
    - stalker: rows are written from the portal items directly. The type comes from `type`/`category_id`/`stream_type`, `is_series`, and `radio`; the id from `id`, `stream_id`, `series_id` or `movie_id`. No catalog is needed.
    - Items that are not in the catalog are skipped. One warning per kind lists the count and up to five ids.
-7. When the catalog could not be loaded (m3u or xtream), the entry's user state is parked in `app_state` under `backup_pending:<sourceId>` and is not applied yet. `apply_pending_restore(state, id)` applies it once the source has items, and then deletes the key. `backup::init` retries every parked key at boot. The sources module should call it after a successful `sources.refresh`.
+7. When the catalog could not be loaded (m3u or xtream), the entry's user state is parked in `app_state` under `backup_pending:<sourceId>` and is not applied yet. `apply_pending_restore(state, id)` applies it once the source has items, and then deletes the key. `backup::init` retries every parked key at boot.
 
 `imported` counts entries created or merged. `sources.changed` is emitted once at the end.
 

@@ -45,7 +45,7 @@ export function UpNextRail({
               <button
                 type="button"
                 onClick={() => onPlay(ep)}
-                className="group flex w-full items-center gap-3 rounded-md p-1.5 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+                className="group flex w-full items-center gap-3 rounded-md p-1.5 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-28 shrink-0">
                   <Poster src={ep.posterUrl} alt={ep.title} aspect="wide" rounded="sm" />
@@ -58,9 +58,9 @@ export function UpNextRail({
                 <div className="min-w-0">
                   <div className="font-display tabular text-xs text-fg-subtle">
                     {episodeCode(ep.season, ep.episode)}
-                    {runtime && <span className="ml-2">{runtime}</span>}
+                    {runtime && <span className="ms-2">{runtime}</span>}
                   </div>
-                  <div className="line-clamp-2 text-sm text-fg">{ep.title}</div>
+                  <div dir="auto" className="line-clamp-2 text-sm text-fg text-match-parent">{ep.title}</div>
                 </div>
               </button>
             </li>
@@ -115,7 +115,7 @@ export function NextEpisodeCard({
           {autoplay ? t('nextEpisodeIn', { seconds: left }) : t('nextEpisode')}
         </div>
         <div className="truncate text-[15px] text-fg">
-          <span className="font-display tabular mr-2 text-fg-subtle">{episodeCode(next.season, next.episode)}</span>
+          <span className="font-display tabular me-2 text-fg-subtle">{episodeCode(next.season, next.episode)}</span>
           {next.title}
         </div>
       </div>

@@ -91,6 +91,29 @@ pub fn configured_urls(
     Ok(out)
 }
 
+/// Ids of every source that lists `url` (detected or manual, not disabled),
+/// in `position` order. [`configured_urls`] keeps only the first of them.
+pub fn sources_listing(conn: &Connection, url: &str) -> CoreResult<Vec<String>> {
+    let url = url.trim();
+    let mut stmt =
+        conn.prepare_cached("SELECT id, epg_json FROM sources ORDER BY position, created_at, id")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, epg_json) = row?;
+        let links: EpgLinks = serde_json::from_str(&epg_json).unwrap_or_default();
+        let listed = links
+            .detected_urls
+            .iter()
+            .chain(links.manual_urls.iter())
+            .any(|u| u.trim() == url);
+        if listed && !links.disabled_urls.iter().any(|u| u.trim() == url) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
 /// Stored state of one `epg_sources` row.
 #[derive(Debug, Clone, Default)]
 pub struct SourceRow {

@@ -89,27 +89,82 @@ function langLabel(lang: string | undefined, name: string | undefined, fallback:
   return fallback;
 }
 
-function isSameOrigin(url: string): boolean {
+/** A proxied load URL split into the proxy route it went through and the upstream it wraps. */
+export interface ProxyRoute {
+  /** The route as the load URL wrote it: web `/api/proxy`, desktop `http://127.0.0.1:<port>/<token>/api/proxy`. */
+  base: string;
+  /** Origin and path of the route, for recognising URLs already routed through it. */
+  origin: string;
+  path: string;
+  /** Absolute upstream URL of the manifest/playlist. */
+  upstream: string;
+  /** Every other query param of the load URL (`sourceId`, `ua`, `referer`, `origin`). */
+  params: URLSearchParams;
+}
+
+/** The proxy route of `loadUrl` (`proxiedUrl(source)`), or null when it loads directly. */
+export function proxyRoute(loadUrl: string): ProxyRoute | null {
+  let u: URL;
   try {
-    return new URL(url, window.location.href).origin === window.location.origin;
+    u = new URL(loadUrl, window.location.href);
   } catch {
-    return true;
+    return null;
+  }
+  const upstream = u.searchParams.get('url');
+  if (!u.pathname.endsWith('/api/proxy') || !upstream || !/^https?:/i.test(upstream)) return null;
+  const params = new URLSearchParams(u.search);
+  params.delete('url');
+  const base = /^[a-z][a-z0-9+.-]*:/i.test(loadUrl) ? `${u.origin}${u.pathname}` : u.pathname;
+  return { base, origin: u.origin, path: u.pathname, upstream, params };
+}
+
+/** The upstream URL a request to `route` wraps; any other URL is returned as is. */
+export function unproxiedUrl(route: ProxyRoute, url: string): string {
+  try {
+    const u = new URL(url, `${route.origin}${route.path}`);
+    if (u.origin !== route.origin || u.pathname !== route.path) return url;
+    return u.searchParams.get('url') ?? url;
+  } catch {
+    return url;
   }
 }
 
 /**
- * When the playlist goes through the same-origin `/api/proxy`, every follow-up
- * request (keys, absolute segment URLs the proxy did not rewrite) must go through it too,
- * or the browser hits the upstream without the source headers.
+ * When the manifest/playlist goes through the media proxy (web `/api/proxy` or the desktop
+ * loopback `/<token>/api/proxy`), every follow-up request (segments, keys, absolute URLs the
+ * server did not rewrite) must go through the same route with the same header params, or the
+ * browser hits the upstream without them. URLs already on the route and the app's own URLs pass
+ * through. A relative URI an engine resolved against the proxy URL (`/api/init.mp4`) is resolved
+ * against the upstream manifest URL instead.
  */
-export function proxyRewrite(source: PlayerSource, loadUrl: string): ((url: string) => string) | null {
-  if (!loadUrl.startsWith('/api/proxy')) return null;
-  const sourceId = source.ref?.sourceId;
+export function proxyRewrite(loadUrl: string): ((url: string) => string) | null {
+  const route = proxyRoute(loadUrl);
+  if (!route) return null;
+  const dir = route.path.slice(0, -'proxy'.length); // `/api/` or `/<token>/api/`
+  const wrap = (target: string): string => {
+    const params = new URLSearchParams({ url: target });
+    for (const [k, v] of route.params) params.append(k, v);
+    return `${route.base}?${params.toString()}`;
+  };
   return (url: string) => {
-    if (isSameOrigin(url)) return url;
-    const params = new URLSearchParams({ url });
-    if (sourceId) params.set('sourceId', sourceId);
-    return `/api/proxy?${params.toString()}`;
+    let u: URL;
+    try {
+      // Root-relative means our own server (the HLS rewriter emits `/api/proxy?...`); other relative URIs are the manifest's.
+      u = new URL(url, url.startsWith('/') ? `${route.origin}${route.path}` : route.upstream);
+    } catch {
+      return url;
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return url;
+    const appOrigin = window.location.origin;
+    if (u.origin === route.origin) {
+      if (u.pathname === route.path) return url;
+      const appRoute = u.origin === appOrigin && u.pathname.startsWith('/api/files/');
+      if (u.pathname.startsWith(dir) && !appRoute) {
+        return wrap(new URL(`${u.pathname.slice(dir.length)}${u.search}`, route.upstream).href);
+      }
+    }
+    if (u.origin === appOrigin) return url;
+    return wrap(u.href);
   };
 }
 
@@ -287,7 +342,7 @@ async function hlsEngine(
     cb.onError({ message: 'HLS is not supported in this browser', fatal: true, kind: 'unsupported' });
     return nativeEngine(el, url, cb);
   }
-  const rewrite = proxyRewrite(source, url);
+  const rewrite = proxyRewrite(url);
   const hls = new Hls({
     enableWorker: true,
     lowLatencyMode: false,
@@ -453,10 +508,17 @@ async function shakaEngine(
     streaming: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
     manifest: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
   });
-  const rewrite = proxyRewrite(source, url);
-  if (rewrite) {
-    player.getNetworkingEngine()?.registerRequestFilter((_type, request) => {
+  const route = proxyRoute(url);
+  const rewrite = proxyRewrite(url);
+  if (route && rewrite) {
+    const net = player.getNetworkingEngine();
+    net?.registerRequestFilter((_type, request) => {
       request.uris = request.uris.map(rewrite);
+    });
+    // The DASH parser resolves BaseURL/SegmentTemplate against the manifest response URI; make
+    // that the upstream URL, so `chunk-1.m4s` and `../x` resolve there, then go through the proxy.
+    net?.registerResponseFilter((type, response) => {
+      if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) response.uri = unproxiedUrl(route, response.uri);
     });
   }
 

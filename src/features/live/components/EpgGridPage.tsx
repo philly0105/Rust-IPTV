@@ -123,8 +123,6 @@ export function EpgGridPage() {
   const [measurePage, pageWidth] = useElementWidth();
   const windowMs = gridWindowFor(pageWidth, channelCol);
   const end = start + windowMs;
-  const fromIso = new Date(start).toISOString();
-  const toIso = new Date(end).toISOString();
 
   const paged = usePagedChannels({ sourceId, categoryId, withExtras: false });
   const count = paged.total ?? 0;
@@ -149,6 +147,12 @@ export function EpgGridPage() {
   const last = vItems[vItems.length - 1]?.index ?? 0;
   const { setVisibleRange } = paged;
   useEffect(() => setVisibleRange(first, last), [first, last, setVisibleRange]);
+
+  // `[start, end)` is display time. Programmes are shown `epgOffsetMinutes` later than the guide
+  // says, so the guide is asked for the window moved back by the offset, then shifted for display.
+  const offsetMs = prefs.epgOffsetMinutes * MINUTE;
+  const fromIso = new Date(start - offsetMs).toISOString();
+  const toIso = new Date(end - offsetMs).toISOString();
 
   const chunkA = Math.floor(first / GRID_CHUNK);
   const chunkB = Math.floor(last / GRID_CHUNK);
@@ -180,7 +184,7 @@ export function EpgGridPage() {
     return [plain, archive];
   }, [isStalker, first, last, getChannel]);
   const portalLimit = stalkerGridLimit(windowMs);
-  const archiveQuery = stalkerArchiveQuery(start, end, now, portalLimit);
+  const archiveQuery = stalkerArchiveQuery(start - offsetMs, end - offsetMs, now, portalLimit);
   const plainPortal = useStalkerPreviews(sourceId, isStalker, plainRefs, now, portalLimit);
   const archivePortal = useStalkerPreviews(sourceId, isStalker, archiveRefs, now, archiveQuery.limit, archiveQuery.from);
   const programsFor = useCallback(
@@ -679,14 +683,14 @@ function ProgramPopover({
           <p className="text-xs text-fg-muted">
             {channelName} · <span className="tabular-nums">{formatRange(program, i18n.language)}</span>
           </p>
-          <h3 className="mt-0.5 text-base font-semibold">{program.title}</h3>
+          <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
           {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}
         </div>
         <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-surface-2">
           <X className="size-4" />
         </button>
       </div>
-      {program.description ? <p className="mt-2 line-clamp-6 text-sm text-fg-muted">{program.description}</p> : null}
+      {program.description ? <p dir="auto" className="mt-2 line-clamp-6 text-sm text-fg-muted text-match-parent">{program.description}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {when === 'now' ? (
           <Button size="sm" variant="primary" icon={<Radio className="size-3.5" />} onClick={onLive}>

@@ -184,7 +184,7 @@ async fn server_guard_no_client_sends_referer_on_redirect() {
     http::check_fetch(&e.state, &format!("{base}/to-echo"), Some(&own))
         .await
         .unwrap();
-    let guarded = http::client_for(&e.state)
+    let guarded = http::guarded_client(&e.state, Some(&own))
         .get(format!("{base}/to-echo"))
         .send()
         .await
@@ -218,20 +218,15 @@ async fn server_guard_redirect_to_other_port_of_trusted_name_is_refused() {
 
     let e = env(true).await;
     let (base, seen) = spawn_stub().await;
-    // A source on `name:1` makes the name trusted (on port 1 only).
+    // The client of a source on `name:1` trusts the name on port 1 only.
     let named = Authority {
         host: name.clone(),
         port: 1,
     };
-    http::check_fetch(&e.state, &format!("http://{name}:1/"), Some(&named))
-        .await
-        .unwrap();
     *seen.other_port.lock() = format!("http://{name}:{}/x", closed_port());
 
     let url = format!("{base}/other-port");
-    let own = Authority::parse_lenient(&base).unwrap();
-    http::check_fetch(&e.state, &url, Some(&own)).await.unwrap();
-    let err = http::send(http::client_for(&e.state).get(&url))
+    let err = http::send(http::guarded_client(&e.state, Some(&named)).get(&url))
         .await
         .unwrap_err();
     match err {
@@ -329,7 +324,7 @@ async fn server_guard_local_epg_paths_are_refused() {
         report
             .warnings
             .iter()
-            .any(|w| w.contains("EPG URLs could not be restored")),
+            .any(|w| w.contains("was not restored") && w.contains(&path)),
         "{report:?}"
     );
     assert!(!st.settings_snapshot().epg_urls.contains(&path));

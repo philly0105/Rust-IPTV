@@ -73,7 +73,7 @@
   "guideSource": "المصدر",
   "guideTime": "وقت الدليل",
   "guideLoadFailed": "لم يُحمَّل جزء من الدليل.",
-  "portalGuideUnavailable": "دليل البوابة لا يستجيب. ستُعاد المحاولة تلقائيًا.",
+  "portalGuideUnavailable": "دليل البوابة لا يستجيب. تجري إعادة المحاولة تلقائيًا.",
   "guideNotAnswering": "الدليل لا يستجيب",
   "guideNoData": "لا توجد بيانات دليل لهذه القنوات بعد. أضف عنوان XMLTV أو حدّث مصادر EPG.",
   "guideNoSources": "لا توجد مصادر بعد",

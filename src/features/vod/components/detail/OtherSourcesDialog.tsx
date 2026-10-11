@@ -38,14 +38,14 @@ export function OtherSourcesDialog({ open, onClose, current, currentSourceName, 
           const pinned = isPinned(pin, item.ref);
           const rating = formatRating(item.rating, i18n.language);
           return (
-            <li key={`${item.ref.sourceId}|${item.ref.itemId}`} className={cn('flex items-center gap-3 py-3', pinned && 'tuning-tick pl-3')}>
+            <li key={`${item.ref.sourceId}|${item.ref.itemId}`} className={cn('flex items-center gap-3 py-3', pinned && 'tuning-tick ps-3')}>
               <div className="w-10 shrink-0 overflow-hidden rounded-sm">
                 <Poster src={item.posterUrl} alt="" label={item.title} aspect="poster" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-fg">{sourceName}</div>
                 <div className="flex flex-wrap gap-x-3 text-xs text-fg-subtle">
-                  <span className="truncate">{item.title}</span>
+                  <span dir="auto" className="truncate text-match-parent">{item.title}</span>
                   {item.year && <span className="tabular">{item.year}</span>}
                   {rating && <span className="tabular">{rating}</span>}
                   {item.containerExtension && <span>{item.containerExtension.toUpperCase()}</span>}

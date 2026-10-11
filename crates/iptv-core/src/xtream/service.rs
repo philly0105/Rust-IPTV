@@ -851,13 +851,82 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
         max_connections: u.max_connections.unwrap_or(0).max(0),
         is_trial: u.is_trial.unwrap_or(false),
         created_at: u.created_at.and_then(unix_to_rfc3339),
-        server_time: s
-            .timestamp_now
-            .and_then(unix_to_rfc3339)
-            .or_else(|| non_empty(s.time_now)),
+        server_time: server_time(s.timestamp_now, s.time_now, s.timezone.as_deref()),
         timezone: non_empty(s.timezone),
         allowed_output_formats,
     })
+}
+
+/// `serverTime` of `xtream.accountInfo`: RFC 3339 from `timestamp_now`, or
+/// from the `time_now` wall clock when `timezone` names UTC or a fixed
+/// offset. A named zone (`Europe/Berlin`) cannot be converted without a zone
+/// database, so the wall clock is returned as sent, without an offset, and
+/// the UI shows it verbatim next to the zone name.
+fn server_time(
+    timestamp_now: Option<i64>,
+    time_now: Option<String>,
+    timezone: Option<&str>,
+) -> Option<String> {
+    if let Some(t) = timestamp_now.and_then(unix_to_rfc3339) {
+        return Some(t);
+    }
+    let wall = non_empty(time_now)?;
+    let utc = parse_server_datetime(&wall).and_then(|naive| {
+        let offset = timezone.and_then(fixed_offset_seconds)?;
+        let at = naive.and_utc() - chrono::Duration::seconds(offset);
+        Some(at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+    });
+    Some(utc.unwrap_or(wall))
+}
+
+/// Seconds east of UTC for a zone written as UTC or a fixed offset: `UTC`,
+/// `GMT`, `Etc/UTC`, `+02:00`, `-0530`, `UTC+2`, `GMT-03:30`, and `Etc/GMT-2`
+/// (POSIX sign: east of UTC is negative). `None` for named zones.
+fn fixed_offset_seconds(tz: &str) -> Option<i64> {
+    let tz = tz.trim();
+    let upper = tz.to_ascii_uppercase();
+    let (rest, sign_flip) = if let Some(r) = upper.strip_prefix("ETC/GMT") {
+        (r, -1)
+    } else if let Some(r) = upper
+        .strip_prefix("ETC/UTC")
+        .or_else(|| upper.strip_prefix("ETC/UCT"))
+    {
+        (r, 1)
+    } else if let Some(r) = upper
+        .strip_prefix("UTC")
+        .or_else(|| upper.strip_prefix("GMT"))
+        .or_else(|| upper.strip_prefix("UCT"))
+    {
+        (r, 1)
+    } else if upper == "Z" {
+        ("", 1)
+    } else if upper.starts_with('+') || upper.starts_with('-') {
+        (upper.as_str(), 1)
+    } else {
+        return None;
+    };
+    if rest.is_empty() {
+        return Some(0);
+    }
+    let (sign, digits) = match rest.as_bytes()[0] {
+        b'+' => (1, &rest[1..]),
+        b'-' => (-1, &rest[1..]),
+        _ => return None,
+    };
+    let (h, m) = match digits.split_once(':') {
+        Some((h, m)) => (h, m),
+        None if digits.len() == 4 => digits.split_at(2),
+        None => (digits, "0"),
+    };
+    if h.is_empty() || h.len() > 2 || m.len() > 2 {
+        return None;
+    }
+    let h: i64 = h.parse().ok()?;
+    let m: i64 = m.parse().ok()?;
+    if h > 14 || m >= 60 {
+        return None;
+    }
+    Some(sign_flip * sign * (h * 3600 + m * 60))
 }
 
 /// Turns a failure into a message naming the next action.
@@ -1053,5 +1122,54 @@ mod tests {
         let named = "Could not reach 127.0.0.1. Check the address and that the server is online, then try again. (refused)";
         assert_eq!(test_message(&CoreError::Network(named.into())), named);
         assert!(test_message(&CoreError::NotFound("x".into())).contains("server URL"));
+    }
+
+    /// R2 r3 F3: without `timestamp_now`, `time_now` is converted with a
+    /// fixed-offset zone and passed through verbatim (no offset, so never
+    /// read as UTC or as the viewer's local time) with a named zone.
+    #[test]
+    fn server_time_without_timestamp() {
+        let wall = || Some("2026-10-11 18:00:00".to_string());
+        assert_eq!(
+            server_time(Some(1_700_000_000), wall(), Some("Europe/Berlin")).as_deref(),
+            Some("2023-11-14T22:13:20Z")
+        );
+        assert_eq!(
+            server_time(None, wall(), Some("Europe/Berlin")).as_deref(),
+            Some("2026-10-11 18:00:00")
+        );
+        assert_eq!(
+            server_time(None, wall(), None).as_deref(),
+            Some("2026-10-11 18:00:00")
+        );
+        assert_eq!(
+            server_time(None, wall(), Some("UTC")).as_deref(),
+            Some("2026-10-11T18:00:00Z")
+        );
+        assert_eq!(
+            server_time(None, wall(), Some("+02:00")).as_deref(),
+            Some("2026-10-11T16:00:00Z")
+        );
+        assert_eq!(
+            server_time(None, wall(), Some("GMT-5")).as_deref(),
+            Some("2026-10-11T23:00:00Z")
+        );
+        assert_eq!(
+            server_time(None, wall(), Some("UTC+05:30")).as_deref(),
+            Some("2026-10-11T12:30:00Z")
+        );
+        // POSIX sign: Etc/GMT-2 is two hours east of UTC.
+        assert_eq!(
+            server_time(None, wall(), Some("Etc/GMT-2")).as_deref(),
+            Some("2026-10-11T16:00:00Z")
+        );
+        assert_eq!(server_time(None, Some("  ".into()), Some("UTC")), None);
+        assert_eq!(
+            server_time(None, Some("soon".into()), Some("UTC")).as_deref(),
+            Some("soon")
+        );
+        assert_eq!(fixed_offset_seconds("America/New_York"), None);
+        assert_eq!(fixed_offset_seconds("+0530"), Some(19_800));
+        assert_eq!(fixed_offset_seconds("UTC+99"), None);
     }
 }

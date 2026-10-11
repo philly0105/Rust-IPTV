@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -9,6 +9,19 @@ import { ErrorState, Skeleton, cn } from '@/ui';
 export function railScrollBehavior(): ScrollBehavior {
   const reduced = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   return reduced ? 'auto' : 'smooth';
+}
+
+/**
+ * Which step buttons a rail shows. `scrollLeft` runs 0..max in LTR and
+ * 0..-max in RTL, so `|scrollLeft|` is the distance from the inline start in
+ * both directions: Back needs room behind the start, Forward room before the end.
+ * The buttons sit at `start-0`/`end-0` and `scrollBy` maps Back/Forward to the
+ * inline direction, so no RTL special case belongs here.
+ */
+export function dashRailButtons(scrollLeft: number, scrollWidth: number, clientWidth: number): { canPrev: boolean; canNext: boolean } {
+  const pos = Math.abs(scrollLeft);
+  const max = scrollWidth - clientWidth - 2;
+  return { canPrev: pos > 2, canNext: pos < max };
 }
 
 export interface RailCardProps {
@@ -73,6 +86,18 @@ export function DashboardRail<T>({
   const [canPrev, setCanPrev] = useState(false);
   const [canNext, setCanNext] = useState(false);
   const count = items?.length ?? 0;
+  // Whether the track sat at its inline start before the last render.
+  const atStartRef = useRef(true);
+  const orderKey = items?.map(getKey).join('\u0000') ?? '';
+
+  // Scroll snapping keeps the previously snapped card snapped across layout
+  // changes; when the items reorder (e.g. sources ranked once recents load) the
+  // first card moves and the browser follows it to the end. A rail that was at
+  // its start stays at its start.
+  useLayoutEffect(() => {
+    const el = trackRef.current;
+    if (el && atStartRef.current && el.scrollLeft !== 0) el.scrollLeft = 0;
+  }, [orderKey]);
 
   useEffect(() => {
     if (focusIndex >= count && count > 0) setFocusIndex(count - 1);
@@ -82,11 +107,10 @@ export function DashboardRail<T>({
     const el = trackRef.current;
     if (!el) return;
     const measure = () => {
-      const rtl = getComputedStyle(el).direction === 'rtl';
-      const pos = Math.abs(el.scrollLeft);
-      const max = el.scrollWidth - el.clientWidth - 2;
-      setCanPrev(rtl ? pos < max && max > 0 : pos > 2);
-      setCanNext(rtl ? pos > 2 : pos < max);
+      const edges = dashRailButtons(el.scrollLeft, el.scrollWidth, el.clientWidth);
+      atStartRef.current = !edges.canPrev;
+      setCanPrev(edges.canPrev);
+      setCanNext(edges.canNext);
     };
     measure();
     el.addEventListener('scroll', measure, { passive: true });

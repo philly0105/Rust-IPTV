@@ -36,7 +36,8 @@ function countClass(active: boolean): string {
 }
 
 export function CategorySidebar(props: CategorySidebarProps) {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +80,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
       <div className="px-2" style={{ height: ROW }}>
         <NavLink end to={props.hrefFor(undefined)} onClick={props.onNavigate} className={() => linkClass(!props.activeId)}>
           <span className="flex-1 truncate">{props.totalLabel}</span>
-          <span className={countClass(!props.activeId)}>{props.categories ? allCount.toLocaleString() : ''}</span>
+          <span className={countClass(!props.activeId)}>{props.categories ? fmt.format(allCount) : ''}</span>
         </NavLink>
       </div>
 
@@ -114,8 +115,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
                     className={() => linkClass(props.activeId === c.id)}
                     title={c.name}
                   >
-                    <span className="flex-1 truncate">{c.name}</span>
-                    <span className={countClass(props.activeId === c.id)}>{c.itemCount.toLocaleString()}</span>
+                    <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+                    <span className={countClass(props.activeId === c.id)}>{fmt.format(c.itemCount)}</span>
                   </NavLink>
                 </div>
               );

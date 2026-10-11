@@ -19,6 +19,8 @@ interface Args {
   selectRef(ref: ItemRef): void;
   /** The channel playing in this view, if any. */
   current?: Channel;
+  /** `current`'s name as the app shows it (country prefix stripped when the setting is on). */
+  currentName?: string;
   currentNowNext?: EpgNowNext;
 }
 
@@ -130,7 +132,7 @@ export function useRemoteBridge(args: Args): void {
           status: {
             sourceName: a.sourceName,
             isLive: true,
-            channelName: a.current?.name,
+            channelName: a.currentName ?? a.current?.name,
             channelNumber: a.current?.number,
             epgNow: a.currentNowNext?.now?.title,
             volume: Math.round(volume <= 1 ? volume * 100 : volume),

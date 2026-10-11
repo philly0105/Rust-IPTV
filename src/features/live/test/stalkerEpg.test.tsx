@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, configure } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, ItemRef, Page, PageQuery } from '@/api/types';
@@ -8,6 +8,11 @@ import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage } from '../components/LivePage';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
+
+// Under CPU load (a cargo build alongside) the 1 s findBy/waitFor default and the 5 s test default
+// time out before the mocked queries settle; these waits only ever succeed, so give them room.
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 // Stalker sources read the portal's own guide (stalker.epg); XMLTV, when one resolves, fills the rest.
 

@@ -35,6 +35,16 @@ pub type ImporterRegistry = DashMap<SourceKind, Arc<dyn Importer>>;
 
 type LockMap = DashMap<String, Arc<tokio::sync::Mutex<()>>>;
 
+/// `AppState.extensions` key of the per-source import cancel tokens.
+pub const CANCELS_KEY: &str = "sources.cancels";
+
+type CancelMap = DashMap<String, tokio_util::sync::CancellationToken>;
+
+tokio::task_local! {
+    /// Cancel token of the import [`run_import`] is running in this task.
+    static IMPORT_CANCEL: tokio_util::sync::CancellationToken;
+}
+
 /// Imports (or re-imports) one source's catalog. m3u is registered by B1,
 /// xtream by B3, stalker by B4, each from its module `init`.
 #[async_trait::async_trait]
@@ -427,6 +437,37 @@ fn lock_for(state: &AppState, id: &str) -> Arc<tokio::sync::Mutex<()>> {
     Arc::clone(lock.value())
 }
 
+fn cancels(state: &AppState) -> Arc<CancelMap> {
+    state.ext_or_insert_with::<CancelMap>(CANCELS_KEY, || Arc::new(DashMap::new()))
+}
+
+/// Cancels the import of `id` that is running (and every one queued behind
+/// the import lock when `removing`), without waiting for the lock. Imports
+/// that start later get a fresh token unless `removing`.
+fn cancel_imports(state: &AppState, id: &str, removing: bool) {
+    let next = tokio_util::sync::CancellationToken::new();
+    if removing {
+        next.cancel();
+    }
+    if let Some(old) = cancels(state).insert(id.to_string(), next) {
+        old.cancel();
+    }
+}
+
+/// Cancel token of the import running in the current task (set by
+/// [`run_import`]); importers stop their network reads when it fires.
+pub fn import_cancel() -> Option<tokio_util::sync::CancellationToken> {
+    IMPORT_CANCEL.try_with(Clone::clone).ok()
+}
+
+/// The error a cancelled import ends with.
+pub fn import_cancelled_error() -> CoreError {
+    CoreError::Conflict(
+        "the import stopped because the source was removed or its settings changed. Refresh the source to import it again."
+            .into(),
+    )
+}
+
 /// Runs `fut` while holding the per-source import lock that [`run_import`]
 /// and [`remove`] take, so a partial sync (e.g. `xtream.sync` with a
 /// `contentTypes` subset) never interleaves with a full refresh of the same
@@ -561,10 +602,21 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
 }
 
 /// Runs the importer for one source (serialized per source), then records the
-/// outcome. A failed import leaves the previous catalog in place.
+/// outcome. A failed import leaves the previous catalog in place. [`remove`]
+/// and a settings change in [`update`] cancel it (see [`import_cancel`]); a
+/// cancelled import records no `lastError`.
 pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, ImportSummary)> {
     let lock = lock_for(&state, id);
     let guard = lock.lock().await;
+    let token = cancels(&state)
+        .entry(id.to_string())
+        .or_default()
+        .value()
+        .clone();
+    if token.is_cancelled() {
+        // Queued behind an import that `remove` cancelled.
+        return Err(import_cancelled_error());
+    }
     let source = get(&state, id).await?;
     let Some(imp) = importer(&state, source.kind) else {
         let err = CoreError::Unsupported(format!(
@@ -575,7 +627,10 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
         return Err(err);
     };
     let started = std::time::Instant::now();
-    match imp.import(state.clone(), &source).await {
+    let outcome = IMPORT_CANCEL
+        .scope(token.clone(), imp.import(state.clone(), &source))
+        .await;
+    match outcome {
         Ok(summary) => {
             let sid = id.to_string();
             let kind = source.kind;
@@ -611,8 +666,12 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
         }
         Err(err) => {
             let msg = error_text(&err);
-            tracing::warn!(source_id = id, error = %msg, "source import failed; previous catalog kept");
-            record(&state, id, Some(&msg)).await;
+            if token.is_cancelled() {
+                tracing::info!(source_id = id, "source import cancelled");
+            } else {
+                tracing::warn!(source_id = id, error = %msg, "source import failed; previous catalog kept");
+                record(&state, id, Some(&msg)).await;
+            }
             progress(&state, id, "error", 0, None, Some(&msg));
             emit_changed(&state);
             Err(err)
@@ -820,8 +879,9 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
-    let updated = state
+    let (updated, config_changed) = state
         .db_call(move |c| {
+            let mut config_changed = false;
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             if let Some(n) = &name {
                 tx.execute(
@@ -844,6 +904,7 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 if n > 0 {
                     // New URL or credentials: a cached portal session is stale.
                     store::forget_session(&tx, &sid)?;
+                    config_changed = true;
                 }
             }
             if let Some(e) = &epg {
@@ -860,9 +921,14 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             if let Some(p) = position {
                 store::move_to(c, &sid, p)?;
             }
-            store::get(c, &sid)
+            Ok((store::get(c, &sid)?, config_changed))
         })
         .await?;
+    if config_changed {
+        // An import still running fetches the old address (and may be stuck
+        // on it); stop it so the next refresh uses the new settings.
+        cancel_imports(state, id, false);
+    }
     if portal_changed {
         crate::stalker::forget_source(state, id).await;
     }
@@ -870,12 +936,17 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     Ok(updated)
 }
 
-/// `sources.remove`. Waits for a running import of the source to finish.
+/// `sources.remove`. Cancels a running import of the source (and any queued
+/// one), then waits for it to stop.
 pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
+    cancel_imports(state, id, true);
     let lock = lock_for(state, id);
     let _guard = lock.lock().await;
     let sid = id.to_string();
-    state.db_call(move |c| store::delete(c, &sid)).await?;
+    let deleted = state.db_call(move |c| store::delete(c, &sid)).await;
+    // Imports after this (a failed delete, or an id reused) start uncancelled.
+    cancels(state).remove(id);
+    deleted?;
     crate::m3u::remove_cached_playlist(state, id);
     crate::stalker::forget_source(state, id).await;
     if let Some(locks) = state.ext::<LockMap>(LOCKS_KEY) {

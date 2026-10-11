@@ -30,7 +30,7 @@ export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
               type="button"
               onClick={() => onPick(tile.kind)}
               data-testid={`onboard-${tile.kind}`}
-              className="group flex h-full w-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 text-left shadow-1 hover:border-accent/70 hover:bg-surface-2 motion-safe:transition-colors"
+              className="group flex h-full w-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 text-start shadow-1 hover:border-accent/70 hover:bg-surface-2 motion-safe:transition-colors"
             >
               <span className="flex items-center gap-3">
                 <span

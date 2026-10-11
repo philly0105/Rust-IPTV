@@ -1,6 +1,7 @@
 //! `m3u` module (B1): streaming M3U parser, the m3u [`Importer`](crate::sources::Importer),
 //! and `m3u.*` rpc. See `docs/architecture/m3u.md`.
 
+pub mod body;
 pub mod importer;
 pub mod parser;
 pub mod rpc;

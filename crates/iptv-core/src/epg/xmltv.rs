@@ -13,14 +13,22 @@
 //!   `Z`, `UTC` or `GMT` offset, plus RFC 3339 as a fallback;
 //! - programmes without `stop`: the stop is inferred from the next programme
 //!   on the same channel, or start + 1 h when none follows;
-//! - mismatched end tags and a truncated tail (data read so far is kept).
+//! - mismatched end tags, unclosed tags (`<br>` inside a description) and a
+//!   truncated tail (data read so far is kept).
 //!
 //! Hostile input is bounded: the document stops with an `Invalid` error once
 //! more than [`MAX_DOCUMENT_BYTES`] (decompressed) were read, a text, CDATA or
 //! comment / processing-instruction node keeps only its first
 //! [`MAX_NODE_BYTES`] (the rest is read and discarded), and a single tag
 //! (quoted attribute values included) or DOCTYPE declaration larger than that
-//! is an `Invalid` error.
+//! is an `Invalid` error. Element nesting is bounded too: once more than
+//! [`MAX_OPEN_DEPTH`] elements (or [`MAX_OPEN_NAME_BYTES`] of their names)
+//! are open, quick-xml's stack of open names is dropped, since the parser only
+//! needs the names of the elements it is inside. Channel ids and programme
+//! `channel` attributes longer than [`MAX_ID_BYTES`] skip the element, and
+//! icon URLs longer than [`MAX_URL_BYTES`] are dropped. At most
+//! [`MAX_PENDING`] stop-less programmes wait for their next programme; past
+//! that the oldest gets the default duration.
 //!
 //! Only the first non-empty `display-name` / `icon` of a channel and the first
 //! non-empty `title` / `desc` / `category` / `icon` of a programme are kept,
@@ -30,7 +38,7 @@ use crate::error::{CoreError, CoreResult};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader, Read};
 
 /// Seconds in a day.
@@ -52,6 +60,21 @@ pub const MAX_DOCUMENT_BYTES: u64 = 2 << 30;
 /// Bytes of one text / CDATA / comment node handed to quick-xml; the rest of
 /// the node is discarded. Also the largest tag accepted.
 pub const MAX_NODE_BYTES: usize = 4 << 20;
+/// Open elements beyond which quick-xml's stack of open names is dropped.
+pub const MAX_OPEN_DEPTH: usize = 256;
+/// Bytes of open element names beyond which quick-xml's stack is dropped.
+pub const MAX_OPEN_NAME_BYTES: usize = 64 * 1024;
+/// Longest channel id / programme `channel` attribute (and date) accepted;
+/// an element with a longer one is skipped.
+pub const MAX_ID_BYTES: usize = 1024;
+/// Longest icon URL kept; a longer one is dropped.
+pub const MAX_URL_BYTES: usize = 4096;
+/// Stop-less programmes held while waiting for the next programme on their
+/// channel; past this (or [`MAX_PENDING_BYTES`]) the oldest is finished with
+/// [`DEFAULT_DURATION_SECS`].
+pub const MAX_PENDING: usize = 100_000;
+/// Approximate bytes of held stop-less programmes (see [`MAX_PENDING`]).
+pub const MAX_PENDING_BYTES: usize = 64 << 20;
 
 /// A `<channel>` element.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +144,8 @@ pub struct ParseStats {
     pub programmes: u64,
     /// Programmes outside the window.
     pub skipped_window: u64,
-    /// Programmes without a channel, with an unparseable start, or with stop <= start.
+    /// Programmes without a channel, with an unparseable start, or with
+    /// stop <= start; channels and programmes whose id is over [`MAX_ID_BYTES`].
     pub skipped_invalid: u64,
     /// Programmes whose stop was inferred.
     pub inferred_stop: u64,
@@ -158,6 +182,8 @@ impl Field {
 #[derive(Default)]
 struct ChannelBuilder {
     id: String,
+    /// The id was longer than [`MAX_ID_BYTES`].
+    bad_id: bool,
     display_name: Option<String>,
     icon: Option<String>,
 }
@@ -208,7 +234,12 @@ struct Parser<'s> {
     latin1: bool,
     ctx: Ctx,
     capture: Option<Capture>,
-    pending: HashMap<String, XmltvProgramme>,
+    /// Stop-less programmes by channel, with their sequence number.
+    pending: HashMap<String, (u64, XmltvProgramme)>,
+    /// (start, sequence) -> channel of every entry in `pending`, oldest first.
+    pending_order: BTreeMap<(i64, u64), String>,
+    pending_bytes: usize,
+    pending_seq: u64,
     stats: ParseStats,
     saw_tv: bool,
     sink: &'s mut dyn FnMut(XmltvItem) -> CoreResult<()>,
@@ -243,20 +274,23 @@ pub fn parse_with_limits<R: BufRead>(
         inner: reader,
         f: Filter::new(max_document, max_node.max(16)),
     };
-    let mut xml = Reader::from_reader(BufReader::with_capacity(64 * 1024, guard));
-    {
-        let cfg = xml.config_mut();
-        cfg.trim_text(false);
-        cfg.check_end_names = false;
-        cfg.expand_empty_elements = false;
-        cfg.check_comments = false;
-    }
+    let mut xml = xml_reader(BufReader::with_capacity(64 * 1024, guard));
+    // Mirror of quick-xml's stack of open names (their lengths): Start pushes,
+    // End pops one, whatever its name. quick-xml keeps every unclosed name, so
+    // a feed of `<a><a><a>...` would grow it without bound.
+    let mut open: Vec<usize> = Vec::new();
+    let mut open_bytes: usize = 0;
+    // Bytes consumed by readers dropped when the stack was reset.
+    let mut pos_base: u64 = 0;
     let mut p = Parser {
         window,
         latin1: false,
         ctx: Ctx::None,
         capture: None,
         pending: HashMap::new(),
+        pending_order: BTreeMap::new(),
+        pending_bytes: 0,
+        pending_seq: 0,
         stats: ParseStats::default(),
         saw_tv: false,
         sink,
@@ -273,7 +307,7 @@ pub fn parse_with_limits<R: BufRead>(
                         return Err(CoreError::Invalid(limit.0.clone()));
                     }
                 }
-                let pos = xml.buffer_position();
+                let pos = pos_base + xml.buffer_position();
                 if p.stats.channels + p.stats.programmes + p.stats.skipped_window > 0 {
                     let msg = format!("XMLTV ended early at byte {pos}: {err}");
                     tracing::warn!(%msg, "keeping data parsed before the error");
@@ -308,9 +342,17 @@ pub fn parse_with_limits<R: BufRead>(
                     );
                 }
             }
-            Event::Start(e) => p.on_start(&e, false)?,
+            Event::Start(e) => {
+                let n = e.name().as_ref().len();
+                open.push(n);
+                open_bytes += n;
+                p.on_start(&e, false)?;
+            }
             Event::Empty(e) => p.on_start(&e, true)?,
             Event::End(e) => {
+                if let Some(n) = open.pop() {
+                    open_bytes -= n;
+                }
                 let name = e.local_name();
                 p.on_end(name.as_ref())?;
             }
@@ -331,6 +373,19 @@ pub fn parse_with_limits<R: BufRead>(
             buf = Vec::with_capacity(64 * 1024);
         } else {
             buf.clear();
+        }
+        if open.len() > MAX_OPEN_DEPTH || open_bytes > MAX_OPEN_NAME_BYTES {
+            // Only reached right after a Start, where a fresh reader picks up
+            // in the same (text) state; the parser's own context does not
+            // depend on quick-xml's stack, and unmatched ends are allowed.
+            tracing::debug!(
+                depth = open.len(),
+                "XMLTV nesting too deep; dropping open names"
+            );
+            pos_base += xml.buffer_position();
+            xml = xml_reader(xml.into_inner());
+            open.clear();
+            open_bytes = 0;
         }
     }
     let skipped = xml.get_ref().get_ref().f.skipped_nodes;
@@ -355,21 +410,52 @@ pub fn parse_with_limits<R: BufRead>(
     Ok(p.stats)
 }
 
+/// A quick-xml reader over `inner` with the lenient settings [`parse`] uses.
+fn xml_reader<R: BufRead>(inner: R) -> Reader<R> {
+    let mut xml = Reader::from_reader(inner);
+    let cfg = xml.config_mut();
+    cfg.trim_text(false);
+    cfg.check_end_names = false;
+    cfg.allow_unmatched_ends = true;
+    cfg.expand_empty_elements = false;
+    cfg.check_comments = false;
+    xml
+}
+
+/// Approximate heap bytes of a held programme.
+fn programme_bytes(p: &XmltvProgramme) -> usize {
+    let opt = |s: &Option<String>| s.as_ref().map_or(0, String::len);
+    128 + 2 * p.channel.len()
+        + p.title.len()
+        + opt(&p.description)
+        + opt(&p.category)
+        + opt(&p.icon)
+}
+
 impl Parser<'_> {
-    fn attr(&self, e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
+    /// The trimmed, unescaped value of attribute `key`: `Ok(None)` when it is
+    /// missing or blank, `Err(())` when it is longer than `max` bytes.
+    fn attr(&self, e: &BytesStart<'_>, key: &[u8], max: usize) -> Result<Option<String>, ()> {
         for a in e.attributes().with_checks(false).flatten() {
             if a.key.local_name().as_ref() == key {
                 let v = decode(&a.value, self.latin1);
                 let v = unescape_lenient(&v);
                 let v = v.trim();
                 return if v.is_empty() {
-                    None
+                    Ok(None)
+                } else if v.len() > max {
+                    Err(())
                 } else {
-                    Some(v.to_string())
+                    Ok(Some(v.to_string()))
                 };
             }
         }
-        None
+        Ok(None)
+    }
+
+    /// [`Self::attr`] with an over-long value treated as missing.
+    fn attr_or_none(&self, e: &BytesStart<'_>, key: &[u8], max: usize) -> Option<String> {
+        self.attr(e, key, max).ok().flatten()
     }
 
     fn on_start(&mut self, e: &BytesStart<'_>, empty: bool) -> CoreResult<()> {
@@ -379,8 +465,10 @@ impl Parser<'_> {
             b"tv" => self.saw_tv = true,
             b"channel" => {
                 self.capture = None;
+                let id = self.attr(e, b"id", MAX_ID_BYTES);
                 let cb = ChannelBuilder {
-                    id: self.attr(e, b"id").unwrap_or_default(),
+                    bad_id: id.is_err(),
+                    id: id.ok().flatten().unwrap_or_default(),
                     ..Default::default()
                 };
                 self.ctx = Ctx::Channel(cb);
@@ -390,10 +478,19 @@ impl Parser<'_> {
             }
             b"programme" => {
                 self.capture = None;
+                // An over-long channel leaves it empty: skipped as invalid.
                 let pb = ProgrammeBuilder {
-                    channel: self.attr(e, b"channel").unwrap_or_default(),
-                    start: self.attr(e, b"start").as_deref().and_then(parse_xmltv_date),
-                    stop: self.attr(e, b"stop").as_deref().and_then(parse_xmltv_date),
+                    channel: self
+                        .attr_or_none(e, b"channel", MAX_ID_BYTES)
+                        .unwrap_or_default(),
+                    start: self
+                        .attr_or_none(e, b"start", MAX_ID_BYTES)
+                        .as_deref()
+                        .and_then(parse_xmltv_date),
+                    stop: self
+                        .attr_or_none(e, b"stop", MAX_ID_BYTES)
+                        .as_deref()
+                        .and_then(parse_xmltv_date),
                     ..Default::default()
                 };
                 self.ctx = Ctx::Programme(pb);
@@ -402,7 +499,7 @@ impl Parser<'_> {
                 }
             }
             b"icon" => {
-                let src = self.attr(e, b"src");
+                let src = self.attr_or_none(e, b"src", MAX_URL_BYTES);
                 match &mut self.ctx {
                     Ctx::Channel(c) if c.icon.is_none() => c.icon = src,
                     Ctx::Programme(p) if p.icon.is_none() => p.icon = src,
@@ -456,7 +553,9 @@ impl Parser<'_> {
             b"channel" => {
                 if let Ctx::Channel(c) = std::mem::replace(&mut self.ctx, Ctx::None) {
                     self.capture = None;
-                    if !c.id.is_empty() {
+                    if c.bad_id {
+                        self.stats.skipped_invalid += 1;
+                    } else if !c.id.is_empty() {
                         let display_name = c.display_name.unwrap_or_else(|| c.id.clone());
                         self.stats.channels += 1;
                         (self.sink)(XmltvItem::Channel(XmltvChannel {
@@ -483,16 +582,14 @@ impl Parser<'_> {
             self.stats.skipped_invalid += 1;
             return Ok(());
         };
-        if !self.pending.is_empty() {
-            if let Some(mut prev) = self.pending.remove(&p.channel) {
-                prev.stop = if prev.start < start {
-                    start
-                } else {
-                    prev.start + DEFAULT_DURATION_SECS
-                };
-                self.stats.inferred_stop += 1;
-                self.emit(prev)?;
-            }
+        if let Some(mut prev) = self.take_pending(&p.channel) {
+            prev.stop = if prev.start < start {
+                start
+            } else {
+                prev.start + DEFAULT_DURATION_SECS
+            };
+            self.stats.inferred_stop += 1;
+            self.emit(prev)?;
         }
         let prog = XmltvProgramme {
             channel: p.channel,
@@ -504,10 +601,13 @@ impl Parser<'_> {
             icon: p.icon,
         };
         match p.stop {
-            None => {
-                self.pending.insert(prog.channel.clone(), prog);
+            // Its stop is at least its start, so a start past the window is
+            // outside it whatever stop is inferred later.
+            None if start > self.window.max_start => {
+                self.stats.skipped_window += 1;
                 Ok(())
             }
+            None => self.hold(prog),
             Some(stop) if stop > start => self.emit(prog),
             Some(_) => {
                 self.stats.skipped_invalid += 1;
@@ -516,8 +616,42 @@ impl Parser<'_> {
         }
     }
 
+    /// Removes and returns the held programme of `channel`.
+    fn take_pending(&mut self, channel: &str) -> Option<XmltvProgramme> {
+        let (seq, prog) = self.pending.remove(channel)?;
+        self.pending_order.remove(&(prog.start, seq));
+        self.pending_bytes -= programme_bytes(&prog);
+        Some(prog)
+    }
+
+    /// Holds a stop-less programme until the next one on its channel (none is
+    /// held for that channel: [`Self::finish_programme`] took it). Past the
+    /// caps the oldest held programme gets the default duration.
+    fn hold(&mut self, prog: XmltvProgramme) -> CoreResult<()> {
+        self.pending_seq += 1;
+        let seq = self.pending_seq;
+        self.pending_bytes += programme_bytes(&prog);
+        self.pending_order
+            .insert((prog.start, seq), prog.channel.clone());
+        self.pending.insert(prog.channel.clone(), (seq, prog));
+        while self.pending.len() > MAX_PENDING || self.pending_bytes > MAX_PENDING_BYTES {
+            let Some((_, channel)) = self.pending_order.first_key_value() else {
+                break;
+            };
+            let channel = channel.clone();
+            if let Some(mut oldest) = self.take_pending(&channel) {
+                oldest.stop = oldest.start + DEFAULT_DURATION_SECS;
+                self.stats.inferred_stop += 1;
+                self.emit(oldest)?;
+            }
+        }
+        Ok(())
+    }
+
     fn flush_pending(&mut self) -> CoreResult<()> {
-        let mut rest: Vec<_> = self.pending.drain().map(|(_, p)| p).collect();
+        self.pending_order.clear();
+        self.pending_bytes = 0;
+        let mut rest: Vec<_> = self.pending.drain().map(|(_, (_, p))| p).collect();
         rest.sort_by(|a, b| a.channel.cmp(&b.channel).then(a.start.cmp(&b.start)));
         for mut p in rest {
             p.stop = p.start + DEFAULT_DURATION_SECS;

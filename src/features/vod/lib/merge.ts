@@ -269,8 +269,9 @@ export function nextEpisode(seasons: Season[], episodeId: string | undefined): E
 }
 
 /**
- * Where "Play" should start: the most recent unfinished episode; else, after
- * the most recent finished one, the first episode not marked watched; else
+ * Where "Play" should start: the most recent unfinished episode (from the
+ * start when it ran under 10 s); else, after the most recent finished one, the
+ * first episode not marked watched; else
  * the first unwatched episode of the series; else the first episode.
  */
 export function resumeTarget(order: Episode[], positions: PlaybackPosition[]): { episode: Episode; resume: boolean } | undefined {
@@ -283,7 +284,9 @@ export function resumeTarget(order: Episode[], positions: PlaybackPosition[]): {
     const ep = order[i];
     if (ep) {
       if (isResumable(latest)) return { episode: ep, resume: true };
-      const after = firstUnwatchedFrom(i + 1);
+      // Not resumable: finished (watched, or past the resume window) moves on; barely started (under 10 s) replays it.
+      const finished = isWatched(latest) || latest.positionSeconds >= 10;
+      const after = firstUnwatchedFrom(finished ? i + 1 : i);
       if (after) return { episode: after, resume: false };
     }
   }

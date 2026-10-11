@@ -61,7 +61,7 @@
   "guideSource": "소스",
   "guideTime": "가이드 시간",
   "guideLoadFailed": "가이드 일부를 불러오지 못했습니다.",
-  "portalGuideUnavailable": "포털의 TV 가이드가 응답하지 않습니다. 자동으로 다시 요청합니다.",
+  "portalGuideUnavailable": "포털의 TV 가이드가 응답하지 않습니다. 자동으로 다시 시도하는 중입니다.",
   "guideNotAnswering": "가이드 응답 없음",
   "guideNoData": "이 채널들의 가이드 데이터가 아직 없습니다. XMLTV 주소를 추가하거나 EPG 소스를 새로 고치세요.",
   "guideNoSources": "아직 소스가 없습니다",

@@ -11,7 +11,7 @@ The app is a TV and radio tuner, so the design borrows from a backlit radio dial
 - The signature detail is the tuning tick, a short amber bar on the leading edge of the active rail item (the `tuning-tick` utility). Focus rings use the same amber with a soft glow.
 - Type: Bahnschrift (`font-display`) for headings, titles, and numbers; Segoe UI Variable Text for body; Cascadia Mono for key caps.
 - Artwork fallbacks are initials on a per-title hue gradient (`hueOf`, `initialsOf` in `Poster`), so missing posters still look intentional.
-- Motion only answers user actions (dialogs, toasts, card lift). Everything runs under `motion-safe:`. `html[data-reduced-motion='true']` and the OS media query both turn animation off.
+- Motion only answers user actions (dialogs, toasts, card lift). Everything runs under `motion-safe:`. `html[data-reduced-motion='true']` and the OS media query both turn animation off. The player OSD is the exception: it hides through its keyframe, so under reduced motion it keeps a 2.4 s duration with a no-fade `player-osd-still` animation (shown, then gone).
 
 Dark is the default when the OS has no stated preference.
 
@@ -31,7 +31,7 @@ Dark is the default when the OS has no stated preference.
 All of these are Radix-free and keyboard-complete:
 
 - `Button`, `IconButton`, `buttonClass`. A `loading` Button sets `aria-disabled` and `aria-busy` and ignores activation instead of using native `disabled`, so keyboard focus stays on it.
-- Direction: primitives and shell use logical utilities (`start-*`/`end-*`, `ps-*`/`pe-*`, `border-s`/`border-e`, `text-start`) and `rtl:` variants for transforms and gradients, so they mirror in RTL; Tabs, VirtualGrid, and the dashboard rails swap ArrowLeft and ArrowRight there, and Menu's `align` is logical. `ErrorState` shows a translated body and a local-server hint when the transport marks a `network` error with `details.transport === 'unreachable'`, with the raw browser text in a details disclosure.
+- Direction: primitives and shell use logical utilities (`start-*`/`end-*`, `ps-*`/`pe-*`, `border-s`/`border-e`, `text-start`) and `rtl:` variants for transforms and gradients, so they mirror in RTL; Tabs, VirtualGrid, the vod `gridNav` rails and grids, and the dashboard rails swap ArrowLeft and ArrowRight there, and Menu's `align` is logical. Provider text (titles, plots, programme names) carries `dir="auto"` with the `text-match-parent` utility, which aligns it to the parent's start (left, or right under an RTL parent) whatever its own script. `ErrorState` shows a translated body and a local-server hint when the transport marks a `network` error with `details.transport === 'unreachable'`, with the raw browser text in a details disclosure.
 - `Input`, `Textarea`, `Select`, `Toggle` (role=switch), and `SearchInput`. The first Escape clears the field; the next one propagates.
 - `Dialog`: portal, focus trap, Escape, focus restore, scroll lock, and `[data-autofocus]`. The trap stands down once the dialog starts closing, so an always-`open` Dialog that its parent unmounts still hands focus back to the opener. The title row and footer are plain `div`s, because a portaled `<header>`/`<footer>` would add a second banner/contentinfo landmark.
 - `Tabs` and `Menu`: roving focus. Menu also has type-ahead.
@@ -114,7 +114,7 @@ Wire them as:
 - recently added: `catalog.recentlyAdded` for movies and series, merged
 - trending: `tmdb.trending`, only when TMDB is enabled
 
-Rails show a skeleton while loading and an inline error with retry on failure, and they render nothing when empty. With no sources, the page shows a welcome state that links to `/sources?add=1`. Keyboard: each rail is one tab stop. Left, Right, Home, and End move within a rail (RTL-aware), and Up and Down jump to the same position in the neighboring rail. Play actions call `playItem` from `@/features/player` with the source kind.
+Rails show a skeleton while loading and an inline error with retry on failure, and they render nothing when empty. With no sources, the page shows a welcome state that links to `/sources?add=1`. Keyboard: each rail is one tab stop. Left, Right, Home, and End move within a rail (RTL-aware; the step buttons read `Math.abs(scrollLeft)`, and a rail at its start is put back at 0 when its items reorder, since scroll snapping would otherwise follow the old first card), and Up and Down jump to the same position in the neighboring rail. Play actions call `playItem` from `@/features/player` with the source kind.
 
 ## i18n
 

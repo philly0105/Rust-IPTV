@@ -61,7 +61,7 @@
   "guideSource": "Source",
   "guideTime": "Guide time",
   "guideLoadFailed": "Part of the guide did not load.",
-  "portalGuideUnavailable": "The portal's guide is not answering. It is asked again automatically.",
+  "portalGuideUnavailable": "The portal's guide isn't answering. Retrying automatically.",
   "guideNotAnswering": "Guide not answering",
   "guideNoData": "No guide data for these channels yet. Add an XMLTV address or refresh EPG sources.",
   "guideNoSources": "No sources yet",

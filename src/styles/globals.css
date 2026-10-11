@@ -209,6 +209,21 @@ html[data-reduced-motion='true'] *::after {
   scroll-behavior: auto !important;
 }
 
+/*
+ * Provider text (titles, plots, programme names) carries dir="auto" so its own
+ * script decides its bidi order. text-align: start would then resolve against
+ * that direction (an English title in an RTL list would jump to the left edge).
+ * This aligns it to the parent's start instead. Chromium computes
+ * `text-align: match-parent` as plain `start`, so the side is spelled out from
+ * the parent's direction.
+ */
+@utility text-match-parent {
+  text-align: left;
+  &:where(:dir(rtl) > *) {
+    text-align: right;
+  }
+}
+
 @utility scrollbar-none {
   scrollbar-width: none;
   &::-webkit-scrollbar {
@@ -238,11 +253,12 @@ html[data-reduced-motion='true'] *::after {
   &::before {
     content: '';
     position: absolute;
-    left: 0;
+    inset-inline-start: 0;
     top: 22%;
     bottom: 22%;
     width: 3px;
-    border-radius: 0 3px 3px 0;
+    border-start-end-radius: 3px;
+    border-end-end-radius: 3px;
     background: var(--color-accent);
     box-shadow: 0 0 12px var(--color-glow);
   }

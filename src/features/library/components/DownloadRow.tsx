@@ -67,12 +67,12 @@ export function DialProgress({
         }}
       />
       {percent === undefined ? (
-        <div aria-hidden className={cn('absolute inset-y-0 left-0 w-1/4 rounded-full motion-safe:animate-pulse', fill)} />
+        <div aria-hidden className={cn('absolute inset-y-0 start-0 w-1/4 rounded-full motion-safe:animate-pulse', fill)} />
       ) : (
         <>
           <div
             aria-hidden
-            className={cn('absolute inset-y-0 left-0 rounded-full motion-safe:transition-[width] motion-safe:duration-300', fill)}
+            className={cn('absolute inset-y-0 start-0 rounded-full motion-safe:transition-[width] motion-safe:duration-300', fill)}
             style={{ width: `${percent}%` }}
           />
           {tone === 'accent' && percent > 0 && percent < 100 && (
@@ -129,7 +129,7 @@ function DownloadRowImpl({ download: d, progress, source, actions, busy, onActio
             {d.title}
           </span>
           {d.subtitle && <span className="hidden truncate text-[13px] text-fg-muted md:inline">{d.subtitle}</span>}
-          <StatusBadge status={d.status} className="ml-auto shrink-0" />
+          <StatusBadge status={d.status} className="ms-auto shrink-0" />
         </div>
         <DialProgress percent={pct} tone={tone} label={t('progressFor', { title: d.title })} />
         <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
@@ -142,7 +142,7 @@ function DownloadRowImpl({ download: d, progress, source, actions, busy, onActio
           >
             {detail}
           </span>
-          <SourceBadge source={source} className="ml-auto hidden shrink-0 lg:inline-flex" />
+          <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">

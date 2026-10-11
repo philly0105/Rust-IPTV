@@ -36,7 +36,7 @@ export function ContinueRail({
               <button
                 type="button"
                 onClick={() => onOpen(p)}
-                className="flex w-full flex-col gap-2 rounded-lg text-left"
+                className="flex w-full flex-col gap-2 rounded-lg text-start"
                 aria-label={t('continueTitle', { title, time: formatClock(p.positionSeconds) })}
               >
                 <div className="overflow-hidden rounded-lg ring-1 ring-border group-hover:ring-accent/60">
@@ -56,7 +56,7 @@ export function ContinueRail({
                 label={t('removeContinue', { title })}
                 icon={<X size={14} aria-hidden />}
                 onClick={() => onRemove(p)}
-                className="absolute right-1.5 top-1.5 h-7 w-7 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                className="absolute end-1.5 top-1.5 h-7 w-7 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
               />
             </li>
           );

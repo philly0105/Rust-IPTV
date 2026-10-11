@@ -352,7 +352,9 @@ async fn attempt(
     // `identity`: byte ranges and Content-Length must describe the file itself,
     // and a manual Accept-Encoding also turns off reqwest's transparent decoding.
     let mut req = apply_source_headers(
-        crate::http::client_for(state).get(&row.download.url),
+        crate::http::source_client(state, &row.download.item_ref.source_id)
+            .await
+            .get(&row.download.url),
         &row.headers,
     )
     .header(ACCEPT_ENCODING, "identity");

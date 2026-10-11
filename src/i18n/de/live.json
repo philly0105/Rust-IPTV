@@ -61,7 +61,7 @@
   "guideSource": "Quelle",
   "guideTime": "Programmzeit",
   "guideLoadFailed": "Ein Teil des Programmführers wurde nicht geladen.",
-  "portalGuideUnavailable": "Der Programmführer des Portals antwortet nicht. Er wird automatisch erneut abgefragt.",
+  "portalGuideUnavailable": "Der Programmführer des Portals antwortet nicht. Es wird automatisch erneut versucht.",
   "guideNotAnswering": "Programmführer antwortet nicht",
   "guideNoData": "Noch keine Programmdaten für diese Sender. Fügen Sie eine XMLTV-Adresse hinzu oder aktualisieren Sie die EPG-Quellen.",
   "guideNoSources": "Noch keine Quellen",

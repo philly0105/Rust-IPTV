@@ -9,6 +9,8 @@ import type { Channel, EpgProgram, Settings } from '@/api/types';
 import { DEFAULT_SETTINGS } from '@/api/types';
 import live from '@/i18n/en/live.json';
 
+import { resetStalkerPreviewSources } from '../lib/stalkerPreviewQueue';
+
 export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
@@ -48,6 +50,8 @@ export function installDomStubs(): void {
 }
 
 export function renderAt(path: string, routes: { path: string; element: ReactNode }[]) {
+  // Portal backoff and answers are per source and outlive a render; each test starts clean.
+  resetStalkerPreviewSources();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={client}>

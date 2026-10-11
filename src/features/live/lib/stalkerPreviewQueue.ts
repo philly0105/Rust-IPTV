@@ -20,11 +20,52 @@ export interface PreviewQueueOptions {
   /** Longest pause between two attempts at a silent portal. */
   maxBackoffMs?: number;
   clock?: () => number;
+  /**
+   * Share the backoff and the answers with every other queue of this source (the live list, both
+   * grid queues, the next grid window). Without it the queue keeps both to itself.
+   */
+  sourceId?: string;
+  /** What this queue asks for beyond the channel (e.g. `limit|from`); part of its cache keys. */
+  scope?: string;
 }
 
 interface Entry {
   programs: EpgProgram[];
   at: number;
+}
+
+/** Answers kept per source; the oldest go first beyond this. */
+const MAX_CACHED = 2000;
+
+/** One source's portal guide: whether it is answering, and what it said. */
+interface SourceState {
+  /** Consecutive transient failures; 0 while the portal answers. */
+  failures: number;
+  pausedUntil: number;
+  resumeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Keyed by scope + item key, so a window moved back finds its earlier answers. */
+  cache: Map<string, Entry>;
+  /** Queues that synced and were not reset since; a pause, its end and a retry reach all of them. */
+  queues: Set<StalkerPreviewQueue>;
+}
+
+const newSourceState = (): SourceState => ({ failures: 0, pausedUntil: 0, resumeTimer: undefined, cache: new Map(), queues: new Set() });
+
+const sources = new Map<string, SourceState>();
+
+function sourceState(sourceId: string): SourceState {
+  let st = sources.get(sourceId);
+  if (!st) {
+    st = newSourceState();
+    sources.set(sourceId, st);
+  }
+  return st;
+}
+
+/** Forgets every source's backoff and answers (a fresh render tree in tests). */
+export function resetStalkerPreviewSources(): void {
+  for (const st of sources.values()) if (st.resumeTimer !== undefined) clearTimeout(st.resumeTimer);
+  sources.clear();
 }
 
 /**
@@ -43,9 +84,16 @@ export function isTransientEpgError(err: unknown): boolean {
  * now/next call that works everywhere, so each visible channel is asked on its own: throttled,
  * cached and limited to what the user is looking at, so scrolling a 10k list cannot flood the
  * portal. Rows that scroll away before their turn are dropped from the queue.
+ *
+ * With `sourceId`, the backoff and the answers belong to the source, not to the queue: a new queue
+ * for a moved grid window (or the other page) keeps waiting out a silent portal's pause, and reuses
+ * the answers already cached for its `scope`.
  */
 export class StalkerPreviewQueue {
-  private readonly cache = new Map<ItemKey, Entry>();
+  private readonly shared: SourceState;
+  /** True when `shared` is this queue's own (no `sourceId`): `reset` then forgets it too. */
+  private readonly ownsState: boolean;
+  private readonly scope: string;
   private readonly inFlight = new Set<ItemKey>();
   private queue: ItemRef[] = [];
   private workers = 0;
@@ -53,17 +101,16 @@ export class StalkerPreviewQueue {
   private destroyed = false;
   /** Last wanted set, replayed when a backoff ends or on `retry()`. */
   private wanted: readonly ItemRef[] = [];
-  /** Consecutive transient failures; 0 while the portal answers. */
-  private failures = 0;
-  private pausedUntil = 0;
-  private resumeTimer: ReturnType<typeof setTimeout> | undefined;
-  private readonly opts: Required<PreviewQueueOptions>;
+  private readonly opts: Required<Omit<PreviewQueueOptions, 'sourceId' | 'scope'>>;
 
   constructor(
     private readonly fetchPrograms: (ref: ItemRef) => Promise<EpgProgram[]>,
     private readonly onUpdate: () => void,
-    options: PreviewQueueOptions = {},
+    { sourceId, scope = '', ...options }: PreviewQueueOptions = {},
   ) {
+    this.ownsState = sourceId === undefined;
+    this.shared = sourceId === undefined ? newSourceState() : sourceState(sourceId);
+    this.scope = scope;
     this.opts = {
       ttlMs: 5 * 60_000,
       emptyTtlMs: 60_000,
@@ -79,8 +126,7 @@ export class StalkerPreviewQueue {
 
   /** Cached programmes, or undefined when unknown or expired. */
   get(ref: ItemRef): EpgProgram[] | undefined {
-    const key = itemKey(ref);
-    const e = this.cache.get(key);
+    const e = this.shared.cache.get(this.cacheKey(itemKey(ref)));
     if (!e) return undefined;
     return this.usable(e) ? e.programs : undefined;
   }
@@ -90,28 +136,31 @@ export class StalkerPreviewQueue {
    * Rows keep their cached programmes; the rest show the guide as unavailable.
    */
   get unavailable(): boolean {
-    return this.failures > 0;
+    return this.shared.failures > 0;
   }
 
   /** When the next automatic attempt runs (epoch ms), while backing off. */
   get retryAt(): number | undefined {
-    return this.failures > 0 && this.pausedUntil > this.opts.clock() ? this.pausedUntil : undefined;
+    const st = this.shared;
+    return st.failures > 0 && st.pausedUntil > this.opts.clock() ? st.pausedUntil : undefined;
   }
 
-  /** Ends the backoff now and asks the portal again for the wanted rows. */
+  /** Ends the source's backoff now and asks the portal again for every queue's wanted rows. */
   retry(): void {
     if (this.destroyed) return;
     this.clearTimer();
-    this.pausedUntil = 0;
-    this.sync(this.wanted);
+    this.shared.pausedUntil = 0;
+    this.shared.queues.add(this);
+    for (const q of [...this.shared.queues]) q.sync(q.wanted);
   }
 
   /** Replaces the wanted set with `refs` (in display order) and starts fetching what is missing. */
   sync(refs: readonly ItemRef[]): void {
     if (this.destroyed) return;
+    this.shared.queues.add(this);
     this.wanted = refs;
     // Backing off a silent portal: the timer replays the wanted set when the pause ends.
-    if (this.pausedUntil > this.opts.clock()) {
+    if (this.shared.pausedUntil > this.opts.clock()) {
       this.queue = [];
       return;
     }
@@ -121,7 +170,7 @@ export class StalkerPreviewQueue {
       const key = itemKey(ref);
       if (seen.has(key) || this.inFlight.has(key)) continue;
       seen.add(key);
-      const e = this.cache.get(key);
+      const e = this.shared.cache.get(this.cacheKey(key));
       if (e && this.usable(e)) continue;
       missing.push(ref);
       if (missing.length >= this.opts.maxPerSync) break;
@@ -130,41 +179,70 @@ export class StalkerPreviewQueue {
     this.pump();
   }
 
-  /** Forgets everything (source switch, EPG change); in-flight answers are dropped. */
+  /**
+   * Stops this queue's work; in-flight answers are dropped. A shared source keeps its backoff and
+   * answers for the other queues; a queue without `sourceId` forgets both.
+   */
   reset(): void {
     this.generation++;
-    this.cache.clear();
     this.inFlight.clear();
     this.queue = [];
-    this.failures = 0;
-    this.pausedUntil = 0;
-    this.clearTimer();
+    this.shared.queues.delete(this);
+    if (this.ownsState) {
+      this.shared.cache.clear();
+      this.shared.failures = 0;
+      this.shared.pausedUntil = 0;
+      this.clearTimer();
+    }
+  }
+
+  private cacheKey(key: ItemKey): string {
+    return `${this.scope}\n${key}`;
   }
 
   private clearTimer(): void {
-    if (this.resumeTimer !== undefined) clearTimeout(this.resumeTimer);
-    this.resumeTimer = undefined;
+    const st = this.shared;
+    if (st.resumeTimer !== undefined) clearTimeout(st.resumeTimer);
+    st.resumeTimer = undefined;
   }
 
   /** One more transient failure: pause the whole source, doubling the pause each time. */
   private backOff(): void {
+    const st = this.shared;
     const now = this.opts.clock();
     // Workers already in flight when the pause began fail the same way; count the outage once.
-    if (this.pausedUntil > now) return;
-    this.failures++;
-    const pause = Math.min(this.opts.backoffMs * 2 ** (this.failures - 1), this.opts.maxBackoffMs);
-    this.pausedUntil = now + pause;
-    this.queue = [];
+    if (st.pausedUntil > now) return;
+    st.failures++;
+    const pause = Math.min(this.opts.backoffMs * 2 ** (st.failures - 1), this.opts.maxBackoffMs);
+    st.pausedUntil = now + pause;
     this.clearTimer();
-    this.resumeTimer = setTimeout(() => {
-      this.resumeTimer = undefined;
-      if (!this.destroyed) this.sync(this.wanted);
+    this.queue = [];
+    for (const q of st.queues) {
+      q.queue = [];
+      // The other queues of the source show the outage too.
+      if (q !== this) q.onUpdate();
+    }
+    st.resumeTimer = setTimeout(() => {
+      st.resumeTimer = undefined;
+      for (const q of [...st.queues]) q.sync(q.wanted);
     }, pause);
   }
 
   destroy(): void {
     this.reset();
     this.destroyed = true;
+  }
+
+  private store(key: ItemKey, programs: EpgProgram[]): void {
+    const cache = this.shared.cache;
+    const k = this.cacheKey(key);
+    cache.delete(k);
+    cache.set(k, { programs, at: this.opts.clock() });
+    // A Map iterates in insertion order: the first keys are the oldest answers.
+    for (const old of cache.keys()) {
+      if (cache.size <= MAX_CACHED) break;
+      cache.delete(old);
+    }
   }
 
   private usable(e: Entry): boolean {
@@ -209,8 +287,11 @@ export class StalkerPreviewQueue {
           this.backOff();
         } else {
           // Only an answer proves the portal is back; a per-row error says nothing about it.
-          if (answered) this.failures = 0;
-          this.cache.set(key, { programs, at: this.opts.clock() });
+          if (answered && this.shared.failures > 0) {
+            this.shared.failures = 0;
+            for (const q of this.shared.queues) if (q !== this) q.onUpdate();
+          }
+          this.store(key, programs);
         }
         this.onUpdate();
         if (this.queue.length > 0 && this.opts.delayMs > 0) await new Promise((r) => setTimeout(r, this.opts.delayMs));

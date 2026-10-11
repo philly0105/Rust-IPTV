@@ -444,12 +444,26 @@ pub async fn import(
 
     // Settings: EPG URLs.
     let current = state.settings_snapshot().epg_urls;
-    let next = match (&manifest.epg_urls, mode) {
+    let mut next = match (&manifest.epg_urls, mode) {
         (Some(urls), ImportMode::Merge) => merge_urls(urls, &current),
         (Some(urls), ImportMode::Replace) => merge_urls(urls, &[]),
         (None, ImportMode::Replace) => Vec::new(),
         (None, ImportMode::Merge) => current.clone(),
     };
+    // Server mode cannot use local EPG files: drop each new one with its own
+    // warning instead of letting it reject the whole list.
+    next.retain(|u| {
+        current.contains(u)
+            || match crate::epg::fetch::check_server_url(state, u) {
+                Ok(()) => true,
+                Err(err) => {
+                    report
+                        .warnings
+                        .push(format!("EPG URL {u} was not restored: {err}"));
+                    false
+                }
+            }
+    });
     if next != current {
         if let Err(err) = crate::settings::update(state, json!({ "epgUrls": next })).await {
             report

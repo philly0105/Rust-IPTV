@@ -1,0 +1,12 @@
+{
+  "js": {
+    "keep_alive": 180,
+    "not_valid": 0,
+    "random": "5a1e7c0b9d3f4e2a8c6b1d0e9f7a3c5b2e4d6f80",
+    "revision": "1",
+    "servertime": 1767269400,
+    "servertimezone": "UTC",
+    "token": "mock-token-1",
+    "version": "5.6.2"
+  }
+}

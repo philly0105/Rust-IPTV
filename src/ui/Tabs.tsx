@@ -1,0 +1,130 @@
+import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
+
+import { cn } from './cn';
+
+export interface TabItem {
+  id: string;
+  label: ReactNode;
+  /** Optional count or badge after the label. */
+  badge?: ReactNode;
+  disabled?: boolean;
+}
+
+export interface TabsProps {
+  items: TabItem[];
+  value: string;
+  onChange: (id: string) => void;
+  /** Accessible name of the tab list. */
+  label?: string;
+  className?: string;
+  /** `underline` (default) for page sections, `pill` for compact toolbars. */
+  variant?: 'underline' | 'pill';
+  /**
+   * When set, each tab gets aria-controls=`${panelIdPrefix}-${id}`; render
+   * panels with `tabPanelProps(panelIdPrefix, id)`.
+   */
+  panelIdPrefix?: string;
+}
+
+/**
+ * WAI-ARIA tabs with roving focus: ArrowLeft/Right (and Up/Down), Home, End
+ * move focus and activate (automatic activation).
+ */
+export function Tabs({ items, value, onChange, label, className, variant = 'underline', panelIdPrefix }: TabsProps) {
+  const autoId = useId();
+  const prefix = panelIdPrefix ?? autoId;
+  const refs = useRef(new Map<string, HTMLButtonElement>());
+  const enabled = items.filter((i) => !i.disabled);
+
+  const move = (e: KeyboardEvent<HTMLDivElement>) => {
+    const idx = enabled.findIndex((i) => i.id === value);
+    let next = -1;
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        next = (idx + 1) % enabled.length;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        next = (idx - 1 + enabled.length) % enabled.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = enabled.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const item = enabled[next];
+    if (!item) return;
+    onChange(item.id);
+    refs.current.get(item.id)?.focus();
+  };
+
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      aria-orientation="horizontal"
+      onKeyDown={move}
+      className={cn(
+        'flex max-w-full items-center overflow-x-auto scrollbar-none',
+        variant === 'underline' ? 'gap-1 border-b border-border' : 'gap-1 rounded-md bg-surface-2 p-1',
+        className,
+      )}
+    >
+      {items.map((item) => {
+        const selected = item.id === value;
+        return (
+          <button
+            key={item.id}
+            ref={(el) => {
+              if (el) refs.current.set(item.id, el);
+              else refs.current.delete(item.id);
+            }}
+            type="button"
+            role="tab"
+            id={`${prefix}-tab-${item.id}`}
+            aria-selected={selected}
+            aria-controls={panelIdPrefix ? `${prefix}-${item.id}` : undefined}
+            tabIndex={selected ? 0 : -1}
+            disabled={item.disabled}
+            onClick={() => onChange(item.id)}
+            className={cn(
+              'inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-medium disabled:opacity-40',
+              'motion-safe:transition-colors',
+              variant === 'underline'
+                ? cn(
+                    '-mb-px h-10 border-b-2 px-3',
+                    selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+                  )
+                : cn(
+                    'h-8 rounded-sm px-3',
+                    selected ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:text-fg',
+                  ),
+            )}
+          >
+            {item.label}
+            {item.badge !== undefined && (
+              <span className="tabular rounded-full bg-surface-3 px-1.5 text-xs text-fg-muted">{item.badge}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Props for a tab panel paired with `<Tabs panelIdPrefix>`. */
+export function tabPanelProps(panelIdPrefix: string, id: string) {
+  return {
+    role: 'tabpanel' as const,
+    id: `${panelIdPrefix}-${id}`,
+    'aria-labelledby': `${panelIdPrefix}-tab-${id}`,
+    tabIndex: 0,
+  };
+}

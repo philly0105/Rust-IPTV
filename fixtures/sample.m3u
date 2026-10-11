@@ -1,0 +1,55 @@
+#EXTM3U url-tvg="http://127.0.0.1:7290/xmltv/sample.xml" x-tvg-url="http://127.0.0.1:7290/xmltv/sample.xml" refresh="3600"
+#PLAYLIST:Tsrust IPTV sample
+#EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="http://127.0.0.1:7290/img/logo/bbc1.uk.svg" tvg-chno="1" group-title="News" catchup="xc" catchup-days="7",BBC One
+http://127.0.0.1:7290/xtream/live/demo/secret/101.m3u8
+#EXTINF:-1 tvg-id="bbcnews.uk" tvg-name="BBC News" tvg-logo="http://127.0.0.1:7290/img/logo/bbcnews.uk.svg" tvg-chno="2" group-title="News" catchup="xc" catchup-days="7",BBC News
+http://127.0.0.1:7290/xtream/live/demo/secret/102.m3u8
+#EXTINF:-1 tvg-id="cnni.us" tvg-name="CNN International" tvg-logo="http://127.0.0.1:7290/img/logo/cnni.us.svg" tvg-chno="3" group-title="News" catchup="xc" catchup-days="7",CNN International
+http://127.0.0.1:7290/xtream/live/demo/secret/103.m3u8
+#EXTINF:-1 tvg-id="skynews.uk" tvg-name="Sky News" tvg-logo="http://127.0.0.1:7290/img/logo/skynews.uk.svg" tvg-chno="4" group-title="News" catchup="append" catchup-days="3" catchup-source="?utc={utc}&lutc={lutc}",Sky News
+http://127.0.0.1:7290/xtream/live/demo/secret/104.m3u8
+#EXTINF:-1 tvg-id="aljazeera.qa" tvg-name="Al Jazeera English" tvg-logo="http://127.0.0.1:7290/img/logo/aljazeera.qa.svg" tvg-chno="5" group-title="News" catchup="append" catchup-days="3" catchup-source="?utc={utc}&lutc={lutc}",Al Jazeera English
+http://127.0.0.1:7290/xtream/live/demo/secret/105.m3u8
+#EXTINF:-1 tvg-id="france24.fr" tvg-name="France 24 English" tvg-logo="http://127.0.0.1:7290/img/logo/france24.fr.svg" tvg-chno="6" group-title="News",France 24 English
+http://127.0.0.1:7290/xtream/live/demo/secret/106.m3u8
+#EXTINF:-1 tvg-id="dwnews.de" tvg-name="DW News" tvg-logo="http://127.0.0.1:7290/img/logo/dwnews.de.svg" tvg-chno="7" group-title="News",DW News
+http://127.0.0.1:7290/xtream/live/demo/secret/107.m3u8
+#EXTINF:-1 tvg-id="skysportsmain.uk" tvg-name="Sky Sports Main Event" tvg-logo="http://127.0.0.1:7290/img/logo/skysportsmain.uk.svg" tvg-chno="8" group-title="Sports",Sky Sports Main Event
+http://127.0.0.1:7290/xtream/live/demo/secret/113.m3u8
+#EXTINF:-1 tvg-id="skysportsf1.uk" tvg-name="Sky Sports F1" tvg-logo="http://127.0.0.1:7290/img/logo/skysportsf1.uk.svg" tvg-chno="9" group-title="Sports",Sky Sports F1
+http://127.0.0.1:7290/xtream/live/demo/secret/114.m3u8
+#EXTINF:-1 tvg-id="eurosport1.eu" tvg-name="Eurosport 1" tvg-logo="http://127.0.0.1:7290/img/logo/eurosport1.eu.svg" tvg-chno="10" group-title="Sports",Eurosport 1
+http://127.0.0.1:7290/xtream/live/demo/secret/115.m3u8
+#EXTINF:-1 tvg-id="eurosport2.eu" tvg-name="Eurosport 2" tvg-logo="http://127.0.0.1:7290/img/logo/eurosport2.eu.svg" tvg-chno="11" group-title="Sports",Eurosport 2
+http://127.0.0.1:7290/xtream/live/demo/secret/116.m3u8
+#EXTINF:-1 tvg-id="espn.us" tvg-name="ESPN" tvg-logo="http://127.0.0.1:7290/img/logo/espn.us.svg" tvg-chno="12" group-title="Sports",ESPN
+#EXTVLCOPT:http-user-agent=IPTVMockAgent/1.0
+#EXTVLCOPT:http-referrer=http://referer.mock/
+http://127.0.0.1:7290/xtream/live/demo/secret/117.m3u8
+#EXTINF:-1 tvg-id="espn2.us" tvg-name="ESPN 2" tvg-logo="http://127.0.0.1:7290/img/logo/espn2.us.svg" tvg-chno="13" group-title="Sports",ESPN 2
+#EXTGRP:Sports
+http://127.0.0.1:7290/xtream/live/demo/secret/118.m3u8
+#EXTINF:-1 tvg-id="itv1.uk" tvg-name="ITV1" tvg-logo="http://127.0.0.1:7290/img/logo/itv1.uk.svg" tvg-chno="14" group-title="Entertainment",ITV1
+http://127.0.0.1:7290/xtream/live/demo/secret/125.m3u8
+#EXTINF:-1 tvg-id="channel4.uk" tvg-name="Channel 4" tvg-logo="http://127.0.0.1:7290/img/logo/channel4.uk.svg" tvg-chno="15" group-title="Entertainment",Channel 4
+http://127.0.0.1:7290/xtream/live/demo/secret/126.m3u8
+#EXTINF:-1 tvg-id="channel5.uk" tvg-name="Channel 5" tvg-logo="http://127.0.0.1:7290/img/logo/channel5.uk.svg" tvg-chno="16" group-title="Entertainment",Channel 5
+http://127.0.0.1:7290/xtream/live/demo/secret/127.m3u8
+#EXTINF:-1 tvg-id="dave.uk" tvg-name="Dave" tvg-logo="http://127.0.0.1:7290/img/logo/dave.uk.svg" tvg-chno="17" group-title="Entertainment",Dave
+http://127.0.0.1:7290/xtream/live/demo/secret/128.m3u8
+#EXTINF:-1 tvg-id="comedycentral.uk" tvg-name="Comedy Central" tvg-logo="http://127.0.0.1:7290/img/logo/comedycentral.uk.svg" tvg-chno="18" group-title="Entertainment",Comedy Central
+http://127.0.0.1:7290/xtream/live/demo/secret/129.m3u8
+#EXTINF:-1 tvg-id="discovery.us" tvg-name="Discovery Channel" tvg-logo="http://127.0.0.1:7290/img/logo/discovery.us.svg" tvg-chno="19" group-title="Entertainment",Discovery Channel
+http://127.0.0.1:7290/xtream/live/demo/secret/130.m3u8
+#EXTINF:-1 tvg-id="natgeo.us" tvg-name="National Geographic" tvg-logo="http://127.0.0.1:7290/img/logo/natgeo.us.svg" tvg-chno="20" group-title="Entertainment",National Geographic
+http://127.0.0.1:7290/xtream/live/demo/secret/131.m3u8
+#EXTINF:-1 tvg-id="mtvhits.uk" tvg-name="MTV Hits" tvg-logo="http://127.0.0.1:7290/img/logo/mtvhits.uk.svg" tvg-chno="21" group-title="Music",MTV Hits
+http://127.0.0.1:7290/xtream/live/demo/secret/136.m3u8
+#EXTINF:-1 tvg-id="vh1classic.uk" tvg-name="VH1 Classic" tvg-logo="http://127.0.0.1:7290/img/logo/vh1classic.uk.svg" tvg-chno="22" group-title="Music",VH1 Classic
+http://127.0.0.1:7290/xtream/live/demo/secret/137.m3u8
+#EXTINF:-1 tvg-id="kisstv.uk" tvg-name="Kiss TV" tvg-logo="http://127.0.0.1:7290/img/logo/kisstv.uk.svg" tvg-chno="23" group-title="Music",Kiss TV
+http://127.0.0.1:7290/xtream/live/demo/secret/138.m3u8
+#EXTINF:-1 tvg-id="classicfm.uk" tvg-name="Classic FM" tvg-logo="http://127.0.0.1:7290/img/logo/classicfm.uk.svg" tvg-chno="24" group-title="Music" radio="true",Classic FM
+http://127.0.0.1:7290/media/radio.mp3
+#EXTINF:-1 tvg-id="traceurban.fr" tvg-name="Trace Urban" tvg-logo="http://127.0.0.1:7290/img/logo/traceurban.fr.svg" tvg-chno="25" group-title="Music",Trace Urban
+http://127.0.0.1:7290/xtream/live/demo/secret/140.m3u8

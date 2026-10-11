@@ -1,0 +1,133 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render } from '@testing-library/react';
+import i18next from 'i18next';
+import type { ReactNode } from 'react';
+import { I18nextProvider, initReactI18next } from 'react-i18next';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { create } from 'zustand';
+
+import type { ItemRef, Settings, Source } from '@/api/types';
+import { DEFAULT_SETTINGS } from '@/api/types';
+import common from '@/i18n/en/common.json';
+import vod from '@/i18n/en/vod.json';
+
+export const i18n = i18next.createInstance();
+void i18n.use(initReactI18next).init({
+  lng: 'en',
+  fallbackLng: 'en',
+  ns: ['vod', 'common'],
+  defaultNS: 'vod',
+  resources: { en: { vod, common } },
+  interpolation: { escapeValue: false },
+});
+
+/** Records rpc calls; tests install handlers per command. */
+export function createRpcMock() {
+  const handlers: Record<string, (args: unknown) => unknown> = {};
+  const calls: { cmd: string; args: unknown }[] = [];
+  const call = async (cmd: string, args?: unknown) => {
+    calls.push({ cmd, args });
+    const h = handlers[cmd];
+    if (!h) throw new Error(`unmocked rpc ${cmd}`);
+    return h(args);
+  };
+  return { handlers, calls, call };
+}
+
+/** Minimal stand-in for `@/features/player` (C8): a store, a recorder for playItem, and a stage placeholder. */
+interface FakePlayer {
+  source?: { ref: ItemRef; episodeId?: string };
+  mode: 'inline' | 'embedded-mpv' | 'external';
+  status: 'idle' | 'loading' | 'playing' | 'paused' | 'error';
+  error?: string;
+  positionSeconds: number;
+  durationSeconds?: number;
+  stop: () => void;
+}
+export const usePlayerStore = create<FakePlayer>((set) => ({
+  source: undefined,
+  mode: 'inline',
+  status: 'idle',
+  positionSeconds: 0,
+  stop: () => set({ source: undefined, status: 'idle' }),
+}));
+export const played: unknown[] = [];
+export async function playItem(args: { ref: ItemRef; episodeId?: string }): Promise<void> {
+  played.push(args);
+  const source: FakePlayer['source'] = { ref: args.ref };
+  if (args.episodeId) source.episodeId = args.episodeId;
+  usePlayerStore.setState({ source, status: 'playing', mode: 'inline', positionSeconds: 0 });
+}
+export function PlayerStage({ className }: { className?: string }) {
+  return <div data-testid="player-stage" className={className} />;
+}
+export const playerModule = { usePlayerStore, playItem, PlayerStage, playSource: async () => undefined, restorePlayback: async () => undefined };
+
+export function installDomStubs(): void {
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
+  if (typeof window.matchMedia !== 'function') {
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+  // jsdom has no layout: report a desktop-sized box so virtualizers render a window of rows.
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 800 });
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
+  Element.prototype.scrollTo ??= function scrollTo() {};
+  Element.prototype.scrollIntoView ??= function scrollIntoView() {};
+}
+
+export let currentLocation = '';
+function LocationProbe() {
+  const loc = useLocation();
+  currentLocation = `${loc.pathname}${loc.search}`;
+  return null;
+}
+
+export function renderAt(path: string, routes: { path: string; element: ReactNode }[]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter initialEntries={[path]}>
+          <LocationProbe />
+          <Routes>
+            {routes.map((r) => (
+              <Route key={r.path} path={r.path} element={r.element} />
+            ))}
+            <Route path="*" element={<div data-testid="elsewhere" />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>
+    </QueryClientProvider>,
+  );
+}
+
+export const settings = (patch: Partial<Settings> = {}): Settings => ({ ...DEFAULT_SETTINGS, ...patch });
+
+export function makeSource(id: string, kind: Source['kind'], name: string): Source {
+  return {
+    id,
+    kind,
+    name,
+    position: 0,
+    autoRefresh: false,
+    createdAt: '2026-10-01T00:00:00Z',
+    channelCount: 10,
+    movieCount: 5000,
+    seriesCount: 40,
+  } as Source;
+}

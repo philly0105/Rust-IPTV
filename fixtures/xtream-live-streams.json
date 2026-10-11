@@ -1,0 +1,762 @@
+[
+  {
+    "added": "1767222000",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "bbc1.uk",
+    "is_adult": 0,
+    "name": "BBC One",
+    "num": 1,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/bbc1.uk.svg",
+    "stream_id": 101,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 1,
+    "tv_archive_duration": 7
+  },
+  {
+    "added": "1767218400",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "bbcnews.uk",
+    "is_adult": 0,
+    "name": "BBC News",
+    "num": 2,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/bbcnews.uk.svg",
+    "stream_id": 102,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 1,
+    "tv_archive_duration": 7
+  },
+  {
+    "added": "1767214800",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "cnni.us",
+    "is_adult": 0,
+    "name": "CNN International",
+    "num": 3,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/cnni.us.svg",
+    "stream_id": 103,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 1,
+    "tv_archive_duration": 7
+  },
+  {
+    "added": "1767211200",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "skynews.uk",
+    "is_adult": 0,
+    "name": "Sky News",
+    "num": 4,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/skynews.uk.svg",
+    "stream_id": 104,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 1,
+    "tv_archive_duration": 7
+  },
+  {
+    "added": "1767207600",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "aljazeera.qa",
+    "is_adult": 0,
+    "name": "Al Jazeera English",
+    "num": 5,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/aljazeera.qa.svg",
+    "stream_id": 105,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 1,
+    "tv_archive_duration": 7
+  },
+  {
+    "added": "1767204000",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "france24.fr",
+    "is_adult": 0,
+    "name": "France 24 English",
+    "num": 6,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/france24.fr.svg",
+    "stream_id": 106,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767200400",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "dwnews.de",
+    "is_adult": 0,
+    "name": "DW News",
+    "num": 7,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/dwnews.de.svg",
+    "stream_id": 107,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767196800",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "euronews.eu",
+    "is_adult": 0,
+    "name": "Euronews",
+    "num": 8,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/euronews.eu.svg",
+    "stream_id": 108,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767193200",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "bloomberg.us",
+    "is_adult": 0,
+    "name": "Bloomberg TV",
+    "num": 9,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/bloomberg.us.svg",
+    "stream_id": 109,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767189600",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "cnbc.eu",
+    "is_adult": 0,
+    "name": "CNBC Europe",
+    "num": 10,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/cnbc.eu.svg",
+    "stream_id": 110,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767186000",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "nhkworld.jp",
+    "is_adult": 0,
+    "name": "NHK World",
+    "num": 11,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/nhkworld.jp.svg",
+    "stream_id": 111,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767182400",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "cbcnews.ca",
+    "is_adult": 0,
+    "name": "CBC News Network",
+    "num": 12,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/cbcnews.ca.svg",
+    "stream_id": 112,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767178800",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "skysportsmain.uk",
+    "is_adult": 0,
+    "name": "Sky Sports Main Event",
+    "num": 13,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/skysportsmain.uk.svg",
+    "stream_id": 113,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767175200",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "skysportsf1.uk",
+    "is_adult": 0,
+    "name": "Sky Sports F1",
+    "num": 14,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/skysportsf1.uk.svg",
+    "stream_id": 114,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767171600",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "eurosport1.eu",
+    "is_adult": 0,
+    "name": "Eurosport 1",
+    "num": 15,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/eurosport1.eu.svg",
+    "stream_id": 115,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767168000",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "eurosport2.eu",
+    "is_adult": 0,
+    "name": "Eurosport 2",
+    "num": 16,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/eurosport2.eu.svg",
+    "stream_id": 116,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767164400",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "espn.us",
+    "is_adult": 0,
+    "name": "ESPN",
+    "num": 17,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/espn.us.svg",
+    "stream_id": 117,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767160800",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "espn2.us",
+    "is_adult": 0,
+    "name": "ESPN 2",
+    "num": 18,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/espn2.us.svg",
+    "stream_id": 118,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767157200",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "tntsports1.uk",
+    "is_adult": 0,
+    "name": "TNT Sports 1",
+    "num": 19,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/tntsports1.uk.svg",
+    "stream_id": 119,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767153600",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "beinsports.fr",
+    "is_adult": 0,
+    "name": "beIN Sports",
+    "num": 20,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/beinsports.fr.svg",
+    "stream_id": 120,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767150000",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "dazn1.de",
+    "is_adult": 0,
+    "name": "DAZN 1",
+    "num": 21,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/dazn1.de.svg",
+    "stream_id": 121,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767146400",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "nbatv.us",
+    "is_adult": 0,
+    "name": "NBA TV",
+    "num": 22,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/nbatv.us.svg",
+    "stream_id": 122,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767142800",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "golf.us",
+    "is_adult": 0,
+    "name": "Golf Channel",
+    "num": 23,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/golf.us.svg",
+    "stream_id": 123,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767139200",
+    "category_id": "2",
+    "category_ids": [
+      2
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "tennis.us",
+    "is_adult": 0,
+    "name": "Tennis Channel",
+    "num": 24,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/tennis.us.svg",
+    "stream_id": 124,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767135600",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "itv1.uk",
+    "is_adult": 0,
+    "name": "ITV1",
+    "num": 25,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/itv1.uk.svg",
+    "stream_id": 125,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767132000",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "channel4.uk",
+    "is_adult": 0,
+    "name": "Channel 4",
+    "num": 26,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/channel4.uk.svg",
+    "stream_id": 126,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767128400",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "channel5.uk",
+    "is_adult": 0,
+    "name": "Channel 5",
+    "num": 27,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/channel5.uk.svg",
+    "stream_id": 127,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767124800",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "dave.uk",
+    "is_adult": 0,
+    "name": "Dave",
+    "num": 28,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/dave.uk.svg",
+    "stream_id": 128,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767121200",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "comedycentral.uk",
+    "is_adult": 0,
+    "name": "Comedy Central",
+    "num": 29,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/comedycentral.uk.svg",
+    "stream_id": 129,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767117600",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "discovery.us",
+    "is_adult": 0,
+    "name": "Discovery Channel",
+    "num": 30,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/discovery.us.svg",
+    "stream_id": 130,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767114000",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "natgeo.us",
+    "is_adult": 0,
+    "name": "National Geographic",
+    "num": 31,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/natgeo.us.svg",
+    "stream_id": 131,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767110400",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "history.us",
+    "is_adult": 0,
+    "name": "History",
+    "num": 32,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/history.us.svg",
+    "stream_id": 132,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767106800",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "animalplanet.us",
+    "is_adult": 0,
+    "name": "Animal Planet",
+    "num": 33,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/animalplanet.us.svg",
+    "stream_id": 133,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767103200",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "cartoonnetwork.uk",
+    "is_adult": 0,
+    "name": "Cartoon Network",
+    "num": 34,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/cartoonnetwork.uk.svg",
+    "stream_id": 134,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767099600",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "nick.uk",
+    "is_adult": 0,
+    "name": "Nickelodeon",
+    "num": 35,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/nick.uk.svg",
+    "stream_id": 135,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767096000",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "mtvhits.uk",
+    "is_adult": 0,
+    "name": "MTV Hits",
+    "num": 36,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/mtvhits.uk.svg",
+    "stream_id": 136,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767092400",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "vh1classic.uk",
+    "is_adult": 0,
+    "name": "VH1 Classic",
+    "num": 37,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/vh1classic.uk.svg",
+    "stream_id": 137,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767088800",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "kisstv.uk",
+    "is_adult": 0,
+    "name": "Kiss TV",
+    "num": 38,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/kisstv.uk.svg",
+    "stream_id": 138,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767085200",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "classicfm.uk",
+    "is_adult": 0,
+    "name": "Classic FM",
+    "num": 39,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/classicfm.uk.svg",
+    "stream_id": 139,
+    "stream_type": "radio_streams",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  },
+  {
+    "added": "1767081600",
+    "category_id": "3",
+    "category_ids": [
+      3
+    ],
+    "custom_sid": "",
+    "direct_source": "",
+    "epg_channel_id": "traceurban.fr",
+    "is_adult": 0,
+    "name": "Trace Urban",
+    "num": 40,
+    "stream_icon": "http://127.0.0.1:7290/img/logo/traceurban.fr.svg",
+    "stream_id": 140,
+    "stream_type": "live",
+    "thumbnail": "",
+    "tv_archive": 0,
+    "tv_archive_duration": 0
+  }
+]

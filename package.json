@@ -1,0 +1,79 @@
+{
+  "name": "tsrust-iptv",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "IPTVnator rebuilt on Tauri 2 with a Rust core",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc-rs --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:mpv": "tauri build --config crates/iptv-tauri/tauri.mpv.conf.json",
+    "server": "cargo run -p iptv-server -- --port 7180 --data-dir ./.data --static ./dist",
+    "mock": "cargo run -p iptv-mock -- --port 7290",
+    "check": "pnpm typecheck && pnpm test && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all -- --check"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-virtual": "^3.14.14",
+    "@tauri-apps/api": "^2.12.3",
+    "@tauri-apps/plugin-deep-link": "^2.6.1",
+    "@tauri-apps/plugin-dialog": "^2.8.2",
+    "@tauri-apps/plugin-notification": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2.7.1",
+    "@tauri-apps/plugin-shell": "^2.5.0",
+    "@tauri-apps/plugin-updater": "^2.13.3",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "date-fns": "^4.4.0",
+    "hls.js": "^1.6.0",
+    "i18next": "^26.4.3",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "lucide-react": "^1.55.0",
+    "mpegts.js": "1.8.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-i18next": "^17.0.16",
+    "react-router": "^7.18.4",
+    "shaka-player": "^4.16.52",
+    "tailwind-merge": "3.7.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.64.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.12.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^27.4.0",
+    "tailwindcss": "^4.3.3",
+    "tsc-rs": "^0.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "tsc-rs"
+    ]
+  }
+}

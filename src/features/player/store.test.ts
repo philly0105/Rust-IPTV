@@ -1,0 +1,411 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Channel, ItemRef, PlayerSource } from '@/api/types';
+
+const handlers: Record<string, (args: unknown) => unknown> = {};
+const rpcMock = vi.fn(async (name: string, args?: unknown) => {
+  const h = handlers[name];
+  if (!h) throw new Error(`unmocked rpc ${name}`);
+  return h(args);
+});
+
+vi.mock('@/api/transport', () => ({
+  rpc: (name: string, args?: unknown) => rpcMock(name, args),
+  isDesktop: false,
+  proxiedUrl: (s: { url: string }) => s.url,
+}));
+
+const store = await import('./store');
+const media = await import('./media');
+const { usePlayerStore, playItem, playSource, restorePlayback, zap, zapToNumber, handleEnded, registerStage, RESUME_KEY, SAVE_INTERVAL_MS } =
+  store;
+
+const liveRef: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '101' };
+const movieRef: ItemRef = { sourceId: 's1', contentType: 'movie', itemId: '201' };
+
+function vod(id: string, extra: Partial<PlayerSource> = {}): PlayerSource {
+  return {
+    url: `http://h/movie/${id}.mp4`,
+    kind: 'direct',
+    title: `Movie ${id}`,
+    isLive: false,
+    isRadio: false,
+    ref: { sourceId: 's1', contentType: 'movie', itemId: id },
+    ...extra,
+  };
+}
+
+function channel(n: number, extra: Partial<Channel> = {}): Channel {
+  return {
+    ref: { sourceId: 's1', contentType: 'live', itemId: String(100 + n) },
+    name: `Channel ${n}`,
+    number: n,
+    categoryId: 'news',
+    categoryName: 'News',
+    isRadio: false,
+    ...extra,
+  };
+}
+
+const calls = (name: string): unknown[] => rpcMock.mock.calls.filter((c) => c[0] === name).map((c) => c[1]);
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+};
+
+beforeEach(() => {
+  for (const k of Object.keys(handlers)) delete handlers[k];
+  rpcMock.mockClear();
+  sessionStorage.clear();
+  localStorage.clear();
+  store.__resetPlayerForTests();
+  media.resetMedia();
+  handlers['settings.get'] = () => ({ player: 'html5', playerAutoplayNextEpisode: true });
+  handlers['recent.add'] = () => undefined;
+  handlers['positions.set'] = () => undefined;
+  handlers['positions.get'] = () => null;
+  handlers['sources.get'] = () => ({ id: 's1', kind: 'xtream' });
+});
+
+afterEach(() => {
+  store.__resetPlayerForTests();
+  vi.useRealTimers();
+});
+
+describe('store transitions', () => {
+  it('play -> loading in the mini dock, recent.add, then stop -> idle', async () => {
+    await usePlayerStore.getState().play(vod('1'));
+    let s = usePlayerStore.getState();
+    expect(s.status).toBe('loading');
+    expect(s.mode).toBe('inline');
+    expect(s.dock).toBe('mini');
+    expect(calls('recent.add')).toEqual([
+      {
+        ref: { sourceId: 's1', contentType: 'movie', itemId: '1' },
+        snapshot: expect.objectContaining({ title: 'Movie 1', contentType: 'movie' }),
+      },
+    ]);
+
+    usePlayerStore.getState().stop();
+    s = usePlayerStore.getState();
+    expect(s.status).toBe('idle');
+    expect(s.source).toBeUndefined();
+    expect(s.dock).toBe('hidden');
+  });
+
+  it('docks into a mounted stage and falls back to mini when the stage unmounts', async () => {
+    const unregister = registerStage();
+    await usePlayerStore.getState().play(vod('1'));
+    expect(usePlayerStore.getState().dock).toBe('stage');
+    unregister();
+    expect(usePlayerStore.getState().dock).toBe('mini');
+  });
+
+  it('drives the registered controller', async () => {
+    const ctl = { play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(), setVolume: vi.fn(), setMuted: vi.fn() };
+    store.setController(ctl);
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportStatus('playing');
+    store.reportProgress(30, 100);
+    usePlayerStore.getState().togglePlay();
+    expect(ctl.pause).toHaveBeenCalled();
+    usePlayerStore.getState().seekBy(500);
+    expect(ctl.seekTo).toHaveBeenLastCalledWith(100);
+    usePlayerStore.getState().setVolume(1.7);
+    expect(usePlayerStore.getState().volume).toBe(1);
+    usePlayerStore.getState().toggleMute();
+    expect(ctl.setMuted).toHaveBeenLastCalledWith(true);
+    expect(usePlayerStore.getState().muted).toBe(true);
+  });
+
+  it('external player setting opens vlc and hides the dock', async () => {
+    handlers['settings.get'] = () => ({ player: 'vlc' });
+    handlers['player.openExternal'] = () => undefined;
+    await usePlayerStore.getState().play(vod('1'));
+    const s = usePlayerStore.getState();
+    expect(s.mode).toBe('external');
+    expect(s.dock).toBe('hidden');
+    expect(s.status).toBe('playing');
+    expect(calls('player.openExternal')).toEqual([
+      { player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }) },
+    ]);
+    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+  });
+
+  it('embedded-mpv falls back to inline outside the desktop shell; radio gets radio mode', async () => {
+    handlers['settings.get'] = () => ({ player: 'embedded-mpv' });
+    await usePlayerStore.getState().play(vod('1'));
+    expect(usePlayerStore.getState().mode).toBe('inline');
+    expect(store.modeForSettings('html5', { ...vod('2'), isRadio: true })).toBe('radio');
+    expect(store.modeForSettings('mpv', { ...vod('2'), isRadio: true })).toBe('external');
+  });
+
+  it('queue next/prev and the autoplay-next card at the end', async () => {
+    const queue = [vod('1'), vod('2'), vod('3')];
+    await usePlayerStore.getState().play(queue[1]!, { queue });
+    expect(store.nextInQueue()?.ref?.itemId).toBe('3');
+    expect(store.prevInQueue()?.ref?.itemId).toBe('1');
+
+    store.reportProgress(90, 100);
+    handleEnded();
+    expect(usePlayerStore.getState().status).toBe('paused');
+    expect(media.useMediaStore.getState().upNext?.source.ref?.itemId).toBe('3');
+    expect(calls('positions.set').at(-1)).toMatchObject({ positionSeconds: 100, durationSeconds: 100 });
+
+    usePlayerStore.getState().next();
+    await flush();
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('3');
+    expect(usePlayerStore.getState().queue).toHaveLength(3);
+  });
+});
+
+describe('resume persistence', () => {
+  it('writes sessionStorage on play and positions.set every 5 s for VOD', async () => {
+    vi.useFakeTimers();
+    await usePlayerStore.getState().play(vod('1'));
+    expect(JSON.parse(sessionStorage.getItem(RESUME_KEY)!)).toMatchObject({
+      source: { url: 'http://h/movie/1.mp4' },
+      mode: 'inline',
+    });
+
+    store.reportStatus('playing');
+    store.reportProgress(42.7, 600);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    expect(calls('positions.set')).toEqual([
+      expect.objectContaining({
+        ref: { sourceId: 's1', contentType: 'movie', itemId: '1' },
+        positionSeconds: 42,
+        durationSeconds: 600,
+      }),
+    ]);
+    expect(JSON.parse(sessionStorage.getItem(RESUME_KEY)!).positionSeconds).toBeCloseTo(42.7);
+
+    // No progress, no duplicate write.
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    expect(calls('positions.set')).toHaveLength(1);
+
+    store.reportProgress(50, 600);
+    usePlayerStore.getState().stop();
+    expect(calls('positions.set').at(-1)).toMatchObject({ positionSeconds: 50 });
+    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+  });
+
+  it('does not track positions for live channels', async () => {
+    vi.useFakeTimers();
+    await usePlayerStore
+      .getState()
+      .play({ url: 'http://h/live.m3u8', kind: 'hls', title: 'Live', isLive: true, isRadio: false, ref: liveRef });
+    store.reportStatus('playing');
+    store.reportProgress(120);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS * 2);
+    expect(calls('positions.set')).toHaveLength(0);
+  });
+
+  it('restorePlayback replays the saved item with its position', async () => {
+    sessionStorage.setItem(RESUME_KEY, JSON.stringify({ source: vod('7'), positionSeconds: 321, mode: 'inline', savedAt: 1 }));
+    await expect(restorePlayback()).resolves.toBe(true);
+    const s = usePlayerStore.getState();
+    expect(s.source?.ref?.itemId).toBe('7');
+    expect(s.source?.resumeSeconds).toBe(321);
+    expect(s.positionSeconds).toBe(321);
+  });
+
+  it('restorePlayback ignores missing, corrupt and external records', async () => {
+    await expect(restorePlayback()).resolves.toBe(false);
+    sessionStorage.setItem(RESUME_KEY, '{nope');
+    await expect(restorePlayback()).resolves.toBe(false);
+    sessionStorage.setItem(RESUME_KEY, JSON.stringify({ source: vod('7'), positionSeconds: 3, mode: 'external' }));
+    await expect(restorePlayback()).resolves.toBe(false);
+    expect(usePlayerStore.getState().source).toBeUndefined();
+  });
+
+  it('playSource picks up a saved backend position below 95 %', async () => {
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 400, durationSeconds: 1000, updatedAt: '' });
+    await playSource(vod('201'));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(400);
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 990, durationSeconds: 1000, updatedAt: '' });
+    await playSource(vod('202'));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+  });
+});
+
+describe('playItem resolution by kind', () => {
+  const base = { title: 'Demo', isLive: true } as const;
+
+  it('xtream uses xtream.streamUrl', async () => {
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/live/101.m3u8', kind: 'hls', title: 'srv', isLive: true, isRadio: false });
+    await playItem({ ...base, ref: liveRef, sourceKind: 'xtream' });
+    expect(calls('xtream.streamUrl')).toEqual([{ ref: liveRef }]);
+    expect(usePlayerStore.getState().source).toMatchObject({
+      url: 'http://x/live/101.m3u8',
+      kind: 'hls',
+      title: 'Demo',
+      ref: liveRef,
+    });
+  });
+
+  it('stalker uses stalker.streamUrl with the episode id', async () => {
+    const ref: ItemRef = { sourceId: 's2', contentType: 'series', itemId: '9' };
+    handlers['stalker.streamUrl'] = () => ({ url: 'http://st/e.mp4', kind: 'direct', title: 'x', isLive: false, isRadio: false });
+    await playItem({ title: 'Show', isLive: false, ref, episodeId: 'e3', sourceKind: 'stalker' });
+    expect(calls('stalker.streamUrl')).toEqual([{ ref, episodeId: 'e3' }]);
+    expect(usePlayerStore.getState().source).toMatchObject({ url: 'http://st/e.mp4', episodeId: 'e3' });
+  });
+
+  it('m3u uses the catalog.item url plus the source headers', async () => {
+    handlers['catalog.item'] = () => ({ ...channel(1), url: 'http://m/stream.mpd' });
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u', m3u: { headers: { userAgent: 'UA/1', referer: '' } } });
+    await playItem({ ...base, ref: liveRef, sourceKind: 'm3u' });
+    expect(usePlayerStore.getState().source).toMatchObject({
+      url: 'http://m/stream.mpd',
+      kind: 'dash',
+      headers: { userAgent: 'UA/1' },
+    });
+  });
+
+  it('an m3u item without a url ends in the error state', async () => {
+    handlers['catalog.item'] = () => channel(1);
+    await expect(playItem({ ...base, ref: liveRef, sourceKind: 'm3u' })).rejects.toThrow(/no stream URL/);
+    expect(usePlayerStore.getState().status).toBe('error');
+  });
+
+  it('the newest request wins a race', async () => {
+    let release!: () => void;
+    handlers['xtream.streamUrl'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      const src = { url: `http://x/${id}.m3u8`, kind: 'hls', title: id, isLive: true, isRadio: false };
+      return id === 'slow' ? new Promise((r) => (release = () => r(src))) : src;
+    };
+    const slow = playItem({ ...base, ref: { ...liveRef, itemId: 'slow' }, sourceKind: 'xtream' });
+    await playItem({ ...base, ref: { ...liveRef, itemId: 'fast' }, sourceKind: 'xtream' });
+    release();
+    await slow;
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/fast.m3u8');
+  });
+
+  it('kindFromUrl', () => {
+    expect(store.kindFromUrl('http://a/b.m3u8?x=1')).toBe('hls');
+    expect(store.kindFromUrl('http://a/b.mpd')).toBe('dash');
+    expect(store.kindFromUrl('http://a/b.mp4')).toBe('direct');
+  });
+});
+
+describe('zap', () => {
+  beforeEach(() => {
+    handlers['xtream.streamUrl'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      return { url: `http://x/live/${id}.m3u8`, kind: 'hls', title: id, isLive: true, isRadio: false };
+    };
+  });
+
+  it('uses catalog.neighbors with the zap category and plays the neighbor', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', categoryId: 'news' } });
+    handlers['catalog.neighbors'] = () => ({ prev: channel(0), next: channel(2) });
+    const played = await zap('down');
+    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref, categoryId: 'news' }]);
+    expect(played?.number).toBe(2);
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
+    expect(usePlayerStore.getState().source?.subtitle).toBe('News');
+    expect(media.useMediaStore.getState().osd).toMatchObject({ primary: '2', secondary: 'Channel 2' });
+
+    await zap('up');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('100');
+  });
+
+  it('ignores a zap category from another source and does nothing for VOD', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 'other', categoryId: 'news' } });
+    handlers['catalog.neighbors'] = () => ({});
+    await expect(zap('down')).resolves.toBeUndefined();
+    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref }]);
+
+    usePlayerStore.getState().stop();
+    rpcMock.mockClear();
+    await usePlayerStore.getState().play(vod('1'));
+    await expect(zap('down')).resolves.toBeUndefined();
+    expect(calls('catalog.neighbors')).toHaveLength(0);
+  });
+
+  it('zapToNumber resolves catalog.channelByNumber', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    handlers['catalog.channelByNumber'] = () => channel(42);
+    const ch = await zapToNumber(42);
+    expect(calls('catalog.channelByNumber')).toEqual([{ sourceId: 's1', number: 42 }]);
+    expect(ch?.number).toBe(42);
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('142');
+    handlers['catalog.channelByNumber'] = () => null;
+    await expect(zapToNumber(999)).resolves.toBeUndefined();
+  });
+});
+
+describe('ended (derived: paused at the end of a VOD item)', () => {
+  it('isEndedState needs VOD, paused, and a position at the end', () => {
+    const base = { source: vod('1'), status: 'paused' as const, positionSeconds: 100, durationSeconds: 100 };
+    expect(store.isEndedState(base)).toBe(true);
+    expect(store.isEndedState({ ...base, positionSeconds: 99.5 })).toBe(true); // mpv keep-open stops short
+    expect(store.isEndedState({ ...base, positionSeconds: 50 })).toBe(false);
+    expect(store.isEndedState({ ...base, status: 'playing' })).toBe(false);
+    expect(store.isEndedState({ ...base, durationSeconds: undefined })).toBe(false);
+    expect(store.isEndedState({ ...base, source: { ...vod('1'), isLive: true } })).toBe(false);
+  });
+
+  it('handleEnded parks at the end, clears the resume record and keeps it cleared', async () => {
+    vi.useFakeTimers();
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportStatus('playing');
+    store.reportProgress(80, 100);
+    store.flushProgress();
+    expect(sessionStorage.getItem(RESUME_KEY)).not.toBeNull();
+
+    store.reportProgress(100, 100);
+    handleEnded();
+    expect(store.selectEnded(usePlayerStore.getState())).toBe(true);
+    expect(usePlayerStore.getState().positionSeconds).toBe(100);
+    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+
+    // The 5 s saver and page-hide flushes must not bring it back.
+    await vi.advanceTimersByTimeAsync(SAVE_INTERVAL_MS * 2);
+    store.flushProgress();
+    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+    expect(await restorePlayback()).toBe(false);
+  });
+
+  it('handleEnded ignores live sources', async () => {
+    await usePlayerStore.getState().play({ url: 'http://h/1.m3u8', kind: 'hls', title: 'L', isLive: true, isRadio: false, ref: liveRef });
+    store.reportStatus('playing');
+    handleEnded();
+    expect(usePlayerStore.getState().status).toBe('playing');
+  });
+
+  it('replay and togglePlay at the end restart from zero through the controller', async () => {
+    const ctl = { play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(), setVolume: vi.fn(), setMuted: vi.fn() };
+    store.setController(ctl);
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportProgress(100, 100);
+    handleEnded();
+
+    usePlayerStore.getState().togglePlay();
+    expect(ctl.seekTo).toHaveBeenLastCalledWith(0);
+    expect(ctl.play).toHaveBeenCalled();
+    expect(usePlayerStore.getState().positionSeconds).toBe(0);
+    expect(store.selectEnded(usePlayerStore.getState())).toBe(false);
+    expect(sessionStorage.getItem(RESUME_KEY)).not.toBeNull();
+
+    store.reportProgress(100, 100);
+    store.reportStatus('paused');
+    ctl.seekTo.mockClear();
+    store.replay();
+    expect(ctl.seekTo).toHaveBeenCalledWith(0);
+    expect(media.useMediaStore.getState().upNext).toBeUndefined();
+  });
+
+  it('replay without a mounted surface replays the source without its resume point', async () => {
+    await usePlayerStore.getState().play(vod('1', { resumeSeconds: 40 }));
+    store.reportProgress(100, 100);
+    handleEnded();
+    store.replay();
+    await flush();
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+    expect(usePlayerStore.getState().positionSeconds).toBe(0);
+  });
+});

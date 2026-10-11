@@ -1,0 +1,30 @@
+{
+  "js": {
+    "allowed_stb_types": [
+      "mag250",
+      "mag254",
+      "mag256",
+      "mag322",
+      "mag324",
+      "mag420"
+    ],
+    "blocked": "0",
+    "default_locale": "en_GB.utf8",
+    "default_timezone": "UTC",
+    "fname": "Mock User",
+    "hd": "1",
+    "id": "1",
+    "locale": "en_GB.utf8",
+    "login": "",
+    "mac": "00:1A:79:00:00:01",
+    "name": "Mock STB",
+    "play_in_preview_by_ok": true,
+    "sname": "",
+    "status": 0,
+    "stb_type": "MAG250",
+    "tariff_expired_date": "2030-01-01",
+    "tariff_plan_id": "1",
+    "timeslot": 15,
+    "watchdog_timeout": 120
+  }
+}

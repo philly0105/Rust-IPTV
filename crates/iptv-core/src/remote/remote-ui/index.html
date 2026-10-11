@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#161b27">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='9' y='2' width='14' height='28' rx='7' fill='%23262e40'/%3E%3Ccircle cx='16' cy='9' r='3' fill='%23ffb547'/%3E%3C/svg%3E">
+<title>Tsrust IPTV remote</title>
+<style>
+  :root {
+    --body: #161b27;
+    --shell: #1e2433;
+    --key: #2a3246;
+    --key-hi: #343d55;
+    --key-edge: #11151e;
+    --ink: #e9edf5;
+    --ink-muted: #9aa4b8;
+    --lcd: #ffb547;
+    --lcd-dim: #6e5530;
+    --lcd-bg: #241d12;
+    --live: #ff5a5f;
+    --ok: #59c9a5;
+    --radius-key: 18px;
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "SF Pro Text", Roboto, sans-serif;
+    --font-num: "Segoe UI Variable Display", "Bahnschrift", "DIN Alternate", "Roboto Condensed", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--body); color: var(--ink); font-family: var(--font); }
+  body {
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+    touch-action: manipulation;
+    padding: max(12px, env(safe-area-inset-top)) 14px max(16px, env(safe-area-inset-bottom));
+  }
+  button { font: inherit; color: inherit; }
+  .remote { max-width: 420px; margin: 0 auto; display: grid; gap: 14px; }
+
+  /* Connection banner */
+  .banner {
+    display: none; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 12px;
+    background: #3a2326; color: #ffd5d6; font-size: 0.875rem; line-height: 1.35;
+  }
+  .banner.show { display: flex; }
+  .banner b { font-weight: 600; }
+
+  /* LCD now-playing window: the one loud element */
+  .lcd {
+    position: relative;
+    background: var(--lcd-bg);
+    border-radius: 22px;
+    padding: 16px 18px 18px;
+    box-shadow: inset 0 2px 0 rgba(0,0,0,.45), inset 0 0 0 1px #3b2f1a;
+    color: var(--lcd);
+    min-height: 168px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto 1fr auto;
+    column-gap: 16px;
+  }
+  .lcd__source { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: #d8a560; min-height: 20px; }
+  .lcd__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lcd-dim); flex: none; }
+  .lcd__dot.live { background: var(--live); box-shadow: 0 0 8px var(--live); }
+  .lcd__num {
+    font-family: var(--font-num); font-variant-numeric: tabular-nums;
+    font-size: 4.25rem; line-height: 1; font-weight: 600; letter-spacing: -0.02em;
+    align-self: center; min-width: 2ch; text-shadow: 0 0 18px rgba(255,181,71,.35);
+  }
+  .lcd__num.pending { color: #fff1d6; }
+  .lcd__num.pending::after { content: "_"; animation: blink 1s steps(1) infinite; }
+  .lcd__num.empty { color: var(--lcd-dim); text-shadow: none; }
+  .lcd__text { align-self: center; min-width: 0; }
+  .lcd__name { font-size: 1.25rem; font-weight: 600; line-height: 1.25; color: #ffe2b0; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .lcd__prog { margin-top: 4px; font-size: 0.9375rem; line-height: 1.35; color: #d8a560;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .lcd__commit { grid-column: 1 / -1; height: 3px; margin-top: 12px; border-radius: 2px; background: rgba(255,181,71,.12); overflow: hidden; }
+  .lcd__commit span { display: block; height: 100%; width: 0; background: var(--lcd); }
+  .lcd__commit.run span { animation: commit 1.5s linear forwards; }
+  @keyframes commit { from { width: 0; } to { width: 100%; } }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Key base */
+  .key {
+    min-height: 56px; min-width: 44px;
+    border: 0; border-radius: var(--radius-key);
+    background: linear-gradient(180deg, var(--key-hi), var(--key));
+    box-shadow: 0 3px 0 var(--key-edge), inset 0 1px 0 rgba(255,255,255,.06);
+    font-size: 1.125rem; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    cursor: pointer; transition: transform .06s, box-shadow .06s, background-color .2s;
+  }
+  .key:active, .key.pressed { transform: translateY(2px); box-shadow: 0 1px 0 var(--key-edge), inset 0 1px 0 rgba(255,255,255,.04); }
+  .key:focus-visible { outline: 3px solid var(--lcd); outline-offset: 3px; }
+  .key[disabled] { opacity: .38; cursor: not-allowed; transform: none; }
+  .key svg { width: 26px; height: 26px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .key.sent { color: var(--ok); }
+  .key.failed { color: var(--live); }
+
+  /* Rockers: channel left, volume right, mute between */
+  .deck { display: grid; grid-template-columns: 1fr 72px 1fr; gap: 14px; align-items: stretch; }
+  .rocker { display: grid; grid-template-rows: 1fr auto 1fr; border-radius: 40px; background: var(--shell); padding: 8px; gap: 6px; box-shadow: inset 0 0 0 1px #262d3e; }
+  .rocker .key { min-height: 84px; border-radius: 32px; }
+  .rocker__label { text-align: center; font-size: 0.8125rem; color: var(--ink-muted); padding: 2px 0; }
+  .deck__mid { display: grid; grid-template-rows: 1fr 1fr; gap: 14px; }
+  .deck__mid .key { border-radius: 26px; font-size: 0.8125rem; flex-direction: column; gap: 4px; }
+  .deck__mid .key svg { width: 24px; height: 24px; }
+  .key.muted { color: var(--live); }
+
+  .vol { display: flex; align-items: center; gap: 12px; padding: 0 4px; }
+  .vol input { flex: 1; height: 44px; accent-color: var(--lcd); background: transparent; }
+  .vol__pct { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-muted); font-size: 0.9375rem; }
+  .vol__note { font-size: 0.8125rem; color: var(--ink-muted); padding: 0 4px; margin-top: -6px; }
+
+  /* Keypad */
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .pad .key { font-family: var(--font-num); font-size: 1.625rem; font-variant-numeric: tabular-nums; min-height: 60px; }
+  .pad .key.alt { font-family: var(--font); font-size: 0.9375rem; font-weight: 600; color: var(--ink-muted); }
+  .pad .key.go { color: var(--lcd); }
+
+  .wide { width: 100%; min-height: 56px; }
+
+  .foot { text-align: center; font-size: 0.8125rem; color: var(--ink-muted); min-height: 1.2em; }
+
+  /* Toast */
+  .toast {
+    position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom));
+    transform: translate(-50%, calc(100% + 48px)); visibility: hidden; max-width: calc(100% - 28px);
+    background: #f1f3f8; color: #161b27; border-radius: 14px; padding: 12px 16px;
+    font-size: 0.9375rem; line-height: 1.35; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    transition: transform .2s ease, visibility 0s linear .2s; z-index: 30;
+  }
+  .toast.show { transform: translate(-50%, 0); visibility: visible; transition: transform .2s ease; }
+  .toast.error { background: #ffd9da; }
+
+  /* Channel sheet */
+  .sheet { position: fixed; inset: 0; z-index: 20; display: none; }
+  .sheet.open { display: block; }
+  .sheet__scrim { position: absolute; inset: 0; background: rgba(5,7,12,.6); }
+  .sheet__panel {
+    position: absolute; left: 0; right: 0; bottom: 0; top: max(48px, env(safe-area-inset-top));
+    max-width: 520px; margin: 0 auto;
+    background: var(--shell); border-radius: 24px 24px 0 0;
+    display: flex; flex-direction: column; overflow: hidden;
+    animation: rise .22s ease-out;
+  }
+  @keyframes rise { from { transform: translateY(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+  .sheet__head { display: flex; gap: 10px; padding: 14px; align-items: center; }
+  .sheet__head h2 { margin: 0; font-size: 1.125rem; font-weight: 600; flex: 1; }
+  .search {
+    margin: 0 14px 10px; height: 48px; border-radius: 14px; border: 1px solid #39425a;
+    background: var(--body); color: var(--ink); padding: 0 14px; font: inherit; font-size: 1rem;
+    -webkit-user-select: text; user-select: text;
+  }
+  .search:focus-visible { outline: 3px solid var(--lcd); outline-offset: 1px; }
+  .sheet__count { padding: 0 16px 8px; font-size: 0.8125rem; color: var(--ink-muted); }
+  .list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px max(12px, env(safe-area-inset-bottom)); }
+  .row {
+    width: 100%; min-height: 56px; display: grid; grid-template-columns: 48px 40px 1fr; align-items: center; gap: 12px;
+    padding: 6px 10px; border: 0; border-radius: 14px; background: transparent; text-align: left; cursor: pointer;
+  }
+  .row:hover { background: var(--key); }
+  .row:focus-visible { outline: 3px solid var(--lcd); outline-offset: -3px; }
+  .row.current { background: #2f2818; }
+  .row__num { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--lcd); font-size: 1.0625rem; text-align: right; }
+  .row__logo { width: 40px; height: 40px; border-radius: 10px; background: var(--key-hi); object-fit: contain; }
+  .row__name { font-size: 1rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty { padding: 32px 18px; text-align: center; color: var(--ink-muted); line-height: 1.5; }
+  .empty b { display: block; color: var(--ink); font-size: 1.0625rem; margin-bottom: 6px; }
+  .skel { height: 56px; margin: 4px 0; border-radius: 14px; background: linear-gradient(90deg, var(--key) 0%, var(--key-hi) 50%, var(--key) 100%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media (min-width: 700px) { body { padding-top: 32px; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .lcd__commit.run span { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<main class="remote" aria-label="Remote control">
+  <div class="banner" id="banner" role="alert">
+    <span><b>Can't reach Tsrust IPTV.</b> Keep the desktop app open with remote control turned on. Retrying in <span id="retryIn">1</span> s.</span>
+  </div>
+
+  <section class="lcd" aria-live="polite" aria-label="Now playing">
+    <div class="lcd__source"><span class="lcd__dot" id="liveDot"></span><span id="source">Connecting</span></div>
+    <div class="lcd__num empty" id="num">--</div>
+    <div class="lcd__text">
+      <div class="lcd__name" id="name">Nothing playing</div>
+      <div class="lcd__prog" id="prog">Start a live channel on the desktop app.</div>
+    </div>
+    <div class="lcd__commit" id="commit" aria-hidden="true"><span></span></div>
+  </section>
+
+  <section class="deck" aria-label="Channel and volume">
+    <div class="rocker" role="group" aria-label="Channel">
+      <button class="key" id="chUp" aria-label="Next channel" data-act="chUp">
+        <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+      <div class="rocker__label" aria-hidden="true">Channel</div>
+      <button class="key" id="chDown" aria-label="Previous channel" data-act="chDown">
+        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+    <div class="deck__mid">
+      <button class="key" id="mute" aria-pressed="false" data-act="mute">
+        <svg viewBox="0 0 24 24" id="muteIcon"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>
+        <span id="muteLabel">Mute</span>
+      </button>
+      <button class="key" id="openList" aria-haspopup="dialog" data-act="list">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        <span>Channels</span>
+      </button>
+    </div>
+    <div class="rocker" role="group" aria-label="Volume">
+      <button class="key" id="volUp" aria-label="Volume up" data-act="volUp">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="rocker__label" aria-hidden="true">Volume</div>
+      <button class="key" id="volDown" aria-label="Volume down" data-act="volDown">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <div class="vol">
+    <label class="sr" for="volSlider">Volume level</label>
+    <input type="range" id="volSlider" min="0" max="100" step="1" value="0">
+    <span class="vol__pct" id="volPct">--</span>
+  </div>
+  <div class="vol__note" id="volNote"></div>
+
+  <section class="pad" aria-label="Channel number keypad">
+    <button class="key" data-digit="1">1</button>
+    <button class="key" data-digit="2">2</button>
+    <button class="key" data-digit="3">3</button>
+    <button class="key" data-digit="4">4</button>
+    <button class="key" data-digit="5">5</button>
+    <button class="key" data-digit="6">6</button>
+    <button class="key" data-digit="7">7</button>
+    <button class="key" data-digit="8">8</button>
+    <button class="key" data-digit="9">9</button>
+    <button class="key alt" data-act="back" aria-label="Delete last digit">Delete</button>
+    <button class="key" data-digit="0">0</button>
+    <button class="key alt go" data-act="go" aria-label="Go to channel number">Go</button>
+  </section>
+
+  <p class="foot" id="foot">Waiting for the app</p>
+</main>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet__scrim" data-act="closeList"></div>
+  <div class="sheet__panel">
+    <div class="sheet__head">
+      <h2 id="sheetTitle">Channels</h2>
+      <button class="key" data-act="closeList" aria-label="Close channel list">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <input class="search" id="search" type="search" placeholder="Search by name or number" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-label="Search channels">
+    <div class="sheet__count" id="count" aria-live="polite"></div>
+    <div class="list" id="list" role="list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  "use strict";
+  const API = "/api/remote-control";
+  const COMMIT_MS = 1500;
+  const POLL_MS = 1000;
+  const MAX_BACKOFF_MS = 15000;
+  const LIST_LIMIT = 200;
+  const $ = (id) => document.getElementById(id);
+
+  let status = null;
+  let failures = 0;
+  let pollTimer = 0;
+  let inFlight = false;
+  let digits = "";
+  let commitTimer = 0;
+  let toastTimer = 0;
+  let sliderBusy = false;
+  let sliderTimer = 0;
+
+  const buzz = () => { try { navigator.vibrate && navigator.vibrate(8); } catch (_) {} };
+
+  function toast(text, isError) {
+    const el = $("toast");
+    el.textContent = text;
+    el.classList.toggle("error", !!isError);
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 4000 : 1800);
+  }
+
+  async function request(path, body) {
+    const init = body === undefined
+      ? { method: "GET", cache: "no-store" }
+      : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const res = await fetch(API + path, { ...init, signal: ctrl.signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.message || ("Request failed with status " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  // ---- status polling ------------------------------------------------------
+
+  function scheduleNext() {
+    clearTimeout(pollTimer);
+    if (document.hidden) return;
+    const delay = failures === 0 ? POLL_MS : Math.min(MAX_BACKOFF_MS, POLL_MS * 2 ** failures);
+    if (failures > 0) $("retryIn").textContent = String(Math.round(delay / 1000));
+    pollTimer = setTimeout(poll, delay);
+  }
+
+  async function poll() {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      status = await request("/status");
+      failures = 0;
+      $("banner").classList.remove("show");
+      render();
+    } catch (_) {
+      failures += 1;
+      if (failures >= 2) $("banner").classList.add("show");
+    } finally {
+      inFlight = false;
+      scheduleNext();
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearTimeout(pollTimer);
+    else { failures = Math.min(failures, 1); poll(); }
+  });
+
+  function volumePercent(v) {
+    if (typeof v !== "number" || !isFinite(v)) return null;
+    return Math.round(v <= 1 ? v * 100 : v);
+  }
+
+  function render() {
+    const s = status || {};
+    const live = !!s.isLive;
+    $("liveDot").classList.toggle("live", live);
+    $("source").textContent = s.sourceName ? (live ? "Live on " + s.sourceName : s.sourceName) : (live ? "Live" : "Idle");
+    if (!digits) {
+      const n = $("num");
+      const has = typeof s.channelNumber === "number";
+      n.textContent = has ? String(s.channelNumber) : "--";
+      n.classList.toggle("empty", !has);
+      n.classList.remove("pending");
+    }
+    $("name").textContent = s.channelName || "Nothing playing";
+    $("prog").textContent = s.channelName
+      ? (s.epgNow || "No guide data for this channel")
+      : "Start a live channel on the desktop app.";
+
+    const canVol = !!s.canVolume;
+    for (const id of ["volUp", "volDown", "mute"]) $(id).disabled = !canVol;
+    $("volSlider").disabled = !canVol;
+    const pct = volumePercent(s.volume);
+    if (!sliderBusy && pct !== null) $("volSlider").value = String(pct);
+    $("volPct").textContent = canVol && pct !== null ? pct + "%" : "--";
+    $("volNote").textContent = canVol ? "" : "Volume works with the built-in player. External players keep their own volume.";
+    const muted = !!s.muted;
+    $("mute").classList.toggle("muted", muted);
+    $("mute").setAttribute("aria-pressed", String(muted));
+    $("muteLabel").textContent = muted ? "Unmute" : "Mute";
+
+    if (s.updatedAt) {
+      const d = new Date(s.updatedAt);
+      $("foot").textContent = "Connected. Player last reported at " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } else {
+      $("foot").textContent = "Connected. Waiting for the player to report.";
+    }
+  }
+
+  // ---- commands ------------------------------------------------------------
+
+  async function send(path, body, button) {
+    buzz();
+    try {
+      await request(path, body === undefined ? {} : body);
+      if (button) flash(button, "sent");
+      setTimeout(poll, 250);
+      return true;
+    } catch (err) {
+      if (button) flash(button, "failed");
+      toast(err.status === 403
+        ? "This page must be opened at the address shown in the app's settings."
+        : (err.name === "AbortError" ? "The app did not answer. Check that it is still open." : err.message), true);
+      return false;
+    }
+  }
+
+  function flash(el, cls) {
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 450);
+  }
+
+  // ---- keypad --------------------------------------------------------------
+
+  function showDigits() {
+    const n = $("num");
+    n.textContent = digits;
+    n.classList.add("pending");
+    n.classList.remove("empty");
+    const bar = $("commit");
+    bar.classList.remove("run");
+    void bar.offsetWidth;
+    if (digits) bar.classList.add("run");
+  }
+
+  function addDigit(d) {
+    buzz();
+    if (digits.length >= 6) return;
+    if (digits === "" && d === "0") { flash($("num"), "failed"); return; }
+    digits += d;
+    showDigits();
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(commit, COMMIT_MS);
+  }
+
+  function backDigit() {
+    buzz();
+    clearTimeout(commitTimer);
+    digits = digits.slice(0, -1);
+    if (!digits) { cancelDigits(); return; }
+    showDigits();
+    commitTimer = setTimeout(commit, COMMIT_MS);
+  }
+
+  function cancelDigits() {
+    clearTimeout(commitTimer);
+    digits = "";
+    $("commit").classList.remove("run");
+    render();
+  }
+
+  async function commit() {
+    clearTimeout(commitTimer);
+    if (!digits) return;
+    const number = Number(digits);
+    digits = "";
+    $("commit").classList.remove("run");
+    $("num").classList.remove("pending");
+    const ok = await send("/channel/select", { number });
+    if (ok) toast("Switching to channel " + number);
+    render();
+  }
+
+  // ---- volume slider -------------------------------------------------------
+
+  $("volSlider").addEventListener("input", (e) => {
+    sliderBusy = true;
+    $("volPct").textContent = e.target.value + "%";
+    clearTimeout(sliderTimer);
+    sliderTimer = setTimeout(() => {
+      send("/volume", { level: Number(e.target.value) / 100 }).finally(() => { sliderBusy = false; });
+    }, 150);
+  });
+
+  // ---- channel sheet -------------------------------------------------------
+
+  let searchTimer = 0;
+  let searchSeq = 0;
+  let lastFocus = null;
+
+  function openList() {
+    lastFocus = document.activeElement;
+    $("sheet").classList.add("open");
+    $("search").value = "";
+    loadChannels("");
+    setTimeout(() => $("search").focus(), 30);
+  }
+
+  function closeList() {
+    $("sheet").classList.remove("open");
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+
+  function skeleton() {
+    const list = $("list");
+    list.replaceChildren();
+    for (let i = 0; i < 8; i++) {
+      const s = document.createElement("div");
+      s.className = "skel";
+      list.appendChild(s);
+    }
+    $("count").textContent = "";
+  }
+
+  function emptyState(title, text) {
+    const div = document.createElement("div");
+    div.className = "empty";
+    const b = document.createElement("b");
+    b.textContent = title;
+    div.append(b, document.createTextNode(text));
+    $("list").replaceChildren(div);
+  }
+
+  async function loadChannels(q) {
+    const seq = ++searchSeq;
+    skeleton();
+    let data;
+    try {
+      data = await request("/channels?limit=" + LIST_LIMIT + (q ? "&q=" + encodeURIComponent(q) : ""));
+    } catch (err) {
+      if (seq !== searchSeq) return;
+      emptyState("Channels did not load.", " " + (err.message || "Check that the app is open, then search again."));
+      return;
+    }
+    if (seq !== searchSeq) return;
+    const items = data.channels || [];
+    if (!items.length) {
+      if (q) emptyState("No channels match “" + q + "”.", " Try part of the name or the channel number.");
+      else emptyState("No channel list yet.", " Open Live TV on the desktop app and its channels appear here.");
+      $("count").textContent = "";
+      return;
+    }
+    const total = data.total || items.length;
+    $("count").textContent = total > items.length
+      ? "Showing " + items.length + " of " + total + ". Search to narrow the list."
+      : total + (total === 1 ? " channel" : " channels");
+    const frag = document.createDocumentFragment();
+    const current = status && status.channelName;
+    for (const c of items) {
+      const row = document.createElement("button");
+      row.className = "row";
+      row.setAttribute("role", "listitem");
+      row.dataset.id = c.id;
+      if (current && c.name === current) row.classList.add("current");
+      const num = document.createElement("span");
+      num.className = "row__num";
+      num.textContent = c.number != null ? String(c.number) : "";
+      let logo;
+      if (c.logoUrl) {
+        logo = document.createElement("img");
+        logo.className = "row__logo";
+        logo.loading = "lazy";
+        logo.decoding = "async";
+        logo.alt = "";
+        logo.referrerPolicy = "no-referrer";
+        logo.src = c.logoUrl;
+        logo.onerror = () => { logo.style.visibility = "hidden"; };
+      } else {
+        logo = document.createElement("span");
+        logo.className = "row__logo";
+      }
+      const name = document.createElement("span");
+      name.className = "row__name";
+      name.textContent = c.name;
+      row.append(num, logo, name);
+      row.setAttribute("aria-label", (c.number != null ? c.number + " " : "") + c.name);
+      frag.appendChild(row);
+    }
+    $("list").replaceChildren(frag);
+  }
+
+  $("search").addEventListener("input", (e) => {
+    clearTimeout(searchTimer);
+    const q = e.target.value.trim();
+    searchTimer = setTimeout(() => loadChannels(q), 200);
+  });
+
+  $("list").addEventListener("click", async (e) => {
+    const row = e.target.closest(".row");
+    if (!row) return;
+    const name = row.querySelector(".row__name").textContent;
+    const ok = await send("/channel/select-id", { id: row.dataset.id });
+    if (ok) { toast("Switching to " + name); closeList(); }
+  });
+
+  // ---- wiring --------------------------------------------------------------
+
+  const actions = {
+    chUp: (b) => send("/channel/up", undefined, b),
+    chDown: (b) => send("/channel/down", undefined, b),
+    volUp: (b) => send("/volume", { delta: 0.05 }, b),
+    volDown: (b) => send("/volume", { delta: -0.05 }, b),
+    mute: (b) => send("/volume", { mute: !(status && status.muted) }, b),
+    list: () => openList(),
+    closeList: () => closeList(),
+    back: () => backDigit(),
+    go: () => commit(),
+  };
+
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-act], [data-digit]");
+    if (!el || el.disabled) return;
+    if (el.dataset.digit) addDigit(el.dataset.digit);
+    else if (actions[el.dataset.act]) actions[el.dataset.act](el);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const sheetOpen = $("sheet").classList.contains("open");
+    if (sheetOpen) {
+      if (e.key === "Escape") { e.preventDefault(); closeList(); }
+      return;
+    }
+    const press = (id) => { const b = $(id); if (!b.disabled) { b.classList.add("pressed"); setTimeout(() => b.classList.remove("pressed"), 120); actions[b.dataset.act](b); } };
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); addDigit(e.key); }
+    else if (e.key === "Backspace") { e.preventDefault(); backDigit(); }
+    else if (e.key === "Enter" && digits) { e.preventDefault(); commit(); }
+    else if (e.key === "Escape" && digits) { e.preventDefault(); cancelDigits(); }
+    else if (e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); press("chUp"); }
+    else if (e.key === "ArrowDown" || e.key === "PageDown") { e.preventDefault(); press("chDown"); }
+    else if (e.key === "+" || e.key === "=" || e.key === "ArrowRight") { e.preventDefault(); press("volUp"); }
+    else if (e.key === "-" || e.key === "ArrowLeft") { e.preventDefault(); press("volDown"); }
+    else if (e.key === "m" || e.key === "M") { e.preventDefault(); press("mute"); }
+    else if (e.key === "/" || e.key === "c" || e.key === "C") { e.preventDefault(); openList(); }
+  });
+
+  render();
+  poll();
+})();
+</script>
+</body>
+</html>

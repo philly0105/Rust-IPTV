@@ -1,0 +1,75 @@
+/*
+ * Design tokens (SPEC C10). Visual direction: "Night Tuner".
+ * Deep ink-navy surfaces, one amber accent borrowed from a backlit radio dial,
+ * Bahnschrift (DIN-style, ships with Windows) for channel numbers and display type.
+ * Every fg/bg pair below meets WCAG AA (4.5:1 for text, 3:1 for UI borders/focus).
+ */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0c1320;
+  --color-surface: #131c2d;
+  --color-surface-2: #1a2539;
+  --color-surface-3: #233049;
+  --color-border: #2f3d57;
+  --color-fg: #e9edf5;
+  --color-fg-muted: #a9b3c6;
+  --color-fg-subtle: #8692a9;
+  --color-accent: #f5b544;
+  --color-accent-hover: #ffc865;
+  --color-accent-fg: #1b1204;
+  --color-danger: #ff7a7a;
+  --color-success: #4fd49b;
+  --color-warning: #eccb5c;
+  --color-live: #ff5a61;
+
+  /* Derived (not in C10; used by shell chrome). */
+  --color-scrim: rgb(4 8 16 / 0.72);
+  --color-focus: #ffc865;
+  --color-glow: rgb(245 181 68 / 0.28);
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-bg: #edf0f5;
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f6fa;
+  --color-surface-3: #e3e8f0;
+  --color-border: #c6cedc;
+  --color-fg: #121a2a;
+  --color-fg-muted: #445169;
+  --color-fg-subtle: #586480;
+  --color-accent: #8f4f00;
+  --color-accent-hover: #743f00;
+  --color-accent-fg: #ffffff;
+  --color-danger: #b42323;
+  --color-success: #17714a;
+  --color-warning: #805a00;
+  --color-live: #c41f2a;
+
+  --color-scrim: rgb(18 26 42 / 0.45);
+  --color-focus: #8f4f00;
+  --color-glow: rgb(143 79 0 / 0.18);
+
+  --shadow-1: 0 1px 2px rgb(18 26 42 / 0.08), 0 2px 8px rgb(18 26 42 / 0.06);
+  --shadow-2: 0 12px 32px rgb(18 26 42 / 0.16), 0 2px 6px rgb(18 26 42 / 0.08);
+}
+
+:root {
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: Bahnschrift, 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, 'SF Mono', monospace;
+
+  --rail-width: 248px;
+  --rail-width-collapsed: 72px;
+  --header-height: 60px;
+  --panel-width: 340px;
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tsrust IPTV",
+  "version": "0.1.0",
+  "identifier": "com.philly.tsrustiptv",
+  "build": {
+    "frontendDist": "../../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Tsrust IPTV",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: asset: http://asset.localhost https: http:",
+        "media-src": "'self' blob: data: asset: http://asset.localhost https: http:",
+        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost https: http: ws: wss:",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "frame-src": "https://www.youtube-nocookie.com https://www.youtube.com"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$DOWNLOAD/**", "$VIDEO/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "philly",
+    "category": "Video",
+    "shortDescription": "IPTV player with a Rust core",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["iptv"]
+      }
+    }
+  }
+}

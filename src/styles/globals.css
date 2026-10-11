@@ -1,0 +1,264 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* `dark:` follows the theme provider (html[data-theme]), not the OS. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Tailwind 4 theme mapping (SPEC C10). Values here are the dark defaults so
+ * utilities exist; tokens.css re-declares the same properties per
+ * [data-theme] (unlayered, higher specificity), so every utility resolves to
+ * the active theme: bg-surface, bg-surface-2, text-fg, text-fg-muted,
+ * border-border, bg-accent, text-accent-fg, rounded-lg, shadow-1, font-display.
+ */
+@theme {
+  --color-bg: #0c1320;
+  --color-surface: #131c2d;
+  --color-surface-2: #1a2539;
+  --color-surface-3: #233049;
+  --color-border: #2f3d57;
+  --color-fg: #e9edf5;
+  --color-fg-muted: #a9b3c6;
+  --color-fg-subtle: #8692a9;
+  --color-accent: #f5b544;
+  --color-accent-hover: #ffc865;
+  --color-accent-fg: #1b1204;
+  --color-danger: #ff7a7a;
+  --color-success: #4fd49b;
+  --color-warning: #eccb5c;
+  --color-live: #ff5a61;
+  --color-scrim: rgb(4 8 16 / 0.72);
+  --color-focus: #ffc865;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
+
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: Bahnschrift, 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, 'SF Mono', monospace;
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-toast-in: toast-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-live-pulse: live-pulse 2s ease-in-out infinite;
+  --animate-indeterminate: indeterminate 1.2s ease-in-out infinite;
+
+  @keyframes indeterminate {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes live-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    overflow-x: hidden;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-accent-fg);
+  }
+
+  /* One focus language everywhere: an amber halo readable from the couch. */
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 6px var(--color-glow);
+  }
+
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  summary {
+    cursor: pointer;
+  }
+
+  /* Scrollbars: thin, low-contrast; thumb brightens on hover. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-surface-3) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-surface-3);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-border);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/*
+ * Reduced motion. `motion-safe:` utilities already respect the media query;
+ * html[data-reduced-motion] (set by the theme provider) is the hard stop for
+ * anything that slipped through, including rail and grid smooth scrolling.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+html[data-reduced-motion='true'] *,
+html[data-reduced-motion='true'] *::before,
+html[data-reduced-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Skeleton shimmer surface (animate with motion-safe:animate-shimmer). */
+@utility skeleton-surface {
+  background-color: var(--color-surface-2);
+  background-image: linear-gradient(
+    90deg,
+    var(--color-surface-2) 0%,
+    var(--color-surface-3) 50%,
+    var(--color-surface-2) 100%
+  );
+  background-size: 200% 100%;
+}
+
+/* The tuning tick: a short amber bar marking the active rail item or selected row. */
+@utility tuning-tick {
+  position: relative;
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 22%;
+    bottom: 22%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--color-accent);
+    box-shadow: 0 0 12px var(--color-glow);
+  }
+}
+
+/* cmdk renders its own elements with data attributes. */
+[cmdk-item][data-selected='true'] {
+  background: var(--color-surface-3);
+  color: var(--color-fg);
+}
+[cmdk-item][data-disabled='true'] {
+  opacity: 0.5;
+}
+[cmdk-group-heading] {
+  padding: 10px 14px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-fg-subtle);
+}

@@ -1,0 +1,39 @@
+[package]
+name = "iptv-server"
+description = "Tsrust IPTV web server: serves the SPA plus /api for PWA mode (SPEC C12)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+name = "iptv_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "iptv-server"
+path = "src/main.rs"
+
+[dependencies]
+iptv-core = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tower = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+percent-encoding = { workspace = true }
+rusqlite = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+iptv-fixtures = { workspace = true }

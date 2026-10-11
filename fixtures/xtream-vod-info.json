@@ -1,0 +1,57 @@
+{
+  "info": {
+    "actors": "Mara Venn, Elias Shore, Tomas Bell, June Cross",
+    "age": "12",
+    "audio": {
+      "channels": 1,
+      "codec_name": "aac"
+    },
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/black-harbor.svg"
+    ],
+    "bitrate": 64,
+    "cast": "Mara Venn, Elias Shore, Tomas Bell, June Cross",
+    "country": "United Kingdom",
+    "cover_big": "http://127.0.0.1:7290/img/poster/black-harbor.svg",
+    "description": "Every tide returns a secret. A dock inspector follows a missing cargo ledger through a fogbound harbor where every night crew remembers a different ship.",
+    "director": "Nadia Rook",
+    "duration": "01:32:33",
+    "duration_secs": 5553,
+    "episode_run_time": "92",
+    "genre": "Maritime Crime Thriller",
+    "kinopoisk_url": "",
+    "movie_image": "http://127.0.0.1:7290/img/poster/black-harbor.svg",
+    "mpaa_rating": "PG-13",
+    "name": "Black Harbor",
+    "o_name": "Black Harbor",
+    "plot": "A dock inspector follows a missing cargo ledger through a fogbound harbor where every night crew remembers a different ship.",
+    "rating": "8.2",
+    "rating_count_kinopoisk": 0,
+    "rating_imdb": "8.2",
+    "release_date": "2026-01-10",
+    "releasedate": "2026-01-10",
+    "runtime": "92",
+    "status": "Released",
+    "tmdb_id": "900201",
+    "video": {
+      "codec_name": "h264",
+      "height": 180,
+      "width": 320
+    },
+    "youtube_trailer": ""
+  },
+  "movie_data": {
+    "added": "1767225600",
+    "category_id": "10",
+    "category_ids": [
+      10
+    ],
+    "container_extension": "mp4",
+    "custom_sid": "",
+    "direct_source": "",
+    "name": "Black Harbor (2026)",
+    "stream_id": 201,
+    "title": "Black Harbor",
+    "year": "2026"
+  }
+}

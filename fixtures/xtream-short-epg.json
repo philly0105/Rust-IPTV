@@ -1,0 +1,56 @@
+{
+  "epg_listings": [
+    {
+      "channel_id": "bbc1.uk",
+      "description": "R3Vlc3RzIGRpc2N1c3MgIndoYXQgY29tZXMgbmV4dCIgYW5kIHdoeSBpdCBtYXR0ZXJzIHRvIHZpZXdlcnMgYXQgaG9tZS4gQW4gaW4tZGVwdGggbG9vayBhdCB0aGUgc3RvcmllcyBiZWhpbmQgdGhlIGhlYWRsaW5lcywgd2l0aCBhcmNoaXZlIGZvb3RhZ2Uu",
+      "end": "2026-01-01 12:30:00",
+      "epg_id": "bbc1.uk",
+      "id": "29454420000",
+      "lang": "en",
+      "start": "2026-01-01 11:00:00",
+      "start_timestamp": "1767265200",
+      "stop_timestamp": "1767270600",
+      "stream_id": "101",
+      "title": "TmV3c25pZ2h0"
+    },
+    {
+      "channel_id": "bbc1.uk",
+      "description": "SGlnaGxpZ2h0cywgaW50ZXJ2aWV3cywgYW5kIHRoZSBtb21lbnRzIGV2ZXJ5b25lJ3MgdGFsa2luZyBhYm91dC4gVGhlIHRlYW0gdmlzaXRzIFNhaW50LcOJdGllbm5lLCBaw7xyaWNoIGFuZCBNw6FsYWdhIGluIGEgd2hpcmx3aW5kIHdlZWsu",
+      "end": "2026-01-01 13:30:00",
+      "epg_id": "bbc1.uk",
+      "id": "29454510000",
+      "lang": "en",
+      "start": "2026-01-01 12:30:00",
+      "start_timestamp": "1767270600",
+      "stop_timestamp": "1767274200",
+      "stream_id": "101",
+      "title": "UG9saXRpY3MgTGl2ZQ=="
+    },
+    {
+      "channel_id": "bbc1.uk",
+      "description": "TGl2ZSBjb3ZlcmFnZSB3aXRoIGV4cGVydCBhbmFseXNpcyAmIHJlYWN0aW9uIGZyb20gYXJvdW5kIHRoZSB3b3JsZC4gR3Vlc3RzIGRpc2N1c3MgIndoYXQgY29tZXMgbmV4dCIgYW5kIHdoeSBpdCBtYXR0ZXJzIHRvIHZpZXdlcnMgYXQgaG9tZS4=",
+      "end": "2026-01-01 14:15:00",
+      "epg_id": "bbc1.uk",
+      "id": "29454570000",
+      "lang": "en",
+      "start": "2026-01-01 13:30:00",
+      "start_timestamp": "1767274200",
+      "stop_timestamp": "1767276900",
+      "stream_id": "101",
+      "title": "V2VhdGhlciBXYXRjaA=="
+    },
+    {
+      "channel_id": "bbc1.uk",
+      "description": "UHJlc2VudGVycyB0YWtlIHZpZXdlcnMgYmVoaW5kIHRoZSBzY2VuZXMgZm9yIGFuIGV4Y2x1c2l2ZSB0b3VyLiBMaXZlIGNvdmVyYWdlIHdpdGggZXhwZXJ0IGFuYWx5c2lzICYgcmVhY3Rpb24gZnJvbSBhcm91bmQgdGhlIHdvcmxkLg==",
+      "end": "2026-01-01 15:00:00",
+      "epg_id": "bbc1.uk",
+      "id": "29454615000",
+      "lang": "en",
+      "start": "2026-01-01 14:15:00",
+      "start_timestamp": "1767276900",
+      "stop_timestamp": "1767279600",
+      "stream_id": "101",
+      "title": "QnJlYWtmYXN0IEJyaWVmaW5n"
+    }
+  ]
+}

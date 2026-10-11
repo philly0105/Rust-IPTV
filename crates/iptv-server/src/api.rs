@@ -1,0 +1,182 @@
+//! `/api/rpc/{cmd}`, `/api/events`, `/api/health`, and the API 404.
+
+use crate::Server;
+use axum::body::Bytes;
+use axum::extract::ws::{close_code, CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use iptv_core::events::AppEvent;
+use iptv_core::{AppState, RpcError};
+use std::time::Duration;
+use tokio::sync::broadcast::{self, error::RecvError};
+use tokio::time::{Instant, MissedTickBehavior};
+
+/// Interval between server pings on an event socket.
+pub const PING_INTERVAL: Duration = Duration::from_secs(20);
+/// A socket that sends nothing (not even a pong) for this long is closed.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// A single frame that cannot be written within this time marks the client
+/// as stuck; the socket is closed so the broadcast buffer is not pinned.
+pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+/// Event sent to one client after it fell behind the broadcast buffer.
+/// Payload: `{skipped: number}`. The UI should refetch what it shows.
+pub const LAGGED_EVENT: &str = "events.lagged";
+
+/// JSON error response with the C1 status mapping.
+pub fn error_response(err: RpcError) -> Response {
+    let status =
+        StatusCode::from_u16(err.code.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    error_response_with(status, err)
+}
+
+/// JSON error response with an explicit status.
+pub fn error_response_with(status: StatusCode, err: RpcError) -> Response {
+    (status, Json(err)).into_response()
+}
+
+/// `GET /api/health -> {ok, version}`.
+pub async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true, "version": AppState::version() }))
+}
+
+/// Any unknown `/api/*` route.
+pub async fn not_found() -> Response {
+    error_response(RpcError::not_found("unknown API route"))
+}
+
+/// `POST /api/rpc/{cmd}`: body is the JSON args (empty body means `null`).
+pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) -> Response {
+    let args = if body.iter().all(u8::is_ascii_whitespace) {
+        serde_json::Value::Null
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                return error_response(RpcError::invalid(format!(
+                    "request body is not valid JSON: {e}"
+                )))
+            }
+        }
+    };
+    let started = Instant::now();
+    let result = s.rpc.dispatch(s.app.clone(), &cmd, args).await;
+    let ms = started.elapsed().as_millis() as u64;
+    match result {
+        Ok(v) => {
+            tracing::debug!(%cmd, ms, "rpc ok");
+            Json(v).into_response()
+        }
+        Err(e) => {
+            // The message is safe to log; args (which may hold passwords) are not.
+            tracing::info!(%cmd, ms, code = ?e.code, message = %e.message, "rpc error");
+            error_response(e)
+        }
+    }
+}
+
+/// `GET /api/events`: upgrades to a WebSocket that receives every AppEvent.
+pub async fn events(State(s): State<Server>, ws: WebSocketUpgrade) -> Response {
+    if s.is_shutting_down() {
+        return error_response_with(
+            StatusCode::SERVICE_UNAVAILABLE,
+            RpcError::internal("server is shutting down").retryable(true),
+        );
+    }
+    let rx = s.events.subscribe();
+    ws.on_upgrade(move |socket| forward_events(socket, rx, s))
+}
+
+/// Why an event socket ended (for logs).
+#[derive(Debug)]
+enum End {
+    ClientClosed,
+    SendFailed,
+    SendTimedOut,
+    Idle,
+    Shutdown,
+    ChannelClosed,
+}
+
+async fn send(socket: &mut WebSocket, msg: Message) -> Result<(), End> {
+    match tokio::time::timeout(SEND_TIMEOUT, socket.send(msg)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(End::SendFailed),
+        Err(_) => Err(End::SendTimedOut),
+    }
+}
+
+async fn send_event(socket: &mut WebSocket, ev: &AppEvent) -> Result<(), End> {
+    match serde_json::to_string(ev) {
+        Ok(text) => send(socket, Message::Text(text.into())).await,
+        Err(err) => {
+            tracing::warn!(kind = %ev.kind, %err, "event failed to serialize; skipped");
+            Ok(())
+        }
+    }
+}
+
+async fn forward_events(mut socket: WebSocket, mut rx: broadcast::Receiver<AppEvent>, s: Server) {
+    tracing::debug!(clients = s.event_clients(), "event socket open");
+    let mut ping = tokio::time::interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last_seen = Instant::now();
+    let shutdown = s.shutdown_requested();
+    tokio::pin!(shutdown);
+
+    let end = loop {
+        let step: Result<(), End> = tokio::select! {
+            ev = rx.recv() => match ev {
+                Ok(ev) => send_event(&mut socket, &ev).await,
+                Err(RecvError::Lagged(skipped)) => {
+                    // Lag policy: keep the client, tell it what it missed so it can
+                    // refetch; a client too slow to take a frame at all is dropped
+                    // by SEND_TIMEOUT instead.
+                    tracing::warn!(skipped, "event socket lagged behind the broadcast buffer");
+                    let notice = AppEvent::new(LAGGED_EVENT, serde_json::json!({ "skipped": skipped }));
+                    send_event(&mut socket, &notice).await
+                }
+                Err(RecvError::Closed) => Err(End::ChannelClosed),
+            },
+            msg = socket.recv() => match msg {
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => Err(End::ClientClosed),
+                // Pongs, pings (auto-answered by tungstenite) and client text all count as liveness.
+                Some(Ok(_)) => {
+                    last_seen = Instant::now();
+                    Ok(())
+                }
+            },
+            _ = ping.tick() => {
+                if last_seen.elapsed() > IDLE_TIMEOUT {
+                    Err(End::Idle)
+                } else {
+                    send(&mut socket, Message::Ping(Bytes::from_static(b"ka"))).await
+                }
+            },
+            _ = &mut shutdown => Err(End::Shutdown),
+        };
+        if let Err(end) = step {
+            break end;
+        }
+    };
+
+    let close = match end {
+        End::Shutdown | End::ChannelClosed => Some((close_code::AWAY, "server shutting down")),
+        End::Idle => Some((close_code::POLICY, "keepalive timeout")),
+        End::SendTimedOut => Some((close_code::AGAIN, "client too slow")),
+        End::ClientClosed | End::SendFailed => None,
+    };
+    if let Some((code, reason)) = close {
+        let frame = CloseFrame {
+            code,
+            reason: reason.into(),
+        };
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            socket.send(Message::Close(Some(frame))),
+        )
+        .await;
+    }
+    tracing::debug!(reason = ?end, "event socket closed");
+}

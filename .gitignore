@@ -1,0 +1,44 @@
+# Dependencies and build output
+node_modules/
+dist/
+target/
+crates/iptv-tauri/gen/
+
+# Vendored binaries (placed after user approval)
+vendor/mpv/
+
+# Secrets and local data
+.env
+.env.*
+!.env.example
+.data/
+/data/
+.e2e-data/
+.b10-data/
+.i-data/
+.w0-data/
+*.db
+*.db-*
+*.db.*
+*.part
+
+# Test output
+test-results/
+playwright-report/
+blob-report/
+coverage/
+.playwright-mcp/
+
+# Scratch
+scratch/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Any agent/local data dir
+.*-data/

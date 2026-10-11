@@ -1,0 +1,12 @@
+[
+  {
+    "category_id": "20",
+    "category_name": "Drama Series",
+    "parent_id": 0
+  },
+  {
+    "category_id": "21",
+    "category_name": "Comedy & Family Series",
+    "parent_id": 0
+  }
+]

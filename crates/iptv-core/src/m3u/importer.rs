@@ -1,0 +1,684 @@
+//! M3U importer: fetch (URL / file / pasted text) -> streaming parse -> one
+//! write transaction that rewrites the source's catalog, stores `m3u_raw`, and
+//! records the header EPG URLs. A failure anywhere rolls the transaction back,
+//! so the previous catalog survives a failed refresh.
+
+use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
+use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
+use crate::db::now_rfc3339;
+use crate::error::{CoreError, CoreResult};
+use crate::model::{
+    ContentType, EpgLinks, ImportSummary, M3uOrigin, M3uSourceConfig, Source, SourceKind,
+};
+use crate::sources::{self, Importer};
+use crate::state::AppState;
+use futures::StreamExt;
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::io::{BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+
+/// Progress cadence (items) during parse + save.
+pub const PROGRESS_EVERY: u64 = 2000;
+/// Content types an m3u source owns (all rewritten on import).
+pub const M3U_TYPES: [ContentType; 4] = [
+    ContentType::Live,
+    ContentType::Radio,
+    ContentType::Movie,
+    ContentType::Series,
+];
+/// Download attempts for a playlist URL (network errors and 5xx only).
+pub const FETCH_ATTEMPTS: u32 = 3;
+/// Read buffer for parsing files.
+const READ_BUF: usize = 256 * 1024;
+
+/// First 16 hex chars of sha256(s).
+pub fn hash16(s: &str) -> String {
+    let d = Sha256::digest(s.as_bytes());
+    hex::encode(&d[..8])
+}
+
+/// m3u item id: 16 hex chars of sha256(url + '\n' + name) (C2).
+pub fn item_id(url: &str, name: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(url.as_bytes());
+    h.update(b"\n");
+    h.update(name.as_bytes());
+    hex::encode(&h.finalize()[..8])
+}
+
+/// m3u category id: 16 hex chars of sha256(group name) (C4 m3u notes).
+pub fn group_id(group: &str) -> String {
+    hash16(group)
+}
+
+/// Content type of an entry: `radio="true"` -> radio; a movie container URL in
+/// a group whose title mentions movie / vod / film -> movie; else live.
+pub fn classify(e: &M3uEntry) -> ContentType {
+    if e.radio {
+        return ContentType::Radio;
+    }
+    if has_movie_extension(&e.url) {
+        let g = e.group.as_deref().unwrap_or("").to_lowercase();
+        if g.contains("movie") || g.contains("vod") || g.contains("film") {
+            return ContentType::Movie;
+        }
+    }
+    ContentType::Live
+}
+
+/// Turns parser entries into catalog rows: stable ids (with a suffix for exact
+/// duplicates), categories in first-seen order per content type, channel
+/// numbers (tvg-chno, else running index per type).
+pub struct RowBuilder {
+    source_id: String,
+    seen_ids: HashSet<String>,
+    categories: HashMap<ContentType, (Vec<CategoryRow>, HashSet<String>)>,
+    counters: HashMap<ContentType, i64>,
+    position: i64,
+}
+
+impl RowBuilder {
+    pub fn new(source_id: &str) -> Self {
+        Self {
+            source_id: source_id.to_string(),
+            seen_ids: HashSet::new(),
+            categories: HashMap::new(),
+            counters: HashMap::new(),
+            position: 0,
+        }
+    }
+
+    pub fn row(&mut self, e: M3uEntry) -> ItemRow {
+        let ct = classify(&e);
+        let mut id = item_id(&e.url, &e.name);
+        if self.seen_ids.contains(&id) {
+            let mut n = 2u32;
+            loop {
+                let candidate = hash16(&format!("{}\n{}\n#{n}", e.url, e.name));
+                if !self.seen_ids.contains(&candidate) {
+                    id = candidate;
+                    break;
+                }
+                n += 1;
+            }
+        }
+        self.seen_ids.insert(id.clone());
+
+        let group = e.group.clone().unwrap_or_default();
+        let cat_id = group_id(&group);
+        let (cats, cat_ids) = self.categories.entry(ct).or_default();
+        if !cat_ids.contains(&cat_id) {
+            cat_ids.insert(cat_id.clone());
+            let name = if group.trim().is_empty() {
+                catalog::FALLBACK_CATEGORY_NAME.to_string()
+            } else {
+                group.clone()
+            };
+            cats.push(CategoryRow {
+                category_id: cat_id.clone(),
+                name,
+                position: cats.len() as i64,
+            });
+        }
+
+        let counter = self.counters.entry(ct).or_default();
+        *counter += 1;
+        let number = match ct {
+            ContentType::Live | ContentType::Radio => Some(e.tvg_chno.unwrap_or(*counter)),
+            _ => None,
+        };
+
+        let mut extra = serde_json::Map::new();
+        if let Some(v) = &e.tvg_name {
+            extra.insert("tvgName".into(), v.clone().into());
+        }
+        if let Some(v) = &e.tvg_shift {
+            extra.insert("tvgShift".into(), v.clone().into());
+        }
+        let has_catchup = e.catchup.is_some() || e.catchup_source.is_some();
+        if has_catchup {
+            let mut c = serde_json::Map::new();
+            c.insert(
+                "type".into(),
+                e.catchup.clone().unwrap_or_else(|| "default".into()).into(),
+            );
+            if let Some(d) = e.catchup_days {
+                c.insert("days".into(), d.into());
+            }
+            if let Some(s) = &e.catchup_source {
+                c.insert("source".into(), s.clone().into());
+            }
+            extra.insert("catchup".into(), c.into());
+        }
+        if e.user_agent.is_some() || e.referrer.is_some() || e.origin.is_some() {
+            let mut h = serde_json::Map::new();
+            if let Some(v) = &e.user_agent {
+                h.insert("userAgent".into(), v.clone().into());
+            }
+            if let Some(v) = &e.referrer {
+                h.insert("referrer".into(), v.clone().into());
+            }
+            if let Some(v) = &e.origin {
+                h.insert("origin".into(), v.clone().into());
+            }
+            extra.insert("headers".into(), h.into());
+        }
+        if !e.vlc_opts.is_empty() {
+            let m: serde_json::Map<String, serde_json::Value> = e
+                .vlc_opts
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone().into()))
+                .collect();
+            extra.insert("vlcOpts".into(), m.into());
+        }
+        if !e.kodi_props.is_empty() {
+            let m: serde_json::Map<String, serde_json::Value> = e
+                .kodi_props
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone().into()))
+                .collect();
+            extra.insert("kodiProps".into(), m.into());
+        }
+
+        let (title_base, year) = if ct == ContentType::Movie {
+            let (b, y) = catalog::title_base(&e.name);
+            (Some(b), y)
+        } else {
+            (None, None)
+        };
+        let archive_hours = if has_catchup || e.catchup_days.is_some() {
+            e.catchup_days.map(|d| d * 24)
+        } else {
+            None
+        };
+        let position = self.position;
+        self.position += 1;
+        let container_extension = if ct == ContentType::Movie {
+            url_extension(&e.url)
+        } else {
+            None
+        };
+
+        ItemRow {
+            source_id: self.source_id.clone(),
+            content_type: ct,
+            item_id: id,
+            category_id: cat_id,
+            title: e.name,
+            title_base,
+            number,
+            logo_url: if ct == ContentType::Movie {
+                None
+            } else {
+                e.tvg_logo.clone()
+            },
+            poster_url: if ct == ContentType::Movie {
+                e.tvg_logo
+            } else {
+                None
+            },
+            backdrop_url: None,
+            rating: None,
+            added: None,
+            year,
+            epg_channel_id: e.tvg_id,
+            url: Some(e.url),
+            container_extension,
+            is_radio: ct == ContentType::Radio,
+            archive_hours,
+            extra: serde_json::Value::Object(extra),
+            position,
+        }
+    }
+
+    /// Categories per content type, in first-seen order.
+    pub fn categories(&self) -> Vec<(ContentType, Vec<CategoryRow>)> {
+        M3U_TYPES
+            .iter()
+            .map(|ct| {
+                (
+                    *ct,
+                    self.categories
+                        .get(ct)
+                        .map(|(v, _)| v.clone())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// Where the playlist bytes are for one import.
+enum Payload {
+    /// A file on disk (user file or downloaded temp file).
+    File(PathBuf),
+    /// Pasted text (already stored in `m3u_raw`).
+    Text(String),
+}
+
+/// Deletes the downloaded temp file on drop.
+struct TempFile(PathBuf);
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if self.0.exists() {
+            if let Err(err) = std::fs::remove_file(&self.0) {
+                tracing::warn!(%err, file = %self.0.display(), "could not remove temporary playlist file");
+            }
+        }
+    }
+}
+
+/// The m3u [`Importer`] registered by `m3u::init`.
+pub struct M3uImporter;
+
+#[async_trait::async_trait]
+impl Importer for M3uImporter {
+    fn kind(&self) -> SourceKind {
+        SourceKind::M3u
+    }
+
+    async fn import(&self, state: Arc<AppState>, source: &Source) -> CoreResult<ImportSummary> {
+        import_source(state, source).await
+    }
+}
+
+fn file_path_of(cfg: &M3uSourceConfig) -> CoreResult<PathBuf> {
+    match cfg.origin {
+        M3uOrigin::File => cfg
+            .file_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                CoreError::Invalid(
+                    "this playlist has no file path; edit the source and choose a file".into(),
+                )
+            }),
+        M3uOrigin::Url => {
+            let url = cfg.url.as_deref().unwrap_or("").trim();
+            let parsed = url::Url::parse(url)
+                .map_err(|e| CoreError::Invalid(format!("invalid playlist URL: {e}")))?;
+            parsed
+                .to_file_path()
+                .map_err(|_| CoreError::Invalid("invalid file:// playlist URL".into()))
+        }
+        M3uOrigin::Text => Err(CoreError::Invalid("text playlists have no file".into())),
+    }
+}
+
+fn is_file_url(cfg: &M3uSourceConfig) -> bool {
+    cfg.origin == M3uOrigin::Url
+        && cfg
+            .url
+            .as_deref()
+            .map(|u| u.trim().to_ascii_lowercase().starts_with("file://"))
+            .unwrap_or(false)
+}
+
+/// Full m3u import for `source` (see module docs).
+pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<ImportSummary> {
+    let cfg = source
+        .m3u
+        .clone()
+        .ok_or_else(|| CoreError::Invalid("source has no m3u configuration".into()))?;
+    let source_id = source.id.clone();
+    let _tmp_guard;
+
+    // 1. Acquire bytes + sha256.
+    let (payload, sha) = match cfg.origin {
+        M3uOrigin::Text => {
+            let sid = source_id.clone();
+            let raw = state
+                .db_call(move |c| {
+                    Ok(c.query_row(
+                        "SELECT raw FROM m3u_raw WHERE source_id = ?1",
+                        [&sid],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()?)
+                })
+                .await?
+                .ok_or_else(|| {
+                    CoreError::Invalid(
+                        "the pasted playlist text is missing; edit the source and paste it again"
+                            .into(),
+                    )
+                })?;
+            let sha = hex::encode(Sha256::digest(raw.as_bytes()));
+            (Payload::Text(raw), sha)
+        }
+        M3uOrigin::File => {
+            let path = file_path_of(&cfg)?;
+            let sha = hash_file(path.clone()).await?;
+            (Payload::File(path), sha)
+        }
+        M3uOrigin::Url if is_file_url(&cfg) => {
+            let path = file_path_of(&cfg)?;
+            let sha = hash_file(path.clone()).await?;
+            (Payload::File(path), sha)
+        }
+        M3uOrigin::Url => {
+            let url = cfg.url.clone().unwrap_or_default();
+            let tmp_dir = state.data_dir.join("tmp");
+            tokio::fs::create_dir_all(&tmp_dir).await?;
+            let tmp = tmp_dir.join(format!(
+                "m3u-{}-{}.part",
+                source_id,
+                uuid::Uuid::new_v4().simple()
+            ));
+            _tmp_guard = TempFile(tmp.clone());
+            let sha = fetch_to_file(&state, &source_id, &url, &cfg, &tmp).await?;
+            (Payload::File(tmp), sha)
+        }
+    };
+
+    // 2. Unchanged since the last successful import: keep the catalog.
+    let sid = source_id.clone();
+    let prev_sha: Option<String> = state
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT sha256 FROM m3u_raw WHERE source_id = ?1",
+                [&sid],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+        .await?;
+    if source.last_refresh_at.is_some() && prev_sha.as_deref() == Some(sha.as_str()) {
+        let sid = source_id.clone();
+        let (channels, movies, series) = state
+            .db_call(move |c| {
+                c.execute(
+                    "UPDATE m3u_raw SET fetched_at = ?2 WHERE source_id = ?1",
+                    params![sid, now_rfc3339()],
+                )?;
+                catalog::source_counts(c, &sid)
+            })
+            .await?;
+        tracing::info!(source_id = %source_id, "playlist unchanged; catalog kept");
+        sources::progress(&state, &source_id, "saving", 0, None, Some("unchanged"));
+        return Ok(ImportSummary {
+            channels,
+            movies,
+            series,
+        });
+    }
+
+    // 3. Parse + write in one transaction on the blocking pool.
+    sources::progress(&state, &source_id, "parsing", 0, None, None);
+    let st = state.clone();
+    let pool = state.db.clone();
+    let origin = cfg.origin;
+    tokio::task::spawn_blocking(move || -> CoreResult<ImportSummary> {
+        let mut conn = pool.get()?;
+        write_catalog(&st, &mut conn, &source_id, payload, &sha, origin)
+    })
+    .await?
+}
+
+/// Streams `payload` through the parser into the catalog inside one IMMEDIATE
+/// transaction, then stores the raw text and detected EPG URLs.
+fn write_catalog(
+    state: &AppState,
+    conn: &mut Connection,
+    source_id: &str,
+    payload: Payload,
+    sha: &str,
+    origin: M3uOrigin,
+) -> CoreResult<ImportSummary> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut builder = RowBuilder::new(source_id);
+    let started = std::time::Instant::now();
+
+    let (header, stats, summary) = {
+        let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES)?;
+        let reader: Box<dyn std::io::BufRead + '_> = match &payload {
+            Payload::File(p) => Box::new(BufReader::with_capacity(
+                READ_BUF,
+                std::fs::File::open(p).map_err(|e| file_error(p, e))?,
+            )),
+            Payload::Text(t) => Box::new(std::io::Cursor::new(t.as_bytes())),
+        };
+        let mut parser = M3uReader::new(reader);
+        let mut n = 0u64;
+        for entry in parser.by_ref() {
+            let row = builder.row(entry);
+            writer.insert(&row)?;
+            n += 1;
+            if n % PROGRESS_EVERY == 0 {
+                sources::progress(state, source_id, "parsing", n, None, None);
+            }
+        }
+        if let Some(err) = parser.take_io_error() {
+            return Err(CoreError::Io(err));
+        }
+        let stats = parser.stats();
+        let header = parser.header().clone();
+        if !stats.saw_header && stats.entries == 0 {
+            return Err(CoreError::Invalid(
+                "this is not an M3U playlist (no #EXTM3U header and no #EXTINF entries); check the URL or file".into(),
+            ));
+        }
+        sources::progress(state, source_id, "saving", n, Some(n), None);
+        let summary = ImportSummary {
+            channels: (writer.inserted_of(ContentType::Live)
+                + writer.inserted_of(ContentType::Radio)) as i64,
+            movies: writer.inserted_of(ContentType::Movie) as i64,
+            series: writer.inserted_of(ContentType::Series) as i64,
+        };
+        writer.finish(&builder.categories())?;
+        (header, stats, summary)
+    };
+
+    // Raw playlist (needed by m3u.raw, backups, and the unchanged check).
+    let now = now_rfc3339();
+    match payload {
+        Payload::Text(_) => {
+            tx.execute(
+                "UPDATE m3u_raw SET sha256 = ?2, fetched_at = ?3 WHERE source_id = ?1",
+                params![source_id, sha, now],
+            )?;
+        }
+        Payload::File(p) => {
+            let raw = read_text_lossy(&p)?;
+            tx.execute(
+                "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(source_id) DO UPDATE SET raw = excluded.raw, sha256 = excluded.sha256, fetched_at = excluded.fetched_at",
+                params![source_id, raw, sha, now],
+            )?;
+        }
+    }
+
+    // Header EPG URLs -> detectedUrls (manual / disabled lists untouched).
+    let epg_json: Option<String> = tx
+        .query_row(
+            "SELECT epg_json FROM sources WHERE id = ?1",
+            [source_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(epg_json) = epg_json else {
+        return Err(CoreError::NotFound(
+            "the source was removed during import".into(),
+        ));
+    };
+    let mut epg: EpgLinks = serde_json::from_str(&epg_json).unwrap_or_default();
+    if epg.detected_urls != header.epg_urls {
+        epg.detected_urls = header.epg_urls.clone();
+        tx.execute(
+            "UPDATE sources SET epg_json = ?2 WHERE id = ?1",
+            params![source_id, serde_json::to_string(&epg)?],
+        )?;
+    }
+    tx.commit()?;
+    tracing::info!(
+        source_id,
+        origin = origin.as_str(),
+        entries = stats.entries,
+        skipped = stats.skipped,
+        lines = stats.lines,
+        ms = started.elapsed().as_millis() as u64,
+        "m3u import complete"
+    );
+    if stats.skipped > 0 {
+        tracing::warn!(
+            source_id,
+            skipped = stats.skipped,
+            "m3u lines skipped (no URL, junk, or overlong)"
+        );
+    }
+    Ok(summary)
+}
+
+fn file_error(p: &Path, e: std::io::Error) -> CoreError {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => CoreError::NotFound(format!(
+            "playlist file not found: {}; choose the file again",
+            p.display()
+        )),
+        _ => CoreError::Io(std::io::Error::new(
+            e.kind(),
+            format!("cannot read playlist file {}: {e}", p.display()),
+        )),
+    }
+}
+
+/// Reads a file as text, replacing invalid UTF-8 and dropping a leading BOM.
+fn read_text_lossy(p: &Path) -> CoreResult<String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(p)
+        .map_err(|e| file_error(p, e))?
+        .read_to_end(&mut bytes)?;
+    let start = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        3
+    } else {
+        0
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(mut s) => {
+            if start > 0 {
+                s.drain(..start);
+            }
+            s
+        }
+        Err(e) => String::from_utf8_lossy(&e.into_bytes()[start..]).into_owned(),
+    };
+    Ok(text)
+}
+
+/// sha256 of a file, streamed.
+async fn hash_file(path: PathBuf) -> CoreResult<String> {
+    tokio::task::spawn_blocking(move || -> CoreResult<String> {
+        let mut f = std::fs::File::open(&path).map_err(|e| file_error(&path, e))?;
+        if !f.metadata()?.is_file() {
+            return Err(CoreError::Invalid(format!(
+                "{} is not a file",
+                path.display()
+            )));
+        }
+        let mut h = Sha256::new();
+        let mut buf = vec![0u8; READ_BUF];
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            h.update(&buf[..n]);
+        }
+        Ok(hex::encode(h.finalize()))
+    })
+    .await?
+}
+
+/// Downloads `url` with the source headers into `dest` (streamed, never held
+/// in memory), retrying transient failures. Returns the body's sha256.
+async fn fetch_to_file(
+    state: &Arc<AppState>,
+    source_id: &str,
+    url: &str,
+    cfg: &M3uSourceConfig,
+    dest: &Path,
+) -> CoreResult<String> {
+    let safe_url = crate::logging::redact_url(url);
+    sources::progress(state, source_id, "fetching", 0, None, None);
+    crate::http::with_retry(FETCH_ATTEMPTS, || async {
+        let req = crate::http::apply_source_headers(state.http.get(url), &cfg.headers);
+        let resp = crate::http::send_checked(req, "playlist download")
+            .await
+            .map_err(|e| {
+                tracing::warn!(url = %safe_url, error = %e, "playlist download failed");
+                e
+            })?;
+        let total = resp.content_length();
+        let mut file = tokio::fs::File::create(dest).await?;
+        let mut hasher = Sha256::new();
+        let mut done: u64 = 0;
+        let mut last_report: u64 = 0;
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(CoreError::from)?;
+            hasher.update(&chunk);
+            file.write_all(&chunk).await?;
+            done += chunk.len() as u64;
+            if done - last_report >= 1024 * 1024 {
+                last_report = done;
+                sources::progress(state, source_id, "fetching", done, total, None);
+            }
+        }
+        file.flush().await?;
+        file.sync_all().await.ok();
+        sources::progress(
+            state,
+            source_id,
+            "fetching",
+            done,
+            total.or(Some(done)),
+            None,
+        );
+        Ok(hex::encode(hasher.finalize()))
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::m3u::parser::parse_str;
+
+    #[test]
+    fn ids_are_stable_and_unique() {
+        assert_eq!(item_id("http://a", "A"), item_id("http://a", "A"));
+        assert_eq!(item_id("http://a", "A").len(), 16);
+        assert_eq!(group_id("News"), hash16("News"));
+        let (entries, _, _) = parse_str("#EXTM3U\n#EXTINF:-1 group-title=\"G\",Dup\nhttp://d\n#EXTINF:-1 group-title=\"H\",Dup\nhttp://d\n");
+        let mut b = RowBuilder::new("s");
+        let rows: Vec<ItemRow> = entries.into_iter().map(|e| b.row(e)).collect();
+        assert_ne!(rows[0].item_id, rows[1].item_id);
+        assert_eq!(rows[0].item_id, item_id("http://d", "Dup"));
+        assert_eq!(rows[0].number, Some(1));
+        assert_eq!(rows[1].number, Some(2));
+        let cats = b.categories();
+        assert_eq!(cats[0].1.len(), 2);
+    }
+
+    #[test]
+    fn classifies_movies_and_radio() {
+        let (e, _, _) = parse_str(
+            "#EXTM3U\n#EXTINF:-1 group-title=\"VOD Movies\",Heat (1995)\nhttp://x/heat.mp4\n#EXTINF:-1 group-title=\"News\",Clip\nhttp://x/clip.mp4\n#EXTINF:-1 radio=\"true\",R\nhttp://r\n",
+        );
+        assert_eq!(classify(&e[0]), ContentType::Movie);
+        assert_eq!(classify(&e[1]), ContentType::Live);
+        assert_eq!(classify(&e[2]), ContentType::Radio);
+        let mut b = RowBuilder::new("s");
+        let movie = b.row(e[0].clone());
+        assert_eq!(movie.title_base.as_deref(), Some("Heat"));
+        assert_eq!(movie.year, Some(1995));
+        assert_eq!(movie.container_extension.as_deref(), Some("mp4"));
+        assert_eq!(movie.number, None);
+    }
+}

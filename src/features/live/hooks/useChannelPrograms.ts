@@ -1,0 +1,66 @@
+import { useMemo } from 'react';
+
+import { useRpcQuery } from '@/api/query';
+import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
+
+import { mergePrograms } from '../lib/epgMerge';
+import { ms } from '../lib/epgTime';
+
+const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
+/** `stalker.epg` caps its answer at 50 programmes. */
+export const STALKER_RIBBON_LIMIT = 50;
+
+export interface ChannelPrograms {
+  /** Start-ordered programmes inside [from, to). */
+  programs: EpgProgram[];
+  isLoading: boolean;
+  /** Set only when nothing could be shown. */
+  error: unknown;
+  refetch(): void;
+}
+
+/**
+ * Programmes for one channel's guide ribbon.
+ * - xtream / m3u: the XMLTV guide (`epg.programs`).
+ * - stalker: the portal's own guide (`stalker.epg`: the airing programme onwards), merged with
+ *   the XMLTV guide when one resolves for the channel (a global EPG URL or a manual mapping).
+ *   The portal wins where both cover the same time; XMLTV fills the rest, notably the past
+ *   hours that catch-up needs.
+ */
+export function useChannelPrograms(channel: Channel | undefined, kind: SourceKind | undefined, from: number, to: number): ChannelPrograms {
+  const ref = channel?.ref ?? EMPTY_REF;
+  const isStalker = kind === 'stalker';
+  const xmltv = useRpcQuery(
+    'epg.programs',
+    { ref, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
+    { enabled: !!channel, staleTime: 5 * 60_000 },
+  );
+  const portal = useRpcQuery('stalker.epg', { ref, limit: STALKER_RIBBON_LIMIT }, { enabled: !!channel && isStalker, staleTime: 5 * 60_000 });
+
+  const programs = useMemo(() => {
+    const inWindow = (p: EpgProgram) => ms(p.end) > from && ms(p.start) < to;
+    const base = (xmltv.data ?? []).filter(inWindow);
+    if (!isStalker) return [...base].sort((a, b) => ms(a.start) - ms(b.start));
+    return mergePrograms((portal.data ?? []).filter(inWindow), base);
+  }, [xmltv.data, portal.data, isStalker, from, to]);
+
+  if (!isStalker) {
+    return {
+      programs,
+      isLoading: xmltv.isLoading,
+      error: xmltv.error,
+      refetch: () => void xmltv.refetch(),
+    };
+  }
+  const pending = portal.isLoading || xmltv.isLoading;
+  return {
+    programs,
+    // Show what one side has while the other is still answering.
+    isLoading: programs.length === 0 && pending,
+    error: programs.length === 0 && !pending ? (portal.error ?? xmltv.error) : null,
+    refetch: () => {
+      void portal.refetch();
+      void xmltv.refetch();
+    },
+  };
+}

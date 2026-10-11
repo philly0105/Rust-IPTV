@@ -1,0 +1,46 @@
+{
+  "js": {
+    "cur_page": 1,
+    "data": [
+      {
+        "added": "2026-01-01 00:00:00",
+        "category_id": "11",
+        "cmd": "",
+        "description": "Season 1 of The Lantern Keepers (3 episodes).",
+        "has_files": 0,
+        "id": "5030:1",
+        "is_episode": false,
+        "is_season": true,
+        "is_series": "0",
+        "name": "Season 1",
+        "o_name": "Season 1",
+        "screenshot_uri": "http://127.0.0.1:7290/img/poster/the-lantern-keepers.svg",
+        "season_number": 1,
+        "series": [],
+        "video_id": "5030",
+        "year": "2025"
+      },
+      {
+        "added": "2026-01-01 00:00:00",
+        "category_id": "11",
+        "cmd": "",
+        "description": "Season 2 of The Lantern Keepers (2 episodes).",
+        "has_files": 0,
+        "id": "5030:2",
+        "is_episode": false,
+        "is_season": true,
+        "is_series": "0",
+        "name": "Season 2",
+        "o_name": "Season 2",
+        "screenshot_uri": "http://127.0.0.1:7290/img/poster/the-lantern-keepers.svg",
+        "season_number": 2,
+        "series": [],
+        "video_id": "5030",
+        "year": "2026"
+      }
+    ],
+    "max_page_items": 14,
+    "selected_item": 0,
+    "total_items": 2
+  }
+}

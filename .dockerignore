@@ -1,0 +1,17 @@
+# Keep the server image build context small and free of local data and secrets.
+.git/
+target/
+node_modules/
+dist/
+.data/
+.e2e-data/
+.b10-data/
+.i-data/
+vendor/
+.env
+.env.*
+.playwright-mcp/
+test-results/
+playwright-report/
+scratch/
+*.part

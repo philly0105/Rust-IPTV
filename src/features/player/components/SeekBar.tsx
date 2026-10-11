@@ -1,0 +1,134 @@
+import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { cn } from '../cn';
+import { formatTime } from '../format';
+import type { TimeRange } from '../media';
+
+export interface SeekBarProps {
+  /** Window start (0 for VOD, seekable start for live DVR). */
+  min: number;
+  max: number;
+  value: number;
+  buffered: TimeRange[];
+  /** Live streams mark the live edge at `max`. */
+  live?: boolean;
+  onSeek(seconds: number): void;
+  className?: string;
+}
+
+/**
+ * The tuner dial: a thin track with buffered segments, an amber played fill and a
+ * needle thumb. Scrubbing previews locally and commits one seek on release.
+ */
+export function SeekBar({ min, max, value, buffered, live, onSeek, className }: SeekBarProps) {
+  const { t } = useTranslation('player');
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [preview, setPreview] = useState<number | null>(null);
+  const [hover, setHover] = useState<{ x: number; time: number } | null>(null);
+  const span = Math.max(0.001, max - min);
+  const shown = preview ?? value;
+  const pct = (v: number): number => Math.min(100, Math.max(0, ((v - min) / span) * 100));
+
+  const timeAt = useCallback(
+    (clientX: number): { time: number; x: number } => {
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return { time: min, x: 0 };
+      const x = Math.min(rect.width, Math.max(0, clientX - rect.left));
+      return { time: min + (x / rect.width) * span, x };
+    },
+    [min, span],
+  );
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setPreview(timeAt(e.clientX).time);
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
+    const at = timeAt(e.clientX);
+    setHover(at);
+    if (preview !== null) setPreview(at.time);
+  };
+  const onPointerUp = (e: PointerEvent<HTMLDivElement>): void => {
+    if (preview === null) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const target = timeAt(e.clientX).time;
+    setPreview(null);
+    if (Number.isFinite(target)) onSeek(target);
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const step = e.shiftKey ? 30 : 5;
+    let next: number | null = null;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = value - step;
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = value + step;
+    else if (e.key === 'PageDown') next = value - 60;
+    else if (e.key === 'PageUp') next = value + 60;
+    else if (e.key === 'Home') next = min;
+    else if (e.key === 'End') next = max;
+    if (next === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSeek(Math.min(max, Math.max(min, next)));
+  };
+
+  const behind = live ? Math.max(0, max - shown) : 0;
+  const valueText = live
+    ? behind < 3
+      ? t('live')
+      : t('behindLive', { time: formatTime(behind) })
+    : `${formatTime(shown)} / ${formatTime(max)}`;
+
+  return (
+    <div
+      ref={trackRef}
+      role="slider"
+      tabIndex={0}
+      aria-label={t('seek')}
+      aria-valuemin={Math.floor(min)}
+      aria-valuemax={Math.floor(max)}
+      aria-valuenow={Math.floor(shown)}
+      aria-valuetext={valueText}
+      className={cn('group/seek relative flex h-5 cursor-pointer touch-none items-center select-none', className)}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={() => setPreview(null)}
+      onPointerLeave={() => setHover(null)}
+      onKeyDown={onKeyDown}
+    >
+      <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/20 motion-safe:transition-[height] group-hover/seek:h-1.5 group-focus-visible/seek:h-1.5">
+        {buffered.map((r) => (
+          <div
+            key={`${r.start}-${r.end}`}
+            className="absolute inset-y-0 bg-white/30"
+            style={{ left: `${pct(r.start)}%`, width: `${Math.max(0, pct(r.end) - pct(r.start))}%` }}
+          />
+        ))}
+        <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${pct(shown)}%` }} />
+      </div>
+      {/* The needle */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-hover shadow-[0_0_10px_var(--color-accent)] opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
+        style={{ left: `${pct(shown)}%`, opacity: preview !== null ? 1 : undefined }}
+      />
+      {live && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live"
+        />
+      )}
+      {hover && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm bg-black/85 px-1.5 py-0.5 font-display text-xs text-white tabular-nums"
+          style={{ left: hover.x }}
+        >
+          {live ? `-${formatTime(Math.max(0, max - hover.time))}` : formatTime(hover.time)}
+        </div>
+      )}
+    </div>
+  );
+}

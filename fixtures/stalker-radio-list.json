@@ -1,0 +1,90 @@
+{
+  "js": {
+    "cur_page": 1,
+    "data": [
+      {
+        "censored": 0,
+        "cmd": "ffmpeg http://127.0.0.1:7290/media/radio.mp3?station=2001",
+        "count": "0",
+        "fav": 0,
+        "id": "2001",
+        "lock": 0,
+        "logo": "http://127.0.0.1:7290/img/logo/radio-2001.svg",
+        "name": "Classic FM",
+        "number": "1",
+        "radio": true,
+        "status": 1,
+        "tv_genre_id": "40",
+        "use_http_tmp_link": "0",
+        "use_load_balancing": "0"
+      },
+      {
+        "censored": 0,
+        "cmd": "ffmpeg http://127.0.0.1:7290/media/radio.mp3?station=2002",
+        "count": "0",
+        "fav": 0,
+        "id": "2002",
+        "lock": 0,
+        "logo": "http://127.0.0.1:7290/img/logo/radio-2002.svg",
+        "name": "Jazz FM",
+        "number": "2",
+        "radio": true,
+        "status": 1,
+        "tv_genre_id": "40",
+        "use_http_tmp_link": "0",
+        "use_load_balancing": "0"
+      },
+      {
+        "censored": 0,
+        "cmd": "ffmpeg http://127.0.0.1:7290/media/radio.mp3?station=2003",
+        "count": "0",
+        "fav": 0,
+        "id": "2003",
+        "lock": 0,
+        "logo": "http://127.0.0.1:7290/img/logo/radio-2003.svg",
+        "name": "Rock Radio",
+        "number": "3",
+        "radio": true,
+        "status": 1,
+        "tv_genre_id": "40",
+        "use_http_tmp_link": "0",
+        "use_load_balancing": "0"
+      },
+      {
+        "censored": 0,
+        "cmd": "ffmpeg http://127.0.0.1:7290/media/radio.mp3?station=2004",
+        "count": "0",
+        "fav": 0,
+        "id": "2004",
+        "lock": 0,
+        "logo": "http://127.0.0.1:7290/img/logo/radio-2004.svg",
+        "name": "Talk Radio 24",
+        "number": "4",
+        "radio": true,
+        "status": 1,
+        "tv_genre_id": "40",
+        "use_http_tmp_link": "0",
+        "use_load_balancing": "0"
+      },
+      {
+        "censored": 0,
+        "cmd": "ffmpeg http://127.0.0.1:7290/media/radio.mp3?station=2005",
+        "count": "0",
+        "fav": 0,
+        "id": "2005",
+        "lock": 0,
+        "logo": "http://127.0.0.1:7290/img/logo/radio-2005.svg",
+        "name": "Chill Lounge",
+        "number": "5",
+        "radio": true,
+        "status": 1,
+        "tv_genre_id": "40",
+        "use_http_tmp_link": "0",
+        "use_load_balancing": "0"
+      }
+    ],
+    "max_page_items": 14,
+    "selected_item": 0,
+    "total_items": 5
+  }
+}

@@ -1,0 +1,272 @@
+[
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg"
+    ],
+    "cast": "Mara Venn, Elias Shore, June Cross",
+    "category_id": "20",
+    "category_ids": [
+      20
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+    "director": "Nadia Rook",
+    "episode_run_time": "42",
+    "genre": "Crime Drama",
+    "last_modified": "1767225600",
+    "name": "Harbor Lights",
+    "num": 1,
+    "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift.",
+    "rating": "8.1",
+    "rating_5based": 4.1,
+    "releaseDate": "2024-03-01",
+    "release_date": "2024-03-01",
+    "series_id": 301,
+    "stream_type": "series",
+    "title": "Harbor Lights",
+    "year": "2024",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/the-archive-room.svg"
+    ],
+    "cast": "Rhea Voss, Owen Marr, Selah Quinn",
+    "category_id": "20",
+    "category_ids": [
+      20
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/the-archive-room.svg",
+    "director": "Iris Shore",
+    "episode_run_time": "42",
+    "genre": "Mystery",
+    "last_modified": "1766793600",
+    "name": "The Archive Room",
+    "num": 2,
+    "plot": "Two archivists discover that a city's lost records are being rewritten one drawer at a time.",
+    "rating": "8.4",
+    "rating_5based": 4.2,
+    "releaseDate": "2025-03-01",
+    "release_date": "2025-03-01",
+    "series_id": 302,
+    "stream_type": "series",
+    "title": "The Archive Room",
+    "year": "2025",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/signal-and-noise.svg"
+    ],
+    "cast": "Ari Cole, Leni Wynn, Milo Reed",
+    "category_id": "20",
+    "category_ids": [
+      20
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/signal-and-noise.svg",
+    "director": "Elise March",
+    "episode_run_time": "42",
+    "genre": "Techno Thriller",
+    "last_modified": "1766361600",
+    "name": "Signal & Noise",
+    "num": 3,
+    "plot": "A pirate radio crew stumbles onto a broadcast that predicts tomorrow's headlines.",
+    "rating": "7.9",
+    "rating_5based": 4.0,
+    "releaseDate": "2025-03-01",
+    "release_date": "2025-03-01",
+    "series_id": 303,
+    "stream_type": "series",
+    "title": "Signal & Noise",
+    "year": "2025",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/northbound.svg"
+    ],
+    "cast": "Kit Arden, Orla Moss, Finn Vale",
+    "category_id": "20",
+    "category_ids": [
+      20
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/northbound.svg",
+    "director": "Tomas Bell",
+    "episode_run_time": "42",
+    "genre": "Road Drama",
+    "last_modified": "1765929600",
+    "name": "Northbound",
+    "num": 4,
+    "plot": "Three siblings drive their late father's bus from the coast to the arctic circle.",
+    "rating": "7.6",
+    "rating_5based": 3.8,
+    "releaseDate": "2023-03-01",
+    "release_date": "2023-03-01",
+    "series_id": 304,
+    "stream_type": "series",
+    "title": "Northbound",
+    "year": "2023",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/glass-orchard.svg"
+    ],
+    "cast": "Mina Hart, Darius Cole, Ruth Bell",
+    "category_id": "20",
+    "category_ids": [
+      20
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/glass-orchard.svg",
+    "director": "Lumi North",
+    "episode_run_time": "42",
+    "genre": "Family Saga",
+    "last_modified": "1765497600",
+    "name": "Glass Orchard",
+    "num": 5,
+    "plot": "A family-run glassworks fights to survive a decade of storms, debts, and secrets.",
+    "rating": "8.0",
+    "rating_5based": 4.0,
+    "releaseDate": "2022-03-01",
+    "release_date": "2022-03-01",
+    "series_id": 305,
+    "stream_type": "series",
+    "title": "Glass Orchard",
+    "year": "2022",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/corner-booth.svg"
+    ],
+    "cast": "Clara Moss, Ben Rowe, Juno Pike",
+    "category_id": "21",
+    "category_ids": [
+      21
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/corner-booth.svg",
+    "director": "Milo Hart",
+    "episode_run_time": "42",
+    "genre": "Sitcom",
+    "last_modified": "1765065600",
+    "name": "Corner Booth",
+    "num": 6,
+    "plot": "Regulars at a 24-hour diner argue, scheme, and occasionally help each other out.",
+    "rating": "7.4",
+    "rating_5based": 3.7,
+    "releaseDate": "2024-03-01",
+    "release_date": "2024-03-01",
+    "series_id": 306,
+    "stream_type": "series",
+    "title": "Corner Booth",
+    "year": "2024",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/tiny-planet-picnic.svg"
+    ],
+    "cast": "Finn Vale, Mina Hart, Kit Arden",
+    "category_id": "21",
+    "category_ids": [
+      21
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/tiny-planet-picnic.svg",
+    "director": "Orla Moss",
+    "episode_run_time": "42",
+    "genre": "Animated Adventure",
+    "last_modified": "1764633600",
+    "name": "Tiny Planet Picnic",
+    "num": 7,
+    "plot": "A picnic blanket turns out to be a map to a planet the size of a backyard.",
+    "rating": "8.7",
+    "rating_5based": 4.4,
+    "releaseDate": "2025-03-01",
+    "release_date": "2025-03-01",
+    "series_id": 307,
+    "stream_type": "series",
+    "title": "Tiny Planet Picnic",
+    "year": "2025",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/office-of-lost-umbrellas.svg"
+    ],
+    "cast": "Ben Rowe, Tessa Vale, Owen Pike",
+    "category_id": "21",
+    "category_ids": [
+      21
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/office-of-lost-umbrellas.svg",
+    "director": "Evelyn Cole",
+    "episode_run_time": "42",
+    "genre": "Workplace Comedy",
+    "last_modified": "1764201600",
+    "name": "Office of Lost Umbrellas",
+    "num": 8,
+    "plot": "The city's least important department becomes its most beloved.",
+    "rating": "7.8",
+    "rating_5based": 3.9,
+    "releaseDate": "2023-03-01",
+    "release_date": "2023-03-01",
+    "series_id": 308,
+    "stream_type": "series",
+    "title": "Office of Lost Umbrellas",
+    "year": "2023",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/captain-kindling.svg"
+    ],
+    "cast": "Juno Pike, Leni Wynn, Ari Cole",
+    "category_id": "21",
+    "category_ids": [
+      21
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/captain-kindling.svg",
+    "director": "Bram North",
+    "episode_run_time": "42",
+    "genre": "Family Comedy",
+    "last_modified": "1763769600",
+    "name": "Captain Kindling",
+    "num": 9,
+    "plot": "A retired firefighter becomes a reluctant superhero for a town with very small problems.",
+    "rating": "8.2",
+    "rating_5based": 4.1,
+    "releaseDate": "2024-03-01",
+    "release_date": "2024-03-01",
+    "series_id": 309,
+    "stream_type": "series",
+    "title": "Captain Kindling",
+    "year": "2024",
+    "youtube_trailer": ""
+  },
+  {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/weekend-champions.svg"
+    ],
+    "cast": "Milo Reed, Selah Quinn, Darius Cole",
+    "category_id": "21",
+    "category_ids": [
+      21
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/weekend-champions.svg",
+    "director": "Clara Moss",
+    "episode_run_time": "42",
+    "genre": "Sports Comedy",
+    "last_modified": "1763337600",
+    "name": "Weekend Champions",
+    "num": 10,
+    "plot": "An amateur football club with no wins and endless optimism enters a national cup.",
+    "rating": "7.5",
+    "rating_5based": 3.8,
+    "releaseDate": "2022-03-01",
+    "release_date": "2022-03-01",
+    "series_id": 310,
+    "stream_type": "series",
+    "title": "Weekend Champions",
+    "year": "2022",
+    "youtube_trailer": ""
+  }
+]

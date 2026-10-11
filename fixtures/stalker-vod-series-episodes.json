@@ -1,0 +1,61 @@
+{
+  "js": {
+    "cur_page": 1,
+    "data": [
+      {
+        "added": "2026-01-12 00:00:00",
+        "category_id": "11",
+        "cmd": "/media/file_503011.mpg",
+        "description": "Three cousins inherit a lighthouse whose lamp still turns every night, though nobody has climbed the stairs in years. Season 1, episode 1.",
+        "has_files": 1,
+        "id": "5030:1:1",
+        "is_episode": true,
+        "is_season": false,
+        "is_series": "0",
+        "name": "The Lamp Room",
+        "o_name": "The Lamp Room",
+        "screenshot_uri": "http://127.0.0.1:7290/img/backdrop/the-lantern-keepers.svg",
+        "series_number": 1,
+        "time": "39",
+        "video_id": "5030"
+      },
+      {
+        "added": "2026-01-13 00:00:00",
+        "category_id": "11",
+        "cmd": "/media/file_503012.mpg",
+        "description": "Three cousins inherit a lighthouse whose lamp still turns every night, though nobody has climbed the stairs in years. Season 1, episode 2.",
+        "has_files": 1,
+        "id": "5030:1:2",
+        "is_episode": true,
+        "is_season": false,
+        "is_series": "0",
+        "name": "Fog Signal",
+        "o_name": "Fog Signal",
+        "screenshot_uri": "http://127.0.0.1:7290/img/backdrop/the-lantern-keepers.svg",
+        "series_number": 2,
+        "time": "40",
+        "video_id": "5030"
+      },
+      {
+        "added": "2026-01-14 00:00:00",
+        "category_id": "11",
+        "cmd": "/media/file_503013.mpg",
+        "description": "Three cousins inherit a lighthouse whose lamp still turns every night, though nobody has climbed the stairs in years. Season 1, episode 3.",
+        "has_files": 1,
+        "id": "5030:1:3",
+        "is_episode": true,
+        "is_season": false,
+        "is_series": "0",
+        "name": "Low Tide Ledger",
+        "o_name": "Low Tide Ledger",
+        "screenshot_uri": "http://127.0.0.1:7290/img/backdrop/the-lantern-keepers.svg",
+        "series_number": 3,
+        "time": "41",
+        "video_id": "5030"
+      }
+    ],
+    "max_page_items": 14,
+    "selected_item": 0,
+    "total_items": 3
+  }
+}

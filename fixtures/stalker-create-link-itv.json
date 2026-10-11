@@ -1,0 +1,10 @@
+{
+  "js": {
+    "cmd": "ffmpeg http://127.0.0.1:7290/xtream/live/demo/secret/101.m3u8",
+    "error": "",
+    "id": "1001",
+    "link_id": 1,
+    "load": 0,
+    "streamer_id": 0
+  }
+}

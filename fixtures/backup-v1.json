@@ -1,0 +1,193 @@
+{
+  "exportedAt": "2026-10-01T12:00:00.000Z",
+  "includeSecrets": true,
+  "kind": "iptvnator-playlist-backup",
+  "playlists": [
+    {
+      "autoRefresh": false,
+      "exportedId": "m3u-sample",
+      "portalType": "m3u",
+      "position": 0,
+      "source": {
+        "kind": "url",
+        "rawM3u": "#EXTM3U url-tvg=\"http://127.0.0.1:7290/xmltv/sample.xml\" x-tvg-url=\"http://127.0.0.1:7290/xmltv/sample.xml\" refresh=\"3600\"\n#PLAYLIST:Tsrust IPTV sample\n#EXTINF:-1 tvg-id=\"bbc1.uk\" tvg-name=\"BBC One\" tvg-logo=\"http://127.0.0.1:7290/img/logo/bbc1.uk.svg\" tvg-chno=\"1\" group-title=\"News\" catchup=\"xc\" catchup-days=\"7\",BBC One\nhttp://127.0.0.1:7290/xtream/live/demo/secret/101.m3u8\n#EXTINF:-1 tvg-id=\"bbcnews.uk\" tvg-name=\"BBC News\" tvg-logo=\"http://127.0.0.1:7290/img/logo/bbcnews.uk.svg\" tvg-chno=\"2\" group-title=\"News\" catchup=\"xc\" catchup-days=\"7\",BBC News\nhttp://127.0.0.1:7290/xtream/live/demo/secret/102.m3u8\n#EXTINF:-1 tvg-id=\"cnni.us\" tvg-name=\"CNN International\" tvg-logo=\"http://127.0.0.1:7290/img/logo/cnni.us.svg\" tvg-chno=\"3\" group-title=\"News\" catchup=\"xc\" catchup-days=\"7\",CNN International\nhttp://127.0.0.1:7290/xtream/live/demo/secret/103.m3u8\n#EXTINF:-1 tvg-id=\"skynews.uk\" tvg-name=\"Sky News\" tvg-logo=\"http://127.0.0.1:7290/img/logo/skynews.uk.svg\" tvg-chno=\"4\" group-title=\"News\" catchup=\"append\" catchup-days=\"3\" catchup-source=\"?utc={utc}&lutc={lutc}\",Sky News\nhttp://127.0.0.1:7290/xtream/live/demo/secret/104.m3u8\n#EXTINF:-1 tvg-id=\"aljazeera.qa\" tvg-name=\"Al Jazeera English\" tvg-logo=\"http://127.0.0.1:7290/img/logo/aljazeera.qa.svg\" tvg-chno=\"5\" group-title=\"News\" catchup=\"append\" catchup-days=\"3\" catchup-source=\"?utc={utc}&lutc={lutc}\",Al Jazeera English\nhttp://127.0.0.1:7290/xtream/live/demo/secret/105.m3u8\n#EXTINF:-1 tvg-id=\"france24.fr\" tvg-name=\"France 24 English\" tvg-logo=\"http://127.0.0.1:7290/img/logo/france24.fr.svg\" tvg-chno=\"6\" group-title=\"News\",France 24 English\nhttp://127.0.0.1:7290/xtream/live/demo/secret/106.m3u8\n#EXTINF:-1 tvg-id=\"dwnews.de\" tvg-name=\"DW News\" tvg-logo=\"http://127.0.0.1:7290/img/logo/dwnews.de.svg\" tvg-chno=\"7\" group-title=\"News\",DW News\nhttp://127.0.0.1:7290/xtream/live/demo/secret/107.m3u8\n#EXTINF:-1 tvg-id=\"skysportsmain.uk\" tvg-name=\"Sky Sports Main Event\" tvg-logo=\"http://127.0.0.1:7290/img/logo/skysportsmain.uk.svg\" tvg-chno=\"8\" group-title=\"Sports\",Sky Sports Main Event\nhttp://127.0.0.1:7290/xtream/live/demo/secret/113.m3u8\n#EXTINF:-1 tvg-id=\"skysportsf1.uk\" tvg-name=\"Sky Sports F1\" tvg-logo=\"http://127.0.0.1:7290/img/logo/skysportsf1.uk.svg\" tvg-chno=\"9\" group-title=\"Sports\",Sky Sports F1\nhttp://127.0.0.1:7290/xtream/live/demo/secret/114.m3u8\n#EXTINF:-1 tvg-id=\"eurosport1.eu\" tvg-name=\"Eurosport 1\" tvg-logo=\"http://127.0.0.1:7290/img/logo/eurosport1.eu.svg\" tvg-chno=\"10\" group-title=\"Sports\",Eurosport 1\nhttp://127.0.0.1:7290/xtream/live/demo/secret/115.m3u8\n#EXTINF:-1 tvg-id=\"eurosport2.eu\" tvg-name=\"Eurosport 2\" tvg-logo=\"http://127.0.0.1:7290/img/logo/eurosport2.eu.svg\" tvg-chno=\"11\" group-title=\"Sports\",Eurosport 2\nhttp://127.0.0.1:7290/xtream/live/demo/secret/116.m3u8\n#EXTINF:-1 tvg-id=\"espn.us\" tvg-name=\"ESPN\" tvg-logo=\"http://127.0.0.1:7290/img/logo/espn.us.svg\" tvg-chno=\"12\" group-title=\"Sports\",ESPN\n#EXTVLCOPT:http-user-agent=IPTVMockAgent/1.0\n#EXTVLCOPT:http-referrer=http://referer.mock/\nhttp://127.0.0.1:7290/xtream/live/demo/secret/117.m3u8\n#EXTINF:-1 tvg-id=\"espn2.us\" tvg-name=\"ESPN 2\" tvg-logo=\"http://127.0.0.1:7290/img/logo/espn2.us.svg\" tvg-chno=\"13\" group-title=\"Sports\",ESPN 2\n#EXTGRP:Sports\nhttp://127.0.0.1:7290/xtream/live/demo/secret/118.m3u8\n#EXTINF:-1 tvg-id=\"itv1.uk\" tvg-name=\"ITV1\" tvg-logo=\"http://127.0.0.1:7290/img/logo/itv1.uk.svg\" tvg-chno=\"14\" group-title=\"Entertainment\",ITV1\nhttp://127.0.0.1:7290/xtream/live/demo/secret/125.m3u8\n#EXTINF:-1 tvg-id=\"channel4.uk\" tvg-name=\"Channel 4\" tvg-logo=\"http://127.0.0.1:7290/img/logo/channel4.uk.svg\" tvg-chno=\"15\" group-title=\"Entertainment\",Channel 4\nhttp://127.0.0.1:7290/xtream/live/demo/secret/126.m3u8\n#EXTINF:-1 tvg-id=\"channel5.uk\" tvg-name=\"Channel 5\" tvg-logo=\"http://127.0.0.1:7290/img/logo/channel5.uk.svg\" tvg-chno=\"16\" group-title=\"Entertainment\",Channel 5\nhttp://127.0.0.1:7290/xtream/live/demo/secret/127.m3u8\n#EXTINF:-1 tvg-id=\"dave.uk\" tvg-name=\"Dave\" tvg-logo=\"http://127.0.0.1:7290/img/logo/dave.uk.svg\" tvg-chno=\"17\" group-title=\"Entertainment\",Dave\nhttp://127.0.0.1:7290/xtream/live/demo/secret/128.m3u8\n#EXTINF:-1 tvg-id=\"comedycentral.uk\" tvg-name=\"Comedy Central\" tvg-logo=\"http://127.0.0.1:7290/img/logo/comedycentral.uk.svg\" tvg-chno=\"18\" group-title=\"Entertainment\",Comedy Central\nhttp://127.0.0.1:7290/xtream/live/demo/secret/129.m3u8\n#EXTINF:-1 tvg-id=\"discovery.us\" tvg-name=\"Discovery Channel\" tvg-logo=\"http://127.0.0.1:7290/img/logo/discovery.us.svg\" tvg-chno=\"19\" group-title=\"Entertainment\",Discovery Channel\nhttp://127.0.0.1:7290/xtream/live/demo/secret/130.m3u8\n#EXTINF:-1 tvg-id=\"natgeo.us\" tvg-name=\"National Geographic\" tvg-logo=\"http://127.0.0.1:7290/img/logo/natgeo.us.svg\" tvg-chno=\"20\" group-title=\"Entertainment\",National Geographic\nhttp://127.0.0.1:7290/xtream/live/demo/secret/131.m3u8\n#EXTINF:-1 tvg-id=\"mtvhits.uk\" tvg-name=\"MTV Hits\" tvg-logo=\"http://127.0.0.1:7290/img/logo/mtvhits.uk.svg\" tvg-chno=\"21\" group-title=\"Music\",MTV Hits\nhttp://127.0.0.1:7290/xtream/live/demo/secret/136.m3u8\n#EXTINF:-1 tvg-id=\"vh1classic.uk\" tvg-name=\"VH1 Classic\" tvg-logo=\"http://127.0.0.1:7290/img/logo/vh1classic.uk.svg\" tvg-chno=\"22\" group-title=\"Music\",VH1 Classic\nhttp://127.0.0.1:7290/xtream/live/demo/secret/137.m3u8\n#EXTINF:-1 tvg-id=\"kisstv.uk\" tvg-name=\"Kiss TV\" tvg-logo=\"http://127.0.0.1:7290/img/logo/kisstv.uk.svg\" tvg-chno=\"23\" group-title=\"Music\",Kiss TV\nhttp://127.0.0.1:7290/xtream/live/demo/secret/138.m3u8\n#EXTINF:-1 tvg-id=\"classicfm.uk\" tvg-name=\"Classic FM\" tvg-logo=\"http://127.0.0.1:7290/img/logo/classicfm.uk.svg\" tvg-chno=\"24\" group-title=\"Music\" radio=\"true\",Classic FM\nhttp://127.0.0.1:7290/media/radio.mp3\n#EXTINF:-1 tvg-id=\"traceurban.fr\" tvg-name=\"Trace Urban\" tvg-logo=\"http://127.0.0.1:7290/img/logo/traceurban.fr.svg\" tvg-chno=\"25\" group-title=\"Music\",Trace Urban\nhttp://127.0.0.1:7290/xtream/live/demo/secret/140.m3u8\n",
+        "referrer": "http://referer.mock/",
+        "url": "http://127.0.0.1:7290/m3u/sample.m3u",
+        "userAgent": "IPTVMockAgent/1.0"
+      },
+      "title": "Mock Sample M3U",
+      "userState": {
+        "favorites": [
+          "http://127.0.0.1:7290/xtream/live/demo/secret/101.m3u8",
+          "http://127.0.0.1:7290/xtream/live/demo/secret/113.m3u8",
+          "http://127.0.0.1:7290/xtream/live/demo/secret/125.m3u8"
+        ],
+        "hiddenGroupTitles": [
+          "Music"
+        ],
+        "recentlyViewed": [
+          {
+            "added_at": "2026-09-30T20:15:00.000Z",
+            "category_id": "live",
+            "group_title": "News",
+            "id": "http://127.0.0.1:7290/xtream/live/demo/secret/102.m3u8",
+            "name": "BBC News",
+            "source": "m3u",
+            "title": "BBC News",
+            "tvg_id": "bbcnews.uk",
+            "url": "http://127.0.0.1:7290/xtream/live/demo/secret/102.m3u8"
+          },
+          {
+            "added_at": "2026-09-29T18:00:00.000Z",
+            "category_id": "live",
+            "group_title": "Sports",
+            "id": "http://127.0.0.1:7290/xtream/live/demo/secret/114.m3u8",
+            "name": "Sky Sports F1",
+            "source": "m3u",
+            "title": "Sky Sports F1",
+            "url": "http://127.0.0.1:7290/xtream/live/demo/secret/114.m3u8"
+          }
+        ]
+      }
+    },
+    {
+      "autoRefresh": false,
+      "connection": {
+        "password": "secret",
+        "serverUrl": "http://127.0.0.1:7290/xtream",
+        "username": "demo"
+      },
+      "exportedId": "xtream-demo",
+      "portalType": "xtream",
+      "position": 1,
+      "title": "Mock Xtream",
+      "userState": {
+        "favorites": [
+          {
+            "addedAt": "2026-09-20T10:00:00.000Z",
+            "contentType": "live",
+            "position": 0,
+            "xtreamId": 101
+          },
+          {
+            "addedAt": "2026-09-21T10:00:00.000Z",
+            "contentType": "movie",
+            "position": 1,
+            "xtreamId": 201
+          },
+          {
+            "addedAt": "2026-09-22T10:00:00.000Z",
+            "contentType": "series",
+            "position": 2,
+            "xtreamId": 301
+          }
+        ],
+        "hiddenCategories": [
+          {
+            "categoryType": "live",
+            "xtreamId": 3
+          },
+          {
+            "categoryType": "movies",
+            "xtreamId": 11
+          }
+        ],
+        "playbackPositions": [
+          {
+            "contentType": "vod",
+            "contentXtreamId": 203,
+            "durationSeconds": 60,
+            "positionSeconds": 30,
+            "updatedAt": "2026-09-30T19:30:00.000Z"
+          },
+          {
+            "contentType": "episode",
+            "contentXtreamId": 3002,
+            "durationSeconds": 60,
+            "episodeNumber": 2,
+            "positionSeconds": 12,
+            "seasonNumber": 1,
+            "seriesXtreamId": 301,
+            "updatedAt": "2026-09-29T19:40:00.000Z"
+          }
+        ],
+        "recentlyViewed": [
+          {
+            "contentType": "live",
+            "viewedAt": "2026-09-30T21:00:00.000Z",
+            "xtreamId": 102
+          },
+          {
+            "contentType": "movie",
+            "viewedAt": "2026-09-30T19:00:00.000Z",
+            "xtreamId": 203
+          },
+          {
+            "contentType": "series",
+            "viewedAt": "2026-09-29T19:00:00.000Z",
+            "xtreamId": 302
+          }
+        ],
+        "sourcePins": []
+      }
+    },
+    {
+      "autoRefresh": false,
+      "connection": {
+        "isFullStalkerPortal": false,
+        "macAddress": "00:1A:79:00:00:01",
+        "portalUrl": "http://127.0.0.1:7290/stalker/portal.php"
+      },
+      "exportedId": "stalker-mag",
+      "portalType": "stalker",
+      "position": 2,
+      "title": "Mock Stalker",
+      "userState": {
+        "favorites": [
+          {
+            "added": "2026-09-20T10:00:00.000Z",
+            "category_id": "itv",
+            "cmd": "ffmpeg http://localhost/ch/1001_",
+            "id": "1001",
+            "logo": "http://127.0.0.1:7290/img/logo/bbc1.uk.svg",
+            "name": "BBC One",
+            "type": "itv"
+          },
+          {
+            "added": "2026-09-21T10:00:00.000Z",
+            "category_id": "vod",
+            "cmd": "/media/5001.mpg",
+            "id": "5001",
+            "name": "Black Harbor",
+            "type": "vod"
+          }
+        ],
+        "recentlyViewed": [
+          {
+            "added": "2026-09-30T21:05:00.000Z",
+            "category_id": "itv",
+            "cmd": "ffmpeg http://localhost/ch/1002_",
+            "id": "1002",
+            "logo": "http://127.0.0.1:7290/img/logo/bbcnews.uk.svg",
+            "name": "BBC News",
+            "type": "itv"
+          },
+          {
+            "added": "2026-09-29T20:00:00.000Z",
+            "category_id": "series",
+            "cmd": "/media/series/7001.mpg",
+            "id": "7001",
+            "name": "Harbor Lights",
+            "type": "series"
+          }
+        ]
+      }
+    }
+  ],
+  "settings": {
+    "epgUrls": [
+      "http://127.0.0.1:7290/xmltv/sample.xml"
+    ]
+  },
+  "version": 1
+}

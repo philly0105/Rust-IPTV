@@ -1,0 +1,224 @@
+import { Clapperboard, Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Navigate, useNavigate, useParams } from 'react-router';
+
+import { useQueryClient } from '@tanstack/react-query';
+
+import { useRpcQuery } from '@/api/query';
+import type { ItemRef, VodItem } from '@/api/types';
+
+import { DownloadButton, FavoriteButton } from '../components/detail/actions';
+import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
+import { OtherSourcesDialog } from '../components/detail/OtherSourcesDialog';
+import { TrailerDialog } from '../components/detail/TrailerDialog';
+import { WatchStage } from '../components/detail/WatchStage';
+import { TmdbAttribution } from '../components/TmdbAttribution';
+import { TmdbRail } from '../components/TmdbRail';
+import { useIsFavorite, useMovieDetail, useSettings, useSource, useSourceMap, useTmdbMovie, useTmdbSimilar } from '../hooks/queries';
+import { usePageHeader } from '../hooks/usePageHeader';
+import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
+import { useSourcePin } from '../hooks/useSourcePin';
+import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
+import { formatClock, isResumable } from '../lib/format';
+import { mergeMovieDetail, youtubeKey } from '../lib/merge';
+import { detailHref, isCachedStalkerSeries } from '../lib/search';
+import { Button, EmptyState, ErrorState } from '../_shim';
+
+export function MovieDetailPage() {
+  const { t } = useTranslation('vod');
+  const navigate = useNavigate();
+  const { sourceId = '', itemId = '' } = useParams();
+  const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'movie', itemId }), [sourceId, itemId]);
+  const settings = useSettings();
+  const tmdbOn = settings.tmdb.enabled;
+  const source = useSource(sourceId);
+  const sources = useSourceMap();
+  const qc = useQueryClient();
+  // A Stalker VOD-as-series row belongs on the series page (seasons and episodes come from stalker.seriesDetail).
+  const seriesTwin = useMemo(() => {
+    if (source.data?.kind !== 'stalker') return false;
+    const cached = ['stalker.movies', 'stalker.search'].flatMap((cmd) => qc.getQueriesData({ queryKey: [cmd] }).map(([, data]) => data));
+    return isCachedStalkerSeries(cached, sourceId, itemId);
+  }, [qc, source.data?.kind, sourceId, itemId]);
+  const detail = useMovieDetail(seriesTwin ? undefined : source.data, ref);
+  const item = detail.data?.item;
+  const tmdb = useTmdbMovie(item, tmdbOn);
+  const model = useMemo(() => (detail.data ? mergeMovieDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
+  const similarFallback = useTmdbSimilar('movie', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
+  const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
+
+  const position = useRpcQuery('positions.get', { ref }, { staleTime: 5_000 });
+  const isFavorite = useIsFavorite(ref);
+  const sameTitle = useRpcQuery('catalog.sameTitle', { ref }, { enabled: !!item, staleTime: 5 * 60_000 });
+  const others = useMemo(() => (sameTitle.data ?? []).filter((o) => o.ref.sourceId !== sourceId || o.ref.itemId !== itemId), [sameTitle.data, sourceId, itemId]);
+  const { pin, setPin, pinnedOther } = useSourcePin(item, others);
+
+  const [trailerOpen, setTrailerOpen] = useState(false);
+  const [othersOpen, setOthersOpen] = useState(false);
+
+  const ownTarget = useMemo<PlayTarget | undefined>(
+    () => (item && source.data ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl } : undefined),
+    [item, source.data, ref, model?.title, model?.posterUrl],
+  );
+  const targetFor = (copy: VodItem): PlayTarget | undefined => {
+    const kind = sources.get(copy.ref.sourceId)?.kind;
+    return kind ? { ref: copy.ref, sourceKind: kind, title: model?.title ?? copy.title, posterUrl: model?.posterUrl ?? copy.posterUrl } : undefined;
+  };
+  const pinnedTarget = pinnedOther ? targetFor(pinnedOther) : undefined;
+  const playback = usePlayback(ownTarget);
+  const downloads = useItemDownloads(ref, playback.canDownload);
+
+  const ownWatch = useWatchState(ref);
+  const pinnedWatch = useWatchState(pinnedOther?.ref ?? ref);
+  const watching = ownWatch.active || (!!pinnedOther && pinnedWatch.active);
+  useEscapeToClose(watching, playback.stop);
+
+  // Until the title is known, the page (sr-only h1) and the shell header both read the section name.
+  const pageTitle = model?.title ?? t('movies');
+  usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
+
+  const resumable = isResumable(position.data);
+  const play = (fromStart = false) => void playback.play(pinnedTarget ? { target: pinnedTarget, fromStart } : { fromStart });
+  const playCopy = (copy: VodItem) => {
+    setOthersOpen(false);
+    const tgt = targetFor(copy);
+    if (!tgt) return;
+    void playback.play({ target: tgt });
+    const href = detailHref(copy.ref);
+    if (href && (copy.ref.sourceId !== sourceId || copy.ref.itemId !== itemId)) navigate(href);
+  };
+
+  if (seriesTwin) {
+    return <Navigate replace to={detailHref({ sourceId, contentType: 'series', itemId }) ?? '/'} />;
+  }
+  if (source.isError || detail.isError) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <ErrorState
+          error={source.error ?? detail.error}
+          onRetry={() => {
+            void source.refetch();
+            void detail.refetch();
+          }}
+        />
+      </div>
+    );
+  }
+  if (!model || !item) {
+    return (
+      <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <DetailHeroSkeleton />
+      </div>
+    );
+  }
+
+  const trailer = youtubeKey(model.trailerKey ?? model.trailerUrl);
+  const download = downloads.get('');
+  const sourceName = source.data?.name ?? sourceId;
+
+  const secondary = (
+    <>
+      <FavoriteButton itemRef={ref} snapshot={{ title: model.title, posterUrl: model.posterUrl, contentType: 'movie' }} isFavorite={isFavorite} compact={watching} />
+      {playback.canDownload && (
+        <DownloadButton
+          download={download}
+          pending={playback.pendingDownload === ''}
+          compact={watching}
+          onStart={() => void playback.download({ extension: item.containerExtension })}
+        />
+      )}
+      {others.length > 0 && (
+        <Button size={watching ? 'sm' : 'lg'} variant="ghost" icon={<Layers aria-hidden size={18} />} onClick={() => setOthersOpen(true)}>
+          {t('otherSourcesCount', { count: others.length })}
+        </Button>
+      )}
+    </>
+  );
+
+  return (
+    <div className="h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
+      {watching ? (
+        <>
+          <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
+          <section className="mx-auto mt-6 flex w-full max-w-[1800px] flex-col gap-3 px-4 md:px-8" aria-label={t('about')}>
+            <div className="flex flex-wrap items-center gap-2">{secondary}</div>
+            {model.plot && <p className="max-w-[72ch] text-[15px] leading-relaxed text-fg-muted">{model.plot}</p>}
+          </section>
+        </>
+      ) : (
+        <DetailHero
+          model={model}
+          sourceId={sourceId}
+          note={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
+          actions={
+            <>
+              <Button size="lg" variant="primary" icon={<Play aria-hidden size={18} className="fill-current" />} onClick={() => play(false)}>
+                {resumable && position.data && !pinnedTarget
+                  ? t('resumeAt', { time: formatClock(position.data.positionSeconds) })
+                  : t('play')}
+              </Button>
+              {resumable && !pinnedTarget && (
+                <Button size="lg" variant="ghost" icon={<RotateCcw aria-hidden size={18} />} onClick={() => play(true)}>
+                  {t('startOver')}
+                </Button>
+              )}
+              {trailer && (
+                <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
+                  {t('trailer')}
+                </Button>
+              )}
+              {secondary}
+            </>
+          }
+        />
+      )}
+
+      <div className="mx-auto mt-8 flex w-full max-w-[1800px] flex-col gap-8 px-4 md:px-8">
+        {tmdbOn && (
+          <div className="flex flex-col gap-4">
+            <TmdbRail
+              title={t('similar')}
+              items={similar}
+              loading={tmdb.isPending || similarFallback.isFetching}
+              sourceId={sourceId}
+              empty={
+                tmdb.isError || similarFallback.isError ? (
+                  <ErrorState
+                    size="inline"
+                    title={t('tmdbUnavailable')}
+                    error={tmdb.error ?? similarFallback.error}
+                    onRetry={() => {
+                      void tmdb.refetch();
+                      void similarFallback.refetch();
+                    }}
+                  />
+                ) : (
+                  <EmptyState size="inline" icon={<Clapperboard size={20} />} title={t('noSimilar')} />
+                )
+              }
+            />
+            <TmdbAttribution />
+          </div>
+        )}
+      </div>
+
+      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.title} />}
+      {others.length > 0 && (
+        <OtherSourcesDialog
+          open={othersOpen}
+          onClose={() => setOthersOpen(false)}
+          current={item}
+          currentSourceName={sourceName}
+          others={others}
+          sources={sources}
+          pin={pin}
+          onPin={setPin}
+          onPlay={playCopy}
+        />
+      )}
+    </div>
+  );
+}

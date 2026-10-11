@@ -1,0 +1,106 @@
+/* Player-only styles that Tailwind utilities cannot express cleanly. */
+
+.player-range {
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+.player-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+}
+.player-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+}
+.player-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgb(0 0 0 / 0.25);
+}
+.player-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+}
+
+/* Fullscreen host paints black so a remounted engine never shows app surface. */
+[data-player-host]:fullscreen {
+  background: #000;
+}
+
+/* Hide the cursor with the chrome in fullscreen. */
+[data-player-host][data-idle='true']:fullscreen,
+[data-player-host][data-idle='true']:fullscreen * {
+  cursor: none;
+}
+
+/* hls.js native text tracks: readable captions over any frame. */
+[data-player-host] video::cue {
+  background: rgb(0 0 0 / 0.72);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: clamp(14px, 2.4vw, 28px);
+  line-height: 1.35;
+}
+
+/* Channel-number OSD: the tuner readout. */
+@keyframes player-osd {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  8%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.player-osd {
+  animation: player-osd 2.4s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-osd {
+    animation: player-osd-still 2.4s step-end forwards;
+  }
+  @keyframes player-osd-still {
+    0%,
+    99% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}
+html[data-reduced-motion='true'] .player-osd {
+  animation-timing-function: step-end;
+}
+
+/* Radio signal meter. */
+@keyframes player-radio-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion='true']) .player-radio-bar {
+    animation: player-radio-bar 1.1s ease-in-out infinite;
+  }
+}

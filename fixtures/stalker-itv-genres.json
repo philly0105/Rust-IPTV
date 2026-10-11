@@ -1,0 +1,25 @@
+{
+  "js": [
+    {
+      "active_sub": true,
+      "alias": "news",
+      "censored": 0,
+      "id": "1",
+      "title": "News"
+    },
+    {
+      "active_sub": true,
+      "alias": "sports",
+      "censored": 0,
+      "id": "2",
+      "title": "Sports"
+    },
+    {
+      "active_sub": true,
+      "alias": "entertainment",
+      "censored": 0,
+      "id": "3",
+      "title": "Entertainment"
+    }
+  ]
+}

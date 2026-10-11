@@ -1,0 +1,23 @@
+[package]
+name = "iptv-fixtures"
+description = "Test fixture generators and in-process mock spawner (SPEC C14)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+name = "iptv_fixtures"
+path = "src/lib.rs"
+
+[dependencies]
+iptv-mock = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }

@@ -1,0 +1,50 @@
+{
+  "js": {
+    "cur_page": 1,
+    "data": [
+      {
+        "added": "2026-01-01 00:00:00",
+        "category_id": "20",
+        "cmd": "/media/series/7001/1.mpg",
+        "description": "Season 1 of Harbor Lights.",
+        "has_files": 0,
+        "id": "7001:1",
+        "is_episode": false,
+        "is_season": true,
+        "is_series": "0",
+        "name": "Season 1",
+        "o_name": "Season 1",
+        "screenshot_uri": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+        "series": [
+          1,
+          2,
+          3
+        ],
+        "year": "2024"
+      },
+      {
+        "added": "2026-01-01 00:00:00",
+        "category_id": "20",
+        "cmd": "/media/series/7001/2.mpg",
+        "description": "Season 2 of Harbor Lights.",
+        "has_files": 0,
+        "id": "7001:2",
+        "is_episode": false,
+        "is_season": true,
+        "is_series": "0",
+        "name": "Season 2",
+        "o_name": "Season 2",
+        "screenshot_uri": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+        "series": [
+          1,
+          2,
+          3
+        ],
+        "year": "2025"
+      }
+    ],
+    "max_page_items": 14,
+    "selected_item": 0,
+    "total_items": 2
+  }
+}

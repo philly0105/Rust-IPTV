@@ -1,0 +1,188 @@
+{
+  "episodes": {
+    "1": [
+      {
+        "added": "1767139200",
+        "container_extension": "mp4",
+        "custom_sid": "",
+        "direct_source": "",
+        "episode_num": 1,
+        "id": "3001",
+        "info": {
+          "bitrate": 64,
+          "duration": "00:45:09",
+          "duration_secs": 2709,
+          "movie_image": "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg",
+          "name": "Crossing Lines",
+          "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift. Episode 1 of season 1.",
+          "rating": 8.1,
+          "releasedate": "2024-02-07",
+          "season": "1",
+          "tmdb_id": 803001
+        },
+        "season": 1,
+        "title": "Harbor Lights - S01E01 - Crossing Lines"
+      },
+      {
+        "added": "1767052800",
+        "container_extension": "mp4",
+        "custom_sid": "",
+        "direct_source": "",
+        "episode_num": 2,
+        "id": "3002",
+        "info": {
+          "bitrate": 64,
+          "duration": "00:47:55",
+          "duration_secs": 2875,
+          "movie_image": "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg",
+          "name": "Low Tide",
+          "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift. Episode 2 of season 1.",
+          "rating": 8.1,
+          "releasedate": "2024-02-14",
+          "season": "1",
+          "tmdb_id": 803002
+        },
+        "season": 1,
+        "title": "Harbor Lights - S01E02 - Low Tide"
+      },
+      {
+        "added": "1766966400",
+        "container_extension": "mp4",
+        "custom_sid": "",
+        "direct_source": "",
+        "episode_num": 3,
+        "id": "3003",
+        "info": {
+          "bitrate": 64,
+          "duration": "00:54:42",
+          "duration_secs": 3282,
+          "movie_image": "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg",
+          "name": "Paper Trail",
+          "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift. Episode 3 of season 1.",
+          "rating": 8.1,
+          "releasedate": "2024-02-21",
+          "season": "1",
+          "tmdb_id": 803003
+        },
+        "season": 1,
+        "title": "Harbor Lights - S01E03 - Paper Trail"
+      }
+    ],
+    "2": [
+      {
+        "added": "1766880000",
+        "container_extension": "mp4",
+        "custom_sid": "",
+        "direct_source": "",
+        "episode_num": 1,
+        "id": "3004",
+        "info": {
+          "bitrate": 64,
+          "duration": "00:46:42",
+          "duration_secs": 2802,
+          "movie_image": "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg",
+          "name": "Open Water",
+          "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift. Episode 1 of season 2.",
+          "rating": 8.1,
+          "releasedate": "2025-03-07",
+          "season": "2",
+          "tmdb_id": 803004
+        },
+        "season": 2,
+        "title": "Harbor Lights - S02E01 - Open Water"
+      },
+      {
+        "added": "1766793600",
+        "container_extension": "mp4",
+        "custom_sid": "",
+        "direct_source": "",
+        "episode_num": 2,
+        "id": "3005",
+        "info": {
+          "bitrate": 64,
+          "duration": "00:43:51",
+          "duration_secs": 2631,
+          "movie_image": "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg",
+          "name": "Static",
+          "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift. Episode 2 of season 2.",
+          "rating": 8.1,
+          "releasedate": "2025-03-14",
+          "season": "2",
+          "tmdb_id": 803005
+        },
+        "season": 2,
+        "title": "Harbor Lights - S02E02 - Static"
+      },
+      {
+        "added": "1766707200",
+        "container_extension": "mp4",
+        "custom_sid": "",
+        "direct_source": "",
+        "episode_num": 3,
+        "id": "3006",
+        "info": {
+          "bitrate": 64,
+          "duration": "00:54:03",
+          "duration_secs": 3243,
+          "movie_image": "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg",
+          "name": "The Return",
+          "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift. Episode 3 of season 2.",
+          "rating": 8.1,
+          "releasedate": "2025-03-21",
+          "season": "2",
+          "tmdb_id": 803006
+        },
+        "season": 2,
+        "title": "Harbor Lights - S02E03 - The Return"
+      }
+    ]
+  },
+  "info": {
+    "backdrop_path": [
+      "http://127.0.0.1:7290/img/backdrop/harbor-lights.svg"
+    ],
+    "cast": "Mara Venn, Elias Shore, June Cross",
+    "category_id": "20",
+    "category_ids": [
+      20
+    ],
+    "cover": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+    "director": "Nadia Rook",
+    "episode_run_time": "42",
+    "genre": "Crime Drama",
+    "last_modified": "1767225600",
+    "name": "Harbor Lights",
+    "plot": "A harbor police unit untangles smuggling cases that always seem to start on the night shift.",
+    "rating": "8.1",
+    "rating_5based": 4.1,
+    "releaseDate": "2024-03-01",
+    "release_date": "2024-03-01",
+    "title": "Harbor Lights",
+    "year": "2024",
+    "youtube_trailer": ""
+  },
+  "seasons": [
+    {
+      "air_date": "2024-02-01",
+      "cover": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+      "cover_big": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+      "episode_count": 3,
+      "id": 30101,
+      "name": "Season 1",
+      "overview": "Season 1 of Harbor Lights.",
+      "season_number": 1,
+      "vote_average": 8.1
+    },
+    {
+      "air_date": "2025-03-01",
+      "cover": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+      "cover_big": "http://127.0.0.1:7290/img/poster/harbor-lights.svg",
+      "episode_count": 3,
+      "id": 30102,
+      "name": "Season 2",
+      "overview": "Season 2 of Harbor Lights.",
+      "season_number": 2,
+      "vote_average": 8.1
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "js": [
+    {
+      "active_sub": true,
+      "alias": "drama_series",
+      "censored": 0,
+      "id": "20",
+      "title": "Drama Series"
+    },
+    {
+      "active_sub": true,
+      "alias": "comedy_family_series",
+      "censored": 0,
+      "id": "21",
+      "title": "Comedy & Family Series"
+    }
+  ]
+}

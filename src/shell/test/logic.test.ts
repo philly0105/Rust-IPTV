@@ -1,0 +1,139 @@
+import { describe, expect, it } from 'vitest';
+
+import { DEFAULT_SETTINGS, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
+
+import { mergeRecentlyAdded, minutesLeft, rankSources, watchedFraction } from '../dashboard/DashboardPage';
+import { deepLinkToPath, importToastPolicy, isRestorableRoute, isSourcesRoute } from '../effects';
+import { railLinks } from '../railLinks';
+import { groupShortcuts } from '../ShortcutOverlay';
+import { matches, normalizeCombo, parseCombo } from '../shortcuts';
+import { startupTarget } from '../StartupRedirect';
+import { resolveTheme } from '../theme';
+
+const ev = (key: string, init: Partial<KeyboardEventInit> = {}) => new KeyboardEvent('keydown', { key, ...init });
+
+describe('shortcut matching', () => {
+  it('maps mod to ctrl off Mac', () => {
+    const p = parseCombo('mod+k');
+    expect(matches(p, ev('k', { ctrlKey: true }))).toBe(true);
+    expect(matches(p, ev('k'))).toBe(false);
+    expect(matches(p, ev('k', { ctrlKey: true, shiftKey: true }))).toBe(false);
+  });
+  it('matches symbol keys regardless of shift', () => {
+    expect(matches(parseCombo('?'), ev('?', { shiftKey: true }))).toBe(true);
+  });
+  it('matches the digit wildcard', () => {
+    const p = parseCombo('digit');
+    expect(matches(p, ev('7'))).toBe(true);
+    expect(matches(p, ev('a'))).toBe(false);
+  });
+  it('normalizes modifier order and case', () => {
+    expect(normalizeCombo('Shift+Mod+K')).toBe(normalizeCombo('mod+shift+k'));
+  });
+});
+
+describe('deep links', () => {
+  it('routes iptv://add?url= to the add-source flow', () => {
+    expect(deepLinkToPath('iptv://add?url=http%3A%2F%2Fx.test%2Fa.m3u')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u');
+    expect(deepLinkToPath('iptv://add')).toBe('/sources?add=1');
+  });
+  it('routes search and ignores unknown actions', () => {
+    expect(deepLinkToPath('iptv://search?q=news')).toBe('/search?q=news');
+    expect(deepLinkToPath('iptv://explode')).toBeNull();
+    expect(deepLinkToPath('https://example.test')).toBeNull();
+  });
+});
+
+describe('startup target', () => {
+  it('uses lastRoute only when restoring', () => {
+    expect(startupTarget({ ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view', lastRoute: '/epg' })).toBe('/epg');
+    expect(startupTarget({ ...DEFAULT_SETTINGS, startupBehavior: 'first-view', lastRoute: '/epg', showDashboard: true })).toBe('/dashboard');
+  });
+  it('falls back to /sources when the dashboard is off', () => {
+    expect(startupTarget({ ...DEFAULT_SETTINGS, startupBehavior: 'first-view', showDashboard: false })).toBe('/sources');
+  });
+  it('never restores transient routes', () => {
+    expect(isRestorableRoute('/sources?add=1')).toBe(false);
+    expect(isRestorableRoute('/')).toBe(false);
+    expect(isRestorableRoute('/s/a/live')).toBe(true);
+  });
+});
+
+describe('rail links', () => {
+  const src = (kind: Source['kind'], movieCount = 0) => ({ id: 'a b', kind, movieCount }) as Source;
+  it('gives xtream and stalker every link', () => {
+    expect(railLinks(src('xtream')).map((l) => l.id)).toEqual(['live', 'radio', 'movies', 'series', 'favorites', 'recent']);
+  });
+  it('adds movies for m3u only when it has movies', () => {
+    expect(railLinks(src('m3u', 3)).map((l) => l.id)).toEqual(['live', 'movies', 'favorites', 'recent']);
+  });
+  it('adds radio for m3u only when it has radio', () => {
+    expect(railLinks(src('m3u'), { hasRadio: true }).map((l) => l.id)).toContain('radio');
+    expect(railLinks(src('m3u'), { hasRadio: false }).map((l) => l.id)).not.toContain('radio');
+  });
+  it('encodes the source id in paths', () => {
+    expect(railLinks(src('xtream'), { hasRadio: false })[0]!.to).toBe('/s/a%20b/live');
+  });
+});
+
+describe('shortcut overlay grouping', () => {
+  it('dedupes documented entries already registered in the same area', () => {
+    const groups = groupShortcuts(
+      [{ combo: 'mod+k', description: 'Palette (live)', area: 'Global' }],
+      [
+        { combo: 'mod+k', description: 'Palette (doc)', area: 'Global' },
+        { combo: 'space', description: 'Play', area: 'Playback' },
+      ],
+    );
+    const global = groups.find(([a]) => a === 'Global')![1];
+    expect(global).toHaveLength(1);
+    expect(global[0]!.description).toBe('Palette (live)');
+    expect(groups.map(([a]) => a)).toContain('Playback');
+  });
+});
+
+describe('theme', () => {
+  it('resolves system against the OS preference', () => {
+    expect(resolveTheme('system', true)).toBe('dark');
+    expect(resolveTheme('system', false)).toBe('light');
+    expect(resolveTheme('light', true)).toBe('light');
+  });
+});
+
+describe('dashboard helpers', () => {
+  it('computes watched fraction and minutes left', () => {
+    expect(watchedFraction({ positionSeconds: 30, durationSeconds: 120 })).toBe(0.25);
+    expect(watchedFraction({ positionSeconds: 30 })).toBeUndefined();
+    expect(minutesLeft({ positionSeconds: 0, durationSeconds: 3600 })).toBe(60);
+    expect(minutesLeft({ positionSeconds: 3599, durationSeconds: 3600 })).toBe(1);
+  });
+  it('ranks sources by latest use, then refresh time', () => {
+    const s = (id: string, lastRefreshAt?: string) => ({ id, position: 0, createdAt: '2026-01-01', lastRefreshAt }) as Source;
+    const recent = [{ ref: { sourceId: 'b', contentType: 'live', itemId: '1' }, viewedAt: '2026-10-10' }] as RecentEntry[];
+    expect(rankSources([s('a', '2026-10-09'), s('b'), s('c', '2026-10-11')], recent).map((x) => x.id)).toEqual(['b', 'c', 'a']);
+  });
+  it('merges recently added movies and series newest first', () => {
+    const m = [{ title: 'm1', added: '2026-10-01' }, { title: 'm2', added: '2026-10-05' }] as VodItem[];
+    const se = [{ title: 's1', added: '2026-10-03' }] as SeriesItem[];
+    expect(mergeRecentlyAdded(m, se, 2).map((x) => x.title)).toEqual(['m2', 's1']);
+  });
+});
+
+describe('import toast policy', () => {
+  it('recognizes only the Sources page itself', () => {
+    expect(isSourcesRoute('/sources')).toBe(true);
+    expect(isSourcesRoute('/sources/')).toBe(true);
+    expect(isSourcesRoute('/s/abc/live')).toBe(false);
+    expect(isSourcesRoute('/sourcesx')).toBe(false);
+    expect(isSourcesRoute('/dashboard')).toBe(false);
+  });
+
+  it('stays quiet on Sources for progress and done, but always reports errors', () => {
+    expect(importToastPolicy('parsing', true)).toBe('dismiss');
+    expect(importToastPolicy('done', true)).toBe('dismiss');
+    expect(importToastPolicy('error', true)).toBe('toast');
+    for (const phase of ['fetching', 'parsing', 'saving', 'done', 'error'] as const) {
+      expect(importToastPolicy(phase, false)).toBe('toast');
+    }
+  });
+});

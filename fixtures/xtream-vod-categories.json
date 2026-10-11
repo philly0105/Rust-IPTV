@@ -1,0 +1,12 @@
+[
+  {
+    "category_id": "10",
+    "category_name": "Action & Mystery",
+    "parent_id": 0
+  },
+  {
+    "category_id": "11",
+    "category_name": "Drama & Family",
+    "parent_id": 0
+  }
+]

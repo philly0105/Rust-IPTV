@@ -200,7 +200,7 @@ async fn open_external_validates_args() {
 
 #[tokio::test]
 async fn mpv_commands_without_session() {
-    let (_d, state, _rx) = app().await;
+    let (_d, state, mut rx) = app().await;
     let r = router();
     let src =
         json!({"url": "http://h/x", "kind": "hls", "title": "x", "isLive": true, "isRadio": false});
@@ -212,6 +212,16 @@ async fn mpv_commands_without_session() {
             .await
             .unwrap_err();
         assert_eq!(err.code, RpcErrorCode::Unsupported);
+        // B9: a failed attach is reported like a crash: an `mpv.state`
+        // event and the polled state both carry the error.
+        let ev = next_event(&mut rx, "mpv.state", Duration::from_secs(2), |_| true).await;
+        assert_eq!(ev["attached"], json!(false));
+        assert!(ev["error"].as_str().is_some_and(|e| !e.is_empty()), "{ev}");
+        let st = r
+            .dispatch(Arc::clone(&state), "mpv.state", Value::Null)
+            .await
+            .unwrap();
+        assert_eq!(st["error"], ev["error"]);
         for (cmd, args) in [
             ("mpv.load", json!({"source": src})),
             ("mpv.command", json!({"cmd": ["get_property", "pause"]})),
@@ -303,7 +313,7 @@ async fn open_external_emits_started_and_exited() {
 }
 
 #[tokio::test]
-async fn open_external_missing_player_is_not_found() {
+async fn open_external_missing_player_is_engine_missing() {
     let (_d, state, _rx) = app().await;
     let dir = tempfile::tempdir().unwrap();
     // A configured path that does not exist falls back to search; force a
@@ -324,12 +334,36 @@ async fn open_external_missing_player_is_not_found() {
         )
         .await
         .unwrap_err();
-    assert_eq!(err.code, RpcErrorCode::NotFound);
+    // C12: not `not_found`, which the UI shows as "this stream no longer exists".
+    assert_eq!(err.code, RpcErrorCode::EngineMissing);
     assert!(
         err.message.contains("Settings > Players"),
         "{}",
         err.message
     );
+}
+
+/// C12: a configured player file that cannot run is `engine_missing`.
+#[cfg(windows)]
+#[tokio::test]
+async fn open_external_unrunnable_player_is_engine_missing() {
+    let (_d, state, _rx) = app().await;
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("mpv.exe");
+    std::fs::write(&fake, b"this is not a program").unwrap();
+    state.settings.write().mpv_path = Some(fake.display().to_string());
+    let src =
+        json!({"url": "http://h/x", "kind": "hls", "title": "x", "isLive": true, "isRadio": false});
+    let err = router()
+        .dispatch(
+            state,
+            "player.openExternal",
+            json!({"player": "mpv", "source": src}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::EngineMissing, "{err:?}");
+    assert!(err.message.contains("could not start"), "{}", err.message);
 }
 
 /// Records window calls; hands mpv a dummy HWND (video output is null).
@@ -355,6 +389,46 @@ impl ChildWindowFactory for FakeFactory {
         self.calls.lock().push("destroy".into());
         Ok(())
     }
+}
+
+/// D14 (review round 1): a configured "mpv" that exits before opening its
+/// IPC pipe fails the attach at once with a clear message, and the window
+/// is cleaned up.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attach_reports_mpv_exiting_during_startup() {
+    let (_d, state, _rx) = app().await;
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let quitter = std::path::Path::new(&root).join(r"System32\whoami.exe");
+    assert!(quitter.is_file(), "{}", quitter.display());
+    state.settings.write().mpv_path = Some(quitter.display().to_string());
+    let factory = Arc::new(FakeFactory::default());
+    player::set_window_factory(&state, factory.clone());
+    let started = std::time::Instant::now();
+    let err = tokio::time::timeout(
+        Duration::from_secs(20),
+        router().dispatch(
+            Arc::clone(&state),
+            "mpv.attach",
+            json!({"bounds": {"x": 0, "y": 0, "width": 320, "height": 180}}),
+        ),
+    )
+    .await
+    .expect("attach must not hang")
+    .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::Invalid, "{err:?}");
+    assert!(
+        err.message.contains("exited during startup"),
+        "{}",
+        err.message
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let calls = factory.calls.lock().clone();
+    assert_eq!(
+        calls.last().map(String::as_str),
+        Some("destroy"),
+        "{calls:?}"
+    );
 }
 
 #[cfg(windows)]
@@ -745,6 +819,19 @@ async fn reuse_instance_closes_previous_external_player() {
     .await;
     assert_eq!(player::external::running_pid(&state), Some(second as u32));
 
+    // B9: two launches at once still leave exactly one player running.
+    let (a, b) = tokio::join!(launch(&r, &state), launch(&r, &state));
+    let tracked = player::external::running_pid(&state).expect("one tracked") as u64;
+    assert!(tracked == a || tracked == b);
+    let other = if tracked == a { b } else { a };
+    for gone in [second, other] {
+        next_event(&mut rx, "player.external", Duration::from_secs(10), |p| {
+            p["state"] == "exited" && p["pid"] == json!(gone)
+        })
+        .await;
+    }
+    let second = tracked;
+
     // Reuse off: the next launch leaves the running one alone.
     state.settings.write().player_reuse_instance = false;
     let third = launch(&r, &state).await;
@@ -792,4 +879,41 @@ async fn stop_external_without_player_reports_false() {
         .await
         .unwrap();
     assert_eq!(out, json!({"stopped": false}));
+}
+
+/// B9: after a crash only volume and mute survive; the dead stream's rewind
+/// window and buffering flag are not reported.
+#[test]
+fn detached_state_clears_the_dead_stream() {
+    use iptv_core::model::{MpvSeekRange, MpvState};
+    let live = MpvState {
+        attached: true,
+        loaded: true,
+        paused: false,
+        time_pos: 42.0,
+        duration: Some(100.0),
+        volume: 35.0,
+        muted: true,
+        fullscreen: true,
+        recording: true,
+        record_path: Some("C:/r.ts".into()),
+        seekable: Some(MpvSeekRange {
+            start: 10.0,
+            end: 50.0,
+        }),
+        buffering: Some(true),
+        ..MpvState::default()
+    };
+    let gone = player::embedded::detached_state(live, Some("mpv stopped unexpectedly".into()));
+    assert_eq!(
+        gone,
+        MpvState {
+            volume: 35.0,
+            muted: true,
+            error: Some("mpv stopped unexpectedly".into()),
+            ..MpvState::default()
+        }
+    );
+    let v = serde_json::to_value(&gone).unwrap();
+    assert!(v.get("seekable").is_none() && v.get("buffering").is_none());
 }

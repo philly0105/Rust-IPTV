@@ -261,9 +261,10 @@ describe('Menu focus', () => {
 });
 
 describe('tokens.css header', () => {
-  it('does not claim borders meet 3:1', () => {
+  it('states the border contract that contrast.test.ts enforces', () => {
     const head = readFileSync(join(__dirname, '..', '..', 'styles', 'tokens.css'), 'utf8').split(':root')[0]!;
-    expect(head).not.toMatch(/3:1 for UI borders/);
-    expect(head).toMatch(/does NOT\s*\n?\s*\*?\s*meet the 3:1/);
+    expect(head).toMatch(/--color-border marks the edge of a component/);
+    expect(head).toMatch(/reaches 3:1/);
+    expect(head).toMatch(/contrast\.test\.ts/);
   });
 });

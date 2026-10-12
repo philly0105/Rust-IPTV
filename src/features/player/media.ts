@@ -6,7 +6,7 @@
 
 import { create } from 'zustand';
 
-import type { MpvState, PlayerExternalEvent, PlayerSource } from '@/api/types';
+import type { MpvState, PlayerExternalEvent, PlayerSource, RpcErrorCode } from '@/api/types';
 
 import { EMPTY_TRACKS, type EngineTracks } from './engines';
 
@@ -50,6 +50,11 @@ export interface MediaState {
   channelPanelOpen: boolean;
   externalRuns: ExternalRun[];
   commands: MediaCommands | null;
+  /**
+   * The RPC error code behind the current `status: 'error'`, when the failure came from the
+   * core (resolving a stream URL, `mpv.load`). Classifies the error copy before message matching.
+   */
+  errorCode?: RpcErrorCode;
 }
 
 export const useMediaStore = create<MediaState>()(() => ({
@@ -81,6 +86,7 @@ export function resetMedia(): void {
     inPip: false,
     waiting: false,
     upNext: undefined,
+    errorCode: undefined,
   });
 }
 

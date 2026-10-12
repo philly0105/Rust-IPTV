@@ -5,6 +5,9 @@ import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem } from '@/ap
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from './harness';
 
+/** Matches toast text in the visible stack, not its copy in the screen-reader live region. */
+const VISIBLE_TOAST = { ignore: 'script, style, [data-toast-live] *' };
+
 const events = vi.hoisted(() => ({ handlers: new Map<string, (p: unknown) => void>() }));
 
 vi.mock('@/api/transport', async (orig) => ({
@@ -401,7 +404,8 @@ describe('DashboardPage', () => {
     };
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-live-favorites');
-    expect(await within(rail).findByText("Can't reach the server")).toBeTruthy();
+    expect(await within(rail).findByText("Couldn't reach the server")).toBeTruthy();
+    expect(within(rail).getByText(/stored on this computer/)).toBeTruthy();
     fail = false;
     fireEvent.click(within(rail).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull());
@@ -421,12 +425,24 @@ describe('DashboardPage', () => {
     renderRoutes(routes(), '/dashboard');
 
     const banner = await screen.findByTestId('dashboard-error');
-    expect(within(banner).getByText("Can't reach the server")).toBeTruthy();
-    expect(screen.getAllByText("Can't reach the server")).toHaveLength(1);
+    // Local-data copy, not the provider-network hint.
+    expect(within(banner).getByRole('heading', { name: "Couldn't load your dashboard" })).toBeTruthy();
+    expect(within(banner).getByText(/stored on this computer/)).toBeTruthy();
+    expect(within(banner).queryByText(/provider URL/)).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+    // Failed rails collapse; the card sits in the normal flow (never over live content) and
+    // shares a grid cell with an invisible hero skeleton, so it is at least the hero's height.
     for (const id of ['continue-watching', 'live-favorites', 'recent-live', 'favorite-vod', 'recently-added']) {
       expect(screen.queryByTestId(`dashboard-rail-${id}`)).toBeNull();
     }
+    expect(banner.className).not.toMatch(/absolute/);
+    const slot = screen.getByTestId('dashboard-error-slot');
+    expect(slot.className).toContain('grid');
+    const spacer = slot.querySelector('[data-hero-spacer]')!;
+    expect(spacer.className).toContain('invisible');
+    expect(spacer.getAttribute('aria-hidden')).toBe('true');
+    expect(banner.className).toContain('col-start-1');
+    expect(spacer.className).toContain('col-start-1');
     // Not "nothing to watch yet": the dashboard failed, it is not empty.
     expect(screen.queryByText('Nothing to show yet')).toBeNull();
     // Sources still loaded, so their rail stays.
@@ -448,7 +464,7 @@ describe('DashboardPage', () => {
     };
     renderRoutes(routes(), '/dashboard');
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
-    expect(await within(live).findByText("Can't reach the server")).toBeTruthy();
+    expect(await within(live).findByText("Couldn't reach the server")).toBeTruthy();
     expect(screen.queryByTestId('dashboard-error')).toBeNull();
   });
 
@@ -485,7 +501,7 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
       toast({ id: 'a', title: 'First', duration: 0 });
       toast({ id: 'b', title: 'Second', duration: 0, action: { label: 'Open', onClick: () => {} } });
     });
-    const second = await screen.findByText('Second');
+    const second = await screen.findByText('Second', VISIBLE_TOAST);
     key('F8');
     expect(document.activeElement?.textContent).toBe('Open');
 
@@ -493,13 +509,13 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     expect(document.activeElement?.closest('[data-toast-id]')?.getAttribute('data-toast-id')).toBe('a');
 
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByText('First')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('First', VISIBLE_TOAST)).toBeNull());
     // Focus moved to the surviving toast, not <body>.
     expect(document.activeElement?.closest('[data-toast-id]')?.getAttribute('data-toast-id')).toBe('b');
     expect(second.isConnected).toBe(true);
 
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByText('Second')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('Second', VISIBLE_TOAST)).toBeNull());
     expect(document.activeElement).toBe(origin);
   });
 
@@ -516,7 +532,7 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');
     act(() => void toast({ id: 'solo', title: 'Solo', duration: 0 }));
-    await screen.findByText('Solo');
+    await screen.findByText('Solo', VISIBLE_TOAST);
     key('F8');
     expect(document.activeElement?.closest('[data-toast-id]')).toBeTruthy();
     act(() => dismissToast('solo'));
@@ -617,3 +633,419 @@ function StartupOnly() {
   return <StartupRedirect />;
 }
 const startupModule = await import('../StartupRedirect');
+
+describe('B7 shell fixes', () => {
+  it('digit zap accepts Shift so AZERTY number rows work', async () => {
+    const { matches, parseCombo } = await import('../shortcuts');
+    const p = parseCombo('digit');
+    expect(matches(p, new KeyboardEvent('keydown', { key: '7', code: 'Digit7', shiftKey: true }))).toBe(true);
+    // Shift+7 on QWERTY is "&": still not a digit.
+    expect(matches(p, new KeyboardEvent('keydown', { key: '&', code: 'Digit7', shiftKey: true }))).toBe(false);
+    expect(matches(p, new KeyboardEvent('keydown', { key: '7', ctrlKey: true }))).toBe(false);
+  });
+
+  it('an older theme reply arriving last does not undo the newer choice', async () => {
+    const { persistTheme } = await import('../theme');
+    const { queryClient, rpcKey } = await import('@/api/query');
+    queryClient.setQueryData(rpcKey('settings.get'), settings({ theme: 'dark' }));
+    const pending: { theme: string; resolve: (s: unknown) => void }[] = [];
+    rpcMock.handlers['settings.update'] = (a) =>
+      new Promise((resolve) => pending.push({ theme: (a as { patch: { theme: string } }).patch.theme, resolve }));
+    const first = persistTheme('light');
+    const second = persistTheme('dark');
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]!.resolve(settings({ theme: 'dark' }));
+    await second;
+    pending[0]!.resolve(settings({ theme: 'light' }));
+    await first;
+    expect(queryClient.getQueryData<{ theme: string }>(rpcKey('settings.get'))?.theme).toBe('dark');
+    expect(useThemeStore.getState().theme).toBe('dark');
+  });
+
+  it('the quiet dashboard state waits for every visible rail', async () => {
+    const h = rpcMock.handlers;
+    h['positions.continueWatching'] = () => [];
+    h['favorites.list'] = () => [];
+    h['recent.list'] = () => [];
+    h['catalog.recentlyAdded'] = () => new Promise(() => {});
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-rail-recent-sources');
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(screen.queryByText('Nothing to show yet')).toBeNull();
+    cleanup();
+    h['catalog.recentlyAdded'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    expect(await screen.findByText('Nothing to show yet')).toBeTruthy();
+  });
+
+  it('rails the user switched off do not count as content', async () => {
+    const h = rpcMock.handlers;
+    h['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false, continueWatching: false } });
+    h['favorites.list'] = () => [];
+    h['recent.list'] = () => [];
+    h['catalog.recentlyAdded'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    expect(await screen.findByText('Nothing to show yet')).toBeTruthy();
+  });
+
+  it('poster cards are named once by their caption', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? ([{ ref: { sourceId: 's1', contentType: 'movie', itemId: '99' }, title: 'Fresh Arrival', posterUrl: 'http://x.test/p.jpg', added: '2026-10-09T00:00:00Z', categoryId: 'c' }] satisfies VodItem[])
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recently-added');
+    const link = await within(rail).findByRole('link', { name: /Fresh Arrival/ });
+    expect(link.querySelector('img')!.getAttribute('alt')).toBe('');
+    expect(within(rail).queryByRole('img', { name: 'Fresh Arrival' })).toBeNull();
+  });
+
+  it('rail source errors are spoken, and ids with spaces stay valid IDREFs', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('my source', { name: 'Broken One', lastError: 'boom' } as never)];
+    renderRoutes(routes(), '/favorites');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const btn = await within(nav).findByRole('button', { name: /Broken One.*The last refresh failed/ });
+    expect(nav.querySelector('span[aria-label]')).toBeNull();
+    const controls = btn.getAttribute('aria-controls')!;
+    expect(controls).not.toMatch(/\s/);
+    if (btn.getAttribute('aria-expanded') !== 'true') fireEvent.click(btn);
+    expect(document.getElementById(controls)).toBeTruthy();
+    cleanup();
+    act(() => useShellStore.setState({ railCollapsed: true }));
+    renderRoutes(routes(), '/favorites');
+    const nav2 = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(await within(nav2).findByRole('link', { name: 'Broken One, The last refresh failed' })).toBeTruthy();
+  });
+
+  it('saves the last screen at once when the window hides inside the debounce', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'settings.get')).toBe(true));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(rpcMock.calls.some((c) => c.cmd === 'settings.update')).toBe(false);
+    act(() => void window.dispatchEvent(new Event('pagehide')));
+    expect(rpcMock.calls.some((c) => c.cmd === 'settings.update' && JSON.stringify(c.args).includes('"lastRoute":"/favorites"'))).toBe(true);
+  });
+  it('a cancelled import replaces the progress toast with a short notice that times out', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('Night Portal');
+    await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
+    const emit = events.handlers.get('import.progress')!;
+    act(() => emit({ sourceId: 's1', phase: 'parsing', done: 50, total: 200 }));
+    expect(await screen.findByText('Importing Night Portal', VISIBLE_TOAST)).toBeTruthy();
+    act(() => emit({ sourceId: 's1', phase: 'cancelled', done: 50 }));
+    expect(await screen.findByText('Import of Night Portal cancelled', VISIBLE_TOAST)).toBeTruthy();
+    const rec = useToastStore.getState().toasts.find((t) => t.id === 'import-s1')!;
+    expect(rec.progress).toBeUndefined();
+    expect(rec.duration).toBeGreaterThan(0);
+  });
+
+  it('passes the classified error code to the import summary', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('Night Portal');
+    await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
+    const { importSummaryKey } = await import('@/features/sources/lib/errors');
+    const { default: i18n } = await import('i18next');
+    act(() => events.handlers.get('import.progress')!({ sourceId: 's1', phase: 'error', done: 0, message: 'something odd', code: 'auth' }));
+    const expected = i18n.t(`sources:${importSummaryKey('something odd', 'auth')}`);
+    await waitFor(() =>
+      expect(String(useToastStore.getState().toasts.find((t) => t.id === 'import-s1')?.description)).toContain(expected),
+    );
+  });
+
+  it('sources waiting out their delete-undo window leave the rail, dashboard and palette', async () => {
+    const { usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
+    act(() => usePendingRemovals.setState({ ids: new Set(['s2']) }));
+    try {
+      renderRoutes(routes(), '/dashboard');
+      const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+      await within(nav).findByText('Night Portal');
+      expect(within(nav).queryByText('Backup 1')).toBeNull();
+      const sourcesRail = await screen.findByTestId('dashboard-rail-recent-sources');
+      expect(within(sourcesRail).queryByText('Backup 1')).toBeNull();
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+      expect(await within(nav).findByText('Backup 1')).toBeTruthy();
+    } finally {
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+    }
+  });
+});
+
+
+describe('B7 review round 1', () => {
+  it('palette ranks a source named for the query above a keyword-only command', async () => {
+    const { paletteFilter } = await import('../CommandPalette');
+    const sep = '\u0000';
+    const named = paletteFilter(`Mock Xtream: Live TV${sep}source.m.live`, 'xtream', ['Mock Xtream', 'xtream', 'live']);
+    const keywordOnly = paletteFilter(`Add source${sep}nav.addSource`, 'xtream', ['playlist', 'm3u', 'xtream']);
+    expect(keywordOnly).toBeGreaterThan(0);
+    expect(named).toBeGreaterThan(keywordOnly);
+
+    rpcMock.handlers['sources.list'] = () => [makeSource('m', { name: 'Mock Xtream' })];
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    // Sources loaded (the rail shows it) before the palette filters.
+    await screen.findAllByText('Mock Xtream');
+    key('k', { ctrlKey: true });
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'xtream' } });
+    await waitFor(() => {
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('Mock Xtream');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+  });
+
+  it('header: page title follows its own script, and the palette button has no Mac-only glyph', async () => {
+    renderRoutes(routes(), '/dashboard');
+    expect((await screen.findByTestId('page-title')).getAttribute('dir')).toBe('auto');
+    const open = screen.getByTestId('open-palette');
+    expect(open.querySelector('svg.lucide-command')).toBeNull();
+    expect(open.querySelector('svg.lucide-square-chevron-right')).not.toBeNull();
+  });
+
+  it('rail links press darker', async () => {
+    renderRoutes(routes(), '/favorites');
+    const link = await screen.findByRole('link', { name: /Favorites/ });
+    expect(link.className).toContain('active:bg-surface-3');
+  });
+
+  it('joins card counts with the locale list format, and names carry dir="auto"', async () => {
+    const { joinList } = await import('../dashboard/cards');
+    const iso = (x: string) => `⁨${x}⁩`;
+    expect(joinList(['120 channels', '40 movies'], 'en')).toBe(`${iso('120 channels')}, ${iso('40 movies')}`);
+    for (const lng of ['ru', 'fr', 'ko', 'tr', 'de']) expect(joinList(['a', 'b'], lng)).toBe(`${iso('a')}, ${iso('b')}`);
+    expect(joinList(['a', false, undefined, '', 'b'], 'en')).toBe(`${iso('a')}, ${iso('b')}`);
+    expect(joinList(['a', 'b'], 'ja')).toBe(`${iso('a')}、${iso('b')}`);
+    expect(joinList(['a', 'b'], 'zh-TW')).toBe(`${iso('a')}、${iso('b')}`);
+    // Arabic: Arabic comma, no "و" conjunction, and the year isolated so it stays in place.
+    expect(joinList(['مصدر', 2019], 'ar')).toBe(`${iso('مصدر')}، ${iso('2019')}`);
+    expect(joinList([2019], 'ary')).toBe(iso('2019'));
+    // Parts with no letters or digits are left bare (PosterCard derives the separator this way).
+    expect(joinList(['', ''], 'en').slice(1, -1)).toBe(', ');
+    expect(joinList([], 'en')).toBe('');
+
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-sources');
+    const name = await within(rail).findByText('Night Portal');
+    expect(name.getAttribute('dir')).toBe('auto');
+    const counts = joinList(['120 channels', '40 movies'], 'en');
+    expect(within(rail).getAllByText(counts).length).toBeGreaterThan(0);
+  });
+});
+
+describe('B7 review round 2', () => {
+  const railsOff = (over: Record<string, boolean>) =>
+    settings({ dashboardRails: { ...settings().dashboardRails, ...over } as ReturnType<typeof settings>['dashboardRails'] });
+
+  it('with the hero off, the shared error sits in the flow with no hero spacer', async () => {
+    const h = rpcMock.handlers;
+    h['settings.get'] = () => railsOff({ hero: false, continueWatching: false, recentlyWatchedLive: false, favoriteMoviesAndSeries: false });
+    const fail = () => {
+      throw { code: 'db', message: 'database is locked' };
+    };
+    h['favorites.list'] = fail;
+    h['catalog.recentlyAdded'] = fail;
+    renderRoutes(routes(), '/dashboard');
+    const slot = await screen.findByTestId('dashboard-error-slot');
+    expect(slot.querySelector('[data-hero-spacer]')).toBeNull();
+    // The error slot comes before the sources rail in document order, both in flow.
+    const sources = screen.getByTestId('dashboard-rail-recent-sources');
+    expect(slot.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('dashboard-error').className).not.toMatch(/\babsolute\b/);
+  });
+
+  it('a rail error reserves its skeleton card height and lays out in a row', async () => {
+    rpcMock.handlers['recent.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-live');
+    const box = await within(rail).findByTestId('dashboard-rail-error');
+    const spacer = box.querySelector<HTMLElement>('[data-rail-error-spacer]')!;
+    expect(spacer.getAttribute('aria-hidden')).toBe('true');
+    expect(spacer.className).toContain('invisible');
+    // Same skeleton card as the loading state: the rail's card width and aspect.
+    expect((spacer.firstElementChild as HTMLElement).style.width).toBe('232px');
+    expect(within(box).getByRole('alert').className).toContain('flex-row');
+  });
+
+  it('the one favorites query shows one error panel, not two', async () => {
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(await within(live).findByRole('alert')).toBeTruthy();
+    expect(screen.queryByTestId('dashboard-rail-favorite-vod')).toBeNull();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('the favorite-vod rail shows the favorites error when the live rail is off', async () => {
+    rpcMock.handlers['settings.get'] = () => railsOff({ liveFavorites: false });
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const vod = await screen.findByTestId('dashboard-rail-favorite-vod');
+    expect(await within(vod).findByRole('alert')).toBeTruthy();
+  });
+
+  it('a rail that loaded empty last time shows no skeleton while it loads', async () => {
+    const { readRailEmpty } = await import('../dashboard/railEmpty');
+    let resolve!: (v: unknown) => void;
+    rpcMock.handlers['favorites.list'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    await waitFor(() => expect(readRailEmpty('live-favorites')).toBe(true));
+    cleanup();
+    const { queryClient } = await import('@/api/query');
+    queryClient.clear();
+    rpcMock.handlers['favorites.list'] = () => new Promise((r) => (resolve = r));
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-rail-continue-watching');
+    expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull();
+    expect(screen.queryByTestId('dashboard-rail-favorite-vod')).toBeNull();
+    // Rails below the still-loading favorites wait for it (round 3 hold rule), then appear.
+    expect(screen.queryByTestId('dashboard-rail-recent-live')).toBeNull();
+    resolve([]);
+    expect(await screen.findByTestId('dashboard-rail-recent-live')).toBeTruthy();
+  });
+
+  it('rail source names follow their own script', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { name: 'مصدر عربي' })];
+    renderRoutes(routes(), '/favorites');
+    const name = (await screen.findAllByText('مصدر عربي')).find((el) => el.closest('nav'))!;
+    expect(name.getAttribute('dir')).toBe('auto');
+    expect(name.className).toContain('text-match-parent');
+  });
+
+  it('rail "See all" links and scroll arrows have pressed states', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, '..', 'dashboard', 'DashboardRail.tsx'), 'utf8');
+    expect(src.match(/active:text-accent-pressed/g)).toHaveLength(3);
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect((await within(live).findByRole('link', { name: 'See all' })).className).toContain('active:text-accent-pressed');
+  });
+
+  it('typing in the palette scrolls the list back to the selected top result', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    const palette = await screen.findByTestId('command-palette');
+    const list = palette.querySelector<HTMLElement>('[cmdk-list]')!;
+    // jsdom has no layout, so give the list a scroll position it keeps.
+    Object.defineProperty(list, 'scrollTop', { value: 284, writable: true, configurable: true });
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'mo' } });
+    await waitFor(() => expect(list.scrollTop).toBe(0));
+  });
+});
+
+describe('B7 review round 3', () => {
+  it('a failed rail, or one whose error is hidden, never writes the "loaded empty" flag', async () => {
+    const { readRailEmpty } = await import('../dashboard/railEmpty');
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(await within(live).findByRole('alert')).toBeTruthy();
+    // favorite-vod reads the same failed query with its error hidden: still no flag.
+    expect(readRailEmpty('live-favorites')).toBe(false);
+    expect(readRailEmpty('favorite-vod')).toBe(false);
+  });
+
+  it('a shared failure of every rail writes no flags', async () => {
+    const { readRailEmpty } = await import('../dashboard/railEmpty');
+    const fail = () => {
+      throw { code: 'network', message: 'down' };
+    };
+    const h = rpcMock.handlers;
+    for (const c of ['positions.continueWatching', 'favorites.list', 'recent.list', 'catalog.recentlyAdded']) h[c] = fail;
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-error');
+    for (const id of ['continue-watching', 'live-favorites', 'recent-live', 'favorite-vod', 'recently-added']) {
+      expect(readRailEmpty(id), id).toBe(false);
+    }
+  });
+
+  it('maps query results to the rails they feed', async () => {
+    const { railsWithContent } = await import('../dashboard/railEmpty');
+    const live = { ref: { contentType: 'live' } };
+    const movie = { ref: { contentType: 'movie' } };
+    expect(railsWithContent('favorites.list', [live, movie])).toEqual(['live-favorites', 'favorite-vod']);
+    expect(railsWithContent('favorites.list', [movie])).toEqual(['favorite-vod']);
+    expect(railsWithContent('recent.list', [movie])).toEqual([]);
+    expect(railsWithContent('recent.list', [live])).toEqual(['recent-live']);
+    expect(railsWithContent('positions.continueWatching', [movie])).toEqual(['continue-watching']);
+    expect(railsWithContent('catalog.recentlyAdded', [movie])).toEqual(['recently-added']);
+    expect(railsWithContent('favorites.list', [])).toEqual([]);
+    expect(railsWithContent('sources.list', [movie])).toEqual([]);
+  });
+
+  it('content arriving anywhere in the query cache clears a stale flag', async () => {
+    const { QueryClient } = await import('@tanstack/react-query');
+    const { bindRailEmptySync, readRailEmpty, writeRailEmpty } = await import('../dashboard/railEmpty');
+    const client = new QueryClient();
+    const off = bindRailEmptySync(client);
+    writeRailEmpty('live-favorites', true);
+    writeRailEmpty('favorite-vod', true);
+    // E.g. the Favorites page after the first live favorite.
+    client.setQueryData(['favorites.list', null], [{ ref: { contentType: 'live' } }]);
+    expect(readRailEmpty('live-favorites')).toBe(false);
+    expect(readRailEmpty('favorite-vod')).toBe(true);
+    off();
+    client.setQueryData(['favorites.list', {}], [{ ref: { contentType: 'series' } }]);
+    expect(readRailEmpty('favorite-vod')).toBe(true);
+  });
+
+  it('nothing renders below the first section still loading', async () => {
+    let resolve!: () => void;
+    const recent = rpcMock.handlers['recent.list']!;
+    rpcMock.handlers['recent.list'] = (a) => new Promise((r) => (resolve = () => r(recent(a))));
+    renderRoutes(routes(), '/dashboard');
+    // Above the pending rail: settled content. The pending rail: its skeleton.
+    await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(screen.getByTestId('dashboard-rail-recent-live')).toBeTruthy();
+    for (const id of ['favorite-vod', 'recent-sources', 'recently-added']) {
+      expect(screen.queryByTestId(`dashboard-rail-${id}`), id).toBeNull();
+    }
+    resolve();
+    expect(await screen.findByTestId('dashboard-rail-recent-sources')).toBeTruthy();
+    expect(screen.getByTestId('dashboard-rail-favorite-vod')).toBeTruthy();
+    expect(await screen.findByTestId('dashboard-rail-recently-added')).toBeTruthy();
+  });
+
+  it('card names follow their own script inside an RTL page', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    const name = within(live).getByText('Harbor News');
+    expect(name.getAttribute('dir')).toBe('auto');
+    expect(name.className).toContain('text-match-parent');
+    expect((await within(live).findByText('Morning Bulletin')).className).toContain('text-match-parent');
+    const src = await screen.findByTestId('dashboard-rail-recent-sources');
+    const srcName = within(src).getByText('Night Portal');
+    expect(srcName.getAttribute('dir')).toBe('auto');
+    expect(srcName.className).toContain('text-match-parent');
+  });
+
+  it('source and recently-added cards read the name first', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? ([
+            { ref: { sourceId: 's1', contentType: 'movie', itemId: '99' }, title: 'Fresh Arrival', year: 2024, rating: 7.46, added: '2026-10-09T00:00:00Z', categoryId: 'c' },
+          ] as VodItem[])
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const src = await screen.findByTestId('dashboard-rail-recent-sources');
+    // Monogram "NP" and the kind badge are decorative; the kind follows the name.
+    const link = within(src).getByRole('link', { name: /^Night Portal, Xtream/ });
+    expect(within(link).getByText('NP').getAttribute('aria-hidden')).toBe('true');
+    const added = await screen.findByTestId('dashboard-rail-recently-added');
+    const strip = (s: string | null) => (s ?? '').replace(/[⁨⁩]/g, '');
+    expect(strip(within(added).getByRole('link').getAttribute('aria-label'))).toBe('Fresh Arrival, Night Portal, 2024, rated 7.5');
+    const vod = await screen.findByTestId('dashboard-rail-favorite-vod');
+    expect(strip(within(vod).getByRole('link', { name: /Quiet Coast/ }).getAttribute('aria-label'))).toBe('Quiet Coast, Series');
+  });
+});

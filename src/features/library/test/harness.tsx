@@ -112,3 +112,8 @@ export function renderAt(path: string, routes: { path: string; element: React.Re
     </QueryClientProvider>,
   );
 }
+
+/** i18n only, for rendering a single component outside a page. */
+export function I18nWrap({ children }: { children: React.ReactNode }) {
+  return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
+}

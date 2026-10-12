@@ -13,15 +13,26 @@ export interface SeekBarProps {
   buffered: TimeRange[];
   /** Live streams mark the live edge at `max`. */
   live?: boolean;
+  /** Seconds behind the live edge that still read as "Live" (see `LIVE_EDGE_SLACK`). */
+  edgeSlack?: number;
   onSeek(seconds: number): void;
   className?: string;
+}
+
+/** Half the width of the widest preview label ("1:02:03"), in px. */
+const TIP_HALF = 28;
+
+/** Centre of the preview label: under the pointer, but never past either end of the bar. */
+export function clampTip(x: number, width: number): number {
+  if (width <= TIP_HALF * 2) return width / 2;
+  return Math.min(width - TIP_HALF, Math.max(TIP_HALF, x));
 }
 
 /**
  * The tuner dial: a thin track with buffered segments, an amber played fill and a
  * needle thumb. Scrubbing previews locally and commits one seek on release.
  */
-export function SeekBar({ min, max, value, buffered, live, onSeek, className }: SeekBarProps) {
+export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, className }: SeekBarProps) {
   const { t } = useTranslation('player');
   const trackRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<number | null>(null);
@@ -43,7 +54,10 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setPreview(timeAt(e.clientX).time);
+    const at = timeAt(e.clientX);
+    // Touch has no hover: the press itself shows the preview time.
+    setHover(at);
+    setPreview(at.time);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
     const at = timeAt(e.clientX);
@@ -55,6 +69,7 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
     e.currentTarget.releasePointerCapture(e.pointerId);
     const target = timeAt(e.clientX).time;
     setPreview(null);
+    if (e.pointerType === 'touch') setHover(null);
     if (Number.isFinite(target)) onSeek(target);
   };
 
@@ -73,7 +88,7 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
     onSeek(Math.min(max, Math.max(min, next)));
   };
 
-  const valueText = positionReadout(t, { position: shown, duration: max, liveEnd: live ? max : undefined });
+  const valueText = positionReadout(t, { position: shown, duration: max, liveEnd: live ? max : undefined, edgeSlack });
 
   return (
     <div
@@ -137,8 +152,10 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
       {hover && (
         <div
           aria-hidden
+          data-testid="seek-preview"
           className="pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm bg-black/85 px-1.5 py-0.5 font-display text-xs text-white tabular-nums"
-          style={{ left: hover.x }}
+          // Kept inside the bar so the ends never clip at the player's edge.
+          style={{ left: clampTip(hover.x, trackRef.current?.getBoundingClientRect().width ?? 0) }}
         >
           {live ? `-${formatTime(Math.max(0, max - hover.time))}` : formatTime(hover.time)}
         </div>

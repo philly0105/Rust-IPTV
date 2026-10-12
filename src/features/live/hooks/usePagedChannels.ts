@@ -4,7 +4,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type Page } from '@/api/types';
 
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
-import { MINUTE } from '../lib/epgTime';
+import { MINUTE, ms } from '../lib/epgTime';
 import { useStalkerPreviews } from './useStalkerPreviews';
 
 export const CHANNEL_PAGE_SIZE = 120;
@@ -70,6 +70,9 @@ function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offset
   return { nowNext: nowNext.data, favSet };
 }
 
+/** How long the visible range must hold still before the portal guide is asked for it. */
+export const STALKER_RANGE_SETTLE_MS = 150;
+
 /**
  * Pages a channel list out of SQLite. The view virtualizes `total` rows and reports its
  * visible range; only the one or two pages that cover it are queried (C1 `useRpcQuery`
@@ -122,12 +125,21 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   }, [stalkerOn, range, listKey, pageA, pageB]);
   const portalPrograms = useStalkerPreviews(args.sourceId, stalkerOn, visibleRefs, args.now ?? 0);
 
+  const rangeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(rangeTimer.current), []);
   const setVisibleRange = useCallback(
     (start: number, end: number) => {
       const na = Math.max(0, Math.floor(start / size));
       const nb = Math.max(na, Math.floor(Math.max(start, end) / size));
       setPages((p) => (p.key === listKey && p.a === na && p.b === nb ? p : { key: listKey, a: na, b: nb }));
-      if (stalkerOn) setRange((r) => (r.key === listKey && r.start === start && r.end === end ? r : { key: listKey, start, end }));
+      if (!stalkerOn) return;
+      // The portal guide follows the visible rows once scrolling pauses: a range update per row of
+      // a held arrow key would queue a render of the page behind every keystroke (React #185).
+      window.clearTimeout(rangeTimer.current);
+      rangeTimer.current = window.setTimeout(
+        () => setRange((r) => (r.key === listKey && r.start === start && r.end === end ? r : { key: listKey, start, end })),
+        STALKER_RANGE_SETTLE_MS,
+      );
     },
     [listKey, size, stalkerOn],
   );
@@ -156,13 +168,23 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     [pageA, pageB, exA.favSet, exB.favSet],
   );
 
-  // Refresh now/next once the airing programme of any loaded channel has ended.
+  // Refresh now/next once the airing programme of any loaded channel has ended, or once the
+  // programme after a gap (nothing airing, only `next`) has started.
   const now = args.now;
+  const refreshedAt = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (now === undefined) return;
     const maps = [exA.nowNext, exB.nowNext];
-    const stale = maps.some((m) => m && Object.values(m).some((nn) => nn.now && Date.parse(nn.now.end) <= now - offsetMs));
-    if (stale) void invalidate('epg.nowNext');
+    const guideNow = now - offsetMs;
+    const changed = (nn: EpgNowNext) =>
+      nn.now ? ms(nn.now.end) > 0 && ms(nn.now.end) <= guideNow : !!nn.next && ms(nn.next.start) > 0 && ms(nn.next.start) <= guideNow;
+    const stale = maps.some((m) => m && Object.values(m).some(changed));
+    // Once per clock tick: a core whose clock lags ours keeps answering with the "stale" pair,
+    // and asking again on every answer would spin.
+    if (stale && refreshedAt.current !== now) {
+      refreshedAt.current = now;
+      void invalidate('epg.nowNext');
+    }
   }, [now, offsetMs, exA.nowNext, exB.nowNext]);
 
   const loaded = useMemo(() => {

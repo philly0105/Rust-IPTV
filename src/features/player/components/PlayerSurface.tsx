@@ -1,5 +1,5 @@
 import { AlertTriangle, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type FocusEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FocusEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
@@ -8,7 +8,18 @@ import { cn } from '../cn';
 import { bindInputModality, focusFromPointer, focusIfPlayerOwnsFocus, focusIsLost, formatTime } from '../format';
 import { showOsd, UP_NEXT_SECONDS, useMediaStore } from '../media';
 import { exitPip, usePipStore } from '../pip';
-import { replay, selectEnded, usePlayerStore } from '../store';
+import {
+  cancelUpNext,
+  DOUBLE_CLICK_MS,
+  MIN_RESUME_SECONDS,
+  playUpNextNow,
+  replay,
+  retryResolve,
+  selectEnded,
+  setPaused,
+  usePlayerStore,
+} from '../store';
+import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { BarReadout, Controls, CtlButton, InlineSpinner } from './Controls';
 import { FullscreenChannelPanel } from './FullscreenChannelPanel';
 import { InlinePlayer } from './InlinePlayer';
@@ -18,7 +29,6 @@ import { RadioPlayer } from './RadioPlayer';
 const HIDE_AFTER_MS = 2600;
 /** How often fullscreen mpv checks whether the mouse moved over the native video window. */
 const CURSOR_POLL_MS = 200;
-const CLICK_DELAY_MS = 220;
 
 /**
  * Keeps the chrome pinned while *keyboard* focus is inside it. Focus left on a button by a
@@ -65,21 +75,17 @@ function Osd() {
  * "Next episode" card with a 10 s countdown; Play now or Cancel.
  * `strip` lays it out in flow (embedded mpv: nothing may float over the native window).
  */
-function UpNextCard({ variant = 'overlay' }: { variant?: 'overlay' | 'strip' }) {
+function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overlay' | 'strip'; compact?: boolean }) {
   const { t } = useTranslation('player');
   const upNext = useMediaStore((s) => s.upNext);
   const [now, setNow] = useState(() => Date.now());
+  // Display only: the store's timer advances at zero (see `playUpNextNow` / the up-next timer).
   useEffect(() => {
     if (!upNext) return;
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
   }, [upNext]);
-  useEffect(() => {
-    if (upNext && now >= upNext.deadline) {
-      useMediaStore.setState({ upNext: undefined });
-      usePlayerStore.getState().next();
-    }
-  }, [now, upNext]);
   // Play now takes focus only when the player has it: an episode ending in the mini player
   // must not pull focus out of the list the user is browsing.
   const playNowRef = useRef<HTMLButtonElement>(null);
@@ -89,51 +95,64 @@ function UpNextCard({ variant = 'overlay' }: { variant?: 'overlay' | 'strip' }) 
   }, [hasUpNext]);
   if (!upNext) return null;
   const left = Math.max(0, Math.ceil((upNext.deadline - now) / 1000));
-  const progress = 1 - left / UP_NEXT_SECONDS;
-  const cancel = (): void => useMediaStore.setState({ upNext: undefined });
+  const progress = Math.min(1, Math.max(0, 1 - left / UP_NEXT_SECONDS));
+  const name = `${upNext.source.subtitle ? `${upNext.source.subtitle} ` : ''}${upNext.source.title}`;
+  // The mini player is too narrow for the card: a bar across its bottom edge instead.
+  const tight = compact && variant === 'overlay';
   return (
     <div
       role="status"
       data-mpv-reserved=""
+      data-testid="up-next"
+      aria-label={t('nextEpisode')}
       className={cn(
         'overflow-hidden text-white',
-        variant === 'overlay'
-          ? 'absolute end-4 bottom-24 z-30 w-72 rounded-lg border border-white/10 bg-[rgb(9_13_21/0.94)] shadow-2 motion-safe:animate-pop-in'
-          : 'shrink-0 border-t border-white/10 bg-[#070b12]',
+        tight
+          ? 'absolute inset-x-0 bottom-0 z-30 bg-[rgb(9_13_21/0.94)]'
+          : variant === 'overlay'
+            ? 'absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-lg border border-white/10 bg-[rgb(9_13_21/0.94)] shadow-2 motion-safe:animate-pop-in'
+            : 'shrink-0 border-t border-white/10 bg-[#070b12]',
       )}
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
-          cancel();
+          cancelUpNext();
         }
       }}
     >
       <div className="h-0.5 bg-white/10">
         <div className="h-full bg-accent motion-safe:transition-[width] motion-safe:duration-300" style={{ width: `${progress * 100}%` }} />
       </div>
-      <div className={variant === 'overlay' ? 'p-3' : 'flex items-center gap-3 px-3 py-2'}>
+      <div className={variant === 'overlay' && !tight ? 'p-3' : 'flex items-center gap-2 px-3 py-2'}>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-white/70">{t('nextEpisodeIn', { count: left })}</p>
-          <p className="mt-0.5 truncate font-display text-base" title={upNext.source.title}>
-            {upNext.source.subtitle ? `${upNext.source.subtitle} ` : ''}
-            {upNext.source.title}
-          </p>
+          {!tight && (
+            <p className="mt-0.5 truncate font-display text-base" title={name}>
+              {name}
+            </p>
+          )}
         </div>
-        <div className={cn('flex shrink-0 gap-2', variant === 'overlay' && 'mt-3')}>
+        <div className={cn('flex shrink-0 gap-2', variant === 'overlay' && !tight && 'mt-3')}>
           <button
             ref={playNowRef}
             type="button"
-            onClick={() => {
-              cancel();
-              usePlayerStore.getState().next();
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+            onClick={playUpNextNow}
+            title={tight ? name : undefined}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md bg-accent font-medium text-accent-fg hover:bg-accent-hover',
+              tight ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm',
+            )}
           >
-            <Play className="size-4 fill-current" aria-hidden />
+            <Play className={cn('fill-current', tight ? 'size-3.5' : 'size-4')} aria-hidden />
             {t('playNow')}
           </button>
-          <button type="button" onClick={cancel} className="rounded-md px-3 py-1.5 text-sm text-white/80 hover:bg-white/10">
+          <button
+            type="button"
+            onClick={cancelUpNext}
+            className={cn('rounded-md text-white/80 hover:bg-white/10', tight ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm')}
+          >
             {t('cancel')}
           </button>
         </div>
@@ -203,10 +222,16 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
   const mpv = useMediaStore((s) => s.mpv);
-  const commands = useMediaStore((s) => s.commands);
   const retryRef = useRef<HTMLButtonElement>(null);
   const buffering = useMpvBuffering();
   const isError = status === 'error';
+  const view = useStreamError(null);
+  const retry = useCallback((): void => {
+    if (retryResolve()) return;
+    usePlayerStore.setState({ status: 'loading', error: undefined });
+    useMediaStore.getState().commands?.retry();
+  }, []);
+  useRetryWhenOnline(isError ? view.cls : 'generic', retry);
   useEffect(() => {
     if (isError) focusIfPlayerOwnsFocus(retryRef.current);
   }, [isError]);
@@ -216,23 +241,20 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const strip = 'flex shrink-0 items-center gap-2 border-t border-white/10 bg-[#070b12] px-3 py-1.5 text-sm text-white';
   if (status === 'error') {
     return (
-      <div role="alert" data-mpv-reserved="" className={strip}>
+      <div role="alert" data-mpv-reserved="" data-error-class={view.cls} className={strip}>
         <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
-        {/* What happened first, then mpv's own reason (often a bare "HTTP 404" or "loading failed"). */}
-        <span className="min-w-0 flex-1 truncate" title={error ? `${t('errorTitle')}: ${error}` : t('errorGeneric')}>
-          <span className="font-medium">{t('errorTitle')}</span>
+        {/* What happened first, then mpv's own reason (often a bare "HTTP 404" or "loading failed"); the hover says what to do. */}
+        <span className="min-w-0 flex-1 truncate" title={`${view.title}. ${view.hint}${error ? `\n${error}` : ''}`}>
+          <span className="font-medium">{view.title}</span>
           <span data-testid="mpv-error-detail" className="ms-2 text-white/70">
-            {error ?? t('errorGeneric')}
+            {compact ? '' : (error ?? view.hint)}
           </span>
         </span>
         <button
           ref={retryRef}
           type="button"
           data-ctl="retry"
-          onClick={() => {
-            usePlayerStore.setState({ status: 'loading', error: undefined });
-            commands?.retry();
-          }}
+          onClick={retry}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
         >
           <RotateCcw className="size-3.5" aria-hidden />
@@ -485,7 +507,9 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   const [onBar, setOnBar] = useState(false);
   const focusPin = useKeyboardFocusPin();
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastClick = useRef<{ at: number; wasPaused: boolean } | null>(null);
+  /** A click on an ended item: the replay waits out the double-click time (C6). */
+  const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const playing = status === 'playing';
@@ -501,7 +525,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
     poke();
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
-      if (clickTimer.current) clearTimeout(clickTimer.current);
+      if (replayTimer.current) clearTimeout(replayTimer.current);
+      replayTimer.current = null;
     };
   }, [source?.url]);
 
@@ -514,7 +539,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   // Resume notice for VOD.
   const resumedFrom = source?.resumeSeconds;
   useEffect(() => {
-    if (resumedFrom && resumedFrom > 5 && !compact) {
+    if (resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
       showOsd(t('resumedAt', { time: formatTime(resumedFrom) }));
     }
     // Only when a new item starts.
@@ -538,12 +563,34 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
   if (mode === 'external') return null;
 
-  const onSurfaceClick = (): void => {
-    if (clickTimer.current) clearTimeout(clickTimer.current);
-    clickTimer.current = setTimeout(() => usePlayerStore.getState().togglePlay(), CLICK_DELAY_MS);
+  // A click toggles pause at once; the double click that follows puts the play state back and
+  // toggles fullscreen (C6). Waiting out the double-click time instead made clicks feel slow,
+  // and any wait shorter than the system's (500 ms on Windows) both paused and went fullscreen.
+  const onSurfaceClick = (e: MouseEvent): void => {
+    if (e.detail > 1) return;
+    const st = usePlayerStore.getState();
+    if (selectEnded(st)) {
+      // Replaying cannot be undone (it seeks to 0 and drops Up next), so it waits until the
+      // click is known not to start a double click.
+      lastClick.current = null;
+      if (replayTimer.current) clearTimeout(replayTimer.current);
+      const src = st.source;
+      replayTimer.current = setTimeout(() => {
+        replayTimer.current = null;
+        const now = usePlayerStore.getState();
+        if (now.source === src && selectEnded(now)) now.togglePlay();
+      }, DOUBLE_CLICK_MS);
+      return;
+    }
+    lastClick.current = { at: Date.now(), wasPaused: st.status !== 'playing' && st.status !== 'loading' };
+    st.togglePlay();
   };
   const onSurfaceDouble = (): void => {
-    if (clickTimer.current) clearTimeout(clickTimer.current);
+    if (replayTimer.current) clearTimeout(replayTimer.current);
+    replayTimer.current = null;
+    const lc = lastClick.current;
+    lastClick.current = null;
+    if (lc && Date.now() - lc.at < DOUBLE_CLICK_MS) setPaused(lc.wasPaused);
     usePlayerStore.getState().toggleFullscreen();
   };
 
@@ -563,7 +610,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         if (playing) setIdle(true);
       }}
     >
-      <InlinePlayer as="video" />
+      <InlinePlayer as="video" compact={compact} />
       {/* Click surface sits above the video so clicks never reach native controls. */}
       <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
       {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
@@ -589,7 +636,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
       <Osd />
       <EndedOverlay compact={compact} />
-      <UpNextCard />
+      <UpNextCard compact={compact} />
 
       <div
         data-testid="overlay-chrome"

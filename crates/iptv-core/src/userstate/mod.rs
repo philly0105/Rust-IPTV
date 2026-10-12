@@ -20,7 +20,7 @@ use crate::model::{
     ContentType, FavoriteEntry, ItemRef, ItemSnapshot, PlaybackPosition, RecentEntry,
 };
 use crate::state::AppState;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 use serde_json::Value;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -226,7 +226,8 @@ pub fn favorite_upsert_json(
     added_at: Option<&str>,
     position: Option<i64>,
 ) -> CoreResult<bool> {
-    if is_favorite(conn, r)? {
+    let existed = is_favorite(conn, r)?;
+    if existed {
         conn.execute(
             "UPDATE favorites SET snapshot_json = ?4
              WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
@@ -248,9 +249,12 @@ pub fn favorite_upsert_json(
         )?,
     };
     let added_at = added_at.map(str::to_string).unwrap_or_else(now_ts);
+    // ON CONFLICT: a concurrent toggle may have inserted the row since the
+    // check above (each RPC runs on its own pooled connection).
     conn.execute(
         "INSERT INTO favorites(source_id, content_type, item_id, added_at, position, snapshot_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET snapshot_json = excluded.snapshot_json",
         params![
             r.source_id,
             r.content_type.as_str(),
@@ -265,18 +269,27 @@ pub fn favorite_upsert_json(
 }
 
 /// Toggles a favorite. Returns the new state (`true` = now a favorite).
+///
+/// The remove-or-insert runs in one IMMEDIATE transaction: two toggles of the
+/// same ref on separate pooled connections then serialize, so one turns it on
+/// and the other off instead of both reporting the same state.
 pub fn favorite_toggle(
-    conn: &Connection,
+    conn: &mut Connection,
     r: &ItemRef,
     snapshot: &ItemSnapshot,
 ) -> CoreResult<bool> {
     validate_ref(r)?;
-    if favorite_remove(conn, r)? {
-        return Ok(false);
-    }
-    validate_snapshot(snapshot)?;
-    favorite_upsert_json(conn, r, &serde_json::to_string(snapshot)?, None, None)?;
-    Ok(true)
+    let json = serde_json::to_string(snapshot)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let now = if favorite_remove(&tx, r)? {
+        false
+    } else {
+        validate_snapshot(snapshot)?;
+        favorite_upsert_json(&tx, r, &json, None, None)?;
+        true
+    };
+    tx.commit()?;
+    Ok(now)
 }
 
 /// Removes a favorite. Returns true when a row was deleted.
@@ -316,9 +329,12 @@ pub fn favorites_reorder(
 ) -> CoreResult<()> {
     let tx = conn.transaction()?;
     {
+        // A ref listed twice keeps its first place.
+        let mut seen = std::collections::HashSet::new();
         let listed: Vec<&ItemRef> = refs
             .iter()
             .filter(|r| source_id.is_none_or(|s| r.source_id == s))
+            .filter(|r| seen.insert(*r))
             .collect();
         let mut set = tx.prepare_cached(
             "UPDATE favorites SET position = ?4 WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
@@ -428,11 +444,48 @@ pub fn recent_trim(conn: &Connection, source_id: &str) -> CoreResult<usize> {
 
 /// `recent.add`: records a view now.
 pub fn recent_add(conn: &Connection, r: &ItemRef, snapshot: &ItemSnapshot) -> CoreResult<()> {
+    recent_add_at(conn, r, snapshot, None)
+}
+
+/// How far in the future a caller-supplied `viewedAt` may be (clock skew
+/// between the UI and the core); anything later is refused.
+pub const VIEWED_AT_MAX_SKEW: chrono::Duration = chrono::Duration::days(1);
+
+/// Parses a caller-supplied `viewedAt` (C7): strict RFC 3339 with an offset,
+/// stored in UTC with milliseconds. Garbage and dates more than
+/// [`VIEWED_AT_MAX_SKEW`] in the future are `Invalid`.
+pub fn parse_viewed_at(raw: &str, field: &str) -> CoreResult<String> {
+    let dt = chrono::DateTime::parse_from_rfc3339(raw.trim())
+        .map_err(|_| {
+            CoreError::invalid(format!(
+                "{field} must be an RFC 3339 date and time (e.g. 2026-10-12T08:30:00Z), got {:?}",
+                raw.chars().take(40).collect::<String>()
+            ))
+        })?
+        .with_timezone(&chrono::Utc);
+    if dt > chrono::Utc::now() + VIEWED_AT_MAX_SKEW {
+        return Err(CoreError::invalid(format!("{field} is in the future")));
+    }
+    Ok(fmt_ts(dt))
+}
+
+/// `recent.add` with an optional `viewedAt` (C7): when present the entry
+/// gets that time (Recent undo restores the original date); otherwise now.
+/// Either way the stored time replaces the existing one.
+pub fn recent_add_at(
+    conn: &Connection,
+    r: &ItemRef,
+    snapshot: &ItemSnapshot,
+    viewed_at: Option<&str>,
+) -> CoreResult<()> {
     validate_ref(r)?;
     validate_snapshot(snapshot)?;
     // A fresh view always moves the entry to the top, even when an imported
     // timestamp was in the future: use plain replacement of viewed_at.
-    let now = now_ts();
+    let now = match viewed_at {
+        Some(raw) => parse_viewed_at(raw, "viewedAt")?,
+        None => now_ts(),
+    };
     conn.execute(
         "INSERT INTO recent(source_id, content_type, item_id, viewed_at, snapshot_json)
          VALUES (?1, ?2, ?3, ?4, ?5)
@@ -481,7 +534,8 @@ pub struct PositionInput {
     pub duration_seconds: Option<i64>,
     /// Raw snapshot JSON; `None` keeps the stored snapshot.
     pub snapshot_json: Option<String>,
-    /// Explicit timestamp (backup import); `None` = now.
+    /// Explicit timestamp (backup import, C14 undo); `None` = now. When set,
+    /// an existing row is replaced only if this is newer.
     pub updated_at: Option<String>,
     /// Store the row as watched (backup import). `false` keeps the stored flag.
     pub watched: bool,
@@ -533,41 +587,113 @@ pub fn position_get(
         .optional()?)
 }
 
+/// Positions at or below this are not offered in Continue Watching: the
+/// player only resumes above it (`MIN_RESUME_SECONDS` in the player store).
+pub const MIN_RESUME_SECONDS: i64 = 5;
+
+/// Largest accepted position or duration (about 115 days): larger values are
+/// a player glitch, not a place to resume from.
+pub const MAX_POSITION_SECONDS: i64 = 10_000_000;
+
 /// True when a position counts as watched to the end.
 pub fn is_complete(position_seconds: i64, duration_seconds: Option<i64>) -> bool {
     matches!(duration_seconds, Some(d) if d > 0 && position_seconds as f64 >= COMPLETE_RATIO * d as f64)
 }
 
-/// Saves a position, or deletes it when it reached [`COMPLETE_RATIO`] of the
-/// duration. Returns true when a row is stored afterwards. A row marked
-/// watched keeps its flag (and is kept when the new position is complete).
+/// Saves a position. Returns true when a row is stored afterwards.
+///
+/// - Reaching [`COMPLETE_RATIO`] of the duration: an episode is kept as a
+///   watched row at its end (C13); an item-level row (a movie) is deleted
+///   unless it is marked watched.
+/// - Below that, a live save (no `updated_at`) above [`MIN_RESUME_SECONDS`]
+///   clears a watched flag: the episode is being rewatched, so it is the
+///   series' place to resume. A save at or below it (the player's first tick)
+///   keeps the flag, because nothing would be resumed from there yet.
+/// - With `updated_at` (backup import, C14 undo) an existing row is only
+///   overwritten, or deleted, when that time is newer than the stored one,
+///   so an older backup never rolls back newer progress. Such writes keep a
+///   watched flag (`watched = false` means "not known").
 pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
     validate_ref(&p.item_ref)?;
     if p.position_seconds < 0 {
         return Err(CoreError::invalid("positionSeconds must be >= 0"));
     }
-    let duration = p.duration_seconds.filter(|d| *d > 0);
+    if p.position_seconds > MAX_POSITION_SECONDS
+        || p.duration_seconds.is_some_and(|d| d > MAX_POSITION_SECONDS)
+    {
+        return Err(CoreError::invalid(format!(
+            "positionSeconds and durationSeconds must be at most {MAX_POSITION_SECONDS}"
+        )));
+    }
     let r = &p.item_ref;
     let ep = ep_key(p.episode_id.as_deref());
-    if !p.watched && is_complete(p.position_seconds, duration) {
-        let kept = conn.execute(
-            "DELETE FROM playback_positions
-             WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4 AND watched = 0",
-            params![r.source_id, r.content_type.as_str(), r.item_id, ep],
-        )? == 0
-            && position_get(conn, r, Some(ep))?.is_some();
-        return Ok(kept);
-    }
+    let dated = p.updated_at.is_some();
+    // Players without a finite duration omit it; completion then uses the
+    // duration stored by an earlier save, so a finished item still leaves
+    // Continue Watching.
+    let duration = match p.duration_seconds.filter(|d| *d > 0) {
+        Some(d) => Some(d),
+        None => position_get(conn, r, Some(ep))?
+            .and_then(|stored| stored.duration_seconds)
+            .filter(|d| *d > 0),
+    };
     let updated_at = p.updated_at.clone().unwrap_or_else(now_ts);
+    let complete = is_complete(p.position_seconds, duration);
+    if complete && !ep.is_empty() {
+        // A finished episode stays as a watched row (position at the end):
+        // Continue Watching ranks a series by its newest row, so the record
+        // that a later episode was finished keeps an older half-watched one
+        // from resurfacing (C13).
+        conn.execute(
+            &format!(
+                "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
+                 ON CONFLICT(source_id, content_type, item_id, episode_id) DO UPDATE SET
+                   position_seconds = excluded.position_seconds,
+                   duration_seconds = excluded.duration_seconds,
+                   updated_at = excluded.updated_at,
+                   snapshot_json = COALESCE(excluded.snapshot_json, playback_positions.snapshot_json),
+                   watched = 1
+                 WHERE {NEWER_ONLY}"
+            ),
+            params![
+                r.source_id,
+                r.content_type.as_str(),
+                r.item_id,
+                ep,
+                duration.unwrap_or(p.position_seconds),
+                duration,
+                updated_at,
+                p.snapshot_json,
+                dated,
+            ],
+        )
+        .map_err(|e| map_fk(e, &r.source_id))?;
+        return Ok(true);
+    }
+    if !p.watched && complete {
+        conn.execute(
+            "DELETE FROM playback_positions
+             WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4 AND watched = 0
+               AND (NOT ?6 OR COALESCE(julianday(?5) > julianday(updated_at), 1))",
+            params![r.source_id, r.content_type.as_str(), r.item_id, ep, updated_at, dated],
+        )?;
+        return Ok(position_get(conn, r, Some(ep))?.is_some());
+    }
     conn.execute(
-        "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT(source_id, content_type, item_id, episode_id) DO UPDATE SET
-           position_seconds = excluded.position_seconds,
-           duration_seconds = COALESCE(excluded.duration_seconds, playback_positions.duration_seconds),
-           updated_at = excluded.updated_at,
-           snapshot_json = COALESCE(excluded.snapshot_json, playback_positions.snapshot_json),
-           watched = MAX(playback_positions.watched, excluded.watched)",
+        &format!(
+            "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10)
+             ON CONFLICT(source_id, content_type, item_id, episode_id) DO UPDATE SET
+               position_seconds = excluded.position_seconds,
+               duration_seconds = COALESCE(excluded.duration_seconds, playback_positions.duration_seconds),
+               updated_at = excluded.updated_at,
+               snapshot_json = COALESCE(excluded.snapshot_json, playback_positions.snapshot_json),
+               watched = CASE WHEN ?9 OR excluded.position_seconds <= ?11
+                 THEN MAX(playback_positions.watched, excluded.watched)
+                 ELSE excluded.watched END
+             WHERE {NEWER_ONLY}"
+        ),
         params![
             r.source_id,
             r.content_type.as_str(),
@@ -577,12 +703,19 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
             duration,
             updated_at,
             p.snapshot_json,
-            p.watched as i64
+            dated,
+            p.watched as i64,
+            MIN_RESUME_SECONDS
         ],
     )
     .map_err(|e| map_fk(e, &r.source_id))?;
     Ok(true)
 }
+
+/// Upsert guard for [`position_set`]: `?9` is true for a dated write, which
+/// replaces the stored row only when it is newer (julianday copes with both
+/// stored timestamp formats; an unreadable stored time counts as older).
+const NEWER_ONLY: &str = "NOT ?9 OR COALESCE(julianday(excluded.updated_at) > julianday(playback_positions.updated_at), 1)";
 
 /// Marks an item (or one episode) watched or unwatched (`userstate.setWatched`).
 ///
@@ -627,9 +760,13 @@ pub fn positions_for_series(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<Pl
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Newest unfinished, unwatched positions, one per item (the latest episode of a series),
-/// each with a snapshot: the stored one, else built from the catalog row,
-/// else a minimal fallback.
+/// Newest unfinished, unwatched positions, one per item, each with a snapshot:
+/// the stored one, else built from the catalog row, else a minimal fallback.
+///
+/// A series is represented by its most recently updated episode row,
+/// finished or not (C13). When that row is watched, or at or below
+/// [`MIN_RESUME_SECONDS`], the series is left out: an older half-watched
+/// episode never resurfaces after a newer one is done or started.
 pub fn continue_watching(
     conn: &Connection,
     limit: Option<i64>,
@@ -643,18 +780,17 @@ pub fn continue_watching(
              PARTITION BY p.source_id, p.content_type, p.item_id
              ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
            FROM playback_positions p
-           WHERE p.position_seconds > 0 AND p.watched = 0
          )
          SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
                 k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
                 i.title, COALESCE(i.poster_url, i.logo_url)
          FROM ranked k
          LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
-         WHERE k.rn = 1
+         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2
          ORDER BY k.updated_at DESC, k.rid DESC
          LIMIT ?1",
     )?;
-    let rows = stmt.query_map(params![limit], |row| {
+    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], |row| {
         let mut p = position_from_row(row)?;
         if p.snapshot.is_none() {
             let title: Option<String> = row.get(9)?;
@@ -687,6 +823,16 @@ pub fn position_remove(conn: &Connection, r: &ItemRef, episode_id: Option<&str>)
         ],
     )?;
     Ok(())
+}
+
+/// Removes every unfinished position row of an item (all episodes of a
+/// series); watched rows are kept (C13 `allEpisodes`). Returns the count.
+pub fn position_remove_unfinished(conn: &Connection, r: &ItemRef) -> CoreResult<usize> {
+    Ok(conn.execute(
+        "DELETE FROM playback_positions
+         WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND watched = 0",
+        params![r.source_id, r.content_type.as_str(), r.item_id],
+    )?)
 }
 
 /// No runtime needed.
@@ -749,9 +895,9 @@ mod tests {
     #[test]
     fn favorites_toggle_order_and_reorder() {
         let mut c = conn();
-        assert!(favorite_toggle(&c, &r("s1", "a"), &snap("A")).unwrap());
-        assert!(favorite_toggle(&c, &r("s2", "b"), &snap("B")).unwrap());
-        assert!(favorite_toggle(&c, &r("s1", "c"), &snap("C")).unwrap());
+        assert!(favorite_toggle(&mut c, &r("s1", "a"), &snap("A")).unwrap());
+        assert!(favorite_toggle(&mut c, &r("s2", "b"), &snap("B")).unwrap());
+        assert!(favorite_toggle(&mut c, &r("s1", "c"), &snap("C")).unwrap());
         let ids: Vec<_> = favorites_list(&c, None)
             .unwrap()
             .into_iter()
@@ -765,10 +911,10 @@ mod tests {
             .map(|f| f.item_ref.item_id)
             .collect();
         assert_eq!(ids, ["c", "a"]);
-        assert!(!favorite_toggle(&c, &r("s1", "c"), &snap("C")).unwrap());
+        assert!(!favorite_toggle(&mut c, &r("s1", "c"), &snap("C")).unwrap());
         let got = favorites_contains(&c, &[r("s1", "a"), r("s1", "c"), r("s1", "a")]).unwrap();
         assert_eq!(got, vec![r("s1", "a")]);
-        let err = favorite_toggle(&c, &r("nope", "x"), &snap("X")).unwrap_err();
+        let err = favorite_toggle(&mut c, &r("nope", "x"), &snap("X")).unwrap_err();
         assert!(matches!(err, CoreError::NotFound(_)));
     }
 
@@ -825,15 +971,26 @@ mod tests {
         assert_eq!(cw.len(), 1, "one card per series");
         assert_eq!(cw[0].episode_id.as_deref(), Some("e2"));
         assert_eq!(cw[0].snapshot.as_ref().unwrap().title, "show");
-        // >= 95 % deletes.
-        assert!(!position_set(&c, &p("show", Some("e2"), 950, Some(1000))).unwrap());
-        assert!(position_get(
+        // >= 95 % of an episode keeps it as a watched row at the end (C13),
+        // and the series leaves Continue Watching instead of falling back to e1.
+        assert!(position_set(&c, &p("show", Some("e2"), 950, Some(1000))).unwrap());
+        let done = position_get(
             &c,
             &ItemRef::new("s2", ContentType::Series, "show"),
-            Some("e2")
+            Some("e2"),
         )
         .unwrap()
-        .is_none());
+        .unwrap();
+        assert!(done.watched);
+        assert_eq!(done.position_seconds, 1000);
+        assert!(continue_watching(&c, Some(10)).unwrap().is_empty());
+        // A movie (item-level row) is still deleted when finished.
+        let movie = |pos| PositionInput {
+            item_ref: ItemRef::new("s2", ContentType::Movie, "m"),
+            ..p("x", None, pos, Some(1000))
+        };
+        assert!(position_set(&c, &movie(100)).unwrap());
+        assert!(!position_set(&c, &movie(990)).unwrap());
         assert!(position_set(&c, &p("show", Some("e1"), -1, None)).is_err());
     }
 }

@@ -34,6 +34,7 @@ import type {
   RecentEntry,
   RemoteStatus,
   RequestHeaders,
+  RpcErrorCode,
   SeriesDetail,
   SeriesItem,
   Settings,
@@ -214,8 +215,17 @@ export interface RpcMap {
   /** Re-import: m3u refetch, xtream/stalker resync. */
   'sources.refresh': Cmd<{ id: string }, Source>;
   /** Refreshes sources with autoRefresh. */
-  'sources.refreshAll': Cmd<void, { refreshed: string[]; failed: { id: string; error: string }[] }>;
+  'sources.refreshAll': Cmd<
+    void,
+    { refreshed: string[]; failed: { id: string; error: string; /** Classified code (C10). */ code?: RpcErrorCode }[] }
+  >;
   'sources.counts': Cmd<{ id: string }, SourceCounts>;
+  /**
+   * Cancels a running import or refresh for the source (C8). Returns true when one was
+   * running and is now cancelling; that run emits `import.progress` with `phase: 'cancelled'`
+   * and leaves the previous catalog intact. False when nothing was running.
+   */
+  'sources.cancelImport': Cmd<{ id: string }, boolean>;
 
   // ---- catalog (B1) -------------------------------------------------------
   'catalog.categories': Cmd<{ sourceId: string; contentType: ContentType; includeHidden?: boolean }, Category[]>;
@@ -261,19 +271,26 @@ export interface RpcMap {
   'favorites.reorder': Cmd<{ sourceId?: string; refs: ItemRef[] }, void>;
   'favorites.remove': Cmd<{ ref: ItemRef }, void>;
   'recent.list': Cmd<{ sourceId?: string; limit?: number }, RecentEntry[]>;
-  'recent.add': Cmd<{ ref: ItemRef; snapshot: ItemSnapshot }, void>;
+  /** `viewedAt` (C7) is RFC 3339; when present the core stores it as the entry's viewed time instead of now (Recent undo). */
+  'recent.add': Cmd<{ ref: ItemRef; snapshot: ItemSnapshot; viewedAt?: string }, void>;
   'recent.remove': Cmd<{ ref: ItemRef }, void>;
   'recent.clear': Cmd<{ sourceId?: string }, void>;
   'positions.get': Cmd<{ ref: ItemRef; episodeId?: string }, PlaybackPosition | null>;
-  /** Deleted when positionSeconds >= 0.95 * duration. */
+  /**
+   * At >= 0.95 * duration the item is finished: a movie's row is deleted (unless marked watched) and an
+   * episode's row is kept as watched at its end (C13), so a replay must not resume from it.
+   * `updatedAt` (C14, ISO 8601): only undo/restore passes it; the row keeps that
+   * time and replaces a stored row only when newer. `watched` (undo of Mark
+   * watched/unwatched) stores the row as watched.
+   */
   'positions.set': Cmd<
-    { ref: ItemRef; episodeId?: string; positionSeconds: number; durationSeconds?: number; snapshot?: ItemSnapshot },
+    { ref: ItemRef; episodeId?: string; positionSeconds: number; durationSeconds?: number; snapshot?: ItemSnapshot; updatedAt?: string; watched?: boolean },
     void
   >;
   'positions.forSeries': Cmd<{ ref: ItemRef }, PlaybackPosition[]>;
   /** Snapshot filled. */
   'positions.continueWatching': Cmd<{ limit: number }, PlaybackPosition[]>;
-  'positions.remove': Cmd<{ ref: ItemRef; episodeId?: string }, void>;
+  'positions.remove': Cmd<{ ref: ItemRef; episodeId?: string; allEpisodes?: boolean }, void>;
   /** Watched: row kept with watched = true (position = duration when known). Unwatched: row cleared. */
   'userstate.setWatched': Cmd<{ ref: ItemRef; episodeId?: string; watched: boolean }, void>;
 
@@ -411,6 +428,7 @@ export const RPC_COMMANDS = [
   'sources.refresh',
   'sources.refreshAll',
   'sources.counts',
+  'sources.cancelImport',
   'catalog.categories',
   'catalog.setCategoryHidden',
   'catalog.setCategoriesHidden',

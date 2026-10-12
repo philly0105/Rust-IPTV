@@ -106,14 +106,20 @@ export function measureMpvBounds(surface: Element): Bounds | null {
   return computeMpvBounds(surfaceRect, { clip, reserved });
 }
 
+/** Transient chrome over the video (the context menu) that is cut out of it, never shrinks it. */
+export const OVERLAY_SELECTOR = '[data-mpv-overlay]';
+
 /**
- * Same measurements; in fullscreen the chrome over the video becomes holes in the native
- * window (`computeMpvOverlay`) instead of shrinking it, everywhere else `holes` is empty.
+ * Same measurements; in fullscreen, and while an overlay such as the context menu is open, the
+ * chrome over the video becomes holes in the native window (`computeMpvOverlay`) instead of
+ * shrinking it; everywhere else `holes` is empty.
  */
 export function measureMpvLayout(surface: Element): MpvLayout {
   const { surfaceRect, clip, reserved } = measureParts(surface);
   const layer = topLayer();
-  if (layer && layer.contains(surface)) return computeMpvOverlay(surfaceRect, { clip, reserved });
+  const host = surface.closest('[data-player-host]') ?? surface.parentElement;
+  const overlayOpen = !!host?.querySelector(OVERLAY_SELECTOR);
+  if ((layer && layer.contains(surface)) || overlayOpen) return computeMpvOverlay(surfaceRect, { clip, reserved });
   return { bounds: computeMpvBounds(surfaceRect, { clip, reserved }), holes: [] };
 }
 

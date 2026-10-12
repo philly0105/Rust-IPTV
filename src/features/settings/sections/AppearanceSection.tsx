@@ -6,16 +6,24 @@ import type { Theme } from '@/api/types';
 import { SettingsGroup, SettingsSection } from '../components';
 import type { SectionProps } from './types';
 
-/** Miniature of the app chrome drawn with fixed colors so each card previews its own theme. */
+/**
+ * Each card previews its own theme whatever theme is active, so it cannot read
+ * the live CSS variables (they hold only the active theme's values). These
+ * mirror src/styles/tokens.css; `line` is --color-divider. A test keeps them
+ * in step with the token file.
+ */
+export const PREVIEW_PALETTE = {
+  dark: { bg: '#0c1320', surface: '#131c2d', line: '#2f3d57', fg: '#e9edf5', accent: '#f5b544' },
+  light: { bg: '#edf0f5', surface: '#ffffff', line: '#c6cedc', fg: '#121a2a', accent: '#8f4f00' },
+} as const;
+
+/** Miniature of the app chrome so each card previews its own theme. */
 function ThemePreview({ mode }: { mode: 'light' | 'dark' | 'system' }) {
   const half = (m: 'light' | 'dark') => {
-    const c =
-      m === 'dark'
-        ? { bg: '#0c1320', surface: '#131c2d', line: '#2f3d57', fg: '#e9edf5', accent: '#f5b544' }
-        : { bg: '#edf0f5', surface: '#ffffff', line: '#c6cedc', fg: '#121a2a', accent: '#8f4f00' };
+    const c = PREVIEW_PALETTE[m];
     return (
       <div className="flex h-full flex-1" style={{ background: c.bg }}>
-        <div className="flex w-1/4 flex-col gap-1 p-1.5" style={{ background: c.surface, borderRight: `1px solid ${c.line}` }}>
+        <div className="flex w-1/4 flex-col gap-1 p-1.5" style={{ background: c.surface, borderInlineEnd: `1px solid ${c.line}` }}>
           <span className="h-1.5 w-3/4 rounded-full" style={{ background: c.accent }} />
           <span className="h-1 w-full rounded-full opacity-50" style={{ background: c.fg }} />
           <span className="h-1 w-2/3 rounded-full opacity-50" style={{ background: c.fg }} />

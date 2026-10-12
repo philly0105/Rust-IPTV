@@ -190,6 +190,28 @@ async fn spawn_stub() -> String {
         )
         .route("/bytes", get(serve_bytes))
         .route(
+            "/live/ranged-playlist",
+            get(|h: HeaderMap| async move {
+                // Honors Range like a static file server would.
+                let ct = [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")];
+                match h.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+                    Some(_) => (
+                        StatusCode::PARTIAL_CONTENT,
+                        [
+                            (header::CONTENT_TYPE, "application/vnd.apple.mpegurl"),
+                            (
+                                header::CONTENT_RANGE,
+                                &*format!("bytes 10-19/{}", PLAYLIST.len()),
+                            ),
+                        ],
+                        PLAYLIST[10..20].to_string(),
+                    )
+                        .into_response(),
+                    None => (ct, PLAYLIST).into_response(),
+                }
+            }),
+        )
+        .route(
             "/page.html",
             get(|| async {
                 (
@@ -711,6 +733,29 @@ async fn cross_origin_writes_are_refused() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
+    // B9: a cross-site page cannot embed the GET routes either.
+    for path in [
+        "/api/files/1",
+        "/api/proxy?url=http%3A%2F%2Fexample.com%2F",
+        "/api/health",
+    ] {
+        let r = h
+            .http
+            .get(format!("{}{path}", h.base))
+            .header("sec-fetch-site", "cross-site")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 403, "{path}");
+    }
+    let r = h
+        .http
+        .get(format!("{}/api/health", h.base))
+        .header("sec-fetch-site", "same-origin")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
 }
 
 /// Minimal WebSocket client: handshake, then read one server text frame.
@@ -898,7 +943,11 @@ async fn proxy_and_files_never_serve_active_content() {
 
 #[tokio::test]
 async fn rebinding_host_is_refused_on_any_bind() {
-    // Bound to every interface, as in Docker.
+    // The Host guard does not look at the bind address. The only thing a
+    // non-loopback bind (0.0.0.0, as in Docker) changes is that main.rs adds
+    // the machine host name to the allowed hosts, so this test sets the
+    // options the same way and listens on loopback. Binding a wildcard address
+    // in a test pops a Windows Firewall prompt.
     let tmp = tempfile::tempdir().unwrap();
     let (tx, _) = broadcast::channel::<AppEvent>(8);
     let app = AppState::new(
@@ -909,9 +958,18 @@ async fn rebinding_host_is_refused_on_any_bind() {
     .await
     .unwrap();
     let mut opts = ServerOptions::new(tmp.path().join("dist"));
-    opts.allowed_hosts = iptv_server::guard::AllowedHosts::parse("tv.example.com");
+    let mut hosts = iptv_server::guard::AllowedHosts::parse("tv.example.com");
+    hosts.add_machine_hostname();
+    let machine = hosts
+        .names()
+        .iter()
+        .find(|n| n.as_str() != "tv.example.com")
+        .cloned();
+    opts.allowed_hosts = hosts;
     let server = Server::new(app, Arc::new(build_router()), tx, opts);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let port = listener.local_addr().unwrap().port();
     let router = iptv_server::router(server);
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -934,6 +992,16 @@ async fn rebinding_host_is_refused_on_any_bind() {
     }
     let r = http.get(&url).send().await.unwrap();
     assert_eq!(r.status(), 200);
+    // The machine name added for a non-loopback bind is accepted.
+    if let Some(name) = machine {
+        let r = http
+            .get(&url)
+            .header(header::HOST, format!("{name}:7180"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "Host: {name}");
+    }
 }
 
 #[tokio::test]
@@ -1180,4 +1248,87 @@ async fn server_mode_refuses_server_paths() {
         .await
         .unwrap();
     assert_eq!(origin, "text");
+}
+
+// ---------------------------------------------------------------------------
+// B9: contracts C7, C8 and C10 over HTTP.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn http_exposes_cancel_import_viewed_at_and_error_codes() {
+    let h = start().await;
+    // C8: nothing running -> false.
+    let (status, v) = rpc(
+        &h,
+        "sources.cancelImport",
+        serde_json::json!({ "id": "none" }),
+    )
+    .await;
+    assert_eq!((status, v), (200, serde_json::json!(false)));
+    let (status, v) = rpc(&h, "sources.cancelImport", serde_json::json!({})).await;
+    assert_eq!(status, 400);
+    assert_eq!(v["code"], "invalid");
+
+    // C7: viewedAt restores the date; garbage is a 400 `invalid`.
+    h.add_source("s7", "m3u", serde_json::json!({ "origin": "text" }))
+        .await;
+    let entry = |viewed_at: serde_json::Value| {
+        serde_json::json!({
+            "ref": { "sourceId": "s7", "contentType": "live", "itemId": "c1" },
+            "snapshot": { "title": "Channel", "contentType": "live" },
+            "viewedAt": viewed_at,
+        })
+    };
+    let (status, _) = rpc(&h, "recent.add", entry("2026-02-03T04:05:06Z".into())).await;
+    assert_eq!(status, 200);
+    let (_, list) = rpc(&h, "recent.list", serde_json::json!({ "sourceId": "s7" })).await;
+    assert_eq!(list[0]["viewedAt"], "2026-02-03T04:05:06.000Z");
+    let (status, v) = rpc(&h, "recent.add", entry("not a date".into())).await;
+    assert_eq!(status, 400);
+    assert_eq!(v["code"], "invalid");
+
+    // C10: a source's recorded code is served as camelCase `lastErrorCode`.
+    h.server
+        .app
+        .db_call(|c| {
+            c.execute(
+                "UPDATE sources SET last_error = 'down', last_error_code = 'timeout' WHERE id = 's7'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (status, v) = rpc(&h, "sources.get", serde_json::json!({ "id": "s7" })).await;
+    assert_eq!(status, 200);
+    assert_eq!(v["lastError"], "down");
+    assert_eq!(v["lastErrorCode"], "timeout");
+}
+
+#[tokio::test]
+async fn proxy_never_serves_a_slice_of_a_playlist() {
+    let stub = spawn_stub().await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let r = h
+        .http
+        .get(h.proxy_url(&format!("{stub}/live/ranged-playlist"), Some("x-1")))
+        .header(header::RANGE, "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.headers()[header::CONTENT_TYPE],
+        "application/vnd.apple.mpegurl"
+    );
+    assert!(r.headers().get(header::CONTENT_RANGE).is_none());
+    let body = r.text().await.unwrap();
+    assert!(body.starts_with("#EXTM3U"), "{body}");
+    assert!(body.contains("/api/proxy?url="), "{body}");
 }

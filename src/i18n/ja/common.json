@@ -23,7 +23,7 @@
   "pageNotFound": "ページが見つかりません",
   "pageNotFoundHint": "このアドレスに該当するページはありません。サイドバーを使うか、ホームに戻ってください。",
 
-  "errorTitleNetwork": "サーバーに接続できません",
+  "errorTitleNetwork": "サーバーに接続できませんでした",
   "errorTitleTimeout": "リクエストがタイムアウトしました",
   "errorTitleAuth": "ログインが拒否されました",
   "errorTitleNotFound": "見つかりません",
@@ -46,5 +46,10 @@
   "errorHintConflict": "再読み込みして最新の状態を確認してから、もう一度お試しください。",
   "errorHintIo": "フォルダーが存在し、書き込み権限があることを確認してください。",
   "errorHintDb": "アプリを再起動してください。繰り返し発生する場合は、設定からバックアップを復元してください。",
-  "errorHintInternal": "もう一度お試しください。繰り返し発生する場合は、アプリを再起動してください。"
+  "errorHintInternal": "もう一度お試しください。繰り返し発生する場合は、アプリを再起動してください。",
+  "errorCode": "エラーコード: {{code}}",
+  "errorTitleEngineMissing": "プレーヤーエンジンを起動できませんでした",
+  "errorHintEngineMissing": "動画プレーヤーエンジン(mpv)が見つからないか、起動できませんでした。",
+  "errorTitleServer": "サーバーで問題が発生しました",
+  "errorHintServer": "サーバーが混雑しているか、問題が発生しています。しばらくしてからもう一度お試しください。"
 }

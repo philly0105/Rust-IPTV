@@ -11,7 +11,7 @@
 pub mod rpc;
 pub mod store;
 
-use crate::error::{CoreError, CoreResult, RpcError};
+use crate::error::{CoreError, CoreResult, RpcError, RpcErrorCode};
 use crate::model::{
     EpgLinks, ImportSummary, M3uOrigin, M3uSourceConfig, RequestHeaders, Source, SourceKind,
     StalkerSourceConfig, XtreamSourceConfig,
@@ -19,6 +19,7 @@ use crate::model::{
 use crate::state::AppState;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use store::SourceConfig;
@@ -43,6 +44,8 @@ type CancelMap = DashMap<String, tokio_util::sync::CancellationToken>;
 tokio::task_local! {
     /// Cancel token of the import [`run_import`] is running in this task.
     static IMPORT_CANCEL: tokio_util::sync::CancellationToken;
+    /// The run itself, so errors raised inside it name the real cause.
+    static IMPORT_RUN: Arc<ActiveRun>;
 }
 
 /// Imports (or re-imports) one source's catalog. m3u is registered by B1,
@@ -73,13 +76,16 @@ pub fn importer(state: &AppState, kind: SourceKind) -> Option<Arc<dyn Importer>>
 #[serde(rename_all = "camelCase")]
 pub struct ImportProgress<'a> {
     pub source_id: &'a str,
-    /// `fetching` | `parsing` | `saving` | `done` | `error`
+    /// `fetching` | `parsing` | `saving` | `done` | `error` | `cancelled`
     pub phase: &'a str,
     pub done: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<&'a str>,
+    /// Classified error code for `phase: "error"` (C10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<RpcErrorCode>,
 }
 
 /// Emits `import.progress` (C6). Importers call it at least every 2000 items.
@@ -99,8 +105,31 @@ pub fn progress(
             done,
             total,
             message,
+            code: None,
         },
     );
+}
+
+/// Emits `import.progress` with `phase: "error"`, the message and its
+/// classified code (C10).
+pub fn progress_error(state: &AppState, source_id: &str, message: &str, code: RpcErrorCode) {
+    state.emit(
+        "import.progress",
+        ImportProgress {
+            source_id,
+            phase: "error",
+            done: 0,
+            total: None,
+            message: Some(message),
+            code: Some(code),
+        },
+    );
+}
+
+/// Emits `import.progress` with `phase: "cancelled"` (C8): the run stopped
+/// and the previous catalog is intact.
+pub fn progress_cancelled(state: &AppState, source_id: &str, message: &str) {
+    progress(state, source_id, "cancelled", 0, None, Some(message));
 }
 
 /// Emits `sources.changed {}`.
@@ -192,6 +221,9 @@ pub struct SourceCounts {
 pub struct RefreshFailure {
     pub id: String,
     pub error: String,
+    /// Classified code of `error` (C10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<RpcErrorCode>,
 }
 
 /// `sources.refreshAll` result.
@@ -419,6 +451,8 @@ pub fn error_text(err: &CoreError) -> String {
         | CoreError::Network(m)
         | CoreError::Auth(m)
         | CoreError::Timeout(m)
+        | CoreError::Server(m)
+        | CoreError::EngineMissing(m)
         | CoreError::Conflict(m)
         | CoreError::Unsupported(m) => m.clone(),
         other => other.to_string(),
@@ -455,17 +489,193 @@ fn cancel_imports(state: &AppState, id: &str, removing: bool) {
 }
 
 /// Cancel token of the import running in the current task (set by
-/// [`run_import`]); importers stop their network reads when it fires.
+/// [`run_import`] and [`run_import_with`]); importers and the HTTP helpers
+/// stop their network reads when it fires.
 pub fn import_cancel() -> Option<tokio_util::sync::CancellationToken> {
     IMPORT_CANCEL.try_with(Clone::clone).ok()
 }
 
-/// The error a cancelled import ends with.
+/// True when the import running in the current task was cancelled.
+pub fn is_import_cancelled() -> bool {
+    IMPORT_CANCEL
+        .try_with(tokio_util::sync::CancellationToken::is_cancelled)
+        .unwrap_or(false)
+}
+
+const REMOVED_OR_CHANGED_MESSAGE: &str = "the import stopped because the source was removed or its settings changed. Refresh the source to import it again.";
+const USER_CANCELLED_MESSAGE: &str =
+    "import stopped: cancelled by user. Nothing from this run was saved; refresh the source to import it again.";
+
+/// The error a cancelled import ends with. Inside a run stopped by
+/// `sources.cancelImport` this is [`user_cancelled_error`], so code that
+/// only sees the token (HTTP helpers, importers) reports the real cause.
 pub fn import_cancelled_error() -> CoreError {
-    CoreError::Conflict(
-        "the import stopped because the source was removed or its settings changed. Refresh the source to import it again."
-            .into(),
-    )
+    let by_user = IMPORT_RUN
+        .try_with(|r| r.user_cancelled.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    if by_user {
+        user_cancelled_error()
+    } else {
+        CoreError::Conflict(REMOVED_OR_CHANGED_MESSAGE.into())
+    }
+}
+
+/// The error an import stopped by `sources.cancelImport` ends with (C8).
+pub fn user_cancelled_error() -> CoreError {
+    CoreError::Conflict(USER_CANCELLED_MESSAGE.into())
+}
+
+/// True for the errors of a cancelled import ([`import_cancelled_error`],
+/// [`user_cancelled_error`]); they are not import failures.
+pub fn is_cancelled_error(err: &CoreError) -> bool {
+    matches!(err, CoreError::Conflict(m) if m == REMOVED_OR_CHANGED_MESSAGE || m == USER_CANCELLED_MESSAGE)
+}
+
+/// How long a cancelled import may take to stop on its own (cooperative
+/// checks between fetch, parse and save) before [`run_import`] drops it.
+/// A catalog writer still running on the blocking pool then rolls back at
+/// its next check (see [`writer_cancel_token`]).
+pub const CANCEL_GRACE: Duration = Duration::from_secs(2);
+
+/// `AppState.extensions` key of the runs in progress (C8).
+pub const ACTIVE_KEY: &str = "sources.active";
+
+/// One import or refresh in progress for a source.
+#[derive(Debug)]
+pub struct ActiveRun {
+    pub token: tokio_util::sync::CancellationToken,
+    /// Set by `sources.cancelImport` (versus a remove or settings change).
+    pub user_cancelled: AtomicBool,
+}
+
+type ActiveMap = DashMap<String, Arc<ActiveRun>>;
+
+fn active(state: &AppState) -> Arc<ActiveMap> {
+    state.ext_or_insert_with::<ActiveMap>(ACTIVE_KEY, || Arc::new(DashMap::new()))
+}
+
+type WriterTokens = DashMap<String, Vec<Arc<tokio_util::sync::CancellationToken>>>;
+
+/// Cancel tokens of the runs in progress, for catalog writers on the
+/// blocking pool (no task-local there). Process-wide because a writer only
+/// has its connection and source id, so the key is the database file plus
+/// the source id ([`writer_key`]): two app states (tests, server plus
+/// desktop) with the same source id never see each other's cancel. A writer
+/// snapshots the newest token when it begins, so a newer run never sees an
+/// older run's cancel.
+static WRITER_TOKENS: std::sync::LazyLock<WriterTokens> = std::sync::LazyLock::new(DashMap::new);
+
+/// `WRITER_TOKENS` key: the canonical database path and the source id.
+fn writer_key(db_path: &std::path::Path, source_id: &str) -> String {
+    let db = std::fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf());
+    format!("{}\u{0}{source_id}", db.to_string_lossy())
+}
+
+/// Cancel token of the newest run in progress for `source_id` in the
+/// database `conn` is open on. Catalog writers take it when they begin and
+/// check it while inserting and before committing, so a cancelled run never
+/// commits a catalog.
+pub fn writer_cancel_token(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+) -> Option<tokio_util::sync::CancellationToken> {
+    let db = conn.path().unwrap_or_default();
+    WRITER_TOKENS
+        .get(&writer_key(std::path::Path::new(db), source_id))
+        .and_then(|v| v.last().map(|t| (**t).clone()))
+}
+
+/// Registers a run for [`cancel_import`] and the catalog writers; dropping it
+/// unregisters.
+struct RunGuard {
+    active: Arc<ActiveMap>,
+    id: String,
+    run: Arc<ActiveRun>,
+    writer_key: String,
+    writer_token: Arc<tokio_util::sync::CancellationToken>,
+    /// While the run lasts, user writes wait for its write transaction
+    /// instead of failing after the normal busy timeout (review round 3).
+    _long: crate::db::LongWrite,
+}
+
+impl RunGuard {
+    fn new(state: &AppState, id: &str, token: tokio_util::sync::CancellationToken) -> Self {
+        let run = Arc::new(ActiveRun {
+            token: token.clone(),
+            user_cancelled: AtomicBool::new(false),
+        });
+        let active = active(state);
+        active.insert(id.to_string(), run.clone());
+        let writer_token = Arc::new(token);
+        let writer_key = writer_key(&state.db_path(), id);
+        WRITER_TOKENS
+            .entry(writer_key.clone())
+            .or_default()
+            .push(writer_token.clone());
+        Self {
+            active,
+            writer_key,
+            id: id.to_string(),
+            run,
+            writer_token,
+            _long: crate::db::long_write(),
+        }
+    }
+
+    fn user_cancelled(&self) -> bool {
+        self.run.user_cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Message of the cancel that stopped this run.
+    fn cancel_message(&self) -> &'static str {
+        if self.user_cancelled() {
+            USER_CANCELLED_MESSAGE
+        } else {
+            REMOVED_OR_CHANGED_MESSAGE
+        }
+    }
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.active
+            .remove_if(&self.id, |_, r| Arc::ptr_eq(r, &self.run));
+        if let dashmap::mapref::entry::Entry::Occupied(mut e) =
+            WRITER_TOKENS.entry(self.writer_key.clone())
+        {
+            e.get_mut().retain(|t| !Arc::ptr_eq(t, &self.writer_token));
+            if e.get().is_empty() {
+                e.remove();
+            }
+        }
+    }
+}
+
+/// True while an import or refresh of `id` is running (holding the
+/// per-source lock).
+pub fn is_import_running(state: &AppState, id: &str) -> bool {
+    active(state).contains_key(id)
+}
+
+/// `sources.cancelImport` (C8): cancels the import or refresh of `id` that is
+/// running. Returns true when one was running and is now cancelling (it ends
+/// with `import.progress` `phase: "cancelled"` and keeps the previous
+/// catalog), false when nothing was running. Runs queued behind it start
+/// normally.
+pub fn cancel_import(state: &AppState, id: &str) -> bool {
+    let Some(run) = active(state).get(id).map(|r| Arc::clone(r.value())) else {
+        return false;
+    };
+    let map = cancels(state);
+    // A remove in progress leaves a cancelled token for queued runs; keep it.
+    let removing = map.get(id).is_some_and(|t| t.is_cancelled());
+    run.user_cancelled.store(true, Ordering::SeqCst);
+    run.token.cancel();
+    if !removing {
+        map.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
+    }
+    tracing::info!(source_id = id, "import cancel requested");
+    true
 }
 
 /// Runs `fut` while holding the per-source import lock that [`run_import`]
@@ -473,17 +683,85 @@ pub fn import_cancelled_error() -> CoreError {
 /// `contentTypes` subset) never interleaves with a full refresh of the same
 /// source. `fut` must not call `run_import` / `remove` for that source itself
 /// (the lock is not reentrant).
-pub async fn run_import_with<T>(
+///
+/// The run is cancellable like [`run_import`] (`sources.cancelImport`, a
+/// remove, a settings change): `fut` sees the token through
+/// [`import_cancel`], and the HTTP helpers and catalog writers honour it.
+/// `fut` reports its own outcome; when the run was cancelled this also emits
+/// `import.progress` `phase: "cancelled"`. A cancelled `fut` that does not
+/// stop within [`CANCEL_GRACE`] is dropped, as in [`run_import`], and the
+/// result is [`CancelOutcome::cancelled`].
+pub async fn run_import_with<T: CancelOutcome>(
     state: &AppState,
     id: &str,
     fut: impl std::future::Future<Output = T>,
 ) -> T {
     let lock = lock_for(state, id);
     let _guard = lock.lock().await;
-    fut.await
+    let token = current_token(state, id);
+    if token.is_cancelled() {
+        // Queued behind a run that `remove` cancelled: the source is going.
+        return T::cancelled(import_cancelled_error());
+    }
+    let run = RunGuard::new(state, id, token.clone());
+    let fut = IMPORT_RUN.scope(run.run.clone(), IMPORT_CANCEL.scope(token.clone(), fut));
+    tokio::pin!(fut);
+    let out = tokio::select! {
+        out = &mut fut => out,
+        () = token.cancelled() => match tokio::time::timeout(CANCEL_GRACE, &mut fut).await {
+            Ok(out) => out,
+            Err(_) => {
+                tracing::warn!(source_id = id, "sync did not stop in time after cancel; dropped");
+                T::cancelled(if run.user_cancelled() {
+                    user_cancelled_error()
+                } else {
+                    import_cancelled_error()
+                })
+            }
+        },
+    };
+    if token.is_cancelled() {
+        progress_cancelled(state, id, run.cancel_message());
+    }
+    out
 }
 
-/// Every source ordered by position, with cached counts.
+/// Result of a [`run_import_with`] run that was dropped after a cancel.
+pub trait CancelOutcome {
+    fn cancelled(err: CoreError) -> Self;
+}
+
+impl CancelOutcome for () {
+    fn cancelled(_: CoreError) -> Self {}
+}
+
+impl<T> CancelOutcome for Option<T> {
+    fn cancelled(_: CoreError) -> Self {
+        None
+    }
+}
+
+impl<T> CancelOutcome for CoreResult<T> {
+    fn cancelled(err: CoreError) -> Self {
+        Err(err)
+    }
+}
+
+impl<T> CancelOutcome for Result<T, String> {
+    fn cancelled(err: CoreError) -> Self {
+        Err(error_text(&err))
+    }
+}
+
+fn current_token(state: &AppState, id: &str) -> tokio_util::sync::CancellationToken {
+    cancels(state)
+        .entry(id.to_string())
+        .or_default()
+        .value()
+        .clone()
+}
+
+// Every source ordered by position, with cached counts.
 pub async fn list(state: &AppState) -> CoreResult<Vec<Source>> {
     state.db_call(|c| store::list(c)).await
 }
@@ -513,11 +791,29 @@ impl From<CoreError> for AddError {
 
 impl From<AddError> for RpcError {
     fn from(e: AddError) -> Self {
+        let cancelled = is_cancelled_error(&e.error);
         let mut err = RpcError::from(e.error);
-        if let Some(id) = e.source_id {
-            err = err.with_details(serde_json::json!({ "sourceId": id }));
+        match (e.source_id, cancelled) {
+            (Some(id), true) => {
+                err = err.with_details(serde_json::json!({ "sourceId": id, "cancelled": true }))
+            }
+            (Some(id), false) => err = err.with_details(serde_json::json!({ "sourceId": id })),
+            (None, true) => err = err.with_details(serde_json::json!({ "cancelled": true })),
+            (None, false) => {}
         }
         err
+    }
+}
+
+/// RPC error of a run that may have been cancelled: a cancelled run carries
+/// `details.cancelled = true` (C8) so callers can tell it from a failure.
+pub fn cancel_aware_rpc_error(err: CoreError) -> RpcError {
+    let cancelled = is_cancelled_error(&err);
+    let rpc = RpcError::from(err);
+    if cancelled {
+        rpc.with_details(serde_json::json!({ "cancelled": true }))
+    } else {
+        rpc
     }
 }
 
@@ -602,36 +898,58 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
 }
 
 /// Runs the importer for one source (serialized per source), then records the
-/// outcome. A failed import leaves the previous catalog in place. [`remove`]
-/// and a settings change in [`update`] cancel it (see [`import_cancel`]); a
-/// cancelled import records no `lastError`.
+/// outcome. A failed import leaves the previous catalog in place and records
+/// `lastError` with its code (C10).
+///
+/// Cancellation (C8): `sources.cancelImport`, [`remove`] and a settings change
+/// in [`update`] cancel the run's token. The importer stops at its next
+/// cooperative check (HTTP sends and body reads, stage boundaries, catalog
+/// writer batches); one that does not stop within [`CANCEL_GRACE`] is
+/// dropped. Catalog writers check the token before committing, so a
+/// cancelled run leaves the previous catalog intact. It emits
+/// `import.progress` `phase: "cancelled"` and records no `lastError`.
 pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, ImportSummary)> {
     let lock = lock_for(&state, id);
     let guard = lock.lock().await;
-    let token = cancels(&state)
-        .entry(id.to_string())
-        .or_default()
-        .value()
-        .clone();
+    let token = current_token(&state, id);
     if token.is_cancelled() {
         // Queued behind an import that `remove` cancelled.
         return Err(import_cancelled_error());
     }
+    let run = RunGuard::new(&state, id, token.clone());
     let source = get(&state, id).await?;
     let Some(imp) = importer(&state, source.kind) else {
         let err = CoreError::Unsupported(format!(
             "{} sources are not available in this build",
             source.kind.as_str()
         ));
-        record(&state, id, Some(&error_text(&err))).await;
+        record(&state, id, Some((&error_text(&err), err.code()))).await;
+        progress_error(&state, id, &error_text(&err), err.code());
         return Err(err);
     };
     let started = std::time::Instant::now();
-    let outcome = IMPORT_CANCEL
-        .scope(token.clone(), imp.import(state.clone(), &source))
-        .await;
+    let fut = IMPORT_RUN.scope(
+        run.run.clone(),
+        IMPORT_CANCEL.scope(token.clone(), imp.import(state.clone(), &source)),
+    );
+    tokio::pin!(fut);
+    let outcome = tokio::select! {
+        r = &mut fut => r,
+        () = token.cancelled() => {
+            // Give the importer a moment to stop cleanly (temp files, logs).
+            match tokio::time::timeout(CANCEL_GRACE, &mut fut).await {
+                Ok(r) => r,
+                Err(_) => {
+                    tracing::warn!(source_id = id, "import did not stop in time after cancel; dropped");
+                    Err(import_cancelled_error())
+                }
+            }
+        }
+    };
     match outcome {
         Ok(summary) => {
+            // A cancel that arrived after the catalog was committed is too
+            // late to undo; the run is reported as done.
             let sid = id.to_string();
             let kind = source.kind;
             let (movies, series) = (summary.movies, summary.series);
@@ -645,6 +963,7 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
                     Ok(())
                 })
                 .await?;
+            drop(run);
             // The backup import lock is never taken while this source's
             // import lock is held (lock order: backup, then source).
             drop(guard);
@@ -664,22 +983,38 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
             spawn_guide_refresh(&state, &source);
             Ok((source, summary))
         }
+        Err(err) if token.is_cancelled() => {
+            let msg = run.cancel_message();
+            tracing::info!(
+                source_id = id,
+                by_user = run.user_cancelled(),
+                ms = started.elapsed().as_millis() as u64,
+                "source import cancelled; previous catalog kept"
+            );
+            if !is_cancelled_error(&err) {
+                tracing::debug!(source_id = id, error = %error_text(&err), "error after cancel");
+            }
+            progress_cancelled(&state, id, msg);
+            emit_changed(&state);
+            Err(if run.user_cancelled() {
+                user_cancelled_error()
+            } else {
+                import_cancelled_error()
+            })
+        }
         Err(err) => {
             let msg = error_text(&err);
-            if token.is_cancelled() {
-                tracing::info!(source_id = id, "source import cancelled");
-            } else {
-                tracing::warn!(source_id = id, error = %msg, "source import failed; previous catalog kept");
-                record(&state, id, Some(&msg)).await;
-            }
-            progress(&state, id, "error", 0, None, Some(&msg));
+            let code = err.code();
+            tracing::warn!(source_id = id, error = %msg, code = code.as_str(), "source import failed; previous catalog kept");
+            record(&state, id, Some((&msg, code))).await;
+            progress_error(&state, id, &msg, code);
             emit_changed(&state);
             Err(err)
         }
     }
 }
 
-/// Guide URLs of a source that a refresh should cover: detected and manual
+// Guide URLs of a source that a refresh should cover: detected and manual
 /// URLs minus the disabled ones, trimmed, blanks dropped, first occurrence kept.
 pub fn guide_urls(links: &EpgLinks) -> Vec<String> {
     let disabled: std::collections::HashSet<&str> =
@@ -797,11 +1132,16 @@ async fn apply_parked_backup(state: &Arc<AppState>, id: &str) {
     }
 }
 
-async fn record(state: &AppState, id: &str, error: Option<&str>) {
+/// Records a failed import (message and code, C10), or a success when `error`
+/// is `None`. The message is redacted: it is shown on screen and exported.
+async fn record(state: &AppState, id: &str, error: Option<(&str, RpcErrorCode)>) {
     let sid = id.to_string();
-    let error = error.map(str::to_owned);
+    let error = error.map(|(m, c)| (crate::logging::redact_text(m).into_owned(), c));
     if let Err(err) = state
-        .db_call(move |c| store::record_import(c, &sid, error.as_deref()))
+        .db_call(move |c| match &error {
+            Some((msg, code)) => store::record_import_error(c, &sid, msg, *code),
+            None => store::record_import(c, &sid, None),
+        })
         .await
     {
         tracing::warn!(source_id = id, %err, "could not record import outcome");
@@ -995,9 +1335,12 @@ pub async fn refresh_all(state: Arc<AppState>) -> CoreResult<RefreshAllResult> {
             Err(CoreError::NotFound(_)) if get(&state, &s.id).await.is_err() => {
                 // Removed while we were refreshing others; nothing to report.
             }
+            // Cancelled (cancelImport, remove, edit): not a failure.
+            Err(err) if is_cancelled_error(&err) => {}
             Err(err) => out.failed.push(RefreshFailure {
                 id: s.id,
-                error: error_text(&err),
+                code: Some(err.code()),
+                error: crate::logging::redact_text(&error_text(&err)).into_owned(),
             }),
         }
     }

@@ -481,3 +481,36 @@ async fn rpc_lifecycle_and_registration() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn a_busy_port_at_startup_is_retried_until_it_frees_up() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (sink, _rx) = BroadcastSink::channel(8);
+    let state = AppState::new(tmp.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    let busy = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let port = busy.local_addr().unwrap().port();
+    {
+        let mut settings = state.settings.write();
+        settings.remote_control.enabled = true;
+        settings.remote_control.port = port;
+    }
+    assert!(remote::init(state.clone()).await.is_err());
+    assert_eq!(remote::hub(&state).running_port(), None);
+    drop(busy);
+
+    // The watcher tries again without any settings change.
+    let deadline = tokio::time::Instant::now() + remote::START_RETRY + Duration::from_secs(5);
+    while remote::hub(&state).running_port().is_none() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the remote server never started once the port was free"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert_eq!(remote::hub(&state).running_port(), Some(port));
+    remote::stop(state.clone()).await.unwrap();
+}

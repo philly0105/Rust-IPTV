@@ -26,6 +26,7 @@
   "manageCategoriesHidden_other": "Управление категориями (скрыто {{count}})",
   "manageCategoriesHint": "Скрыто {{hidden}} из {{total}}. Скрытые категории не отображаются в списках и поиске.",
   "noCategoryMatch": "Нет категорий, подходящих под фильтр.",
+  "clearFilter": "Сбросить фильтр",
   "saveCategories": "Сохранить",
   "categoriesSaved": "Видимость категорий сохранена",
   "categoriesSaveFailed": "Не удалось сохранить видимость категорий",
@@ -67,6 +68,7 @@
   "resume": "Продолжить",
   "resumeAt": "Продолжить с {{time}}",
   "startOver": "Смотреть с начала",
+  "startOverEpisode": "Смотреть {{code}} сначала",
   "playEpisode": "Смотреть {{code}}",
   "resumeEpisode": "Возобновить {{code}}",
   "nowPlaying": "Сейчас воспроизводится",
@@ -159,6 +161,8 @@
   "tmdbKeyMissingTitle": "Для похожих позиций нужен ключ TMDB",
   "tmdbKeyMissingHint": "Добавьте ключ TMDB в разделе «Настройки» > «Метаданные».",
   "addTmdbKey": "Добавить ключ TMDB",
+  "tmdbKeyRejectedTitle": "TMDB отклонил ключ API",
+  "tmdbKeyRejectedHint": "Проверьте или замените ключ TMDB в разделе «Настройки» > «Метаданные».",
   "watched": "Просмотрено",
   "markWatched": "Отметить как просмотренное",
   "markUnwatched": "Отметить как непросмотренное",
@@ -193,5 +197,6 @@
   "searchCountMore_few": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Не удалось загрузить эти названия"
+  "pageLoadFailed": "Не удалось загрузить эти названия",
+  "searchPartialError": "Не удалось загрузить часть результатов."
 }

@@ -113,7 +113,11 @@ pub fn xmltv_url(server: &str, username: &str, password: &str) -> String {
 /// True when `url` is an `xmltv.php` URL on `server` (any credentials).
 pub fn is_xmltv_url_for(url: &str, server: &str) -> bool {
     let prefix = format!("{server}/xmltv.php");
-    url.len() >= prefix.len() && url[..prefix.len()].eq_ignore_ascii_case(&prefix)
+    // Compare bytes: `url[..n]` panics when byte `n` falls inside a
+    // multi-byte character of a provider-supplied EPG URL.
+    url.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
 /// Live stream: `{server}/live/{u}/{p}/{id}.{ext}`.
@@ -167,7 +171,16 @@ pub fn timeshift_url(
 /// Formats a catch-up start as `YYYY-MM-DD:HH-mm` in the server's local time
 /// (`offset_seconds` east of UTC; 0 when unknown).
 pub fn catchup_stamp(start: DateTime<Utc>, offset_seconds: i64) -> String {
-    (start + Duration::seconds(offset_seconds))
+    // The offset is read back from stored metadata; an out-of-range value
+    // (or a start at the edge of chrono's range) must not panic. Real
+    // offsets are within +-14 h, so anything else is treated as 0.
+    let offset = Some(offset_seconds)
+        .filter(|s| s.unsigned_abs() <= 14 * 3600)
+        .and_then(Duration::try_seconds)
+        .unwrap_or_else(Duration::zero);
+    start
+        .checked_add_signed(offset)
+        .unwrap_or(start)
         .format("%Y-%m-%d:%H-%M")
         .to_string()
 }
@@ -255,6 +268,29 @@ mod tests {
         assert_eq!(catchup_stamp(t, 0), "2026-10-11:23-05");
         assert_eq!(catchup_stamp(t, 2 * 3600), "2026-10-12:01-05");
         assert_eq!(catchup_stamp(t, -5 * 3600), "2026-10-11:18-05");
+    }
+
+    /// B8-parsers: absurd offsets and starts at chrono's range edge used to
+    /// panic in `Duration::seconds` / `DateTime + Duration`.
+    #[test]
+    fn catchup_stamp_survives_extreme_inputs() {
+        let t = Utc.with_ymd_and_hms(2026, 10, 11, 23, 5, 0).unwrap();
+        assert_eq!(catchup_stamp(t, i64::MAX), "2026-10-11:23-05");
+        assert_eq!(catchup_stamp(t, i64::MIN), "2026-10-11:23-05");
+        let _ = catchup_stamp(DateTime::<Utc>::MAX_UTC, 3600);
+        let _ = catchup_stamp(DateTime::<Utc>::MIN_UTC, -3600);
+    }
+
+    /// B8-parsers: a multi-byte char at the prefix length used to panic.
+    #[test]
+    fn xmltv_url_check_is_char_safe() {
+        let server = "http://h:8080";
+        assert!(is_xmltv_url_for("HTTP://H:8080/XMLTV.PHP?u=a", server));
+        assert!(!is_xmltv_url_for("http://h:8080/xmltv.ph", server));
+        // Byte 26 (the prefix length) lands inside 'é' here.
+        assert!(!is_xmltv_url_for("http://h:8080/xmltv.phéé", server));
+        assert!(!is_xmltv_url_for("http://h:8080/éééééééééé", server));
+        assert!(!is_xmltv_url_for("", server));
     }
 
     #[test]

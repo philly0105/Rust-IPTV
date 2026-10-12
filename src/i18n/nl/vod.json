@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "Categorieën beheren ({{count}} verborgen)",
   "manageCategoriesHint": "{{hidden}} van {{total}} verborgen. Verborgen categorieën blijven buiten lijsten en zoekresultaten.",
   "noCategoryMatch": "Geen categorie komt overeen met dit filter.",
+  "clearFilter": "Filter wissen",
   "saveCategories": "Opslaan",
   "categoriesSaved": "Zichtbaarheid van categorieën opgeslagen",
   "categoriesSaveFailed": "Kan zichtbaarheid van categorieën niet opslaan",
@@ -61,6 +62,7 @@
   "resume": "Hervatten",
   "resumeAt": "Hervatten vanaf {{time}}",
   "startOver": "Vanaf begin bekijken",
+  "startOverEpisode": "{{code}} opnieuw beginnen",
   "playEpisode": "{{code}} afspelen",
   "resumeEpisode": "{{code}} hervatten",
   "nowPlaying": "Nu bezig",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "Voor vergelijkbare titels is een TMDB-sleutel nodig",
   "tmdbKeyMissingHint": "Voeg een TMDB-sleutel toe in Instellingen > Metadata.",
   "addTmdbKey": "TMDB-sleutel toevoegen",
+  "tmdbKeyRejectedTitle": "TMDB heeft de API-sleutel geweigerd",
+  "tmdbKeyRejectedHint": "Controleer of vervang de TMDB-sleutel in Instellingen > Metadata.",
   "watched": "Bekeken",
   "markWatched": "Markeren als bekeken",
   "markUnwatched": "Markeren als niet bekeken",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "Tot {{count}} tonen",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Deze titels konden niet worden geladen"
+  "pageLoadFailed": "Deze titels konden niet worden geladen",
+  "searchPartialError": "Sommige resultaten konden niet worden geladen."
 }

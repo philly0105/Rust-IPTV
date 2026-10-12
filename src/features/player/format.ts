@@ -12,14 +12,22 @@ export function formatTime(seconds: number | undefined): string {
 export const SEEK_STEP = 10;
 export const SEEK_STEP_LARGE = 30;
 
-/** "4:20 / 45:00" for VOD; for live "Live" at the edge or "1:20 behind live". */
+/** Seconds behind the end of the seekable window that still count as live (the element's buffer). */
+export const LIVE_EDGE_SLACK = 6;
+/** mpv's cache runs a few seconds ahead of playback even at the live edge. */
+export const LIVE_EDGE_SLACK_MPV = 10;
+
+/**
+ * "4:20 / 45:00" for VOD; for live "Live" at the edge or "1:20 behind live". The edge uses the
+ * same slack as the control bar's LIVE badge, so the readout and the badge never disagree.
+ */
 export function positionReadout(
   t: (key: string, opts?: Record<string, unknown>) => string,
-  p: { position: number; duration?: number; liveEnd?: number },
+  p: { position: number; duration?: number; liveEnd?: number; edgeSlack?: number | undefined },
 ): string {
   if (p.liveEnd !== undefined) {
     const behind = Math.max(0, p.liveEnd - p.position);
-    return behind < 3 ? t('live') : t('behindLive', { time: formatTime(behind) });
+    return behind < (p.edgeSlack ?? LIVE_EDGE_SLACK) ? t('live') : t('behindLive', { time: formatTime(behind) });
   }
   return `${formatTime(p.position)} / ${formatTime(p.duration)}`;
 }

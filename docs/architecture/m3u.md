@@ -67,4 +67,4 @@ The whole remote body is never held in a `String` while downloading or parsing.
 ## Known limits
 
 - Playlists over 8 MB are not copied into `m3u_raw.raw`; readers other than `m3u.raw` (backup export, backup fingerprint) must read through `m3u::stored_text`. An 82 MB, 480k-channel file imports with a peak RSS delta of about 50 MB (`m3u_perf::import_80mb_playlist_with_flat_memory`, ignored by default).
-- An import holds the write lock for its whole transaction (about 1 s per 50k rows in release). Other writers wait, up to the 5 s busy timeout.
+- An import holds the write lock for its whole transaction (about 1 s per 50k rows in release). Other writers wait for it: while a catalog import runs the busy wait is up to 600 s (`db::LONG_BUSY_TIMEOUT`) instead of the usual 5 s, so user writes (positions, favorites, settings) wait for the commit instead of failing.

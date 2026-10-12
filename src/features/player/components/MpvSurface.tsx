@@ -1,27 +1,32 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
 import { isDesktop, rpc } from '@/api/transport';
-import type { Bounds, MpvState, MpvTrack } from '@/api/types';
+import type { Bounds, MpvState, MpvTrack, PlayerSource } from '@/api/types';
 
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import type { EngineTracks, TrackOption } from '../engines';
+import { classifyStreamError, rpcErrorCode } from '../errors';
 import { modalOpen } from '../format';
 import { setMediaCommands, useMediaStore } from '../media';
 import { measureMpvBounds, measureMpvLayout } from '../mpvBounds';
-import { exitPip, togglePip, usePipStore } from '../pip';
+import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
 import {
+  DOUBLE_CLICK_MS,
   ENDED_EPSILON,
   handleEnded,
   reportFullscreen,
   reportProgress,
   reportStatus,
   reportVolume,
+  selectEnded,
   setController,
   usePlayerStore,
 } from '../store';
+import { stepVolume } from '../usePlaybackShortcuts';
+import { VideoContextMenu } from './VideoContextMenu';
 
 /** Off-screen bounds while a modal dialog needs the whole window (the native surface paints above the DOM). */
 export const HIDDEN_BOUNDS: Bounds = { x: -16000, y: -16000, width: 16, height: 16 };
@@ -42,6 +47,19 @@ export function surfaceBounds(el: Element): Bounds {
  * and that detach would kill the newer one.
  */
 let attachSeq = 0;
+
+/** Most notches one wheel event may move the volume (a flung free-spinning wheel). */
+const MAX_WHEEL_NOTCHES = 4;
+
+/** The mpv executable is missing (C12 `engine_missing`, or its message before the core sends that code). */
+function engineMissing(err: unknown): boolean {
+  return classifyStreamError({ code: rpcErrorCode(err), message: err instanceof Error ? err.message : String(err) }) === 'engineMissing';
+}
+
+/** Identifies one item for mpv; '' for a placeholder without a stream URL (nothing to load). */
+export function mpvLoadKey(s: Pick<PlayerSource, 'url' | 'episodeId'>): string {
+  return s.url ? `${s.url}|${s.episodeId ?? ''}` : '';
+}
 
 export function boundsEqual(a: Bounds | null, b: Bounds): boolean {
   return !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
@@ -81,13 +99,46 @@ export function MpvSurface({ className }: { className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const source = usePlayerStore((s) => s.source);
   const [attached, setAttached] = useState(false);
+  /** Bumped per successful attach (first start and every restart after a crash): the load effect reloads. */
+  const [sessionNonce, setSessionNonce] = useState(0);
+  /** Bumped by Retry on a live session: reload the same item. */
+  const [reloadNonce, setReloadNonce] = useState(0);
+  /**
+   * The item whose `mpv.load` mpv has accepted. Until it matches the store's current item,
+   * mpv's state still describes the previous file (or a failed load being retried), and its
+   * position, pause and end must not be credited to the new item.
+   */
+  const loadedKey = useRef<string | null>(null);
+  /** Where the video's context menu is open (viewport CSS px), or null. */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const menuOpen = useRef(false);
+  /** Re-measures the native window (set while attached): the open menu is cut out of the video. */
+  const remeasure = useRef<() => void>(() => undefined);
+  const closeMenu = useCallback(() => setMenuAt(null), []);
+  /** mpv cannot run here: say so, play in the built-in player, and offer the way back. */
+  const fallBack = useRef<(reason: string) => void>(() => undefined);
+  fallBack.current = (reason: string): void => {
+    toast({
+      title: t('mpvFailed'),
+      description: `${t('mpvUnavailable')}${reason ? ` (${reason})` : ''}`,
+      variant: 'error',
+      action: {
+        label: t('mpvTryAgain'),
+        onClick: () => {
+          if (usePlayerStore.getState().source) usePlayerStore.setState({ mode: 'embedded-mpv', status: 'loading', error: undefined });
+        },
+      },
+    });
+    useMediaStore.setState({ errorCode: undefined });
+    usePlayerStore.setState({ mode: 'inline', status: 'loading', error: undefined });
+  };
 
-  // Attach once per mount; detach on unmount.
+  // Attach once per mount (again after a crash, from Retry); detach on unmount.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     let disposed = false;
-    const session = ++attachSeq;
+    let session = 0;
     /** False until `mpv.attach` resolved and its state was applied: earlier events describe a session not yet configured. */
     let ready = false;
     let unController: () => void = () => undefined;
@@ -141,20 +192,69 @@ export function MpvSurface({ className }: { className?: string }) {
     // Clicks on the native video window. A click toggles pause at once; the double click that
     // follows puts the play state back and toggles fullscreen (or leaves PiP).
     let lastClick: { at: number; wasPaused: boolean } | null = null;
+    /** The double click that follows a click which only closed the menu does nothing either. */
+    let swallowDoubleUntil = 0;
+    /** A click on an ended item replays only once it is known not to start a double click (C6). */
+    let replayTimer: ReturnType<typeof setTimeout> | null = null;
+    const cancelReplay = (): void => {
+      if (replayTimer) clearTimeout(replayTimer);
+      replayTimer = null;
+    };
     const unClick = onAppEvent('mpv.click', () => {
       if (disposed || !ready) return;
+      // A click on the video while its menu is open only closes the menu.
+      if (menuOpen.current) {
+        lastClick = null;
+        swallowDoubleUntil = Date.now() + DOUBLE_CLICK_MS;
+        setMenuAt(null);
+        return;
+      }
+      const st = usePlayerStore.getState();
+      if (selectEnded(st)) {
+        // Replaying seeks to 0 and drops Up next, which a double click could not undo.
+        lastClick = null;
+        cancelReplay();
+        const src = st.source;
+        replayTimer = setTimeout(() => {
+          replayTimer = null;
+          const now = usePlayerStore.getState();
+          if (!disposed && now.source === src && selectEnded(now)) now.togglePlay();
+        }, DOUBLE_CLICK_MS);
+        return;
+      }
       lastClick = { at: Date.now(), wasPaused: useMediaStore.getState().mpv?.paused ?? false };
-      usePlayerStore.getState().togglePlay();
+      st.togglePlay();
     });
     const unDouble = onAppEvent('mpv.dblclick', () => {
-      if (disposed || !ready) return;
-      if (lastClick && Date.now() - lastClick.at < 1000) {
+      if (disposed || !ready || Date.now() < swallowDoubleUntil) return;
+      cancelReplay();
+      if (lastClick && Date.now() - lastClick.at < DOUBLE_CLICK_MS) {
         void rpc('mpv.setProperty', { name: 'pause', value: lastClick.wasPaused }).catch(() => undefined);
       }
       lastClick = null;
       if (usePipStore.getState().active) void exitPip();
       else usePlayerStore.getState().toggleFullscreen();
     });
+    // The wheel over the native video steps the volume like the arrow keys, with the same readout.
+    const unWheel = onAppEvent('mpv.wheel', ({ delta }) => {
+      if (disposed || !ready || !Number.isFinite(delta) || delta === 0) return;
+      stepVolume(Math.max(-MAX_WHEEL_NOTCHES, Math.min(MAX_WHEEL_NOTCHES, delta)), t);
+    });
+    const unMenu = onAppEvent('mpv.contextmenu', ({ x, y }) => {
+      if (disposed || !ready || !Number.isFinite(x) || !Number.isFinite(y)) return;
+      if (!usePlayerStore.getState().source) return;
+      setMenuAt({ x, y });
+    });
+    // PiP opens in the video's shape (mpv's display size, 16:9 when it has none yet).
+    const unAspect = setPipAspectSource(async () =>
+      ready ? aspectFromVideoParams(await rpc('mpv.command', { cmd: ['get_property', 'video-params'] })) : undefined,
+    );
+    remeasure.current = () => {
+      lastSent = null;
+      schedule();
+    };
+    /** The item whose video shape PiP last followed (a zap in PiP reshapes the window once). */
+    let aspectFollowed: string | null = null;
 
     const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
@@ -168,15 +268,26 @@ export function MpvSurface({ className }: { className?: string }) {
         recordStartedAt: st.recording ? (prev?.recording ? useMediaStore.getState().recordStartedAt : undefined) ?? Date.now() : undefined,
       });
       const src = usePlayerStore.getState().source;
-      reportProgress(st.timePos, src?.isLive ? undefined : st.duration);
       // The attach reply may predate the volume/mute we sent with it; the store keeps the saved values.
       if (!initial) reportVolume(st.volume / 100, st.muted);
+      // mpv died: always surface it, whatever item it was loading.
+      if (!st.attached && st.error) {
+        reportStatus('error', st.error);
+        return;
+      }
+      if (!src || loadedKey.current === null || loadedKey.current !== mpvLoadKey(src)) return;
+      reportProgress(st.timePos, src.isLive ? undefined : st.duration);
       if (st.error) reportStatus('error', st.error);
       else if (st.loaded) reportStatus(st.paused ? 'paused' : 'playing');
+      // The first frame of a new item is up: in PiP, the window follows its shape.
+      if (st.loaded && st.timePos > 0 && aspectFollowed !== loadedKey.current) {
+        aspectFollowed = loadedKey.current;
+        void refreshPipAspect();
+      }
       // keep-open pauses at EOF instead of ending: treat "paused at the end" as ended, once.
       const atEnd = !!st.duration && st.timePos >= st.duration - ENDED_EPSILON && st.paused;
       const wasAtEnd = !!prev?.duration && prev.timePos >= prev.duration - ENDED_EPSILON && prev.paused;
-      if (src && !src.isLive && atEnd && !wasAtEnd) handleEnded();
+      if (!src.isLive && atEnd && !wasAtEnd) handleEnded();
     };
 
     const unCommands = setMediaCommands({
@@ -189,47 +300,70 @@ export function MpvSurface({ className }: { className?: string }) {
       },
       togglePip: () => void togglePip(),
       retry: () => {
-        const src = usePlayerStore.getState().source;
-        if (src) void rpc('mpv.load', { source: src }).catch(() => undefined);
+        // The process is gone (crash, killed): start a new session; the load follows the attach.
+        if (useMediaStore.getState().mpv?.attached === false) {
+          attach(true);
+          return;
+        }
+        setReloadNonce((n) => n + 1);
       },
     });
     // Window picture-in-picture (the native video cannot use the browser's).
     useMediaStore.setState({ canPip: isDesktop });
 
-    const initial = surfaceBounds(el);
-    const { volume, muted } = usePlayerStore.getState();
-    // The session starts at the saved volume instead of mpv's 100 %.
-    rpc('mpv.attach', { bounds: initial, volume: Math.round(volume * 100), muted })
-      .then((st) => {
-        if (disposed) {
-          // Unmounted while attaching: make sure the session goes, unless a newer attach owns it.
-          if (session === attachSeq) void rpc('mpv.detach').catch(() => undefined);
-          return;
-        }
-        lastSent = initial;
-        applyState(st, true);
-        ready = true;
-        // Only now can property writes reach mpv (before attach they fail with "not attached").
-        unController = setController({
-          play: () => void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined),
-          pause: () => void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined),
-          seekTo: (s) => void rpc('mpv.command', { cmd: ['seek', s, 'absolute'] }).catch(() => undefined),
-          setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
-          setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
+    /** `restart`: after a crash, from Retry. A failure then stays in the player as an error with Retry. */
+    function attach(restart: boolean): void {
+      const mine = ++attachSeq;
+      session = mine;
+      ready = false;
+      loadedKey.current = null;
+      if (restart) {
+        setAttached(false);
+        lastSent = null;
+        lastHoles = '[]';
+      }
+      const initial = surfaceBounds(el!);
+      const { volume, muted } = usePlayerStore.getState();
+      // The session starts at the saved volume instead of mpv's 100 %.
+      rpc('mpv.attach', { bounds: initial, volume: Math.round(volume * 100), muted })
+        .then((st) => {
+          if (disposed) {
+            // Unmounted while attaching: make sure the session goes, unless a newer attach owns it.
+            if (mine === attachSeq) void rpc('mpv.detach').catch(() => undefined);
+            return;
+          }
+          if (mine !== session) return;
+          lastSent = initial;
+          applyState(st, true);
+          ready = true;
+          // Only now can property writes reach mpv (before attach they fail with "not attached").
+          unController();
+          unController = setController({
+            play: () => void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined),
+            pause: () => void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined),
+            seekTo: (s) => void rpc('mpv.command', { cmd: ['seek', s, 'absolute'] }).catch(() => undefined),
+            setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
+            setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
+          });
+          setAttached(true);
+          setSessionNonce((n) => n + 1);
+          schedule();
+        })
+        .catch((err: unknown) => {
+          if (disposed || mine !== session) return;
+          const reason = err instanceof Error && err.message ? err.message : '';
+          if (restart && !engineMissing(err)) {
+            // The strip keeps Retry and "Use the built-in player"; the reason says what is wrong.
+            setAttached(true);
+            useMediaStore.setState({ errorCode: rpcErrorCode(err) });
+            reportStatus('error', reason || t('mpvFailed'));
+            return;
+          }
+          // Unsupported platform or mpv missing: fall back to the built-in player, and offer the way back.
+          fallBack.current(reason);
         });
-        setAttached(true);
-        schedule();
-      })
-      .catch((err: unknown) => {
-        if (disposed) return;
-        // Unsupported platform or mpv missing: fall back to the built-in player.
-        toast({
-          title: t('mpvFailed'),
-          description: `${t('mpvUnavailable')}${err instanceof Error && err.message ? ` (${err.message})` : ''}`,
-          variant: 'error',
-        });
-        usePlayerStore.setState({ mode: 'inline', status: 'loading', error: undefined });
-      });
+    }
+    attach(false);
 
     return () => {
       disposed = true;
@@ -243,7 +377,12 @@ export function MpvSurface({ className }: { className?: string }) {
       dpr.removeEventListener('change', onDpr);
       unState();
       unClick();
+      cancelReplay();
       unDouble();
+      unWheel();
+      unMenu();
+      unAspect();
+      remeasure.current = () => undefined;
       unController();
       unCommands();
       useMediaStore.setState({ mpv: undefined, recordStartedAt: undefined });
@@ -254,15 +393,46 @@ export function MpvSurface({ className }: { className?: string }) {
   }, []);
 
   // Load (or reload) the current source into the attached session.
-  const loadKey = source ? `${source.url}|${source.episodeId ?? ''}` : '';
+  const loadKey = source ? mpvLoadKey(source) : '';
+  const hasSource = !!source;
   useEffect(() => {
-    if (!attached || !loadKey) return;
+    if (sessionNonce === 0 || !hasSource) return;
     const src = usePlayerStore.getState().source;
     if (!src) return;
-    rpc('mpv.load', { source: src }).catch((err: unknown) => {
-      reportStatus('error', err instanceof Error ? err.message : String(err));
-    });
-  }, [attached, loadKey]);
+    if (!loadKey) {
+      // A placeholder (the stream URL could not be resolved): nothing to load, stop the old item.
+      loadedKey.current = '';
+      void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined);
+      return;
+    }
+    let stale = false;
+    loadedKey.current = null;
+    rpc('mpv.load', { source: src })
+      .then(() => {
+        if (!stale) loadedKey.current = loadKey;
+      })
+      .catch((err: unknown) => {
+        if (stale) return;
+        if (engineMissing(err)) {
+          fallBack.current(err instanceof Error ? err.message : '');
+          return;
+        }
+        loadedKey.current = loadKey;
+        useMediaStore.setState({ errorCode: rpcErrorCode(err) });
+        reportStatus('error', err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sessionNonce, loadKey, reloadNonce, hasSource]);
+
+  // Cut the menu out of the video as it opens, give the video back as it closes.
+  useEffect(() => {
+    menuOpen.current = menuAt !== null;
+    remeasure.current();
+  }, [menuAt]);
+  // A new item (or none) closes the menu of the old one.
+  useEffect(() => setMenuAt(null), [loadKey, hasSource]);
 
   // mpv fullscreen is the DOM host's fullscreen; mirror it for completeness.
   useEffect(() => {
@@ -272,6 +442,7 @@ export function MpvSurface({ className }: { className?: string }) {
   }, []);
 
   return (
+    <>
     <div ref={ref} data-mpv-surface="" className={cn('relative h-full w-full bg-black', className)}>
       {/* Only before the native window exists: once attached it paints over this element. */}
       {!attached && (
@@ -289,5 +460,7 @@ export function MpvSurface({ className }: { className?: string }) {
         </div>
       )}
     </div>
+    {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
+    </>
   );
 }

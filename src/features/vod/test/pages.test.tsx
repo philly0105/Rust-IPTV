@@ -189,6 +189,19 @@ describe('MovieDetailPage', () => {
     await waitFor(() => expect(screen.queryByTestId('player-stage')).toBeNull());
   });
 
+  it('B4-vod-D20: a Stalker movie (not in the local catalog) never asks catalog.sameTitle and shows no other sources', async () => {
+    baseHandlers('stalker');
+    rpcMock.handlers['stalker.vodDetail'] = rpcMock.handlers['xtream.vodDetail']!;
+    rpcMock.handlers['catalog.sameTitle'] = () => {
+      throw { code: 'not_found', message: 'item m7 not found' };
+    };
+    renderAt('/s/src1/movie/m7', route);
+    await screen.findByRole('heading', { name: 'Dune: Part Two', level: 1 });
+    expect(await screen.findByRole('button', { name: 'Resume from 12:34' })).toBeTruthy();
+    expect(callsOf('catalog.sameTitle')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /other source/ })).toBeNull();
+  });
+
   it('shows an error state with retry when the provider fails', async () => {
     rpcMock.handlers['xtream.vodDetail'] = () => {
       throw { code: 'network', message: 'Portal unreachable' };

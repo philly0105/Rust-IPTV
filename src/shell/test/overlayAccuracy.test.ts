@@ -26,6 +26,35 @@ describe('shortcut overlay accuracy', () => {
     for (const c of bound) expect(documented, `overlay documents ${c}`).toContain(c);
   });
 
+  it('documents every combo any source file binds through the registry', () => {
+    // Walks all of src, so a shortcut added anywhere fails here until the overlay lists it.
+    const files: string[] = [];
+    const walk = (rel: string) => {
+      for (const e of readdirSync(join(ROOT, rel), { withFileTypes: true })) {
+        const child = `${rel}/${e.name}`;
+        if (e.isDirectory()) {
+          if (e.name !== 'test' && e.name !== 'node_modules') walk(child);
+        } else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) files.push(child);
+      }
+    };
+    walk('src');
+    const bound = new Map<string, string>();
+    for (const f of files) {
+      const src = read(f);
+      for (const m of src.matchAll(/(?:useShortcut|shortcutRegistry\.register)\(\s*'([^']+)'/g)) bound.set(normalizeCombo(m[1]!), f);
+    }
+    expect(bound.size).toBeGreaterThan(20);
+    for (const [c, f] of bound) expect(documented, `${f}: ${c}`).toContain(c);
+  });
+
+  it('documents the keys the channel list, seek bar and library rows handle themselves', () => {
+    const has = (combo: string, area: string) => DOCUMENTED_SHORTCUTS.some((d) => d.combo === combo && d.area === area);
+    for (const c of ['s', 'shift+f10', 'contextmenu']) expect(has(c, 'Live'), c).toBe(true);
+    for (const c of ['pageup', 'pagedown', 'home', 'end']) expect(has(c, 'Seek bar'), c).toBe(true);
+    for (const c of ['home', 'end', 'pageup', 'pagedown', 'delete', 'arrowleft']) expect(has(c, 'Dialogs and lists'), c).toBe(true);
+    expect(has('n', 'Playback')).toBe(true);
+  });
+
   it('every documented description key exists in English', () => {
     for (const d of DOCUMENTED_SHORTCUTS) {
       const [ns, key] = d.descKey.includes(':') ? d.descKey.split(':') : ['shell', d.descKey];

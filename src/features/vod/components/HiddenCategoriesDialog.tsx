@@ -121,7 +121,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
                   <label
                     key={c.id}
                     className={cn(
-                      'absolute start-0 flex w-full cursor-pointer items-center gap-3 border-b border-border/50 px-3 text-sm',
+                      'absolute start-0 flex w-full cursor-pointer items-center gap-3 border-b border-divider px-3 text-sm',
                       'hover:bg-surface-2 has-focus-visible:bg-surface-2',
                       isHidden ? 'text-fg-subtle' : 'text-fg',
                     )}

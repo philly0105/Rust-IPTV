@@ -21,7 +21,15 @@ import {
 } from '../lib/draft';
 import { enabledEpgUrls, refreshGuides, useGuideProgressFeed } from '../lib/epgRefresh';
 import { claimImportErrors, failedSourceId, fieldForError, nextStepKey, summaryKey } from '../lib/errors';
-import { useImportProgressFeed, useImportProgressStore, useNewSourceProgress, useSourceProgress } from '../lib/progress';
+import {
+  beginImport,
+  cancelImport,
+  useImportProgressFeed,
+  useImportProgressStore,
+  useNewSourceProgress,
+  useSourceProgress,
+  wasCancelled,
+} from '../lib/progress';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
 import { parseXtreamLink, suggestName } from '../lib/validate';
@@ -85,11 +93,20 @@ export function AddSourceDialog({
   const [suggested, setSuggested] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  // Source ids that existed when the submit started. The live list would absorb the new source as soon as
+  // `sources.list` refetches mid-import, and the dialog would lose its progress and Cancel button.
+  const [idsAtSubmit, setIdsAtSubmit] = useState<readonly string[]>([]);
   const [submitError, setSubmitError] = useState<RpcError | null>(null);
   // Set once `sources.add` created a source whose import failed. Further submits retry that source
   // (update + re-import, or replace it when the kind or origin changed) instead of adding another.
   const [failed, setFailed] = useState<{ id: string; name: string } | null>(null);
+  // The last submit's import was cancelled (C8); shows the cancelled note until the next submit.
+  const [cancelled, setCancelled] = useState(false);
+  // Source whose import the user asked to stop, so the rejection that follows reads as the cancel.
+  const cancelIdRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLFormElement>(null);
+  const cancelledRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
   const nextFrame = useNextFrame();
   /**
    * Import errors this dialog reports itself, so the shell does not toast them as well:
@@ -108,7 +125,10 @@ export function AddSourceDialog({
     setSuggested('');
     setSubmitError(null);
     setStartedAt(null);
+    setIdsAtSubmit([]);
     setFailed(null);
+    setCancelled(false);
+    cancelIdRef.current = null;
     claimRef.current = { failedId: null, knownAtSubmit: null };
   }, [open, initialKey]);
 
@@ -122,9 +142,20 @@ export function AddSourceDialog({
 
   const sources = useRpcQuery('sources.list', undefined, { enabled: open });
   const knownIds = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
-  const newProgress = useNewSourceProgress(knownIds, startedAt);
+  const newProgress = useNewSourceProgress(idsAtSubmit, startedAt);
   const retryProgress = useSourceProgress(failed?.id);
   const progress = failed ? retryProgress : newProgress;
+  const cancellingImport = useImportProgressStore((s) => (progress ? s.cancelling[progress.sourceId] === true : false));
+
+  const onCancelImport = () => {
+    const id = progress?.sourceId;
+    if (!id) return;
+    cancelIdRef.current = id;
+    cancelImport(id).catch((e: unknown) => {
+      cancelIdRef.current = null;
+      toast({ variant: 'error', title: t('cancelFailed'), description: t(summaryKey(RpcError.from(e))) });
+    });
+  };
 
   const suggest = (input: string) => setSuggested(suggestName(input));
 
@@ -135,6 +166,21 @@ export function AddSourceDialog({
     prevDraft.current = draft;
     if (prev !== draft) setErrors((e) => clearChangedErrors(prev, draft, e));
   }, [draft]);
+  // When a run ends, the progress view (and the Cancel button that may hold focus) unmounts and focus
+  // falls to <body>, outside the dialog, where Escape and Tab no longer reach it. Put it back inside:
+  // on the cancelled notice, the error, or the submit button. A field the error points at wins (it is
+  // focused a frame later by focusFirstInvalid).
+  const wasSubmitting = useRef(false);
+  useEffect(() => {
+    const ended = wasSubmitting.current && !submitting;
+    wasSubmitting.current = submitting;
+    if (!ended) return;
+    const panel = bodyRef.current?.closest<HTMLElement>('[role="dialog"]');
+    if (!panel || panel.contains(document.activeElement)) return;
+    const target = cancelledRef.current ?? errorRef.current ?? panel.querySelector<HTMLElement>('[data-testid="add-source-submit"]') ?? panel;
+    target.focus({ preventScroll: true });
+  }, [submitting]);
+
   const onFieldBlur = (path: string) => setErrors((e) => withFieldError(e, path, blurError(draft, path)));
 
   const setKind = (kind: SourceKind) => {
@@ -151,6 +197,8 @@ export function AddSourceDialog({
 
   const submit = async () => {
     setSubmitError(null);
+    setCancelled(false);
+    cancelIdRef.current = null;
     const named = draft.name.trim() ? draft : { ...draft, name: suggested };
     const built = buildAddArgs(named, { isDesktop });
     setErrors(built.errors);
@@ -160,6 +208,7 @@ export function AddSourceDialog({
     }
     setSubmitting(true);
     setStartedAt(Date.now());
+    setIdsAtSubmit(knownIds);
     claimRef.current.knownAtSubmit ??= new Set(knownIds);
     try {
       const source = failed ? await retry(failed.id, named, built.value) : await rpc('sources.add', built.value);
@@ -184,6 +233,24 @@ export function AddSourceDialog({
       onClose();
     } catch (e) {
       const err = RpcError.from(e);
+      const createdId = failedSourceId(err);
+      if (cancelIdRef.current !== null && wasCancelled(cancelIdRef.current, err)) {
+        // The user stopped it. A source this submit created has no channels yet: take it away
+        // again so Cancel leaves nothing behind. A retried source keeps its earlier state.
+        const orphan = failed ? null : (createdId ?? cancelIdRef.current);
+        if (orphan) {
+          try {
+            await rpc('sources.remove', { id: orphan });
+          } catch {
+            // Gone already, or the backend is unreachable: the list refetch below shows the truth.
+          }
+          claimRef.current = { failedId: null, knownAtSubmit: null };
+        }
+        cancelIdRef.current = null;
+        setCancelled(true);
+        void invalidate('sources.');
+        return;
+      }
       setSubmitError(err);
       // Point at the field to fix (the login for rejected credentials, the address for a dead server).
       const field = fieldForError(err, built.value.kind, built.value.m3u?.origin);
@@ -195,7 +262,7 @@ export function AddSourceDialog({
       // Remember it so the next submit retries it rather than adding a duplicate. A transport
       // failure (proxy 504, network blip during a long import) names nothing although the core
       // may already have created the row: look for it among the sources that are new since submit.
-      const id = failedSourceId(err) ?? (failed ? null : await adoptCreatedSource(built.value));
+      const id = createdId ?? (failed ? null : await adoptCreatedSource(built.value));
       if (id) claimRef.current.failedId = id;
       if (id) setFailed({ id, name: built.value.name });
       else setFailed((f) => (f ? { ...f, name: built.value.name } : f));
@@ -246,8 +313,8 @@ export function AddSourceDialog({
         return null;
       }
       if (Object.keys(patch.value).length > 0) await rpc('sources.update', { id, patch: patch.value });
-      // Drop the previous attempt's error entry so the progress view starts fresh.
-      useImportProgressStore.getState().clear(id);
+      // Drop the previous attempt's error entry and cancel request so the progress view starts fresh.
+      beginImport(id);
       return rpc('sources.refresh', { id });
     }
     if (existing) await rpc('sources.remove', { id });
@@ -255,11 +322,15 @@ export function AddSourceDialog({
     return rpc('sources.add', args);
   };
 
-  const kinds: { id: SourceKind; label: string }[] = [
-    { id: 'm3u', label: t('kindM3u') },
-    { id: 'xtream', label: t('kindXtream') },
-    { id: 'stalker', label: t('kindStalker') },
-  ];
+  // Locked while an import runs: switching kind mid-import would show a form that is not the one importing.
+  // The current tab stays enabled so it keeps its place in the tab order.
+  const kinds: { id: SourceKind; label: string; disabled: boolean }[] = (
+    [
+      ['m3u', t('kindM3u')],
+      ['xtream', t('kindXtream')],
+      ['stalker', t('kindStalker')],
+    ] as const
+  ).map(([id, label]) => ({ id, label, disabled: submitting && id !== draft.kind }));
 
   const isTextOrigin = draft.kind === 'm3u' && draft.m3u.origin !== 'url' && !(draft.m3u.origin === 'file' && isDesktop);
 
@@ -360,22 +431,31 @@ export function AddSourceDialog({
           description={isTextOrigin ? t('autoRefreshUnavailable') : t('autoRefreshHint')}
         />
 
-        {submitting ? <ImportProgressView entry={progress} /> : null}
+        {submitting ? <ImportProgressView entry={progress} kind={draft.kind} onCancel={progress ? onCancelImport : undefined} cancelling={cancellingImport} /> : null}
+
+        {cancelled && !submitting ? (
+          <div ref={cancelledRef} tabIndex={-1} role="status" className="rounded-md border border-border bg-surface-2/60 p-3 outline-none" data-testid="add-source-cancelled">
+            <ImportProgressView
+              entry={{ sourceId: '', phase: 'cancelled', done: 0, at: 0 }}
+              cancelledNote={t(failed ? 'cancelledRetryNote' : 'cancelledAddNote')}
+            />
+          </div>
+        ) : null}
 
         {submitError ? (
-          <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm" data-testid="add-source-error">
+          <div ref={errorRef} tabIndex={-1} role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm outline-none" data-testid="add-source-error">
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
             <div className="flex min-w-0 flex-col gap-1">
               <p className="font-medium text-fg">{t('addFailed')}</p>
               <p className="text-fg">{t(summaryKey(submitError))}</p>
-              <p className="text-fg-muted">{t(nextStepKey(submitError))}</p>
+              <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
               {failed ? (
                 <p className="text-fg-muted" data-testid="add-source-retry-note">
                   {t('addRetryNote', { name: failed.name })}
                 </p>
               ) : null}
               <details className="text-fg-muted">
-                <summary className="cursor-pointer select-none text-xs">{t('technicalDetails')}</summary>
+                <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
                 <p className="mt-1 break-words font-mono text-xs">{redactText(submitError.message)}</p>
               </details>
               {/* With a failed source on file the footer button already reads "Try again". */}

@@ -1,10 +1,11 @@
-import { ListVideo, Play, MonitorPlay } from 'lucide-react';
+import { ListVideo, Play, MonitorPlay, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import type { Episode, ItemRef } from '@/api/types';
+import { sameRef, type Episode, type ItemRef } from '@/api/types';
+import { usePlayerStore } from '@/features/player';
 
 import { FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
@@ -33,6 +34,8 @@ import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../l
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
 import { Button, EmptyState, ErrorState, useToast } from '@/ui';
 import { detailHref } from '../lib/search';
+import { startEpisodeQueue } from '../lib/episodeQueue';
+import { captureWatched, watchedUndoAction } from '@/features/library/lib/watchedUndo';
 
 export function SeriesDetailPage() {
   const { t } = useTranslation('vod');
@@ -67,12 +70,27 @@ export function SeriesDetailPage() {
   const positions = useMemo(() => new Map(positionList.filter((p) => p.episodeId).map((p) => [p.episodeId!, p])), [positionList]);
   const setWatched = useSetWatched();
   const { toast } = useToast();
-  const toggleEpisodeWatched = (ep: Episode) => {
+  const toggleEpisodeWatched = async (ep: Episode) => {
     const next = !isWatched(positions.get(ep.id));
+    const target = { ref, episodeIds: [ep.id] };
+    // The row about to change, so Undo can put it back; without it the toast has no Undo.
+    const before = await captureWatched(target).catch(() => undefined);
     setWatched.mutate(
-      { ref, episodeIds: [ep.id], watched: next },
+      { ...target, watched: next },
       {
-        onSuccess: () => toast({ title: next ? t('markedWatched') : t('markedUnwatched'), variant: 'success' }),
+        onSuccess: () =>
+          toast({
+            title: next ? t('markedWatched') : t('markedUnwatched'),
+            variant: 'success',
+            ...(before
+              ? {
+                  action: watchedUndoAction(target, before, {
+                    label: t('undo', { ns: 'library' }),
+                    onFailed: () => toast({ title: t('undoFailed', { ns: 'library' }), variant: 'error' }),
+                  }),
+                }
+              : {}),
+          }),
         onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
       },
     );
@@ -125,14 +143,24 @@ export function SeriesDetailPage() {
   const pageTitle = model?.title ?? t('series');
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
 
-  const playEpisode = (ep: Episode) =>
-    void playback.play({ episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title) });
+  // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
+  const playEpisode = (ep: Episode, fromStart = false) => {
+    const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), fromStart };
+    void playback.play(opts).then(() => {
+      if (!target) return;
+      const ctx: Parameters<typeof startEpisodeQueue>[0] = { ref, sourceKind: target.sourceKind, title: target.title, order, positions };
+      if (target.posterUrl) ctx.posterUrl = target.posterUrl;
+      return startEpisodeQueue(ctx, ep.id);
+    });
+  };
   const downloadEpisode = (ep: Episode) =>
     void playback.download({ episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), extension: ep.containerExtension });
 
   const next = nextEpisode(seasons, watch.episodeId);
   const [dismissedFor, setDismissedFor] = useState<string | undefined>(undefined);
-  const showNextCard = watch.ended && !!next && dismissedFor !== watch.episodeId;
+  // When the player's queue already holds the next episode, the player shows its own Up next card.
+  const queuedNext = usePlayerStore((s) => !!next && (s.queue ?? []).some((q) => q.episodeId === next.id && sameRef(q.ref, ref)));
+  const showNextCard = watch.ended && !!next && !queuedNext && dismissedFor !== watch.episodeId;
   const playing = order.find((e) => e.id === watch.episodeId);
 
   if (twin.data) {
@@ -199,6 +227,11 @@ export function SeriesDetailPage() {
                   {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: episodeCode(start.episode.season, start.episode.episode) })}
                 </Button>
               )}
+              {start?.resume && (
+                <Button size="lg" variant="ghost" icon={<RotateCcw aria-hidden size={18} />} onClick={() => playEpisode(start.episode, true)}>
+                  {t('startOverEpisode', { code: episodeCode(start.episode.season, start.episode.episode) })}
+                </Button>
+              )}
               {trailer && (
                 <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
                   {t('trailer')}
@@ -257,7 +290,7 @@ export function SeriesDetailPage() {
                 canDownload={playback.canDownload}
                 pendingDownload={playback.pendingDownload}
                 onDownload={downloadEpisode}
-                onToggleWatched={toggleEpisodeWatched}
+                onToggleWatched={(ep) => void toggleEpisodeWatched(ep)}
                 scrollRef={scrollRef}
                 layoutKey={`${selectedSeason}|${watch.active}|${showNextCard}`}
               />

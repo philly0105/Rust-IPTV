@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -12,11 +13,18 @@ const MAX_CAST = 16;
 export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }) {
   const { t } = useTranslation('vod');
   const people = cast.slice(0, MAX_CAST);
+  const headingId = useId();
+  // With no linked chip the scrolling row has nothing to focus, so the row
+  // itself takes focus (named by the heading) and scrolls with the arrow keys.
+  const focusableRow = !people.some((p) => p.id !== undefined);
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <h2 className="text-sm font-medium text-fg-subtle">{t('cast')}</h2>
+      <h2 id={headingId} className="text-sm font-medium text-fg-subtle">{t('cast')}</h2>
       <ul
-        className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2"
+        aria-labelledby={headingId}
+        tabIndex={focusableRow ? 0 : undefined}
+        data-testid="vod-cast-row"
+        className="-mx-1 flex gap-2 overflow-x-auto rounded-md px-1 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus"
         onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: people.length })}
       >
         {people.map((p, i) => {

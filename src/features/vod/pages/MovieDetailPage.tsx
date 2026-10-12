@@ -67,7 +67,10 @@ export function MovieDetailPage() {
   const position = useRpcQuery('positions.get', { ref }, { staleTime: 5_000 });
   const watched = isWatched(position.data);
   const isFavorite = useIsFavorite(ref);
-  const sameTitle = useRpcQuery('catalog.sameTitle', { ref }, { enabled: !!item, staleTime: 5 * 60_000 });
+  // Stalker VOD is paged live from the portal, not stored in the local catalog, so the core's
+  // same-title lookup has nothing to match (it answers not_found); no "other sources" there.
+  const inLocalCatalog = !!source.data && source.data.kind !== 'stalker';
+  const sameTitle = useRpcQuery('catalog.sameTitle', { ref }, { enabled: !!item && inLocalCatalog, staleTime: 5 * 60_000 });
   const others = useMemo(() => (sameTitle.data ?? []).filter((o) => o.ref.sourceId !== sourceId || o.ref.itemId !== itemId), [sameTitle.data, sourceId, itemId]);
   const { pin, setPin, pinnedOther } = useSourcePin(item, others);
 

@@ -12,7 +12,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
 
-const { isDesktop, proxiedUrl, setDesktopProxyBase } = await import('./transport');
+const { isDesktop, proxiedUrl, setDesktopProxyBase, rpcRaw, RPC_ERROR_CODES, sourceRunDetails } = await import('./transport');
 
 const base: PlayerSource = { url: 'http://cdn.example/a.m3u8', kind: 'hls', title: 't', isLive: true, isRadio: false };
 
@@ -68,4 +68,17 @@ describe('proxiedUrl (desktop)', () => {
     setDesktopProxyBase(null);
     expect(proxiedUrl({ ...base, headers: { userAgent: 'UA' } })).toBe(base.url);
   });
+});
+
+describe('rpc errors (desktop)', () => {
+  it.each(RPC_ERROR_CODES.flatMap((code) => [[code, 'object'], [code, 'json string']] as const))(
+    'keeps code %s from a Tauri rejection (%s), with its details',
+    async (code, shape) => {
+      const payload = { code, message: `boom ${code}`, details: { sourceId: 's9' } };
+      invoke.mockImplementationOnce(() => Promise.reject(shape === 'object' ? payload : JSON.stringify(payload)));
+      const err = await rpcRaw('sources.get', { id: 'x' }).catch((e: unknown) => e);
+      expect(err).toMatchObject({ name: 'RpcError', code, message: `boom ${code}` });
+      expect(sourceRunDetails(err)).toEqual({ sourceId: 's9' });
+    },
+  );
 });

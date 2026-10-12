@@ -10,10 +10,12 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
 import { isDesktop, rpc } from '@/api/transport';
+import { QUIT_FLUSH_EVENT, type QuitFlushDetail } from '@/api/window';
 import type {
   Channel,
   ItemRef,
   ItemSnapshot,
+  PlaybackPosition,
   PlayerKind,
   PlayerSource,
   Settings,
@@ -23,6 +25,7 @@ import type {
 import { itemKey } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
 
+import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
@@ -89,6 +92,20 @@ let requestSeq = 0;
 let settingsCache: Settings | null = null;
 let settingsPromise: Promise<Settings | null> | null = null;
 const sourceKindCache = new Map<string, SourceKind>();
+/**
+ * The resolution that failed before anything could load (stream URL lookup, a queue entry):
+ * Retry runs it again, since there is no media URL for the surface to reload.
+ */
+let failedResolve: (() => Promise<void>) | null = null;
+/** Saved positions this close to the start are not worth a resume (and no "Resumed at 0:03"). */
+export const MIN_RESUME_SECONDS = 5;
+/**
+ * The double-click window: above the longest double-click time Windows allows (900 ms), so a
+ * slow double click still counts. A click on an ended item waits this long before it replays
+ * (a double click there only toggles fullscreen, C6), and a double click within it undoes its
+ * first click's pause toggle. Both video surfaces use it for both.
+ */
+export const DOUBLE_CLICK_MS = 1000;
 
 function readStoredVolume(): { volume: number; muted: boolean } {
   try {
@@ -214,7 +231,13 @@ export function peekSettings(): Settings | null {
   return settingsCache;
 }
 
-async function sourceKindOf(sourceId: string): Promise<SourceKind> {
+/** The kind of a source this session already looked up, without asking the core. */
+export function knownSourceKind(sourceId: string): SourceKind | undefined {
+  return sourceKindCache.get(sourceId);
+}
+
+/** The source's kind, looked up once per session (`sources.get`); rejects when that fails. */
+export async function sourceKindOf(sourceId: string): Promise<SourceKind> {
   const cached = sourceKindCache.get(sourceId);
   if (cached) return cached;
   const src = await rpc('sources.get', { id: sourceId });
@@ -269,7 +292,8 @@ function writeResume(): void {
   const { source, positionSeconds, mode } = state;
   try {
     // A finished item must not come back at its last frame after a reload.
-    if (!source || mode === 'external' || isEndedState(state)) {
+    // No url: a failed lookup, nothing a reload could replay.
+    if (!source?.url || mode === 'external' || isEndedState(state)) {
       sessionStorage.removeItem(RESUME_KEY);
       return;
     }
@@ -291,11 +315,12 @@ function clearResume(): void {
 /** Last position we pushed to the backend, so ticks without progress do not write. */
 let lastSavedPosition = -1;
 
-function savePosition(): void {
+/** Sends the VOD position; the promise settles when the core has it (or the send failed). */
+function savePosition(): Promise<void> {
   const { source, positionSeconds, durationSeconds } = usePlayerStore.getState();
-  if (!tracksPosition(source)) return;
+  if (!tracksPosition(source)) return Promise.resolve();
   const pos = Math.floor(positionSeconds);
-  if (pos <= 0 || pos === lastSavedPosition) return;
+  if (pos <= 0 || pos === lastSavedPosition) return Promise.resolve();
   lastSavedPosition = pos;
   const args: Parameters<typeof rpc<'positions.set'>>[1] = {
     ref: source.ref,
@@ -306,15 +331,27 @@ function savePosition(): void {
   if (dur && Number.isFinite(dur)) args.durationSeconds = Math.floor(dur);
   const snap = snapshotOf(source);
   if (snap) args.snapshot = snap;
-  rpc('positions.set', args).catch(() => {
-    lastSavedPosition = -1; // retry on next tick
-  });
+  return rpc('positions.set', args).then(
+    () => undefined,
+    () => {
+      lastSavedPosition = -1; // retry on next tick
+    },
+  );
 }
 
 /** Persist now: resume record and VOD position. Called every 5 s, on stop, and on page hide. */
 export function flushProgress(): void {
   writeResume();
-  savePosition();
+  void savePosition();
+}
+
+/**
+ * Quit or window close (tray Quit, the window's X, Alt+F4): save like `pagehide` would, and let
+ * the quit wait for the position to land, up to the 2.5 s flush budget (`QUIT_FLUSH_BUDGET_MS`).
+ */
+function flushBeforeQuit(e: Event): void {
+  writeResume();
+  (e as CustomEvent<QuitFlushDetail>).detail?.waitUntil(savePosition());
 }
 
 function startSaver(): void {
@@ -336,6 +373,7 @@ function bindUnload(): void {
   unloadBound = true;
   window.addEventListener('pagehide', flushProgress);
   window.addEventListener('beforeunload', flushProgress);
+  window.addEventListener(QUIT_FLUSH_EVENT, flushBeforeQuit);
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +397,9 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   async play(source, opts) {
     const token = ++playToken;
     requestSeq++;
+    failedResolve = null;
+    // A pending Up next must not fire while this request resolves and replace it.
+    cancelUpNext();
     bindUnload();
     // Persist the outgoing item before switching.
     if (get().source) flushProgress();
@@ -456,7 +497,15 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     const { source, durationSeconds } = get();
     if (!source || get().mode === 'external') return;
     let target = Math.max(0, seconds);
-    if (durationSeconds && Number.isFinite(durationSeconds)) target = Math.min(target, durationSeconds);
+    if (durationSeconds && Number.isFinite(durationSeconds)) {
+      target = Math.min(target, durationSeconds);
+      // Seeking back into a finished episode means "keep watching": no auto-advance now, and
+      // reaching the end again offers the next item again.
+      if (target < durationSeconds - ENDED_EPSILON) {
+        cancelUpNext();
+        upNextHandledFor = undefined;
+      }
+    }
     controller?.seekTo(target);
     set({ positionSeconds: target });
   },
@@ -491,17 +540,18 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   },
 
   next() {
-    const { queue, source } = get();
-    const idx = queue.findIndex((q) => sameSource(q, source));
-    const nextSource = idx >= 0 ? queue[idx + 1] : undefined;
-    if (nextSource) void get().play(nextSource, { queue, mode: get().mode });
+    const nextSource = nextInQueue();
+    if (!nextSource) return;
+    // The countdown would otherwise start a second advance while this one resolves.
+    cancelUpNext();
+    void playQueued(nextSource);
   },
 
   prev() {
-    const { queue, source } = get();
-    const idx = queue.findIndex((q) => sameSource(q, source));
-    const prevSource = idx > 0 ? queue[idx - 1] : undefined;
-    if (prevSource) void get().play(prevSource, { queue, mode: get().mode });
+    const prevSource = prevInQueue();
+    if (!prevSource) return;
+    cancelUpNext();
+    void playQueued(prevSource);
   },
 }));
 
@@ -532,6 +582,7 @@ export function reportProgress(positionSeconds: number, durationSeconds?: number
 export function reportStatus(status: PlayerState['status'], error?: string): void {
   const s = usePlayerStore.getState();
   if (!s.source) return;
+  if (status !== 'error' && useMediaStore.getState().errorCode) useMediaStore.setState({ errorCode: undefined });
   if (s.status === status && s.error === error) return;
   usePlayerStore.setState(status === 'error' ? { status, error } : { status, error: undefined });
 }
@@ -557,14 +608,196 @@ export function handleEnded(): void {
   const patch: Partial<PlayerState> = { status: 'paused' };
   if (s.durationSeconds && Number.isFinite(s.durationSeconds)) patch.positionSeconds = s.durationSeconds;
   usePlayerStore.setState(patch);
-  // Mark as finished: positions.set deletes rows at >= 95 %.
-  if (tracksPosition(s.source) && s.durationSeconds) savePosition();
+  // Mark as finished: at >= 95 % the core deletes a movie's row (unless marked watched) and keeps an
+  // episode's as a watched row at its end (C13); `withSavedPosition` never resumes from either.
+  if (tracksPosition(s.source) && s.durationSeconds) void savePosition();
   clearResume();
+  offerUpNext();
+}
+
+// ---------------------------------------------------------------------------
+// Up next: the countdown lives here, not in the card, so auto-advance happens even when no
+// card is mounted (hidden fullscreen chrome, a surface between layouts).
+// ---------------------------------------------------------------------------
+
+let upNextTimer: ReturnType<typeof setTimeout> | null = null;
+let upNextArmed: MediaUpNext | undefined;
+type MediaUpNext = NonNullable<ReturnType<typeof useMediaStore.getState>['upNext']>;
+/**
+ * The finished item whose Up next was already offered (then counted down, played or
+ * cancelled). The end can be reported more than once (a surface remount, a late duplicate
+ * event, the queue arriving after the end); each item advances at most once.
+ */
+let upNextHandledFor: PlayerSource | undefined;
+
+/** The dock shows a 10 s "Next episode" card; the store's timer (below) advances at zero. */
+function offerUpNext(): void {
+  const s = usePlayerStore.getState();
+  if (!s.source || upNextHandledFor === s.source || useMediaStore.getState().upNext) return;
   const next = nextInQueue();
-  if (next && (peekSettings()?.playerAutoplayNextEpisode ?? true)) {
-    // The dock shows a 10 s "Next episode" card; it calls next() at zero or on "Play now".
-    useMediaStore.setState({ upNext: { source: next, deadline: Date.now() + UP_NEXT_SECONDS * 1000 } });
+  if (!next || !(peekSettings()?.playerAutoplayNextEpisode ?? true)) return;
+  upNextHandledFor = s.source;
+  useMediaStore.setState({ upNext: { source: next, deadline: Date.now() + UP_NEXT_SECONDS * 1000 } });
+}
+
+/**
+ * The queue is owned by whoever plays a list (the series page rebuilds and refreshes it while
+ * an episode plays). Keep a pending Up next pointed at the queue's current next entry (a
+ * refreshed short-lived link replaces the old one), and offer it when the queue only arrives
+ * after the item already ended.
+ */
+usePlayerStore.subscribe((s, prev) => {
+  if (s.queue === prev.queue) return;
+  const pending = useMediaStore.getState().upNext;
+  if (pending) {
+    const next = nextInQueue();
+    if (next && next !== pending.source) useMediaStore.setState({ upNext: { source: next, deadline: pending.deadline } });
+    return;
   }
+  if (isEndedState(s)) offerUpNext();
+});
+
+/**
+ * Startup and stall watchdog. Some failures never reach the engine as an error: a stream that
+ * answers 401 with `WWW-Authenticate: Basic` leaves both WebView2 and mpv waiting with no
+ * event. After `STARTUP_TIMEOUT_MS` in `loading` on the same item, raise a timeout so the error
+ * overlay shows its Retry. (The 401 itself is not visible from here, so this is a timeout, not
+ * an auth error; streams whose 401 the engine does report still classify as auth.)
+ */
+export const STARTUP_TIMEOUT_MS = 30_000;
+let stallTimer: ReturnType<typeof setTimeout> | null = null;
+let stallFor: PlayerSource | undefined;
+
+function clearStallTimer(): void {
+  if (stallTimer) clearTimeout(stallTimer);
+  stallTimer = null;
+  stallFor = undefined;
+}
+
+usePlayerStore.subscribe((s) => {
+  const watching = s.status === 'loading' && !!s.source?.url && s.mode !== 'external';
+  if (watching && stallTimer && stallFor === s.source) return;
+  clearStallTimer();
+  if (!watching) return;
+  const src = s.source;
+  stallFor = src;
+  stallTimer = setTimeout(() => {
+    stallTimer = null;
+    stallFor = undefined;
+    const now = usePlayerStore.getState();
+    if (now.source !== src || now.status !== 'loading') return;
+    useMediaStore.setState({ errorCode: 'timeout' });
+    reportStatus('error', 'Timed out waiting for the stream');
+  }, STARTUP_TIMEOUT_MS);
+});
+
+useMediaStore.subscribe((s) => {
+  if (s.upNext === upNextArmed) return;
+  upNextArmed = s.upNext;
+  if (upNextTimer) clearTimeout(upNextTimer);
+  upNextTimer = null;
+  const pending = s.upNext;
+  if (!pending) return;
+  upNextTimer = setTimeout(
+    () => {
+      upNextTimer = null;
+      if (useMediaStore.getState().upNext !== pending) return;
+      useMediaStore.setState({ upNext: undefined });
+      void playQueued(pending.source);
+    },
+    Math.max(0, pending.deadline - Date.now()),
+  );
+});
+
+/** "Play now" on the Up next card. */
+export function playUpNextNow(): void {
+  const pending = useMediaStore.getState().upNext;
+  if (!pending) return;
+  useMediaStore.setState({ upNext: undefined });
+  void playQueued(pending.source);
+}
+
+/** "Cancel" on the Up next card: stay on the finished item. */
+export function cancelUpNext(): void {
+  if (useMediaStore.getState().upNext) useMediaStore.setState({ upNext: undefined });
+}
+
+/**
+ * Play a queue entry, keeping the queue. Entries may be placeholders (a `ref` and `episodeId`
+ * with an empty `url`): those are resolved now, so short-lived links (Stalker) are fresh.
+ * Either way the entry picks up its saved position.
+ */
+async function playQueued(entry: PlayerSource): Promise<void> {
+  const { queue, mode } = usePlayerStore.getState();
+  const run = async (): Promise<void> => {
+    const seq = ++requestSeq;
+    let resolved = entry;
+    try {
+      if (entry.ref && !entry.url) {
+        const sourceKind = await sourceKindOf(entry.ref.sourceId);
+        const args: PlayItemArgs = {
+          ref: entry.ref,
+          title: entry.title,
+          isLive: entry.isLive,
+          isRadio: entry.isRadio,
+          sourceKind,
+        };
+        if (entry.episodeId) args.episodeId = entry.episodeId;
+        if (entry.subtitle) args.subtitle = entry.subtitle;
+        if (entry.posterUrl) args.posterUrl = entry.posterUrl;
+        resolved = await resolveSource(args);
+        resolved = await withResume(resolved);
+      } else {
+        resolved = await freshResume(resolved);
+      }
+    } catch (err) {
+      if (seq !== requestSeq) return;
+      failResolve(err, { ...entry, url: '' }, run);
+      return;
+    }
+    if (seq !== requestSeq) return;
+    // The list owner may have rebuilt or refreshed the queue meanwhile: keep its newest copy.
+    const latest = usePlayerStore.getState().queue;
+    await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue, mode });
+  };
+  if (!entry.url) usePlayerStore.setState({ status: 'loading', error: undefined });
+  await run();
+}
+
+/** A resolution failed: show the error on the item it was for, and let Retry run it again. */
+function failResolve(err: unknown, placeholder: PlayerSource, again: () => Promise<void>): void {
+  failedResolve = again;
+  // The empty url makes the surfaces drop whatever played before (see InlinePlayer, MpvSurface).
+  const code = rpcErrorCode(err);
+  useMediaStore.setState({ errorCode: code });
+  usePlayerStore.setState({ status: 'error', error: errorMessage(err), source: placeholder });
+}
+
+/**
+ * Retry after a failure that happened before any media existed (no stream URL yet).
+ * Returns false when the surface should reload its media instead.
+ */
+export function retryResolve(): boolean {
+  const s = usePlayerStore.getState();
+  if (!failedResolve || !s.source || s.source.url) return false;
+  const again = failedResolve;
+  failedResolve = null;
+  usePlayerStore.setState({ status: 'loading', error: undefined });
+  useMediaStore.setState({ errorCode: undefined });
+  void again().catch(() => undefined);
+  return true;
+}
+
+/**
+ * Put the play state back to `paused` (the double click undoing its first click's toggle).
+ * Unlike `togglePlay` it does not read `status`, which lags the engine by an event.
+ */
+export function setPaused(paused: boolean): void {
+  const s = usePlayerStore.getState();
+  if (!s.source || s.mode === 'external') return;
+  if (paused) controller?.pause();
+  else controller?.play();
+  if (!controller) usePlayerStore.setState({ status: paused ? 'paused' : 'playing' });
 }
 
 /** Start the current item again from the beginning (the dock's replay affordance). */
@@ -572,6 +805,7 @@ export function replay(): void {
   const s = usePlayerStore.getState();
   if (!s.source || s.mode === 'external') return;
   useMediaStore.setState({ upNext: undefined });
+  upNextHandledFor = undefined;
   lastSavedPosition = -1;
   if (!controller) {
     const { resumeSeconds: _drop, ...fresh } = s.source;
@@ -675,24 +909,72 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
 }
 
 async function withResume(source: PlayerSource): Promise<PlayerSource> {
-  if (source.resumeSeconds !== undefined || !tracksPosition(source)) return source;
-  try {
-    const pos = await rpc(
-      'positions.get',
-      source.episodeId ? { ref: source.ref, episodeId: source.episodeId } : { ref: source.ref },
-    );
-    if (pos && pos.positionSeconds > 5) {
-      const dur = pos.durationSeconds;
-      if (!dur || pos.positionSeconds < dur * 0.95) return { ...source, resumeSeconds: pos.positionSeconds };
+  if (source.resumeSeconds !== undefined) {
+    const { resumeSeconds: given, ...rest } = source;
+    // The core fills it for Xtream from any saved row; a few seconds in is not a resume.
+    if (source.isLive || given <= MIN_RESUME_SECONDS) return rest;
+    if (!tracksPosition(source)) return source;
+    // A finished item is kept as a watched row at its end (C13): replaying it starts over.
+    try {
+      const saved = await savedPosition(source);
+      if (saved && (isFinished(saved) || isPastEnd(given, saved.durationSeconds))) return rest;
+    } catch {
+      // No saved row to check against: keep the given point.
     }
+    return source;
+  }
+  if (!tracksPosition(source)) return source;
+  try {
+    return withSavedPosition(source, await savedPosition(source));
   } catch {
     // no saved position
   }
   return source;
 }
 
+function savedPosition(source: PlayerSource & { ref: ItemRef }): Promise<PlaybackPosition | null> {
+  return rpc('positions.get', source.episodeId ? { ref: source.ref, episodeId: source.episodeId } : { ref: source.ref });
+}
+
+/** Share of the duration from which an item counts as finished (the core marks it watched there). */
+const FINISHED_RATIO = 0.95;
+
+function isPastEnd(seconds: number, duration: number | undefined): boolean {
+  return !!duration && seconds >= duration * FINISHED_RATIO;
+}
+
+/** A saved row for an item that was finished or marked watched: not a resume point. */
+function isFinished(pos: PlaybackPosition): boolean {
+  return pos.watched || isPastEnd(pos.positionSeconds, pos.durationSeconds);
+}
+
+/** The one resume rule: more than MIN_RESUME_SECONDS in, and not finished or watched. */
+function withSavedPosition(source: PlayerSource, pos: PlaybackPosition | null | undefined): PlayerSource {
+  if (pos && pos.positionSeconds > MIN_RESUME_SECONDS && !isFinished(pos)) {
+    return { ...source, resumeSeconds: pos.positionSeconds };
+  }
+  return source;
+}
+
+/**
+ * A queue entry's resume point was copied when the queue was built, so it can be stale: the
+ * episode was finished since (Prev back to it), or watched further in another session. Ask
+ * for the saved position now; only when that fails is the copied one used.
+ */
+async function freshResume(entry: PlayerSource): Promise<PlayerSource> {
+  if (!tracksPosition(entry)) return withResume(entry);
+  const { resumeSeconds: _copied, ...bare } = entry;
+  try {
+    return withSavedPosition(bare, await savedPosition(entry));
+  } catch {
+    return withResume(entry);
+  }
+}
+
 export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource[] }): Promise<void> {
   const seq = ++requestSeq;
+  // The user picked something: a countdown firing during the lookup must not override it.
+  cancelUpNext();
   usePlayerStore.setState({
     status: 'loading',
     error: undefined,
@@ -712,7 +994,11 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
   } catch (err) {
     // A newer request won the race: do not clobber it.
     if (seq !== requestSeq) return;
-    usePlayerStore.setState({ status: 'error', error: errorMessage(err) });
+    const placeholder: PlayerSource = { url: '', kind: 'direct', title: args.title, isLive: args.isLive, isRadio: !!args.isRadio, ref: args.ref };
+    if (args.episodeId) placeholder.episodeId = args.episodeId;
+    if (args.subtitle) placeholder.subtitle = args.subtitle;
+    if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
+    failResolve(err, placeholder, () => playItem(args, opts));
     throw err;
   }
   if (seq !== requestSeq) return;
@@ -721,6 +1007,7 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
 
 export async function playSource(source: PlayerSource): Promise<void> {
   const seq = ++requestSeq;
+  cancelUpNext();
   const withPos = await withResume(source);
   if (seq !== requestSeq) return;
   await usePlayerStore.getState().play(withPos);
@@ -813,8 +1100,15 @@ export function __resetPlayerForTests(): void {
   settingsCache = null;
   settingsPromise = null;
   lastSavedPosition = -1;
+  failedResolve = null;
   sourceKindCache.clear();
   stopSaver();
+  if (upNextTimer) clearTimeout(upNextTimer);
+  upNextTimer = null;
+  upNextArmed = undefined;
+  upNextHandledFor = undefined;
+  clearStallTimer();
+  useMediaStore.setState({ upNext: undefined, errorCode: undefined });
   usePlayerStore.setState({
     source: undefined,
     mode: 'inline',

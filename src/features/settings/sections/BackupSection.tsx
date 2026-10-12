@@ -174,6 +174,13 @@ export function BackupSection(_props: SectionProps) {
               {picked.summary.exportedAt ? (
                 <p className="text-fg-muted">{t('backupExportedAt', { when: absoluteTime(picked.summary.exportedAt, lang) })}</p>
               ) : null}
+              {picked.summary.skipped > 0 ? (
+                <p className="text-warning" data-testid="backup-skipped">
+                  {picked.summary.skipped === picked.summary.playlists
+                    ? t('backupNoPlaylists')
+                    : t('backupSkippedEntries', { count: picked.summary.skipped })}
+                </p>
+              ) : null}
               {!picked.summary.includeSecrets && picked.summary.byKind.xtream + picked.summary.byKind.stalker > 0 ? (
                 <p className="text-warning">{t('backupNoSecrets')}</p>
               ) : null}

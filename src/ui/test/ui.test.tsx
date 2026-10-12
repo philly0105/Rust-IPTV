@@ -9,6 +9,9 @@ import { Dialog, ErrorState, Menu, SearchInput, Tabs, ToastViewport, VirtualList
 import { pageWindow } from '../Pagination';
 import { aspectRatio, gridLayout } from '../VirtualGrid';
 
+/** Matches toast text in the visible stack, not its copy in the screen-reader live region. */
+const VISIBLE_TOAST = { ignore: 'script, style, [data-toast-live] *' };
+
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -220,11 +223,11 @@ describe('Toast', () => {
     act(() => {
       toast({ id: 'imp', title: 'Importing' });
     });
-    expect(screen.getByText('Importing')).toBeTruthy();
+    expect(screen.getByText('Importing', VISIBLE_TOAST)).toBeTruthy();
     act(() => {
       toast({ id: 'imp', title: 'Done', variant: 'success' });
     });
-    expect(screen.queryByText('Importing')).toBeNull();
-    expect(screen.getByText('Done')).toBeTruthy();
+    expect(screen.queryByText('Importing', VISIBLE_TOAST)).toBeNull();
+    expect(screen.getByText('Done', VISIBLE_TOAST)).toBeTruthy();
   });
 });

@@ -121,7 +121,8 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
           role="list"
           onScroll={updateEdges}
           onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: items.length })}
-          className="-mx-1 flex snap-x scroll-px-1 gap-4 overflow-x-auto px-1 pt-1 pb-3 motion-safe:scroll-smooth"
+          // Skeletons have nothing to focus, so the loading row clips instead of scrolling (axe scrollable-region-focusable).
+          className={cn('-mx-1 flex snap-x scroll-px-1 gap-4 px-1 pt-1 pb-3 motion-safe:scroll-smooth', loading ? 'overflow-x-hidden' : 'overflow-x-auto')}
         >
           {loading
             ? Array.from({ length: 8 }, (_, i) => (

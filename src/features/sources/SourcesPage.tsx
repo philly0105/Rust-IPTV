@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { ListFilter, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { CircleStop, ListFilter, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
@@ -9,7 +9,7 @@ import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
-import { Button, Dialog, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
+import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
@@ -33,12 +33,16 @@ import {
   type SourceSort,
   type StatusFilter,
 } from './lib/listView';
-import { useImportProgressFeed, useImportProgressStore } from './lib/progress';
+import { isRemovalPending, scheduleRemoval, usePendingRemovals } from './lib/pendingRemoval';
+import { beginImport, cancelImport, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
 import { redactText } from './lib/redact';
 import { applyOrder, moveItem } from './lib/reorder';
 import { useNextFrame } from './lib/useNextFrame';
 
 const KINDS: readonly SourceKind[] = ['m3u', 'xtream', 'stalker'];
+
+/** How one refresh ended: `failed` includes an import that finished with `lastError`. */
+type RefreshOutcome = 'ok' | 'failed' | 'cancelled';
 
 function SourcesSkeleton() {
   return (
@@ -67,20 +71,24 @@ export function SourcesPage() {
   useGuideProgressFeed();
 
   const query = useRpcQuery('sources.list', undefined);
-  const sources = useMemo(() => query.data ?? [], [query.data]);
+  // Sources waiting out their Undo window (C9) stay hidden even when a refetch brings them back.
+  const hidden = usePendingRemovals((s) => s.ids);
+  const sources = useMemo(() => (query.data ?? []).filter((s) => !hidden.has(s.id)), [query.data, hidden]);
   const progress = useImportProgressStore((s) => s.bySource);
+  const cancelling = useImportProgressStore((s) => s.cancelling);
 
   const [refreshing, setRefreshing] = useState<ReadonlySet<string>>(new Set());
   // 1-based position in a running "Refresh all", or null when none runs.
   const [refreshAllStep, setRefreshAllStep] = useState<{ current: number; total: number } | null>(null);
   const refreshingAll = refreshAllStep !== null;
+  // Set by Stop: the running "Refresh all" cancels its current import and starts no more.
+  const stopAllRef = useRef<{ stopped: boolean; currentId: string | null } | null>(null);
+  const [stoppingAll, setStoppingAll] = useState(false);
   const [editing, setEditing] = useState<Source | null>(null);
   const [editTab, setEditTab] = useState<EditTab>('details');
   const [view, setViewState] = useState<ListView>(() => loadView());
   const [removeAllOpen, setRemoveAllOpen] = useState(false);
   const [removeAllBusy, setRemoveAllBusy] = useState(false);
-  const [removing, setRemoving] = useState<Source | null>(null);
-  const [removeBusy, setRemoveBusy] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const [drag, setDrag] = useState<{ id: string; overId?: string; pos?: 'before' | 'after' } | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -127,9 +135,9 @@ export function SourcesPage() {
   useEffect(() => {
     setHeader({
       title: t('title'),
-      subtitle: query.data ? t('subtitleCount', { count: query.data.length }) : undefined,
+      subtitle: query.data ? t('subtitleCount', { count: sources.length }) : undefined,
     });
-  }, [setHeader, t, query.data]);
+  }, [setHeader, t, query.data, sources.length]);
 
   useEffect(() => onAppEvent('sources.changed', () => void invalidate('sources.')), []);
 
@@ -137,23 +145,29 @@ export function SourcesPage() {
 
   const setCache = (list: Source[]) => queryClient.setQueryData(rpcKey('sources.list'), list);
 
-  const refreshOne = async (s: Source): Promise<boolean> => {
+  const refreshOne = async (s: Source): Promise<RefreshOutcome> => {
     setRefreshing((prev) => new Set(prev).add(s.id));
+    beginImport(s.id);
     try {
       const updated = await rpc('sources.refresh', { id: s.id });
       await Promise.all([invalidate('sources.'), invalidate('catalog.')]);
       // A re-import can detect guide links that were not there before (new url-tvg, changed Xtream login).
       const guides = newlyEnabledEpgUrls(s.epg, updated.epg);
       if (guides.length > 0) void refreshGuides(guides);
-      return !updated.lastError;
+      return updated.lastError ? 'failed' : 'ok';
     } catch (e) {
       const err = RpcError.from(e);
+      // A cancelled refresh is what the user asked for: the card shows it, no error toast.
+      if (wasCancelled(s.id, err)) {
+        void invalidate('sources.');
+        return 'cancelled';
+      }
       // Unknown failures keep the core's text: the generic summary would hide the only detail.
       const what = err.code === 'internal' ? redactText(err.message) : t(summaryKey(err));
       toast({
         variant: 'error',
         title: t('refreshFailedTitle', { name: s.name }),
-        description: `${what} ${t(nextStepKey(err))}`,
+        description: `${what} ${t(nextStepKey(err, s.kind))}`,
         // Bad credentials or a wrong address will fail the same way again: send the user to the settings.
         action:
           err.code === 'auth' || err.code === 'not_found' || err.code === 'invalid'
@@ -161,7 +175,7 @@ export function SourcesPage() {
             : { label: t('tryAgain'), onClick: () => void refreshOne(s) },
       });
       void invalidate('sources.');
-      return false;
+      return 'failed';
     } finally {
       setRefreshing((prev) => {
         const next = new Set(prev);
@@ -175,19 +189,50 @@ export function SourcesPage() {
   const refreshable = sources.filter((s) => s.m3u?.origin !== 'text');
   const refreshAll = async () => {
     const targets = refreshable;
-    if (targets.length === 0) return;
+    if (targets.length === 0 || stopAllRef.current) return;
+    const run = { stopped: false, currentId: null as string | null };
+    stopAllRef.current = run;
     let failed = 0;
-    // One at a time: imports hold a write transaction each, and portals rate-limit.
-    for (const [i, s] of targets.entries()) {
-      setRefreshAllStep({ current: i + 1, total: targets.length });
-      if (!(await refreshOne(s))) failed += 1;
+    let refreshed = 0;
+    try {
+      // One at a time: imports hold a write transaction each, and portals rate-limit.
+      for (const [i, s] of targets.entries()) {
+        if (run.stopped) break;
+        // Removed (waiting for Undo) since the run started.
+        if (isRemovalPending(s.id)) continue;
+        setRefreshAllStep({ current: i + 1, total: targets.length });
+        run.currentId = s.id;
+        const outcome = await refreshOne(s);
+        run.currentId = null;
+        if (outcome === 'failed') failed += 1;
+        else if (outcome === 'ok') refreshed += 1;
+      }
+    } finally {
+      stopAllRef.current = null;
+      setRefreshAllStep(null);
+      setStoppingAll(false);
     }
-    setRefreshAllStep(null);
-    toast(
-      failed === 0
-        ? { variant: 'success', title: t('refreshAllDone', { count: targets.length }) }
-        : { variant: 'error', title: t('refreshAllPartial', { failed, count: targets.length }) },
-    );
+    if (run.stopped) toast({ variant: 'info', title: t('refreshAllStopped', { done: refreshed, count: targets.length }) });
+    else if (failed > 0) toast({ variant: 'error', title: t('refreshAllPartial', { failed, count: failed + refreshed }) });
+    // Every one cancelled or removed on the way: the cards already say so.
+    else if (refreshed > 0) toast({ variant: 'success', title: t('refreshAllDone', { count: refreshed }) });
+  };
+
+  /** Stop for "Refresh all": cancels the import that is running and skips the rest. */
+  const stopRefreshAll = () => {
+    const run = stopAllRef.current;
+    if (!run || run.stopped) return;
+    run.stopped = true;
+    setStoppingAll(true);
+    if (run.currentId) void cancelOne(run.currentId);
+  };
+
+  const cancelOne = async (id: string) => {
+    try {
+      await cancelImport(id);
+    } catch (e) {
+      toast({ variant: 'error', title: t('cancelFailed'), description: t(summaryKey(RpcError.from(e))) });
+    }
   };
 
   const commitOrder = async (ids: string[], movedId: string) => {
@@ -256,29 +301,56 @@ export function SourcesPage() {
     void commitOrder(ids, drag.id);
   };
 
-  const confirmRemove = async () => {
-    if (!removing) return;
-    const target = removing;
-    const before = sources;
-    setRemoveBusy(true);
-    try {
-      await rpc('sources.remove', { id: target.id });
-      setCache(before.filter((s) => s.id !== target.id));
-      useImportProgressStore.getState().clear(target.id);
-      setRemoving(null);
-      toast({ variant: 'success', title: t('removedTitle', { name: target.name }) });
-      await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
-    } catch (e) {
-      const err = RpcError.from(e);
-      toast({
-        variant: 'error',
-        title: t('removeFailed', { name: target.name }),
-        // The confirm dialog stays open, so pressing Remove again is the retry.
-        description: redactText(err.message),
-      });
-    } finally {
-      setRemoveBusy(false);
-    }
+  /**
+   * Remove with Undo (C9): the card goes at once and a toast offers Undo for 8 s.
+   * `sources.remove` goes out when the toast closes without Undo, or on pagehide.
+   */
+  const removeSource = (target: Source) => {
+    // Keyboard focus was on the card's Remove button: move it to the neighbouring card (or Add).
+    const order = shown.map((s) => s.id);
+    const at = order.indexOf(target.id);
+    const neighbour = order[at + 1] ?? order[at - 1];
+    const sendRemove = async () => {
+      try {
+        await rpc('sources.remove', { id: target.id });
+      } catch (e) {
+        // Already gone (Remove all, another window): that is the outcome the user wanted.
+        if (RpcError.from(e).code !== 'not_found') throw e;
+      }
+    };
+    scheduleRemoval({
+      id: target.id,
+      toast: { variant: 'info', title: t('removedTitle', { name: target.name }), description: t('removedUndoHint') },
+      undoLabel: t('undo'),
+      remove: sendRemove,
+      onRemoved: () => {
+        const list = queryClient.getQueryData<Source[]>(rpcKey('sources.list'));
+        if (list) setCache(list.filter((s) => s.id !== target.id));
+        useImportProgressStore.getState().clear(target.id);
+        void Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
+      },
+      onFailed: (e) => {
+        const err = RpcError.from(e);
+        void invalidate('sources.');
+        toast({
+          variant: 'error',
+          title: t('removeFailed', { name: target.name }),
+          description: `${t(summaryKey(err))} ${t('removeFailedKept')}`,
+          action: { label: t('tryAgain'), onClick: () => removeSource(target) },
+        });
+      },
+      onUndone: () => {
+        setAnnouncement(t('restoredAnnouncement', { name: target.name }));
+        void invalidate('sources.');
+      },
+    });
+    setAnnouncement(t('removedAnnouncement', { name: target.name }));
+    nextFrame(() => {
+      const cards = listRef.current?.querySelectorAll<HTMLElement>('[data-source-id]') ?? [];
+      const card = [...cards].find((el) => el.dataset.sourceId === neighbour);
+      const next = card?.querySelector<HTMLElement>('[data-testid="source-remove"]:not(:disabled)') ?? card?.querySelector<HTMLElement>('a');
+      (next ?? document.querySelector<HTMLElement>('[data-testid="sources-add"], [data-testid="sources-onboarding"] button'))?.focus();
+    });
   };
 
   const confirmRemoveAll = async () => {
@@ -351,6 +423,17 @@ export function SourcesPage() {
             >
               {refreshAllStep && refreshAllStep.total > 1 ? t('refreshAllProgress', refreshAllStep) : t('refreshAll')}
             </Button>
+            {refreshingAll ? (
+              <Button
+                variant="ghost"
+                icon={<CircleStop aria-hidden className="size-4" />}
+                disabled={stoppingAll}
+                onClick={stopRefreshAll}
+                data-testid="sources-refresh-all-stop"
+              >
+                {stoppingAll ? t('refreshAllStopping') : t('refreshAllStop')}
+              </Button>
+            ) : null}
             <Button variant="primary" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
               {t('addSource')}
             </Button>
@@ -416,7 +499,9 @@ export function SourcesPage() {
               onRefresh={() => void refreshOne(s)}
               onEdit={() => openEdit(s)}
               onAccount={() => openEdit(s, 'account')}
-              onRemove={() => setRemoving(s)}
+              onRemove={() => removeSource(s)}
+              onCancelImport={() => void cancelOne(s.id)}
+              cancelling={cancelling[s.id] === true}
               onMove={(to) => moveTo(s.id, to)}
               onDragStart={onDragStart(s.id)}
               onDragOver={onDragOver(s.id)}
@@ -451,25 +536,6 @@ export function SourcesPage() {
         onClose={() => setRemoveAllOpen(false)}
         onConfirm={() => void confirmRemoveAll()}
       />
-
-      <Dialog
-        open={removing !== null}
-        onClose={() => (removeBusy ? undefined : setRemoving(null))}
-        title={t('removeTitle', { name: removing?.name ?? '' })}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setRemoving(null)} disabled={removeBusy}>
-              {t('cancel')}
-            </Button>
-            <Button variant="danger" loading={removeBusy} onClick={() => void confirmRemove()} data-testid="source-remove-confirm">
-              {t('removeConfirm')}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-fg-muted">{t('removeBody')}</p>
-      </Dialog>
     </div>
   );
 }

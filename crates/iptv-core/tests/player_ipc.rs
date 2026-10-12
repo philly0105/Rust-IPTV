@@ -449,3 +449,76 @@ fn demuxer_cache_state_gives_the_rewind_window() {
     assert!(apply_event(&mut st, &json!({"event": "start-file"})));
     assert_eq!(st.seekable, None);
 }
+
+/// B9: an mpv that stops reading its pipe must not hang callers forever. The
+/// write shares the reply deadline; a write cut short closes the connection
+/// (the stream would be misframed) and later commands fail fast.
+#[tokio::test]
+async fn a_pipe_mpv_stops_reading_times_out_and_closes() {
+    // A 64-byte pipe nobody reads: the first long command blocks in write.
+    let (ours, _theirs) = tokio::io::duplex(64);
+    let client = MpvClient::with_timeout(
+        ours,
+        MpvState {
+            attached: true,
+            ..MpvState::default()
+        },
+        Duration::from_millis(300),
+    );
+    let long = "x".repeat(10_000);
+    let started = std::time::Instant::now();
+    let err = client
+        .command(vec![json!("loadfile"), json!(long)])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(
+        client.is_closed(),
+        "a half-written line closes the connection"
+    );
+    let err = tokio::time::timeout(Duration::from_secs(1), client.get_property("pause"))
+        .await
+        .expect("later commands fail fast")
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Conflict(_)), "{err:?}");
+}
+
+/// B9: a caller that gives up (its future is dropped) leaves no pending entry
+/// and, when it stopped mid-write, no half line for the next caller.
+#[tokio::test]
+async fn a_dropped_call_mid_write_closes_instead_of_desyncing() {
+    let (ours, _theirs) = tokio::io::duplex(64);
+    let client = MpvClient::with_timeout(ours, MpvState::default(), Duration::from_secs(30));
+    let long = "y".repeat(10_000);
+    let r = tokio::time::timeout(
+        Duration::from_millis(200),
+        client.command(vec![json!("loadfile"), json!(long)]),
+    )
+    .await;
+    assert!(r.is_err(), "still blocked in write");
+    assert!(client.is_closed());
+    assert_eq!(client.pending_len(), 0);
+}
+
+/// D11 (review round 1): a call dropped while waiting for its reply (the
+/// write finished) removes its pending entry and keeps the connection.
+#[tokio::test]
+async fn a_dropped_call_awaiting_its_reply_leaves_no_pending_entry() {
+    let (ours, _theirs) = tokio::io::duplex(64 * 1024);
+    let client = MpvClient::with_timeout(ours, MpvState::default(), Duration::from_secs(30));
+    for _ in 0..3 {
+        let r = tokio::time::timeout(
+            Duration::from_millis(100),
+            client.command(vec![json!("get_property"), json!("pause")]),
+        )
+        .await;
+        assert!(r.is_err(), "no reply was sent");
+    }
+    assert!(!client.is_closed(), "a finished write must not close");
+    assert_eq!(
+        client.pending_len(),
+        0,
+        "dropped calls leaked pending entries"
+    );
+}

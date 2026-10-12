@@ -20,8 +20,9 @@ import { RpcError } from '@/api/transport';
 import { Badge, Button, EmptyState, ErrorState, Poster, ProgressBar, buttonClass, useToast } from '@/ui';
 
 import { useShell } from '../store';
+import { useVisibleSources } from '../useVisibleSources';
 import { useSettings } from '../useSettings';
-import { ChannelCard, PosterCard, SourceCard, itemPath } from './cards';
+import { ChannelCard, PosterCard, SourceCard, itemPath, joinList } from './cards';
 import { DashboardRail } from './DashboardRail';
 import { HeroSkeleton } from './HeroSkeleton';
 
@@ -114,7 +115,7 @@ function Hero({
     <section
       aria-labelledby="dash-hero-title"
       data-testid="dashboard-hero"
-      className="relative mx-8 overflow-hidden rounded-lg border border-border bg-surface"
+      className="relative mx-8 overflow-hidden rounded-lg border border-divider bg-surface"
     >
       {snap?.posterUrl && (
         <div aria-hidden className="absolute inset-0">
@@ -167,7 +168,7 @@ export function DashboardPage() {
 }
 
 function DashboardBody() {
-  const { t } = useTranslation('shell');
+  const { t, i18n } = useTranslation('shell');
   const shell = useShell();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -179,9 +180,10 @@ function DashboardBody() {
   const settings = useSettings();
   const rails = settings.data?.dashboardRails;
   const show = (k: keyof NonNullable<typeof rails>) => rails?.[k] ?? true;
+  type Section = keyof NonNullable<typeof rails>;
   const tmdbEnabled = settings.data?.tmdb.enabled ?? false;
 
-  const sources = useRpcQuery('sources.list', undefined);
+  const sources = useVisibleSources();
   const hasSources = (sources.data?.length ?? 0) > 0;
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
 
@@ -246,6 +248,7 @@ function DashboardBody() {
   const anyRailError = railQueries.some((q) => q.isError);
   /** Per-rail error, hidden when the dashboard shows the shared one. */
   const railError = (err: unknown) => (sharedError ? undefined : err);
+  const showSharedError = sharedError !== undefined;
   const retryAllRails = () => {
     for (const q of railQueries) if (q.isError) void q.refetch();
   };
@@ -301,20 +304,58 @@ function DashboardBody() {
 
   const seriesBadge = (p: PlaybackPosition) => (p.ref.contentType === 'series' && p.snapshot?.subtitle ? <Badge variant="neutral">{p.snapshot.subtitle}</Badge> : undefined);
 
+  // Only rails the user has switched on count: hidden rails with data must not suppress the quiet state.
   const anyRailVisible =
-    (continueWatching.data?.length ?? 0) +
-      liveFavorites.length +
-      recentLive.length +
-      vodFavorites.length +
-      recentlyAdded.length +
-      (trending.data?.length ?? 0) >
-    0;
+    ((show('hero') || show('continueWatching')) && (continueWatching.data?.length ?? 0) > 0) ||
+    (show('liveFavorites') && liveFavorites.length > 0) ||
+    (show('recentlyWatchedLive') && recentLive.length > 0) ||
+    (show('favoriteMoviesAndSeries') && vodFavorites.length > 0) ||
+    (show('recentlyAdded') && recentlyAdded.length > 0) ||
+    (show('tmdbTrending') && tmdbEnabled && (trending.data?.length ?? 0) > 0);
+  // Wait for every rail on screen, so "Nothing to show yet" never flashes above rails still loading.
+  const anyRailPending = railQueries.some((q) => q.isPending);
+
+  // Layout stability: nothing renders below the first section still loading. A skeleton
+  // that collapses (empty rail, shared error) or a flagged rail that appears then moves
+  // nothing, because everything after it is inserted only once it has settled.
+  const sections: [Section, boolean][] = [
+    ['hero', heroLoading],
+    ['continueWatching', continueWatching.isPending],
+    ['liveFavorites', favorites.isPending],
+    ['recentlyWatchedLive', recent.isPending],
+    ['favoriteMoviesAndSeries', favorites.isPending],
+    ['recentSources', sources.isPending],
+    ['recentlyAdded', addedMovies.isPending || addedSeries.isPending],
+    ['tmdbTrending', tmdbEnabled && trending.isPending],
+  ];
+  const firstPending = sections.findIndex(([k, pending]) => show(k) && pending);
+  /** The section is on and nothing above it is still loading. */
+  const visible = (k: Section) => show(k) && (firstPending < 0 || sections.findIndex(([x]) => x === k) <= firstPending);
 
   return (
     <div className="flex flex-col gap-10 pt-8 pb-16" data-testid="dashboard">
-      {sharedError !== undefined && (
-        <div className="mx-8 rounded-lg border border-border bg-surface" data-testid="dashboard-error">
-          <ErrorState error={sharedError} onRetry={retryAllRails} />
+      {/*
+        The shared error takes the hero's place in the normal flow. With the hero on,
+        an invisible hero skeleton shares its grid cell, so the slot keeps at least the
+        loading state's height and the content below doesn't jump up under it.
+      */}
+      {showSharedError && (
+        <div className="grid" data-testid="dashboard-error-slot">
+          {visible('hero') && (
+            <div aria-hidden className="invisible col-start-1 row-start-1" data-hero-spacer="">
+              <HeroSkeleton />
+            </div>
+          )}
+          <div className="col-start-1 row-start-1 mx-8 flex rounded-lg border border-divider bg-surface" data-testid="dashboard-error">
+            <ErrorState
+              error={sharedError}
+              size="inline"
+              className="flex-1"
+              title={t('dashboardLoadFailed')}
+              hint={t('dashboardLocalDataHint')}
+              onRetry={retryAllRails}
+            />
+          </div>
         </div>
       )}
       {show('hero') && (heroLoading ? <HeroSkeleton /> : hero ? (
@@ -333,13 +374,15 @@ function DashboardBody() {
         />
       ) : null)}
 
-      {show('continueWatching') && (
+      {visible('continueWatching') && (
         <DashboardRail<PlaybackPosition>
           id="continue-watching"
           title={t('railContinueWatching')}
           items={continueWatching.data}
           loading={continueWatching.isPending}
+          loaded={continueWatching.isSuccess}
           error={railError(continueWatching.error)}
+          errorHint={t('dashboardLocalDataHint')}
           onRetry={() => void continueWatching.refetch()}
           getKey={(p) => `${itemKey(p.ref)}|${p.episodeId ?? ''}`}
           cardWidth={168}
@@ -365,13 +408,15 @@ function DashboardBody() {
         />
       )}
 
-      {show('liveFavorites') && (
+      {visible('liveFavorites') && (
         <DashboardRail<FavoriteEntry>
           id="live-favorites"
           title={t('railLiveFavorites')}
           items={liveFavorites}
           loading={favorites.isPending}
+          loaded={favorites.isSuccess}
           error={railError(favorites.error)}
+          errorHint={t('dashboardLocalDataHint')}
           onRetry={() => void favorites.refetch()}
           seeAll={{ to: '/favorites' }}
           getKey={(f) => itemKey(f.ref)}
@@ -396,13 +441,15 @@ function DashboardBody() {
         />
       )}
 
-      {show('recentlyWatchedLive') && (
+      {visible('recentlyWatchedLive') && (
         <DashboardRail<RecentEntry>
           id="recent-live"
           title={t('railRecentLive')}
           items={recentLive}
           loading={recent.isPending}
+          loaded={recent.isSuccess}
           error={railError(recent.error)}
+          errorHint={t('dashboardLocalDataHint')}
           onRetry={() => void recent.refetch()}
           seeAll={{ to: '/recent' }}
           getKey={(r) => itemKey(r.ref)}
@@ -422,31 +469,38 @@ function DashboardBody() {
         />
       )}
 
-      {show('favoriteMoviesAndSeries') && (
+      {visible('favoriteMoviesAndSeries') && (
         <DashboardRail<FavoriteEntry>
           id="favorite-vod"
           title={t('railFavoriteVod')}
           items={vodFavorites}
           loading={favorites.isPending}
-          error={railError(favorites.error)}
+          loaded={favorites.isSuccess}
+          // Both favorites rails read one query: only one of them shows its error.
+          error={show('liveFavorites') ? undefined : railError(favorites.error)}
+          errorHint={t('dashboardLocalDataHint')}
           onRetry={() => void favorites.refetch()}
           seeAll={{ to: '/favorites' }}
           getKey={(f) => itemKey(f.ref)}
           cardWidth={168}
           skeletonAspect={2 / 3}
-          renderCard={(f, rail) => (
-            <PosterCard
-              rail={rail}
-              title={f.snapshot.title}
-              subtitle={f.snapshot.subtitle ?? (f.ref.contentType === 'series' ? t('series') : t('movie'))}
-              posterUrl={f.snapshot.posterUrl}
-              to={itemPath(f.ref)}
-            />
-          )}
+          renderCard={(f, rail) => {
+            const subtitle = f.snapshot.subtitle ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
+            return (
+              <PosterCard
+                rail={rail}
+                title={f.snapshot.title}
+                subtitle={subtitle}
+                posterUrl={f.snapshot.posterUrl}
+                to={itemPath(f.ref)}
+                ariaLabel={joinList([f.snapshot.title, subtitle], i18n.language)}
+              />
+            );
+          }}
         />
       )}
 
-      {show('recentSources') && (
+      {visible('recentSources') && (
         <DashboardRail<Source>
           id="recent-sources"
           title={t('railRecentSources')}
@@ -460,13 +514,15 @@ function DashboardBody() {
         />
       )}
 
-      {show('recentlyAdded') && (
+      {visible('recentlyAdded') && (
         <DashboardRail<VodItem | SeriesItem>
           id="recently-added"
           title={t('railRecentlyAdded')}
           items={recentlyAdded}
           loading={addedMovies.isPending || addedSeries.isPending}
+          loaded={addedMovies.isSuccess && addedSeries.isSuccess}
           error={railError(addedMovies.error ?? addedSeries.error)}
+          errorHint={t('dashboardLocalDataHint')}
           onRetry={() => {
             void addedMovies.refetch();
             void addedSeries.refetch();
@@ -474,25 +530,34 @@ function DashboardBody() {
           getKey={(v) => itemKey(v.ref)}
           cardWidth={168}
           skeletonAspect={2 / 3}
-          renderCard={(v, rail) => (
-            <PosterCard
-              rail={rail}
-              title={v.title}
-              subtitle={[sourceById.get(v.ref.sourceId)?.name, v.year].filter(Boolean).join(', ')}
-              posterUrl={v.posterUrl}
-              badge={v.rating ? <Badge variant="neutral">{v.rating.toFixed(1)}</Badge> : undefined}
-              to={itemPath(v.ref)}
-            />
-          )}
+          renderCard={(v, rail) => {
+            const rating = v.rating ? v.rating.toFixed(1) : undefined;
+            return (
+              <PosterCard
+                rail={rail}
+                title={v.title}
+                subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, v.year], i18n.language)}
+                posterUrl={v.posterUrl}
+                badge={rating ? <Badge variant="neutral">{rating}</Badge> : undefined}
+                to={itemPath(v.ref)}
+                // Name first: the rating badge sits before the caption in the DOM.
+                ariaLabel={joinList(
+                  [v.title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
+                  i18n.language,
+                )}
+              />
+            );
+          }}
         />
       )}
 
-      {show('tmdbTrending') && tmdbEnabled && (
+      {visible('tmdbTrending') && tmdbEnabled && (
         <DashboardRail<TmdbBrief>
           id="tmdb-trending"
           title={t('railTrending')}
           items={trending.data}
           loading={trending.isPending}
+          loaded={trending.isSuccess}
           error={railError(trending.error)}
           onRetry={() => void trending.refetch()}
           getKey={(b) => `${b.mediaType}-${b.tmdbId}`}
@@ -502,7 +567,7 @@ function DashboardBody() {
             <PosterCard
               rail={rail}
               title={b.title}
-              subtitle={[b.mediaType === 'tv' ? t('series') : t('movie'), b.year].filter(Boolean).join(', ')}
+              subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
               posterUrl={b.posterUrl}
               badge={b.rating ? <Badge variant="neutral">{b.rating.toFixed(1)}</Badge> : undefined}
               to={`/search?q=${encodeURIComponent(b.title)}`}
@@ -512,12 +577,7 @@ function DashboardBody() {
         />
       )}
 
-      {hasSources &&
-        !anyRailVisible &&
-        !anyRailError &&
-        !continueWatching.isPending &&
-        !favorites.isPending &&
-        !recent.isPending && (
+      {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && (
           <EmptyState
             size="inline"
             icon={<Play size={22} />}

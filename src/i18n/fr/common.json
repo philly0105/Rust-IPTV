@@ -46,5 +46,10 @@
   "errorHintConflict": "Rechargez pour voir la dernière version, puis réessayez.",
   "errorHintIo": "Vérifiez que le dossier existe et que vous avez le droit d'y écrire.",
   "errorHintDb": "Redémarrez l'application. Si le problème persiste, restaurez une sauvegarde depuis les Paramètres.",
-  "errorHintInternal": "Réessayez. Si le problème persiste, redémarrez l'application."
+  "errorHintInternal": "Réessayez. Si le problème persiste, redémarrez l'application.",
+  "errorCode": "Code d'erreur : {{code}}",
+  "errorTitleEngineMissing": "Impossible de démarrer le moteur de lecture",
+  "errorHintEngineMissing": "Le moteur de lecture vidéo (mpv) est absent ou n'a pas pu démarrer.",
+  "errorTitleServer": "Le serveur a rencontré un problème",
+  "errorHintServer": "Le serveur est occupé ou rencontre des difficultés. Réessayez plus tard."
 }

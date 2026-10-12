@@ -16,7 +16,7 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
 
@@ -26,6 +26,7 @@ import { cn, hueOf, initialsOf, Skeleton } from '@/ui';
 
 import { railLinks, sourceBasePath } from './railLinks';
 import { useShellStore } from './store';
+import { useVisibleSources } from './useVisibleSources';
 
 interface PrimaryLink {
   to: string;
@@ -51,7 +52,7 @@ const itemClass = (active: boolean, collapsed: boolean) =>
     'group flex h-10 items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
     'motion-safe:transition-colors motion-safe:duration-150',
     collapsed ? 'justify-center px-0' : 'px-3',
-    active ? 'tuning-tick bg-surface-2 text-fg' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg',
+    active ? 'tuning-tick bg-surface-2 text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
   );
 
 function RailNavLink({ to, labelKey, icon: Icon, collapsed, end }: PrimaryLink & { collapsed: boolean }) {
@@ -75,18 +76,20 @@ function RailNavLink({ to, labelKey, icon: Icon, collapsed, end }: PrimaryLink &
   );
 }
 
-function SourceMark({ source, size = 'sm' }: { source: Source; size?: 'sm' | 'md' }) {
+function SourceMark({ source, size = 'sm', errorDot }: { source: Source; size?: 'sm' | 'md'; errorDot?: boolean }) {
   const hue = hueOf(source.name);
   return (
     <span
       aria-hidden
       className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-sm font-display font-semibold text-white',
+        'relative inline-flex shrink-0 items-center justify-center rounded-sm font-display font-semibold text-white',
         size === 'sm' ? 'h-6 w-6 text-[11px]' : 'h-9 w-9 text-sm',
       )}
       style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
     >
       {initialsOf(source.name)}
+      {/* The collapsed rail has no room for the status column, so the error rides on the monogram. */}
+      {errorDot && <span className="absolute -top-1 -end-1 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-surface" />}
     </span>
   );
 }
@@ -104,18 +107,19 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
     { enabled: source.kind === 'm3u' && (expanded || active), staleTime: 5 * 60_000 },
   );
   const links = railLinks(source, { hasRadio: (radio.data?.total ?? 0) > 0 });
-  const listId = `rail-source-${source.id}`;
+  // Source ids may hold spaces or other characters an IDREF cannot carry.
+  const listId = useId();
 
   if (collapsed) {
     return (
       <li>
         <Link
           to={`${sourceBasePath(source.id)}/live`}
-          title={source.name}
-          aria-label={source.name}
+          title={source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name}
+          aria-label={source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name}
           className={cn(itemClass(active, true))}
         >
-          <SourceMark source={source} />
+          <SourceMark source={source} errorDot={!!source.lastError} />
         </Link>
       </li>
     );
@@ -130,24 +134,27 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
         onClick={() => setExpanded((v) => !v)}
         className={cn(
           'flex h-10 w-full items-center gap-3 rounded-md px-3 text-start text-sm',
-          active ? 'text-fg' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg',
+          active ? 'text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
         )}
       >
         <SourceMark source={source} />
-        <span className="min-w-0 flex-1 truncate font-medium">{source.name}</span>
+        <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent font-medium">{source.name}</span>
         {source.lastError ? (
-          <span className="h-2 w-2 shrink-0 rounded-full bg-danger" title={t('sourceHasError')} aria-label={t('sourceHasError')} />
+          // aria-label is not allowed on a plain span; the sr-only text joins the button's name.
+          <span className="h-2 w-2 shrink-0 rounded-full bg-danger" title={t('sourceHasError')}>
+            <span className="sr-only">{t('sourceHasError')}</span>
+          </span>
         ) : (
           <span className="shrink-0 text-[10px] font-semibold text-fg-subtle">{KIND_LABEL[source.kind]}</span>
         )}
         <ChevronDown
           aria-hidden
           size={14}
-          className={cn('shrink-0 text-fg-subtle motion-safe:transition-transform', expanded ? 'rotate-0' : '-rotate-90')}
+          className={cn('shrink-0 text-fg-subtle motion-safe:transition-transform', expanded ? 'rotate-0' : '-rotate-90 rtl:rotate-90')}
         />
       </button>
       {expanded && (
-        <ul id={listId} className="mt-0.5 mb-1 ms-[22px] flex flex-col gap-0.5 border-s border-border ps-2">
+        <ul id={listId} className="mt-0.5 mb-1 ms-[22px] flex flex-col gap-0.5 border-s border-divider ps-2">
           {links.map((l) => (
             <li key={l.id}>
               <NavLink
@@ -155,7 +162,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
                 className={({ isActive }) =>
                   cn(
                     'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-[13px]',
-                    isActive ? 'tuning-tick bg-surface-2 font-medium text-fg' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg',
+                    isActive ? 'tuning-tick bg-surface-2 font-medium text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
                   )
                 }
               >
@@ -176,7 +183,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
 
 export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCollapsed: boolean }) {
   const { t } = useTranslation('shell');
-  const sources = useRpcQuery('sources.list', undefined);
+  const sources = useVisibleSources();
   const toggleRail = useShellStore((s) => s.toggleRail);
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const location = useLocation();
@@ -188,7 +195,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
       data-testid="shell-rail"
       data-collapsed={collapsed || undefined}
       className={cn(
-        'flex h-full shrink-0 flex-col border-e border-border bg-surface',
+        'flex h-full shrink-0 flex-col border-e border-divider bg-surface',
         collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
       )}
     >
@@ -220,7 +227,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
               to="/sources?add=1"
               title={t('addSource')}
               aria-label={t('addSource')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3"
             >
               <Plus aria-hidden size={16} />
             </Link>
@@ -244,7 +251,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
                 disabled={sources.isFetching}
                 title={t('retry', { ns: 'common' })}
                 aria-label={t('retry', { ns: 'common' })}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 disabled:opacity-50"
               >
                 <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
               </button>
@@ -269,7 +276,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
         </section>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-0.5 border-t border-border p-2">
+      <div className="flex shrink-0 flex-col gap-0.5 border-t border-divider p-2">
         <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
         <button
           type="button"
@@ -290,9 +297,9 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
             className={itemClass(false, collapsed)}
           >
             {collapsed ? (
-              <PanelLeftOpen aria-hidden size={18} className="shrink-0" />
+              <PanelLeftOpen aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
             ) : (
-              <PanelLeftClose aria-hidden size={18} className="shrink-0" />
+              <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
             )}
             {!collapsed && <span className="truncate">{t('collapseRail')}</span>}
           </button>

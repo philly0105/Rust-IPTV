@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "تدبير الفئات (المخبية: {{count}})",
   "manageCategoriesHint": "{{hidden}} من {{total}} مخبيين. الفئات المخبية كتبقى برا اللوائح والبحث.",
   "noCategoryMatch": "ما كاينة حتى فئة مطابقة لهاد الفلتر.",
+  "clearFilter": "مسح الفيلتر",
   "saveCategories": "حفظ",
   "categoriesSaved": "ظهور الفئات تحفظ",
   "categoriesSaveFailed": "ما قدرناش نحفظو ظهور الفئات",
@@ -61,6 +62,7 @@
   "resume": "كمّل",
   "resumeAt": "كمّل من {{time}}",
   "startOver": "عاود من الأول",
+  "startOverEpisode": "عاود {{code}} من اللول",
   "playEpisode": "شغّل {{code}}",
   "resumeEpisode": "كمّل {{code}}",
   "nowPlaying": "كيتشغل دابا",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "العناوين المشابهة خاصها مفتاح TMDB",
   "tmdbKeyMissingHint": "زيد مفتاح TMDB فالإعدادات > الميتاداتا.",
   "addTmdbKey": "زيد مفتاح TMDB",
+  "tmdbKeyRejectedTitle": "TMDB رفض مفتاح API",
+  "tmdbKeyRejectedHint": "شوف ولا بدّل مفتاح TMDB فالإعدادات > الميتاداتا.",
   "watched": "متشاف",
   "markWatched": "علّم بلي تشاف",
   "markUnwatched": "علّم بلي ما تشافش",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "ورّي حتى لـ {{count}}",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين"
+  "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين",
+  "searchPartialError": "شي نتائج ما تشارجاوش."
 }

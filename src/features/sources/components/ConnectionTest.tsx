@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ConnectionTestResult } from '@/api/rpc';
+import type { SourceKind } from '@/api/types';
 import { RpcError } from '@/api/transport';
 
 import { Button } from '@/ui';
@@ -20,10 +21,13 @@ export function ConnectionTest({
   run,
   disabled,
   inputs,
+  kind,
 }: {
   run: () => Promise<ConnectionTestResult> | null;
   disabled?: boolean;
   inputs?: string;
+  /** The tested source's kind, for sign-in advice that names its login. */
+  kind?: SourceKind;
 }) {
   const { t } = useTranslation('sources');
   const [state, setState] = useState<TestState>({ status: 'idle' });
@@ -61,12 +65,12 @@ export function ConnectionTest({
     else {
       message = r.message ?? t('testFailedGeneric');
       const code = importErrorCode(r.message);
-      if (code !== 'internal') nextStep = t(nextStepKey({ code, message: r.message }));
+      if (code !== 'internal') nextStep = t(nextStepKey({ code, message: r.message }, kind));
     }
   } else if (state.status === 'failed') {
     // The plain summary first; the core's own text (English, often technical) behind a disclosure.
     message = t(summaryKey(state.error));
-    nextStep = t(nextStepKey(state.error));
+    nextStep = t(nextStepKey(state.error, kind));
     detail = state.error.message;
   }
 

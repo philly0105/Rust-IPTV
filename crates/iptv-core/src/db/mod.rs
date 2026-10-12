@@ -2,7 +2,9 @@
 //!
 //! Written by W0; owned and extended by B1. Every pooled connection runs with
 //! `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`,
-//! `busy_timeout=5000`. Long imports should use one write transaction per source.
+//! a busy handler that waits up to 5 s for the write lock (longer while a
+//! catalog import holds it, see [`long_write`]). Long imports should use one
+//! write transaction per source.
 
 use crate::error::{is_sqlite_corruption, CoreError, CoreResult};
 use r2d2_sqlite::SqliteConnectionManager;
@@ -19,8 +21,69 @@ pub type PooledConn = r2d2::PooledConnection<SqliteConnectionManager>;
 pub const DB_FILE: &str = "iptv.db";
 /// Maximum pooled connections.
 pub const POOL_MAX: u32 = 8;
-/// SQLite busy timeout applied to every connection.
+/// How long a connection waits for the write lock before failing with
+/// "database is locked", when no catalog import is running.
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
+/// The same wait while a catalog import runs. A large playlist holds the
+/// write lock for its whole save (17 s for 486k channels, review round 3),
+/// so user writes (positions, favorites, settings) wait for it to commit
+/// instead of failing. Still bounded so a stuck writer cannot hang a call
+/// forever.
+pub const LONG_BUSY_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Catalog imports in flight in this process. A plain `fn` busy handler has
+/// no per-connection state, so this is process-wide; with several databases
+/// open (tests) an import elsewhere only lengthens a wait that would
+/// otherwise have failed.
+static LONG_WRITERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Marks a catalog import as running until dropped; see [`LONG_BUSY_TIMEOUT`].
+#[must_use = "the mark lasts until the guard is dropped"]
+pub struct LongWrite(());
+
+impl Drop for LongWrite {
+    fn drop(&mut self) {
+        LONG_WRITERS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Marks a catalog import as running; held by `sources` for each import run.
+pub fn long_write() -> LongWrite {
+    LONG_WRITERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    LongWrite(())
+}
+
+thread_local! {
+    /// When the current busy wait on this thread began.
+    static BUSY_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// Busy handler for every connection: retries with short sleeps (as
+/// SQLite's own busy_timeout does) until [`BUSY_TIMEOUT`] has passed, or
+/// [`LONG_BUSY_TIMEOUT`] while an import runs. `count` is 0 on the first
+/// call of each wait.
+fn busy_wait(count: i32) -> bool {
+    const DELAYS_MS: [u64; 12] = [1, 2, 5, 10, 15, 20, 25, 25, 25, 50, 50, 100];
+    let now = std::time::Instant::now();
+    let since = BUSY_SINCE.with(|c| match c.get() {
+        Some(t) if count > 0 => t,
+        _ => {
+            c.set(Some(now));
+            now
+        }
+    });
+    let limit = if LONG_WRITERS.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+        LONG_BUSY_TIMEOUT
+    } else {
+        BUSY_TIMEOUT
+    };
+    if now.duration_since(since) >= limit {
+        return false;
+    }
+    let delay = DELAYS_MS[(count.max(0) as usize).min(DELAYS_MS.len() - 1)];
+    std::thread::sleep(Duration::from_millis(delay));
+    true
+}
 
 /// One embedded migration script.
 pub struct Migration {
@@ -52,6 +115,26 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0004_position_watched",
         sql: include_str!("migrations/0004_position_watched.sql"),
     },
+    Migration {
+        version: 5,
+        name: "0005_source_error_code",
+        sql: include_str!("migrations/0005_source_error_code.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "0006_items_position_index",
+        sql: include_str!("migrations/0006_items_position_index.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "0007_epg_programs_unique",
+        sql: include_str!("migrations/0007_epg_programs_unique.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "0008_drop_epg_url_index",
+        sql: include_str!("migrations/0008_drop_epg_url_index.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -70,7 +153,7 @@ pub fn latest_version() -> i64 {
 
 /// Applies the per-connection pragmas.
 pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
-    conn.busy_timeout(BUSY_TIMEOUT)?;
+    conn.busy_handler(Some(busy_wait))?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY;",
     )?;
@@ -95,6 +178,17 @@ pub fn open(path: &Path) -> CoreResult<DbPool> {
 /// Applies pending migrations inside one IMMEDIATE transaction, tracked in
 /// `schema_migrations`. Idempotent.
 pub fn migrate(conn: &mut Connection) -> CoreResult<()> {
+    // Index builds over a large table (a unique index on a multi-million-row
+    // table) sort through temp storage: on disk here, not in memory, so an
+    // upgrade does not take hundreds of MB before the window shows. The
+    // pragma cannot change inside a transaction; restored afterwards.
+    conn.execute_batch("PRAGMA temp_store=FILE;")?;
+    let result = migrate_in_tx(conn);
+    conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
+    result
+}
+
+fn migrate_in_tx(conn: &mut Connection) -> CoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let has_table: bool = tx
         .query_row(
@@ -304,6 +398,48 @@ pub fn to_rfc3339(ts: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// Every guide statement over `epg_programs` searches an index instead of
+    /// scanning the table (0008 dropped the epg_url index).
+    #[test]
+    fn guide_queries_use_an_index_after_all_migrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = super::open_and_migrate(&dir.path().join("plan.db")).unwrap();
+        let conn = pool.get().unwrap();
+        let statements = [
+            // epg/query.rs `rows` (the guide grid and now/next).
+            "SELECT p.start, p.stop, p.title, p.description, p.category, p.icon \
+             FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url \
+             WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND p.stop > ?4 \
+             AND s.enabled = 1 AND s.origin <> ?5 ORDER BY p.start, s.rowid LIMIT ?6",
+            // epg/resolve.rs: does a channel have programmes.
+            "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",
+            // epg/store.rs: replace, clear and remove a feed.
+            "DELETE FROM epg_programs WHERE epg_url = ?1",
+            "UPDATE OR IGNORE epg_programs SET epg_url = ?1 WHERE epg_url = ?2",
+            "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
+        ];
+        for sql in statements {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let args = vec![rusqlite::types::Null; stmt.parameter_count()];
+            let plan: Vec<String> = stmt
+                .query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let programmes: Vec<&String> = plan
+                .iter()
+                .filter(|d| matches!(d.split_whitespace().nth(1), Some("p" | "epg_programs")))
+                .collect();
+            assert!(!programmes.is_empty(), "{sql}: {plan:?}");
+            for d in programmes {
+                assert!(
+                    d.starts_with("SEARCH") && d.contains("INDEX"),
+                    "{sql} does not use an index: {plan:?}"
+                );
+            }
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -344,14 +480,24 @@ mod tests {
         assert_eq!(schema_version(&conn).unwrap(), 1);
         migrate(&mut conn).unwrap();
         assert_eq!(schema_version(&conn).unwrap(), latest_version());
-        let has_url_index: bool = conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_epg_programs_url'",
-                [],
-                |_| Ok(true),
+        let has_index = |name: &str| -> bool {
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [name],
+                |r| r.get::<_, i64>(0),
             )
-            .unwrap();
-        assert!(has_url_index, "0003 adds the epg_programs(epg_url) index");
+            .unwrap()
+                == 1
+        };
+        // 0007's unique slot index replaces 0003's epg_url index (0008).
+        assert!(
+            has_index("idx_epg_programs_slot"),
+            "0007 adds the slot index"
+        );
+        assert!(
+            !has_index("idx_epg_programs_url"),
+            "0008 drops the redundant epg_url index"
+        );
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM sources", [], |r| r.get(0))
             .unwrap();

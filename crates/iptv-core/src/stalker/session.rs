@@ -26,6 +26,9 @@ pub const LONG_TIMEOUT: Duration = Duration::from_secs(90);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Attempts for one portal request (Network/Timeout only).
 const ATTEMPTS: u32 = 3;
+/// Largest portal answer accepted. `get_all_channels` of a big panel is tens
+/// of MB; past this the body is not a portal answer.
+pub const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
 
 /// `app_state` key of a source's cached session.
 pub fn token_key(source_id: &str) -> String {
@@ -323,7 +326,14 @@ impl StalkerClient {
                 if !status.is_success() {
                     return Err(status_error(status, &format!("Stalker {label}")));
                 }
-                let text = resp.text().await.map_err(CoreError::from)?;
+                // Capped read (was `resp.text()`, unbounded): the request
+                // timeout alone lets a fast hostile server fill memory.
+                // reqwest runs without its `charset` feature, so `text()`
+                // was UTF-8 lossy too.
+                let body =
+                    crate::http::read_capped(resp, &format!("Stalker {label}"), MAX_BODY_BYTES)
+                        .await?;
+                let text = String::from_utf8_lossy(&body);
                 match p::classify_body(&text) {
                     b @ (Body::Js(_) | Body::AuthFailure(_)) => Ok(b),
                     Body::Empty => Err(CoreError::network(format!(
@@ -842,5 +852,61 @@ mod tests {
         assert!(validate_config(&c).is_err());
         c.mac_address = "00:1A; x=1".into();
         assert!(validate_config(&c).is_err());
+    }
+
+    /// D5: the `raw` call site itself enforces MAX_BODY_BYTES (a declared
+    /// oversized body is refused before any read), not only `read_capped`.
+    #[tokio::test]
+    async fn raw_call_site_is_capped() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999999999999\r\n\r\n{\"js\":";
+                let _ = sock.write_all(head.as_bytes()).await;
+                // Keep the socket open; the client must refuse on its own.
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let config = StalkerSourceConfig {
+            portal_url: format!("http://127.0.0.1:{port}/c"),
+            mac_address: "00:1a:79:00:00:01".into(),
+            is_full_portal: true,
+            username: None,
+            password: None,
+            headers: Default::default(),
+            serial_number: None,
+            device_id1: None,
+            device_id2: None,
+            signature1: None,
+            signature2: None,
+        };
+        let client = StalkerClient::ephemeral(&state, config).unwrap();
+        let req = Req::new("itv", "get_genres").timeout(Duration::from_secs(10));
+        let started = std::time::Instant::now();
+        let err = client
+            .raw(
+                &format!("http://127.0.0.1:{port}/portal.php"),
+                &req,
+                None,
+                1,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("more than"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(8));
     }
 }

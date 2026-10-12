@@ -1,16 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const enterPipWindow = vi.fn(async () => true);
+const enterPipWindow = vi.fn(async (_aspect?: number) => true);
 const exitPipWindow = vi.fn(async () => undefined);
 const recoverPipWindow = vi.fn(async () => false);
-vi.mock('@/api/window', () => ({ enterPipWindow, exitPipWindow, recoverPipWindow }));
+const setPipWindowAspect = vi.fn(async (_aspect: number) => true);
+vi.mock('@/api/window', () => ({
+  enterPipWindow,
+  exitPipWindow,
+  recoverPipWindow,
+  setPipWindowAspect,
+  PIP_DEFAULT_ASPECT: 16 / 9,
+  QUIT_FLUSH_EVENT: 'tsrust:flush',
+}));
 vi.mock('@/api/transport', () => ({
   rpc: vi.fn(() => Promise.reject(new Error('offline'))),
   isDesktop: true,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
 
-const { usePipStore, enterPip, exitPip, togglePip, __resetPipForTests } = await import('./pip');
+const { usePipStore, enterPip, exitPip, togglePip, __resetPipForTests, setPipAspectSource, aspectFromVideoParams, refreshPipAspect } =
+  await import('./pip');
 const { usePlayerStore, __resetPlayerForTests } = await import('./store');
 const { shortcutRegistry } = await import('@/shell/shortcuts');
 
@@ -140,5 +149,94 @@ describe('window picture-in-picture', () => {
     await Promise.resolve();
     expect(usePipStore.getState().active).toBe(true);
     menu.remove();
+  });
+});
+
+describe('PiP in the video aspect', () => {
+  it('reads the display aspect from mpv video-params, rotation included', () => {
+    expect(aspectFromVideoParams({ w: 720, h: 576, dw: 1024, dh: 576 })).toBeCloseTo(16 / 9);
+    expect(aspectFromVideoParams({ dw: 1440, dh: 1080, rotate: 0 })).toBeCloseTo(4 / 3);
+    expect(aspectFromVideoParams({ dw: 1920, dh: 1080, rotate: 90 })).toBeCloseTo(9 / 16);
+    expect(aspectFromVideoParams({ dw: 1920, dh: 1080, rotate: 180 })).toBeCloseTo(16 / 9);
+    for (const bad of [null, undefined, 'x', {}, { dw: 0, dh: 1080 }, { dw: 1920, dh: 'a' }]) {
+      expect(aspectFromVideoParams(bad)).toBeUndefined();
+    }
+    // Extreme shapes get the nearest usable PiP shape instead of 16:9.
+    expect(aspectFromVideoParams({ dw: 10000, dh: 10 })).toBe(4);
+    expect(aspectFromVideoParams({ dw: 10, dh: 10000 })).toBe(0.25);
+  });
+
+  it('passes the playing video aspect to the window, and nothing when it is unknown or fails', async () => {
+    const unregister = setPipAspectSource(async () => 4 / 3);
+    await enterPip();
+    expect(enterPipWindow).toHaveBeenLastCalledWith(4 / 3);
+    await exitPip();
+    unregister();
+
+    await enterPip();
+    expect(enterPipWindow).toHaveBeenLastCalledWith(undefined);
+    await exitPip();
+
+    setPipAspectSource(() => Promise.reject(new Error('not attached')));
+    await enterPip();
+    expect(enterPipWindow).toHaveBeenLastCalledWith(undefined);
+    expect(usePipStore.getState().active).toBe(true);
+  });
+
+  it('a stale surface unregistering leaves the newer one in place', async () => {
+    const offOld = setPipAspectSource(async () => 4 / 3);
+    setPipAspectSource(async () => 9 / 16);
+    offOld();
+    await enterPip();
+    expect(enterPipWindow).toHaveBeenLastCalledWith(9 / 16);
+  });
+
+  it('a zap in PiP to a video of another shape re-locks the window once', async () => {
+    setPipWindowAspect.mockClear();
+    let aspect: number | undefined = 16 / 9;
+    setPipAspectSource(async () => aspect);
+    // Outside PiP nothing happens.
+    await refreshPipAspect();
+    expect(setPipWindowAspect).not.toHaveBeenCalled();
+
+    await enterPip();
+    await refreshPipAspect(); // same shape as on entry
+    expect(setPipWindowAspect).not.toHaveBeenCalled();
+
+    aspect = 4 / 3;
+    await refreshPipAspect();
+    expect(setPipWindowAspect).toHaveBeenCalledTimes(1);
+    expect(setPipWindowAspect).toHaveBeenLastCalledWith(4 / 3);
+    await refreshPipAspect(); // already 4:3
+    aspect = 1.3337; // within rounding
+    await refreshPipAspect();
+    aspect = undefined; // not known yet
+    await refreshPipAspect();
+    expect(setPipWindowAspect).toHaveBeenCalledTimes(1);
+
+    // A failed reshape is retried by the next refresh.
+    aspect = 9 / 16;
+    setPipWindowAspect.mockResolvedValueOnce(false);
+    await refreshPipAspect();
+    await refreshPipAspect();
+    expect(setPipWindowAspect).toHaveBeenCalledTimes(3);
+
+    await exitPip();
+    aspect = 16 / 9;
+    await refreshPipAspect();
+    expect(setPipWindowAspect).toHaveBeenCalledTimes(3);
+  });
+
+  it('an unknown aspect on entry counts as 16:9', async () => {
+    setPipWindowAspect.mockClear();
+    let aspect: number | undefined;
+    setPipAspectSource(async () => aspect);
+    await enterPip();
+    aspect = 16 / 9;
+    await refreshPipAspect();
+    expect(setPipWindowAspect).not.toHaveBeenCalled();
+    aspect = 4 / 3;
+    await refreshPipAspect();
+    expect(setPipWindowAspect).toHaveBeenLastCalledWith(4 / 3);
   });
 });

@@ -34,7 +34,7 @@ const WRITE_BUFFER: usize = 256 * 1024;
 const THROTTLE_SLICE: Duration = Duration::from_millis(200);
 
 /// How a run ended.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Outcome {
     Completed {
         file_name: String,
@@ -224,6 +224,7 @@ fn user_message(err: &CoreError) -> String {
         CoreError::Timeout(m) | CoreError::Network(m) => {
             format!("{m}. Check the connection, then retry.")
         }
+        CoreError::Server(m) => format!("{m}. Retry later."),
         CoreError::Io(e) => format!(
             "Disk error: {e}. Free some space or choose another downloads folder, then retry."
         ),
@@ -251,6 +252,24 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
     let reservation = tokio::task::spawn_blocking(move || -> CoreResult<Reservation> {
         if let Some(final_path) = retained {
             let part = naming::part_path(&final_path);
+            let moved_folder = final_path.parent() != Some(default_dir.as_path());
+            if moved_folder {
+                if let Ok(Some(_)) = naming::regular_file_len(&part) {
+                    // The user chose another downloads folder (the advice for
+                    // a full disk): continue there. The partial moves along
+                    // when it can be renamed (same volume); otherwise the
+                    // transfer restarts there and the old partial is deleted
+                    // so it stops taking space on the full disk.
+                    std::fs::create_dir_all(&default_dir)?;
+                    let fresh = naming::reserve(&default_dir, &requested)?;
+                    if std::fs::rename(&part, &fresh.part_path).is_err() {
+                        if let Err(e) = naming::remove_regular_file(&part) {
+                            tracing::warn!(id, error = %e, "could not delete the old partial download");
+                        }
+                    }
+                    return Ok(fresh);
+                }
+            }
             if let Ok(Some(_)) = naming::regular_file_len(&part) {
                 let file_name = final_path
                     .file_name()
@@ -368,7 +387,15 @@ async fn attempt(
         _ = ctl.token.cancelled() => return AttemptEnd::Stopped(resume_from),
         r = req.send() => match r {
             Ok(r) => r,
-            Err(e) => return err(CoreError::from(e), resume_from),
+            // transport_error: a redirect the server-mode guard blocked is
+            // `invalid` (not retried), not a network failure.
+            Err(e) => {
+                let host = url::Url::parse(&row.download.url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(str::to_owned))
+                    .unwrap_or_else(|| "the server".into());
+                return err(crate::http::transport_error(&host, e), resume_from);
+            }
         },
     };
 

@@ -73,6 +73,70 @@ fn write_lock(state: &AppState) -> Arc<tokio::sync::Mutex<()>> {
     state.ext_or_insert_with(LOCK_KEY, || Arc::new(tokio::sync::Mutex::new(())))
 }
 
+/// Start of a masked secret; the UI's `maskSecret` uses the same form.
+pub const SECRET_MASK: &str = "\u{2022}\u{2022}\u{2022}\u{2022}";
+
+/// The mask plus the last 4 characters (only the mask for 4 or fewer).
+fn mask_secret(secret: &str) -> String {
+    let n = secret.chars().count();
+    if n <= 4 {
+        return SECRET_MASK.to_string();
+    }
+    let tail: String = secret.chars().skip(n - 4).collect();
+    format!("{SECRET_MASK}{tail}")
+}
+
+/// Settings as an RPC client or `settings.changed` sees them. In server
+/// mode the TMDB key is masked: a browser on the network never gets it back.
+/// The desktop app sees it unchanged.
+pub fn for_client(state: &AppState, mut s: Settings) -> Settings {
+    if !state.is_desktop {
+        s.tmdb.api_key = s.tmdb.api_key.as_deref().map(mask_secret);
+    }
+    s
+}
+
+/// `AppState.extensions` key of the TMDB key cleared by the last
+/// [`reset`] (server mode only; in memory, never persisted or sent).
+const RESET_KEY_STASH: &str = "settings_reset_tmdb_key";
+
+#[derive(Default)]
+struct ResetKeyStash(parking_lot::Mutex<Option<String>>);
+
+fn reset_stash(state: &AppState) -> Arc<ResetKeyStash> {
+    state.ext_or_insert_with(RESET_KEY_STASH, || Arc::new(ResetKeyStash::default()))
+}
+
+/// Server mode: a patch that sends back the masked key (the UI resends the
+/// whole `tmdb` object) keeps the stored key instead of overwriting it.
+/// After a reset cleared the key, the mask of that key (an Undo resending
+/// the pre-reset settings) restores it.
+fn unmask_key(state: &AppState, current: &Settings, patch: &mut Value) {
+    let Some(tmdb) = patch.get_mut("tmdb").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(sent) = tmdb
+        .get("apiKey")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|k| k.starts_with(SECRET_MASK))
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    let stash = reset_stash(state);
+    let mut stashed = stash.0.lock();
+    match stashed.as_deref() {
+        Some(old) if current.tmdb.api_key.is_none() && mask_secret(old) == sent => {
+            tmdb.insert("apiKey".into(), Value::String(old.to_owned()));
+            *stashed = None;
+        }
+        _ => {
+            tmdb.remove("apiKey");
+        }
+    }
+}
+
 /// Current settings (from the cache).
 pub fn get(state: &AppState) -> Settings {
     state.settings_snapshot()
@@ -81,7 +145,7 @@ pub fn get(state: &AppState) -> Settings {
 /// Applies `patch` (a partial camelCase Settings object) over the current
 /// settings, validates, persists, refreshes the cache, and emits
 /// `settings.changed`. Returns the new settings.
-pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings> {
+pub async fn update(state: &Arc<AppState>, mut patch: Value) -> CoreResult<Settings> {
     if !patch.is_object() {
         return Err(CoreError::invalid("settings patch must be a JSON object"));
     }
@@ -89,6 +153,9 @@ pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings>
     let _guard = lock.lock().await;
 
     let current = state.settings_snapshot();
+    if !state.is_desktop {
+        unmask_key(state, &current, &mut patch);
+    }
     let merged = merge(&current, &patch)?;
     if !state.is_desktop {
         // Before validation, so a server client cannot probe which paths exist.
@@ -110,11 +177,29 @@ pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings>
     store(state, next).await
 }
 
-/// Restores the defaults, persists them, and emits `settings.changed`.
+/// Restores the defaults, persists them, and emits `settings.changed`. In
+/// server mode the [`DESKTOP_ONLY_FIELDS`] keep their values: a server
+/// client cannot set them, so an Undo that resent them would be refused and
+/// leave every setting reset (review round 3).
 pub async fn reset(state: &Arc<AppState>) -> CoreResult<Settings> {
     let lock = write_lock(state);
     let _guard = lock.lock().await;
-    store(state, Settings::default()).await
+    let mut next = Settings::default();
+    if !state.is_desktop {
+        let current = state.settings_snapshot();
+        // Server clients only ever saw the mask, so an Undo cannot resend
+        // the key: keep it in memory for [`unmask_key`].
+        if current.tmdb.api_key.is_some() {
+            *reset_stash(state).0.lock() = current.tmdb.api_key.clone();
+        }
+        next.mpv_path = current.mpv_path;
+        next.vlc_path = current.vlc_path;
+        next.mpv_args = current.mpv_args;
+        next.vlc_args = current.vlc_args;
+        next.downloads_dir = current.downloads_dir;
+        next.recordings_dir = current.recordings_dir;
+    }
+    store(state, next).await
 }
 
 /// Replaces the whole settings document (for modules that change one field,
@@ -163,7 +248,7 @@ async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
     state.db_call(move |conn| persist_json(conn, &json)).await?;
     *state.settings.write() = next.clone();
     tracing::info!("settings updated");
-    state.emit("settings.changed", &next);
+    state.emit("settings.changed", for_client(state, next.clone()));
     Ok(next)
 }
 

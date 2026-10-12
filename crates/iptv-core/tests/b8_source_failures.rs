@@ -49,7 +49,8 @@ async fn missing_playlist_is_not_found() {
 #[tokio::test]
 async fn busy_server_is_retryable_network() {
     let e = fail("/fail/503.m3u").await;
-    assert_eq!(e.code, RpcErrorCode::Network, "{e:?}");
+    // C12: an HTTP 5xx answer is `server` (still retryable).
+    assert_eq!(e.code, RpcErrorCode::Server, "{e:?}");
     assert!(e.retryable);
     assert!(e.message.contains("try again later"), "{e:?}");
 }

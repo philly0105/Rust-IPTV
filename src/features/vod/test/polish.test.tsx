@@ -281,25 +281,27 @@ describe('CategoryGridPage: states', () => {
       { ref: { sourceId: 'other', contentType: 'movie', itemId: 'm2' }, positionSeconds: 10, durationSeconds: 100, updatedAt: '2026-10-10T00:00:00Z', watched: false },
     ];
     renderAt('/s/src1/movies/c/c1', [gridRoute]);
-    const card = await screen.findByRole('option', { name: 'Movie 1' });
+    const card = await screen.findByRole('option', { name: /^Movie 1(,|$)/ });
     await waitFor(() => expect(card.querySelector('[role="progressbar"]')).not.toBeNull());
+    // The progress is also in the accessible name, not only drawn (B4-vod-D6).
+    expect(screen.getByRole('option', { name: 'Movie 1, 50% watched' })).toBe(card);
     expect(screen.getByRole('option', { name: 'Movie 2' }).querySelector('[role="progressbar"]')).toBeNull();
   });
 
-  it('opens a 10,000-title category inside a render budget and mounts only a window of cells', async () => {
+  it('opens a 10,000-title category mounting only a window of cells (B4-vod-D19: structural, no wall clock)', async () => {
     rpcMock.handlers['catalog.movies'] = pages(10_000);
-    const t0 = performance.now();
     renderAt('/s/src1/movies/c/all', [gridRoute]);
     await screen.findByText('Movie 0');
-    const elapsed = performance.now() - t0;
-    expect(listbox().querySelectorAll('[role="option"]').length).toBeLessThan(120);
-    expect(listbox().querySelector('[role="option"]')?.getAttribute('aria-setsize')).toBe('10000');
-    expect(elapsed).toBeLessThan(3000);
+    const mounted = () => listbox().querySelectorAll('[role="option"]');
+    expect(mounted().length).toBeLessThan(120);
+    expect(mounted()[0]?.getAttribute('aria-setsize')).toBe('10000');
     // End jumps the cursor to the last title without mounting the rest.
     act(() => listbox().focus());
-    const t1 = performance.now();
-    fireEvent.keyDown(listbox(), { key: 'End' });
-    expect(performance.now() - t1).toBeLessThan(500);
+    act(() => {
+      fireEvent.keyDown(listbox(), { key: 'End' });
+    });
+    await waitFor(() => expect(listbox().getAttribute('aria-activedescendant')).toMatch(/-cell-9999$/));
+    expect(mounted().length).toBeLessThan(120);
   });
 });
 

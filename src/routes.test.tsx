@@ -1,11 +1,13 @@
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryRouter, matchRoutes, RouterProvider } from 'react-router';
 
+import { DEFAULT_SETTINGS } from '@/api/types';
 import i18n from '@/i18n';
 import { useShellStore } from '@/shell';
+import { startupTarget } from '@/shell/StartupRedirect';
 
-import { NotFoundPage, routes } from './routes';
+import { AppLoading, NotFoundPage, RouteErrorPage, routes } from './routes';
 
 /** Every C7 path; each must resolve to a real page, never the `*` fallback. */
 const C7_PATHS = [
@@ -59,6 +61,58 @@ describe('route tree (C7)', () => {
     const m = matchRoutes(routes, '/no/such/page');
     expect(m?.[0]?.route.path).toBe('/');
     expect(m?.at(-1)?.route.path).toBe('*');
+  });
+});
+
+describe('startup default (D22)', () => {
+  it('restores the last screen by default', () => {
+    expect(DEFAULT_SETTINGS.startupBehavior).toBe('restore-last-view');
+    expect(startupTarget({ ...DEFAULT_SETTINGS, lastRoute: '/s/a/movies' })).toBe('/s/a/movies');
+  });
+
+  it('falls back to the dashboard on a fresh install with no saved screen', () => {
+    expect(DEFAULT_SETTINGS.lastRoute).toBeUndefined();
+    expect(startupTarget(DEFAULT_SETTINGS)).toBe('/dashboard');
+    expect(startupTarget({ ...DEFAULT_SETTINGS, lastRoute: '/' })).toBe('/dashboard');
+  });
+});
+
+describe('lazy shell', () => {
+  it('loads the dashboard lazily, not in the entry chunk', () => {
+    const leaf = matchRoutes(routes, '/dashboard')?.at(-1)?.route;
+    expect(leaf?.lazy).toBeTypeOf('function');
+    expect(leaf?.element).toBeUndefined();
+  });
+
+  it('has a hydrate fallback and error boundaries at the shell and page level', () => {
+    const m = matchRoutes(routes, '/s/x/live');
+    expect(m?.[0]?.route.HydrateFallback).toBe(AppLoading);
+    expect(m?.[0]?.route.errorElement).toBeTruthy();
+    expect(m?.[1]?.route.path).toBeUndefined();
+    expect(m?.[1]?.route.errorElement).toBeTruthy();
+  });
+});
+
+describe('route error page', () => {
+  afterEach(cleanup);
+
+  function Boom(): never {
+    throw new Error('Failed to fetch dynamically imported module: /assets/x.js');
+  }
+
+  it('shows a retryable error with one h1 instead of a blank screen', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const router = createMemoryRouter([{ path: '/', element: <Boom />, errorElement: <RouteErrorPage /> }]);
+    render(<RouterProvider router={router} />);
+    spy.mockRestore();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(i18n.t('common:errorTitleNetwork'));
+    expect(screen.getByRole('button', { name: i18n.t('common:retry') })).toBeTruthy();
+  });
+
+  it('renders the loading frame without text', () => {
+    render(<AppLoading />);
+    expect(screen.getByTestId('app-loading').textContent).toBe('');
   });
 });
 

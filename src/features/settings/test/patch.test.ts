@@ -25,13 +25,13 @@ describe('settings patch shape', () => {
     expect(p.dashboardRails).toEqual({ ...s.dashboardRails, hero: !s.dashboardRails.hero });
   });
 
-  it('sends the whole tmdb object and drops an empty key', () => {
+  it('sends the whole tmdb object and clears an empty key with null (merge patch)', () => {
     const s = base();
     s.tmdb = { ...s.tmdb, apiKey: 'abc', language: 'de-DE' };
     const p = tmdbPatch(s, { apiKey: '', enabled: true });
     expect(Object.keys(p)).toEqual(['tmdb']);
-    expect(p.tmdb).toEqual({ ...s.tmdb, enabled: true, apiKey: undefined });
-    expect(p.tmdb && 'apiKey' in p.tmdb ? p.tmdb.apiKey : undefined).toBeUndefined();
+    // Left out, the core would keep the stored key; null removes it (B6-D27).
+    expect(p.tmdb).toEqual({ ...s.tmdb, enabled: true, apiKey: null });
   });
 
   it('sends the whole remoteControl object', () => {

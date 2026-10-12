@@ -18,16 +18,16 @@ import {
   Terminal,
   type LucideIcon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { useRpcQuery } from '@/api/query';
 import { Dialog, Kbd } from '@/ui';
 
 import { useCommandList } from './commands';
 import { railLinks } from './railLinks';
 import { useShellStore } from './store';
+import { useVisibleSources } from './useVisibleSources';
 import { persistTheme } from './theme';
 
 export const SETTINGS_SECTIONS = [
@@ -51,7 +51,13 @@ const VALUE_SEP = '';
  * so internal ids (`nav.*`, `settings.*`) never make unrelated items match.
  */
 export function paletteFilter(value: string, search: string, keywords?: string[]): number {
-  return defaultFilter(value.split(VALUE_SEP)[0] ?? value, search, keywords);
+  const title = value.split(VALUE_SEP)[0] ?? value;
+  // Title matches land in (0.5, 1], keyword-only matches in (0, 0.5], so an item
+  // named for the query (a "Mock Xtream" source) outranks one that only lists it
+  // as a keyword ("Add source").
+  const byTitle = defaultFilter(title, search);
+  if (byTitle > 0) return 0.5 + byTitle / 2;
+  return defaultFilter(title, search, keywords) / 2;
 }
 
 interface PaletteItem {
@@ -68,7 +74,7 @@ interface PaletteItem {
 export function usePaletteItems(): PaletteItem[] {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
-  const sources = useRpcQuery('sources.list', undefined);
+  const sources = useVisibleSources();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useCommandList();
 
@@ -146,6 +152,35 @@ export function CommandPalette() {
     return [...map.entries()];
   }, [items]);
 
+  // cmdk 1.1 sorts items inside a group but never moves the groups themselves (it looks a
+  // group up by its value while tracking it by an internal id), so "Go to" always led. Order
+  // the groups here by their best match while a query is typed; ties keep the default order.
+  const ranked = useMemo(() => {
+    const q = query.trim();
+    if (!q) return groups;
+    const best = (list: PaletteItem[]) => Math.max(0, ...list.map((it) => paletteFilter(it.title, q, it.keywords)));
+    return groups
+      .map((g) => [g, best(g[1])] as const)
+      .sort((a, b) => b[1] - a[1])
+      .map(([g]) => g);
+  }, [groups, query]);
+
+  // A new query re-ranks the list and cmdk selects its first item; bring the top back into
+  // view so Enter never runs an item scrolled out of sight. cmdk re-sorts the DOM in its own
+  // effect afterwards and scroll anchoring then nudges the list (about one group heading),
+  // so the reset is repeated a frame later, before checking the selected item.
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTop = 0;
+    const raf = requestAnimationFrame(() => {
+      list.scrollTop = 0;
+      list.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [query]);
+
   const close = () => {
     setOpen(false);
     setQuery('');
@@ -163,7 +198,7 @@ export function CommandPalette() {
         shell's mod+k must reach the registry to toggle the palette closed.
       */}
       <Cmdk label={t('commandPalette')} loop vimBindings={false} filter={paletteFilter} className="flex flex-col">
-        <div className="flex items-center gap-3 border-b border-border px-4">
+        <div className="flex items-center gap-3 border-b border-divider px-4">
           <Search aria-hidden size={18} className="shrink-0 text-fg-subtle" />
           <Cmdk.Input
             data-autofocus=""
@@ -174,9 +209,9 @@ export function CommandPalette() {
           />
           <Kbd>Esc</Kbd>
         </div>
-        <Cmdk.List className="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-2">
+        <Cmdk.List ref={listRef} className="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-2">
           <Cmdk.Empty className="px-4 py-10 text-center text-sm text-fg-muted">{t('paletteEmpty')}</Cmdk.Empty>
-          {groups.map(([group, list]) => (
+          {ranked.map(([group, list]) => (
             <Cmdk.Group key={group} heading={group}>
               {list.map((it) => {
                 const Icon = it.icon;
@@ -211,7 +246,7 @@ export function CommandPalette() {
             </Cmdk.Group>
           )}
         </Cmdk.List>
-        <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-xs text-fg-subtle">
+        <div className="flex items-center gap-4 border-t border-divider px-4 py-2 text-xs text-fg-subtle">
           <span className="flex items-center gap-1.5">
             <Kbd combo="arrowup" />
             <Kbd combo="arrowdown" />

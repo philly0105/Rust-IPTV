@@ -1,10 +1,6 @@
 import type { EpgNowNext, EpgProgram } from '@/api/types';
 
-import { ms } from './epgTime';
-
-function valid(p: EpgProgram): boolean {
-  return ms(p.end) > ms(p.start);
-}
+import { isValidProgram as valid, ms } from './epgTime';
 
 /**
  * Unions two programme lists into one start-ordered schedule. `primary` wins: a `secondary`

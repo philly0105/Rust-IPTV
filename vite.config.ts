@@ -20,7 +20,13 @@ const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly s
   ['vendor-tauri', ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
 ];
 
+/** `src/i18n/en/*.json`, the eager fallback locale. */
+const EN_LOCALE = /[\\/]src[\\/]i18n[\\/]en[\\/][^\\/]+\.json$/;
+
 function vendorChunk(id: string): string | undefined {
+  // English strings change on every copy edit; their own chunk keeps the app
+  // code cache warm and loads in parallel with the entry.
+  if (EN_LOCALE.test(id)) return 'locale-en';
   const at = id.lastIndexOf('node_modules');
   if (at < 0) return undefined;
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);

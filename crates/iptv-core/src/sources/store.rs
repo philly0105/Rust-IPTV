@@ -2,13 +2,13 @@
 
 use crate::catalog;
 use crate::db::{now_rfc3339, to_rfc3339};
-use crate::error::{CoreError, CoreResult};
+use crate::error::{CoreError, CoreResult, RpcErrorCode};
 use crate::model::{
     EpgLinks, M3uSourceConfig, Source, SourceKind, StalkerSourceConfig, XtreamSourceConfig,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
-const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio') FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
+const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio'), s.last_error_code FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
 
 /// Kind-specific configuration of a source.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +53,14 @@ fn read_source(r: &Row<'_>) -> rusqlite::Result<(Source, String)> {
             updated_at: r.get::<_, Option<String>>(6)?.map(|s| to_rfc3339(&s)),
             last_refresh_at: r.get::<_, Option<String>>(7)?.map(|s| to_rfc3339(&s)),
             last_error: r.get(8)?,
+            // A code is only meaningful next to its message.
+            last_error_code: match r.get::<_, Option<String>>(8)? {
+                Some(_) => r
+                    .get::<_, Option<String>>(15)?
+                    .as_deref()
+                    .and_then(RpcErrorCode::parse),
+                None => None,
+            },
             channel_count: r.get(11)?,
             radio_count: r.get(14)?,
             movie_count: r.get(12)?,
@@ -177,23 +185,43 @@ fn insert_rows(
     Ok(())
 }
 
-/// Records the outcome of an import.
+/// Records the outcome of an import: `None` clears `last_error` /
+/// `last_error_code`, stamps `last_refresh_at` and refreshes the counts;
+/// `Some(message)` stores the message without a code (callers that know the
+/// code use [`record_import_error`]) and keeps the catalog.
 pub fn record_import(conn: &Connection, id: &str, error: Option<&str>) -> CoreResult<()> {
     match error {
         None => {
             conn.execute(
-                "UPDATE sources SET last_refresh_at = ?2, last_error = NULL WHERE id = ?1",
+                "UPDATE sources SET last_refresh_at = ?2, last_error = NULL, last_error_code = NULL WHERE id = ?1",
                 params![id, now_rfc3339()],
             )?;
             catalog::update_counts(conn, id)?;
         }
         Some(msg) => {
+            // Redacted here too: importers outside `sources` record errors
+            // directly, and lastError is shown and exported.
             conn.execute(
-                "UPDATE sources SET last_error = ?2 WHERE id = ?1",
-                params![id, msg],
+                "UPDATE sources SET last_error = ?2, last_error_code = NULL WHERE id = ?1",
+                params![id, crate::logging::redact_text(msg)],
             )?;
         }
     }
+    Ok(())
+}
+
+/// Records a failed import with its classified code (C10); the catalog and
+/// `last_refresh_at` are kept.
+pub fn record_import_error(
+    conn: &Connection,
+    id: &str,
+    msg: &str,
+    code: RpcErrorCode,
+) -> CoreResult<()> {
+    conn.execute(
+        "UPDATE sources SET last_error = ?2, last_error_code = ?3 WHERE id = ?1",
+        params![id, crate::logging::redact_text(msg), code.as_str()],
+    )?;
     Ok(())
 }
 

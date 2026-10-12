@@ -25,6 +25,8 @@ const KEY_LABELS: Record<string, string> = {
   tab: 'Tab',
   home: 'Home',
   end: 'End',
+  delete: 'Del',
+  contextmenu: 'Menu',
 };
 
 /** Human labels for a combo string like `mod+shift+k`. */

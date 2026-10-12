@@ -11,10 +11,20 @@ import { Button, IconButton, Poster, ProgressBar, cn } from '@/ui';
 /** How many upcoming episodes the watch-state rail shows. */
 export const UP_NEXT_LIMIT = 12;
 
-/** The episodes after `currentId` in play order (capped), for the watch-state rail. */
+/**
+ * The episodes after `currentId` in play order (capped), for the watch-state
+ * rail. Same rule as `nextEpisode` and the player queue: a regular season
+ * never runs on into the specials (season 0, sorted last).
+ */
 export function upcoming(order: Episode[], currentId: string | undefined, limit = UP_NEXT_LIMIT): Episode[] {
   const i = currentId ? order.findIndex((e) => e.id === currentId) : -1;
-  return order.slice(i + 1, i + 1 + limit);
+  let rest = order.slice(i + 1);
+  const current = order[i];
+  if (current && current.season > 0) {
+    const special = rest.findIndex((e) => e.season <= 0);
+    if (special >= 0) rest = rest.slice(0, special);
+  }
+  return rest.slice(0, limit);
 }
 
 /**
@@ -48,7 +58,7 @@ export function UpNextRail({
                 className="group flex w-full items-center gap-3 rounded-md p-1.5 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-28 shrink-0">
-                  <Poster src={ep.posterUrl} alt={ep.title} aspect="wide" rounded="sm" />
+                  <Poster src={ep.posterUrl} alt="" label={ep.title.trim() || episodeCode(ep.season, ep.episode)} aspect="wide" rounded="sm" />
                   {fraction > 0 && (
                     <div className="pointer-events-none absolute inset-x-1 bottom-1">
                       <ProgressBar value={fraction} max={1} size="xs" />

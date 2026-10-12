@@ -41,7 +41,8 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
     // Arrow keys follow the screen: in RTL the tab row is mirrored, so ArrowLeft moves forward.
     const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
     const forward = (idx + 1) % enabled.length;
-    const back = (idx - 1 + enabled.length) % enabled.length;
+    // When the value is not an enabled tab (idx -1), back wraps to the last tab, not the one before it.
+    const back = idx < 0 ? enabled.length - 1 : (idx - 1 + enabled.length) % enabled.length;
     let next = -1;
     switch (e.key) {
       case 'ArrowRight':
@@ -81,7 +82,7 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
       onKeyDown={move}
       className={cn(
         'flex max-w-full items-center overflow-x-auto scrollbar-none',
-        variant === 'underline' ? 'gap-1 border-b border-border' : 'gap-1 rounded-md bg-surface-2 p-1',
+        variant === 'underline' ? 'gap-1 border-b border-divider' : 'gap-1 rounded-md bg-surface-2 p-1',
         className,
       )}
     >
@@ -108,11 +109,11 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
               variant === 'underline'
                 ? cn(
                     '-mb-px h-10 border-b-2 px-3',
-                    selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+                    selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg active:border-divider',
                   )
                 : cn(
                     'h-8 rounded-sm px-3',
-                    selected ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:text-fg',
+                    selected ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:text-fg active:bg-surface-3',
                   ),
             )}
           >

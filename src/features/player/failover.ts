@@ -7,7 +7,7 @@
 import { rpc } from '@/api/transport';
 import { itemKey, type PlayerSource } from '@/api/types';
 
-import { getSettings, resolveSource, sameSource, usePlayerStore } from './store';
+import { getSettings, MIN_RESUME_SECONDS, resolveSource, sameSource, sourceKindOf, usePlayerStore } from './store';
 
 const attempted = new Set<string>();
 
@@ -28,6 +28,10 @@ export async function tryFailover(failed: PlayerSource): Promise<FailoverResult 
 
   let candidates;
   try {
+    // Stalker VOD is paged live from the portal, not stored in the local catalog, so the core's
+    // same-title lookup answers not_found (a console resource error in the browser). Only a
+    // known source that is not Stalker is asked, as on the movie page.
+    if ((await sourceKindOf(ref.sourceId)) === 'stalker') return null;
     candidates = await rpc('catalog.sameTitle', { ref });
   } catch {
     return null;
@@ -54,7 +58,7 @@ export async function tryFailover(failed: PlayerSource): Promise<FailoverResult 
     const resolved = await resolveSource(args);
     if (!sameSource(usePlayerStore.getState().source, failed)) return null;
     attempted.add(itemKey(alt.ref));
-    const to: PlayerSource = position > 5 ? { ...resolved, resumeSeconds: position } : resolved;
+    const to: PlayerSource = position > MIN_RESUME_SECONDS ? { ...resolved, resumeSeconds: position } : resolved;
     await usePlayerStore.getState().play(to);
     return {
       sourceName: info.name,
@@ -62,7 +66,7 @@ export async function tryFailover(failed: PlayerSource): Promise<FailoverResult 
       undo: () => {
         const back: PlayerSource = { ...failed };
         const pos = usePlayerStore.getState().positionSeconds;
-        if (pos > 5) back.resumeSeconds = pos;
+        if (pos > MIN_RESUME_SECONDS) back.resumeSeconds = pos;
         void usePlayerStore.getState().play(back);
       },
     };

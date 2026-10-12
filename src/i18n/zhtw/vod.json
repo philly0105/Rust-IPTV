@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "管理類別（已隱藏 {{count}} 個）",
   "manageCategoriesHint": "已隱藏 {{hidden}} 個，共 {{total}} 個。隱藏的類別不會出現在清單與搜尋中。",
   "noCategoryMatch": "沒有符合此篩選條件的類別。",
+  "clearFilter": "清除篩選",
   "saveCategories": "儲存",
   "categoriesSaved": "已儲存類別顯示設定",
   "categoriesSaveFailed": "無法儲存類別顯示設定",
@@ -61,6 +62,7 @@
   "resume": "繼續",
   "resumeAt": "從 {{time}} 繼續播放",
   "startOver": "從頭播放",
+  "startOverEpisode": "從頭播放 {{code}}",
   "playEpisode": "播放 {{code}}",
   "resumeEpisode": "繼續播放 {{code}}",
   "nowPlaying": "現正播放",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "類似作品需要 TMDB 金鑰",
   "tmdbKeyMissingHint": "請在「設定 > 中繼資料」中新增 TMDB 金鑰。",
   "addTmdbKey": "新增 TMDB 金鑰",
+  "tmdbKeyRejectedTitle": "TMDB 拒絕了 API 金鑰",
+  "tmdbKeyRejectedHint": "請在「設定 > 中繼資料」中檢查或更換 TMDB 金鑰。",
   "watched": "已觀看",
   "markWatched": "標示為已觀看",
   "markUnwatched": "標示為未觀看",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "最多顯示 {{count}} 筆",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "無法載入這些影片"
+  "pageLoadFailed": "無法載入這些影片",
+  "searchPartialError": "部分結果無法載入。"
 }

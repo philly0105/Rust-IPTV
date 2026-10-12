@@ -295,12 +295,12 @@ fn m3u_entry(conn: &Connection, data_dir: &Path, s: &Source) -> CoreResult<Value
         rows.collect::<Result<_, _>>()?
     };
 
+    let mut us =
+        json!({ "favorites": favorites, "recentlyViewed": recent, "hiddenGroupTitles": hidden });
+    add_tsrust_state(conn, &s.id, &mut us, true, false)?;
     let mut m = base(s, "m3u");
     m.insert("source".into(), Value::Object(source));
-    m.insert(
-        "userState".into(),
-        json!({ "favorites": favorites, "recentlyViewed": recent, "hiddenGroupTitles": hidden }),
-    );
+    m.insert("userState".into(), us);
     Ok(Value::Object(m))
 }
 
@@ -483,18 +483,18 @@ fn xtream_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRes
         }
     }
 
+    let mut us = json!({
+        "hiddenCategories": hidden,
+        "favorites": favorites,
+        "recentlyViewed": recent,
+        "playbackPositions": positions,
+        "sourcePins": pins,
+    });
+    // Xtream positions and hidden categories travel in the IPTVnator fields.
+    add_tsrust_state(conn, &s.id, &mut us, false, false)?;
     let mut m = base(s, "xtream");
     m.insert("connection".into(), Value::Object(connection));
-    m.insert(
-        "userState".into(),
-        json!({
-            "hiddenCategories": hidden,
-            "favorites": favorites,
-            "recentlyViewed": recent,
-            "playbackPositions": positions,
-            "sourcePins": pins,
-        }),
-    );
+    m.insert("userState".into(), us);
     Ok(Value::Object(m))
 }
 
@@ -564,13 +564,114 @@ fn stalker_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRe
         &s.id,
     )?;
 
+    let mut us = json!({ "favorites": favorites, "recentlyViewed": recent });
+    add_tsrust_state(conn, &s.id, &mut us, true, true)?;
     let mut m = base(s, "stalker");
     m.insert("connection".into(), Value::Object(connection));
-    m.insert(
-        "userState".into(),
-        json!({ "favorites": favorites, "recentlyViewed": recent }),
-    );
+    m.insert("userState".into(), us);
     Ok(Value::Object(m))
+}
+
+// ---------------------------------------------------------------------------
+// Tsrust extensions
+// ---------------------------------------------------------------------------
+
+/// User state the IPTVnator format has no field for, as Tsrust extensions in
+/// `userState` (IPTVnator ignores unknown keys; backups without them still
+/// import): manual EPG mappings for every kind, and with `positions` /
+/// `hidden` the playback positions and hidden categories by catalog id
+/// (M3U and Stalker positions, Stalker hidden categories). Each key is
+/// written only when it has rows.
+fn add_tsrust_state(
+    conn: &Connection,
+    source_id: &str,
+    us: &mut Value,
+    positions: bool,
+    hidden: bool,
+) -> CoreResult<()> {
+    let Value::Object(us) = us else {
+        return Ok(());
+    };
+    let mut maps = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT content_type, item_id, epg_channel_id FROM epg_channel_map WHERE source_id = ?1
+             ORDER BY content_type, item_id",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok(json!({
+                "contentType": r.get::<_, String>(0)?,
+                "itemId": r.get::<_, String>(1)?,
+                "epgChannelId": r.get::<_, Option<String>>(2)?,
+            }))
+        })?;
+        for row in rows {
+            maps.push(row?);
+        }
+    }
+    if !maps.is_empty() {
+        us.insert(super::EXT_EPG_MAPPINGS.into(), Value::Array(maps));
+    }
+    if positions {
+        let mut out = Vec::new();
+        let mut stmt = conn.prepare(
+            "SELECT content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched
+             FROM playback_positions WHERE source_id = ?1 ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, i64>(7)? != 0,
+            ))
+        })?;
+        for row in rows {
+            let (ct, item, ep, pos, dur, updated_at, snap, watched) = row?;
+            let mut m = Map::new();
+            m.insert("contentType".into(), json!(ct));
+            m.insert("itemId".into(), json!(item));
+            if !ep.is_empty() {
+                m.insert("episodeId".into(), json!(ep));
+            }
+            m.insert("positionSeconds".into(), json!(pos));
+            if let Some(d) = dur {
+                m.insert("durationSeconds".into(), json!(d));
+            }
+            m.insert("updatedAt".into(), json!(ts(&updated_at)));
+            if watched {
+                m.insert("watched".into(), json!(true));
+            }
+            if let Some(v) = snap.and_then(|j| serde_json::from_str::<Value>(&j).ok()) {
+                m.insert("snapshot".into(), v);
+            }
+            out.push(Value::Object(m));
+        }
+        if !out.is_empty() {
+            us.insert(super::EXT_POSITIONS.into(), Value::Array(out));
+        }
+    }
+    if hidden {
+        let mut stmt = conn.prepare(
+            "SELECT content_type, category_id FROM categories WHERE source_id = ?1 AND hidden = 1
+             ORDER BY content_type, position",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok(json!({
+                "contentType": r.get::<_, String>(0)?,
+                "categoryId": r.get::<_, String>(1)?,
+            }))
+        })?;
+        let out = rows.collect::<Result<Vec<_>, _>>()?;
+        if !out.is_empty() {
+            us.insert(super::EXT_HIDDEN_CATEGORIES.into(), Value::Array(out));
+        }
+    }
+    Ok(())
 }
 
 /// Rebuilds `StalkerPortalItem`s: the original portal object when the row

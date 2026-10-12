@@ -79,7 +79,7 @@ export function DialProgress({
             <div
               aria-hidden
               className="absolute -inset-y-0.5 w-0.5 rounded-full bg-fg shadow-[0_0_6px_var(--color-glow)]"
-              style={{ left: `calc(${percent}% - 1px)` }}
+              style={{ insetInlineStart: `calc(${percent}% - 1px)` }}
             />
           )}
         </>

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
 
 import { displayChannelName } from '../lib/channelName';
-import { formatClock, hasUsableArchive, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
+import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo } from './ChannelLogo';
 
 export const CHANNEL_ROW_HEIGHT = 64;
@@ -52,8 +52,9 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   if (!channel) return <RowSkeleton />;
 
   const shifted = shiftNowNext(nowNext, props.epgOffsetMinutes ?? 0);
-  const cur = shifted?.now;
-  const nxt = shifted?.next;
+  // A programme with unreadable times would read as airing since 1970: show the group instead.
+  const cur = shifted?.now && isValidProgram(shifted.now) ? shifted.now : undefined;
+  const nxt = shifted?.next && isValidProgram(shifted.next) ? shifted.next : undefined;
   const progress = cur ? programProgress(cur, now) : 0;
   const archive = hasUsableArchive(channel, props.sourceKind);
   const name = displayChannelName(channel.name, props.stripPrefix);
@@ -61,7 +62,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
 
   return (
     <div
-      className={`group relative flex h-full items-stretch border-b border-border/60 ${
+      className={`group relative flex h-full items-stretch border-b border-divider ${
         playing ? 'bg-accent/10' : active ? 'bg-surface-2' : 'hover:bg-surface-2/70'
       }`}
       onContextMenu={(e) => props.onContextMenu(e, channel, index)}
@@ -103,9 +104,13 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                 <span data-testid="channel-progress" className="absolute inset-y-0 start-0 rounded-full bg-live" style={{ width: `${progress * 100}%` }} />
               </span>
               {nxt && !compact ? (
-                <span className="truncate text-[11px] text-fg-subtle">
-                  {formatClock(ms(nxt.start), i18n.language)}{' '}
-                  <bdi>{nxt.title}</bdi>
+                // Only the title truncates, in its own direction: one RTL truncate over clock and a Latin
+                // title put the ellipsis at the title's start ("…ews Today").
+                <span className="flex min-w-0 items-baseline gap-1 text-[11px] text-fg-subtle" data-testid="row-next">
+                  <span className="shrink-0 tabular-nums">{formatClock(ms(nxt.start), i18n.language)}</span>
+                  <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="row-next-title" title={nxt.title}>
+                    {nxt.title}
+                  </span>
                 </span>
               ) : null}
             </>

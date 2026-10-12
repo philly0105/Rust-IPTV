@@ -20,16 +20,19 @@ import {
 } from '../engines';
 import { tryFailover } from '../failover';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
+import { canShareSource } from '../shareable';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
 import {
   handleEnded,
   reportProgress,
   reportStatus,
   reportVolume,
+  retryResolve,
   setController,
   usePlayerStore,
 } from '../store';
 import { usePlayerSettings } from '../useSettings';
+import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 
 /** Stable identity for "the same media": a source swap with the same url keeps the engine. */
 function mediaKey(s: PlayerSource | undefined): string {
@@ -46,13 +49,15 @@ export interface InlinePlayerProps {
   /** Audio element for radio; video otherwise. */
   as?: 'video' | 'audio';
   className?: string;
+  /** Mini player: the error state keeps to a headline and Retry. */
+  compact?: boolean;
 }
 
 /**
  * The media element plus its engine. Reports progress/status into the store and
  * registers itself as the store's PlaybackController. Chrome is rendered by the caller.
  */
-export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
+export function InlinePlayer({ as = 'video', className, compact = false }: InlinePlayerProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -88,10 +93,11 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
   useEffect(() => {
     const el = elRef.current;
     const src = usePlayerStore.getState().source;
+    // A new item (or none) must not inherit the last engine's error class.
+    setErrorKind(null);
     if (!el || !src || !src.url) return;
     let disposed = false;
     const abort = new AbortController();
-    setErrorKind(null);
     useMediaStore.setState({ tracks: EMPTY_TRACKS, buffered: [], seekable: undefined, waiting: true });
     const loadUrl = proxiedUrl(src);
 
@@ -278,6 +284,8 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
   }, [as]);
 
   const retry = useCallback(() => {
+    // No media yet (the stream URL lookup failed): look it up again instead of reloading nothing.
+    if (retryResolve()) return;
     reportStatus('loading');
     setRetryNonce((n) => n + 1);
   }, []);
@@ -309,6 +317,7 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
           source={source}
           onRetry={retry}
           openExternalAvailable={isDesktop}
+          compact={compact}
         />
       )}
     </div>
@@ -321,33 +330,56 @@ function ErrorOverlay({
   source,
   onRetry,
   openExternalAvailable,
+  compact,
 }: {
   message?: string;
   kind: EngineError['kind'] | null;
   source?: PlayerSource;
   onRetry(): void;
   openExternalAvailable: boolean;
+  compact: boolean;
 }) {
   const { t } = useTranslation('player');
   const { toast } = useToast();
   const retryRef = useRef<HTMLButtonElement>(null);
+  const view = useStreamError(kind);
+  useRetryWhenOnline(view.cls, onRetry);
   // Keyboard users land on Retry instead of hunting for it (only when the player has focus).
   useEffect(() => focusIfPlayerOwnsFocus(retryRef.current), []);
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
-  const hint = isRawTs
-    ? t('errorTsLive')
-    : kind === 'network'
-      ? t('errorNetwork')
-      : kind === 'media'
-        ? t('errorMedia')
-        : kind === 'unsupported'
-          ? t('errorUnsupported')
-          : t('errorGeneric');
+  const hint = isRawTs ? t('errorTsLive') : view.hint;
+  const hasMedia = !!source?.url;
+
+  if (compact) {
+    return (
+      <div
+        role="alert"
+        data-error-class={view.cls}
+        className="pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/80 p-3 text-center text-white"
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <p className="flex max-w-full items-center gap-1.5 text-sm font-medium" title={message ? `${view.title}: ${message}` : hint}>
+          <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
+          <span className="truncate">{view.title}</span>
+        </p>
+        <button
+          ref={retryRef}
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
+        >
+          <RotateCcw className="size-3.5" aria-hidden />
+          {t('retry')}
+        </button>
+      </div>
+    );
+  }
 
   /** Browser mode cannot launch players: hand the user the link for VLC or MPV instead. */
   const copyLink = async (): Promise<void> => {
-    if (!source) return;
+    if (!source || !canShareSource(source)) return;
     try {
       await navigator.clipboard.writeText(source.url);
       toast({ title: t('streamLinkCopied'), description: t('streamLinkCopiedHint'), variant: 'success' });
@@ -373,13 +405,14 @@ function ErrorOverlay({
   return (
     <div
       role="alert"
-      className="pointer-events-auto absolute inset-0 z-20 flex items-center justify-center bg-black/80 p-6 text-white"
+      data-error-class={view.cls}
+      className="pointer-events-auto absolute inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/80 p-6 text-white"
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className="flex max-w-md flex-col items-start gap-3">
         <AlertTriangle className="size-7 text-warning" aria-hidden />
-        <h2 className="font-display text-lg">{t('errorTitle')}</h2>
+        <h2 className="font-display text-lg">{view.title}</h2>
         <p className="text-sm text-white/80">{hint}</p>
         {message && <p className="font-mono text-xs break-all text-white/70">{message}</p>}
         <div className="mt-1 flex flex-wrap gap-2">
@@ -392,7 +425,7 @@ function ErrorOverlay({
             <RotateCcw className="size-4" aria-hidden />
             {t('retry')}
           </button>
-          {!openExternalAvailable && source && /^https?:/i.test(source.url) && (
+          {!openExternalAvailable && hasMedia && source && canShareSource(source) && (
             <button
               type="button"
               onClick={() => void copyLink()}
@@ -402,7 +435,7 @@ function ErrorOverlay({
               {t('copyStreamLink')}
             </button>
           )}
-          {openExternalAvailable && (
+          {openExternalAvailable && hasMedia && (
             <>
               <button
                 type="button"

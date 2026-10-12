@@ -324,12 +324,15 @@ impl<'c> StagingWriter<'c> {
                 self.channel_count +=
                     ch.execute(params![self.key, c.id, c.display_name, c.icon])? as u64;
             }
+            // A feed that lists a slot twice (same channel and start) keeps
+            // the first; the unique index from migration 0007 makes the
+            // repeat a no-op instead of an error that would abort the import.
             let mut pr = tx.prepare_cached(
-                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title, description, category, icon)
+                "INSERT OR IGNORE INTO epg_programs(epg_url, channel_id, start, stop, title, description, category, icon)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
             for p in self.programmes.drain(..) {
-                pr.execute(params![
+                self.program_count += pr.execute(params![
                     self.key,
                     p.channel,
                     p.start,
@@ -338,8 +341,7 @@ impl<'c> StagingWriter<'c> {
                     p.description,
                     p.category,
                     p.icon
-                ])?;
-                self.program_count += 1;
+                ])? as u64;
             }
         }
         tx.commit()?;
@@ -360,8 +362,11 @@ pub fn commit_staging(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
     tx.execute("DELETE FROM epg_channels WHERE epg_url = ?1", [url])?;
+    // The old rows of `url` are gone, so no re-keyed row can hit the unique
+    // slot index (0007); OR IGNORE only spares SQLite the abort bookkeeping
+    // of a constraint that cannot fire (a little less memory on big guides).
     tx.execute(
-        "UPDATE epg_programs SET epg_url = ?1 WHERE epg_url = ?2",
+        "UPDATE OR IGNORE epg_programs SET epg_url = ?1 WHERE epg_url = ?2",
         params![url, key],
     )?;
     tx.execute(
@@ -439,4 +444,125 @@ pub fn clear_all(conn: &mut Connection) -> CoreResult<usize> {
     )?;
     tx.commit()?;
     Ok(programs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prog(channel: &str, start: i64, title: &str) -> XmltvProgramme {
+        XmltvProgramme {
+            channel: channel.into(),
+            start,
+            stop: start + 1800,
+            title: title.into(),
+            description: None,
+            category: None,
+            icon: None,
+        }
+    }
+
+    fn count(conn: &Connection, url: &str) -> i64 {
+        conn.query_row(
+            "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
+            [url],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// B8-parsers D20 / B9-D37: a feed listing a slot twice stored both rows.
+    /// The repeat is now ignored (first wins, as the queries showed), it is
+    /// not counted, and it never aborts the batch.
+    #[test]
+    fn duplicate_programmes_are_stored_once() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        let url = "http://e/g.xml";
+        conn.execute("INSERT INTO epg_sources(url) VALUES (?1)", [url])
+            .unwrap();
+        let key = begin_staging(&conn, url).unwrap();
+        let n = {
+            let mut w = StagingWriter::new(&mut conn, key.clone());
+            w.push_programme(prog("a", 1000, "First")).unwrap();
+            w.push_programme(prog("a", 1000, "Repeat")).unwrap();
+            w.push_programme(prog("a", 1000, "First")).unwrap();
+            w.push_programme(prog("a", 2800, "Next")).unwrap();
+            w.push_programme(prog("b", 1000, "Other channel")).unwrap();
+            w.flush().unwrap();
+            // A repeat in a later batch is ignored too.
+            w.push_programme(prog("a", 2800, "Late repeat")).unwrap();
+            w.flush().unwrap();
+            w.program_count
+        };
+        assert_eq!(n, 3);
+        assert_eq!(count(&conn, &key), 3);
+        commit_staging(&mut conn, url, None, 0, n).unwrap();
+        assert_eq!(count(&conn, url), 3);
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM epg_programs WHERE epg_url = ?1 AND channel_id = 'a' AND start = 1000",
+                [url],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "First");
+    }
+
+    /// Migration 0007 drops the cached guide (which may hold duplicates from
+    /// older builds), adds the unique index and resets the fetch state so the
+    /// next refresh refills it.
+    #[test]
+    fn migration_0007_clears_the_cached_guide_and_adds_the_unique_index() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for m in crate::db::MIGRATIONS.iter().filter(|m| m.version < 7) {
+            conn.execute_batch(m.sql).unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                [m.version],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO epg_sources(url, last_fetch_at, etag, program_count) VALUES ('u', '2026-01-01T00:00:00Z', 'e', 5)",
+            [],
+        )
+        .unwrap();
+        for (ch, start, title) in [
+            ("a", 1000, "First"),
+            ("a", 1000, "Repeat"),
+            ("a", 1000, "Repeat"),
+            ("a", 2800, "Next"),
+            ("b", 1000, "Other"),
+        ] {
+            conn.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('u', ?1, ?2, ?3, ?4)",
+                params![ch, start, start + 1800, title],
+            )
+            .unwrap();
+        }
+        crate::db::migrate(&mut conn).unwrap();
+        assert_eq!(count(&conn, "u"), 0);
+        let fetch: (Option<String>, Option<String>, i64) = conn
+            .query_row(
+                "SELECT last_fetch_at, etag, program_count FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(fetch, (None, None, 0), "the next refresh refetches");
+        conn.execute(
+            "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('u', 'a', 1000, 1, 'First')",
+            [],
+        )
+        .unwrap();
+        let dup = conn.execute(
+            "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('u', 'a', 1000, 1, 'x')",
+            [],
+        );
+        assert!(
+            dup.is_err(),
+            "the unique index rejects a plain duplicate insert"
+        );
+    }
 }

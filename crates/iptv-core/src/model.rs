@@ -188,6 +188,10 @@ pub struct Source {
     pub last_refresh_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Classified code of `last_error` (C10); absent when there is no error
+    /// or it was recorded before codes existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error_code: Option<crate::error::RpcErrorCode>,
     /// Live channels only (radio stations are counted in `radio_count`).
     #[serde(default)]
     pub channel_count: i64,
@@ -983,7 +987,7 @@ impl Default for Settings {
             language: "en".to_string(),
             theme: Theme::System,
             show_dashboard: true,
-            startup_behavior: StartupBehavior::FirstView,
+            startup_behavior: StartupBehavior::RestoreLastView,
             last_route: None,
             mpv_path: None,
             vlc_path: None,
@@ -1339,6 +1343,22 @@ mod tests {
             VideoPlayer::EmbeddedMpv
         );
         assert!("nope".parse::<ContentType>().is_err());
+    }
+
+    /// Matches the frontend DEFAULT_SETTINGS (`src/api/types.ts`).
+    #[test]
+    fn startup_behavior_defaults_to_restoring_the_last_view() {
+        assert_eq!(
+            Settings::default().startup_behavior,
+            StartupBehavior::RestoreLastView
+        );
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["startupBehavior"], "restore-last-view");
+        let missing: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(missing.startup_behavior, StartupBehavior::RestoreLastView);
+        // A saved choice is kept.
+        let saved: Settings = serde_json::from_str(r#"{"startupBehavior":"first-view"}"#).unwrap();
+        assert_eq!(saved.startup_behavior, StartupBehavior::FirstView);
     }
 
     #[test]

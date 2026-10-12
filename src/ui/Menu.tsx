@@ -38,6 +38,42 @@ function isAction(i: MenuItem): i is MenuAction {
   return !('type' in i);
 }
 
+/** Gap between trigger and menu, and the minimum distance kept from the viewport edge. */
+const GAP = 6;
+const MARGIN = 8;
+
+interface MenuAnchor {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/**
+ * Where a menu of `size` opens next to its trigger. It drops below the
+ * trigger, or opens upward when it would leave the viewport and there is more
+ * room above; `align` lines it up with the trigger's start or end edge
+ * (logical, so `end` is the left edge in RTL). The result is clamped so the
+ * menu stays fully on screen. Exported for tests.
+ */
+export function placeMenu(
+  anchor: MenuAnchor,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  opts: { align: 'start' | 'end'; rtl: boolean },
+): { top: number; left: number; side: 'below' | 'above' } {
+  const below = viewport.height - anchor.bottom - GAP - MARGIN;
+  const above = anchor.top - GAP - MARGIN;
+  const side = size.height > below && above > below ? 'above' : 'below';
+  let top = side === 'below' ? anchor.bottom + GAP : anchor.top - GAP - size.height;
+  const alignRight = (opts.align === 'end') !== opts.rtl;
+  let left = alignRight ? anchor.right - size.width : anchor.left;
+  const clamp = (v: number, max: number) => Math.max(MARGIN, Math.min(v, max - MARGIN));
+  left = clamp(left, viewport.width - size.width);
+  top = clamp(top, viewport.height - size.height);
+  return { top, left, side };
+}
+
 /**
  * Menu button (WAI-ARIA menu pattern): Enter/Space/ArrowDown open on the
  * first item, ArrowUp opens on the last; roving focus with arrows, Home/End,
@@ -46,7 +82,8 @@ function isAction(i: MenuItem): i is MenuAction {
 export function Menu({ items, label, trigger, triggerClassName, align = 'end', className }: MenuProps) {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; right: number; rtl: boolean } | null>(null);
+  const [anchor, setAnchor] = useState<{ rect: MenuAnchor; rtl: boolean } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const focusOnOpen = useRef<'first' | 'last'>('first');
@@ -54,10 +91,27 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
   const actions = items.filter(isAction);
 
   const place = () => {
-    const r = triggerRef.current?.getBoundingClientRect();
-    if (r && triggerRef.current)
-      setPos({ top: r.bottom + 6, left: r.left, right: window.innerWidth - r.right, rtl: getComputedStyle(triggerRef.current).direction === 'rtl' });
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setAnchor({ rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right }, rtl: getComputedStyle(el).direction === 'rtl' });
   };
+
+  // Measure the rendered (still hidden) menu, then flip and clamp it into the viewport before paint.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!open || !anchor || !menu) {
+      setPos(null);
+      return;
+    }
+    const size = menu.getBoundingClientRect();
+    setPos(
+      placeMenu(anchor.rect, { width: size.width, height: size.height }, { width: window.innerWidth, height: window.innerHeight }, {
+        align,
+        rtl: anchor.rtl,
+      }),
+    );
+  }, [open, anchor, align, items.length]);
 
   const openMenu = (where: 'first' | 'last') => {
     focusOnOpen.current = where;
@@ -70,15 +124,17 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
     if (restore) triggerRef.current?.focus();
   };
 
+  // Focus once the menu is placed: a `visibility: hidden` element cannot take focus.
+  const placed = pos !== null;
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || !placed) return;
     const nodes = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])');
     if (!nodes || nodes.length === 0) {
       menuRef.current?.focus();
       return;
     }
     (focusOnOpen.current === 'first' ? nodes[0] : nodes[nodes.length - 1])?.focus();
-  }, [open]);
+  }, [open, placed]);
 
   useEffect(() => {
     if (!open) return;
@@ -129,7 +185,10 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
         close();
         break;
       case 'Tab':
-        close(false);
+        // The menu is portaled to the end of <body>, so the browser's own Tab
+        // would leave the document. Putting focus back on the trigger first
+        // lets Tab and Shift+Tab continue from where the menu was opened.
+        close();
         return;
       default: {
         if (e.key.length === 1 && /\S/.test(e.key)) {
@@ -171,14 +230,14 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
         }}
         className={cn(
           !trigger &&
-            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg',
+            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3',
           triggerClassName,
         )}
       >
         {trigger ?? <Ellipsis aria-hidden size={18} />}
       </button>
       {open &&
-        pos &&
+        anchor &&
         createPortal(
           <div
             ref={menuRef}
@@ -188,8 +247,8 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
             data-dialog-layer=""
             aria-label={label}
             onKeyDown={onMenuKey}
-            // `align` is logical: `end` lines the menu up with the trigger's inline-end edge (its left edge in RTL).
-            style={(align === 'end') !== pos.rtl ? { top: pos.top, right: pos.right } : { top: pos.top, left: pos.left }}
+            // Rendered hidden for one layout pass so placeMenu can measure it.
+            style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, visibility: 'hidden' }}
             className={cn(
               'fixed z-[60] min-w-48 max-w-80 rounded-md border border-border bg-surface p-1 shadow-2 motion-safe:animate-pop-in',
               className,
@@ -218,7 +277,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
                   }}
                   className={cn(
                     'flex h-9 cursor-pointer items-center gap-3 rounded-sm px-3 text-sm outline-none select-none',
-                    'hover:bg-surface-2 focus:bg-surface-3 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
+                    'hover:bg-surface-2 focus:bg-surface-3 active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
                     item.danger ? 'text-danger' : 'text-fg',
                   )}
                 >
@@ -231,7 +290,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
                   {item.hint && <span className="text-xs text-fg-subtle">{item.hint}</span>}
                 </div>
               ) : (
-                <div key={item.id} role="separator" className="my-1 h-px bg-border" />
+                <div key={item.id} role="separator" className="my-1 h-px bg-divider" />
               ),
             )}
             {actions.length === 0 && (

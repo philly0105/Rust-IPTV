@@ -76,6 +76,53 @@ describe('10k items', () => {
   });
 });
 
+describe('50k items', () => {
+  const big = Array.from({ length: 50_000 }, (_, i) => ({ id: `ch-${i}`, name: `Channel ${i}` }));
+
+  it('VirtualList keeps a bounded window and Home/End/PageUp cross the whole list', () => {
+    const t0 = performance.now();
+    render(
+      <VirtualList
+        items={big}
+        itemHeight={48}
+        label="Channels"
+        getKey={(c) => c.id}
+        initialRect={{ width: 960, height: 600 }}
+        render={(c) => <span>{c.name}</span>}
+      />,
+    );
+    expect(performance.now() - t0).toBeLessThan(2000);
+    const list = screen.getByRole('listbox', { name: 'Channels' });
+    list.focus();
+    fireEvent.keyDown(list, { key: 'End' });
+    expect(list.getAttribute('aria-activedescendant')).toMatch(/-opt-49999$/);
+    fireEvent.keyDown(list, { key: 'PageUp' });
+    expect(list.getAttribute('aria-activedescendant')).not.toMatch(/-opt-49999$/);
+    fireEvent.keyDown(list, { key: 'Home' });
+    expect(list.getAttribute('aria-activedescendant')).toMatch(/-opt-0$/);
+    expect(list.querySelectorAll('[role="option"]').length).toBeLessThan(60);
+  });
+
+  it('VirtualGrid reaches the last of 50k cells with a bounded DOM', () => {
+    render(
+      <VirtualGrid
+        items={big}
+        minColumnWidth={150}
+        aspect="poster"
+        label="Movies"
+        getKey={(c) => c.id}
+        initialRect={{ width: 960, height: 720 }}
+        render={(c) => <span>{c.name}</span>}
+      />,
+    );
+    const grid = screen.getByLabelText('Movies');
+    grid.focus();
+    fireEvent.keyDown(grid, { key: 'End' });
+    expect(grid.getAttribute('aria-activedescendant')).toMatch(/49999$/);
+    expect(grid.querySelectorAll('[data-index]').length).toBeLessThan(120);
+  });
+});
+
 describe('VirtualGrid cursor restore', () => {
   const few = items.slice(0, 40);
   const grid = (extra: { initialActiveIndex?: number; onSelect?: (c: (typeof items)[number], i: number) => void }) => (

@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "Manage categories ({{count}} hidden)",
   "manageCategoriesHint": "{{hidden}} of {{total}} hidden. Hidden categories stay out of lists and search.",
   "noCategoryMatch": "No category matches that filter.",
+  "clearFilter": "Clear filter",
   "saveCategories": "Save",
   "categoriesSaved": "Category visibility saved",
   "categoriesSaveFailed": "Could not save category visibility",
@@ -61,6 +62,7 @@
   "resume": "Resume",
   "resumeAt": "Resume from {{time}}",
   "startOver": "Start over",
+  "startOverEpisode": "Start {{code}} over",
   "playEpisode": "Play {{code}}",
   "resumeEpisode": "Resume {{code}}",
   "nowPlaying": "Now playing",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "Similar titles need a TMDB key",
   "tmdbKeyMissingHint": "Add a TMDB key in Settings > Metadata.",
   "addTmdbKey": "Add a TMDB key",
+  "tmdbKeyRejectedTitle": "TMDB rejected the API key",
+  "tmdbKeyRejectedHint": "Check or replace the TMDB key in Settings > Metadata.",
   "watched": "Watched",
   "markWatched": "Mark as watched",
   "markUnwatched": "Mark as unwatched",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "Show up to {{count}}",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Couldn't load these titles"
+  "pageLoadFailed": "Couldn't load these titles",
+  "searchPartialError": "Some results could not be loaded."
 }

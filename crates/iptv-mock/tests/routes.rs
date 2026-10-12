@@ -649,3 +649,83 @@ async fn ten_k_playlist_has_ten_thousand_entries() {
         iptv_mock::playlists::TEN_K_CHANNELS
     );
 }
+
+/// B9: slow large playlist, hung headers, Xtream failure panels, non-ASCII.
+#[tokio::test]
+async fn b9_failure_routes_answer_as_documented() {
+    use iptv_mock::failures::UNICODE_CHANNELS;
+    use std::time::{Duration, Instant};
+    let m = spawn().await;
+    let c = client();
+    let get = |p: &str| c.get(format!("{}{p}", m.base)).send();
+
+    // The slow large playlist is paced chunk by chunk but complete.
+    let started = Instant::now();
+    let text = get("/fail/slow-large.m3u?channels=2000&ms=50")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(text.matches("#EXTINF").count(), 2000);
+    let chunks = gen::M3uGen::new(&m.base, 2000, 20).count() as u32;
+    assert!(chunks > 1, "the test playlist should span several chunks");
+    assert!(started.elapsed() >= Duration::from_millis(50) * (chunks - 1));
+
+    // A hung server never sends its status line.
+    let hung = tokio::time::timeout(Duration::from_millis(300), get("/fail/hang.m3u")).await;
+    assert!(hung.is_err(), "hang.m3u answered");
+
+    for (mode, code) in [("401", 401), ("403", 403), ("404", 404), ("503", 503)] {
+        for file in ["player_api.php", "get.php", "xmltv.php"] {
+            let r = get(&format!(
+                "/fail/xtream/{mode}/{file}?username=demo&password=secret"
+            ))
+            .await
+            .unwrap();
+            assert_eq!(r.status().as_u16(), code, "{mode}/{file}");
+        }
+    }
+    let html = get("/fail/xtream/html/player_api.php").await.unwrap();
+    assert!(html.headers()[header::CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .starts_with("text/html"));
+    let bad = get("/fail/xtream/badjson/player_api.php")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(serde_json::from_str::<Value>(&bad).is_err());
+    assert_eq!(
+        get("/fail/xtream/nope/player_api.php")
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    let hung = tokio::time::timeout(
+        Duration::from_millis(300),
+        get("/fail/xtream/hang/player_api.php"),
+    )
+    .await;
+    assert!(hung.is_err(), "the hung panel answered");
+
+    let bytes = get("/fail/unicode.m3u")
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert!(bytes.starts_with(b"\xEF\xBB\xBF#EXTM3U\r\n"));
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert_eq!(text.matches("#EXTINF").count(), UNICODE_CHANNELS.len());
+    for (group, name) in UNICODE_CHANNELS {
+        assert!(
+            text.contains(&format!("group-title=\"{group}\",{name}\r\n")),
+            "{name}"
+        );
+    }
+    assert!(!text.is_ascii());
+}

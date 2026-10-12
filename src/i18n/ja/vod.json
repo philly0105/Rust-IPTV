@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "カテゴリーを管理（{{count}}件非表示）",
   "manageCategoriesHint": "{{total}}件中{{hidden}}件が非表示です。非表示のカテゴリーは一覧と検索に表示されません。",
   "noCategoryMatch": "この条件に一致するカテゴリーはありません。",
+  "clearFilter": "フィルターをクリア",
   "saveCategories": "保存",
   "categoriesSaved": "カテゴリーの表示設定を保存しました",
   "categoriesSaveFailed": "カテゴリーの表示設定を保存できませんでした",
@@ -61,6 +62,7 @@
   "resume": "続きから再生",
   "resumeAt": "{{time}}から再開",
   "startOver": "最初から再生",
+  "startOverEpisode": "{{code}} を最初から再生",
   "playEpisode": "{{code}}を再生",
   "resumeEpisode": "{{code}}を続きから再生",
   "nowPlaying": "再生中",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "類似作品の表示にはTMDBキーが必要です",
   "tmdbKeyMissingHint": "設定 > メタデータでTMDBキーを追加してください。",
   "addTmdbKey": "TMDBキーを追加",
+  "tmdbKeyRejectedTitle": "TMDBがAPIキーを拒否しました",
+  "tmdbKeyRejectedHint": "設定 > メタデータでTMDBキーを確認するか、置き換えてください。",
   "watched": "視聴済み",
   "markWatched": "視聴済みにする",
   "markUnwatched": "未視聴にする",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "最大{{count}}件まで表示",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "これらのタイトルを読み込めませんでした"
+  "pageLoadFailed": "これらのタイトルを読み込めませんでした",
+  "searchPartialError": "一部の結果を読み込めませんでした。"
 }

@@ -68,6 +68,32 @@ pub const WINDOW_FACTORY_KEY: &str = "mpv_window_factory";
 /// `AppState.extensions` (`AppState::ext` downcasts to a sized type).
 pub struct WindowFactoryHandle(pub Arc<dyn ChildWindowFactory>);
 
+/// Error for a player program that could not be started: a missing or
+/// non-runnable executable is `engine_missing` (C12), anything else stays an
+/// I/O error.
+pub fn spawn_error(err: std::io::Error, message: String) -> crate::error::CoreError {
+    use std::io::ErrorKind;
+    /// Windows `ERROR_BAD_EXE_FORMAT`: the file is not a valid program.
+    const BAD_EXE_FORMAT: i32 = 193;
+    /// Windows `ERROR_EXE_MACHINE_TYPE_MISMATCH`: a program for another CPU,
+    /// or (Windows 11) a non-PE file named `.exe`.
+    const EXE_MACHINE_TYPE_MISMATCH: i32 = 216;
+    match err.kind() {
+        ErrorKind::NotFound | ErrorKind::PermissionDenied => {
+            crate::error::CoreError::EngineMissing(message)
+        }
+        _ if cfg!(windows)
+            && matches!(
+                err.raw_os_error(),
+                Some(BAD_EXE_FORMAT | EXE_MACHINE_TYPE_MISMATCH)
+            ) =>
+        {
+            crate::error::CoreError::EngineMissing(message)
+        }
+        kind => crate::error::CoreError::Io(std::io::Error::new(kind, message)),
+    }
+}
+
 /// Registers the window factory (called by iptv-tauri at boot).
 pub fn set_window_factory(state: &AppState, factory: Arc<dyn ChildWindowFactory>) {
     state.set_ext(WINDOW_FACTORY_KEY, Arc::new(WindowFactoryHandle(factory)));
@@ -157,4 +183,30 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
         "players detected"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod spawn_error_tests {
+    use super::spawn_error;
+    use crate::error::RpcErrorCode;
+    use std::io::{Error, ErrorKind};
+
+    /// C12: a player program that is missing or not runnable is
+    /// `engine_missing`, never `not_found` ("this stream no longer exists").
+    #[test]
+    fn missing_or_blocked_player_is_engine_missing() {
+        for kind in [ErrorKind::NotFound, ErrorKind::PermissionDenied] {
+            let err = spawn_error(Error::new(kind, "x"), "could not start mpv".into());
+            assert_eq!(err.code(), RpcErrorCode::EngineMissing, "{kind:?}");
+            let rpc = crate::error::RpcError::from(err);
+            assert_eq!(serde_json::to_value(rpc.code).unwrap(), "engine_missing");
+        }
+        let other = spawn_error(Error::other("x"), "m".into());
+        assert_eq!(other.code(), RpcErrorCode::Io);
+        #[cfg(windows)]
+        for raw in [193, 216] {
+            let err = spawn_error(Error::from_raw_os_error(raw), "m".into());
+            assert_eq!(err.code(), RpcErrorCode::EngineMissing, "os error {raw}");
+        }
+    }
 }

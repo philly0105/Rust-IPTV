@@ -109,16 +109,20 @@ pub async fn api_guard(State(s): State<Server>, req: Request, next: Next) -> Res
         );
     }
 
+    // Every method: GET routes (`/api/proxy`, `/api/files/{id}`) would
+    // otherwise let any web page embed them (`<video src=...>`) to probe the
+    // library or use the proxy as a relay. Browsers that predate
+    // Sec-Fetch-Site still get the Origin check below on state changes.
+    if headers
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("cross-site"))
+    {
+        return forbidden("cross-site requests are not allowed");
+    }
     let state_changing = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     let upgrade = headers.contains_key(UPGRADE);
     if state_changing || upgrade {
-        if headers
-            .get("sec-fetch-site")
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| v.eq_ignore_ascii_case("cross-site"))
-        {
-            return forbidden("cross-site requests are not allowed");
-        }
         if let Some(origin) = headers.get(ORIGIN).and_then(|v| v.to_str().ok()) {
             let forwarded = headers
                 .get("x-forwarded-host")

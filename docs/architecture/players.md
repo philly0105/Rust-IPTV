@@ -74,7 +74,7 @@ The old Electron app loaded `libmpv-2.dll` through a native Node addon and passe
    Its window procedure returns `HTTRANSPARENT` for `WM_NCHITTEST` and lets `DefWindowProc` paint the black brush.
 3. Bounds arrive in CSS px relative to the webview, which fills the client area. The factory multiplies them by `window.scale_factor()`, rounds, and clamps width and height to at least 1.
 4. mpv is started with the user's `mpvArgs` first, then the C4 flags, so the C4 flags always win:
-   `--wid=<hwnd> --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<our pid> --idle=yes --keep-open=yes --no-osc --no-input-default-bindings --force-window=yes --hwdec=auto-safe --input-vo-keyboard=no --no-terminal --volume=<last volume>`
+   `--wid=<hwnd> --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<our pid>-<session> --idle=yes --keep-open=yes --no-osc --no-input-default-bindings --force-window=yes --hwdec=auto-safe --input-vo-keyboard=no --no-terminal --volume=<last volume>`
    mpv creates its own video window inside ours, so moving or destroying our window moves or removes the video. The process runs with `CREATE_NO_WINDOW`, null stdio, and kill-on-drop. It is also assigned to a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; the job handle is never closed, so Windows ends mpv when the app process dies, even after a crash or a Task Manager kill.
 5. The video window is native and sits above the web content. HTML cannot draw on top of it, so player controls must sit outside the reported bounds, or the UI must shrink the bounds while an overlay is open. The old app used a fixed dock for the same reason.
 

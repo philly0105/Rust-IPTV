@@ -286,29 +286,51 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     } else {
         Ok(())
     };
-    spawn_settings_watcher(Arc::downgrade(&state), initial);
+    spawn_settings_watcher(Arc::downgrade(&state), initial, result.is_err());
     result
 }
 
-fn spawn_settings_watcher(state: Weak<AppState>, mut last: RemoteControlSettings) {
+/// How often a start that failed (port busy) is tried again while the
+/// settings still ask for the server.
+pub const START_RETRY: Duration = Duration::from_secs(5);
+
+fn spawn_settings_watcher(
+    state: Weak<AppState>,
+    mut last: RemoteControlSettings,
+    mut start_failed: bool,
+) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SETTINGS_POLL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut last_attempt = tokio::time::Instant::now();
         loop {
             tick.tick().await;
             let Some(state) = state.upgrade() else { break };
             let current = state.settings.read().remote_control.clone();
-            if current == last {
+            let changed = current != last;
+            // A failed start (another program held the port) is retried until
+            // it works or the settings change; an explicit `remote.stop` after
+            // a successful start is not undone.
+            let retry = !changed
+                && start_failed
+                && current.enabled
+                && last_attempt.elapsed() >= START_RETRY
+                && hub(&state).running_port().is_none();
+            if !changed && !retry {
                 continue;
             }
             last = current.clone();
+            last_attempt = tokio::time::Instant::now();
             let outcome = if current.enabled {
                 start_on(Arc::clone(&state), current.port).await.map(|_| ())
             } else {
                 stop(Arc::clone(&state)).await
             };
+            start_failed = current.enabled && outcome.is_err();
             if let Err(err) = outcome {
-                tracing::warn!(%err, "remote control settings change could not be applied");
+                if !retry {
+                    tracing::warn!(%err, "remote control settings change could not be applied; retrying every {START_RETRY:?}");
+                }
             }
         }
     });

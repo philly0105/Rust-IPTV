@@ -33,7 +33,7 @@ export function OtherSourcesDialog({ open, onClose, current, currentSourceName, 
   ];
   return (
     <Dialog open={open} onClose={onClose} size="lg" title={t('otherSourcesTitle')} description={t('otherSourcesHint', { count: rows.length })}>
-      <ul className="flex flex-col divide-y divide-border">
+      <ul className="flex flex-col divide-y divide-divider">
         {rows.map(({ item, sourceName, isCurrent }) => {
           const pinned = isPinned(pin, item.ref);
           const rating = formatRating(item.rating, i18n.language);

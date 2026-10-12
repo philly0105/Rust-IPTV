@@ -81,6 +81,7 @@ export function XtreamForm({
         </Field>
       </div>
       <ConnectionTest
+        kind="xtream"
         disabled={disabled}
         inputs={JSON.stringify(value)}
         run={() => {

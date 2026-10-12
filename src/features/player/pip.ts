@@ -12,7 +12,7 @@
 import i18next from 'i18next';
 import { create } from 'zustand';
 
-import { enterPipWindow, exitPipWindow, recoverPipWindow } from '@/api/window';
+import { enterPipWindow, exitPipWindow, PIP_DEFAULT_ASPECT, recoverPipWindow, setPipWindowAspect } from '@/api/window';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { usePlayerStore } from './store';
 
@@ -25,18 +25,62 @@ let running: Promise<void> | null = null;
 let wasFullscreen = false;
 let releaseEscape: (() => void) | null = null;
 
+/** Reads the playing video's aspect (width / height); set by the surface that owns the video. */
+type AspectSource = () => Promise<number | undefined>;
+let aspectSource: AspectSource | null = null;
+/** The aspect the PiP window is shaped and locked to while PiP lasts. */
+let lockedAspect = PIP_DEFAULT_ASPECT;
+/** Aspects closer than this count as the same shape (rounding in mpv's `dw`/`dh`). */
+const SAME_ASPECT = 0.01;
+
+/**
+ * Lets the mounted video surface tell PiP the video's shape, so the window matches it.
+ * Returns an unregister function (a newer surface's registration is left alone).
+ */
+export function setPipAspectSource(source: AspectSource): () => void {
+  aspectSource = source;
+  return () => {
+    if (aspectSource === source) aspectSource = null;
+  };
+}
+
+/**
+ * The display aspect from mpv's `video-params` (`dw`/`dh`, already corrected for the pixel
+ * aspect), swapped for a 90/270 degree rotation, clamped to 1:4..4:1 (a very wide or tall
+ * video gets the nearest usable PiP shape). Undefined when unknown, so PiP falls back to 16:9.
+ */
+export function aspectFromVideoParams(params: unknown): number | undefined {
+  if (typeof params !== 'object' || params === null) return undefined;
+  const p: { dw?: unknown; dh?: unknown; rotate?: unknown } = params;
+  const { dw, dh } = p;
+  if (typeof dw !== 'number' || typeof dh !== 'number' || !(dw > 0) || !(dh > 0)) return undefined;
+  const turned = typeof p.rotate === 'number' && p.rotate % 180 === 90;
+  const aspect = turned ? dh / dw : dw / dh;
+  return Number.isFinite(aspect) ? Math.min(4, Math.max(0.25, aspect)) : undefined;
+}
+
+async function videoAspect(): Promise<number | undefined> {
+  try {
+    return (await aspectSource?.()) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function turnOn(): Promise<void> {
   const player = usePlayerStore.getState();
   wasFullscreen = player.isFullscreen || document.fullscreenElement != null;
   if (player.isFullscreen) player.toggleFullscreen();
+  const aspect = aspectSource ? await videoAspect() : undefined;
   if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined);
-  if (!(await enterPipWindow())) {
+  if (!(await enterPipWindow(aspect))) {
     // Nothing changed after all: put the player back in fullscreen if it was.
     const now = usePlayerStore.getState();
     if (player.isFullscreen && now.source && !now.isFullscreen) now.toggleFullscreen();
     wasFullscreen = false;
     return;
   }
+  lockedAspect = aspect ?? PIP_DEFAULT_ASPECT;
   usePipStore.setState({ active: true });
   // Newest registration wins, so this beats the shell's Escape (which only blurs) while
   // PiP lasts. Menus and dialogs inside the PiP player claim Escape before it gets here.
@@ -101,6 +145,20 @@ export function togglePip(): Promise<void> {
   return request(!(target ?? usePipStore.getState().active));
 }
 
+/**
+ * While PiP lasts, follows the video's shape: the surface calls this when a new item's video
+ * is up (a zap from a 16:9 channel to a 4:3 one), and the window is reshaped and re-locked
+ * when the aspect changed. No-op outside PiP, while the window is changing, or when the
+ * aspect is unknown.
+ */
+export async function refreshPipAspect(): Promise<void> {
+  if (running || !usePipStore.getState().active || !aspectSource) return;
+  const aspect = await videoAspect();
+  if (aspect === undefined || running || !usePipStore.getState().active) return;
+  if (Math.abs(aspect - lockedAspect) < SAME_ASPECT) return;
+  if (await setPipWindowAspect(aspect)) lockedAspect = aspect;
+}
+
 /** For tests: forget queued requests and the Escape binding. */
 export function __resetPipForTests(): void {
   target = null;
@@ -108,6 +166,8 @@ export function __resetPipForTests(): void {
   wasFullscreen = false;
   releaseEscape?.();
   releaseEscape = null;
+  aspectSource = null;
+  lockedAspect = PIP_DEFAULT_ASPECT;
   usePipStore.setState({ active: false });
 }
 

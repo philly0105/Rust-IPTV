@@ -132,7 +132,7 @@ function XtreamAccountView({ sourceId }: { sourceId: string }) {
   const formats = a.allowedOutputFormats?.filter(Boolean) ?? [];
   return (
     <Frame onRefresh={refresh} fetching={q.isFetching}>
-      <dl className="flex flex-col divide-y divide-border rounded-lg border border-border bg-surface">
+      <dl className="flex flex-col divide-y divide-divider rounded-lg border border-border bg-surface">
         <Row label={t('accountStatus')} testId="account-status">
           <Badge variant={statusTone(a.status)}>{a.status}</Badge>
         </Row>
@@ -190,7 +190,7 @@ function StalkerAccountView({ sourceId }: { sourceId: string }) {
   const empty = !a.status && !a.expDate && !a.tariff && rows.length === 0;
   return (
     <Frame onRefresh={refresh} fetching={q.isFetching}>
-      <dl className="flex flex-col divide-y divide-border rounded-lg border border-border bg-surface">
+      <dl className="flex flex-col divide-y divide-divider rounded-lg border border-border bg-surface">
         <Row label={t('accountMac')}>
           <span className="font-mono text-sm">{a.mac}</span>
         </Row>
@@ -205,8 +205,8 @@ function StalkerAccountView({ sourceId }: { sourceId: string }) {
       {empty ? <p className="text-sm text-fg-muted" data-testid="account-empty">{t('accountEmpty')}</p> : null}
       {rows.length > 0 ? (
         <details className="group rounded-lg border border-border bg-surface" data-testid="account-raw">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-fg">{t('accountPortalDetails', { count: rows.length })}</summary>
-          <dl className="flex flex-col divide-y divide-border border-t border-border">
+          <summary className="cursor-pointer select-none rounded-lg px-4 py-3 text-sm font-medium text-fg hover:bg-surface-2 active:bg-surface-3">{t('accountPortalDetails', { count: rows.length })}</summary>
+          <dl className="flex flex-col divide-y divide-divider border-t border-divider">
             {rows.map(([k, v]) => (
               <Row key={k} label={k}>
                 <span className="text-sm">{redactText(v)}</span>

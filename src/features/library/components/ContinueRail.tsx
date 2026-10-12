@@ -16,6 +16,27 @@ function focusNeighbour(from: HTMLElement): void {
   next?.focus();
 }
 
+/**
+ * Arrow keys walk the rail in reading order (mirrored in RTL); Home and End
+ * jump to its ends. Returns false for keys it does not handle.
+ */
+function moveInRail(from: HTMLElement, key: string): boolean {
+  const cards = [...(from.closest('ul')?.querySelectorAll<HTMLElement>('[data-continue-open]') ?? [])];
+  const at = cards.indexOf(from);
+  if (at < 0) return false;
+  const rtl = getComputedStyle(from).direction === 'rtl';
+  let to: number;
+  if (key === 'Home') to = 0;
+  else if (key === 'End') to = cards.length - 1;
+  else if (key === 'ArrowRight') to = at + (rtl ? -1 : 1);
+  else if (key === 'ArrowLeft') to = at + (rtl ? 1 : -1);
+  else return false;
+  const target = cards[Math.max(0, Math.min(cards.length - 1, to))];
+  target?.focus();
+  target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  return true;
+}
+
 export const CONTINUE_RAIL_HEIGHT = 300;
 
 export function ContinueRail({
@@ -44,6 +65,11 @@ export function ContinueRail({
                 type="button"
                 onClick={() => onOpen(p)}
                 onKeyDown={(e) => {
+                  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+                  if (moveInRail(e.currentTarget, e.key)) {
+                    e.preventDefault();
+                    return;
+                  }
                   if (e.key !== 'Delete') return;
                   e.preventDefault();
                   focusNeighbour(e.currentTarget);

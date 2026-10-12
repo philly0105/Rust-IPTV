@@ -54,7 +54,7 @@ export function TmdbAttribution({ className }: { className?: string }) {
   return (
     <footer
       data-testid="tmdb-attribution"
-      className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3 text-xs text-fg-subtle', className)}
+      className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-divider pt-3 text-xs text-fg-subtle', className)}
     >
       <a
         href={TMDB_HOME}

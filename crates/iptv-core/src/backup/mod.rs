@@ -44,6 +44,17 @@ pub const BACKUP_KIND: &str = "iptvnator-playlist-backup";
 pub const BACKUP_VERSION: i64 = 1;
 /// `app_state` key prefix of parked user state.
 pub const PENDING_PREFIX: &str = "backup_pending:";
+
+/// Tsrust extension in an entry's `userState`: manual EPG mappings
+/// (`[{contentType, itemId, epgChannelId}]`, `null` = explicitly unmapped).
+pub const EXT_EPG_MAPPINGS: &str = "tsrustEpgMappings";
+/// Tsrust extension in an M3U or Stalker entry's `userState`: playback
+/// positions by catalog id (`[{contentType, itemId, episodeId?,
+/// positionSeconds, durationSeconds?, updatedAt, watched?, snapshot?}]`).
+pub const EXT_POSITIONS: &str = "tsrustPlaybackPositions";
+/// Tsrust extension in a Stalker entry's `userState`: hidden categories
+/// (`[{contentType, categoryId}]`).
+pub const EXT_HIDDEN_CATEGORIES: &str = "tsrustHiddenCategories";
 /// App-level settings carried in the manifest's `settings` object next to
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
 /// specific values (player paths, folders) are deliberately not exported.
@@ -96,7 +107,7 @@ pub struct ExportResult {
 // depend on the sources module's internal API.
 // ---------------------------------------------------------------------------
 
-const SOURCE_COLS: &str = "id, kind, name, position, auto_refresh, created_at, updated_at, last_refresh_at, last_error, config_json, epg_json";
+const SOURCE_COLS: &str = "id, kind, name, position, auto_refresh, created_at, updated_at, last_refresh_at, last_error, config_json, epg_json, last_error_code";
 
 fn source_from_row(row: &Row<'_>) -> rusqlite::Result<(Source, String)> {
     let kind_s: String = row.get(1)?;
@@ -116,6 +127,10 @@ fn source_from_row(row: &Row<'_>) -> rusqlite::Result<(Source, String)> {
             updated_at: ts(row.get(6)?),
             last_refresh_at: ts(row.get(7)?),
             last_error: row.get(8)?,
+            last_error_code: row
+                .get::<_, Option<String>>(11)?
+                .as_deref()
+                .and_then(crate::error::RpcErrorCode::parse),
             channel_count: 0,
             movie_count: 0,
             series_count: 0,

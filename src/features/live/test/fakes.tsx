@@ -100,7 +100,7 @@ export function Dialog({
       >
         <h2 className="px-5 pt-4 pb-2 text-lg font-semibold">{title}</h2>
         <div className="min-h-0 flex-1 overflow-auto px-5 pb-4">{children}</div>
-        {footer ? <div className="flex justify-end gap-2 border-t border-border px-5 py-3">{footer}</div> : null}
+        {footer ? <div className="flex justify-end gap-2 border-t border-divider px-5 py-3">{footer}</div> : null}
       </div>
     </div>
   );

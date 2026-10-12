@@ -124,6 +124,11 @@ pub fn ingest_reader(
     etag: Option<&str>,
     on_progress: &mut dyn FnMut(&str, u64),
 ) -> CoreResult<IngestStats> {
+    // A large feed (millions of programmes) holds the write lock for long
+    // stretches, the final swap above all; user writes made meanwhile wait
+    // for it as they do for a catalog import (B9-D64) instead of failing
+    // with "database is locked" after the normal busy timeout.
+    let _long = crate::db::long_write();
     // Bulk-load tuning for this pooled connection only: a 64 MB page cache
     // keeps the (channel_id, start) index hot, and deferring WAL checkpoints
     // avoids copying pages back mid-load. Both are restored afterwards.
@@ -174,13 +179,21 @@ fn ingest_inner(
         Ok((stats, channels, programs)) => {
             on_progress("saving", programs);
             store::commit_staging(conn, url, etag, channels, programs)?;
+            // Most programmes unreadable (often an unknown time zone): the
+            // status stays ok (the readable part was stored) but the source
+            // row and the done event carry the C15 code saying why the
+            // guide is empty or thin.
+            let unreadable = unreadable_warning(&stats);
+            if let Some(w) = &unreadable {
+                store::set_status(conn, url, EpgFetchStatus::Ok, Some(w))?;
+            }
             Ok(IngestStats {
                 channels,
                 programs,
                 skipped_window: stats.skipped_window,
                 skipped_invalid: stats.skipped_invalid,
                 not_modified: false,
-                warning: stats.truncated,
+                warning: unreadable.or(stats.truncated),
             })
         }
         Err(err) => {
@@ -190,6 +203,20 @@ fn ingest_inner(
             Err(err)
         }
     }
+}
+
+/// The C15 code `epg_unreadable:<skipped>:<seen>` when more than half of a
+/// feed's programmes were skipped as invalid (unreadable start or stop, no
+/// channel); `None` otherwise. Stored verbatim as the source's status error;
+/// the UI translates it (`epgUnreadable`).
+fn unreadable_warning(stats: &xmltv::ParseStats) -> Option<String> {
+    let skipped = stats.skipped_invalid;
+    let seen = stats
+        .programmes
+        .saturating_add(stats.skipped_window)
+        .saturating_add(skipped);
+    (skipped > 0 && skipped.saturating_mul(2) > seen)
+        .then(|| format!("epg_unreadable:{skipped}:{seen}"))
 }
 
 /// Looks up `url` among the configured urls; unknown urls are treated as
@@ -547,6 +574,60 @@ mod tests {
             last_fetch_at: last.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    /// Review R2-5: a feed whose programme times could not be read stored an
+    /// empty guide with status ok and no message.
+    #[test]
+    fn unreadable_feed_is_reported_on_the_source() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        let prog = |start: &str| {
+            format!(
+                r#"<programme channel="c" start="{start}" stop="20261012130000 +0000"><title>T</title></programme>"#
+            )
+        };
+        // Two readable, three in an unknown zone.
+        let xml = format!(
+            r#"<tv><channel id="c"><display-name>C</display-name></channel>{}{}{}{}{}</tv>"#,
+            prog("20261012120000 +0000"),
+            prog("20261012121000 +0000"),
+            prog("20261012120000 XYZ"),
+            prog("20261012121000 XYZ"),
+            prog("20261012122000 XYZ"),
+        );
+        let stats = ingest_reader(
+            &mut conn,
+            "u",
+            std::io::Cursor::new(xml.into_bytes()),
+            Window::unbounded(),
+            None,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(stats.programs, 2);
+        assert_eq!(stats.skipped_invalid, 3);
+        let w = stats.warning.expect("warning");
+        // C15: exactly the code, no other text.
+        assert_eq!(w, "epg_unreadable:3:5");
+        let (status, error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "ok");
+        assert_eq!(error.as_deref(), Some(w.as_str()));
+        // A mostly readable feed carries no warning.
+        let s = xmltv::ParseStats {
+            programmes: 10,
+            skipped_invalid: 4,
+            ..Default::default()
+        };
+        assert!(unreadable_warning(&s).is_none());
     }
 
     #[test]

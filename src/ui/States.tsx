@@ -33,7 +33,7 @@ export function EmptyState({ icon, title, description, action, className, size =
         <div
           aria-hidden
           className={cn(
-            'flex items-center justify-center rounded-full border border-border bg-surface-2 text-fg-muted',
+            'flex items-center justify-center rounded-full border border-divider bg-surface-2 text-fg-muted',
             size === 'page' ? 'h-16 w-16' : 'h-11 w-11',
           )}
         >
@@ -61,6 +61,8 @@ export const ERROR_HINT_KEYS: Record<RpcErrorCode, string> = {
   io: 'errorHintIo',
   db: 'errorHintDb',
   internal: 'errorHintInternal',
+  engine_missing: 'errorHintEngineMissing',
+  server: 'errorHintServer',
 };
 
 /** i18n key (common namespace) of the short title for each error code. */
@@ -75,6 +77,8 @@ export const ERROR_TITLE_KEYS: Record<RpcErrorCode, string> = {
   io: 'errorTitleIo',
   db: 'errorTitleDb',
   internal: 'errorTitleInternal',
+  engine_missing: 'errorTitleEngineMissing',
+  server: 'errorTitleServer',
 };
 
 export interface ErrorStateProps {
@@ -86,6 +90,11 @@ export interface ErrorStateProps {
   size?: 'page' | 'inline';
   /** Overrides the code-derived title. */
   title?: ReactNode;
+  /**
+   * Overrides the code-derived next-step hint, for callers that know where the data lives
+   * (local library vs provider). The unreachable-server hint still wins: it is more specific.
+   */
+  hint?: ReactNode;
   /** A retry is in flight: Retry shows a spinner and ignores presses (focus stays on it). */
   retrying?: boolean;
 }
@@ -104,7 +113,7 @@ export function isServerUnreachable(err: RpcError): boolean {
  * server is unreachable the body and hint are translated and the raw browser text moves into a
  * details disclosure.
  */
-export function ErrorState({ error, onRetry, action, className, size = 'page', title, retrying = false }: ErrorStateProps) {
+export function ErrorState({ error, onRetry, action, className, size = 'page', title, hint, retrying = false }: ErrorStateProps) {
   const { t } = useTranslation('common');
   const err = RpcError.from(error);
   const unreachable = isServerUnreachable(err);
@@ -127,17 +136,23 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
         <CircleAlert size={size === 'page' ? 28 : 20} />
       </div>
       <div className="flex max-w-lg flex-col gap-1.5">
-        <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code])}</h2>
+        <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code] ?? 'errorTitleInternal')}</h2>
         <p className="text-sm break-words text-fg-muted">{unreachable ? t('errorBodyServerUnreachable') : err.message}</p>
-        <p className="text-sm text-fg">{t(unreachable ? 'errorHintServerUnreachable' : ERROR_HINT_KEYS[err.code])}</p>
-        {unreachable && (
-          <details className="text-xs text-fg-subtle">
-            <summary className="cursor-pointer rounded-sm hover:text-fg-muted">{t('errorTechnicalDetails')}</summary>
+        <p className="text-sm text-fg">
+          {unreachable ? t('errorHintServerUnreachable') : (hint ?? t(ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal'))}
+        </p>
+        {/* The code is what support asks for; it stays folded away so the message leads. */}
+        <details className="text-xs text-fg-subtle">
+          <summary className="cursor-pointer rounded-sm hover:text-fg-muted">{t('errorTechnicalDetails')}</summary>
+          <p className="mt-1" data-error-code={err.code}>
+            {t('errorCode', { code: err.code })}
+          </p>
+          {unreachable && (
             <p className="mt-1 font-mono break-words" dir="ltr">
               {err.message}
             </p>
-          </details>
-        )}
+          )}
+        </details>
       </div>
       {(onRetry || action) && (
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">

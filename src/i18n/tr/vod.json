@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "Kategorileri yönet ({{count}} gizli)",
   "manageCategoriesHint": "{{total}} kategoriden {{hidden}} tanesi gizli. Gizli kategoriler listelerde ve aramada görünmez.",
   "noCategoryMatch": "Bu filtreyle eşleşen kategori yok.",
+  "clearFilter": "Filtreyi temizle",
   "saveCategories": "Kaydet",
   "categoriesSaved": "Kategori görünürlüğü kaydedildi",
   "categoriesSaveFailed": "Kategori görünürlüğü kaydedilemedi",
@@ -61,6 +62,7 @@
   "resume": "Devam et",
   "resumeAt": "{{time}} noktasından devam et",
   "startOver": "Baştan başlat",
+  "startOverEpisode": "{{code}} baştan başlat",
   "playEpisode": "Oynat: {{code}}",
   "resumeEpisode": "Devam et: {{code}}",
   "nowPlaying": "Şimdi oynatılıyor",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "Benzer içerikler için TMDB anahtarı gerekir",
   "tmdbKeyMissingHint": "Ayarlar > Meta veri bölümünde bir TMDB anahtarı ekleyin.",
   "addTmdbKey": "TMDB anahtarı ekle",
+  "tmdbKeyRejectedTitle": "TMDB API anahtarını reddetti",
+  "tmdbKeyRejectedHint": "Ayarlar > Meta veri bölümünde TMDB anahtarını kontrol edin veya değiştirin.",
   "watched": "İzlendi",
   "markWatched": "İzlendi olarak işaretle",
   "markUnwatched": "İzlenmedi olarak işaretle",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "En fazla {{count}} göster",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Bu başlıklar yüklenemedi"
+  "pageLoadFailed": "Bu başlıklar yüklenemedi",
+  "searchPartialError": "Bazı sonuçlar yüklenemedi."
 }

@@ -36,6 +36,12 @@ One entry per source, in `sources.list` order. Common fields: `portalType`, `exp
   - Ids that are not numeric are left out, since the old format requires numbers.
 - stalker: `connection {portalUrl, macAddress, isFullStalkerPortal, username?, userAgent?, referrer?, origin?, stalkerSerialNumber?, stalkerDeviceId1?, stalkerDeviceId2?, password?, stalkerSignature1?, stalkerSignature2?}`. `favorites` and `recentlyViewed` are `StalkerPortalItem`s: the original portal object when the row came from a backup (kept as `portalItem` in the snapshot), otherwise a minimal `{id, name, title, type, category_id, logo/cover, added_at}`.
 
+Tsrust extensions in an entry's `userState` (`backup::EXT_*`). Export writes each key only when it has data, IPTVnator ignores unknown keys, and backups without them import as before:
+
+- `tsrustEpgMappings` (every kind): manual EPG mappings `[{contentType, itemId, epgChannelId}]`; `epgChannelId: null` means explicitly unmapped. On import a mapping the source already has for the item is kept.
+- `tsrustPlaybackPositions` (M3U and Stalker; Xtream uses `playbackPositions`): `[{contentType, itemId, episodeId?, positionSeconds, durationSeconds?, updatedAt, watched?, snapshot?}]` by catalog id. Import follows the same rules as the IPTVnator positions: dated rows only replace older ones, undated rows only fill gaps. M3U rows need the item in the local catalog; Stalker VOD is not stored locally, so its rows apply as they are.
+- `tsrustHiddenCategories` (Stalker): `[{contentType, categoryId}]`.
+
 M3U entries carry the stored playlist text in `rawM3u`. Playlists over 8 MB keep an empty `m3u_raw.raw` and live in `data_dir/playlists/<id>.m3u`; export and the merge fingerprint both read the text through `m3u::stored_text`, so large file sources export their real text and match on re-import.
 
 ## Export to a file
@@ -57,7 +63,7 @@ Secrets (the Xtream password, and the Stalker password and signatures) are writt
 ## Import
 
 1. Parse and check. Invalid JSON, a legacy JSON array export, a wrong `kind`, a `version` other than 1, or a missing `playlists` array rejects the file (`Invalid`). Anything else is lenient: a bad entry is skipped with a warning (`skipped += 1`), and a bad user-state item is dropped.
-2. `replace` deletes every source (user state cascades), every VOD pin, parked state, and Stalker tokens, plus the deleted sources' cached playlist copies (`data_dir/playlists/<id>.m3u`).
+2. `replace` never deletes first. Every entry is parsed before anything changes, and a backup none of whose entries can be used is refused (`Invalid`, "nothing was replaced"). The backup's playlists are imported next to the existing sources. Only once at least one new catalog has loaded are the old sources removed (user state cascades), with their VOD pins, parked state, Stalker tokens and cached playlist copies (`data_dir/playlists/<id>.m3u`), and the backup's settings applied. When no catalog loads, the new sources are rolled back, the old pins restored, and the call fails with `Invalid`; nothing changes.
 3. EPG URLs go through `settings::update`:
    - `merge`: the backup's URLs come first, then the current ones, deduplicated by URL identity.
    - `replace`: exactly the backup's URLs. A replace with no `settings` clears them.
@@ -70,7 +76,7 @@ Secrets (the Xtream password, and the Stalker password and signatures) are writt
 
    A match is updated in place (`merge`). Otherwise a new source is created with `exportedId` as its id when that id is safe and free, or a new UUID. A duplicate fingerprint inside the same file is skipped.
 5. Catalog:
-   - m3u: the source is created with `origin = text`, and `rawM3u` is stored in `m3u_raw` with an empty `sha256`, so the m3u importer parses the embedded text and never downloads anything. Text over `RAW_INLINE_MAX` (8 MB) goes through `m3u::place_raw_text`: it is written to `data_dir/playlists/<id>.m3u` and `m3u_raw.raw` stays `''`, the same layout an import of a large file produces; a text source with `raw = ''` and a cached copy is parsed from that file. On re-import the stored `sha256` survives only when the text is unchanged (inline text compared directly, a cached copy compared by sha). After the import the config is switched to its real origin: `url`, `file` (only when `filePathHint` exists on disk), or `text`.
+   - m3u: the source is created with `origin = text`, and `rawM3u` is stored in `m3u_raw` with an empty `sha256`, so the m3u importer parses the embedded text and never downloads anything. Text over `RAW_INLINE_MAX` (8 MB) goes through `m3u::place_raw_text`: it is written to `data_dir/playlists/<id>.m3u` and `m3u_raw.raw` stays `''`, the same layout an import of a large file produces; a text source with `raw = ''` and a cached copy is parsed from that file. On re-import the stored `sha256` survives only when the text is unchanged (inline text compared directly, a cached copy compared by sha). After the import the config is switched to its real origin: `url`, `file` (only when `filePathHint` exists on disk), or `text`. Exception: a `url` entry whose `rawM3u` is empty or only a header (for example a URL source whose first import failed) is imported by fetching its URL instead.
    - xtream and stalker: the registered importer runs against the portal.
    - Success sets `last_refresh_at` and clears `last_error`. Failure stores `last_error`, and the source is kept with a warning.
    - An Xtream entry without a password (exported without secrets) skips the sync with a warning asking the user to add the password.

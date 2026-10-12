@@ -23,7 +23,7 @@
   "pageNotFound": "Page not found",
   "pageNotFoundHint": "This address does not match any page. Use the rail or go back home.",
 
-  "errorTitleNetwork": "Can't reach the server",
+  "errorTitleNetwork": "Couldn't reach the server",
   "errorTitleTimeout": "The request took too long",
   "errorTitleAuth": "Sign-in was rejected",
   "errorTitleNotFound": "Not found",
@@ -46,5 +46,10 @@
   "errorHintConflict": "Reload to see the latest version, then try again.",
   "errorHintIo": "Check that the folder exists and that you have permission to write to it.",
   "errorHintDb": "Restart the app. If it keeps happening, restore a backup from Settings.",
-  "errorHintInternal": "Try again. If it keeps happening, restart the app."
+  "errorHintInternal": "Try again. If it keeps happening, restart the app.",
+  "errorCode": "Error code: {{code}}",
+  "errorTitleEngineMissing": "Couldn't start the player engine",
+  "errorHintEngineMissing": "The video player engine (mpv) is missing or could not start.",
+  "errorTitleServer": "The server had a problem",
+  "errorHintServer": "The server is busy or having trouble. Try again later."
 }

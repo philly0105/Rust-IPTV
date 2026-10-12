@@ -174,11 +174,15 @@ impl ItemRow {
             .map(|t| t.trim().to_ascii_lowercase())
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| "default".into());
-        let days = c.get("days").and_then(|v| {
-            v.as_i64()
-                .or_else(|| v.as_f64().map(|f| f as i64))
-                .or_else(|| v.as_str()?.trim().parse().ok())
-        });
+        let days = c
+            .get("days")
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_f64().map(|f| f as i64))
+                    .or_else(|| v.as_str()?.trim().parse().ok())
+            })
+            // Rows imported before the parsers bounded it can hold any number.
+            .map(|d: i64| d.clamp(0, crate::xtream::meta::MAX_ARCHIVE_DAYS));
         let source = c
             .get("source")
             .and_then(|v| v.as_str())
@@ -192,7 +196,8 @@ impl ItemRow {
         match self.archive_hours {
             Some(h) if h > 0 => Some(ArchiveInfo {
                 enabled: true,
-                duration_hours: Some(h),
+                // Clamped on read too: older rows can hold unbounded values.
+                duration_hours: Some(crate::xtream::meta::clamp_archive_hours(h)),
             }),
             _ if self.catchup().is_some_and(|c| catchup_usable(&c.kind)) => Some(ArchiveInfo {
                 enabled: true,
@@ -375,12 +380,36 @@ pub struct CatalogWriter<'c> {
     inserted: HashMap<ContentType, u64>,
     total: u64,
     duplicates: u64,
+    /// Cancel token of the import run writing this catalog (C8), taken at
+    /// [`CatalogWriter::begin`]; checked every [`WRITE_BATCH`] rows and in
+    /// [`CatalogWriter::finish`], so a cancelled run rolls back.
+    cancel: Option<tokio_util::sync::CancellationToken>,
+}
+
+/// `Err` with the cancelled-import error when `token` fired.
+fn check_cancel(token: Option<&tokio_util::sync::CancellationToken>) -> CoreResult<()> {
+    if token.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+        return Err(crate::sources::import_cancelled_error());
+    }
+    Ok(())
 }
 
 impl<'c> CatalogWriter<'c> {
     /// Starts a rewrite of `types` for `source_id`. `conn` should be inside a
     /// transaction (one write transaction per source import).
-    pub fn begin(conn: &'c Connection, source_id: &str, types: &[ContentType]) -> CoreResult<Self> {
+    ///
+    /// `cancel` is the import run's token, taken by the caller in async
+    /// context before waiting for a connection or the write lock (C8). If that
+    /// wait outlasts the cancel grace, the run's writer token is already
+    /// unregistered (or replaced by a newer run's), so a lookup here would
+    /// miss the cancel. `None` falls back to [`crate::sources::writer_cancel_token`]
+    /// for writers outside an import run.
+    pub fn begin(
+        conn: &'c Connection,
+        source_id: &str,
+        types: &[ContentType],
+        cancel: Option<tokio_util::sync::CancellationToken>,
+    ) -> CoreResult<Self> {
         let mut hidden: HashMap<ContentType, HashSet<String>> = HashMap::new();
         {
             let mut stmt = conn.prepare_cached(
@@ -427,6 +456,7 @@ impl<'c> CatalogWriter<'c> {
             inserted: HashMap::new(),
             total: 0,
             duplicates: 0,
+            cancel: cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id)),
         })
     }
 
@@ -478,6 +508,9 @@ impl<'c> CatalogWriter<'c> {
             extra,
             item.position,
         ])?;
+        if (self.total + self.duplicates + 1) % WRITE_BATCH == 0 {
+            check_cancel(self.cancel.as_ref())?;
+        }
         if n == 0 {
             self.duplicates += 1;
             return Ok(false);
@@ -509,6 +542,7 @@ impl<'c> CatalogWriter<'c> {
     /// Writes categories, restores hidden flags, recomputes counts. Returns the
     /// number of items written. Does not commit.
     pub fn finish(self, categories: &[(ContentType, Vec<CategoryRow>)]) -> CoreResult<u64> {
+        check_cancel(self.cancel.as_ref())?;
         let mut insert_cat = self.conn.prepare_cached(
             "INSERT OR IGNORE INTO categories (source_id, content_type, category_id, name, hidden, position, item_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
         )?;
@@ -590,13 +624,16 @@ pub fn replace_catalog(
     items: &mut dyn Iterator<Item = ItemRow>,
 ) -> CoreResult<u64> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let n = {
-        let mut w = CatalogWriter::begin(&tx, source_id, &[content_type])?;
+    let (n, cancel) = {
+        let mut w = CatalogWriter::begin(&tx, source_id, &[content_type], None)?;
+        let cancel = w.cancel.clone();
         for item in items {
             w.insert(&item)?;
         }
-        w.finish(&[(content_type, categories.to_vec())])?
+        (w.finish(&[(content_type, categories.to_vec())])?, cancel)
     };
+    // Last check: a cancelled import run never commits (C8).
+    check_cancel(cancel.as_ref())?;
     tx.commit()?;
     Ok(n)
 }
@@ -883,6 +920,16 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
         Some(s) if fts_query(s).is_some() => &[Match::Fts, Match::Like],
         Some(_) => &[Match::Like],
     };
+    // Skip the hidden-category filter when nothing is hidden (the common case).
+    let filter_hidden = q.category_id.is_none()
+        && !q.include_hidden
+        && conn
+            .prepare_cached(
+                "SELECT EXISTS(SELECT 1 FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
+            )?
+            .query_row(params![q.source_id, q.content_type.as_str()], |r| {
+                r.get::<_, bool>(0)
+            })?;
     for (i, m) in attempts.iter().enumerate() {
         let mut where_sql = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
@@ -892,8 +939,12 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
         if let Some(cat) = &q.category_id {
             args.push(cat.clone().into());
             where_sql.push_str(&format!(" AND i.category_id = ?{}", args.len()));
-        } else if !q.include_hidden {
-            where_sql.push_str(" AND COALESCE(c.hidden, 0) = 0");
+        } else if filter_hidden {
+            // Same rows as `COALESCE(c.hidden, 0) = 0` on the join (an item
+            // whose category is missing stays visible), without a join per row.
+            where_sql.push_str(
+                " AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
+            );
         }
         if let Some(min) = q.min_rating.filter(|r| r.is_finite() && *r > 0.0) {
             args.push(min.into());
@@ -914,13 +965,12 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
                 }
             }
         }
-        let count_sql = format!(
-            "SELECT count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE {where_sql}"
-        );
-        let total: i64 =
-            conn.query_row(&count_sql, rusqlite::params_from_iter(args.iter()), |r| {
-                r.get(0)
-            })?;
+        // The join only adds the category name; it cannot change the count
+        // (categories' key is unique).
+        let count_sql = format!("SELECT count(*) FROM items i WHERE {where_sql}");
+        let total: i64 = conn
+            .prepare_cached(&count_sql)?
+            .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
         if total == 0 && i + 1 < attempts.len() {
             continue;
         }
@@ -1215,6 +1265,19 @@ mod tests {
             position: pos,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn stored_archive_lengths_are_clamped_on_read() {
+        let mut row = item("1", "a", "Old", 0);
+        row.archive_hours = Some(i64::MAX / 2);
+        let a = row.archive().unwrap();
+        assert_eq!(a.duration_hours, Some(8784));
+        row.archive_hours = None;
+        row.extra = serde_json::json!({ "catchup": { "type": "xc", "days": 9_999_999 } });
+        assert_eq!(row.catchup().unwrap().days, Some(366));
+        row.extra = serde_json::json!({ "catchup": { "type": "xc", "days": -5 } });
+        assert_eq!(row.catchup().unwrap().days, Some(0));
     }
 
     #[test]

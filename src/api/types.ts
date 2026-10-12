@@ -65,6 +65,8 @@ export interface Source {
   updatedAt?: string;
   lastRefreshAt?: string;
   lastError?: string;
+  /** Classified code for `lastError` (C10); absent when there is no error or it predates codes. */
+  lastErrorCode?: RpcErrorCode;
   /** Live channels only; radio stations are in `radioCount`. */
   channelCount: number;
   radioCount: number;
@@ -448,7 +450,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'en',
   theme: 'system',
   showDashboard: true,
-  startupBehavior: 'first-view',
+  startupBehavior: 'restore-last-view',
   mpvArgs: '',
   vlcArgs: '',
   openStreamOnDoubleClick: false,
@@ -662,7 +664,9 @@ export type RpcErrorCode =
   | 'db'
   | 'unsupported'
   | 'conflict'
-  | 'internal';
+  | 'internal'
+  | 'engine_missing'
+  | 'server';
 
 /** JSON body of an RPC error (Tauri rejection value or HTTP error body). */
 export interface RpcErrorPayload {
@@ -672,11 +676,26 @@ export interface RpcErrorPayload {
   details?: unknown;
 }
 
+/**
+ * `details` of a rejected `sources.add` / `sources.refresh` (C8, C10). `sourceId` is the
+ * row `sources.add` inserted before its importer failed (the source keeps `lastError`).
+ * `cancelled: true` marks a run stopped by `sources.cancelImport`, `sources.remove` or an
+ * edit: the code is `conflict`, and the previous catalog is intact. Use `isCancelledRun`.
+ */
+export interface SourceRunErrorDetails {
+  sourceId?: string;
+  cancelled?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // App events (C1). `type` -> payload.
 // ---------------------------------------------------------------------------
 
-export type ImportPhase = 'fetching' | 'parsing' | 'saving' | 'done' | 'error';
+/**
+ * `cancelled` (C8): the run was stopped by `sources.cancelImport`; the source's
+ * previous catalog is left intact (no half-written data).
+ */
+export type ImportPhase = 'fetching' | 'parsing' | 'saving' | 'done' | 'error' | 'cancelled';
 
 export interface ImportProgressEvent {
   sourceId: string;
@@ -684,6 +703,11 @@ export interface ImportProgressEvent {
   done: number;
   total?: number;
   message?: string;
+  /** Classified error code (C10); set for `phase: 'error'`. */
+  code?: RpcErrorCode;
+  /** Download attempt in progress (1-based) and how many are allowed; sent with `phase: 'fetching'`. */
+  attempt?: number;
+  attempts?: number;
 }
 
 export interface EpgProgressEvent {
@@ -740,6 +764,12 @@ export interface AppEventMap {
   'mpv.click': EmptyEvent;
   /** Double click on the embedded mpv video (follows an `mpv.click`). */
   'mpv.dblclick': EmptyEvent;
+  /** Mouse wheel over the embedded mpv video; `delta` in notches, positive = away from the user. */
+  'mpv.wheel': { delta: number };
+  /** Right click released on the embedded mpv video, in CSS px relative to the webview. */
+  'mpv.contextmenu': { x: number; y: number };
+  /** The app is about to quit (tray Quit): save what must survive, then invoke `flush_done`. */
+  'app.flush': EmptyEvent;
   'settings.changed': Settings;
   'player.external': PlayerExternalEvent;
   'deeplink.open': DeepLinkEvent;

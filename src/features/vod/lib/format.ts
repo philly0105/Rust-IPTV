@@ -1,4 +1,5 @@
 import type { PlaybackPosition } from '@/api/types';
+import { MIN_RESUME_SECONDS } from '@/features/player/store';
 import { formatDurationParts, resetDurationFormatCache, type DurationFormatOptions } from '@/lib/duration';
 
 type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched'>>;
@@ -42,9 +43,13 @@ export function progressFraction(pos: ProgressInput | undefined | null): number 
   return Math.min(1, Math.max(0, pos.positionSeconds / pos.durationSeconds));
 }
 
-/** A saved position worth offering "Resume" for (past 10 s, before 95 %). */
+/**
+ * A saved position worth offering "Resume" for: past the player's own resume
+ * threshold (`MIN_RESUME_SECONDS`, so the label matches what playback does)
+ * and before 95 %.
+ */
 export function isResumable(pos: ProgressInput | undefined | null): boolean {
-  if (!pos || isWatched(pos) || pos.positionSeconds < 10) return false;
+  if (!pos || isWatched(pos) || !(pos.positionSeconds > MIN_RESUME_SECONDS)) return false;
   if (!pos.durationSeconds) return true;
   return pos.positionSeconds < pos.durationSeconds * 0.95;
 }

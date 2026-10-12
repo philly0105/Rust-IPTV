@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
+import { invalidate } from '@/api/query';
 import { isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
@@ -107,7 +108,13 @@ export function DownloadsPage() {
       for (const d of attention) await perform('remove', d, { deleteFile: true });
       setClearing(false);
     } else if (confirm.download) {
-      await perform(confirm.action, confirm.download, { deleteFile: confirm.action === 'remove' ? deletePartial : false });
+      // Close first so focus returns to the row while it still exists; when the
+      // row then leaves the list, the list moves focus to its neighbour instead
+      // of dropping it to the page.
+      const { action, download } = confirm;
+      setConfirm(null);
+      await perform(action, download, { deleteFile: action === 'remove' ? deletePartial : false });
+      return;
     }
     setConfirm(null);
   };
@@ -143,7 +150,17 @@ export function DownloadsPage() {
   if (query.isLoading) {
     body = <SkeletonList rows={6} className="pt-4" />;
   } else if (query.isError) {
-    body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+    // One error state for the page: its retry also re-reads the folder bar.
+    body = (
+      <ErrorState
+        error={query.error}
+        retrying={query.isFetching}
+        onRetry={() => {
+          void query.refetch();
+          void invalidate('downloads.dir');
+        }}
+      />
+    );
   } else if (rows.length === 0) {
     body = (
       <EmptyState
@@ -185,7 +202,7 @@ export function DownloadsPage() {
       <PageTitle>{title}</PageTitle>
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
-          <FolderBar summary={summary} />
+          <FolderBar summary={summary} pageError={query.isError} />
         </div>
         {attention.length > 0 && (
           <Button variant="ghost" icon={<Eraser size={16} aria-hidden />} onClick={() => setConfirm({ action: 'clear' })}>

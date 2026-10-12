@@ -15,7 +15,7 @@ import { VirtualCardGrid } from '../components/VirtualCardGrid';
 import { useMyVideos } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes } from '../lib/format';
-import { buildLibrary, filterLibrary, librarySize, type LibraryEntry, type LibraryFilter } from '../lib/myvideos';
+import { buildLibrary, entryTargetId, filterLibrary, librarySize, type LibraryFilter } from '../lib/myvideos';
 
 const FILTERS: readonly LibraryFilter[] = ['all', 'movies', 'series', 'missing'];
 
@@ -23,9 +23,7 @@ function isFilter(v: string | null): v is LibraryFilter {
   return v !== null && (FILTERS as readonly string[]).includes(v);
 }
 
-export function entryTargetId(e: LibraryEntry): number {
-  return e.kind === 'movie' ? e.download.id : e.latest.id;
-}
+export { entryTargetId };
 
 export function MyVideosPage() {
   const { t, i18n } = useTranslation('library');
@@ -134,7 +132,7 @@ export function MyVideosPage() {
         cardLabel={(e) =>
           e.kind === 'movie'
             ? `${e.title}${e.missing ? `, ${t('fileMissing')}` : ''}`
-            : `${e.title}, ${t('episodeCount', { count: e.episodes.length })}`
+            : `${e.title}, ${t('episodeCount', { count: e.episodes.length })}${e.missingCount > 0 ? `, ${t('episodesMissingTitle', { count: e.missingCount })}` : ''}`
         }
         onActivate={(e) => navigate(`/my-videos/${entryTargetId(e)}`)}
         render={(e) => <LibraryCard entry={e} />}

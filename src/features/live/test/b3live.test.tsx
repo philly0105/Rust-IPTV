@@ -323,42 +323,41 @@ describe('Live list: keyboard', () => {
 });
 
 describe('Live list: 10k channels (SC7)', () => {
-  // jsdom on a busy machine is 5-20x slower than the app; the budgets catch O(n) rendering, not jitter.
-  const BUDGET_MS = 2500;
+  // No wall-clock budgets: jsdom on a busy machine is too noisy for them. O(n) work shows up as an
+  // unbounded DOM, oversized pages or extra queries, which are asserted instead.
   const N = 10_000;
   const all = Array.from({ length: N }, (_, i) => ({ ...makeChannel(i), name: `${['BBC', 'Sky', 'CNN', 'ESPN'][i % 4]} ${i}` }));
 
-  it('renders, scrolls to the end and searches a 10k list within budget, virtualized', async () => {
+  it('renders, scrolls to the end and searches a 10k list, virtualized', async () => {
     rpcMock.handlers['catalog.channels'] = serve(all);
     rpcMock.handlers['catalog.categories'] = () => [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'All', hidden: false, itemCount: N, position: 0 }];
 
-    let t0 = performance.now();
     renderAt('/s/src1/live', ROUTE);
     await screen.findByText('BBC 0');
-    expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
     expect(screen.getByText('10,000 channels')).toBeTruthy();
     expect(list().querySelectorAll('[role="listitem"]').length).toBeLessThan(60);
+    // First paint asks for the first page only.
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.channels').map((c) => (c.args as { query: PageQuery }).query.offset)).toEqual([0]);
 
     // End: the last row, fetched as one page, not 10k nodes. jsdom cannot scroll, so the
     // browser's scroll to the cursor is replayed by hand.
-    t0 = performance.now();
     rowButton(0)!.focus();
     fireEvent.keyDown(document.activeElement!, { key: 'End' });
     scrollListTo(N * CHANNEL_ROW_HEIGHT - 800);
     await waitFor(() => expect(rowButton(N - 1)?.textContent ?? '').toContain('ESPN 9999'));
     expect(cursorIndex()).toBe(N - 1);
-    expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
     expect(list().querySelectorAll('[role="listitem"]').length).toBeLessThan(60);
     const offsets = rpcMock.calls.filter((c) => c.cmd === 'catalog.channels').map((c) => (c.args as { query: PageQuery }).query);
     for (const q of offsets) expect(q.limit).toBeLessThanOrEqual(120);
+    // Jumping to the end fetched the pages at the two ends, not the 80 in between.
+    expect(new Set(offsets.map((q) => q.offset)).size).toBeLessThanOrEqual(4);
 
     // Typing a burst of characters sends one debounced search, not one per key.
     const before = rpcMock.calls.filter((c) => (c.args as { query?: PageQuery } | undefined)?.query?.search).length;
-    t0 = performance.now();
     for (const v of ['e', 'es', 'esp', 'espn', 'espn 99']) fireEvent.change(searchBox(), { target: { value: v } });
     const expected = all.filter((c) => c.name.toLowerCase().includes('espn 99')).length;
-    await screen.findByText(`${expected} channels`, undefined, { timeout: BUDGET_MS });
-    expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
+    await screen.findByText(`${expected} channels`, undefined, { timeout: 10_000 });
+    expect(list().querySelectorAll('[role="listitem"]').length).toBeLessThan(60);
     const searches = rpcMock.calls.filter((c) => (c.args as { query?: PageQuery } | undefined)?.query?.search).slice(before);
     expect(new Set(searches.map((c) => (c.args as { query: PageQuery }).query.search))).toEqual(new Set(['espn 99']));
     // A new list goes back to the top (the browser fires the scroll event jsdom does not).
@@ -367,7 +366,7 @@ describe('Live list: 10k channels (SC7)', () => {
     expect(await screen.findByText('ESPN 99')).toBeTruthy();
   });
 
-  it('filters 10k groups in the groups column within budget and renders only a window', async () => {
+  it('filters 10k groups in the groups column and renders only a window', async () => {
     const cats: Category[] = Array.from({ length: N }, (_, i) => ({
       id: `g${i}`,
       sourceId: 'src1',
@@ -395,10 +394,8 @@ describe('Live list: 10k channels (SC7)', () => {
       },
     ]);
     expect(screen.getAllByRole('link').length).toBeLessThan(80);
-    const t0 = performance.now();
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter groups' }), { target: { value: 'Group 9999' } });
     expect(await screen.findByText('Group 9999')).toBeTruthy();
-    expect(performance.now() - t0).toBeLessThan(BUDGET_MS);
     // "All channels" + the one match
     expect(screen.getAllByRole('link')).toHaveLength(2);
   });

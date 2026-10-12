@@ -156,4 +156,42 @@ describe('Controls live rewind', () => {
     rerender(<Controls variant="dock" visible />);
     expect(screen.queryByRole('slider', { name: /seek/i })).toBeNull();
   });
+
+  it('Jump to live leaves keyboard focus on play/pause, not the page', () => {
+    act(() => {
+      usePlayerStore.setState({ source: live, mode: 'embedded-mpv', durationSeconds: undefined, positionSeconds: 1000 });
+      useMediaStore.setState({ seekable: { start: 900, end: 1090 } });
+    });
+    render(<Controls variant="dock" visible />);
+    const jump = screen.getByRole('button', { name: 'Jump to live' });
+    act(() => jump.focus());
+    fireEvent.click(jump);
+    // The button is gone (LIVE badge at the edge); focus stayed inside the player.
+    expect(screen.queryByRole('button', { name: 'Jump to live' })).toBeNull();
+    expect(document.activeElement?.getAttribute('data-ctl')).toBe('play');
+  });
+
+  it('the behind-live readout and the LIVE badge agree near the edge', () => {
+    // 8 s behind on mpv is within its edge slack: LIVE, no "0:08 behind live".
+    act(() => {
+      usePlayerStore.setState({ source: live, mode: 'embedded-mpv', durationSeconds: undefined, positionSeconds: 1082 });
+      useMediaStore.setState({ seekable: { start: 900, end: 1090 } });
+    });
+    render(<Controls variant="dock" visible />);
+    expect(screen.getByTestId('live-badge')).toBeTruthy();
+    expect(screen.getByRole('slider', { name: /seek/i }).getAttribute('aria-valuetext')).not.toMatch(/behind/);
+  });
+});
+
+describe('Controls volume', () => {
+  it('shows the volume as a percent next to the slider', () => {
+    act(() => usePlayerStore.setState({ volume: 0.42, muted: false }));
+    render(<Controls variant="dock" visible />);
+    expect(screen.getByTestId('volume-readout').textContent).toBe('42%');
+  });
+
+  it('the compact bar has no room for the readout', () => {
+    render(<Controls variant="dock" visible compact />);
+    expect(screen.queryByTestId('volume-readout')).toBeNull();
+  });
 });

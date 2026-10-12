@@ -107,14 +107,35 @@ where
     loop {
         match op().await {
             Ok(v) => return Ok(v),
-            Err(err) if err.is_retryable() && n + 1 < attempts => {
+            // A cancelled import run (C8) stops retrying at once.
+            Err(err) if err.is_retryable() && n + 1 < attempts && !import_cancelled() => {
                 let delay = backoff_delay(n);
                 tracing::debug!(attempt = n + 1, ?delay, error = %err, "retrying after transient error");
-                tokio::time::sleep(delay).await;
+                cancellable(tokio::time::sleep(delay)).await?;
                 n += 1;
             }
             Err(err) => return Err(err),
         }
+    }
+}
+
+fn import_cancelled() -> bool {
+    crate::sources::is_import_cancelled()
+}
+
+/// Awaits `fut` unless the import run of the current task (C8, see
+/// [`crate::sources::import_cancel`]) is cancelled first, which fails with
+/// [`crate::sources::import_cancelled_error`]. Outside an import run this is
+/// `fut` itself. Every network wait in this module goes through it, so a
+/// cancelled import stops at its next send or body read.
+pub async fn cancellable<T>(fut: impl Future<Output = T>) -> CoreResult<T> {
+    match crate::sources::import_cancel() {
+        None => Ok(fut.await),
+        Some(token) => tokio::select! {
+            biased;
+            () = token.cancelled() => Err(crate::sources::import_cancelled_error()),
+            v = fut => Ok(v),
+        },
     }
 }
 
@@ -139,7 +160,7 @@ pub fn apply_source_headers(
 /// What the user can do about a non-success HTTP status.
 pub fn status_hint(status: reqwest::StatusCode) -> &'static str {
     match status.as_u16() {
-        401 | 403 => "The server refused access. Check the username, password or MAC address, and that the subscription is still active.",
+        401 | 403 => "The server refused access. Check your login details, and that the subscription is still active.",
         404 | 410 => "The server does not know this address. Check the URL; the provider may have changed it.",
         408 | 504 => "The server took too long to answer. Try again later.",
         429 => "The server is rate limiting requests. Wait a minute, then try again.",
@@ -149,7 +170,8 @@ pub fn status_hint(status: reqwest::StatusCode) -> &'static str {
 }
 
 /// Maps a non-success HTTP status to a `CoreError` (401/403 Auth, 404 NotFound,
-/// 408/504 Timeout, 5xx and 429 Network (retryable), other 4xx Invalid). The
+/// 408/504 Timeout, 429 and other 5xx Server (retryable; the server is up but
+/// refusing work, not unreachable), other 4xx Invalid). The
 /// message is `"{context}: HTTP {status}. {hint}"` ([`status_hint`]).
 pub fn status_error(status: reqwest::StatusCode, context: &str) -> CoreError {
     status_error_with_hint(status, context, status_hint(status))
@@ -162,7 +184,7 @@ pub fn status_error_with_hint(status: reqwest::StatusCode, context: &str, hint: 
         401 | 403 => CoreError::Auth(msg),
         404 => CoreError::NotFound(msg),
         408 | 504 => CoreError::Timeout(msg),
-        429 | 500..=599 => CoreError::Network(msg),
+        429 | 500..=599 => CoreError::Server(msg),
         _ => CoreError::Invalid(msg),
     }
 }
@@ -223,7 +245,7 @@ pub async fn send_within(
         ))
     })?;
     let host = request.url().host_str().unwrap_or("the server").to_owned();
-    match tokio::time::timeout(header_timeout, client.execute(request)).await {
+    match cancellable(tokio::time::timeout(header_timeout, client.execute(request))).await? {
         Ok(Ok(resp)) => Ok(resp),
         Ok(Err(e)) => Err(transport_error(&host, e)),
         Err(_) => Err(CoreError::Timeout(format!(
@@ -784,7 +806,7 @@ where
     S: futures::Stream<Item = reqwest::Result<T>> + Unpin,
 {
     use futures::StreamExt;
-    match tokio::time::timeout(idle, stream.next()).await {
+    match cancellable(tokio::time::timeout(idle, stream.next())).await? {
         Ok(Some(Ok(chunk))) => Ok(Some(chunk)),
         Ok(Some(Err(err))) => Err(transport_error(host, err)),
         Ok(None) => Ok(None),
@@ -795,9 +817,77 @@ where
     }
 }
 
+/// Reads a response body into memory, failing with `Invalid` once it passes
+/// `max` bytes (checked against Content-Length first, then while streaming).
+/// `context` starts the error message ("Xtream get_vod_streams").
+pub async fn read_capped(
+    mut resp: reqwest::Response,
+    context: &str,
+    max: usize,
+) -> CoreResult<bytes::Bytes> {
+    let too_large = || {
+        CoreError::Invalid(format!(
+            "{context}: the server sent more than {}, which is not an API answer. Check the server URL.",
+            size_text(max)
+        ))
+    };
+    let declared = resp.content_length().unwrap_or(0);
+    if declared > max as u64 {
+        return Err(too_large());
+    }
+    // Content-Length is only a hint for the first allocation; never trust it
+    // for more than a few MB.
+    let mut buf = bytes::BytesMut::with_capacity((declared as usize).min(8 * 1024 * 1024));
+    // The request's own deadline ([`send_metadata`]) also bounds these
+    // reads; a cancelled import stops at the next one.
+    while let Some(chunk) = cancellable(resp.chunk()).await?.map_err(|err| {
+        if err.is_timeout() {
+            CoreError::Timeout(format!(
+                "{context}: the server took too long to send its answer. Try again later."
+            ))
+        } else {
+            CoreError::from(err)
+        }
+    })? {
+        if buf.len().saturating_add(chunk.len()) > max {
+            return Err(too_large());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf.freeze())
+}
+
+fn size_text(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{} MB", bytes / (1024 * 1024))
+    } else {
+        format!("{} KB", (bytes / 1024).max(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review round 1: the 401/403 hint fits every source kind, and a 5xx is
+    /// `Server` (C12) except 504, which stays a timeout.
+    #[test]
+    fn status_errors_are_kind_neutral_and_classify_5xx_as_server() {
+        let auth = status_error(reqwest::StatusCode::UNAUTHORIZED, "Xtream account");
+        let text = auth.to_string();
+        assert!(text.contains("Check your login details"), "{text}");
+        assert!(!text.contains("MAC"), "{text}");
+        for code in [500, 502, 503] {
+            let err = status_error(reqwest::StatusCode::from_u16(code).unwrap(), "x");
+            assert!(matches!(err, CoreError::Server(_)), "{code}: {err:?}");
+            assert!(err.is_retryable());
+        }
+        let gw = status_error(reqwest::StatusCode::GATEWAY_TIMEOUT, "x");
+        assert!(matches!(gw, CoreError::Timeout(_)), "{gw:?}");
+        let busy = status_error(reqwest::StatusCode::TOO_MANY_REQUESTS, "x");
+        assert!(matches!(busy, CoreError::Server(_)), "{busy:?}");
+        assert!(busy.is_retryable());
+    }
     use std::sync::atomic::{AtomicU32, Ordering};
 
     #[tokio::test]
@@ -850,7 +940,7 @@ mod tests {
         let msg = |s: S| status_error(s, "Xtream get_live_streams").to_string();
         let m = msg(S::UNAUTHORIZED);
         assert!(
-            m.contains("Xtream get_live_streams: HTTP 401") && m.contains("password"),
+            m.contains("Xtream get_live_streams: HTTP 401") && m.contains("login details"),
             "{m}"
         );
         assert!(msg(S::FORBIDDEN).contains("subscription"));

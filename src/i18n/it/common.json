@@ -46,5 +46,10 @@
   "errorHintConflict": "Ricarica per vedere la versione più recente, poi riprova.",
   "errorHintIo": "Verifica che la cartella esista e di avere i permessi di scrittura.",
   "errorHintDb": "Riavvia l'app. Se il problema persiste, ripristina un backup dalle Impostazioni.",
-  "errorHintInternal": "Riprova. Se il problema persiste, riavvia l'app."
+  "errorHintInternal": "Riprova. Se il problema persiste, riavvia l'app.",
+  "errorCode": "Codice errore: {{code}}",
+  "errorTitleEngineMissing": "Impossibile avviare il motore del lettore",
+  "errorHintEngineMissing": "Il motore del lettore video (mpv) manca o non è riuscito ad avviarsi.",
+  "errorTitleServer": "Il server ha avuto un problema",
+  "errorHintServer": "Il server è occupato o ha dei problemi. Riprova più tardi."
 }

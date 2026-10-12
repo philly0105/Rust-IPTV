@@ -252,7 +252,7 @@ export function PlayerDock() {
         style={{ right: pos.right, bottom: pos.bottom }}
       >
         <div
-          className="flex h-9 shrink-0 cursor-grab items-center gap-1.5 border-b border-border pe-1 ps-2 active:cursor-grabbing"
+          className="flex h-9 shrink-0 cursor-grab items-center gap-1.5 border-b border-divider pe-1 ps-2 active:cursor-grabbing"
           onPointerDown={onDragStart}
           onPointerMove={onDragMove}
           onPointerUp={onDragEnd}

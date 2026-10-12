@@ -292,7 +292,13 @@ fn check_archive_window(
             "This programme has not started yet, so there is nothing to catch up on.",
         ));
     }
-    if start < now - Duration::hours(archive_hours) {
+    // Rows stored by older builds may carry any provider value: clamp so the
+    // duration and the subtraction cannot panic.
+    let archive_hours = super::protocol::clamp_archive_hours(archive_hours);
+    let oldest = now
+        .checked_sub_signed(Duration::hours(archive_hours))
+        .unwrap_or(DateTime::<Utc>::MIN_UTC);
+    if start < oldest {
         let window = if archive_hours % 24 == 0 {
             let days = archive_hours / 24;
             format!("{days} day{}", if days == 1 { "" } else { "s" })
@@ -366,24 +372,33 @@ async fn find_archive_program(
     start: DateTime<Utc>,
 ) -> CoreResult<Option<Value>> {
     let ts = start.timestamp();
-    let matches = |v: &Value| -> bool {
-        let st = n(v, "start_timestamp");
-        let en = n(v, "stop_timestamp");
-        match (st, en) {
-            (Some(a), Some(b)) => a <= ts + 60 && ts < b,
-            (Some(a), None) => (a - ts).abs() <= 60,
-            _ => false,
-        }
-    };
-    let day = start.date_naive();
-    for date in [day, day + Duration::days(1), day - Duration::days(1)] {
+    for date in archive_days(start.date_naive()) {
         if let Some(rows) = day_table(client, channel_id, date).await? {
-            if let Some(hit) = rows.into_iter().find(|v| matches(v)) {
+            if let Some(hit) = rows.into_iter().find(|v| archive_row_matches(v, ts)) {
                 return Ok(Some(hit));
             }
         }
     }
     Ok(None)
+}
+
+/// True when a day-table row is the programme starting at `ts` (within a
+/// minute) or running at it. Portal timestamps can be anything, so nothing
+/// here may overflow (D10).
+fn archive_row_matches(v: &Value, ts: i64) -> bool {
+    match (n(v, "start_timestamp"), n(v, "stop_timestamp")) {
+        (Some(a), Some(b)) => a <= ts.saturating_add(60) && ts < b,
+        (Some(a), None) => a.abs_diff(ts) <= 60,
+        _ => false,
+    }
+}
+
+/// The day of `day`, then the next and the previous one, skipping any past
+/// chrono's date range (`day ± 1 day` panics there; D10).
+fn archive_days(day: chrono::NaiveDate) -> impl Iterator<Item = chrono::NaiveDate> {
+    [Some(day), day.succ_opt(), day.pred_opt()]
+        .into_iter()
+        .flatten()
 }
 
 /// Furthest `stalker.epg` looks back with `from`.
@@ -803,6 +818,42 @@ pub fn user_message(err: &CoreError) -> String {
 mod tests {
     use super::*;
 
+    /// D10: `(a - ts).abs()` overflowed on a hostile start timestamp, and
+    /// `day ± 1 day` panicked at chrono's date range edge.
+    #[test]
+    fn archive_lookup_survives_hostile_data() {
+        let ts = 1_800_000_000;
+        let row = |v: Value| archive_row_matches(&v, ts);
+        assert!(row(serde_json::json!({"start_timestamp": ts + 30})));
+        assert!(row(
+            serde_json::json!({"start_timestamp": ts - 600, "stop_timestamp": ts + 600})
+        ));
+        assert!(!row(
+            serde_json::json!({"start_timestamp": ts + 600, "stop_timestamp": ts + 900})
+        ));
+        assert!(!row(serde_json::json!({"start_timestamp": i64::MIN})));
+        assert!(!row(serde_json::json!({"start_timestamp": i64::MAX})));
+        assert!(!row(
+            serde_json::json!({"start_timestamp": i64::MIN, "stop_timestamp": i64::MIN})
+        ));
+        assert!(!archive_row_matches(
+            &serde_json::json!({"start_timestamp": i64::MAX, "stop_timestamp": i64::MAX}),
+            i64::MAX
+        ));
+        assert!(archive_row_matches(
+            &serde_json::json!({"start_timestamp": i64::MIN, "stop_timestamp": i64::MAX}),
+            i64::MAX - 1
+        ));
+
+        let day = NaiveDate::from_ymd_opt(2026, 10, 12).unwrap();
+        assert_eq!(
+            archive_days(day).collect::<Vec<_>>(),
+            vec![day, day.succ_opt().unwrap(), day.pred_opt().unwrap()]
+        );
+        assert_eq!(archive_days(NaiveDate::MAX).count(), 2);
+        assert_eq!(archive_days(NaiveDate::MIN).count(), 2);
+    }
+
     #[test]
     fn past_days_include_the_next_utc_date() {
         let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
@@ -838,5 +889,16 @@ mod tests {
         );
         let err = check_archive_window(now - Duration::hours(5), now, 3).unwrap_err();
         assert!(user_message(&err).contains("3 hours"), "{err}");
+    }
+
+    #[test]
+    fn archive_window_survives_absurd_archive_hours() {
+        // A stored row with a garbage duration used to panic in Duration::hours.
+        let now = Utc::now();
+        for hours in [i64::MAX, i64::MAX / 3600, 1 << 40] {
+            assert!(check_archive_window(now - Duration::hours(2), now, hours).is_ok());
+            let err = check_archive_window(now - Duration::days(400), now, hours).unwrap_err();
+            assert!(user_message(&err).contains("366 days"), "{err}");
+        }
     }
 }

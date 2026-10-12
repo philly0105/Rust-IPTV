@@ -156,7 +156,13 @@ export function Tooltip({ content, children, side = 'top', delay = 400, classNam
       }}
       onBlur={hide}
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && rect) hide();
+        // WCAG 1.4.13: Escape dismisses the tooltip alone. Claiming the key keeps
+        // the same press from also closing the dialog or leaving the page.
+        if (e.key === 'Escape' && rect && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          e.stopPropagation();
+          hide();
+        }
       }}
     >
       {child}

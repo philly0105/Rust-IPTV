@@ -54,7 +54,14 @@ pub async fn reorder(state: Arc<AppState>, a: ReorderArgs) -> Result<(), RpcErro
 }
 
 pub async fn refresh(state: Arc<AppState>, a: IdArgs) -> Result<Source, RpcError> {
-    Ok(super::refresh(state, &a.id).await?)
+    super::refresh(state, &a.id)
+        .await
+        .map_err(super::cancel_aware_rpc_error)
+}
+
+/// `sources.cancelImport` (C8).
+pub async fn cancel_import(state: Arc<AppState>, a: IdArgs) -> Result<bool, RpcError> {
+    Ok(super::cancel_import(&state, &a.id))
 }
 
 pub async fn refresh_all(state: Arc<AppState>, _a: NoArgs) -> Result<RefreshAllResult, RpcError> {
@@ -81,4 +88,5 @@ pub fn register(r: &mut RpcRouter) {
     r.add("sources.refresh", refresh);
     r.add("sources.refreshAll", refresh_all);
     r.add("sources.counts", counts);
+    r.add("sources.cancelImport", cancel_import);
 }

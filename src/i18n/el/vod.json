@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "Διαχείριση κατηγοριών ({{count}} κρυφές)",
   "manageCategoriesHint": "{{hidden}} από {{total}} κρυφές. Οι κρυφές κατηγορίες δεν εμφανίζονται σε λίστες και αναζήτηση.",
   "noCategoryMatch": "Καμία κατηγορία δεν ταιριάζει με το φίλτρο.",
+  "clearFilter": "Απαλοιφή φίλτρου",
   "saveCategories": "Αποθήκευση",
   "categoriesSaved": "Η ορατότητα κατηγοριών αποθηκεύτηκε",
   "categoriesSaveFailed": "Δεν ήταν δυνατή η αποθήκευση της ορατότητας κατηγοριών",
@@ -61,6 +62,7 @@
   "resume": "Συνέχιση",
   "resumeAt": "Συνέχιση από {{time}}",
   "startOver": "Από την αρχή",
+  "startOverEpisode": "Το {{code}} από την αρχή",
   "playEpisode": "Αναπαραγωγή {{code}}",
   "resumeEpisode": "Συνέχιση {{code}}",
   "nowPlaying": "Τώρα παίζει",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "Οι παρόμοιοι τίτλοι χρειάζονται κλειδί TMDB",
   "tmdbKeyMissingHint": "Προσθέστε κλειδί TMDB στις Ρυθμίσεις > Μεταδεδομένα.",
   "addTmdbKey": "Προσθήκη κλειδιού TMDB",
+  "tmdbKeyRejectedTitle": "Το TMDB απέρριψε το κλειδί API",
+  "tmdbKeyRejectedHint": "Ελέγξτε ή αντικαταστήστε το κλειδί TMDB στις Ρυθμίσεις > Μεταδεδομένα.",
   "watched": "Έχει προβληθεί",
   "markWatched": "Σήμανση ως προβεβλημένο",
   "markUnwatched": "Σήμανση ως μη προβεβλημένο",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "Εμφάνιση έως {{count}}",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Δεν ήταν δυνατή η φόρτωση αυτών των τίτλων"
+  "pageLoadFailed": "Δεν ήταν δυνατή η φόρτωση αυτών των τίτλων",
+  "searchPartialError": "Ορισμένα αποτελέσματα δεν φορτώθηκαν."
 }

@@ -11,6 +11,12 @@
 //! The webview also reads the geometry back after a reload
 //! (`pip_window_saved`), so a reload while in PiP can restore the window
 //! instead of leaving it stuck small.
+//!
+//! Fullscreen has the same problem (the plugin saves the monitor-sized
+//! borderless window), and so does any other way the frame comes off. The
+//! shell therefore also tracks the last normal geometry itself from window
+//! events ([`NormalTracker`]) and, when the app quits while the window is
+//! fullscreen or frameless, writes that back instead.
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -34,25 +40,105 @@ pub struct NormalGeometry {
     pub maximized: bool,
 }
 
-/// Managed state: `Some` while the main window is in PiP.
+/// What the main window looks like at one moment (physical pixels; outer
+/// position, inner size, as in [`NormalGeometry`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowSnapshot {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub maximized: bool,
+    pub minimized: bool,
+    pub fullscreen: bool,
+    pub decorated: bool,
+}
+
+/// Follows the main window through moves and resizes and remembers the last
+/// geometry it had as a normal framed window, plus whether it is currently
+/// in a transient state (fullscreen, or frameless as in PiP).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct NormalTracker {
+    normal: Option<NormalGeometry>,
+    transient: bool,
+}
+
+impl NormalTracker {
+    /// Feeds one observation. Minimized windows report nothing useful and are
+    /// skipped; a maximized window keeps the normal rectangle under it.
+    pub fn observe(&mut self, s: WindowSnapshot) {
+        if s.minimized {
+            return;
+        }
+        self.transient = s.fullscreen || !s.decorated;
+        if self.transient {
+            return;
+        }
+        if let (true, Some(n)) = (s.maximized, &mut self.normal) {
+            n.maximized = true;
+            return;
+        }
+        if s.width == 0 || s.height == 0 {
+            return;
+        }
+        // A maximized window seen first (the app started maximized: while it
+        // is still hidden its rectangle is the normal one) is the best guess.
+        self.normal = Some(NormalGeometry {
+            x: s.x,
+            y: s.y,
+            width: s.width,
+            height: s.height,
+            maximized: s.maximized,
+        });
+    }
+
+    /// The geometry to write back on exit: only when the window is in a
+    /// transient state right now and a normal geometry was seen before.
+    pub fn restore_on_exit(&self) -> Option<NormalGeometry> {
+        if self.transient {
+            self.normal
+        } else {
+            None
+        }
+    }
+}
+
+/// Managed state: the pre-PiP geometry (`Some` while the main window is in
+/// PiP) and the normal-geometry tracker.
 #[derive(Default)]
-pub struct PipState(Mutex<Option<NormalGeometry>>);
+pub struct PipState {
+    pip: Mutex<Option<NormalGeometry>>,
+    tracker: Mutex<NormalTracker>,
+}
 
 impl PipState {
     /// Records the geometry to restore. A second call while PiP is already on
     /// keeps the first geometry: by then the window is already small.
     pub fn begin(&self, geometry: NormalGeometry) {
-        self.0.lock().get_or_insert(geometry);
+        self.pip.lock().get_or_insert(geometry);
     }
 
     /// PiP is over; nothing to restore any more.
     pub fn end(&self) {
-        *self.0.lock() = None;
+        *self.pip.lock() = None;
     }
 
     /// The geometry to restore, if PiP is on.
     pub fn saved(&self) -> Option<NormalGeometry> {
-        *self.0.lock()
+        *self.pip.lock()
+    }
+
+    /// Feeds a window observation to the tracker.
+    pub fn observe(&self, snapshot: WindowSnapshot) {
+        self.tracker.lock().observe(snapshot);
+    }
+
+    /// What to write over the plugin's file on exit: the pre-PiP geometry
+    /// when PiP is on, else the tracked normal geometry when the window is
+    /// fullscreen or frameless, else nothing.
+    pub fn restore_on_exit(&self) -> Option<NormalGeometry> {
+        self.saved()
+            .or_else(|| self.tracker.lock().restore_on_exit())
     }
 }
 
@@ -115,8 +201,8 @@ pub fn fix_state_file(
     Ok(true)
 }
 
-/// On `RunEvent::Exit`: if the app quits while in PiP, replace the PiP
-/// geometry the window-state plugin just saved with the normal geometry.
+/// On `RunEvent::Exit`: if the app quits while in PiP or fullscreen, replace
+/// the geometry the window-state plugin just saved with the normal one.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn persist_on_exit(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -125,7 +211,7 @@ pub fn persist_on_exit(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<PipState>() else {
         return;
     };
-    let geometry = state.saved();
+    let geometry = state.restore_on_exit();
     if geometry.is_none() {
         return;
     }
@@ -138,8 +224,12 @@ pub fn persist_on_exit(app: &tauri::AppHandle) {
     };
     let path = dir.join(app.filename());
     match fix_state_file(&path, MAIN_WINDOW, geometry) {
-        Ok(_) => tracing::info!("quit in picture-in-picture; saved the normal window geometry"),
-        Err(err) => tracing::warn!(%err, "could not fix the window state saved in PiP"),
+        Ok(_) => tracing::info!(
+            "quit in picture-in-picture or fullscreen; saved the normal window geometry"
+        ),
+        Err(err) => {
+            tracing::warn!(%err, "could not fix the window state saved in PiP or fullscreen")
+        }
     }
 }
 
@@ -245,6 +335,112 @@ mod tests {
         assert_eq!(state.saved(), None);
         state.begin(NormalGeometry { x: 5, ..NORMAL });
         assert_eq!(state.saved().map(|g| g.x), Some(5));
+    }
+
+    fn snap(x: i32, width: u32) -> WindowSnapshot {
+        WindowSnapshot {
+            x,
+            y: 80,
+            width,
+            height: 800,
+            maximized: false,
+            minimized: false,
+            fullscreen: false,
+            decorated: true,
+        }
+    }
+
+    #[test]
+    fn quitting_in_fullscreen_restores_the_last_normal_window() {
+        let state = PipState::default();
+        state.observe(snap(120, 1280));
+        assert_eq!(
+            state.restore_on_exit(),
+            None,
+            "normal window: the plugin file is right"
+        );
+        state.observe(WindowSnapshot {
+            y: 0,
+            height: 1080,
+            fullscreen: true,
+            ..snap(0, 1920)
+        });
+        assert_eq!(state.restore_on_exit(), Some(NORMAL));
+        // Back out of fullscreen: nothing to fix any more.
+        state.observe(snap(120, 1280));
+        assert_eq!(state.restore_on_exit(), None);
+    }
+
+    #[test]
+    fn a_frameless_window_counts_as_transient_and_pip_geometry_wins() {
+        let state = PipState::default();
+        state.observe(snap(120, 1280));
+        state.observe(WindowSnapshot {
+            decorated: false,
+            ..snap(1416, 480)
+        });
+        assert_eq!(state.restore_on_exit(), Some(NORMAL));
+        let pip = NormalGeometry { x: 7, ..NORMAL };
+        state.begin(pip);
+        assert_eq!(state.restore_on_exit(), Some(pip));
+    }
+
+    #[test]
+    fn maximized_and_minimized_observations_keep_the_normal_rect() {
+        let mut t = NormalTracker::default();
+        t.observe(snap(120, 1280));
+        t.observe(WindowSnapshot {
+            maximized: true,
+            ..snap(-8, 1936)
+        });
+        t.observe(WindowSnapshot {
+            minimized: true,
+            ..snap(-32000, 160)
+        });
+        t.observe(WindowSnapshot {
+            maximized: true,
+            fullscreen: true,
+            ..snap(0, 1920)
+        });
+        assert_eq!(
+            t.restore_on_exit(),
+            Some(NormalGeometry {
+                maximized: true,
+                ..NORMAL
+            })
+        );
+    }
+
+    #[test]
+    fn fullscreen_before_any_normal_observation_restores_nothing() {
+        let mut t = NormalTracker::default();
+        t.observe(WindowSnapshot {
+            fullscreen: true,
+            ..snap(0, 1920)
+        });
+        assert_eq!(t.restore_on_exit(), None);
+        t.observe(snap(1, 0));
+        assert_eq!(t.restore_on_exit(), None, "a zero size is never recorded");
+    }
+
+    #[test]
+    fn starting_maximized_records_the_rect_as_maximized() {
+        let mut t = NormalTracker::default();
+        t.observe(WindowSnapshot {
+            maximized: true,
+            ..snap(120, 1280)
+        });
+        t.observe(WindowSnapshot {
+            fullscreen: true,
+            ..snap(0, 1920)
+        });
+        assert_eq!(
+            t.restore_on_exit(),
+            Some(NormalGeometry {
+                maximized: true,
+                ..NORMAL
+            })
+        );
     }
 
     #[test]

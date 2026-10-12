@@ -42,6 +42,7 @@ interface FakePlayer {
   error?: string;
   positionSeconds: number;
   durationSeconds?: number;
+  queue: { ref?: ItemRef; episodeId?: string; url: string; resumeSeconds?: number }[];
   stop: () => void;
 }
 export const usePlayerStore = create<FakePlayer>((set) => ({
@@ -49,7 +50,8 @@ export const usePlayerStore = create<FakePlayer>((set) => ({
   mode: 'inline',
   status: 'idle',
   positionSeconds: 0,
-  stop: () => set({ source: undefined, status: 'idle' }),
+  queue: [],
+  stop: () => set({ source: undefined, status: 'idle', queue: [] }),
 }));
 export const played: unknown[] = [];
 export async function playItem(args: { ref: ItemRef; episodeId?: string }): Promise<void> {

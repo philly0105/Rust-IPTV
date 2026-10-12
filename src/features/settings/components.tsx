@@ -31,7 +31,7 @@ export function SettingsGroup({ title, description, children, actions }: { title
           {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
         </div>
       ) : null}
-      <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-surface">{children}</div>
+      <div className="flex flex-col divide-y divide-divider rounded-lg border border-border bg-surface">{children}</div>
     </div>
   );
 }

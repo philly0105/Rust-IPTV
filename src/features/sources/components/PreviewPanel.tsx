@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
-import { Skeleton } from '@/ui';
+import { Button, Skeleton } from '@/ui';
 import { formatCount } from '../lib/format';
 import { redactText, redactUrl } from '../lib/redact';
 import type { PreviewState } from '../lib/usePreview';
@@ -27,9 +27,12 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
       ) : null}
 
       {state.status === 'error' ? (
-        <p role="alert" className="text-sm text-danger">
-          {t('previewFailed', { message: redactText(state.error.message) })}
-        </p>
+        <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-danger" data-testid="preview-error">
+          <p className="min-w-0 flex-1">{t('previewFailed', { message: redactText(state.error.message) })}</p>
+          <Button size="sm" variant="secondary" onClick={state.retry}>
+            {t('tryAgain')}
+          </Button>
+        </div>
       ) : null}
 
       {state.status === 'ready' ? (
@@ -50,8 +53,8 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
               <div className="flex flex-col gap-1.5">
                 <span className="text-sm text-fg-muted">{t('previewGroups', { count: state.preview.groups.length })}</span>
                 <ul className="flex flex-wrap gap-1.5">
-                  {state.preview.groups.slice(0, MAX_GROUPS).map((g) => (
-                    <li key={g} className="max-w-56 truncate rounded-sm border border-border bg-surface px-2 py-0.5 text-xs text-fg">
+                  {state.preview.groups.slice(0, MAX_GROUPS).map((g, i) => (
+                    <li key={`${i}:${g}`} className="max-w-56 truncate rounded-sm border border-border bg-surface px-2 py-0.5 text-xs text-fg">
                       {g}
                     </li>
                   ))}
@@ -67,8 +70,8 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-fg-muted">{t('previewEpg', { count: state.preview.epgUrls.length })}</span>
                 <ul className="flex flex-col gap-0.5">
-                  {state.preview.epgUrls.map((u) => (
-                    <li key={u} className="truncate font-mono text-xs text-fg" title={redactUrl(u)}>
+                  {state.preview.epgUrls.map((u, i) => (
+                    <li key={`${i}:${u}`} className="truncate font-mono text-xs text-fg" title={redactUrl(u)}>
                       {redactUrl(u)}
                     </li>
                   ))}

@@ -23,14 +23,14 @@ pnpm install
 | What | Command |
 | --- | --- |
 | Desktop app, dev mode | `pnpm tauri:dev`, or double-click `Start Tsrust IPTV.cmd` |
-| Desktop installer (NSIS) | `pnpm tauri:build` (output in `target/release/bundle/nsis/`) |
+| Desktop installer (NSIS) | `pnpm tauri:build` (output in `release/bundle/nsis/` under the cargo target dir: `target/` unless a local `.cargo/config.toml` moves it; `cargo metadata --format-version 1 --no-deps` reports it as `target_directory`) |
 | Desktop installer with mpv bundled | `pnpm tauri:build:mpv` (needs `vendor/mpv/`; makes the installer much larger) |
 | Web UI against a server | `pnpm build`, then `pnpm server`, then open http://127.0.0.1:7180 |
 | Web UI with hot reload | `pnpm server` in one terminal, `pnpm dev` in another, open http://localhost:5173 (Vite proxies `/api`) |
 | Mock Xtream/Stalker/M3U/XMLTV servers | `pnpm mock` (port 7290) |
 | Docker (server mode) | `docker build -t tsrust-iptv .` then `docker run --rm -p 127.0.0.1:7180:7180 -v tsrust-iptv-data:/data tsrust-iptv` |
 
-`Start Tsrust IPTV.cmd` starts the installed app if there is one, then a finished `pnpm tauri:build` output, and otherwise falls back to `pnpm tauri dev`.
+`Start Tsrust IPTV.cmd` starts the installed app if there is one, then a `pnpm tauri:build` output (`release\iptv-tauri.exe` in the `TSRUST_TARGET_DIR` environment variable's folder when that is set, else in the target dir `cargo metadata` reports, else in `target\` or `crates\iptv-tauri\target\`), and otherwise falls back to `pnpm tauri dev`.
 
 Server flags: `iptv-server --port 7180 --data-dir ./.data --static ./dist`. It binds 127.0.0.1 unless you pass `--host`. Details are in `docs/architecture/server.md`.
 
@@ -44,7 +44,16 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 
 - M3U URL: `http://127.0.0.1:7290/m3u/sample.m3u`
 - Xtream: server `http://127.0.0.1:7290/xtream`, user `demo`, password `secret`
-- Stalker: portal `http://127.0.0.1:7290/stalker/portal.php`, MAC `00:1A:79:00:00:01`
+- Stalker: portal `http://127.0.0.1:7290/stalker/c/`, MAC `00:1A:79:00:00:01`
+
+## Using it
+
+- Movies and episodes remember where you stopped. The detail page offers "Resume from m:ss" and "Start over".
+- Near the end of an episode, an Up next card counts down to the next one. Use "Play now" to skip the countdown, or press N to play the next item in the queue.
+- An import or refresh can be cancelled while it runs. A cancelled run keeps the catalog the source had before, and a cancelled add leaves no source behind. "Refresh all" has a Stop button.
+- Removing a source hides it and shows an Undo toast. The source is deleted 8 seconds later unless you press Undo, or right away when the app closes or reloads.
+- By default the app returns to the screen you last used (Settings > General > On startup). A fresh install opens the dashboard.
+- The window reopens at its last size and position. If that spot is no longer on any monitor (for example, a screen was unplugged), it is moved back onto one.
 
 ## Data
 
@@ -61,7 +70,9 @@ This runs, in order: `pnpm typecheck` (tsc-rs), `pnpm test` (vitest), `cargo tes
 - `pnpm build` produces `dist/`.
 - `pnpm e2e` runs Playwright against `iptv-server` (port 7180) and `iptv-mock` (port 7290) with a fresh `./.e2e-data`. It needs `dist/` and uses installed Microsoft Edge by default (`PW_CHANNEL=chromium` switches to Playwright's bundled Chromium, which cannot play H.264).
 
-The performance tests run in release mode: `cargo test -p iptv-core --release --test m3u_perf` (50k channels) and `--test epg_perf` (120 MB XMLTV).
+The performance tests run in release mode: `cargo test -p iptv-core --release --test m3u_perf` (50k channels) and `--test epg_perf` (120 MB XMLTV). `--test catalog_perf` checks that live list pages and searches over 50k channels answer in under 100 ms.
+
+`tools/window-probe.ps1` checks the real desktop window from outside: frame and fullscreen state, window and monitor rects in physical pixels, the embedded mpv host, and synthetic clicks, double-clicks and PiP drags on the video. Run `powershell -NoProfile -ExecutionPolicy Bypass -File tools/window-probe.ps1` with the app open (the default `-Action Info` only reads). `-Action SelfTest` needs no running app: it checks offline how the probe picks the mpv IPC pipe (`\\.\pipe\tsrust-iptv-mpv-<pid>-<session>`, a new name for each attach). The script header lists every action.
 
 ## Keyboard
 
@@ -82,7 +93,8 @@ Press `?` in the app for the full list. The main ones:
 | Space or K | Play / pause |
 | F | Fullscreen (in picture-in-picture: back to the full window) |
 | Left / Right | Seek 10 s |
-| Shift+Left / Shift+Right | Seek 30 s while the seek bar has focus |
+| Shift+Left / Shift+Right | Seek 30 s |
+| N | Play the next episode in the queue |
 | Up / Down | Volume 5 % |
 | M | Mute |
 | C | Captions on / off (in fullscreen live TV: the channel panel) |
@@ -104,7 +116,17 @@ Settings > Remote turns on a small web remote served at `http://127.0.0.1:7310/`
 
 Settings > Backup exports and imports the IPTVnator playlist backup format (`iptvnator-playlist-backup`, version 1). A backup exported from IPTVnator imports here with its playlists, favorites, recently viewed items, hidden groups, playback positions, and EPG URLs, and a backup exported here opens in IPTVnator. Export leaves passwords out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See `docs/architecture/backup.md`.
 
-## Troubleshooting sources
+## Troubleshooting
+
+- mpv not found: embedded playback needs mpv. Without it the stream plays in the built-in player and the player says so. Put `mpv.exe` in `vendor/mpv/`, install mpv with WinGet, scoop or choco, or set its path in Settings > Players, then use "Try MPV again".
+- The window opens off-screen: the saved position is checked against the monitors connected at startup, and a window that would land off every monitor is moved back onto one. If it still happens, report it with the monitor layout.
+- An import seems stuck: use "Cancel import" on the source card, or Cancel in the Add source dialog. For "Refresh all", use Stop. Nothing half-imported is kept. A playlist or guide download that stops sending data is dropped after 20 s.
+- The TV guide is empty after an update: this version clears the saved guide once on its first start (database migration 0007) and the next EPG refresh, which starts within a minute of start-up, downloads every guide again. Settings > Guide > "Refresh all guides" starts it at once.
+- Error codes: a failed source shows "Error code: X" on its card. `network` means the server could not be reached, `timeout` that it did not answer in time, `auth` that the credentials or MAC were rejected, `not_found` that the address is wrong, `invalid` that the response or the entered details are not usable, `unsupported` that the format or portal feature is not supported, `conflict` that another run of the same source is already going (or the run was cancelled), `server` that the provider answered with a server error (5xx) or a rate limit (429), so try again later, `engine_missing` that mpv was not found or would not run (see the mpv entry above), and `io`, `db` or `internal` a local file, database or app fault. Those last three are worth reporting with the logs.
+- Logs live in `%APPDATA%\com.philly.tsrustiptv\logs` (Settings > About > "Open log folder"). Secrets are redacted.
+- Reset settings: Settings > General > "Reset settings" puts every setting back to its default, including language, theme and player paths. Sources, favorites, history and downloads stay.
+
+### Sources
 
 A source that fails to load keeps its name and details, and its card on the Sources page says what went wrong with a Try again button. Edit fixes the details without removing the source or its favorites.
 

@@ -18,6 +18,8 @@ import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/err
 import { applyLanguage, languageUnresolved } from '@/i18n';
 import { dismissToast, toast } from '@/ui';
 
+import { bindRailEmptySync } from './dashboard/railEmpty';
+
 /** Query prefixes invalidated per event type. */
 export const EVENT_INVALIDATION: Record<string, string[]> = {
   'sources.changed': ['sources.', 'catalog.', 'favorites.', 'recent.', 'positions.', 'xtream.', 'stalker.'],
@@ -151,6 +153,9 @@ export function useShellEvents(): void {
   useEffect(() => {
     const offs: (() => void)[] = [];
     offs.push(bindEventInvalidation(EVENT_INVALIDATION));
+    // A dashboard rail that was empty and gains content (first favorite, a resume
+    // position, a recent channel) drops its "skip the skeleton" flag right away.
+    offs.push(bindRailEmptySync(queryClient));
 
     offs.push(
       onAppEvent('settings.changed', (s: Settings) => {
@@ -169,6 +174,7 @@ export function useShellEvents(): void {
             void invalidate('sources.');
             void invalidate('catalog.');
           }
+          if (p.phase === 'cancelled') void invalidate('sources.');
           return;
         }
         const name = sourceName(p.sourceId) ?? tr('thisSource');
@@ -184,6 +190,13 @@ export function useShellEvents(): void {
           void invalidate('catalog.');
           return;
         }
+        // Cancelled is final like done and error: replace the progress toast,
+        // which has no timeout of its own, with a short notice that does.
+        if (p.phase === 'cancelled') {
+          void invalidate('sources.');
+          toast({ id, variant: 'info', title: tr('importCancelled', { name }), duration: 4000 });
+          return;
+        }
         if (p.phase === 'error') {
           void invalidate('sources.');
           if (importErrorClaimed(p.sourceId)) {
@@ -195,7 +208,7 @@ export function useShellEvents(): void {
             id,
             variant: 'error',
             title: tr('importFailed', { name }),
-            description: p.message ? `${tr(`sources:${importSummaryKey(p.message)}`)} ${tr('importFailedHint')}` : tr('importFailedHint'),
+            description: p.message ? `${tr(`sources:${importSummaryKey(p.message, p.code)}`)} ${tr('importFailedHint')}` : tr('importFailedHint'),
             duration: 0,
             action: onSources ? undefined : { label: tr('openSources'), onClick: () => navRef.current('/sources') },
           });
@@ -328,15 +341,30 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
     if (!enabled) return;
     const path = `${location.pathname}${location.search}`;
     if (!isRestorableRoute(path) || path === saved.current) return;
-    const timer = setTimeout(() => {
+    let pending = true;
+    const save = () => {
+      if (!pending) return;
+      pending = false;
       saved.current = path;
       rpc('settings.update', { patch: { lastRoute: path } })
         .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
         .catch(() => {
           saved.current = undefined; // retry on the next navigation
         });
-    }, LAST_ROUTE_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    };
+    const timer = setTimeout(save, LAST_ROUTE_DEBOUNCE_MS);
+    // Closing or hiding the window inside the debounce would lose the last
+    // screen; save it right away instead.
+    const flush = () => {
+      if (document.visibilityState === 'hidden') save();
+    };
+    window.addEventListener('pagehide', save);
+    document.addEventListener('visibilitychange', flush);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pagehide', save);
+      document.removeEventListener('visibilitychange', flush);
+    };
   }, [enabled, location.pathname, location.search]);
 }
 

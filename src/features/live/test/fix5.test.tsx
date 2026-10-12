@@ -302,11 +302,11 @@ describe('R6 round 2: layout fixes', () => {
     expect(stalkerArchiveQuery(now - HOUR, now - HOUR + wide, now, 16)).toEqual({ from: now - HOUR, limit: 16 });
   });
 
-  it('"Back to live" keeps its name when the label is hidden on narrow panes', async () => {
+  it('the ribbon live button keeps its name when the label is hidden on narrow panes', async () => {
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     const btn = await screen.findByTestId('ribbon-back-to-live');
-    expect(btn.getAttribute('aria-label')).toBe('Back to live');
-    expect(btn.querySelector('span.hidden')?.textContent).toBe('Back to live');
+    expect(btn.getAttribute('aria-label')).toBe('Watch live');
+    expect(btn.querySelector('span.hidden')?.textContent).toBe('Watch live');
   });
 
   it('live components use logical, not physical, direction classes', async () => {

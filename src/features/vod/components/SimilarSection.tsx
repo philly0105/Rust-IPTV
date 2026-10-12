@@ -4,8 +4,9 @@ import { Link } from 'react-router';
 
 import type { TmdbBrief } from '@/api/types';
 
-import { EmptyState, ErrorState, buttonClass } from '@/ui';
+import { EmptyState, buttonClass } from '@/ui';
 import { TmdbAttribution } from './TmdbAttribution';
+import { TmdbErrorState } from './TmdbErrorState';
 import { TmdbRail } from './TmdbRail';
 
 /**
@@ -58,7 +59,7 @@ export function SimilarSection({
         sourceId={sourceId}
         empty={
           error ? (
-            <ErrorState size="inline" title={t('tmdbUnavailable')} error={error} onRetry={onRetry} />
+            <TmdbErrorState size="inline" title={t('tmdbUnavailable')} error={error} onRetry={onRetry} />
           ) : (
             <EmptyState size="inline" icon={<Clapperboard size={20} />} title={t('noSimilar')} />
           )

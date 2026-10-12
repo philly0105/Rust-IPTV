@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RpcError, isDesktop, proxiedUrl, rpc } from './transport';
+import { RPC_ERROR_CODES, RpcError, isCancelledRun, isDesktop, proxiedUrl, rpc, sourceRunDetails } from './transport';
 import type { PlayerSource } from './types';
 
 const base: PlayerSource = { url: 'http://cdn.example/a.m3u8', kind: 'hls', title: 't', isLive: true, isRadio: false };
@@ -26,6 +26,27 @@ describe('RpcError.from', () => {
   });
 });
 
+describe('source run error details (C8)', () => {
+  it('reads details.cancelled and sourceId from the core rejection', () => {
+    const cancelled = RpcError.from({
+      code: 'conflict',
+      message: 'the import stopped before saving',
+      retryable: false,
+      details: { sourceId: 's1', cancelled: true },
+    });
+    expect(isCancelledRun(cancelled)).toBe(true);
+    expect(sourceRunDetails(cancelled)).toEqual({ sourceId: 's1', cancelled: true });
+  });
+
+  it('is false for a real failure, a missing or malformed details, and non-errors', () => {
+    expect(isCancelledRun(RpcError.from({ code: 'network', message: 'down', retryable: true, details: { sourceId: 's1' } }))).toBe(false);
+    expect(isCancelledRun(new RpcError('conflict', 'x', false, { cancelled: 'yes' }))).toBe(false);
+    expect(isCancelledRun(new RpcError('conflict', 'cancelled'))).toBe(false);
+    expect(isCancelledRun(null)).toBe(false);
+    expect(sourceRunDetails(new RpcError('internal', 'x', false, 'text'))).toBeUndefined();
+  });
+});
+
 describe('rpc (web)', () => {
   it('runs in web mode under jsdom', () => {
     expect(isDesktop).toBe(false);
@@ -45,6 +66,28 @@ describe('rpc (web)', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(rpc('sources.get', { id: 'x' })).rejects.toMatchObject({ code: 'not_found', message: 'missing' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('knows every core error code (C12), including engine_missing and server', () => {
+    expect(RPC_ERROR_CODES).toEqual(expect.arrayContaining(['engine_missing', 'server', 'not_found', 'internal']));
+    expect(RPC_ERROR_CODES).toHaveLength(12);
+  });
+
+  it.each(RPC_ERROR_CODES.flatMap((code) => [502, 503, 500, 404].map((status) => [code, status] as const)))(
+    'keeps code %s and details from a JSON error body (HTTP %i), never the bare status',
+    async (code, status) => {
+      const body = JSON.stringify({ code, message: `boom ${code}`, details: { sourceId: 's9' } });
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status, statusText: 'Bad Gateway' })));
+      const err = await rpc('sources.get', { id: 'x' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RpcError);
+      expect(err).toMatchObject({ code, message: `boom ${code}` });
+      expect(sourceRunDetails(err)).toEqual({ sourceId: 's9' });
+    },
+  );
+
+  it('falls back to the HTTP status only when the body is not an error payload', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 502, statusText: 'Bad Gateway' })));
+    await expect(rpc('app.info')).rejects.toMatchObject({ code: 'network', message: 'HTTP 502 Bad Gateway' });
   });
 
   it('maps fetch failures to a retryable network error', async () => {

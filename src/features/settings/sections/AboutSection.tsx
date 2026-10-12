@@ -58,7 +58,7 @@ export function AboutSection(_props: SectionProps) {
             </p>
           </div>
           <SettingsGroup>
-            <dl className="flex flex-col divide-y divide-border">
+            <dl className="flex flex-col divide-y divide-divider">
               {[
                 { k: t('aboutPlatform'), v: `${info.data.platform}, ${info.data.isDesktop ? t('aboutDesktop') : t('aboutServer')}` },
                 { k: t('aboutReact'), v: reactVersion },

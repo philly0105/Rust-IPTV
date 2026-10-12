@@ -2,8 +2,9 @@
 //!
 //! Windows only. `mpv.attach` asks the registered [`ChildWindowFactory`] for a
 //! child HWND inside the main window, starts `mpv.exe --wid=<hwnd>
-//! --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<pid> ...`, connects to the
-//! named pipe (retrying for up to 5 s), observes the playback properties, and
+//! --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<pid>-<session> ...` (a new
+//! session number per attach), connects to the named pipe (retrying for up
+//! to 5 s), observes the playback properties, and
 //! pushes throttled `mpv.state` events (4/s). A watcher task notices when mpv
 //! exits on its own (crash, killed) and turns that into `state.error` plus a
 //! full detach. Everything lives in one [`MpvManager`] stored in
@@ -205,14 +206,83 @@ pub async fn attach(
     ensure_platform()?;
     let mgr = manager(state);
     let _op = mgr.op.lock().await;
+    let result = attach_locked(state, &mgr, bounds, opts).await;
+    if let Err(e) = &result {
+        // Every failed attach is visible to `mpv.state` polls and listeners
+        // the same way (mpv missing, window or start failure, handshake).
+        if current(&mgr).is_none() {
+            let snapshot = {
+                let mut last = mgr.last.lock();
+                *last = detached_state(last.clone(), Some(e.to_string()));
+                last.clone()
+            };
+            state.emit("mpv.state", snapshot);
+        }
+    }
+    result
+}
 
-    if let Some(s) = current(&mgr) {
+/// How long the attach handshake (property observers) may take in total.
+const ATTACH_HANDSHAKE: Duration = Duration::from_secs(10);
+
+/// Windows loader and image failures, as exit codes: `STATUS_DLL_NOT_FOUND`
+/// (0xC0000135), `STATUS_INVALID_IMAGE_FORMAT` (0xC000007B, e.g. a 32-bit
+/// DLL), `STATUS_ENTRYPOINT_NOT_FOUND` (0xC0000139, a DLL of the wrong
+/// version), `STATUS_DLL_INIT_FAILED` (0xC0000142) and
+/// `STATUS_ILLEGAL_INSTRUCTION` (0xC000001D, a build for a newer CPU).
+const LOADER_FAILURES: [i32; 5] = [
+    0xC000_0135_u32 as i32,
+    0xC000_007B_u32 as i32,
+    0xC000_0139_u32 as i32,
+    0xC000_0142_u32 as i32,
+    0xC000_001D_u32 as i32,
+];
+
+/// Error for an mpv that exited before opening its control pipe. A loader
+/// failure means the mpv build itself is broken or incomplete
+/// (`engine_missing`); any other exit is a configuration problem the user can
+/// fix (Invalid), not an app bug.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn startup_exit_error(code: Option<i32>) -> CoreError {
+    if code.is_some_and(|c| LOADER_FAILURES.contains(&c)) {
+        return CoreError::EngineMissing(format!(
+            "mpv could not start: a library it needs is missing or does not match (exit code {:#X}). Reinstall the mpv build in vendor\\mpv, or pick a complete mpv in Settings > Players.",
+            code.unwrap_or_default() as u32
+        ));
+    }
+    let code = code
+        .map(|c| format!(" (exit code {c})"))
+        .unwrap_or_default();
+    CoreError::Invalid(format!(
+        "mpv exited during startup{code}. Check the mpv build in vendor\\mpv or the extra mpv arguments in Settings > Players."
+    ))
+}
+
+/// Registers the property observers, failing with a Timeout when mpv does
+/// not answer within `limit` (a wedged or half-started mpv).
+async fn handshake(client: &MpvClient, limit: Duration) -> CoreResult<()> {
+    tokio::time::timeout(limit, client.observe(OBSERVED_PROPERTIES))
+        .await
+        .unwrap_or_else(|_| {
+            Err(CoreError::Timeout(
+                "mpv did not finish starting in time".into(),
+            ))
+        })
+}
+
+async fn attach_locked(
+    state: &Arc<AppState>,
+    mgr: &MpvManager,
+    bounds: Bounds,
+    opts: AttachOptions,
+) -> CoreResult<MpvState> {
+    if let Some(s) = current(mgr) {
         if !s.exited() && !s.client.is_closed() {
             set_window_bounds(&s.factory, s.hwnd, bounds).await?;
             return Ok(s.state());
         }
         // A dead session the watcher has not reaped yet.
-        teardown(state, &mgr, &s, None, false).await;
+        teardown(state, mgr, &s, None, false).await;
     }
 
     let factory = window_factory(state).ok_or_else(|| {
@@ -224,7 +294,7 @@ pub async fn attach(
         tokio::task::spawn_blocking(move || find_mpv(configured.as_deref(), &DetectEnv::current()))
             .await?
             .ok_or_else(|| {
-                CoreError::NotFound(
+                CoreError::EngineMissing(
                     embedded_unavailable_reason(true, false, true).unwrap_or_default(),
                 )
             })?;
@@ -234,7 +304,10 @@ pub async fn attach(
         tokio::task::spawn_blocking(move || f.create(bounds)).await??
     };
 
-    let pipe = mpv_pipe_name(std::process::id());
+    // A fresh pipe name per session: an old mpv that survived its kill keeps
+    // its pipe, and reusing the name would connect us to that process.
+    let session_id = mgr.next_id.fetch_add(1, Ordering::Relaxed);
+    let pipe = format!("{}-{session_id}", mpv_pipe_name(std::process::id()));
     let (initial_volume, initial_muted) = {
         let mut last = mgr.last.lock();
         if let Some(v) = opts.volume.filter(|v| v.is_finite()) {
@@ -257,9 +330,6 @@ pub async fn attach(
         Ok(v) => v,
         Err(e) => {
             destroy_window(&factory, hwnd).await;
-            let mut last = mgr.last.lock();
-            last.attached = false;
-            last.error = Some(e.to_string());
             return Err(e);
         }
     };
@@ -276,7 +346,7 @@ pub async fn attach(
         },
     );
     let session = Arc::new(Session {
-        id: mgr.next_id.fetch_add(1, Ordering::Relaxed),
+        id: session_id,
         hwnd,
         factory,
         client: Arc::clone(&client),
@@ -289,10 +359,10 @@ pub async fn attach(
         title: Mutex::new(String::new()),
     });
 
-    if let Err(e) = client.observe(OBSERVED_PROPERTIES).await {
+    if let Err(e) = handshake(&client, ATTACH_HANDSHAKE).await {
         teardown(
             state,
-            &mgr,
+            mgr,
             &session,
             Some(format!("mpv did not accept property observers: {e}")),
             false,
@@ -644,21 +714,11 @@ async fn teardown(
             tracing::warn!(pid = s.pid, "embedded mpv did not exit after kill");
         }
     }
-    let mut final_state = s.client.state();
+    let final_state = detached_state(s.client.state(), error);
     s.client.shutdown();
     s.stop_tasks(from_watcher);
     destroy_window(&s.factory, s.hwnd).await;
 
-    final_state.attached = false;
-    final_state.loaded = false;
-    final_state.paused = true;
-    final_state.time_pos = 0.0;
-    final_state.duration = None;
-    final_state.tracks.clear();
-    final_state.fullscreen = false;
-    final_state.recording = false;
-    final_state.record_path = None;
-    final_state.error = error;
     *mgr.last.lock() = final_state.clone();
     {
         let mut cur = mgr.session.lock();
@@ -667,6 +727,20 @@ async fn teardown(
         }
     }
     state.emit("mpv.state", final_state);
+}
+
+/// The state reported once a session is gone: only volume and mute carry
+/// over to the next attach; everything about the dead file (position,
+/// tracks, the rewind window, buffering) is cleared so the UI does not show
+/// a seek bar for a stream that no longer plays.
+pub fn detached_state(last: MpvState, error: Option<String>) -> MpvState {
+    MpvState {
+        attached: false,
+        volume: last.volume,
+        muted: last.muted,
+        error,
+        ..MpvState::default()
+    }
 }
 
 async fn wait_exit(s: &Session, limit: Duration) -> bool {
@@ -804,10 +878,8 @@ mod platform {
             cmd.current_dir(dir);
         }
         let mut child = cmd.spawn().map_err(|e| {
-            CoreError::Io(std::io::Error::new(
-                e.kind(),
-                format!("could not start mpv ({}): {e}", mpv.display()),
-            ))
+            let msg = format!("could not start mpv ({}): {e}", mpv.display());
+            crate::player::spawn_error(e, msg)
         })?;
         if let Some(handle) = child.raw_handle() {
             if let Err(e) = job::assign(handle) {
@@ -840,13 +912,7 @@ mod platform {
                 Err(e) => return Err(CoreError::Io(e)),
             }
             if let Ok(Some(status)) = child.try_wait() {
-                let code = status
-                    .code()
-                    .map(|c| format!(" (exit code {c})"))
-                    .unwrap_or_default();
-                return Err(CoreError::Other(anyhow::anyhow!(
-                    "mpv exited during startup{code}. Check the mpv build in vendor\\mpv or the extra mpv arguments in Settings > Players."
-                )));
+                return Err(super::startup_exit_error(status.code()));
             }
             if started.elapsed() >= limit {
                 return Err(CoreError::Timeout(
@@ -989,5 +1055,55 @@ mod platform {
         Err(CoreError::Unsupported(
             "embedded mpv is only available on Windows".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review round 2: an mpv that dies in the Windows loader (missing or
+    /// mismatched DLL) is `engine_missing`; other startup exits stay Invalid.
+    #[test]
+    fn loader_failures_at_startup_are_engine_missing() {
+        for code in [
+            0xC000_0135_u32 as i32,
+            0xC000_007B_u32 as i32,
+            0xC000_0139_u32 as i32,
+            0xC000_0142_u32 as i32,
+            0xC000_001D_u32 as i32,
+        ] {
+            let err = startup_exit_error(Some(code));
+            assert!(matches!(err, CoreError::EngineMissing(_)), "{err:?}");
+            assert!(err.to_string().contains("0xC0000"), "{err}");
+        }
+        for code in [Some(1), Some(-1), None] {
+            let err = startup_exit_error(code);
+            assert!(
+                matches!(err, CoreError::Invalid(ref m) if m.contains("exited during startup")),
+                "{err:?}"
+            );
+        }
+    }
+
+    /// D14 (review round 1): an mpv that accepts the pipe but never answers
+    /// fails the attach with a Timeout instead of hanging.
+    #[tokio::test]
+    async fn handshake_times_out_when_mpv_never_answers() {
+        let (ours, _theirs) = tokio::io::duplex(64 * 1024);
+        let client = MpvClient::with_timeout(ours, MpvState::default(), Duration::from_secs(60));
+        let started = std::time::Instant::now();
+        let err = tokio::time::timeout(
+            Duration::from_secs(5),
+            handshake(&client, Duration::from_millis(200)),
+        )
+        .await
+        .expect("handshake must honor its limit")
+        .unwrap_err();
+        assert!(
+            matches!(err, CoreError::Timeout(ref m) if m.contains("did not finish starting")),
+            "{err:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

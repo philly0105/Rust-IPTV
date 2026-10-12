@@ -1,14 +1,28 @@
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { useShortcut } from '@/shell/shortcuts';
-import { positionReadout, SEEK_STEP, targetOwnsKey, type KeyKind } from './format';
+import { LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, positionReadout, SEEK_STEP, SEEK_STEP_LARGE, targetOwnsKey, type KeyKind } from './format';
 import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
-import { usePlayerStore, zap } from './store';
+import { nextInQueue, usePlayerStore, zap } from './store';
 
 const AREA = 'Playback';
 /** Seconds the left and right arrows skip (shared with the seek bar). */
 export { SEEK_STEP };
+/** Volume change per arrow press or wheel notch. */
+export const VOLUME_STEP = 0.05;
+
+/**
+ * Changes the volume by `steps` steps (negative = quieter) and shows the readout: the arrow
+ * keys and the wheel over the native video both go through here.
+ */
+export function stepVolume(steps: number, t: TFunction<'player'>): void {
+  const player = usePlayerStore.getState();
+  player.adjustVolume(VOLUME_STEP * steps);
+  const { volume, muted } = usePlayerStore.getState();
+  showOsd(muted ? t('muted') : t('volumePercent', { percent: Math.round(volume * 100) }));
+}
 
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down).
@@ -19,6 +33,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   const active = usePlayerStore((s) => !!s.source && s.mode !== 'external');
   const live = usePlayerStore((s) => !!s.source?.isLive);
   const seekable = usePlayerStore((s) => !!s.source && !s.source.isLive && !s.source.isRadio);
+  const hasNext = usePlayerStore((s) => s.queue.length > 1 && !!s.source && !!nextInQueue());
 
   /** Wrap a handler: skip when the focused element owns the key, else prevent default and run. */
   const guard =
@@ -44,11 +59,16 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   };
   /** Transient readout after an arrow seek: the step, then where playback now is. */
   const seekOsd = (delta: number): void => {
-    const { positionSeconds, durationSeconds, source } = s();
+    const { positionSeconds, durationSeconds, source, mode } = s();
     const w = useMediaStore.getState().seekable;
     showOsd(
       t(delta < 0 ? 'seekBack' : 'seekForward', { count: Math.abs(delta) }),
-      positionReadout(t, { position: positionSeconds, duration: durationSeconds, liveEnd: source?.isLive && w ? w.end : undefined }),
+      positionReadout(t, {
+        position: positionSeconds,
+        duration: durationSeconds,
+        liveEnd: source?.isLive && w ? w.end : undefined,
+        edgeSlack: mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK,
+      }),
     );
   };
   const seekWindow = (): boolean => {
@@ -62,37 +82,37 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   useShortcut('k', guard('letter', () => s().togglePlay()), { ...base, description: t('shortcutPlayPauseK') });
   // In picture-in-picture, f returns to the full app window instead.
   useShortcut('f', guard('letter', () => (usePipStore.getState().active ? void exitPip() : s().toggleFullscreen())), { ...base, description: t('shortcutFullscreen') });
+  const seek = (delta: number) => () => {
+    if (!seekWindow()) return;
+    s().seekBy(delta);
+    seekOsd(delta);
+  };
+  useShortcut('arrowleft', guard('arrow', seek(-SEEK_STEP)), { ...base, description: t('shortcutSeekBack') });
+  useShortcut('arrowright', guard('arrow', seek(SEEK_STEP)), { ...base, description: t('shortcutSeekForward') });
+  useShortcut('shift+arrowleft', guard('arrow', seek(-SEEK_STEP_LARGE)), { ...base, description: t('shortcutSeekBackLarge') });
+  useShortcut('shift+arrowright', guard('arrow', seek(SEEK_STEP_LARGE)), { ...base, description: t('shortcutSeekForwardLarge') });
+  // Next episode (or the next item of whatever queue is playing), like the bar's Next button.
   useShortcut(
-    'arrowleft',
-    guard('arrow', () => {
-      if (!seekWindow()) return;
-      s().seekBy(-SEEK_STEP);
-      seekOsd(-SEEK_STEP);
+    'n',
+    guard('letter', () => {
+      const next = nextInQueue();
+      if (!next) return;
+      showOsd(t('next'), next.subtitle ? `${next.subtitle} ${next.title}` : next.title);
+      s().next();
     }),
-    { ...base, description: t('shortcutSeekBack') },
-  );
-  useShortcut(
-    'arrowright',
-    guard('arrow', () => {
-      if (!seekWindow()) return;
-      s().seekBy(SEEK_STEP);
-      seekOsd(SEEK_STEP);
-    }),
-    { ...base, description: t('shortcutSeekForward') },
+    { ...base, enabled: active && hasNext, description: t('shortcutNextItem') },
   );
   useShortcut(
     'arrowup',
     guard('arrow', () => {
-      s().adjustVolume(0.05);
-      volumeOsd();
+      stepVolume(1, t);
     }),
     { ...base, description: t('shortcutVolumeUp') },
   );
   useShortcut(
     'arrowdown',
     guard('arrow', () => {
-      s().adjustVolume(-0.05);
-      volumeOsd();
+      stepVolume(-1, t);
     }),
     { ...base, description: t('shortcutVolumeDown') },
   );

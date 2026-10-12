@@ -11,12 +11,10 @@ use serde_json::{json, Value};
 /// ("All") pseudo-category is skipped; titles are trimmed; duplicates dropped.
 pub fn categories(list: &[Value]) -> Vec<CategoryRow> {
     let mut out: Vec<CategoryRow> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for v in list {
         let Some(id) = s(v, "id") else { continue };
-        if id == "*" {
-            continue;
-        }
-        if out.iter().any(|c| c.category_id == id) {
+        if id == "*" || !seen.insert(id.clone()) {
             continue;
         }
         let name = s(v, "title")
@@ -37,7 +35,10 @@ fn archive_hours(v: &Value) -> Option<i64> {
         return None;
     }
     // `tv_archive_duration` is in hours on Ministra; default to a day.
-    Some(n(v, "tv_archive_duration").filter(|h| *h > 0).unwrap_or(24))
+    // Clamped: a garbage duration must not overflow the catch-up time math.
+    Some(p::clamp_archive_hours(
+        n(v, "tv_archive_duration").filter(|h| *h > 0).unwrap_or(24),
+    ))
 }
 
 /// A live channel (or radio station) row.
@@ -173,7 +174,7 @@ pub fn vod_item(
         category_id: s(v, "category_id").unwrap_or_else(|| fallback_category.to_string()),
         category_name,
         container_extension: None,
-        duration_seconds: n(v, "time").filter(|m| *m > 0).map(|m| m * 60),
+        duration_seconds: n(v, "time").and_then(p::minutes_to_seconds),
         plot: s(v, "description"),
         genres: genres(v),
         tmdb_id: n(v, "tmdb_id").or_else(|| n(v, "tmdb")).filter(|x| *x > 0),
@@ -244,8 +245,13 @@ pub fn epg_program(channel_id: &str, v: &Value) -> Option<EpgProgram> {
                 .ok()?
                 .timestamp();
             let secs = n(v, "duration").filter(|d| *d > 0)?;
-            date_to_rfc3339(&json!(start_ts + secs))
+            date_to_rfc3339(&json!(start_ts.checked_add(secs)?))
         })
+        // A stop before the start (swapped or garbage fields) would give the
+        // UI a negative-length programme; collapse it to the start instead.
+        // Both strings come from `date_to_rfc3339` (4-digit years, `Z`), so
+        // they order lexically.
+        .filter(|end| *end >= start)
         .unwrap_or_else(|| start.clone());
     Some(EpgProgram {
         channel_id: channel_id.to_string(),
@@ -365,5 +371,58 @@ mod tests {
         .unwrap();
         assert_eq!(by_time.end, "2021-01-01T10:30:00Z");
         assert!(epg_program("x", &json!({"name": "no time"})).is_none());
+    }
+
+    /// B8-parsers: provider numbers that overflowed (debug panic) or were
+    /// stored unbounded.
+    #[test]
+    fn overflowing_portal_numbers() {
+        let ch = json!({"id": 1, "tv_archive": 1, "tv_archive_duration": i64::MAX});
+        let row = channel_row("s", EP, &ch, ContentType::Live, "c".into(), 0).unwrap();
+        assert_eq!(row.archive_hours, Some(366 * 24));
+        let v = json!({"id": "9", "name": "X", "time": i64::MAX});
+        assert_eq!(
+            vod_item("s", EP, &v, "*", None).unwrap().duration_seconds,
+            None
+        );
+        let v = json!({"id": "9", "name": "X", "time": "-5"});
+        assert_eq!(
+            vod_item("s", EP, &v, "*", None).unwrap().duration_seconds,
+            None
+        );
+        let e = json!({"name": "A", "start_timestamp": 1_600_000_000, "duration": i64::MAX});
+        let prog = epg_program("x", &e).unwrap();
+        assert_eq!(prog.end, prog.start);
+    }
+
+    /// B8-parsers: a stop before the start used to come out unchanged,
+    /// giving the UI a negative-length programme.
+    #[test]
+    fn epg_stop_before_start_collapses() {
+        let e = json!({"name": "A", "start_timestamp": 1_700_000_000, "stop_timestamp": 1000});
+        let prog = epg_program("x", &e).unwrap();
+        assert_eq!(prog.start, "2023-11-14T22:13:20Z");
+        assert_eq!(prog.end, prog.start);
+        let ok =
+            json!({"name": "A", "start_timestamp": 1_700_000_000, "stop_timestamp": 1_700_003_600});
+        assert_eq!(epg_program("x", &ok).unwrap().end, "2023-11-14T23:13:20Z");
+    }
+
+    /// Review R1-8: the duplicate check scanned every kept category, so a
+    /// hostile genre list was quadratic.
+    #[test]
+    fn category_dedupe_is_linear() {
+        let mut list: Vec<Value> = (0..60_000)
+            .map(|i| json!({"id": format!("g{i}"), "title": format!("G {i}")}))
+            .collect();
+        list.push(json!({"id": "g7", "title": "dup"}));
+        list.push(json!({"id": "*", "title": "All"}));
+        let started = std::time::Instant::now();
+        let cats = categories(&list);
+        let took = started.elapsed();
+        assert_eq!(cats.len(), 60_000);
+        assert_eq!(cats[7].name, "G 7", "first wins");
+        assert_eq!(cats[59_999].position, 59_999);
+        assert!(took < std::time::Duration::from_secs(1), "took {took:?}");
     }
 }

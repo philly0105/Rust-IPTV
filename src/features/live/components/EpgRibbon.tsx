@@ -22,6 +22,8 @@ import {
   formatDay,
   formatRange,
   layoutBlocks,
+  localDayKey,
+  localHourTicks,
   lookbackMs,
   minutesLeft,
   ms,
@@ -42,6 +44,8 @@ export interface EpgRibbonProps {
   sourceKind?: SourceKind;
   /** true when the live stream of `channel` is what is playing (not a catch-up) */
   watchingLive: boolean;
+  /** true when a catch-up of `channel` is what is playing: the live button then reads "Back to live" */
+  watchingArchive?: boolean;
   onPlayLive(channel: Channel): void;
   onMapEpg(channel: Channel): void;
   guideHref?: string;
@@ -62,9 +66,12 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const anchor = floorTo(now, 15 * MINUTE);
   const from = anchor - lookbackMs(channel);
   const to = anchor + AHEAD;
-  // XMLTV for every kind; a Stalker portal's own guide on top (see useChannelPrograms).
-  const programs = useChannelPrograms(channel, sourceKind, from, to);
   const prefs = useDisplayPrefs();
+  // `[from, to)` is display time; programmes show `epgOffsetMinutes` later than the guide says,
+  // so the guide is asked for the window that lands there once shifted (as the /epg grid does).
+  const offsetMs = prefs.epgOffsetMinutes * MINUTE;
+  // XMLTV for every kind; a Stalker portal's own guide on top (see useChannelPrograms).
+  const programs = useChannelPrograms(channel, sourceKind, from - offsetMs, to - offsetMs);
   const list = useMemo(() => shiftPrograms(programs.programs, prefs.epgOffsetMinutes), [programs.programs, prefs.epgOffsetMinutes]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
@@ -103,6 +110,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
     [channel, channelName, now, props, sourceKind, t, toast],
   );
 
+  const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   const header = (
     <div className="flex min-w-0 items-start gap-3 px-4 pt-3 pb-2">
       <div className="min-w-0 flex-1">
@@ -113,7 +121,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
               {programWhen(shown, now) === 'now' ? (
                 <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px text-[10px] font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
               ) : null}
-              <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">{formatRange(shown, i18n.language)}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
+                {programWhen(shown, now) !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ?`${formatDay(ms(shown.start), i18n.language)} ` : ''}
+                {formatRange(shown, i18n.language)}
+              </span>
               {programWhen(shown, now) === 'now' ? (
                 <span className="min-w-0 truncate whitespace-nowrap" data-testid="ribbon-remaining" title={t('minutesLeft', { count: minutesLeft(shown, now) })}>
                   {t('minutesLeft', { count: minutesLeft(shown, now) })}
@@ -142,16 +153,17 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className="flex shrink-0 items-center gap-1">
         {channel && !props.watchingLive ? (
           // Icon-only below 1440 px, where the pane is too narrow for the label and the programme line together.
+          // "Back to live" only means something while this channel's catch-up plays; otherwise it starts the stream.
           <Button
             size="sm"
             variant="secondary"
             icon={<Radio className="size-3.5" />}
-            aria-label={t('backToLive')}
-            title={t('backToLive')}
+            aria-label={liveLabel}
+            title={liveLabel}
             data-testid="ribbon-back-to-live"
             onClick={() => props.onPlayLive(channel)}
           >
-            <span className="hidden min-[1440px]:inline">{t('backToLive')}</span>
+            <span className="hidden min-[1440px]:inline">{liveLabel}</span>
           </Button>
         ) : null}
         <div role="group" aria-label={t('guideView')} className="flex rounded-md border border-border p-0.5">
@@ -239,7 +251,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
   }
 
   return (
-    <section aria-label={t('guide')} data-testid="epg-ribbon" className="flex min-h-0 flex-col border-t border-border bg-surface">
+    <section aria-label={t('guide')} data-testid="epg-ribbon" className="flex min-h-0 flex-col border-t border-divider bg-surface">
       {header}
       <div className={mode === 'list' && list.length > 0 ? 'h-56' : 'min-h-[104px]'}>{body}</div>
     </section>
@@ -295,8 +307,8 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
   // Window the blocks: only those near the viewport are in the DOM.
   const pad = 600;
   const visible = blocks.filter((b) => b.left + b.width >= view.left - pad && b.left <= view.left + view.width + pad);
-  const ticks: number[] = [];
-  for (let tt = floorTo(from, HOUR) + HOUR; tt < to; tt += HOUR) ticks.push(tt);
+  // Local hours (a +5:30 or +5:45 viewer gets :00 ticks too); the day shows where the local date changes.
+  const ticks = useMemo(() => localHourTicks(from, to), [from, to]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const btns = [...(scroller.current?.querySelectorAll<HTMLButtonElement>('button[data-start]') ?? [])];
@@ -337,15 +349,15 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         aria-label={t('timelineView')}
       >
         <div style={{ width, height: '100%', position: 'relative', minHeight: 92 }}>
-          {ticks.map((tt) => {
+          {ticks.map((tt, i) => {
             const x = ((tt - from) / MINUTE) * RIBBON_PX_PER_MIN;
-            const midnight = new Date(tt).getHours() === 0;
+            const midnight = localDayKey(tt) !== localDayKey(i > 0 ? ticks[i - 1]! : from);
             return (
               <div key={tt} className="absolute top-0 bottom-0" style={inlineStart(x, rtl)}>
                 <span className="absolute top-0 start-1 text-[11px] whitespace-nowrap text-fg-subtle tabular-nums">
                   {midnight ? formatDay(tt, i18n.language) : formatClock(tt, i18n.language)}
                 </span>
-                <span className={`absolute top-4 bottom-0 w-px ${midnight ? 'bg-border' : 'bg-border/50'}`} />
+                <span className={`absolute top-4 bottom-0 w-px ${midnight ? 'bg-border' : 'bg-divider'}`} />
               </div>
             );
           })}
@@ -372,7 +384,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         <button
           type="button"
           onClick={() => scrollToNow(true)}
-          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live px-3 py-1 text-xs font-semibold text-white shadow-2 dark:text-bg"
+          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live px-3 py-1 text-xs font-semibold text-white shadow-2 hover:brightness-110 active:brightness-95 dark:text-bg"
         >
           <RotateCcw className="size-3" aria-hidden />
           {t('jumpToNow')}
@@ -488,6 +500,9 @@ function ProgramList(props: ViewProps) {
           const p = programs[v.index]!;
           const when = programWhen(p, now);
           const catchup = canCatchUp(p, channel, kind, now);
+          // A list can span a week of archive: the first programme of each local day carries the date.
+          const prevDay = localDayKey(v.index > 0 ? ms(programs[v.index - 1]!.start) : now);
+          const day = localDayKey(ms(p.start)) !== prevDay ? formatDay(ms(p.start), i18n.language) : null;
           return (
             <div key={v.key} role="listitem" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: LIST_ROW, transform: `translateY(${v.start}px)` }}>
               <button
@@ -496,11 +511,18 @@ function ProgramList(props: ViewProps) {
                 tabIndex={v.index === (nowIndex >= 0 ? nowIndex : 0) ? 0 : -1}
                 onClick={() => props.onActivate(p)}
                 onFocus={() => props.onFocusProgram(p)}
-                className={`flex h-full w-full items-center gap-3 border-b border-border/50 px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
+                className={`flex h-full w-full items-center gap-3 border-b border-divider px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
                   when === 'now' ? 'bg-accent/10' : 'hover:bg-surface-2'
                 } ${when === 'past' && !catchup ? 'text-fg-subtle' : 'text-fg'}`}
               >
-                <span className="w-24 shrink-0 text-xs tabular-nums text-fg-muted">{formatRange(p, i18n.language)}</span>
+                <span className="flex w-24 shrink-0 flex-col text-xs tabular-nums text-fg-muted">
+                  {day ? (
+                    <span className="truncate text-[11px] font-medium text-fg" data-testid="ribbon-list-day">
+                      {day}
+                    </span>
+                  ) : null}
+                  <span>{formatRange(p, i18n.language)}</span>
+                </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span dir="auto" className="truncate text-match-parent text-sm font-medium">
                     {p.title}

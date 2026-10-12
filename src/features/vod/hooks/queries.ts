@@ -5,7 +5,7 @@
  */
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, useRpcQuery } from '@/api/query';
@@ -49,19 +49,31 @@ export function resumeKey(ref: ItemRef): string {
  * it as the thin progress bar on the poster.
  */
 export function useResumeMap(sourceId: string, kind: 'movie' | 'series'): Map<string, number> {
-  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { staleTime: 15_000, enabled: !!sourceId });
+  return useResumeLookup(!!sourceId, (ref) => ref.sourceId === sourceId && ref.contentType === kind, `${sourceId}|${kind}`);
+}
+
+/**
+ * Watched fraction per title across every source (search results, rails that
+ * mix sources), keyed by `resumeKey`. `accept` narrows which refs count;
+ * `filterKey` names what `accept` checks, so a new filter recomputes the map.
+ */
+export function useResumeLookup(enabled = true, accept?: (ref: ItemRef) => boolean, filterKey = ''): Map<string, number> {
+  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { staleTime: 15_000, enabled });
+  const acceptRef = useRef(accept);
+  acceptRef.current = accept;
   return useMemo(() => {
     const out = new Map<string, number>();
     for (const p of q.data ?? []) {
-      if (p.ref.sourceId !== sourceId || p.ref.contentType !== kind || p.watched) continue;
-      if (!p.durationSeconds || p.durationSeconds <= 0) continue;
+      if (p.watched || (p.ref.contentType !== 'movie' && p.ref.contentType !== 'series')) continue;
+      if (acceptRef.current && !acceptRef.current(p.ref)) continue;
+      if (!p.durationSeconds || !Number.isFinite(p.durationSeconds) || p.durationSeconds <= 0) continue;
       const key = resumeKey(p.ref);
       if (out.has(key)) continue;
       const f = Math.min(1, Math.max(0, p.positionSeconds / p.durationSeconds));
       if (f > 0) out.set(key, f);
     }
     return out;
-  }, [q.data, sourceId, kind]);
+  }, [q.data, filterKey]);
 }
 
 export function useSource(sourceId: string | undefined): UseQueryResult<Source, RpcError> {

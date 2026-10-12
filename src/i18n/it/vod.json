@@ -24,6 +24,7 @@
   "manageCategoriesHidden_other": "Gestisci categorie ({{count}} nascoste)",
   "manageCategoriesHint": "{{hidden}} nascoste su {{total}}. Le categorie nascoste non compaiono negli elenchi né nella ricerca.",
   "noCategoryMatch": "Nessuna categoria corrisponde al filtro.",
+  "clearFilter": "Cancella filtro",
   "saveCategories": "Salva",
   "categoriesSaved": "Visibilità delle categorie salvata",
   "categoriesSaveFailed": "Impossibile salvare la visibilità delle categorie",
@@ -64,6 +65,7 @@
   "resume": "Riprendi",
   "resumeAt": "Riprendi da {{time}}",
   "startOver": "Ricomincia",
+  "startOverEpisode": "Ricomincia {{code}}",
   "playEpisode": "Riproduci {{code}}",
   "resumeEpisode": "Riprendi {{code}}",
   "nowPlaying": "In riproduzione",
@@ -153,6 +155,8 @@
   "tmdbKeyMissingTitle": "Per i titoli simili serve una chiave TMDB",
   "tmdbKeyMissingHint": "Aggiungi una chiave TMDB in Impostazioni > Metadati.",
   "addTmdbKey": "Aggiungi una chiave TMDB",
+  "tmdbKeyRejectedTitle": "TMDB ha rifiutato la chiave API",
+  "tmdbKeyRejectedHint": "Controlla o sostituisci la chiave TMDB in Impostazioni > Metadati.",
   "watched": "Visto",
   "markWatched": "Segna come visto",
   "markUnwatched": "Segna come non visto",
@@ -184,5 +188,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Impossibile caricare questi titoli"
+  "pageLoadFailed": "Impossibile caricare questi titoli",
+  "searchPartialError": "Non è stato possibile caricare alcuni risultati."
 }

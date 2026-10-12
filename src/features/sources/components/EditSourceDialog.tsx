@@ -226,14 +226,14 @@ export function EditSourceDialog({
                 <>
                   <p className="text-fg">{t(summaryKey(saveError))}</p>
                   <details className="text-fg-muted">
-                    <summary className="w-fit cursor-pointer select-none text-xs">{t('technicalDetails')}</summary>
+                    <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
                     <p className="mt-1 break-words font-mono text-xs" dir="ltr">
                       {redactText(saveError.message)}
                     </p>
                   </details>
                 </>
               )}
-              <p className="text-fg-muted">{t(nextStepKey(saveError))}</p>
+              <p className="text-fg-muted">{t(nextStepKey(saveError, source.kind))}</p>
               <div className="mt-1 flex flex-wrap gap-2">
                 <Button size="sm" variant="secondary" loading={saving} onClick={() => void save()} data-testid="edit-source-retry">
                   {t('tryAgain')}

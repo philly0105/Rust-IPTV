@@ -5,6 +5,8 @@ import { Link } from 'react-router';
 import { invalidate, useRpcMutation } from '@/api/query';
 import type { Download, ItemRef, ItemSnapshot } from '@/api/types';
 
+import { captureWatched, watchedUndoAction } from '@/features/library/lib/watchedUndo';
+
 import { useSetWatched } from '../../hooks/queries';
 import { Button, IconButton, buttonClass, cn, useToast } from '@/ui';
 
@@ -53,22 +55,37 @@ export function WatchedButton({
   const { toast } = useToast();
   const setWatched = useSetWatched();
   const label = watched ? (labels?.unmark ?? t('markUnwatched')) : (labels?.mark ?? t('markWatched'));
-  const onClick = () => {
+  const onClick = async () => {
     const next = !watched;
+    const target = { ref: itemRef, ...(episodeIds ? { episodeIds } : {}) };
+    // The rows about to change, so Undo can put them back; without them the toast has no Undo.
+    const before = await captureWatched(target).catch(() => undefined);
     setWatched.mutate(
-      { ref: itemRef, ...(episodeIds ? { episodeIds } : {}), watched: next },
+      { ...target, watched: next },
       {
-        onSuccess: () => toast({ title: next ? t('markedWatched') : t('markedUnwatched'), variant: 'success' }),
+        onSuccess: () =>
+          toast({
+            title: next ? t('markedWatched') : t('markedUnwatched'),
+            variant: 'success',
+            ...(before
+              ? {
+                  action: watchedUndoAction(target, before, {
+                    label: t('undo', { ns: 'library' }),
+                    onFailed: () => toast({ title: t('undoFailed', { ns: 'library' }), variant: 'error' }),
+                  }),
+                }
+              : {}),
+          }),
         onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
       },
     );
   };
   const icon = <CircleCheck aria-hidden size={18} className={cn(watched && 'text-success')} />;
   if (compact) {
-    return <IconButton label={label} icon={icon} onClick={onClick} disabled={setWatched.isPending} />;
+    return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={setWatched.isPending} />;
   }
   return (
-    <Button size="lg" variant="ghost" icon={icon} loading={setWatched.isPending} onClick={onClick}>
+    <Button size="lg" variant="ghost" icon={icon} loading={setWatched.isPending} onClick={() => void onClick()}>
       {label}
     </Button>
   );

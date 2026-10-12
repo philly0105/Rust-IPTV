@@ -5,11 +5,12 @@ import { Link, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 
+import { TmdbErrorState } from '../components/TmdbErrorState';
 import { TmdbAttribution } from '../components/TmdbAttribution';
 import { TmdbRail } from '../components/TmdbRail';
 import { useSettings } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { EmptyState, ErrorState, Poster, Skeleton, buttonClass, cn } from '@/ui';
+import { EmptyState, Poster, Skeleton, buttonClass, cn } from '@/ui';
 
 const BIO_CLAMP = 600;
 
@@ -49,7 +50,7 @@ export function ActorPage() {
       />
     );
   } else if (person.isError) {
-    body = <ErrorState error={person.error} onRetry={() => void person.refetch()} />;
+    body = <TmdbErrorState error={person.error} onRetry={() => void person.refetch()} />;
   } else if (!valid || person.data === null) {
     body = <EmptyState icon={<UserRound size={28} />} title={t('personNotFound')} />;
   } else if (!person.data) {

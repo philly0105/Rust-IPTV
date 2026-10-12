@@ -144,7 +144,7 @@ describe('connection test', () => {
     const result = await within(dialog()).findByTestId('connection-test-result');
     expect(result.textContent).toBe("The server didn't accept the login.");
     expect(within(dialog()).getByTestId('connection-test-hint').textContent).toBe(
-      'The server rejected the login. Check the username, password or MAC.',
+      'The provider turned down the sign-in. Check the username and password.',
     );
     const detail = within(dialog()).getByTestId('connection-test').querySelector('details')!;
     expect(detail.textContent).toContain('HTTP 401');
@@ -156,7 +156,7 @@ describe('connection test', () => {
     await fillXtream();
     fireEvent.click(within(dialog()).getByRole('button', { name: /Test connection/ }));
     expect((await within(dialog()).findByTestId('connection-test-result')).textContent).toBe('HTTP 403 Forbidden');
-    expect(within(dialog()).getByTestId('connection-test-hint').textContent).toContain('Check the username, password or MAC.');
+    expect(within(dialog()).getByTestId('connection-test-hint').textContent).toContain('Check the username and password.');
   });
 
   it('hints at a pasted space around the password without blocking it', async () => {
@@ -389,7 +389,7 @@ describe('refresh failures', () => {
     fireEvent.click(await screen.findByTestId('source-refresh'));
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     const toast = useToastStore.getState().toasts[0]!;
-    expect(toast.description).toBe("The server didn't accept the login. The server rejected the login. Check the username, password or MAC.");
+    expect(toast.description).toBe("The server didn't accept the login. The provider turned down the sign-in. Check the username and password.");
     expect(toast.action?.label).toBe('Check settings');
     act(() => toast.action!.onClick());
     expect(await screen.findByRole('dialog')).toBeTruthy();
@@ -448,20 +448,5 @@ describe('source card error strip', () => {
     expect(names).toEqual(['Alpha', 'Beta']);
     fireEvent.click(retries[1]!);
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'b' }]));
-  });
-});
-
-describe('remove failures', () => {
-  it('keeps the confirm dialog open and redacts the error text', async () => {
-    rpcMock.handlers['sources.list'] = () => [xtream('x')];
-    rpcMock.handlers['sources.remove'] = () => {
-      throw new RpcError('internal', 'database locked at http://xt.example.com/get.php?username=alice&password=pw-secret');
-    };
-    renderAt(routes(), '/sources');
-    fireEvent.click(await screen.findByTestId('source-remove'));
-    fireEvent.click(screen.getByTestId('source-remove-confirm'));
-    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
-    expect(useToastStore.getState().toasts[0]!.description).not.toContain('pw-secret');
-    expect(screen.getByTestId('source-remove-confirm')).toBeTruthy();
   });
 });

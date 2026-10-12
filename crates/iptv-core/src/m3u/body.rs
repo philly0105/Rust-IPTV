@@ -79,7 +79,18 @@ pub fn too_large_error(host: &str) -> CoreError {
 /// list: a video stream (MPEG-TS, HLS segment playlist, `video/*`), other
 /// binary data, or a web page (often a login or error page). `None` lets the
 /// import continue; the parser makes the final call.
+///
+/// UTF-16 (a `FF FE` / `FE FF` byte order mark, or a NUL-interleaved
+/// `#EXTM3U`) is transcoded before any check, so its NUL bytes are not taken
+/// for binary data.
 pub fn sniff(head: &[u8], content_type: Option<&str>, host: &str) -> Option<CoreError> {
+    match crate::m3u::parser::utf16_text(head) {
+        Some(text) => sniff_text(text.as_bytes(), content_type, host),
+        None => sniff_text(head, content_type, host),
+    }
+}
+
+fn sniff_text(head: &[u8], content_type: Option<&str>, host: &str) -> Option<CoreError> {
     let body = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
     let body = body.trim_ascii_start();
     let has_extm3u = body.len() >= 7 && body[..7].eq_ignore_ascii_case(b"#EXTM3U");
@@ -181,6 +192,45 @@ mod tests {
             b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n#EXTINF:-1 group-title=\"G\",A\nhttp://a\n";
         assert!(sniff(mixed, None, "h").is_none());
         assert!(too_large_error("h").to_string().contains("too large"));
+    }
+
+    /// Review R2-3: a UTF-16 playlist added by URL was rejected as binary
+    /// (every other byte is NUL).
+    #[test]
+    fn sniff_accepts_utf16_playlists() {
+        let text = "#EXTM3U\r\n#EXTINF:-1 group-title=\"News\",A\r\nhttp://h/a.ts\r\n";
+        for le in [true, false] {
+            let mut bom = if le {
+                vec![0xFF, 0xFE]
+            } else {
+                vec![0xFE, 0xFF]
+            };
+            for u in text.encode_utf16() {
+                bom.extend(if le { u.to_le_bytes() } else { u.to_be_bytes() });
+            }
+            for ct in [
+                None,
+                Some("application/octet-stream"),
+                Some("audio/x-mpegurl"),
+            ] {
+                assert!(sniff(&bom, ct, "h").is_none(), "le={le} {ct:?}");
+                assert!(
+                    sniff(&bom[2..], ct, "h").is_none(),
+                    "no BOM, le={le} {ct:?}"
+                );
+                // A head cut mid code unit.
+                assert!(sniff(&bom[..bom.len() - 1], ct, "h").is_none());
+            }
+        }
+        // A UTF-16 web page is still a web page.
+        let mut page = vec![0xFF, 0xFE];
+        for u in "<!DOCTYPE html><html>".encode_utf16() {
+            page.extend(u.to_le_bytes());
+        }
+        assert!(sniff(&page, None, "h")
+            .unwrap()
+            .to_string()
+            .contains("web page"));
     }
 
     #[test]

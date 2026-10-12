@@ -1,4 +1,4 @@
-import { Command as CommandIcon, Moon, PanelRight, Search, Sun } from 'lucide-react';
+import { Moon, PanelRight, Search, SquareChevronRight, Sun } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
@@ -28,7 +28,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
   return (
     <header
       data-testid="shell-header"
-      className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-border bg-bg/90 px-5 backdrop-blur"
+      className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-divider bg-bg/90 px-5 backdrop-blur"
     >
       <div className="flex min-w-0 flex-1 items-baseline gap-3">
         {header?.title ? (
@@ -37,10 +37,10 @@ export function Header({ panelInline }: { panelInline: boolean }) {
               Not a heading: each page owns its single <h1> (C16), so the
               header title stays a styled paragraph to avoid two h1s.
             */}
-            <p className="truncate font-display text-xl font-semibold" data-testid="page-title">
+            <p dir="auto" className="truncate font-display text-xl font-semibold" data-testid="page-title">
               {header.title}
             </p>
-            {header.subtitle && <p className="hidden truncate text-sm text-fg-muted md:block">{header.subtitle}</p>}
+            {header.subtitle && <p dir="auto" className="hidden truncate text-sm text-fg-muted md:block">{header.subtitle}</p>}
           </>
         ) : (
           <span aria-hidden />
@@ -63,7 +63,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
           onClick={() => navigate('/search')}
           className={cn(
             'hidden h-8 w-[clamp(160px,22vw,300px)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
-            'hover:border-fg-subtle hover:text-fg-muted',
+            'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-2',
           )}
         >
           <Search aria-hidden size={15} />
@@ -78,7 +78,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
         {hasPanel && !panelInline && (
           <IconButton
             label={panelOpen ? t('hideDetails') : t('showDetails')}
-            icon={<PanelRight size={18} />}
+            icon={<PanelRight size={18} className="rtl:-scale-x-100" />}
             aria-expanded={panelOpen}
             aria-haspopup="dialog"
             onClick={() => setPanelOpen(!panelOpen)}
@@ -88,7 +88,8 @@ export function Header({ panelInline }: { panelInline: boolean }) {
         <IconButton
           label={t('openPalette')}
           title={`${t('openPalette')} (Ctrl+K)`}
-          icon={<CommandIcon size={18} />}
+          // A command-prompt glyph, not the Mac ⌘ key: this is a Windows app and the shortcut is Ctrl+K.
+          icon={<SquareChevronRight size={18} className="rtl:-scale-x-100" />}
           onClick={() => setPaletteOpen(true)}
           data-testid="open-palette"
         />

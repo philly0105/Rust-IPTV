@@ -172,7 +172,7 @@ describe('library removals can be undone', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Watched a from history' }));
     await waitFor(() => expect(lastToast()?.title).toBe('Removed Watched a from history'));
     lastToast()!.action!.onClick();
-    await waitFor(() => expect(rpc.callsOf('recent.add')).toEqual([{ ref: entry.ref, snapshot: entry.snapshot }]));
+    await waitFor(() => expect(rpc.callsOf('recent.add')).toEqual([{ ref: entry.ref, snapshot: entry.snapshot, viewedAt: entry.viewedAt }]));
   });
 
   it('removing a continue-watching item offers Undo that restores the position', async () => {
@@ -188,7 +188,7 @@ describe('library removals can be undone', () => {
     await waitFor(() => expect(lastToast()?.title).toMatch(/^Removed .* from continue watching$/));
     lastToast()!.action!.onClick();
     await waitFor(() =>
-      expect(rpc.callsOf('positions.set')).toEqual([{ ref: pos.ref, positionSeconds: 600, durationSeconds: 2400, snapshot: pos.snapshot }]),
+      expect(rpc.callsOf('positions.set')).toEqual([{ ref: pos.ref, positionSeconds: 600, durationSeconds: 2400, snapshot: pos.snapshot, updatedAt: pos.updatedAt }]),
     );
   });
 

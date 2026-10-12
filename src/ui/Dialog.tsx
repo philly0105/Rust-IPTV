@@ -130,6 +130,8 @@ export function Dialog({
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
+      // Escape that ends an IME composition (Japanese, Chinese, Korean input) cancels the candidate, not the dialog.
+      if (e.nativeEvent.isComposing) return;
       e.stopPropagation();
       e.nativeEvent.stopImmediatePropagation();
       onCloseRef.current();
@@ -180,7 +182,8 @@ export function Dialog({
         tabIndex={-1}
         data-testid={testId}
         className={cn(
-          'relative flex flex-col border-border bg-surface text-fg shadow-2',
+          // The panel itself only takes focus when it holds nothing focusable; a ring around the whole dialog would read as a stray highlight.
+          'relative flex flex-col border-border bg-surface text-fg shadow-2 focus-visible:shadow-2 focus-visible:outline-none',
           drawer
             ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-fade-in'
             : 'w-full max-h-[calc(100vh-12vh-24px)] rounded-lg border motion-safe:animate-pop-in',
@@ -192,7 +195,7 @@ export function Dialog({
           className={cn(
             'flex gap-4',
             drawer
-              ? 'h-(--header-height) shrink-0 items-center border-b border-border ps-5 pe-3'
+              ? 'h-(--header-height) shrink-0 items-center border-b border-divider ps-5 pe-3'
               : cn('items-start px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4'),
           )}
         >
@@ -214,7 +217,7 @@ export function Dialog({
               onClick={() => onCloseRef.current()}
               className={cn(
                 drawer ? 'ms-auto' : '-me-2',
-                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg',
+                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3',
               )}
             >
               <X aria-hidden size={18} />
@@ -223,7 +226,7 @@ export function Dialog({
         </div>
         <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-6 py-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-divider px-6 py-4">
             {footer}
           </div>
         )}

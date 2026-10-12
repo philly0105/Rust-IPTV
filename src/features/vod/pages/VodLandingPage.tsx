@@ -1,4 +1,4 @@
-import { Clapperboard, ListFilter, Search, Tv } from 'lucide-react';
+import { Clapperboard, ListFilter, Search, SearchX, Tv } from 'lucide-react';
 import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useParams } from 'react-router';
@@ -11,7 +11,7 @@ import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { PosterCard } from '../components/PosterCard';
 import { itemLanguage } from '../lib/language';
 import { PosterRail } from '../components/PosterRail';
-import { useRecentlyAdded, useSource } from '../hooks/queries';
+import { resumeKey, useRecentlyAdded, useResumeMap, useSource } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
@@ -30,6 +30,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const cats = useRpcQuery('catalog.categories', { sourceId, contentType }, { enabled: !!sourceId });
   const allCats = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true }, { enabled: !!sourceId });
   const recent = useRecentlyAdded(source.data, kind);
+  const resume = useResumeMap(sourceId, kind);
 
   const title = kind === 'movie' ? t('movies') : t('series');
   usePageHeader(
@@ -136,6 +137,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   posterUrl={item.posterUrl}
                   year={item.year}
                   rating={item.rating}
+                  progress={resume.get(resumeKey(item.ref))}
                   language={itemLanguage(item.title, item.categoryName)}
                 />
               )}
@@ -172,7 +174,16 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   ))}
                 </div>
               ) : entries.length === 0 ? (
-                <p className="py-8 text-center text-sm text-fg-muted">{t('noCategoryMatch')}</p>
+                <EmptyState
+                  size="inline"
+                  icon={<SearchX size={20} />}
+                  title={t('noCategoryMatch')}
+                  action={
+                    <Button size="sm" variant="secondary" onClick={() => setFilter('')}>
+                      {t('clearFilter')}
+                    </Button>
+                  }
+                />
               ) : (
                 <div onClickCapture={rememberCategory}>
                   <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} />

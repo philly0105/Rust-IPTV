@@ -10,6 +10,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, ImportSummary, Source, SourceKind};
 use crate::sources::{progress, Importer};
 use crate::state::AppState;
+use crate::xtream::sync::{replace_catalogs, CatalogPart};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -244,42 +245,33 @@ async fn run(
         (movies.unwrap_or(0), series.unwrap_or(0))
     };
 
+    // A cancelled run keeps the old catalog (C8): stop before saving, and
+    // save all four types in one transaction so a cancel seen by the writer
+    // rolls every type back together.
+    if crate::sources::is_import_cancelled() {
+        return Err(crate::sources::import_cancelled_error());
+    }
     emit("saving", 0, Some(total), Some("Saving the catalog"));
     let sid = source_id.to_string();
-    let (channel_count, radio_count) = state
-        .db_call(move |conn| {
-            let live = catalog::replace_catalog(
-                conn,
-                &sid,
-                ContentType::Live,
-                &live_categories,
-                &mut live_rows.into_iter(),
-            )?;
-            let radio = catalog::replace_catalog(
-                conn,
-                &sid,
-                ContentType::Radio,
-                &radio_categories,
-                &mut radio_rows.into_iter(),
-            )?;
-            catalog::replace_catalog(
-                conn,
-                &sid,
-                ContentType::Movie,
-                &vod_categories,
-                &mut std::iter::empty(),
-            )?;
-            catalog::replace_catalog(
-                conn,
-                &sid,
-                ContentType::Series,
-                &series_categories,
-                &mut std::iter::empty(),
-            )?;
-            catalog::update_counts(conn, &sid)?;
-            Ok((live, radio))
-        })
+    let part = |content_type, categories, rows| CatalogPart {
+        content_type,
+        categories,
+        rows,
+    };
+    let parts = vec![
+        part(ContentType::Live, live_categories, live_rows),
+        part(ContentType::Radio, radio_categories, radio_rows),
+        part(ContentType::Movie, vod_categories, Vec::new()),
+        part(ContentType::Series, series_categories, Vec::new()),
+    ];
+    // The run's token, read here (task-local) before waiting on the pool or
+    // the write lock (C8; see `CatalogWriter::begin`).
+    let cancel = crate::sources::import_cancel();
+    let counts = state
+        .db_call(move |conn| replace_catalogs(conn, &sid, parts, cancel, &mut |_| {}))
         .await?;
+    let count = |ct: ContentType| counts.get(&ct).copied().unwrap_or(0);
+    let (channel_count, radio_count) = (count(ContentType::Live), count(ContentType::Radio));
     // Plans and page sizes may have changed; listed rows stay usable.
     Runtime::get(state).forget_listings(source_id);
 

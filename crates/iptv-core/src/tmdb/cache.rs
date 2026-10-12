@@ -148,6 +148,8 @@ pub fn clone_error(e: &CoreError) -> CoreError {
         CoreError::NotFound(m) => CoreError::NotFound(m.clone()),
         CoreError::Invalid(m) => CoreError::Invalid(m.clone()),
         CoreError::Network(m) => CoreError::Network(m.clone()),
+        CoreError::Server(m) => CoreError::Server(m.clone()),
+        CoreError::EngineMissing(m) => CoreError::EngineMissing(m.clone()),
         CoreError::Auth(m) => CoreError::Auth(m.clone()),
         CoreError::Timeout(m) => CoreError::Timeout(m.clone()),
         CoreError::Conflict(m) => CoreError::Conflict(m.clone()),

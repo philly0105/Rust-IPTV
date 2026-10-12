@@ -3,6 +3,8 @@
  * a normalized value or an i18n key (namespace `sources`) describing the problem.
  */
 
+import { REDACTED, redactUrl } from './redact';
+
 /** Infomir's OUI. The stock Stalker MAC filter only accepts this range. */
 export const INFOMIR_MAC_OUI = '00:1A:79';
 
@@ -117,7 +119,7 @@ export function suggestName(input: string): string {
   try {
     const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `http://${v}`);
     const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
-    const stem = decodeURIComponent(last).replace(/\.(m3u8?|php|txt)$/i, '');
+    const stem = safeDecode(last).replace(/\.(m3u8?|php|txt)$/i, '');
     if (stem && !/^(get|playlist|index|player_api)$/i.test(stem)) return stem;
     return u.hostname.replace(/^www\./, '');
   } catch {
@@ -126,14 +128,26 @@ export function suggestName(input: string): string {
   }
 }
 
-/** Host part of a URL for display, without credentials. */
+/** `decodeURIComponent` that keeps the raw text when it holds a broken escape (`%E0%A4`). */
+function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Host part of a URL for display, without credentials. Text that does not parse
+ * as a URL is shown with any userinfo, secret parameters or Xtream path removed.
+ */
 export function displayHost(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
     const u = new URL(url);
     return u.port ? `${u.hostname}:${u.port}` : u.hostname;
   } catch {
-    return url;
+    return redactUrl(url).replace(/^[^@/]*@/, `${REDACTED}@`);
   }
 }
 

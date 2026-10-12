@@ -46,7 +46,11 @@ pub fn register(r: &mut RpcRouter) {
         "app.openPath",
         |s: Arc<AppState>, a: OpenPathArgs| async move {
             ensure_desktop(&s)?;
-            let path = validate_open_path(&a.path)?;
+            let roots = [
+                crate::downloads::dir(&s),
+                crate::player::embedded::recordings_dir(&s),
+            ];
+            let path = validate_open_path(&a.path, &roots)?;
             open_with_os(&path)
         },
     );
@@ -140,19 +144,56 @@ fn ensure_desktop(s: &AppState) -> Result<(), RpcError> {
     }
 }
 
-/// Extensions that would execute code if handed to the OS shell.
-const BLOCKED_EXTENSIONS: &[&str] = &[
-    "exe", "bat", "cmd", "com", "msi", "msp", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf",
-    "wsh", "scr", "lnk", "pif", "reg", "hta", "cpl", "jar", "sh", "app", "command",
+/// File types `app.openPath` hands to the OS shell: media, subtitles and
+/// playlists. Everything else (programs, shortcuts, `.url`, `.chm`, `.msc`,
+/// `.search-ms`, ...) could run code and is refused.
+const ALLOWED_EXTENSIONS: &[&str] = &[
+    // video
+    "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "mpg", "mpeg", "ts", "m2ts", "mts",
+    "3gp", "ogv", // audio
+    "mp3", "aac", "m4a", "flac", "ogg", "oga", "opus", "wav", "mka", "wma", // subtitles
+    "srt", "vtt", "ass", "ssa", "sub", // playlists
+    "m3u", "m3u8", "pls", "xspf",
 ];
 
-/// Accepts existing directories and non-executable files.
-fn validate_open_path(raw: &str) -> Result<PathBuf, RpcError> {
+/// Accepts existing local directories and media, subtitle or playlist files.
+/// Network (UNC) paths are refused: opening one can reach a remote host with
+/// the user's Windows credentials. The exception is a path at or under one
+/// of `allowed_roots` (the downloads and recordings folders, which the user
+/// chose and may keep on a share, review round 3).
+fn validate_open_path(raw: &str, allowed_roots: &[PathBuf]) -> Result<PathBuf, RpcError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(RpcError::invalid("Path is empty."));
     }
-    let path = PathBuf::from(trimmed);
+    // Windows treats `/` and `\` alike, so `\/host\share` is a UNC path too:
+    // unify the separators, then resolve the full path (GetFullPathNameW on
+    // Windows) and refuse UNC, verbatim (`\\?\`) and device (`\\.\`) forms
+    // before any filesystem call can reach the network.
+    let is_network = |p: &str| p.starts_with(r"\\") || p.starts_with("//");
+    // Verbatim and device forms are never opened, even under a root.
+    let is_special = |p: &str| {
+        let p = p.replace('/', "\\");
+        p.starts_with(r"\\?\") || p.starts_with(r"\\.\")
+    };
+    let unified = if cfg!(windows) {
+        trimmed.replace('/', "\\")
+    } else {
+        trimmed.to_string()
+    };
+    // `absolute` is a string operation (no filesystem access), so this
+    // still runs before anything can reach the network.
+    let path = std::path::absolute(&unified)
+        .map_err(|_| RpcError::invalid("This path cannot be opened."))?;
+    let shown = path.to_string_lossy();
+    if is_network(&unified) || is_network(&shown) {
+        let allowed = !is_special(&unified)
+            && !is_special(&shown)
+            && allowed_roots.iter().any(|root| is_within(&path, root));
+        if !allowed {
+            return Err(RpcError::invalid("Network paths cannot be opened."));
+        }
+    }
     let meta = std::fs::metadata(&path)
         .map_err(|_| RpcError::not_found(format!("{} does not exist.", path.display())))?;
     if meta.is_file() {
@@ -161,11 +202,30 @@ fn validate_open_path(raw: &str) -> Result<PathBuf, RpcError> {
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if BLOCKED_EXTENSIONS.contains(&ext.as_str()) {
-            return Err(RpcError::invalid("Refusing to open an executable file."));
+        if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(RpcError::invalid(
+                "Only folders and media, subtitle or playlist files can be opened.",
+            ));
         }
     }
     Ok(path)
+}
+
+/// Whether `path` (already absolute) is `root` or inside it, comparing
+/// resolved paths component by component (case-insensitive on Windows).
+fn is_within(path: &Path, root: &Path) -> bool {
+    let unify = |p: &Path| {
+        let s = p.to_string_lossy().into_owned();
+        if cfg!(windows) {
+            s.replace('/', "\\").to_lowercase()
+        } else {
+            s
+        }
+    };
+    let Ok(root) = std::path::absolute(unify(root)) else {
+        return false;
+    };
+    PathBuf::from(unify(path)).starts_with(&root)
 }
 
 /// Opens a file or directory with the OS default handler (detached).
@@ -235,14 +295,101 @@ mod tests {
     #[test]
     fn open_path_validation() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(validate_open_path(&dir.path().display().to_string()).is_ok());
+        assert!(validate_open_path(&dir.path().display().to_string(), &[]).is_ok());
         let exe = dir.path().join("evil.exe");
         std::fs::write(&exe, b"x").unwrap();
-        assert!(validate_open_path(&exe.display().to_string()).is_err());
+        assert!(validate_open_path(&exe.display().to_string(), &[]).is_err());
         let mp4 = dir.path().join("movie.mp4");
         std::fs::write(&mp4, b"x").unwrap();
-        assert!(validate_open_path(&mp4.display().to_string()).is_ok());
-        assert!(validate_open_path("").is_err());
-        assert!(validate_open_path(&dir.path().join("missing").display().to_string()).is_err());
+        assert!(validate_open_path(&mp4.display().to_string(), &[]).is_ok());
+        assert!(validate_open_path("", &[]).is_err());
+        assert!(
+            validate_open_path(&dir.path().join("missing").display().to_string(), &[]).is_err()
+        );
+    }
+
+    /// Review round 1: an allowlist, so shell-executable types a blocklist
+    /// missed are refused, and network paths never reach the shell.
+    #[test]
+    fn open_path_allows_only_media_types_and_local_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        for ext in [
+            "url",
+            "chm",
+            "msc",
+            "appref-ms",
+            "settingcontent-ms",
+            "library-ms",
+            "search-ms",
+            "exe",
+            "lnk",
+            "txt",
+        ] {
+            let f = dir.path().join(format!("x.{ext}"));
+            std::fs::write(&f, b"x").unwrap();
+            assert!(
+                validate_open_path(&f.display().to_string(), &[]).is_err(),
+                "{ext}"
+            );
+        }
+        for ext in ["mkv", "ts", "srt", "m3u8", "MP4"] {
+            let f = dir.path().join(format!("ok.{ext}"));
+            std::fs::write(&f, b"x").unwrap();
+            assert!(
+                validate_open_path(&f.display().to_string(), &[]).is_ok(),
+                "{ext}"
+            );
+        }
+        let mut shapes = vec![r"\\server\share", r"\\?\UNC\server\share", "//server/share"];
+        // Review round 2: mixed separators are UNC on Windows too, and the
+        // verbatim and device forms never reach the filesystem.
+        #[cfg(windows)]
+        shapes.extend([
+            r"\/localhost\share\x.mp4",
+            r"/\localhost\share\x.mp4",
+            r"\/localhost/share",
+            r"\\?\C:\Windows",
+            r"\\.\C:\Windows",
+            r"//?/C:/Windows",
+            r"\\.\pipe\x",
+        ]);
+        for unc in shapes {
+            let err = validate_open_path(unc, &[]).unwrap_err();
+            assert!(err.message.contains("Network paths"), "{unc}: {err:?}");
+        }
+    }
+
+    /// Review round 3: a downloads or recordings folder on a share (which
+    /// `downloads.setDir` accepts) can be opened, with what is inside it;
+    /// every other network path is still refused.
+    #[cfg(windows)]
+    #[test]
+    fn open_path_allows_the_configured_folders_on_a_share() {
+        let roots = [
+            PathBuf::from(r"\\localhost\tsrust-no-share\Downloads"),
+            PathBuf::from(r"\\localhost\tsrust-no-share\Rec"),
+        ];
+        // Past the network check: the share does not exist here, so the
+        // answer is "does not exist", not "Network paths".
+        for p in [
+            r"\\localhost\tsrust-no-share\Downloads",
+            r"\\LOCALHOST\Tsrust-No-Share\downloads\Show\e1.mkv",
+            r"//localhost/tsrust-no-share/Rec/x.ts",
+            r"\/localhost\tsrust-no-share\Rec",
+        ] {
+            let err = validate_open_path(p, &roots).unwrap_err();
+            assert!(err.message.contains("does not exist"), "{p}: {err:?}");
+        }
+        for p in [
+            r"\\localhost\tsrust-no-share",
+            r"\\localhost\tsrust-no-share\Downloads2\x.mkv",
+            r"\\localhost\tsrust-no-share\Downloads\..\secret\x.mkv",
+            r"\\other.invalid\media\Downloads\x.mkv",
+            r"\\?\UNC\localhost\tsrust-no-share\Downloads\x.mkv",
+            r"\\.\pipe\x",
+        ] {
+            let err = validate_open_path(p, &roots).unwrap_err();
+            assert!(err.message.contains("Network paths"), "{p}: {err:?}");
+        }
     }
 }

@@ -42,13 +42,14 @@ export function useDownloadActions() {
   const { pending, run } = usePending<number>();
 
   const perform = useCallback(
-    async function perform(action: DownloadCommand, d: Download, opts?: { deleteFile?: boolean }): Promise<boolean> {
+    async function perform(action: DownloadCommand, d: Download, opts?: { deleteFile?: boolean; quiet?: boolean }): Promise<boolean> {
       let ok = false;
       await run(d.id, async () => {
         try {
           await dispatch(action, d, opts?.deleteFile ?? false);
           ok = true;
-          if (action === 'redownload') toast({ title: t('redownloadQueued', { title: d.title }), variant: 'success' });
+          // `quiet` lets a batch caller report once instead of per item.
+          if (action === 'redownload' && !opts?.quiet) toast({ title: t('redownloadQueued', { title: d.title }), variant: 'success' });
         } catch (err) {
           const e = RpcError.from(err);
           toast({

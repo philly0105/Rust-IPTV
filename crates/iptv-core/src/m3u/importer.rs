@@ -272,7 +272,9 @@ impl RowBuilder {
             (None, None)
         };
         let archive_hours = if catchup_ok {
-            e.catchup_days.filter(|d| *d > 0).map(|d| d * 24)
+            // Clamped: `catchup-days="9223372036854775807"` overflowed `* 24`.
+            e.catchup_days
+                .and_then(crate::xtream::meta::archive_days_to_hours)
         } else {
             None
         };
@@ -538,9 +540,16 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     let st = state.clone();
     let pool = state.db.clone();
     let origin = cfg.origin;
+    // This run's cancel token, taken here (task-local) before waiting for the
+    // write lock: if that wait outlasts CANCEL_GRACE, the run is dropped and
+    // its writer token unregistered, so a token looked up later would be
+    // missing and the cancelled import would commit. The DB-keyed writer
+    // token is only a fallback for callers outside a run.
+    let run_cancel = sources::import_cancel();
     tokio::task::spawn_blocking(move || -> CoreResult<ImportSummary> {
         let mut conn = pool.get()?;
-        write_catalog(&st, &mut conn, &source_id, payload, &sha, origin)
+        let cancel = run_cancel.or_else(|| sources::writer_cancel_token(&conn, &source_id));
+        write_catalog(&st, &mut conn, &source_id, payload, &sha, origin, cancel)
     })
     .await?
     .map_err(|e| state.note_db_error(e))
@@ -570,6 +579,10 @@ async fn keep_unchanged(state: &Arc<AppState>, source_id: &str) -> CoreResult<Im
 
 /// Streams `payload` through the parser into the catalog inside one IMMEDIATE
 /// transaction, then stores the raw text and detected EPG URLs.
+///
+/// `cancel` is the import run's token, taken by the caller before the
+/// transaction: it is checked once the write lock is held, while parsing, and
+/// right before the commit, so a cancelled run never commits (C8).
 fn write_catalog(
     state: &AppState,
     conn: &mut Connection,
@@ -577,13 +590,21 @@ fn write_catalog(
     payload: Payload,
     sha: &str,
     origin: M3uOrigin,
+    cancel: Option<tokio_util::sync::CancellationToken>,
 ) -> CoreResult<ImportSummary> {
+    let check_cancel = || -> CoreResult<()> {
+        if cancel.as_ref().is_some_and(|t| t.is_cancelled()) {
+            return Err(sources::import_cancelled_error());
+        }
+        Ok(())
+    };
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    check_cancel()?;
     let mut builder = RowBuilder::new(source_id);
     let started = std::time::Instant::now();
 
     let (header, stats, summary) = {
-        let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES)?;
+        let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES, cancel.clone())?;
         let reader: Box<dyn std::io::BufRead + '_> = match &payload {
             Payload::File { path: p, .. } => Box::new(BufReader::with_capacity(
                 READ_BUF,
@@ -598,6 +619,7 @@ fn write_catalog(
             writer.insert(&row)?;
             n += 1;
             if n % PROGRESS_EVERY == 0 {
+                check_cancel()?;
                 sources::progress(state, source_id, "parsing", n, None, None);
             }
         }
@@ -671,6 +693,8 @@ fn write_catalog(
             params![source_id, serde_json::to_string(&epg)?],
         )?;
     }
+    // Last check: a cancelled run never commits.
+    check_cancel()?;
     tx.commit()?;
     let cache = cached_playlist_path(&state.data_dir, source_id);
     match keep_copy {
@@ -733,21 +757,9 @@ fn read_text_lossy(p: &Path) -> CoreResult<String> {
     std::fs::File::open(p)
         .map_err(|e| file_error(p, e))?
         .read_to_end(&mut bytes)?;
-    let start = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        3
-    } else {
-        0
-    };
-    let text = match String::from_utf8(bytes) {
-        Ok(mut s) => {
-            if start > 0 {
-                s.drain(..start);
-            }
-            s
-        }
-        Err(e) => String::from_utf8_lossy(&e.into_bytes()[start..]).into_owned(),
-    };
-    Ok(text)
+    // Decoded like the parser reads it (UTF-16, UTF-8 BOM, Windows-1252
+    // lines), so the stored raw text matches the imported catalog.
+    Ok(crate::m3u::parser::decode_playlist_text(bytes))
 }
 
 /// sha256 of a file, streamed.
@@ -794,6 +806,54 @@ fn playlist_status_error(status: reqwest::StatusCode, host: &str) -> CoreError {
         &format!("{host} answered the playlist download"),
         hint,
     )
+}
+
+/// `import.progress` of a download retry: the C6 fields plus `attempt` (the
+/// 1-based try starting now) and `attempts` (tries allowed). Both are
+/// additive; other progress events do not carry them.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RetryProgress<'a> {
+    source_id: &'a str,
+    phase: &'static str,
+    done: u64,
+    message: &'a str,
+    attempt: u32,
+    attempts: u32,
+}
+
+/// Emits the `import.progress` of a retry (try `attempt` of `attempts`).
+/// Shared by the M3U download and the Xtream client.
+pub(crate) fn emit_retry(state: &AppState, source_id: &str, attempt: u32, attempts: u32) {
+    let message = format!("Retrying the download (try {attempt} of {attempts})");
+    state.emit(
+        "import.progress",
+        RetryProgress {
+            source_id,
+            phase: "fetching",
+            done: 0,
+            message: &message,
+            attempt,
+            attempts,
+        },
+    );
+}
+
+/// The last error of a download that was retried: says how many tries were
+/// made (the error itself only describes the last one). Same variant, so the
+/// same error code. Appended, not prefixed: the UI reads the host from the
+/// start of the message (`sourceError.ts` HOST_PATTERNS).
+pub(crate) fn after_tries(err: CoreError, tries: u32) -> CoreError {
+    if tries < 2 {
+        return err;
+    }
+    let say = |m: String| format!("{m} The download failed after {tries} tries.");
+    match err {
+        CoreError::Network(m) => CoreError::Network(say(m)),
+        CoreError::Timeout(m) => CoreError::Timeout(say(m)),
+        CoreError::Server(m) => CoreError::Server(say(m)),
+        other => other,
+    }
 }
 
 /// Downloads `url` with the source headers into `dest` (streamed, never held
@@ -914,14 +974,18 @@ async fn fetch_to_file(
             Ok(sha) => return Ok(sha),
             Err((err, stalled)) => {
                 tracing::warn!(url = %safe_url, error = %err, attempt = n + 1, "playlist download failed");
-                if stalled || !err.is_retryable() || n + 1 >= FETCH_ATTEMPTS {
+                if stalled || !err.is_retryable() {
                     return Err(err);
+                }
+                if n + 1 >= FETCH_ATTEMPTS {
+                    return Err(after_tries(err, n + 1));
                 }
                 tokio::select! {
                     () = tokio::time::sleep(crate::http::backoff_delay(n)) => {}
                     () = cancel.cancelled() => return Err(sources::import_cancelled_error()),
                 }
                 n += 1;
+                emit_retry(state, source_id, n + 1, FETCH_ATTEMPTS);
             }
         }
     }
@@ -1114,7 +1178,7 @@ mod tests {
         .await;
         let (r, _) = fetch(&url).await;
         let err = r.unwrap_err();
-        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        assert!(matches!(err, CoreError::Server(_)), "{err:?}");
         let msg = err.to_string();
         assert!(
             msg.contains("127.0.0.1")
@@ -1130,6 +1194,114 @@ mod tests {
         assert!(
             matches!(err, CoreError::Auth(ref m) if m.contains("HTTP 403") && m.contains("User-Agent"))
         );
+    }
+
+    /// Review R1-6: retries were silent (the UI sat on "Downloading") and the
+    /// final message only described the last try.
+    #[tokio::test]
+    async fn retries_are_reported_and_counted_in_the_message() {
+        let (url, hits) = raw_stub(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let (sink, mut rx) = crate::events::BroadcastSink::channel(256);
+        let state = AppState::new(tmp.path().to_path_buf(), Arc::new(sink), false)
+            .await
+            .unwrap();
+        let cfg = M3uSourceConfig {
+            origin: M3uOrigin::Url,
+            url: Some(url.clone()),
+            file_path: None,
+            headers: Default::default(),
+        };
+        let err = fetch_to_file(&state, "s", &url, &cfg, &tmp.path().join("x.part"))
+            .await
+            .unwrap_err();
+        let CoreError::Server(msg) = &err else {
+            panic!("code kept: {err:?}");
+        };
+        assert!(
+            msg.contains("after 3 tries") && msg.contains("HTTP 503"),
+            "{msg}"
+        );
+        assert!(
+            msg.starts_with("127.0.0.1"),
+            "host stays first for the UI: {msg}"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 3);
+        let mut tries = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if ev.kind == "import.progress" && ev.payload.get("attempt").is_some() {
+                assert_eq!(ev.payload["phase"], "fetching");
+                assert_eq!(ev.payload["attempts"], FETCH_ATTEMPTS);
+                tries.push(ev.payload["attempt"].as_u64().unwrap());
+            }
+        }
+        assert_eq!(tries, [2, 3]);
+        // A single failed try is not reworded.
+        let one = after_tries(CoreError::Timeout("x".into()), 1);
+        assert!(matches!(one, CoreError::Timeout(ref m) if m == "x"));
+    }
+
+    /// Review R1-7: write_catalog looked up the writer token only after
+    /// opening its transaction. When the run was dropped meanwhile (lock wait
+    /// past CANCEL_GRACE) no token was registered any more and the cancelled
+    /// import committed. The run's own token is now passed in and checked.
+    #[tokio::test]
+    async fn cancelled_run_never_commits_without_a_registered_writer_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let mut conn = state.db.get().unwrap();
+        conn.execute(
+            "INSERT INTO sources (id, kind, name, config_json) VALUES ('s7', 'm3u', 'S', '{}')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            sources::writer_cancel_token(&conn, "s7").is_none(),
+            "no run registered"
+        );
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let text = "#EXTM3U\n#EXTINF:-1,A\nhttp://a\n".to_string();
+        let err = write_catalog(
+            &state,
+            &mut conn,
+            "s7",
+            Payload::Text(text.clone()),
+            "sha",
+            M3uOrigin::Url,
+            Some(token),
+        )
+        .unwrap_err();
+        assert!(sources::is_cancelled_error(&err), "{err:?}");
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM items WHERE source_id = 's7'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "nothing committed");
+        // A live token writes normally.
+        let s = write_catalog(
+            &state,
+            &mut conn,
+            "s7",
+            Payload::Text(text),
+            "sha",
+            M3uOrigin::Url,
+            Some(tokio_util::sync::CancellationToken::new()),
+        )
+        .unwrap();
+        assert_eq!(s.channels, 1);
     }
 
     #[test]
@@ -1162,5 +1334,54 @@ mod tests {
         assert_eq!(movie.year, Some(1995));
         assert_eq!(movie.container_extension.as_deref(), Some("mp4"));
         assert_eq!(movie.number, None);
+    }
+
+    /// B8-parsers: `catchup-days` * 24 overflowed (debug panic) on garbage.
+    #[test]
+    fn huge_catchup_days_are_clamped() {
+        let (e, _, _) = parse_str(
+            "#EXTM3U\n#EXTINF:-1 catchup=\"default\" catchup-days=\"9223372036854775807\",A\nhttp://a\n#EXTINF:-1 catchup=\"default\" timeshift=\"3\",B\nhttp://b\n",
+        );
+        let mut b = RowBuilder::new("s");
+        let rows: Vec<ItemRow> = e.into_iter().map(|e| b.row(e)).collect();
+        assert_eq!(
+            rows[0].archive_hours,
+            Some(crate::xtream::meta::MAX_ARCHIVE_DAYS * 24)
+        );
+        assert_eq!(rows[1].archive_hours, Some(72));
+    }
+
+    /// Review R2-3: a UTF-16 playlist added by URL was rejected as binary.
+    #[tokio::test]
+    async fn utf16_playlist_by_url_is_accepted() {
+        // BOM-less UTF-16 LE of ASCII text is valid UTF-8 (NUL-interleaved).
+        let body: String = "#EXTM3U\r\n#EXTINF:-1,A\r\nhttp://s/1.ts\r\n"
+            .chars()
+            .flat_map(|c| [c, '\0'])
+            .collect();
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (url, _) = raw_stub(Box::leak(head.into_boxed_str())).await;
+        let (r, _) = fetch(&url).await;
+        r.unwrap();
+    }
+
+    /// Review R2-8: the stored raw text of a UTF-16 file source was garbled
+    /// (read as UTF-8, lossy).
+    #[test]
+    fn raw_text_of_a_utf16_file_is_decoded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let text = "#EXTM3U\r\n#EXTINF:-1,Télé\r\nhttp://s/1.ts\r\n";
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in text.encode_utf16() {
+            bytes.extend(u.to_le_bytes());
+        }
+        let p = tmp.path().join("u16.m3u");
+        std::fs::write(&p, &bytes).unwrap();
+        assert_eq!(read_text_lossy(&p).unwrap(), text);
+        std::fs::write(&p, b"#EXTM3U\n#EXTINF:-1,Caf\xe9\n").unwrap();
+        assert_eq!(read_text_lossy(&p).unwrap(), "#EXTM3U\n#EXTINF:-1,Café\n");
     }
 }

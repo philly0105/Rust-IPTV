@@ -175,6 +175,11 @@ export function filterLibrary(entries: readonly LibraryEntry[], filter: LibraryF
   });
 }
 
+/** The download id a library entry's detail page is opened with. */
+export function entryTargetId(e: LibraryEntry): number {
+  return e.kind === 'movie' ? e.download.id : e.latest.id;
+}
+
 /** Finds the library entry that owns a download id (movie or any episode of a series). */
 export function findEntry(entries: readonly LibraryEntry[], id: number): LibraryEntry | undefined {
   return entries.find((e) => (e.kind === 'movie' ? e.download.id === id : e.episodes.some((ep) => ep.download.id === id)));

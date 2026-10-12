@@ -26,6 +26,10 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'enter', descKey: 'scSearchToList', area: 'Live' },
   { combo: 'arrowdown', descKey: 'scSearchToList', area: 'Live' },
   { combo: 'escape', descKey: 'scSearchClear', area: 'Live' },
+  // Bound by the focused channel list (ChannelList.tsx onKeyDown).
+  { combo: 's', descKey: 'scChannelFavorite', area: 'Live' },
+  { combo: 'shift+f10', descKey: 'scItemMenu', area: 'Live' },
+  { combo: 'contextmenu', descKey: 'scItemMenu', area: 'Live' },
   { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
   { combo: 'shift+n', descKey: 'sources:shortcutAddSource', area: 'Sources' },
   { combo: 'alt+arrowup', descKey: 'library:shortcutMoveUp', area: 'Favorites' },
@@ -40,7 +44,8 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'f', descKey: 'scFullscreen', area: 'Playback' },
   { combo: 'arrowleft', descKey: 'scSeekBack', area: 'Playback' },
   { combo: 'arrowright', descKey: 'scSeekForward', area: 'Playback' },
-  // Bound by the focused seek bar (SeekBar.tsx, SEEK_STEP_LARGE).
+  { combo: 'n', descKey: 'scNextItem', area: 'Playback' },
+  // Bound app-wide by usePlaybackShortcuts (SEEK_STEP_LARGE), not only on the focused seek bar.
   { combo: 'shift+arrowleft', descKey: 'scSeekBackLarge', area: 'Playback' },
   { combo: 'shift+arrowright', descKey: 'scSeekForwardLarge', area: 'Playback' },
   { combo: 'arrowup', descKey: 'scVolumeUp', area: 'Playback' },
@@ -51,13 +56,26 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'pagedown', descKey: 'scChannelDown', area: 'Playback' },
   // Bound by pip.ts only while picture-in-picture is on.
   { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
+  // Bound by the focused seek bar (SeekBar.tsx onKeyDown). Its own area: PgUp/PgDn mean channel up/down in Playback.
+  { combo: 'pageup', descKey: 'scSeekBarPageForward', area: 'Seek bar' },
+  { combo: 'pagedown', descKey: 'scSeekBarPageBack', area: 'Seek bar' },
+  { combo: 'home', descKey: 'scSeekBarStart', area: 'Seek bar' },
+  { combo: 'end', descKey: 'scSeekBarEnd', area: 'Seek bar' },
   { combo: 'arrowup', descKey: 'scListMove', area: 'Dialogs and lists' },
   { combo: 'arrowdown', descKey: 'scListMove', area: 'Dialogs and lists' },
   { combo: 'enter', descKey: 'scListRun', area: 'Dialogs and lists' },
   { combo: 'escape', descKey: 'scListClose', area: 'Dialogs and lists' },
+  { combo: 'home', descKey: 'scListJump', area: 'Dialogs and lists' },
+  { combo: 'end', descKey: 'scListJump', area: 'Dialogs and lists' },
+  { combo: 'pageup', descKey: 'scListPage', area: 'Dialogs and lists' },
+  { combo: 'pagedown', descKey: 'scListPage', area: 'Dialogs and lists' },
+  { combo: 'arrowleft', descKey: 'scGridMove', area: 'Dialogs and lists' },
+  { combo: 'arrowright', descKey: 'scGridMove', area: 'Dialogs and lists' },
+  // Favorites, Recent and My videos rows (onRowKeyDown); Downloads registers its own.
+  { combo: 'delete', descKey: 'scListRemove', area: 'Dialogs and lists' },
 ];
 
-const AREA_ORDER = ['Global', 'Navigation', 'Live', 'Vod', 'Sources', 'Favorites', 'Downloads', 'My videos', 'Playback', 'Dialogs and lists'];
+const AREA_ORDER = ['Global', 'Navigation', 'Live', 'Vod', 'Sources', 'Favorites', 'Downloads', 'My videos', 'Playback', 'Seek bar', 'Dialogs and lists'];
 /**
  * Area id -> fully namespaced i18n key of its display label. Feature areas
  * reuse the label the feature registers under, so documented and registered
@@ -73,6 +91,7 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Downloads: 'library:title',
   'My videos': 'library:myVideosTitle',
   Playback: 'shell:areaPlayback',
+  'Seek bar': 'shell:areaSeekBar',
   'Dialogs and lists': 'shell:areaDialogs',
 };
 const AREA_KEYS = SHORTCUT_AREA_KEYS;
@@ -172,7 +191,7 @@ export function ShortcutOverlay() {
                   <div
                     key={`${s.combo}|${s.description}`}
                     data-combo={s.combo}
-                    className="flex items-center justify-between gap-4 border-b border-border/60 py-2 last:border-b-0"
+                    className="flex items-center justify-between gap-4 border-b border-divider py-2 last:border-b-0"
                   >
                     <dt className="text-sm text-fg">{s.description}</dt>
                     <dd className="shrink-0">

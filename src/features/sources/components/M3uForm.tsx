@@ -6,7 +6,7 @@ import type { M3uOrigin } from '@/api/types';
 
 import { Button, Input, Tabs, Textarea } from '@/ui';
 import type { DraftErrors, M3uDraft } from '../lib/draft';
-import { PLAYLIST_EXTENSIONS, baseName, pickPathDesktop, readFileText } from '../lib/files';
+import { MAX_WEB_FILE_BYTES, PLAYLIST_EXTENSIONS, baseName, formatFileSize, pickPathDesktop, readFileText } from '../lib/files';
 import { usePlaylistPreview } from '../lib/usePreview';
 import { parseXtreamLink } from '../lib/validate';
 import { Field } from './Field';
@@ -30,7 +30,7 @@ export interface M3uFormProps {
 }
 
 export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur }: M3uFormProps) {
-  const { t } = useTranslation('sources');
+  const { t, i18n } = useTranslation('sources');
   const fileInput = useRef<HTMLInputElement>(null);
   const fileHintId = useId();
   const [reading, setReading] = useState(false);
@@ -62,6 +62,11 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     setFileError(null);
+    // Reading a huge file into one string can stall or crash the page; such lists belong at a URL.
+    if (file.size > MAX_WEB_FILE_BYTES) {
+      setFileError(t('errorFileTooLarge', { size: formatFileSize(file.size, i18n.language) }));
+      return;
+    }
     setReading(true);
     try {
       const text = await readFileText(file);

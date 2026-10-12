@@ -23,7 +23,7 @@
   "pageNotFound": "Az oldal nem található",
   "pageNotFoundHint": "Ez a cím egyetlen oldalnak sem felel meg. Használja az oldalsávot, vagy térjen vissza a kezdőlapra.",
 
-  "errorTitleNetwork": "Nem érhető el a kiszolgáló",
+  "errorTitleNetwork": "Nem sikerült elérni a kiszolgálót",
   "errorTitleTimeout": "A kérés túl sokáig tartott",
   "errorTitleAuth": "A bejelentkezés elutasítva",
   "errorTitleNotFound": "Nem található",
@@ -46,5 +46,10 @@
   "errorHintConflict": "Töltse be újra a legfrissebb változatot, majd próbálja újra.",
   "errorHintIo": "Ellenőrizze, hogy a mappa létezik-e, és van-e írási jogosultsága hozzá.",
   "errorHintDb": "Indítsa újra az alkalmazást. Ha a hiba továbbra is fennáll, állítson vissza egy biztonsági mentést a Beállításokban.",
-  "errorHintInternal": "Próbálja újra. Ha a hiba továbbra is fennáll, indítsa újra az alkalmazást."
+  "errorHintInternal": "Próbálja újra. Ha a hiba továbbra is fennáll, indítsa újra az alkalmazást.",
+  "errorCode": "Hibakód: {{code}}",
+  "errorTitleEngineMissing": "Nem sikerült elindítani a lejátszómotort",
+  "errorHintEngineMissing": "A videolejátszó motor (mpv) hiányzik, vagy nem sikerült elindítani.",
+  "errorTitleServer": "Hiba történt a kiszolgálón",
+  "errorHintServer": "A kiszolgáló túlterhelt vagy hibásan működik. Próbálja újra később."
 }

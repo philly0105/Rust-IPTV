@@ -52,14 +52,14 @@ Size limits, enforced by a byte-level guard between the decoded reader and quick
 - Encoding: UTF-8 by default. ISO-8859-1 or Latin-1 is used when declared.
 - Dates: `YYYYMMDD[hh[mm[ss]]][.frac] [offset]`, where the offset can be `+HHMM`, `+HH:MM`, `+HH`, `Z`, `UTC` or `GMT`. Missing offsets mean UTC. RFC 3339 is accepted as a fallback. The result is stored as unix seconds (UTC).
 - Missing `stop`: the stop is inferred as the next programme's start on the same channel, or start + 1 h if nothing follows.
-- Invalid rows (bad start, no channel, `stop <= start`) are counted and skipped.
+- Invalid rows (bad start, no channel, `stop <= start`) are counted and skipped. When more than half of the programmes seen are skipped this way, the URL's stored `error` is exactly `epg_unreadable:<skipped>:<seen>` (two integers, no other text; C15). The settings EPG section matches `^epg_unreadable:(\d+):(\d+)$` and shows the translated `epgUnreadable` string with those counts; any other error text is shown as it is.
 - Window: only programmes with `stop > now - 2 days` and `start <= now + 14 days` are kept.
 - Overlapping programmes are stored as they are. Queries clip them (see below).
 - A truncated document keeps everything read before the XML error and records a warning. A document without `<tv>`, such as an HTML error page, or with no channels or programmes is rejected as Invalid, and the stored data is left alone.
 
 ## Storage: staging and swap
 
-Tables (C3): `epg_sources`, `epg_channels`, `epg_programs` (start and stop are unix seconds), and `epg_channel_map`.
+Tables (C3): `epg_sources`, `epg_channels`, `epg_programs` (start and stop are unix seconds), and `epg_channel_map`. Migration 0007 adds a unique index on `(epg_url, channel_id, start)`; on upgrade it drops and recreates `epg_programs` and clears each feed's `last_fetch_at`, `etag` and `program_count`, so the cached guide is empty until the next scheduler pass downloads every feed again. Feeds, channel lists and mappings stay.
 
 1. `begin_staging` creates a hidden `epg_sources` row keyed `"<url>\u{1}staging"` (`origin='staging'`, `enabled=0`) and clears earlier staged rows.
 2. `StagingWriter` buffers rows and flushes 2000 per IMMEDIATE transaction with cached statements: `INSERT OR IGNORE` for channels, `INSERT` for programmes. During the load the pooled connection runs with a 64 MB page cache and WAL autocheckpoint disabled. Both settings are restored afterwards and a passive checkpoint runs.

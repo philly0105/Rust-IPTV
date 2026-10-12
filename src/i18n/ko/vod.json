@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "카테고리 관리 ({{count}}개 숨김)",
   "manageCategoriesHint": "{{total}}개 중 {{hidden}}개 숨김. 숨긴 카테고리는 목록과 검색에 표시되지 않습니다.",
   "noCategoryMatch": "필터와 일치하는 카테고리가 없습니다.",
+  "clearFilter": "필터 지우기",
   "saveCategories": "저장",
   "categoriesSaved": "카테고리 표시 설정을 저장했습니다",
   "categoriesSaveFailed": "카테고리 표시 설정을 저장할 수 없습니다",
@@ -61,6 +62,7 @@
   "resume": "이어 보기",
   "resumeAt": "{{time}}부터 이어 보기",
   "startOver": "처음부터 보기",
+  "startOverEpisode": "{{code}} 처음부터 재생",
   "playEpisode": "{{code}} 재생",
   "resumeEpisode": "{{code}} 이어 보기",
   "nowPlaying": "지금 재생 중",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "비슷한 콘텐츠를 보려면 TMDB 키가 필요합니다",
   "tmdbKeyMissingHint": "설정 > 메타데이터에서 TMDB 키를 추가하세요.",
   "addTmdbKey": "TMDB 키 추가",
+  "tmdbKeyRejectedTitle": "TMDB가 API 키를 거부했습니다",
+  "tmdbKeyRejectedHint": "설정 > 메타데이터에서 TMDB 키를 확인하거나 바꾸세요.",
   "watched": "시청 완료",
   "markWatched": "시청함으로 표시",
   "markUnwatched": "시청 안 함으로 표시",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "최대 {{count}}개 보기",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "이 타이틀을 불러오지 못했습니다"
+  "pageLoadFailed": "이 타이틀을 불러오지 못했습니다",
+  "searchPartialError": "일부 결과를 불러오지 못했습니다."
 }

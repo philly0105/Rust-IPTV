@@ -22,7 +22,7 @@ import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useMyVideos, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes, formatClock } from '../lib/format';
-import { findEntry, groupBySeason, buildLibrary, type EpisodeEntry, type LibraryEntry } from '../lib/myvideos';
+import { entryTargetId, findEntry, groupBySeason, buildLibrary, type EpisodeEntry, type LibraryEntry } from '../lib/myvideos';
 import { playDownload } from '../lib/playDownload';
 
 type EpisodeListRow = { kind: 'header'; key: string; season?: number; count: number } | { kind: 'item'; key: string; episode: EpisodeEntry };
@@ -85,10 +85,17 @@ export function MyVideoDetailPage() {
     if (playing?.url && playerUrl !== playing.url) setPlaying(null);
   }, [playerUrl, playing]);
 
-  // An entry that vanished because the user removed its last file returns to the library.
+  // The URL names one download. Removing that episode from a series must not
+  // strand the page: it follows the series to another of its episodes. An
+  // entry that vanished because its last file was removed returns to the library.
+  const entryKey = useRef<string | undefined>(undefined);
+  if (entry) entryKey.current = entry.key;
   useEffect(() => {
-    if (query.data && !entry && removedEntry.current) navigate('/my-videos', { replace: true });
-  }, [entry, navigate, query.data]);
+    if (!query.data || entry) return;
+    const same = entryKey.current ? library.find((e) => e.key === entryKey.current) : undefined;
+    if (same) navigate(`/my-videos/${entryTargetId(same)}`, { replace: true });
+    else if (removedEntry.current) navigate('/my-videos', { replace: true });
+  }, [entry, library, navigate, query.data]);
 
   const primary: Download | undefined = useMemo(() => {
     if (!entry) return undefined;
@@ -131,6 +138,13 @@ export function MyVideoDetailPage() {
     },
     [perform, play],
   );
+
+  // One toast for the whole series; failures still report per episode.
+  const redownloadSeries = async (downloads: Download[], title: string) => {
+    const results = await Promise.all(downloads.map((dl) => perform('redownload', dl, { quiet: true })));
+    const count = results.filter(Boolean).length;
+    if (count > 0) toast({ title: t('redownloadQueuedMany', { count, title }), variant: 'success' });
+  };
 
   const confirmRemove = async () => {
     if (!removeTarget) return;
@@ -213,10 +227,10 @@ export function MyVideoDetailPage() {
           variant="primary"
           size="lg"
           icon={<RotateCcw size={18} aria-hidden />}
-          loading={entry.kind === 'movie' && pending.has(entry.download.id)}
+          loading={entry.kind === 'movie' ? pending.has(entry.download.id) : entry.episodes.some((ep) => pending.has(ep.download.id))}
           onClick={() => {
             if (entry.kind === 'movie') void perform('redownload', entry.download);
-            else for (const ep of entry.episodes) void perform('redownload', ep.download);
+            else void redownloadSeries(entry.episodes.map((ep) => ep.download), entry.title);
           }}
         >
           {t('redownload')}

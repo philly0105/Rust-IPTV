@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
+import { documentIsRtl } from '../lib/rtl';
+
 export interface MenuItem {
   id: string;
   label: string;
@@ -28,7 +30,9 @@ export function ContextMenu({
     if (!pos || !ref.current) return;
     restoreFocus.current = document.activeElement as HTMLElement | null;
     const r = ref.current.getBoundingClientRect();
-    const left = Math.min(pos.x, window.innerWidth - r.width - 8);
+    // In RTL the menu grows from the pointer toward the inline end (leftward), like native menus.
+    const want = documentIsRtl() ? pos.x - r.width : pos.x;
+    const left = Math.min(want, window.innerWidth - r.width - 8);
     const top = pos.y + r.height > window.innerHeight - 8 ? Math.max(8, pos.y - r.height) : pos.y;
     setPlace({ left: Math.max(8, left), top });
     ref.current.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();

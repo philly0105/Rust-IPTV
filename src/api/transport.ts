@@ -6,33 +6,42 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 import type { RpcMap } from './rpc';
-import type { PlayerSource, RpcErrorCode, RpcErrorPayload } from './types';
+import type { PlayerSource, RpcErrorCode, RpcErrorPayload, SourceRunErrorDetails } from './types';
 
 export type RpcName = keyof RpcMap;
 export type RpcArgs<K extends RpcName> = RpcMap[K]['args'];
 export type RpcResult<K extends RpcName> = RpcMap[K]['result'];
 
-const ERROR_CODES: readonly RpcErrorCode[] = [
-  'not_found',
-  'invalid',
-  'network',
-  'auth',
-  'timeout',
-  'io',
-  'db',
-  'unsupported',
-  'conflict',
-  'internal',
-];
+/**
+ * Every `RpcErrorCode`. `satisfies` makes the compiler reject this object when the union gains
+ * or loses a code, so a new core code is never turned into an "Unknown error" here.
+ */
+const ERROR_CODE_SET = {
+  not_found: true,
+  invalid: true,
+  network: true,
+  auth: true,
+  timeout: true,
+  io: true,
+  db: true,
+  unsupported: true,
+  conflict: true,
+  internal: true,
+  engine_missing: true,
+  server: true,
+} as const satisfies Record<RpcErrorCode, true>;
+
+/** All RPC error codes the core can send (C12). */
+export const RPC_ERROR_CODES = Object.keys(ERROR_CODE_SET) as RpcErrorCode[];
+
+function isErrorCode(v: unknown): v is RpcErrorCode {
+  return typeof v === 'string' && Object.hasOwn(ERROR_CODE_SET, v);
+}
 
 function isErrorPayload(v: unknown): v is RpcErrorPayload {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
-  return (
-    typeof o.code === 'string' &&
-    (ERROR_CODES as readonly string[]).includes(o.code) &&
-    typeof o.message === 'string'
-  );
+  return isErrorCode(o.code) && typeof o.message === 'string';
 }
 
 export class RpcError extends Error {
@@ -67,6 +76,22 @@ export class RpcError extends Error {
     if (err instanceof Error) return new RpcError(fallbackCode, err.message);
     return new RpcError(fallbackCode, 'Unknown error');
   }
+}
+
+/** The typed `details` of a rejected source import or refresh, when it has any (C8). */
+export function sourceRunDetails(err: unknown): SourceRunErrorDetails | undefined {
+  const d = err instanceof RpcError ? err.details : isErrorPayload(err) ? err.details : undefined;
+  if (typeof d !== 'object' || d === null) return undefined;
+  const o = d as Record<string, unknown>;
+  const out: SourceRunErrorDetails = {};
+  if (typeof o.sourceId === 'string') out.sourceId = o.sourceId;
+  if (o.cancelled === true) out.cancelled = true;
+  return out;
+}
+
+/** True when a rejected `sources.add` / `sources.refresh` was cancelled, not failed (`details.cancelled`, C8). */
+export function isCancelledRun(err: unknown): boolean {
+  return sourceRunDetails(err)?.cancelled === true;
 }
 
 /** True inside the Tauri webview. */

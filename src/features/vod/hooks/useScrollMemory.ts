@@ -8,14 +8,68 @@ export interface ScrollSpot {
 }
 
 const MAX_SPOTS = 64;
-/** Per-URL scroll memory for this app session (a route remount reads it back). */
+/** localStorage key: the memory survives a restart (the shell reopens the last route). */
+export const SCROLL_STORAGE_KEY = 'vod.scrollMemory';
+const PERSIST_DELAY_MS = 400;
+/** Per-URL scroll memory (a route remount reads it back). */
 const spots = new Map<string, ScrollSpot>();
+/** Season tab picked per series (`sourceId|itemId`). */
+const seasons = new Map<string, number>();
+let loaded = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function isSpot(v: unknown): v is ScrollSpot {
+  if (typeof v !== 'object' || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return typeof o['scrollTop'] === 'number' && Number.isFinite(o['scrollTop']) && (o['index'] === undefined || (typeof o['index'] === 'number' && Number.isInteger(o['index'])));
+}
+
+/** Reads the stored memory once; anything malformed is ignored. */
+function load(): void {
+  if (loaded) return;
+  loaded = true;
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SCROLL_STORAGE_KEY) : null;
+    if (!raw) return;
+    const data: unknown = JSON.parse(raw);
+    if (typeof data !== 'object' || data === null) return;
+    const { spots: s, seasons: z } = data as { spots?: unknown; seasons?: unknown };
+    if (Array.isArray(s)) {
+      for (const e of s.slice(-MAX_SPOTS)) if (Array.isArray(e) && typeof e[0] === 'string' && isSpot(e[1])) spots.set(e[0], e[1]);
+    }
+    if (Array.isArray(z)) {
+      for (const e of z.slice(-MAX_SPOTS)) if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number' && Number.isInteger(e[1])) seasons.set(e[0], e[1]);
+    }
+  } catch {
+    // corrupt or unavailable storage: start empty
+  }
+}
+
+function persistNow(): void {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  try {
+    localStorage.setItem(SCROLL_STORAGE_KEY, JSON.stringify({ spots: [...spots], seasons: [...seasons] }));
+  } catch {
+    // storage full or unavailable: memory still works for this session
+  }
+}
+
+/** Scroll events are frequent: write at most every few hundred ms, and on page hide. */
+function persistSoon(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(persistNow, PERSIST_DELAY_MS);
+}
+
+if (typeof window !== 'undefined') window.addEventListener('pagehide', () => persistTimer && persistNow());
 
 export function recallSpot(key: string): ScrollSpot | undefined {
+  load();
   return spots.get(key);
 }
 
 export function rememberSpot(key: string, patch: Partial<ScrollSpot>): void {
+  load();
   const prev = spots.get(key);
   const next: ScrollSpot = { scrollTop: patch.scrollTop ?? prev?.scrollTop ?? 0 };
   const index = 'index' in patch ? patch.index : prev?.index;
@@ -24,25 +78,44 @@ export function rememberSpot(key: string, patch: Partial<ScrollSpot>): void {
   spots.set(key, next);
   // Oldest first in insertion order: trim from the front.
   while (spots.size > MAX_SPOTS) spots.delete(spots.keys().next().value!);
+  persistSoon();
 }
 
-/** Season tab picked per series (`sourceId|itemId`), for this app session. */
-const seasons = new Map<string, number>();
-
 export function recallSeason(key: string): number | undefined {
+  load();
   return seasons.get(key);
 }
 
 export function rememberSeason(key: string, season: number): void {
+  load();
   seasons.delete(key);
   seasons.set(key, season);
   while (seasons.size > MAX_SPOTS) seasons.delete(seasons.keys().next().value!);
+  persistSoon();
 }
 
-/** Test helper: clears scroll spots and season picks. */
+/** Test helper: clears scroll spots and season picks (memory and storage). */
 export function forgetSpots(): void {
   spots.clear();
   seasons.clear();
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  loaded = true;
+  try {
+    localStorage.removeItem(SCROLL_STORAGE_KEY);
+  } catch {
+    // unavailable
+  }
+}
+
+/** Test helper: drop the in-memory copy so the next read loads from storage (a restart). */
+export function reloadSpotsForTests(persist = true): void {
+  if (persist) persistNow();
+  else if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  spots.clear();
+  seasons.clear();
+  loaded = false;
 }
 
 export interface ScrollMemoryOptions {
@@ -73,17 +146,23 @@ export function useScrollMemory({ key, getScroller, ready, onRestored }: ScrollM
     const el = getRef.current();
     if (!el) return;
     restoredFor.current = key;
-    const spot = spots.get(key);
+    const spot = recallSpot(key);
     if (!spot) return;
     el.scrollTop = spot.scrollTop;
     // Virtualizers render the rows for the new offset on the next frame. A grid
     // that measured its real width meanwhile may have clamped the offset, so
     // apply it once more before handing over.
+    let done = false;
     const raf = requestAnimationFrame(() => {
+      done = true;
       if (el.scrollTop !== spot.scrollTop) el.scrollTop = spot.scrollTop;
       onRestoredRef.current?.(spot, el);
     });
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      // Cancelled before it ran (StrictMode's mount/unmount/mount, or a quick re-render): restore again next run.
+      if (!done) restoredFor.current = null;
+    };
   }, [key, ready]);
 
   useEffect(() => {

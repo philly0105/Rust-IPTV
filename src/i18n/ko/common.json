@@ -23,7 +23,7 @@
   "pageNotFound": "페이지를 찾을 수 없습니다",
   "pageNotFoundHint": "이 주소와 일치하는 페이지가 없습니다. 사이드바를 사용하거나 홈으로 돌아가세요.",
 
-  "errorTitleNetwork": "서버에 연결할 수 없습니다",
+  "errorTitleNetwork": "서버에 연결하지 못했습니다",
   "errorTitleTimeout": "요청 시간이 너무 오래 걸렸습니다",
   "errorTitleAuth": "로그인이 거부되었습니다",
   "errorTitleNotFound": "찾을 수 없습니다",
@@ -46,5 +46,10 @@
   "errorHintConflict": "새로 고쳐 최신 버전을 확인한 후 다시 시도하세요.",
   "errorHintIo": "폴더가 있는지, 그리고 쓰기 권한이 있는지 확인하세요.",
   "errorHintDb": "앱을 다시 시작하세요. 문제가 계속되면 설정에서 백업을 복원하세요.",
-  "errorHintInternal": "다시 시도하세요. 문제가 계속되면 앱을 다시 시작하세요."
+  "errorHintInternal": "다시 시도하세요. 문제가 계속되면 앱을 다시 시작하세요.",
+  "errorCode": "오류 코드: {{code}}",
+  "errorTitleEngineMissing": "플레이어 엔진을 시작하지 못했습니다",
+  "errorHintEngineMissing": "동영상 플레이어 엔진(mpv)이 없거나 시작하지 못했습니다.",
+  "errorTitleServer": "서버에 문제가 발생했습니다",
+  "errorHintServer": "서버가 혼잡하거나 문제가 있습니다. 나중에 다시 시도하세요."
 }

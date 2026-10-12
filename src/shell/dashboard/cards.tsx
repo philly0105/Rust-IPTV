@@ -4,12 +4,41 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { ContentType, ItemRef, Source, SourceKind } from '@/api/types';
-import { LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
+import { LiveBadge, Poster, ProgressBar, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 
 const cardFocus =
   'group/card block w-full rounded-md text-start outline-offset-4 focus-visible:outline-2';
+
+/**
+ * The separator between short facts in a list. Intl.ListFormat's `unit` lists
+ * are no use here: several locales join with a bare space (en narrow, ru, ko,
+ * tr) or nothing (ja, zh), and ar adds "و" (and) that bidi pushes after a year. So
+ * the separator is fixed per script: "、" (ideographic comma) for Japanese and Chinese, "، " (Arabic comma) for
+ * Arabic scripts, ", " otherwise.
+ */
+function factSeparator(language: string): string {
+  const base = language.toLowerCase();
+  if (base.startsWith('ja') || base.startsWith('zh')) return '、';
+  if (base.startsWith('ar') || base === 'ary' || base.startsWith('fa') || base.startsWith('ur')) return '، ';
+  return ', ';
+}
+
+/** First-strong isolate (U+2068 ... U+2069): a part's own script sets its direction. */
+const isolate = (part: string) => (/[\p{L}\p{N}]/u.test(part) ? `\u2068${part}\u2069` : part);
+
+/**
+ * Joins short facts ("120 channels", "40 movies") with the locale's separator,
+ * each fact bidi-isolated so a Latin name or a year keeps its place in an RTL
+ * list and vice versa. Falsy and empty parts are dropped. Exported for tests.
+ */
+export function joinList(parts: readonly (string | number | false | null | undefined)[], language: string): string {
+  return parts
+    .filter((p): p is string | number => p !== false && p !== null && p !== undefined && p !== '')
+    .map((p) => isolate(String(p)))
+    .join(factSeparator(language));
+}
 
 /** In-app path for an item's detail (movie/series) or browse (live/radio) page. */
 export function itemPath(ref: ItemRef): string {
@@ -68,7 +97,8 @@ export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, 
   const body = (
     <>
       <Lift>
-        <Poster src={posterUrl} alt={title} aspect="poster" className="shadow-1">
+        {/* The caption below names the card; alt text would read the title twice. */}
+        <Poster src={posterUrl} alt="" label={title} aspect="poster" className="shadow-1">
           {onPlay && <PlayGlyph />}
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
@@ -78,8 +108,9 @@ export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, 
           )}
         </Poster>
       </Lift>
-      <span className="mt-2 block truncate text-sm font-medium text-fg">{title}</span>
-      {subtitle && <span className="block truncate text-[13px] text-fg-muted">{subtitle}</span>}
+      {/* dir="auto": a Latin title in an RTL UI truncates at its own end, not its start. */}
+      <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{title}</span>
+      {subtitle && <span dir="auto" className="block truncate text-match-parent text-[13px] text-fg-muted">{subtitle}</span>}
     </>
   );
   if (onPlay) {
@@ -121,7 +152,7 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
           className="relative aspect-video w-full overflow-hidden rounded-md border border-border shadow-1"
           style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
         >
-          <Poster src={logoUrl} alt={name} aspect="wide" fit="contain" kind={isRadio ? 'radio' : 'live'} className="bg-transparent" rounded="sm" />
+          <Poster src={logoUrl} alt="" label={name} aspect="wide" fit="contain" kind={isRadio ? 'radio' : 'live'} className="bg-transparent" rounded="sm" />
           <PlayGlyph />
           <span className="absolute top-2 start-2">
             <LiveBadge />
@@ -133,8 +164,8 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
           )}
         </div>
       </Lift>
-      <span className="mt-2 block truncate text-sm font-medium text-fg">{name}</span>
-      <span className="block truncate text-[13px] text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
+      <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{name}</span>
+      <span dir="auto" className="block truncate text-match-parent text-[13px] text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
     </button>
   );
 }
@@ -143,13 +174,13 @@ const KIND_NAMES: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'Xtream', s
 
 /** Source tile: monogram, name, kind, and catalog counts. */
 export function SourceCard({ rail, source }: { rail: RailCardProps; source: Source }) {
-  const { t } = useTranslation('shell');
+  const { t, i18n } = useTranslation('shell');
   const hue = hueOf(source.name);
   const counts = [
     source.channelCount > 0 && t('countChannels', { count: source.channelCount }),
     source.movieCount > 0 && t('countMovies', { count: source.movieCount }),
     source.seriesCount > 0 && t('countSeries', { count: source.seriesCount }),
-  ].filter(Boolean) as string[];
+  ];
   return (
     <Link to={`/s/${encodeURIComponent(source.id)}/live`} {...rail} className={cardFocus}>
       <Lift>
@@ -157,13 +188,21 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
           className="relative flex aspect-video w-full flex-col justify-between overflow-hidden rounded-md border border-border p-4 shadow-1"
           style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 30%), hsl(${(hue + 36) % 360} 46% 16%))` }}
         >
-          <span className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
-          <span className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-[11px] font-semibold text-white">{KIND_NAMES[source.kind]}</span>
-          {source.lastError && <span className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />}
+          {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
+          <span aria-hidden className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
+          <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-[11px] font-semibold text-white">{KIND_NAMES[source.kind]}</span>
+          {source.lastError && (
+            <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
+          )}
         </div>
       </Lift>
-      <span className="mt-2 block truncate text-sm font-medium text-fg">{source.name}</span>
-      <span className={cn('block truncate text-[13px] text-fg-muted')}>{counts.join(', ') || t('emptySource')}</span>
+      <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+        {source.name}
+      </span>
+      {/* A title alone is never read on a link; these join the card's name after the source name. */}
+      <span className="sr-only" data-testid="source-card-kind">{`, ${KIND_NAMES[source.kind]}`}</span>
+      {source.lastError && <span className="sr-only">{`, ${t('sourceHasError')}`}</span>}
+      <span className="block truncate text-[13px] text-fg-muted">{joinList(counts, i18n.language) || t('emptySource')}</span>
     </Link>
   );
 }

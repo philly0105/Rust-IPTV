@@ -21,13 +21,15 @@ struct SetWindowArgs {
 /// Registers `settings.get|update|reset|detectPlayers` and `window.getState|setState`.
 pub fn register(r: &mut RpcRouter) {
     r.add("settings.get", |state, _: ()| async move {
-        Ok::<Settings, RpcError>(super::get(&state))
+        Ok::<Settings, RpcError>(super::for_client(&state, super::get(&state)))
     });
     r.add("settings.update", |state, a: UpdateArgs| async move {
-        Ok::<Settings, RpcError>(super::update(&state, a.patch).await?)
+        let next = super::update(&state, a.patch).await?;
+        Ok::<Settings, RpcError>(super::for_client(&state, next))
     });
     r.add("settings.reset", |state, _: ()| async move {
-        Ok::<Settings, RpcError>(super::reset(&state).await?)
+        let next = super::reset(&state).await?;
+        Ok::<Settings, RpcError>(super::for_client(&state, next))
     });
     r.add("settings.detectPlayers", |state, _: ()| async move {
         // Detection stats files and may walk PATH: keep it off the async workers.

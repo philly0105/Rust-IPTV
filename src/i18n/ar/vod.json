@@ -30,6 +30,7 @@
   "manageCategoriesHidden_other": "إدارة الفئات (المخفية: {{count}})",
   "manageCategoriesHint": "{{hidden}} من {{total}} مخفية. لا تظهر الفئات المخفية في القوائم والبحث.",
   "noCategoryMatch": "لا توجد فئة تطابق هذه التصفية.",
+  "clearFilter": "مسح عامل التصفية",
   "saveCategories": "حفظ",
   "categoriesSaved": "تم حفظ ظهور الفئات",
   "categoriesSaveFailed": "تعذّر حفظ ظهور الفئات",
@@ -73,6 +74,7 @@
   "resume": "استئناف",
   "resumeAt": "استئناف من {{time}}",
   "startOver": "من البداية",
+  "startOverEpisode": "تشغيل {{code}} من البداية",
   "playEpisode": "تشغيل {{code}}",
   "resumeEpisode": "استئناف {{code}}",
   "nowPlaying": "قيد التشغيل",
@@ -171,6 +173,8 @@
   "tmdbKeyMissingTitle": "تتطلب العناوين المشابهة مفتاح TMDB",
   "tmdbKeyMissingHint": "أضف مفتاح TMDB في الإعدادات > البيانات الوصفية.",
   "addTmdbKey": "إضافة مفتاح TMDB",
+  "tmdbKeyRejectedTitle": "رفض TMDB مفتاح API",
+  "tmdbKeyRejectedHint": "تحقق من مفتاح TMDB أو استبدله في الإعدادات > البيانات الوصفية.",
   "watched": "تمت المشاهدة",
   "markWatched": "تعليم كمُشاهَد",
   "markUnwatched": "تعليم كغير مُشاهَد",
@@ -211,5 +215,6 @@
   "searchCountMore_few": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "تعذر تحميل هذه العناوين"
+  "pageLoadFailed": "تعذر تحميل هذه العناوين",
+  "searchPartialError": "تعذّر تحميل بعض النتائج."
 }

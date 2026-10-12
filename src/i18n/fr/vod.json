@@ -24,6 +24,7 @@
   "manageCategoriesHidden_other": "Gérer les catégories ({{count}} masquées)",
   "manageCategoriesHint": "{{hidden}} masquées sur {{total}}. Les catégories masquées n'apparaissent ni dans les listes ni dans la recherche.",
   "noCategoryMatch": "Aucune catégorie ne correspond à ce filtre.",
+  "clearFilter": "Effacer le filtre",
   "saveCategories": "Enregistrer",
   "categoriesSaved": "Visibilité des catégories enregistrée",
   "categoriesSaveFailed": "Impossible d'enregistrer la visibilité des catégories",
@@ -64,6 +65,7 @@
   "resume": "Reprendre",
   "resumeAt": "Reprendre à {{time}}",
   "startOver": "Recommencer",
+  "startOverEpisode": "Reprendre {{code}} depuis le début",
   "playEpisode": "Lire {{code}}",
   "resumeEpisode": "Reprendre {{code}}",
   "nowPlaying": "En cours de lecture",
@@ -153,6 +155,8 @@
   "tmdbKeyMissingTitle": "Les titres similaires nécessitent une clé TMDB",
   "tmdbKeyMissingHint": "Ajoutez une clé TMDB dans Paramètres > Métadonnées.",
   "addTmdbKey": "Ajouter une clé TMDB",
+  "tmdbKeyRejectedTitle": "TMDB a refusé la clé API",
+  "tmdbKeyRejectedHint": "Vérifiez ou remplacez la clé TMDB dans Paramètres > Métadonnées.",
   "watched": "Vu",
   "markWatched": "Marquer comme vu",
   "markUnwatched": "Marquer comme non vu",
@@ -184,5 +188,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Impossible de charger ces titres"
+  "pageLoadFailed": "Impossible de charger ces titres",
+  "searchPartialError": "Certains résultats n’ont pas pu être chargés."
 }

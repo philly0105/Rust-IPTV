@@ -1,4 +1,4 @@
-import type { RpcError } from '@/api/transport';
+import { isCancelledRun, type RpcError } from '@/api/transport';
 import type { M3uOrigin, RpcErrorCode, SourceKind } from '@/api/types';
 
 /** What the error helpers read: the code, plus the core's text when there is one. */
@@ -17,9 +17,24 @@ export function isWrongUrl(err: ErrLike): boolean {
   return (err.code === 'invalid' || err.code === 'internal') && WRONG_URL.test(err.message ?? '');
 }
 
-/** i18n key (sources ns) with the next action for a failed source operation. */
-export function nextStepKey(err: ErrLike): string {
+/**
+ * The upstream answered with HTTP 5xx (not 504, a gateway timeout): the `server` code (C12), or a
+ * `network`/`internal` error from a core that predates it and says so only in the text.
+ */
+function isServerTrouble(err: ErrLike): boolean {
+  if (err.code === 'server') return true;
+  // 429 (rate limited) counts too: B9 maps it to `server`; older cores sent it as network text.
+  return (err.code === 'network' || err.code === 'internal') && /\bHTTP (?:429|5(?!04)\d\d)\b/i.test(err.message ?? '');
+}
+
+/**
+ * i18n key (sources ns) with the next action for a failed source operation. With the source's
+ * kind, a rejected sign-in names what that kind signs in with (the card's per-kind texts).
+ */
+export function nextStepKey(err: ErrLike, kind?: SourceKind): string {
   if (isWrongUrl(err)) return 'hintWrongUrl';
+  if (isServerTrouble(err)) return 'hintServer';
+  if (err.code === 'auth' && kind) return `sourceErrorAuth_${kind}`;
   switch (err.code) {
     case 'network':
       return 'hintNetwork';
@@ -43,6 +58,7 @@ export function nextStepKey(err: ErrLike): string {
 /** i18n key (sources ns) with a plain summary of what went wrong; the raw message is only technical detail. */
 export function summaryKey(err: ErrLike): string {
   if (isWrongUrl(err)) return 'errorSummaryWrongUrl';
+  if (isServerTrouble(err)) return 'errorSummaryServer';
   switch (err.code) {
     case 'network':
       return 'errorSummaryNetwork';
@@ -104,10 +120,12 @@ export function failedSourceId(err: Pick<RpcError, 'details'>): string | null {
 }
 
 /**
- * Error class of an `import.progress` error, guessed from its message: the event carries
- * only the core's text, not the RpcError code. Unknown text maps to `internal` (generic).
+ * Error class of an `import.progress` error or a connection-test verdict. The core's classified
+ * `code` (C10) wins when it says more than `internal`; older cores send only text, so the message
+ * is matched as a fallback. Unknown text maps to `internal` (generic).
  */
-export function importErrorCode(message: string | undefined): RpcErrorCode {
+export function importErrorCode(message: string | undefined, code?: RpcErrorCode): RpcErrorCode {
+  if (code && code !== 'internal') return code;
   const m = (message ?? '').toLowerCase();
   if (!m) return 'internal';
   // Before the auth check: the web-page text mentions a "login or error page".
@@ -122,9 +140,19 @@ export function importErrorCode(message: string | undefined): RpcErrorCode {
   return 'internal';
 }
 
-/** i18n key (sources ns) summarizing an `import.progress` error message. */
-export function importSummaryKey(message: string | undefined): string {
-  return summaryKey({ code: importErrorCode(message), message });
+/** i18n key (sources ns) summarizing an `import.progress` error: by `code` first (C10), else by message. */
+export function importSummaryKey(message: string | undefined, code?: RpcErrorCode): string {
+  return summaryKey({ code: importErrorCode(message, code), message });
+}
+
+/**
+ * True when a rejected import or refresh ended because it was cancelled: by the user
+ * (`sources.cancelImport`, C8), by `sources.remove`, or by a settings change. The core
+ * marks those with `details.cancelled` (C8); an older core only says so in a `conflict`'s text.
+ */
+export function isCancelledImportError(err: ErrLike): boolean {
+  if (isCancelledRun(err)) return true;
+  return (err.code === 'conflict' || err.code === 'internal') && /\bimport stopped\b|\bcancell?ed\b/i.test(err.message ?? '');
 }
 
 type ImportErrorClaim = (sourceId: string) => boolean;

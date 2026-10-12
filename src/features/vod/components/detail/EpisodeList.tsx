@@ -110,7 +110,7 @@ export function EpisodeList({
             className="absolute start-0 w-full"
             style={{ top: row.start - margin, height: ROW_H }}
           >
-            <div className={cn('group flex h-full items-center gap-4 border-b border-border/60 py-2', playing && 'tuning-tick ps-3')}>
+            <div className={cn('group flex h-full items-center gap-4 border-b border-divider py-2', playing && 'tuning-tick ps-3')}>
               <button
                 type="button"
                 data-grid-index={row.index}
@@ -120,7 +120,7 @@ export function EpisodeList({
                 className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-40 shrink-0">
-                  <Poster src={ep.posterUrl} alt={ep.title} aspect="wide" rounded="sm">
+                  <Poster src={ep.posterUrl} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
                     <span
                       aria-hidden
                       className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 text-white opacity-0 group-hover:bg-scrim/50 group-hover:opacity-100 motion-safe:transition-opacity"

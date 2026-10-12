@@ -1,9 +1,9 @@
 import { useQueries } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Radio, Search, SearchX, Tv } from 'lucide-react';
+import { Radio, RotateCw, Search, SearchX, TriangleAlert, Tv } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useSearchParams } from 'react-router';
+import { useLocation, useParams, useSearchParams } from 'react-router';
 
 import { rpcKey, useRpcQuery } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
@@ -12,7 +12,8 @@ import type { Channel, Page, SeriesItem, Source, VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
 
 import { PosterCard } from '../components/PosterCard';
-import { useSettings, useSource, useSourcesList } from '../hooks/queries';
+import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
+import { useScrollMemory } from '../hooks/useScrollMemory';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { itemLanguage } from '../lib/language';
@@ -223,11 +224,17 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   };
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const coverWidth = COVER_WIDTH[useSettings().coverSize];
+  const coverWidth = COVER_WIDTH[useSettings().coverSize] ?? COVER_WIDTH.medium;
+  const resume = useResumeLookup(!!query);
   // One result type at a time, chosen by tab; a type missing from these results falls back to the first one present.
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
+  // Back from a title: the results open where you left them (same query, type and source in the URL).
+  const location = useLocation();
+  useScrollMemory({ key: `${location.pathname}${location.search}`, getScroller: () => scrollRef.current, ready: !!query && !loading && groups.length > 0 });
+  // Some results arrived but one lookup failed (the library or a portal): say so instead of showing a silently short list.
+  const partialError = groups.length > 0 ? (catalog.isError ? catalog.error : stalker.error) : undefined;
 
   let body;
   if (!query) {
@@ -294,9 +301,18 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
             {activeGroup.kind === 'live' ? (
               <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} onPlayChannel={playChannel} scrollRef={scrollRef} />
             ) : (
-              <PosterGrid key={activeGroup.kind} kind={activeGroup.kind} hits={activeGroup.hits} showBadges={showBadges} minWidth={coverWidth} scrollRef={scrollRef} />
+              <PosterGrid key={activeGroup.kind} kind={activeGroup.kind} hits={activeGroup.hits} showBadges={showBadges} minWidth={coverWidth} scrollRef={scrollRef} resume={resume} />
             )}
           </div>
+        )}
+        {partialError && (
+          <PartialErrorNotice
+            message={partialError.message}
+            onRetry={() => {
+              if (catalog.isError) void catalog.refetch();
+              stalker.retry();
+            }}
+          />
         )}
         <CappedNotice
           more={capped.more}
@@ -371,6 +387,27 @@ function CappedNotice({
           {t('searchShowMore', { count: nextLimit })}
         </Button>
       )}
+    </div>
+  );
+}
+
+/** Inline notice when part of a search failed while other results are shown. */
+function PartialErrorNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation('vod');
+  const { t: tc } = useTranslation('common');
+  return (
+    <div
+      role="alert"
+      data-testid="vod-search-partial-error"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg-muted"
+    >
+      <TriangleAlert aria-hidden size={16} className="shrink-0 text-warning" />
+      <p className="min-w-0 flex-1">
+        <span className="text-fg">{t('searchPartialError')}</span> <span className="text-fg-subtle">{message}</span>
+      </p>
+      <Button size="sm" variant="secondary" icon={<RotateCw aria-hidden size={14} />} onClick={onRetry}>
+        {tc('retry')}
+      </Button>
     </div>
   );
 }
@@ -499,12 +536,15 @@ function PosterGrid({
   showBadges,
   minWidth,
   scrollRef,
+  resume,
 }: {
   kind: Exclude<SearchGroupKind, 'live'>;
   hits: SearchHit[];
   showBadges: boolean;
   minWidth: number;
   scrollRef: RefObject<HTMLDivElement | null>;
+  /** Watched fraction by `resumeKey`, for the poster progress bar. */
+  resume: Map<string, number>;
 }) {
   return (
     <HitGrid
@@ -524,6 +564,7 @@ function PosterGrid({
             href={h.href ?? '#'}
             posterUrl={h.imageUrl}
             meta={h.meta}
+            progress={resume.get(resumeKey(item.ref))}
             language={itemLanguage(item.title, item.categoryName)}
             badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
             badgeLabel={showBadges ? h.sourceName : undefined}

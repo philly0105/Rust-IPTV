@@ -5,6 +5,8 @@ import { Link } from 'react-router';
 
 import { ErrorState, Skeleton, cn } from '@/ui';
 
+import { readRailEmpty, writeRailEmpty } from './railEmpty';
+
 /** Arrow scrolls jump instantly under prefers-reduced-motion, like the CSS animations. */
 export function railScrollBehavior(): ScrollBehavior {
   const reduced = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -41,10 +43,29 @@ export interface DashboardRailProps<T> {
   skeletonAspect: number;
   loading?: boolean;
   error?: unknown;
+  /**
+   * The rail's own query succeeded. Only then does an empty rail flag itself to skip its
+   * skeleton next time; a failed, hidden-error or shared-error rail has no items but
+   * proves nothing about emptiness.
+   */
+  loaded?: boolean;
+  /** Next-step hint for `error`, when the rail knows its data is local. */
+  errorHint?: string;
   onRetry?: () => void;
   seeAll?: { to: string; label?: string };
   /** Rendered next to the title (counts, badges). */
   meta?: ReactNode;
+}
+
+/** One placeholder card: poster or tile at the rail's aspect, plus two text lines. */
+function SkeletonCard({ width, aspect }: { width: number; aspect: number }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-2" style={{ width }}>
+      <div className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
+      <Skeleton className="h-3.5 w-4/5" />
+      <Skeleton className="h-3 w-1/2 opacity-70" />
+    </div>
+  );
 }
 
 /** Moves focus to the card at `index` in the rail before/after `from` (ArrowUp/Down between rails). */
@@ -75,6 +96,8 @@ export function DashboardRail<T>({
   skeletonAspect,
   loading,
   error,
+  loaded = false,
+  errorHint,
   onRetry,
   seeAll,
   meta,
@@ -122,7 +145,15 @@ export function DashboardRail<T>({
     };
   }, [count]);
 
-  if (!loading && !error && count === 0) return null;
+  // A rail that came back empty last time skips its skeleton (it would most likely
+  // just collapse again), so slow empty favorites don't flash and shift the page.
+  const [wasEmpty] = useState(() => readRailEmpty(id));
+  useEffect(() => {
+    if (count > 0) writeRailEmpty(id, false);
+    else if (loaded) writeRailEmpty(id, true);
+  }, [id, loaded, count]);
+
+  if (!error && count === 0 && (!loading || wasEmpty)) return null;
 
   const scrollBy = (dir: 1 | -1) => {
     const el = trackRef.current;
@@ -185,27 +216,32 @@ export function DashboardRail<T>({
           {meta}
         </div>
         {seeAll && (
-          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent">
+          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent active:text-accent-pressed">
             {seeAll.label ?? t('seeAll')}
           </Link>
         )}
       </div>
 
       {error ? (
-        <div className="mx-8 rounded-lg border border-border bg-surface">
-          <ErrorState error={error} onRetry={onRetry} size="inline" />
+        // One grid cell holds an invisible skeleton card and the error, so the error box is
+        // at least as tall as the skeleton it replaces; the row layout keeps it from being taller.
+        <div className="mx-8 grid rounded-lg border border-divider bg-surface" data-testid="dashboard-rail-error">
+          {/* -my-px: the box's 1px border plus this cell equal the bare skeleton row. */}
+          <div aria-hidden className="invisible col-start-1 row-start-1 -my-px" data-rail-error-spacer="">
+            <SkeletonCard width={cardWidth} aspect={skeletonAspect} />
+          </div>
+          <ErrorState
+            error={error}
+            hint={errorHint}
+            onRetry={onRetry}
+            size="inline"
+            className="col-start-1 row-start-1 flex-row flex-wrap justify-start gap-x-4 gap-y-2 px-5 py-4 text-start sm:flex-nowrap"
+          />
         </div>
       ) : loading && count === 0 ? (
         <div className="flex gap-4 overflow-hidden px-8" aria-busy="true" aria-label={t('loadingRail', { title })}>
           {Array.from({ length: 8 }, (_, i) => (
-            <div key={i} className="flex shrink-0 flex-col gap-2" style={{ width: cardWidth }}>
-              <div
-                className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer"
-                style={{ aspectRatio: skeletonAspect }}
-              />
-              <Skeleton className="h-3.5 w-4/5" />
-              <Skeleton className="h-3 w-1/2 opacity-70" />
-            </div>
+            <SkeletonCard key={i} width={cardWidth} aspect={skeletonAspect} />
           ))}
         </div>
       ) : (
@@ -234,7 +270,7 @@ export function DashboardRail<T>({
               aria-label={t('scrollBack')}
               onClick={() => scrollBy(-1)}
               className={cn(
-                'absolute top-0 bottom-3 start-0 hidden w-12 items-center justify-center bg-gradient-to-r rtl:bg-gradient-to-l from-bg to-transparent text-fg',
+                'absolute top-0 bottom-3 start-0 hidden w-12 items-center justify-center bg-gradient-to-r rtl:bg-gradient-to-l from-bg to-transparent text-fg active:text-accent-pressed motion-safe:active:translate-x-px',
                 'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
               )}
             >
@@ -248,7 +284,7 @@ export function DashboardRail<T>({
               aria-label={t('scrollForward')}
               onClick={() => scrollBy(1)}
               className={cn(
-                'absolute top-0 end-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l rtl:bg-gradient-to-r from-bg to-transparent text-fg',
+                'absolute top-0 end-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l rtl:bg-gradient-to-r from-bg to-transparent text-fg active:text-accent-pressed motion-safe:active:-translate-x-px',
                 'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
               )}
             >

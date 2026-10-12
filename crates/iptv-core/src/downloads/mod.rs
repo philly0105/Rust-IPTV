@@ -155,7 +155,11 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
     let episode_id = req.episode_id.clone().filter(|e| !e.is_empty());
 
     let (id, fresh) = state
-        .db_call(move |c| -> CoreResult<(i64, bool)> {
+        .db_call(move |conn| -> CoreResult<(i64, bool)> {
+            // One transaction: when reserving the destination fails (disk
+            // full, permissions) the row is not left queued with no file.
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let c: &rusqlite::Connection = &tx;
             let new = store::NewDownload {
                 item_ref: &item_ref,
                 episode_id: episode_id.as_deref(),
@@ -177,7 +181,10 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                         DownloadStatus::Failed | DownloadStatus::Canceled => false,
                     };
                     if keep {
-                        return Ok((d.id, false));
+                        // A queued row the manager does not hold (an earlier
+                        // start failed after writing it) is queued again;
+                        // enqueue ignores rows it already tracks.
+                        return Ok((d.id, d.status == DownloadStatus::Queued));
                     }
                     if d.status != DownloadStatus::Completed {
                         if let Some(p) = d.file_path.as_deref() {
@@ -204,6 +211,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
             );
             let r = naming::reserve(&dir, &name)?;
             store::set_destination(c, id, &r.file_name, &r.final_path.to_string_lossy())?;
+            tx.commit()?;
             Ok((id, true))
         })
         .await?;

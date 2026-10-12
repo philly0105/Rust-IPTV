@@ -184,7 +184,7 @@ export function SettingsPage() {
         At 1440 px and up the shell shows the context panel (and its section list) beside the page.
         Below that the panel lives in a drawer, so the page lists the sections itself.
       */}
-      <div className="mb-8 border-b border-border pb-5 min-[1440px]:hidden" data-testid="settings-nav-inline-wrap">
+      <div className="mb-8 border-b border-divider pb-5 min-[1440px]:hidden" data-testid="settings-nav-inline-wrap">
         <SettingsNav current={current} variant="inline" />
       </div>
       {query.isPending ? (

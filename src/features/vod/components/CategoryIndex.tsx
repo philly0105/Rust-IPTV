@@ -81,7 +81,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label }: CategoryIn
                   to={hrefFor(entry.id)}
                   data-grid-index={i}
                   className={cn(
-                    'group flex h-11 items-center gap-3 rounded-md border-b border-border/50 px-3',
+                    'group flex h-11 items-center gap-3 rounded-md border-b border-divider px-3',
                     'text-sm text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg',
                     entry.emphasis && 'font-semibold text-fg',
                   )}

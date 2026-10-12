@@ -24,6 +24,7 @@
   "manageCategoriesHidden_other": "Gerenciar categorias ({{count}} ocultas)",
   "manageCategoriesHint": "{{hidden}} de {{total}} ocultas. Categorias ocultas ficam fora das listas e da pesquisa.",
   "noCategoryMatch": "Nenhuma categoria corresponde a esse filtro.",
+  "clearFilter": "Limpar filtro",
   "saveCategories": "Salvar",
   "categoriesSaved": "Visibilidade das categorias salva",
   "categoriesSaveFailed": "Não foi possível salvar a visibilidade das categorias",
@@ -64,6 +65,7 @@
   "resume": "Retomar",
   "resumeAt": "Retomar de {{time}}",
   "startOver": "Assistir do início",
+  "startOverEpisode": "Ver {{code}} desde o início",
   "playEpisode": "Reproduzir {{code}}",
   "resumeEpisode": "Retomar {{code}}",
   "nowPlaying": "Reproduzindo agora",
@@ -153,6 +155,8 @@
   "tmdbKeyMissingTitle": "Títulos semelhantes precisam de uma chave do TMDB",
   "tmdbKeyMissingHint": "Adicione uma chave do TMDB em Configurações > Metadados.",
   "addTmdbKey": "Adicionar uma chave do TMDB",
+  "tmdbKeyRejectedTitle": "O TMDB recusou a chave de API",
+  "tmdbKeyRejectedHint": "Verifique ou substitua a chave do TMDB em Configurações > Metadados.",
   "watched": "Assistido",
   "markWatched": "Marcar como assistido",
   "markUnwatched": "Marcar como não assistido",
@@ -184,5 +188,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Não foi possível carregar estes títulos"
+  "pageLoadFailed": "Não foi possível carregar estes títulos",
+  "searchPartialError": "Não foi possível carregar alguns resultados."
 }

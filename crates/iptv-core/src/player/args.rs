@@ -232,7 +232,10 @@ pub fn vlc_external_args(
     args
 }
 
-/// Named pipe for the embedded session's JSON IPC (`<pid>` is this process).
+/// Base name of the embedded session's JSON IPC pipe (`<pid>` is this
+/// process). The embedded player appends `-<session>`, a number that is new
+/// for each attach (player/embedded.rs), so the pipe mpv opens is
+/// `\\.\pipe\tsrust-iptv-mpv-<pid>-<session>`.
 pub fn mpv_pipe_name(pid: u32) -> String {
     format!(r"\\.\pipe\tsrust-iptv-mpv-{pid}")
 }

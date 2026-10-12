@@ -1,16 +1,19 @@
-//! Catalog sync: account check, then live (+radio), movies, series one content
-//! type at a time through `catalog::replace_catalog`, then the XMLTV link.
+//! Catalog sync: account check, then live (+radio), movies and series are
+//! fetched and mapped one content type at a time, and all of them are written
+//! in ONE transaction ([`replace_catalogs`]), then the XMLTV link.
 //!
-//! Memory: each type's body is fetched as bytes, decoded into a
-//! `Vec<RawItem>` on the blocking pool, the bytes dropped, and the Vec fed to
-//! the writer as an iterator; nothing from the previous type is alive when the
-//! next one is fetched.
+//! Atomicity (C8): a cancel or failure anywhere before that commit leaves the
+//! previous catalog whole. Writing type by type used to leave live new and
+//! movies old when a cancel landed between types.
+//!
+//! Memory: each type's body is fetched as bytes, decoded and mapped to
+//! `ItemRow`s on the blocking pool, and the bytes dropped before the next type
+//! is fetched. The mapped rows of every type are held until the single write.
 //!
 //! Failure policy: `Auth`, `Network` and `Timeout` (after retries) abort the
-//! whole sync (the catalog of types not yet synced stays as it was). A type the
-//! panel does not serve (`NotFound`, unreadable JSON) is skipped with a warning
-//! and keeps its previous rows; the sync fails only if every requested type
-//! failed.
+//! whole sync and nothing is written. A type the panel does not serve
+//! (`NotFound`, unreadable JSON) is skipped with a warning and keeps its
+//! previous rows; the sync fails only if every requested type failed.
 
 use super::client::XtreamClient;
 use super::meta::{self, added_to_rfc3339, year_from_date, ServerMeta};
@@ -21,9 +24,9 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgLinks, ImportSummary, XtreamSourceConfig};
 use crate::sources::progress;
 use crate::state::AppState;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Progress is emitted at least this often while saving.
@@ -111,7 +114,7 @@ pub async fn sync_source(
     plan: SyncPlan,
 ) -> CoreResult<ImportSummary> {
     let http = crate::http::trusted_client(&state, &cfg.server_url);
-    let client = XtreamClient::new(http, cfg)?;
+    let client = XtreamClient::new(http, cfg)?.with_progress(&state, source_id);
     tracing::info!(source_id, server = %client.server, user = %client.masked_username(), ?plan, "xtream sync start");
     progress(&state, source_id, "fetching", 0, None, Some("account"));
     let account = client.account().await?;
@@ -125,9 +128,8 @@ pub async fn sync_source(
             .await?;
     }
 
-    let mut summary = ImportSummary::default();
+    let mut parts: Vec<CatalogPart> = Vec::new();
     let mut first_err: Option<CoreError> = None;
-    let mut attempted = 0;
 
     let steps: [(bool, Kind); 3] = [
         (plan.live, Kind::Live),
@@ -138,18 +140,21 @@ pub async fn sync_source(
         if !enabled {
             continue;
         }
-        attempted += 1;
-        match sync_kind(&state, &client, source_id, kind).await {
-            Ok(n) => match kind {
-                Kind::Live => summary.channels = n as i64,
-                Kind::Movies => summary.movies = n as i64,
-                Kind::Series => summary.series = n as i64,
-            },
+        // A cancel between content types stops here, before anything is
+        // written (the HTTP helpers also stop a fetch in flight).
+        if crate::sources::is_import_cancelled() {
+            return Err(crate::sources::import_cancelled_error());
+        }
+        match fetch_kind(&state, &client, source_id, kind).await {
+            Ok(p) => parts.extend(p),
             Err(err)
                 if matches!(
                     err,
-                    CoreError::Auth(_) | CoreError::Network(_) | CoreError::Timeout(_)
-                ) =>
+                    CoreError::Auth(_)
+                        | CoreError::Network(_)
+                        | CoreError::Server(_)
+                        | CoreError::Timeout(_)
+                ) || crate::sources::is_cancelled_error(&err) =>
             {
                 return Err(err);
             }
@@ -167,12 +172,48 @@ pub async fn sync_source(
             }
         }
     }
-    if attempted > 0 && summary == ImportSummary::default() {
+    if parts.iter().all(|p| p.rows.is_empty()) {
         if let Some(err) = first_err {
-            // Every requested type failed.
+            // Every requested type failed (or the rest came back empty):
+            // keep the previous catalog untouched.
             return Err(err);
         }
     }
+    if crate::sources::is_import_cancelled() {
+        return Err(crate::sources::import_cancelled_error());
+    }
+
+    let total = parts.iter().map(|p| p.rows.len() as u64).sum::<u64>();
+    let state2 = state.clone();
+    let sid = source_id.to_string();
+    // The run's token, read here (task-local) before waiting on the pool or
+    // the write lock (C8; see `CatalogWriter::begin`).
+    let cancel = crate::sources::import_cancel();
+    let counts = state
+        .db_call(move |conn| {
+            let mut done = 0u64;
+            let mut on_row = |ct: ContentType| {
+                done += 1;
+                if done % PROGRESS_EVERY == 0 || done == total {
+                    progress(
+                        &state2,
+                        &sid,
+                        "saving",
+                        done,
+                        Some(total),
+                        Some(ct.as_str()),
+                    );
+                }
+            };
+            replace_catalogs(conn, &sid, parts, cancel, &mut on_row)
+        })
+        .await?;
+    let count = |ct: ContentType| counts.get(&ct).copied().unwrap_or(0) as i64;
+    let summary = ImportSummary {
+        channels: count(ContentType::Live) + count(ContentType::Radio),
+        movies: count(ContentType::Movie),
+        series: count(ContentType::Series),
+    };
 
     // XMLTV link + caches.
     let xmltv = xmltv_url(&client.server, &client.username, client.password());
@@ -217,14 +258,14 @@ impl Kind {
     }
 }
 
-/// Fetches, parses and stores one content type. Returns the number of items
-/// written (live includes radio).
-async fn sync_kind(
+/// Fetches and maps one content type (live yields a live and a radio part).
+/// Nothing is written here; see [`replace_catalogs`].
+async fn fetch_kind(
     state: &Arc<AppState>,
     client: &XtreamClient,
     source_id: &str,
     kind: Kind,
-) -> CoreResult<u64> {
+) -> CoreResult<Vec<CatalogPart>> {
     let (cat_action, list_action) = kind.actions();
     progress(state, source_id, "fetching", 0, None, Some(kind.label()));
     let (cats, list) = tokio::join!(
@@ -234,9 +275,12 @@ async fn sync_kind(
     let categories = match cats {
         Ok(c) => map_categories(c),
         // Categories are cosmetic; items still land under "Uncategorized".
-        Err(err @ (CoreError::Auth(_) | CoreError::Network(_) | CoreError::Timeout(_))) => {
-            return Err(err)
-        }
+        Err(
+            err @ (CoreError::Auth(_)
+            | CoreError::Network(_)
+            | CoreError::Server(_)
+            | CoreError::Timeout(_)),
+        ) => return Err(err),
         Err(err) => {
             tracing::warn!(source_id, action = cat_action, error = %err, "xtream categories unavailable");
             Vec::new()
@@ -244,97 +288,59 @@ async fn sync_kind(
     };
     let bytes = list?;
 
-    let state2 = state.clone();
+    progress(state, source_id, "parsing", 0, None, Some(kind.label()));
     let sid = source_id.to_string();
-    state
-        .db_call(move |conn| {
-            progress(&state2, &sid, "parsing", 0, None, Some(kind.label()));
-            match kind {
-                Kind::Live => {
-                    let parsed: LenientVec<RawLive> =
-                        super::client::decode(&bytes, "live streams")?;
-                    drop(bytes);
-                    log_skipped(&sid, kind, parsed.skipped);
-                    let rows: Vec<ItemRow> = parsed
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, r)| live_row(&sid, i as i64, r))
-                        .collect();
-                    let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) =
-                        rows.into_iter().partition(|r| r.is_radio);
-                    let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
-                    let total = (live.len() + radio.len()) as u64;
-                    let mut done = 0u64;
-                    let n_live = write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Live,
-                        &live_cats,
-                        live,
-                        total,
-                        &mut done,
-                    )?;
-                    let n_radio = write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Radio,
-                        &radio_cats,
-                        radio,
-                        total,
-                        &mut done,
-                    )?;
-                    Ok(n_live + n_radio)
-                }
-                Kind::Movies => {
-                    let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
-                    drop(bytes);
-                    log_skipped(&sid, kind, parsed.skipped);
-                    let total = parsed.items.len() as u64;
-                    let rows = parsed
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, r)| vod_row(&sid, i as i64, r));
-                    let mut done = 0;
-                    write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Movie,
-                        &categories,
-                        rows,
-                        total,
-                        &mut done,
-                    )
-                }
-                Kind::Series => {
-                    let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
-                    drop(bytes);
-                    log_skipped(&sid, kind, parsed.skipped);
-                    let total = parsed.items.len() as u64;
-                    let rows = parsed
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, r)| series_row(&sid, i as i64, r));
-                    let mut done = 0;
-                    write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Series,
-                        &categories,
-                        rows,
-                        total,
-                        &mut done,
-                    )
-                }
+    let parts = tokio::task::spawn_blocking(move || -> CoreResult<Vec<CatalogPart>> {
+        let part = |content_type, categories, rows| CatalogPart {
+            content_type,
+            categories,
+            rows,
+        };
+        Ok(match kind {
+            Kind::Live => {
+                let parsed: LenientVec<RawLive> = super::client::decode(&bytes, "live streams")?;
+                drop(bytes);
+                log_skipped(&sid, kind, parsed.skipped);
+                let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) = parsed
+                    .items
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, r)| live_row(&sid, i as i64, r))
+                    .partition(|r| r.is_radio);
+                let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
+                vec![
+                    part(ContentType::Live, live_cats, live),
+                    part(ContentType::Radio, radio_cats, radio),
+                ]
+            }
+            Kind::Movies => {
+                let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
+                drop(bytes);
+                log_skipped(&sid, kind, parsed.skipped);
+                let rows = parsed
+                    .items
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, r)| vod_row(&sid, i as i64, r))
+                    .collect();
+                vec![part(ContentType::Movie, categories, rows)]
+            }
+            Kind::Series => {
+                let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
+                drop(bytes);
+                log_skipped(&sid, kind, parsed.skipped);
+                let rows = parsed
+                    .items
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, r)| series_row(&sid, i as i64, r))
+                    .collect();
+                vec![part(ContentType::Series, categories, rows)]
             }
         })
-        .await
+    })
+    .await??;
+    Ok(parts)
 }
 
 fn log_skipped(source_id: &str, kind: Kind, skipped: usize) {
@@ -348,29 +354,64 @@ fn log_skipped(source_id: &str, kind: Kind, skipped: usize) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write(
+/// The new catalog of one content type, written by [`replace_catalogs`].
+pub(crate) struct CatalogPart {
+    pub content_type: ContentType,
+    pub categories: Vec<CategoryRow>,
+    pub rows: Vec<ItemRow>,
+}
+
+/// Replaces the catalogs of several content types of one source in ONE
+/// transaction and returns the rows written per type (duplicates excluded).
+///
+/// Any error, or a cancel of the import run (C8) seen by the writer or right
+/// before the commit, rolls the whole transaction back: the previous catalog
+/// of every type stays as it was. Types not in `parts` are not touched.
+/// `on_row` is called once per row offered to the writer.
+///
+/// `cancel` is the run's token, taken by the caller before `db_call` (see
+/// [`catalog::CatalogWriter::begin`]); `None` falls back to the registered
+/// writer token.
+pub(crate) fn replace_catalogs(
     conn: &mut Connection,
-    state: &AppState,
     source_id: &str,
-    ct: ContentType,
-    categories: &[CategoryRow],
-    rows: impl IntoIterator<Item = ItemRow>,
-    total: u64,
-    done: &mut u64,
-) -> CoreResult<u64> {
-    let label = ct.as_str();
-    let n = {
-        let mut iter = rows.into_iter().inspect(|_| {
-            *done += 1;
-            if *done % PROGRESS_EVERY == 0 {
-                progress(state, source_id, "saving", *done, Some(total), Some(label));
-            }
-        });
-        catalog::replace_catalog(conn, source_id, ct, categories, &mut iter)?
+    parts: Vec<CatalogPart>,
+    cancel: Option<tokio_util::sync::CancellationToken>,
+    on_row: &mut dyn FnMut(ContentType),
+) -> CoreResult<HashMap<ContentType, u64>> {
+    let cancel = cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id));
+    let check_cancel = || -> CoreResult<()> {
+        if cancel.as_ref().is_some_and(|t| t.is_cancelled()) {
+            return Err(crate::sources::import_cancelled_error());
+        }
+        Ok(())
     };
-    progress(state, source_id, "saving", *done, Some(total), Some(label));
-    Ok(n)
+    check_cancel()?;
+    let mut counts = HashMap::new();
+    if parts.is_empty() {
+        return Ok(counts);
+    }
+    let types: Vec<ContentType> = parts.iter().map(|p| p.content_type).collect();
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    {
+        let mut w = catalog::CatalogWriter::begin(&tx, source_id, &types, cancel.clone())?;
+        let mut categories = Vec::with_capacity(parts.len());
+        for part in parts {
+            for row in &part.rows {
+                w.insert(row)?;
+                on_row(part.content_type);
+            }
+            categories.push((part.content_type, part.categories));
+        }
+        for ct in &types {
+            counts.insert(*ct, w.inserted_of(*ct));
+        }
+        w.finish(&categories)?;
+    }
+    // Last check: a cancelled run never commits.
+    check_cancel()?;
+    tx.commit()?;
+    Ok(counts)
 }
 
 /// Adds the account's XMLTV URL to `epg.detectedUrls`, replacing stale
@@ -524,8 +565,11 @@ pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
         epg_channel_id: r.epg_channel_id,
         is_radio,
         // Xtream reports archive depth in days; enabled archives with an
-        // unknown depth get one day so the UI offers catch-up.
-        archive_hours: archive.then(|| days.unwrap_or(1) * 24),
+        // unknown depth get one day so the UI offers catch-up. Clamped: a
+        // garbage depth must not overflow here or in the catch-up time math.
+        archive_hours: archive
+            .then(|| super::meta::archive_days_to_hours(days.unwrap_or(1)))
+            .flatten(),
         extra: Value::Object(extra),
         position,
         item_id: id,
@@ -648,6 +692,22 @@ mod tests {
     }
 
     #[test]
+    fn huge_archive_duration_is_clamped_not_overflowed() {
+        // `9223372036854775807 * 24` used to overflow (debug panic).
+        for days in [json!(i64::MAX), json!("9223372036854775807"), json!(1e300)] {
+            let r: RawLive =
+                parse(json!({"stream_id": 1, "tv_archive": 1, "tv_archive_duration": days}));
+            let row = live_row("s", 0, r).unwrap();
+            assert!(
+                row.archive_hours
+                    .is_some_and(|h| (24..=366 * 24).contains(&h)),
+                "{:?}",
+                row.archive_hours
+            );
+        }
+    }
+
+    #[test]
     fn maps_vod_and_series_rows() {
         let v: RawVod = parse(json!({
             "name": "Film (2019)", "stream_id": "201", "stream_icon": "http://x/p.jpg",
@@ -696,5 +756,170 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].name, "Radio");
+    }
+
+    fn catalog_db(sid: &str) -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO sources (id, kind, name, config_json) VALUES (?1, 'xtream', 'X', '{}')",
+            [sid],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn item(sid: &str, ct: ContentType, id: &str) -> ItemRow {
+        ItemRow {
+            source_id: sid.into(),
+            content_type: ct,
+            item_id: id.into(),
+            category_id: "c".into(),
+            title: id.into(),
+            ..ItemRow::default()
+        }
+    }
+
+    fn part(ct: ContentType, rows: Vec<ItemRow>) -> CatalogPart {
+        CatalogPart {
+            content_type: ct,
+            categories: vec![CategoryRow {
+                category_id: "c".into(),
+                name: "C".into(),
+                position: 0,
+            }],
+            rows,
+        }
+    }
+
+    fn item_ids(conn: &Connection, sid: &str, ct: ContentType) -> Vec<String> {
+        let mut st = conn
+            .prepare("SELECT item_id FROM items WHERE source_id = ?1 AND content_type = ?2 ORDER BY item_id")
+            .unwrap();
+        st.query_map(rusqlite::params![sid, ct.as_str()], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn replace_catalogs_writes_every_part() {
+        let sid = "s-ok";
+        let mut conn = catalog_db(sid);
+        let mut offered = 0;
+        let counts = replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(ContentType::Live, vec![item(sid, ContentType::Live, "l1")]),
+                part(
+                    ContentType::Movie,
+                    vec![
+                        item(sid, ContentType::Movie, "m1"),
+                        item(sid, ContentType::Movie, "m1"),
+                    ],
+                ),
+            ],
+            None,
+            &mut |_| offered += 1,
+        )
+        .unwrap();
+        assert_eq!(offered, 3);
+        assert_eq!(counts[&ContentType::Live], 1);
+        assert_eq!(counts[&ContentType::Movie], 1, "duplicate not counted");
+        assert_eq!(item_ids(&conn, sid, ContentType::Live), ["l1"]);
+        assert_eq!(item_ids(&conn, sid, ContentType::Movie), ["m1"]);
+    }
+
+    /// B9-D38: a failure in a later content type (here a row of the wrong
+    /// type; a cancel takes the same rollback path) used to leave the earlier
+    /// types committed. Now every type keeps its old catalog.
+    #[test]
+    fn replace_catalogs_rolls_back_every_part_on_error() {
+        let sid = "s-err";
+        let mut conn = catalog_db(sid);
+        replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(
+                    ContentType::Live,
+                    vec![item(sid, ContentType::Live, "old-l")],
+                ),
+                part(
+                    ContentType::Movie,
+                    vec![item(sid, ContentType::Movie, "old-m")],
+                ),
+            ],
+            None,
+            &mut |_| {},
+        )
+        .unwrap();
+        let err = replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(
+                    ContentType::Live,
+                    vec![item(sid, ContentType::Live, "new-l")],
+                ),
+                part(
+                    ContentType::Movie,
+                    vec![item(sid, ContentType::Series, "bad")],
+                ),
+            ],
+            None,
+            &mut |_| {},
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{err:?}");
+        assert_eq!(item_ids(&conn, sid, ContentType::Live), ["old-l"]);
+        assert_eq!(item_ids(&conn, sid, ContentType::Movie), ["old-m"]);
+    }
+
+    /// Review R2-1: the writer looked its cancel token up inside db_call. When
+    /// the pool or the write lock was slow, the run's registration was gone by
+    /// then (no token, or a newer run's), and a cancelled run committed. The
+    /// run's token is now passed in and honoured with nothing registered.
+    #[test]
+    fn replace_catalogs_honours_the_run_token_without_a_registered_writer() {
+        let sid = "s-tok";
+        let mut conn = catalog_db(sid);
+        replace_catalogs(
+            &mut conn,
+            sid,
+            vec![part(
+                ContentType::Live,
+                vec![item(sid, ContentType::Live, "old-l")],
+            )],
+            None,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(crate::sources::writer_cancel_token(&conn, sid).is_none());
+        // Cancelled mid-write: the writer's own check (taken at begin) and the
+        // pre-commit check both see it.
+        let token = tokio_util::sync::CancellationToken::new();
+        let fire = token.clone();
+        let err = replace_catalogs(
+            &mut conn,
+            sid,
+            vec![part(
+                ContentType::Live,
+                vec![item(sid, ContentType::Live, "new-l")],
+            )],
+            Some(token),
+            &mut |_| fire.cancel(),
+        )
+        .unwrap_err();
+        assert!(crate::sources::is_cancelled_error(&err), "{err:?}");
+        assert_eq!(item_ids(&conn, sid, ContentType::Live), ["old-l"]);
+        // The same token, checked by CatalogWriter itself.
+        let tx = conn.transaction().unwrap();
+        let w = catalog::CatalogWriter::begin(&tx, sid, &[ContentType::Live], Some(fire.clone()))
+            .unwrap();
+        assert!(crate::sources::is_cancelled_error(
+            &w.finish(&[(ContentType::Live, Vec::new())]).unwrap_err()
+        ));
     }
 }

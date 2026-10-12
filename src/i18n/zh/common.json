@@ -46,5 +46,10 @@
   "errorHintConflict": "请重新加载以查看最新版本，然后重试。",
   "errorHintIo": "请确认文件夹存在，并且你有写入权限。",
   "errorHintDb": "请重启应用。如果问题仍然存在，请在设置中恢复备份。",
-  "errorHintInternal": "请重试。如果问题仍然存在，请重启应用。"
+  "errorHintInternal": "请重试。如果问题仍然存在，请重启应用。",
+  "errorCode": "错误代码：{{code}}",
+  "errorTitleEngineMissing": "无法启动播放器引擎",
+  "errorHintEngineMissing": "视频播放器引擎(mpv)缺失或无法启动。",
+  "errorTitleServer": "服务器出现问题",
+  "errorHintServer": "服务器繁忙或出现故障。请稍后重试。"
 }

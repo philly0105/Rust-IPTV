@@ -98,3 +98,13 @@ export function buildFavoriteRows(entries: readonly FavoriteEntry[], search = ''
 function matches(e: FavoriteEntry, q: string): boolean {
   return e.snapshot.title.toLocaleLowerCase().includes(q) || (e.snapshot.subtitle?.toLocaleLowerCase().includes(q) ?? false);
 }
+
+/**
+ * Order for putting a removed favorite back where it was: `index` is its old
+ * place in the stored order; everything else keeps its current order.
+ */
+export function reinsertFavorite(current: readonly FavoriteEntry[], restored: FavoriteEntry, index: number): FavoriteEntry[] {
+  const rest = sortFavorites(current).filter((e) => !sameRef(e.ref, restored.ref));
+  const at = Math.max(0, Math.min(rest.length, index));
+  return [...rest.slice(0, at), restored, ...rest.slice(at)];
+}

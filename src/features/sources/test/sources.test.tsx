@@ -141,7 +141,8 @@ describe('Add source flow sends the exact C4 args', () => {
     fireEvent.click(screen.getByTestId('add-source-submit'));
     const alert = await screen.findByTestId('add-source-error');
     expect(alert.textContent).toContain('Bad credentials');
-    expect(alert.textContent).toContain('Check the username, password or MAC.');
+    expect(alert.textContent).toContain('Check the username and password.');
+    expect(alert.textContent).not.toContain('MAC');
   });
 });
 

@@ -38,15 +38,20 @@ interface ToastStore {
 const MAX_VISIBLE = 5;
 
 /**
- * Trims the stack to MAX_VISIBLE. The oldest toast that would time out anyway
- * goes first, so a persistent one (import progress, `duration: 0`) is not
- * pushed out by a burst of short notices. Exported for tests.
+ * Trims the stack to MAX_VISIBLE. The oldest plain toast that would time out
+ * anyway goes first, then the oldest plain persistent one (import progress,
+ * `duration: 0`). Toasts with an action (Undo) and the newest toast are never
+ * evicted; if only those remain, the stack goes over the cap and the list
+ * scrolls. Exported for tests.
  */
 export function evictOverflow(list: ToastRecord[]): ToastRecord[] {
   const next = list.slice();
+  const evictable = (x: ToastRecord, idx: number) => idx < next.length - 1 && !x.action;
   while (next.length > MAX_VISIBLE) {
-    const i = next.findIndex((x, idx) => idx < next.length - 1 && defaultDuration(x) > 0);
-    next.splice(i >= 0 ? i : 0, 1);
+    let i = next.findIndex((x, idx) => evictable(x, idx) && defaultDuration(x) > 0);
+    if (i < 0) i = next.findIndex(evictable);
+    if (i < 0) break;
+    next.splice(i, 1);
   }
   return next;
 }
@@ -198,16 +203,16 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
     <li
       ref={liRef}
       data-toast-id={t.id}
+      data-variant={t.variant}
       onKeyDown={onKeyDown}
-      role={t.variant === 'error' ? 'alert' : 'status'}
-      aria-live={t.variant === 'error' ? 'assertive' : 'polite'}
       data-paused={paused || undefined}
       onFocus={pause}
       onBlur={(e) => {
         if (!paused && !e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
       }}
       className={cn(
-        'pointer-events-auto relative flex w-full gap-3 overflow-hidden rounded-md border border-border bg-surface-2 py-3 pe-2 ps-4 shadow-2',
+        // shrink-0: in the capped flex column a long stack must scroll, not squash each toast.
+        'pointer-events-auto relative flex w-full shrink-0 gap-3 overflow-hidden rounded-md border border-border bg-surface-2 py-3 pe-2 ps-4 shadow-2',
         'motion-safe:animate-toast-in',
       )}
     >
@@ -245,7 +250,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
               t.action?.onClick();
               close();
             }}
-            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline"
+            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline active:bg-pressed"
           >
             {t.action.label}
           </button>
@@ -256,7 +261,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
         aria-label={tr('dismiss')}
         onClick={close}
         data-toast-dismiss=""
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg active:bg-pressed"
       >
         <X aria-hidden size={14} />
       </button>
@@ -264,23 +269,103 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
   );
 }
 
-/** Renders the toast stack (bottom-right). Mount once; the shell does. */
+interface Announcement {
+  /** Bumps on every announcement so identical text is read again. */
+  seq: number;
+  toast: ToastRecord;
+}
+
+/**
+ * Which toasts to read out after the stack changed: those that are new, and
+ * those updated in place with a different title (an import moving from
+ * "Importing" to "Imported"). Progress ticks that only change the description
+ * or the bar stay quiet. Exported for tests.
+ */
+export function toastsToAnnounce(prev: ReadonlyMap<string, ReactNode>, next: readonly ToastRecord[]): ToastRecord[] {
+  return next.filter((t) => !prev.has(t.id) || prev.get(t.id) !== t.title);
+}
+
+/**
+ * Renders the toast stack (bottom-right). Mount once; the shell does.
+ *
+ * Screen readers hear toasts through two live regions that exist from the
+ * first render (a region inserted together with its text is often skipped):
+ * errors through the assertive one, everything else through the polite one.
+ * The visible list items carry no live role, so the list stays a plain list.
+ */
 export function ToastViewport() {
   const { t } = useTranslation('common');
   const toasts = useToastStore((s) => s.toasts);
   const [hovered, setHovered] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const [polite, setPolite] = useState<Announcement | null>(null);
+  const [assertive, setAssertive] = useState<Announcement | null>(null);
+  const seen = useRef(new Map<string, ReactNode>());
+  const seq = useRef(0);
+  const listRef = useRef<HTMLOListElement>(null);
   // The last toast leaving while hovered never fires mouseleave; reset so the next stack starts unpaused.
   useEffect(() => {
     if (toasts.length === 0) setHovered(false);
   }, [toasts.length]);
+  useEffect(() => {
+    for (const x of toastsToAnnounce(seen.current, toasts)) {
+      const a = { seq: ++seq.current, toast: x };
+      if (x.variant === 'error') setAssertive(a);
+      else setPolite(a);
+    }
+    seen.current = new Map(toasts.map((x) => [x.id, x.title]));
+    // Once a toast leaves the stack its words leave the live region too, so a
+    // screen reader's virtual cursor never finds a stale message.
+    const live = new Set(toasts.map((x) => x.id));
+    const drop = (a: Announcement | null) => (a && !live.has(a.toast.id) ? null : a);
+    setPolite(drop);
+    setAssertive(drop);
+  }, [toasts]);
+  // A new toast scrolls into view when the capped list overflows. Updates to a
+  // showing toast (progress ticks) leave the user's scroll position alone.
+  const lastId = toasts.at(-1)?.id;
+  useEffect(() => {
+    const list = listRef.current;
+    if (list && lastId) list.scrollTop = list.scrollHeight;
+  }, [lastId]);
   if (typeof document === 'undefined') return null;
+  const spoken = (a: Announcement | null) =>
+    a && (
+      <p key={a.seq}>
+        {a.toast.title}
+        {a.toast.description ? <>. {a.toast.description}</> : null}
+      </p>
+    );
   return createPortal(
     <section
       aria-label={t('notifications')}
       aria-keyshortcuts="F8"
       data-toast-viewport=""
       className="pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]">
-      <ol className="flex flex-col gap-2" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <div aria-live="polite" aria-atomic="true" className="sr-only" data-toast-live="polite">
+        {spoken(polite)}
+      </div>
+      <div aria-live="assertive" aria-atomic="true" className="sr-only" data-toast-live="assertive">
+        {spoken(assertive)}
+      </div>
+      {/*
+        The viewport and the list never take pointer events, only the toasts do,
+        so the gaps around them never block the page underneath. The list is
+        capped at half the window: a long stack scrolls inside it (newest kept
+        in view) instead of covering the content behind it. The negative margin
+        plus padding gives each card's shadow-2 room inside the scroll clip; once
+        scrolled, the top edge fades instead of slicing the oldest card flat.
+        The fade is static (no transition), so reduced motion needs nothing more.
+      */}
+      <ol
+        ref={listRef}
+        data-toast-list=""
+        data-scrolled={scrolled ? '' : undefined}
+        className="pointer-events-none -mx-6 -mt-6 -mb-4 flex max-h-[50vh] flex-col gap-2 overflow-y-auto overscroll-contain px-6 pt-6 pb-4 data-[scrolled]:[mask-image:linear-gradient(to_bottom,transparent,#000_48px)]"
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         {toasts.map((x) => (
           <ToastItem key={x.id} t={x} paused={hovered} />
         ))}

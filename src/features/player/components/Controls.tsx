@@ -28,16 +28,13 @@ import { isDesktop, rpc } from '@/api/transport';
 
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
-import { formatTime } from '../format';
+import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
 import { useMediaStore } from '../media';
 import { usePipStore } from '../pip';
 import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '../store';
 import { SeekBar } from './SeekBar';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-/** Seconds behind the end of the seekable window that still count as live. */
-const LIVE_EDGE_SLACK = 6;
-const LIVE_EDGE_SLACK_MPV = 10;
 
 /** Key names as shown in tooltips, and their `aria-keyshortcuts` form. */
 const KEYS = {
@@ -96,11 +93,12 @@ export function CtlButton({
   );
 }
 
-function VolumeControl() {
+function VolumeControl({ compact }: { compact?: boolean }) {
   const { t } = useTranslation('player');
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const shown = muted ? 0 : volume;
+  const percent = Math.round(shown * 100);
   const Icon = shown === 0 ? VolumeX : shown < 0.5 ? Volume1 : Volume2;
   return (
     <div className="group/vol flex items-center">
@@ -112,14 +110,24 @@ function VolumeControl() {
         min={0}
         max={100}
         step={1}
-        value={Math.round(shown * 100)}
+        value={percent}
         aria-label={t('volume')}
-        aria-valuetext={t('volumePercent', { percent: Math.round(shown * 100) })}
+        aria-valuetext={t('volumePercent', { percent })}
         onChange={(e) => usePlayerStore.getState().setVolume(Number(e.target.value) / 100)}
         onKeyDown={(e) => e.stopPropagation()}
         className="player-range w-0 opacity-0 group-focus-within/vol:w-24 group-focus-within/vol:opacity-100 group-hover/vol:w-24 group-hover/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-200"
-        style={{ ['--fill' as string]: `${Math.round(shown * 100)}%` }}
+        style={{ ['--fill' as string]: `${percent}%` }}
       />
+      {/* The level as a number while the slider is out (the slider itself announces it). */}
+      {!compact && (
+        <span
+          aria-hidden
+          data-testid="volume-readout"
+          className="w-0 overflow-hidden text-end font-display text-xs whitespace-nowrap text-white/80 tabular-nums opacity-0 group-focus-within/vol:w-10 group-focus-within/vol:opacity-100 group-hover/vol:w-10 group-hover/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-200"
+        >
+          {percent}%
+        </span>
+      )}
     </div>
   );
 }
@@ -248,7 +256,8 @@ export function BarReadout({
 
 type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'speed';
 
-function MenuRow({ label, value, onClick }: { label: string; value?: string; onClick(): void }) {
+/** A row that opens a submenu (shared with the video's context menu). */
+export function MenuRow({ label, value, onClick }: { label: string; value?: string; onClick(): void }) {
   return (
     <button
       type="button"
@@ -265,7 +274,8 @@ function MenuRow({ label, value, onClick }: { label: string; value?: string; onC
   );
 }
 
-function MenuChoice({ label, selected, onClick }: { label: string; selected: boolean; onClick(): void }) {
+/** One choice of a submenu, checked when selected. */
+export function MenuChoice({ label, selected, onClick }: { label: string; selected: boolean; onClick(): void }) {
   return (
     <button
       type="button"
@@ -524,6 +534,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
           value={position}
           buffered={buffered}
           live={!!liveWindow}
+          edgeSlack={edgeSlack}
           onSeek={(s) => store.seekTo(s)}
           className="mb-0.5"
         />
@@ -553,7 +564,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
             <Square className="size-4! fill-current" />
           </CtlButton>
         )}
-        <VolumeControl />
+        <VolumeControl compact={compact} />
 
         {isLive ? (
           atLiveEdge ? (
@@ -570,7 +581,14 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
               <button
                 type="button"
                 data-ctl="golive"
-                onClick={() => liveWindow && store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end)}
+                onClick={(e) => {
+                  if (!liveWindow) return;
+                  // At the edge this button gives way to the LIVE badge: hand focus to play/pause
+                  // first, or it would fall to the page and the player's keys would stop working.
+                  const bar = e.currentTarget.closest('[data-player-controls]');
+                  bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
+                  store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end);
+                }}
                 aria-label={t('goLive')}
                 title={t('goLive')}
                 className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"

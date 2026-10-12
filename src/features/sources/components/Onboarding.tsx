@@ -42,7 +42,7 @@ export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
                 <span className="font-display text-xl font-semibold text-fg">{t(tile.title)}</span>
               </span>
               <span className="text-sm text-fg-muted">{t(tile.body)}</span>
-              <span className="mt-auto border-t border-border pt-3 text-sm text-fg">{t(tile.needs)}</span>
+              <span className="mt-auto border-t border-divider pt-3 text-sm text-fg">{t(tile.needs)}</span>
             </button>
           </li>
         ))}

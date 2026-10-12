@@ -172,7 +172,15 @@ pub fn server_offset_seconds(timestamp_now: Option<i64>, time_now: Option<&str>)
     let Some(naive) = parse_server_datetime(local) else {
         return 0;
     };
-    let diff = naive.and_utc().timestamp() - ts;
+    // `timestamp_now` is provider data: an absurd value must not overflow.
+    let Some(diff) = naive
+        .and_utc()
+        .timestamp()
+        .checked_sub(ts)
+        .filter(|d| d.unsigned_abs() <= 15 * 3600)
+    else {
+        return 0;
+    };
     let rounded = ((diff as f64) / 900.0).round() as i64 * 900;
     if rounded.abs() > 14 * 3600 {
         0
@@ -189,6 +197,15 @@ pub fn parse_server_datetime(s: &str) -> Option<NaiveDateTime> {
         .find_map(|f| NaiveDateTime::parse_from_str(s, f).ok())
 }
 
+/// RFC 3339 text for years 1..=9999 only. chrono writes later years as
+/// `+83158-...`, which is not RFC 3339 and which the UI cannot parse.
+fn rfc3339_bounded(d: DateTime<Utc>) -> Option<String> {
+    use chrono::Datelike;
+    (1..=9999)
+        .contains(&d.year())
+        .then(|| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
 /// Unix seconds to RFC 3339 UTC; `None` for 0, negatives and absurd values.
 pub fn unix_to_rfc3339(secs: i64) -> Option<String> {
     if secs <= 0 {
@@ -196,7 +213,7 @@ pub fn unix_to_rfc3339(secs: i64) -> Option<String> {
     }
     Utc.timestamp_opt(secs, 0)
         .single()
-        .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .and_then(rfc3339_bounded)
 }
 
 /// `added`-style text (unix seconds, or a date string) to RFC 3339.
@@ -206,18 +223,12 @@ pub fn added_to_rfc3339(raw: Option<&str>) -> Option<String> {
         return unix_to_rfc3339(n);
     }
     if let Some(dt) = parse_server_datetime(s) {
-        return Some(
-            dt.and_utc()
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        );
+        return rfc3339_bounded(dt.and_utc());
     }
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .ok()
         .and_then(|d| d.and_hms_opt(0, 0, 0))
-        .map(|dt| {
-            dt.and_utc()
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        })
+        .and_then(|dt| rfc3339_bounded(dt.and_utc()))
 }
 
 /// Parses an RFC 3339 instant (also accepts a bare unix seconds string).
@@ -257,20 +268,45 @@ pub fn year_from_date(s: Option<&str>) -> Option<i64> {
 }
 
 /// `HH:MM:SS` / `MM:SS` / minutes (`"95"`, `"95 min"`) to seconds.
+/// `None` for negative parts and values that overflow.
 pub fn duration_to_seconds(s: Option<&str>) -> Option<i64> {
     let s = s?.trim();
     if s.contains(':') {
-        let parts: Option<Vec<i64>> = s.split(':').map(|p| p.trim().parse::<i64>().ok()).collect();
-        let parts = parts?;
-        let secs = parts.iter().fold(0i64, |acc, p| acc * 60 + p);
+        let mut secs = 0i64;
+        for part in s.split(':') {
+            let part = part.trim();
+            if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let p = part.parse::<i64>().ok()?;
+            secs = secs.checked_mul(60)?.checked_add(p)?;
+        }
         return (secs > 0).then_some(secs);
     }
     let digits: String = s.chars().take_while(char::is_ascii_digit).collect();
-    digits
-        .parse::<i64>()
-        .ok()
-        .filter(|m| *m > 0)
-        .map(|m| m * 60)
+    digits.parse::<i64>().ok().and_then(minutes_to_seconds)
+}
+
+/// Positive minutes to seconds; `None` for zero, negatives and overflow.
+pub fn minutes_to_seconds(minutes: i64) -> Option<i64> {
+    (minutes > 0).then(|| minutes.checked_mul(60)).flatten()
+}
+
+/// Longest catch-up window kept from provider data. Real panels offer up to
+/// a few weeks; anything larger is a typo or garbage and would overflow the
+/// time arithmetic that builds archive URLs.
+pub const MAX_ARCHIVE_DAYS: i64 = 366;
+
+/// Catch-up days as advertised by a provider to archive hours, clamped to
+/// [`MAX_ARCHIVE_DAYS`]. `None` for zero and negatives.
+pub fn archive_days_to_hours(days: i64) -> Option<i64> {
+    (days > 0).then(|| days.min(MAX_ARCHIVE_DAYS) * 24)
+}
+
+/// Archive hours read back from the catalog, clamped the same way so rows
+/// stored by older builds cannot overflow chrono durations.
+pub fn clamp_archive_hours(hours: i64) -> i64 {
+    hours.clamp(0, MAX_ARCHIVE_DAYS * 24)
 }
 
 #[cfg(test)]
@@ -326,5 +362,37 @@ mod tests {
         assert_eq!(duration_to_seconds(Some("01:30:05")), Some(5405));
         assert_eq!(duration_to_seconds(Some("95 min")), Some(5700));
         assert_eq!(duration_to_seconds(Some("")), None);
+    }
+
+    /// B8-parsers: provider numbers that used to overflow (debug panic).
+    #[test]
+    fn overflowing_provider_numbers() {
+        // B8-parsers: years past 9999 used to come out as `+83158-...`.
+        assert_eq!(unix_to_rfc3339(2_562_047_788_015_216), None);
+        assert_eq!(added_to_rfc3339(Some("8210266876799")), None);
+        assert_eq!(
+            unix_to_rfc3339(253_402_300_799).as_deref(),
+            Some("9999-12-31T23:59:59Z")
+        );
+        assert_eq!(
+            server_offset_seconds(Some(i64::MIN), Some("2023-11-14 23:13:20")),
+            0
+        );
+        assert_eq!(
+            server_offset_seconds(Some(i64::MAX), Some("2023-11-14 23:13:20")),
+            0
+        );
+        assert_eq!(duration_to_seconds(Some("9223372036854775807:59:59")), None);
+        assert_eq!(duration_to_seconds(Some(&"99:".repeat(40))), None);
+        assert_eq!(duration_to_seconds(Some("1:-30")), None);
+        assert_eq!(duration_to_seconds(Some("-5:00")), None);
+        assert_eq!(duration_to_seconds(Some("999999999999999999 min")), None);
+        assert_eq!(duration_to_seconds(Some("1:30")), Some(90));
+        assert_eq!(minutes_to_seconds(i64::MAX), None);
+        assert_eq!(minutes_to_seconds(-1), None);
+        assert_eq!(archive_days_to_hours(i64::MAX), Some(MAX_ARCHIVE_DAYS * 24));
+        assert_eq!(archive_days_to_hours(3), Some(72));
+        assert_eq!(archive_days_to_hours(0), None);
+        assert_eq!(clamp_archive_hours(i64::MIN), 0);
     }
 }

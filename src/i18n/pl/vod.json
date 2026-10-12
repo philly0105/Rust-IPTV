@@ -26,6 +26,7 @@
   "manageCategoriesHidden_other": "Zarządzaj kategoriami (ukryte: {{count}})",
   "manageCategoriesHint": "Ukryte: {{hidden}} z {{total}}. Ukryte kategorie nie pojawiają się na listach ani w wyszukiwaniu.",
   "noCategoryMatch": "Żadna kategoria nie pasuje do filtra.",
+  "clearFilter": "Wyczyść filtr",
   "saveCategories": "Zapisz",
   "categoriesSaved": "Zapisano widoczność kategorii",
   "categoriesSaveFailed": "Nie udało się zapisać widoczności kategorii",
@@ -67,6 +68,7 @@
   "resume": "Wznów",
   "resumeAt": "Wznów od {{time}}",
   "startOver": "Od początku",
+  "startOverEpisode": "Odtwórz {{code}} od początku",
   "playEpisode": "Odtwórz {{code}}",
   "resumeEpisode": "Wznów {{code}}",
   "nowPlaying": "Teraz odtwarzane",
@@ -159,6 +161,8 @@
   "tmdbKeyMissingTitle": "Podobne tytuły wymagają klucza TMDB",
   "tmdbKeyMissingHint": "Dodaj klucz TMDB w Ustawienia > Metadane.",
   "addTmdbKey": "Dodaj klucz TMDB",
+  "tmdbKeyRejectedTitle": "TMDB odrzucił klucz API",
+  "tmdbKeyRejectedHint": "Sprawdź lub wymień klucz TMDB w Ustawienia > Metadane.",
   "watched": "Obejrzane",
   "markWatched": "Oznacz jako obejrzane",
   "markUnwatched": "Oznacz jako nieobejrzane",
@@ -193,5 +197,6 @@
   "searchCountMore_few": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Nie udało się wczytać tych tytułów"
+  "pageLoadFailed": "Nie udało się wczytać tych tytułów",
+  "searchPartialError": "Nie udało się wczytać części wyników."
 }

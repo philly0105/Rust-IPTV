@@ -2,9 +2,10 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { sameRef, type Channel, type EpgNowNext, type ItemRef, type SourceKind } from '@/api/types';
+import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
+import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { CHANNEL_ROW_HEIGHT, ChannelRow } from './ChannelRow';
 
@@ -21,8 +22,11 @@ export interface ChannelListProps {
   initialHeight?: number;
   onPlay(channel: Channel, nowNext: EpgNowNext | undefined): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
-  onContextMenu(pos: { x: number; y: number }, channel: Channel): void;
-  /** Reports the channel under the keyboard cursor. */
+  /** `favorite` is the star state shown on the row, so the menu can say "Add" or "Remove". */
+  onContextMenu(pos: { x: number; y: number }, channel: Channel, favorite: boolean): void;
+  /** Optimistic star states (a toggle in flight) that win over the loaded `favorites.contains`. */
+  favoriteOverrides?: ReadonlyMap<ItemKey, boolean>;
+  /** Reports the channel under the keyboard cursor, once it has rested for ACTIVE_SETTLE_MS. */
   onActiveChange?(channel: Channel | undefined): void;
 }
 
@@ -34,6 +38,8 @@ interface ListPlace {
 /** Cursor and scroll offset per list key, kept for the session (bounded, oldest dropped first). */
 const listMemory = new Map<string, ListPlace>();
 const LIST_MEMORY_LIMIT = 64;
+/** The cursor has to rest this long before the parent (guide ribbon) follows it. */
+export const ACTIVE_SETTLE_MS = 200;
 
 function remember(key: string, patch: Partial<ListPlace>): void {
   const prev = listMemory.get(key) ?? { active: 0, scrollTop: 0 };
@@ -57,11 +63,28 @@ export function ChannelList(props: ChannelListProps) {
   const propsRef = useRef(props);
   propsRef.current = props;
   // Coming back to a list (route change, category round trip) restores where you were.
-  const [active, setActive] = useState(() => listMemory.get(resetKey)?.active ?? 0);
+  const [active, setActiveState] = useState(() => listMemory.get(resetKey)?.active ?? 0);
+  // Key repeat on a big list delivers keydowns faster than React renders: every handler reads the
+  // cursor from this ref, so a burst of ArrowDowns moves one row each instead of re-reading a stale `active`.
+  const activeRef = useRef(active);
+  const setActive = useCallback((next: number | ((a: number) => number)) => {
+    const value = typeof next === 'function' ? next(activeRef.current) : next;
+    activeRef.current = value;
+    setActiveState(value);
+  }, []);
   /** Row index to focus once it is rendered (after keyboard moves and zaps). */
   const focusPending = useRef<number | null>(null);
   const count = paged.total ?? 0;
   const prefs = useDisplayPrefs();
+  const { favoriteOverrides } = props;
+  const isFavorite = useCallback(
+    (i: number): boolean => {
+      const ch = paged.getChannel(i);
+      const o = ch ? favoriteOverrides?.get(itemKey(ch.ref)) : undefined;
+      return o ?? paged.isFavorite(i);
+    },
+    [paged, favoriteOverrides],
+  );
 
   // A remembered cursor can point past the end once the list shrank (channels removed, refresh):
   // clamp it once the total is known so one row keeps tabIndex 0 and Enter still plays.
@@ -133,16 +156,42 @@ export function ChannelList(props: ChannelListProps) {
     if (scrollRef.current?.contains(document.activeElement)) focusPending.current = hit.index;
   }, [playingKey, paged.loaded]);
 
+  // The parent hears about the cursor once it settles. Telling it on every key (from an effect)
+  // left a parent render queued behind each keystroke of a fast repeat, so no commit ever ended
+  // idle and React stopped the chain as an update loop (#185).
   const activeChannel = paged.getChannel(active);
   const { onActiveChange } = props;
   useEffect(() => {
-    onActiveChange?.(activeChannel);
-  }, [activeChannel, onActiveChange]);
+    if (!onActiveChange) return;
+    const id = window.setTimeout(() => onActiveChange(activeChannel), ACTIVE_SETTLE_MS);
+    return () => window.clearTimeout(id);
+    // resetKey: a new list restarts the wait, so an old list's pending report never lands on it.
+  }, [activeChannel, onActiveChange, resetKey]);
 
-  // After keyboard moves, focus the row button once it is rendered.
-  useEffect(() => {
-    if (focusPending.current === null) return;
-    const el = scrollRef.current?.querySelector<HTMLButtonElement>(`[data-row-index="${focusPending.current}"]`);
+  /** The focusable button of row `i`: only there while the row is rendered and its channel is loaded. */
+  const rowButton = (i: number) => scrollRef.current?.querySelector<HTMLButtonElement>(`button[data-row-index="${i}"]`) ?? null;
+  /** The element in the list that last had focus, to notice when a re-render removes it. */
+  const lastFocused = useRef<HTMLElement | null>(null);
+
+  // Keyboard focus never sits on something that is about to disappear: while the cursor's row is
+  // off screen or still loading, the list itself holds focus (and takes the keys), and focus moves
+  // to the row as soon as it renders. A focused row removed by a reload hands focus to the list too.
+  useLayoutEffect(() => {
+    const list = scrollRef.current;
+    if (!list) return;
+    const focused = document.activeElement;
+    if (lastFocused.current && !lastFocused.current.isConnected && (focused === document.body || focused === null)) {
+      lastFocused.current = null;
+      focusPending.current = activeRef.current;
+      list.focus({ preventScroll: true });
+    }
+    const i = focusPending.current;
+    if (i === null) return;
+    if (!list.contains(document.activeElement)) {
+      focusPending.current = null; // focus went elsewhere meanwhile: leave it there
+      return;
+    }
+    const el = rowButton(i);
     if (el) {
       el.focus({ preventScroll: true });
       focusPending.current = null;
@@ -154,11 +203,19 @@ export function ChannelList(props: ChannelListProps) {
       if (count === 0) return;
       const next = Math.max(0, Math.min(count - 1, i));
       followKey.current = '';
-      focusPending.current = next;
-      setActive(next);
+      // In the event handler, not in a commit: the virtualizer answers the scroll from its own listener.
       virtualizer.scrollToIndex(next, { align: 'auto' });
+      const el = scrollRef.current?.querySelector<HTMLButtonElement>(`button[data-row-index="${next}"]`);
+      if (el) {
+        el.focus({ preventScroll: true });
+        focusPending.current = null;
+      } else {
+        scrollRef.current?.focus({ preventScroll: true });
+        focusPending.current = next;
+      }
+      setActive(next);
     },
-    [count, virtualizer],
+    [count, setActive, virtualizer],
   );
 
   const activate = useCallback(
@@ -173,7 +230,21 @@ export function ChannelList(props: ChannelListProps) {
     [],
   );
 
+  const openMenuAtCursor = () => {
+    const at = activeRef.current;
+    const ch = paged.getChannel(at);
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-row-index="${at}"]`);
+    if (ch && el) {
+      const r = el.getBoundingClientRect();
+      // Anchor near the row's inline start, which is its right edge in RTL.
+      props.onContextMenu({ x: documentIsRtl() ? r.right - 48 : r.left + 48, y: r.bottom - 8 }, ch, isFavorite(at));
+    }
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    // Ctrl+S, Alt+Enter and friends belong to the app and the browser, not to the row.
+    const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    const active = activeRef.current;
     const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 640) / CHANNEL_ROW_HEIGHT) - 1);
     switch (e.key) {
       case 'ArrowDown':
@@ -195,31 +266,23 @@ export function ChannelList(props: ChannelListProps) {
         moveTo(count - 1);
         break;
       case 'Enter':
-        activate(active, 'key');
+        if (!bare) return;
+        // A held Enter must not restart the stream on every key repeat.
+        if (!e.repeat) activate(active, 'key');
         break;
       case 's':
       case 'S': {
+        if (!bare) return;
         const ch = paged.getChannel(active);
-        if (ch) props.onToggleFavorite(ch, paged.isFavorite(active));
+        if (ch && !e.repeat) props.onToggleFavorite(ch, isFavorite(active));
         break;
       }
-      case 'ContextMenu': {
-        const ch = paged.getChannel(active);
-        const el = scrollRef.current?.querySelector<HTMLElement>(`[data-row-index="${active}"]`);
-        if (ch && el) {
-          const r = el.getBoundingClientRect();
-          props.onContextMenu({ x: r.left + 48, y: r.bottom - 8 }, ch);
-        }
+      case 'ContextMenu':
+        openMenuAtCursor();
         break;
-      }
       default:
         if (e.key === 'F10' && e.shiftKey) {
-          const ch = paged.getChannel(active);
-          const el = scrollRef.current?.querySelector<HTMLElement>(`[data-row-index="${active}"]`);
-          if (ch && el) {
-            const r = el.getBoundingClientRect();
-            props.onContextMenu({ x: r.left + 48, y: r.bottom - 8 }, ch);
-          }
+          openMenuAtCursor();
           break;
         }
         return;
@@ -228,11 +291,15 @@ export function ChannelList(props: ChannelListProps) {
     e.stopPropagation();
   };
 
+  const isFavoriteRef = useRef(isFavorite);
+  isFavoriteRef.current = isFavorite;
   const onRowContext = useCallback(
     (e: MouseEvent, channel: Channel, index: number) => {
       e.preventDefault();
       setActive(index);
-      propsRef.current.onContextMenu({ x: e.clientX, y: e.clientY }, channel);
+      // Focus the row, so Escape in the menu hands focus back to it (not to the search box or body).
+      (e.currentTarget as HTMLElement).querySelector<HTMLButtonElement>('button[data-row-index]')?.focus({ preventScroll: true });
+      propsRef.current.onContextMenu({ x: e.clientX, y: e.clientY }, channel, isFavoriteRef.current(index));
     },
     [],
   );
@@ -246,9 +313,14 @@ export function ChannelList(props: ChannelListProps) {
         aria-label={t('channelList')}
         data-testid="channel-list"
         aria-busy={paged.refreshing || undefined}
+        // Focusable from script only: it holds focus while the cursor's row is still loading.
+        tabIndex={-1}
         onKeyDown={onKeyDown}
         onScroll={onScroll}
-        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain transition-opacity motion-reduce:transition-none ${
+        onFocus={(e) => {
+          lastFocused.current = e.target as HTMLElement;
+        }}
+        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
           paged.refreshing ? 'opacity-60' : ''
         }`}
       >
@@ -268,7 +340,7 @@ export function ChannelList(props: ChannelListProps) {
                   index={v.index}
                   channel={ch}
                   nowNext={paged.getNowNext(v.index)}
-                  favorite={paged.isFavorite(v.index)}
+                  favorite={isFavorite(v.index)}
                   playing={!!ch && sameRef(ch.ref, playingRef)}
                   active={v.index === active}
                   compact={props.compact}
@@ -294,7 +366,7 @@ export function ChannelList(props: ChannelListProps) {
 export function GuideUnavailableNotice({ onRetry }: { onRetry(): void }) {
   const { t } = useTranslation('live');
   return (
-    <div role="status" data-testid="guide-unavailable" className="flex items-center gap-2 border-b border-border bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
+    <div role="status" data-testid="guide-unavailable" className="flex items-center gap-2 border-b border-divider bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
       <span className="min-w-0 flex-1">{t('portalGuideUnavailable')}</span>
       <button
         type="button"

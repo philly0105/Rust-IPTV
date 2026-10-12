@@ -256,7 +256,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 md:px-8">
+      <div className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3 md:px-8">
         <Link to={backHref} className={buttonClass('ghost', 'sm')}>
           <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
           {kind === 'movie' ? t('movies') : t('series')}
@@ -301,7 +301,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
       </div>
 
       {ratingFilterSet && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-divider px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
           <Star aria-hidden size={14} className="fill-current text-accent" />
           {filtered ? (
             <>

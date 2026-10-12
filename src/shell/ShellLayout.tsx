@@ -108,7 +108,7 @@ function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
       <div
         aria-hidden
         className={cn(
-          'flex h-full shrink-0 flex-col gap-3 border-e border-border bg-surface px-3 pt-5',
+          'flex h-full shrink-0 flex-col gap-3 border-e border-divider bg-surface px-3 pt-5',
           collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
         )}
       >
@@ -118,7 +118,7 @@ function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
         ))}
       </div>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-border px-5">
+        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-divider px-5">
           <Skeleton className="h-6 w-40" />
           <div className="flex-1" />
           <Skeleton className="h-8 w-[clamp(160px,22vw,300px)] rounded-md" />

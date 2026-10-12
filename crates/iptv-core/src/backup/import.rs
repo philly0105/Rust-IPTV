@@ -205,6 +205,9 @@ enum Config {
         raw: String,
         /// Config written after the import (url / file / text origin).
         final_cfg: M3uSourceConfig,
+        /// The backup text has no channel (empty or header only, e.g. a URL
+        /// source whose first import failed): import from the URL instead.
+        by_url: bool,
     },
     Xtream(XtreamSourceConfig),
     Stalker(StalkerSourceConfig),
@@ -249,7 +252,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
         .unwrap_or_else(|| format!("Imported playlist {}", index + 1));
     let label = format!("\"{title}\"");
     let auto_refresh = b_field(v, "autoRefresh");
-    let position = i_field(v, "position");
+    let position = i_field(v, "position").map(|p| p.clamp(0, MAX_IMPORTED_POSITION));
     let user_state = v.get("userState").cloned().unwrap_or_else(|| json!({}));
 
     let (kind, config, fingerprint) = match portal.as_str() {
@@ -258,24 +261,42 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
             let raw = src
                 .get("rawM3u")
                 .and_then(Value::as_str)
-                .filter(|r| !r.trim().is_empty())
-                .ok_or_else(|| format!("M3U backup {label} is missing raw playlist data"))?
+                .unwrap_or_default()
                 .to_string();
             let url = s_field(&src, "url");
+            let src_kind = s_field(&src, "kind").unwrap_or_default();
+            let url_kind =
+                url.is_some() && (src_kind != "file" && src_kind != "text" || src_kind == "url");
+            let mut reader = crate::m3u::M3uReader::new(std::io::Cursor::new(raw.as_bytes()));
+            let has_channel = reader.next().is_some();
+            // A URL source whose text is empty (its first import failed) or
+            // only the header is imported from its URL. Junk text is refused
+            // below, as before.
+            let by_url =
+                url_kind && !has_channel && (raw.trim().is_empty() || reader.stats().saw_header);
+            if !by_url {
+                if raw.trim().is_empty() {
+                    return Err(format!("M3U backup {label} is missing raw playlist data"));
+                }
+                // Text the importer would refuse (no `#EXTM3U`, no entry), or
+                // with no channel and no URL to refresh from, cannot become a
+                // catalog: treat it like missing data so Replace never wipes
+                // sources for it.
+                if !has_channel && (url.is_none() || !reader.stats().saw_header) {
+                    return Err(format!(
+                        "M3U backup {label} has no channels in its playlist data"
+                    ));
+                }
+            }
             let file_hint = s_field(&src, "filePathHint");
             let headers = headers_of(&src);
-            let src_kind = s_field(&src, "kind").unwrap_or_default();
             let final_cfg = match (src_kind.as_str(), &url, &file_hint) {
-                (_, Some(u), _)
-                    if src_kind != "file" && src_kind != "text" || src_kind == "url" =>
-                {
-                    M3uSourceConfig {
-                        origin: M3uOrigin::Url,
-                        url: Some(u.clone()),
-                        file_path: None,
-                        headers: headers.clone(),
-                    }
-                }
+                (_, Some(u), _) if url_kind => M3uSourceConfig {
+                    origin: M3uOrigin::Url,
+                    url: Some(u.clone()),
+                    file_path: None,
+                    headers: headers.clone(),
+                },
                 ("file", _, Some(p)) if !probe_files || std::path::Path::new(p).is_file() => {
                     M3uSourceConfig {
                         origin: M3uOrigin::File,
@@ -295,7 +316,15 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
                 Some(u) => fp_m3u_url(u),
                 None => fp_m3u_raw(&raw),
             };
-            (SourceKind::M3u, Config::M3u { raw, final_cfg }, fp)
+            (
+                SourceKind::M3u,
+                Config::M3u {
+                    raw,
+                    final_cfg,
+                    by_url,
+                },
+                fp,
+            )
         }
         "xtream" => {
             let c = v.get("connection").cloned().unwrap_or(Value::Null);
@@ -384,6 +413,12 @@ fn keep_text_only(entry: &mut Entry) -> Option<String> {
     final_cfg.origin = M3uOrigin::Text;
     final_cfg.url = None;
     final_cfg.file_path = None;
+    if let Config::M3u { by_url: true, .. } = &entry.config {
+        return Some(format!(
+            "{}: the playlist URL was ignored (server mode cannot read files on the server) and the backup has no channels for it",
+            entry.label
+        ));
+    }
     Some(format!(
         "{}: the playlist file path was ignored (server mode cannot read files on the server); the playlist text from the backup was imported instead",
         entry.label
@@ -394,7 +429,41 @@ fn usable_id(id: &str) -> bool {
     (1..=128).contains(&id.len())
         && id
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        // The id names files (`playlists/{id}.m3u`): no drive prefix (`C:x`),
+        // alternate data stream (`a:b`) or dot file / `..`.
+        && !id.starts_with('.')
+}
+
+/// Largest source position a backup may set (keeps `MAX(position) + 1`
+/// inside i64 for every later `sources.add`).
+const MAX_IMPORTED_POSITION: i64 = 1_000_000;
+
+/// Config keys a backup made without secrets omits.
+const SECRET_CONFIG_KEYS: &[&str] = &["password", "signature1", "signature2"];
+
+/// Merging a backup made without secrets into an existing source keeps the
+/// source's saved secrets instead of blanking them.
+fn keep_saved_secrets(existing_json: &str, incoming_json: &str) -> String {
+    let (Ok(Value::Object(old)), Ok(Value::Object(mut new))) = (
+        serde_json::from_str::<Value>(existing_json),
+        serde_json::from_str::<Value>(incoming_json),
+    ) else {
+        return incoming_json.to_string();
+    };
+    for key in SECRET_CONFIG_KEYS {
+        let missing = match new.get(*key) {
+            None | Some(Value::Null) => true,
+            Some(Value::String(v)) => v.is_empty(),
+            Some(_) => false,
+        };
+        if missing {
+            if let Some(saved) = old.get(*key).filter(|v| !v.is_null()) {
+                new.insert((*key).to_string(), saved.clone());
+            }
+        }
+    }
+    Value::Object(new).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -417,31 +486,236 @@ pub async fn import(
     let lock = import_lock(state);
     let mut report = ImportReport::default();
 
-    if mode == ImportMode::Replace {
-        let _guard = lock.lock().await;
-        let removed: Vec<String> = state
-            .db_call(|c| {
-                let tx = c.transaction()?;
-                let ids = tx
-                    .prepare("SELECT id FROM sources")?
-                    .query_map([], |r| r.get(0))?
-                    .collect::<Result<Vec<String>, _>>()?;
-                tx.execute_batch(
-                    "DELETE FROM vod_source_pins;
-                     DELETE FROM sources;
-                     DELETE FROM app_state WHERE key LIKE 'backup_pending:%' OR key LIKE 'stalker_token:%';",
-                )?;
-                tx.commit()?;
-                Ok(ids)
-            })
-            .await?;
-        // Their on-disk playlist copies go too, as with `sources.remove`.
-        for id in &removed {
-            crate::m3u::remove_cached_playlist(state, id);
-        }
-        tracing::info!("backup import (replace): existing sources removed");
+    // Every entry is read before anything is changed: Replace must not wipe
+    // the user's sources for a backup none of whose playlists can be used.
+    let server_mode = crate::http::is_server_mode(state);
+    let parsed: Vec<Result<Entry, String>> = manifest
+        .playlists
+        .iter()
+        .enumerate()
+        .map(|(i, v)| parse_entry_with(v, i, !server_mode))
+        .collect();
+    if mode == ImportMode::Replace && parsed.iter().all(Result::is_err) {
+        let reason = parsed
+            .iter()
+            .find_map(|r| r.as_ref().err())
+            .cloned()
+            .unwrap_or_else(|| "the backup has no playlists".to_string());
+        return Err(crate::CoreError::Invalid(format!(
+            "None of the playlists in this backup can be imported, so nothing was replaced ({reason})"
+        )));
     }
 
+    // Replace never deletes first: the backup's playlists are imported next to
+    // the existing sources, which go only once at least one new catalog
+    // loaded. Otherwise the new rows are rolled back and nothing changes.
+    let replace_snapshot = if mode == ImportMode::Replace {
+        Some(
+            state
+                .db_call(|c| {
+                    let ids = c
+                        .prepare("SELECT id FROM sources")?
+                        .query_map([], |r| r.get(0))?
+                        .collect::<Result<Vec<String>, _>>()?;
+                    let pins = c
+                        .prepare(
+                            "SELECT match_key, source_id, item_id, updated_at FROM vod_source_pins",
+                        )?
+                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                        .collect::<Result<Vec<(String, String, String, String)>, _>>()?;
+                    Ok((ids, pins))
+                })
+                .await?,
+        )
+    } else {
+        restore_settings(state, &manifest, mode, &mut report).await;
+        None
+    };
+
+    let fingerprints = if mode == ImportMode::Replace {
+        // Every entry becomes a new source; nothing merges into an old one.
+        HashMap::new()
+    } else {
+        let data_dir = state.data_dir.clone();
+        state
+            .db_call(move |c| {
+                let mut map = HashMap::new();
+                for s in load_sources(c)? {
+                    if let Some(fp) = source_fingerprint(c, &data_dir, &s)? {
+                        map.entry(fp).or_insert_with(|| s.id.clone());
+                    }
+                }
+                Ok(map)
+            })
+            .await?
+    };
+    let mut existing_ids: HashSet<String> = state
+        .db_call(|c| {
+            Ok(c.prepare("SELECT id FROM sources")?
+                .query_map([], |r| r.get(0))?
+                .collect::<Result<HashSet<String>, _>>()?)
+        })
+        .await?;
+
+    let mut created = Vec::new();
+    let mut any_catalog = false;
+    // Plain reasons a catalog did not load, for the Replace rollback message.
+    let mut failures: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+    for parsed_entry in parsed {
+        let mut entry = match parsed_entry {
+            Ok(e) => e,
+            Err(msg) => {
+                report.skipped += 1;
+                report.warnings.push(msg);
+                continue;
+            }
+        };
+        if server_mode {
+            if let Some(w) = keep_text_only(&mut entry) {
+                report.warnings.push(w);
+            }
+        }
+        if !seen.insert(entry.fingerprint.clone()) {
+            report.skipped += 1;
+            report
+                .warnings
+                .push(format!("{}: duplicate backup entry skipped", entry.label));
+            continue;
+        }
+        let matched = fingerprints.get(&entry.fingerprint).cloned();
+        let target_id = match &matched {
+            Some(id) => id.clone(),
+            None => match &entry.exported_id {
+                Some(id) if usable_id(id) && !existing_ids.contains(id) => id.clone(),
+                _ => uuid::Uuid::new_v4().to_string(),
+            },
+        };
+        // Reserved before the import: its source row may be written even
+        // when a later step fails, and no later entry may reuse the id.
+        existing_ids.insert(target_id.clone());
+        if matched.is_none() {
+            created.push(target_id.clone());
+        }
+        match import_entry(
+            state,
+            &lock,
+            &entry,
+            &target_id,
+            matched.is_some(),
+            &mut report.warnings,
+        )
+        .await
+        {
+            Ok(failure) => {
+                report.imported += 1;
+                failures.extend(failure);
+                if !any_catalog {
+                    any_catalog = has_catalog(state, &target_id).await?;
+                }
+            }
+            Err(err) => {
+                report.skipped += 1;
+                report.warnings.push(format!("{}: {err}", entry.label));
+                failures.push(format!("{}: {err}", entry.label));
+            }
+        }
+    }
+
+    if let Some((old_ids, old_pins)) = replace_snapshot {
+        if !any_catalog && !old_ids.is_empty() {
+            // Roll back: the new rows go, the old sources and pins stay.
+            for id in &created {
+                match crate::sources::remove(state, id).await {
+                    Ok(()) | Err(crate::CoreError::NotFound(_)) => {}
+                    Err(err) => {
+                        tracing::warn!(source_id = %id, error = %err, "could not roll back an imported source")
+                    }
+                }
+            }
+            let _guard = lock.lock().await;
+            state
+                .db_call(move |c| {
+                    let tx = c.transaction()?;
+                    tx.execute("DELETE FROM vod_source_pins", [])?;
+                    for (k, s, i, at) in &old_pins {
+                        tx.execute(
+                            "INSERT INTO vod_source_pins(match_key, source_id, item_id, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                            params![k, s, i, at],
+                        )?;
+                    }
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await?;
+            state.emit("sources.changed", json!({}));
+            // The import's own failure, without the "source was kept" tail
+            // of its warning: the source was just rolled back.
+            let reason = failures
+                .first()
+                .or_else(|| report.warnings.iter().find(|w| w.contains("no channels")))
+                .or(report.warnings.first())
+                .cloned()
+                .unwrap_or_else(|| "no catalog could be loaded".to_string());
+            return Err(crate::CoreError::Invalid(format!(
+                "None of the playlists in this backup could be loaded, so nothing was replaced ({reason})"
+            )));
+        }
+        for id in &old_ids {
+            match crate::sources::remove(state, id).await {
+                Ok(()) | Err(crate::CoreError::NotFound(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        let _guard = lock.lock().await;
+        state
+            .db_call(move |c| {
+                let mut stmt = c.prepare("DELETE FROM vod_source_pins WHERE source_id = ?1")?;
+                for id in &old_ids {
+                    stmt.execute([id])?;
+                }
+                Ok(())
+            })
+            .await?;
+        drop(_guard);
+        tracing::info!("backup import (replace): previous sources removed");
+        restore_settings(state, &manifest, mode, &mut report).await;
+    }
+
+    state.emit("sources.changed", json!({}));
+    tracing::info!(
+        imported = report.imported,
+        skipped = report.skipped,
+        warnings = report.warnings.len(),
+        ?mode,
+        "backup imported"
+    );
+    Ok(report)
+}
+
+/// True when source `id` holds a catalog (channels, movies or series).
+async fn has_catalog(state: &AppState, id: &str) -> CoreResult<bool> {
+    let id = id.to_string();
+    state
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT COALESCE((SELECT channel_count + movie_count + series_count FROM source_counts WHERE source_id = ?1), 0) > 0
+                     OR EXISTS(SELECT 1 FROM items WHERE source_id = ?1)",
+                [id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+}
+
+/// Restores the backup's EPG URLs and app settings (Replace: only after the
+/// new sources replaced the old ones).
+async fn restore_settings(
+    state: &Arc<AppState>,
+    manifest: &Manifest,
+    mode: ImportMode,
+    report: &mut ImportReport,
+) {
     // Settings: EPG URLs.
     let current = state.settings_snapshot().epg_urls;
     let mut next = match (&manifest.epg_urls, mode) {
@@ -480,84 +754,6 @@ pub async fn import(
                 .push(format!("App settings could not be restored: {err}"));
         }
     }
-
-    // Existing sources by fingerprint (merge mode).
-    let data_dir = state.data_dir.clone();
-    let (fingerprints, mut existing_ids) = state
-        .db_call(move |c| {
-            let mut map = HashMap::new();
-            let mut ids = HashSet::new();
-            for s in load_sources(c)? {
-                if let Some(fp) = source_fingerprint(c, &data_dir, &s)? {
-                    map.entry(fp).or_insert_with(|| s.id.clone());
-                }
-                ids.insert(s.id);
-            }
-            Ok((map, ids))
-        })
-        .await?;
-
-    let server_mode = crate::http::is_server_mode(state);
-    let mut seen = HashSet::new();
-    for (i, raw_entry) in manifest.playlists.iter().enumerate() {
-        let mut entry = match parse_entry_with(raw_entry, i, !server_mode) {
-            Ok(e) => e,
-            Err(msg) => {
-                report.skipped += 1;
-                report.warnings.push(msg);
-                continue;
-            }
-        };
-        if server_mode {
-            if let Some(w) = keep_text_only(&mut entry) {
-                report.warnings.push(w);
-            }
-        }
-        if !seen.insert(entry.fingerprint.clone()) {
-            report.skipped += 1;
-            report
-                .warnings
-                .push(format!("{}: duplicate backup entry skipped", entry.label));
-            continue;
-        }
-        let matched = fingerprints.get(&entry.fingerprint).cloned();
-        let target_id = match &matched {
-            Some(id) => id.clone(),
-            None => match &entry.exported_id {
-                Some(id) if usable_id(id) && !existing_ids.contains(id) => id.clone(),
-                _ => uuid::Uuid::new_v4().to_string(),
-            },
-        };
-        match import_entry(
-            state,
-            &lock,
-            &entry,
-            &target_id,
-            matched.is_some(),
-            &mut report.warnings,
-        )
-        .await
-        {
-            Ok(()) => {
-                report.imported += 1;
-                existing_ids.insert(target_id);
-            }
-            Err(err) => {
-                report.skipped += 1;
-                report.warnings.push(format!("{}: {err}", entry.label));
-            }
-        }
-    }
-
-    state.emit("sources.changed", json!({}));
-    tracing::info!(
-        imported = report.imported,
-        skipped = report.skipped,
-        warnings = report.warnings.len(),
-        ?mode,
-        "backup imported"
-    );
-    Ok(report)
 }
 
 async fn import_entry(
@@ -567,11 +763,14 @@ async fn import_entry(
     id: &str,
     is_merge: bool,
     warnings: &mut Vec<String>,
-) -> CoreResult<()> {
+) -> CoreResult<Option<String>> {
     // 1. Source row (+ raw text for m3u). The m3u row starts as a `text`
     //    source so the importer parses the embedded playlist instead of
-    //    fetching it; its real origin is written after the import.
+    //    fetching it; its real origin is written after the import. A URL
+    //    entry without channels in its text is fetched from its URL.
+    let fetch_url = matches!(&entry.config, Config::M3u { by_url: true, final_cfg, .. } if final_cfg.origin == M3uOrigin::Url);
     let config_json = match &entry.config {
+        Config::M3u { final_cfg, .. } if fetch_url => serde_json::to_string(final_cfg)?,
         Config::M3u { final_cfg, .. } => serde_json::to_string(&M3uSourceConfig {
             origin: M3uOrigin::Text,
             url: None,
@@ -581,20 +780,20 @@ async fn import_entry(
         Config::Xtream(c) => serde_json::to_string(c)?,
         Config::Stalker(c) => serde_json::to_string(c)?,
     };
-    {
+    let stored_config = {
         let id = id.to_string();
         let kind = entry.kind.as_str();
         let name = entry.title.clone();
         let auto_refresh = entry.auto_refresh;
         let position = entry.position;
         let raw = match &entry.config {
-            Config::M3u { raw, .. } => Some(raw.clone()),
+            Config::M3u { raw, .. } if !fetch_url => Some(raw.clone()),
             _ => None,
         };
         let _guard = lock.lock().await;
         let data_dir = state.data_dir.clone();
         let sid = id.clone();
-        state
+        let stored_config = state
             .db_call(move |c| {
                 // Over RAW_INLINE_MAX the text goes to the playlist cache
                 // with raw = '', exactly as an import of a large file does.
@@ -607,6 +806,19 @@ async fn import_entry(
                 };
                 let tx = c.transaction()?;
                 let now = crate::db::now_rfc3339();
+                let mut config_json = config_json;
+                if is_merge {
+                    let saved: Option<String> = tx
+                        .query_row(
+                            "SELECT config_json FROM sources WHERE id = ?1 AND kind = ?2",
+                            params![id, kind],
+                            |r| r.get(0),
+                        )
+                        .optional()?;
+                    if let Some(saved) = saved {
+                        config_json = keep_saved_secrets(&saved, &config_json);
+                    }
+                }
                 let pos = match position {
                     Some(p) => p,
                     None => tx.query_row(
@@ -643,10 +855,11 @@ async fn import_entry(
                     )?;
                 }
                 tx.commit()?;
-                Ok(())
+                Ok(config_json)
             })
             .await?;
-    }
+        stored_config
+    };
     if is_merge {
         warnings.push(format!(
             "{}: merged into an existing source with the same connection",
@@ -654,12 +867,18 @@ async fn import_entry(
         ));
     }
 
-    // 2. Catalog.
+    // 2. Catalog. `failure` is the plain reason it did not load.
+    let mut failure = None;
     let synced = match &entry.config {
-        Config::Xtream(c) if c.password.is_empty() => {
+        // The stored config: a merge may have kept the saved password.
+        Config::Xtream(_)
+            if serde_json::from_str::<XtreamSourceConfig>(&stored_config)
+                .map_or(true, |c| c.password.is_empty()) =>
+        {
             let msg = "The backup has no password for this account; edit the source to add it, then refresh";
-            set_error(state, id, Some(msg)).await?;
+            set_error_coded(state, id, Some((msg, crate::error::RpcErrorCode::Auth))).await?;
             warnings.push(format!("{}: catalog not loaded: {msg}", entry.label));
+            failure = Some(format!("{}: {msg}", entry.label));
             false
         }
         // Through the per-source lock (never the global one): the same
@@ -673,6 +892,7 @@ async fn import_entry(
                     "{}: catalog not loaded ({msg}); the source was kept and its favorites and history will be restored after the first successful refresh",
                     entry.label
                 ));
+                failure = Some(format!("{}: {msg}", entry.label));
                 false
             }
         },
@@ -681,7 +901,7 @@ async fn import_entry(
     // 3. Final m3u origin (url / file) now that the text is imported.
     let _guard = lock.lock().await;
     if let Config::M3u { final_cfg, .. } = &entry.config {
-        if final_cfg.origin != M3uOrigin::Text {
+        if final_cfg.origin != M3uOrigin::Text && !fetch_url {
             let cfg = serde_json::to_string(final_cfg)?;
             let id = id.to_string();
             state
@@ -715,24 +935,27 @@ async fn import_entry(
         })
         .await?;
     warnings.append(&mut w);
-    Ok(())
+    Ok(failure)
 }
 
-async fn set_error(state: &AppState, id: &str, msg: Option<&str>) -> CoreResult<()> {
+/// Records an import outcome with its classified code (C10).
+async fn set_error_coded(
+    state: &AppState,
+    id: &str,
+    err: Option<(&str, crate::error::RpcErrorCode)>,
+) -> CoreResult<()> {
     let id = id.to_string();
-    let msg = msg.map(str::to_string);
+    let err = err.map(|(m, c)| (m.to_string(), c));
     state
         .db_call(move |c| {
-            if msg.is_some() {
-                c.execute(
-                    "UPDATE sources SET last_error = ?2 WHERE id = ?1",
-                    params![id, msg],
-                )?;
-            } else {
-                c.execute(
-                    "UPDATE sources SET last_error = NULL, last_refresh_at = ?2 WHERE id = ?1",
-                    params![id, crate::db::now_rfc3339()],
-                )?;
+            match &err {
+                Some((msg, code)) => crate::sources::store::record_import_error(c, &id, msg, *code)?,
+                None => {
+                    c.execute(
+                        "UPDATE sources SET last_error = NULL, last_error_code = NULL, last_refresh_at = ?2 WHERE id = ?1",
+                        params![id, crate::db::now_rfc3339()],
+                    )?;
+                }
             }
             Ok(())
         })
@@ -744,7 +967,8 @@ async fn set_error(state: &AppState, id: &str, msg: Option<&str>) -> CoreResult<
 async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Result<(), String> {
     let Some(imp) = crate::sources::importer(state, kind) else {
         let msg = format!("no {kind} importer is available");
-        let _ = set_error(state, id, Some(&msg)).await;
+        let code = crate::error::RpcErrorCode::Unsupported;
+        let _ = set_error_coded(state, id, Some((&msg, code))).await;
         return Err(msg);
     };
     let source = {
@@ -763,7 +987,7 @@ async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Resu
     match imp.import(state.clone(), &source).await {
         Ok(summary) => {
             tracing::info!(source_id = %id, %kind, channels = summary.channels, movies = summary.movies, series = summary.series, "backup source imported");
-            let _ = set_error(state, id, None).await;
+            let _ = set_error_coded(state, id, None).await;
             if kind == SourceKind::Stalker {
                 // Portal VOD is not stored locally; keep its totals, as
                 // `sources::run_import` does.
@@ -780,7 +1004,7 @@ async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Resu
         Err(err) => {
             let msg = crate::sources::error_text(&err);
             tracing::warn!(source_id = %id, %kind, error = %msg, "backup source import failed");
-            let _ = set_error(state, id, Some(&msg)).await;
+            let _ = set_error_coded(state, id, Some((&msg, err.code()))).await;
             Err(msg)
         }
     }
@@ -1011,6 +1235,107 @@ fn apply_m3u(conn: &Connection, id: &str, us: &Value, misses: &mut Misses) -> Co
             misses.add("hidden groups", name);
         }
     }
+    apply_tsrust_state(conn, id, us, true, misses)
+}
+
+/// Whether a playback position row exists for the item (and episode).
+fn position_exists(
+    conn: &Connection,
+    id: &str,
+    ct: ContentType,
+    item_id: &str,
+    episode_id: Option<&str>,
+) -> CoreResult<bool> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT 1 FROM playback_positions
+             WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4",
+        )?
+        .exists(params![
+            id,
+            ct.as_str(),
+            item_id,
+            episode_id.map(str::trim).unwrap_or("")
+        ])?)
+}
+
+/// Applies the Tsrust `userState` extensions (see `backup::EXT_*`) under the
+/// new source id: EPG mappings (kept when the source already has one for
+/// the item), playback positions (same rules as the IPTVnator positions:
+/// dated rows only replace older ones, undated rows only fill gaps) and
+/// hidden categories. `check_items` requires the item in the local catalog
+/// (M3U); Stalker VOD is not stored locally, so its positions apply as is.
+fn apply_tsrust_state(
+    conn: &Connection,
+    id: &str,
+    us: &Value,
+    check_items: bool,
+    misses: &mut Misses,
+) -> CoreResult<()> {
+    let ct_of = |v: &Value| s_field(v, "contentType").and_then(|c| c.parse::<ContentType>().ok());
+    for m in arr(us, super::EXT_EPG_MAPPINGS) {
+        let (Some(ct), Some(item)) = (ct_of(m), s_field(m, "itemId")) else {
+            continue;
+        };
+        conn.execute(
+            "INSERT OR IGNORE INTO epg_channel_map(source_id, content_type, item_id, epg_channel_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, ct.as_str(), item, s_field(m, "epgChannelId")],
+        )?;
+    }
+    for p in arr(us, super::EXT_POSITIONS) {
+        let (Some(ct), Some(item), Some(pos)) = (
+            ct_of(p),
+            s_field(p, "itemId"),
+            i_field(p, "positionSeconds"),
+        ) else {
+            continue;
+        };
+        let episode_id = s_field(p, "episodeId");
+        let updated_at = p.get("updatedAt").and_then(normalize_ts);
+        let mut snapshot = p
+            .get("snapshot")
+            .filter(|v| v.is_object())
+            .map(Value::to_string);
+        if check_items {
+            match lookup(conn, id, ct, &item)? {
+                Some(info) => {
+                    snapshot = snapshot.or_else(|| Some(snapshot_json(&info, None, None)));
+                }
+                None => {
+                    misses.add("playback positions", format!("{} {item}", ct.as_str()));
+                    continue;
+                }
+            }
+        }
+        if updated_at.is_none() && position_exists(conn, id, ct, &item, episode_id.as_deref())? {
+            continue;
+        }
+        let input = PositionInput {
+            item_ref: crate::model::ItemRef::new(id, ct, item.clone()),
+            episode_id,
+            position_seconds: pos.max(0),
+            duration_seconds: i_field(p, "durationSeconds"),
+            snapshot_json: snapshot,
+            updated_at,
+            watched: b_field(p, "watched"),
+        };
+        if position_set(conn, &input).is_err() {
+            misses.add("playback positions", format!("{} {item}", ct.as_str()));
+        }
+    }
+    for h in arr(us, super::EXT_HIDDEN_CATEGORIES) {
+        let (Some(ct), Some(cat)) = (ct_of(h), s_field(h, "categoryId")) else {
+            continue;
+        };
+        let n = conn.execute(
+            "UPDATE categories SET hidden = 1 WHERE source_id = ?1 AND content_type = ?2 AND category_id = ?3",
+            params![id, ct.as_str(), cat],
+        )?;
+        if n == 0 {
+            misses.add("hidden categories", cat);
+        }
+    }
     Ok(())
 }
 
@@ -1169,6 +1494,21 @@ fn apply_xtream(conn: &Connection, id: &str, us: &Value, misses: &mut Misses) ->
         };
         match lookup(conn, id, ct, &item_id)? {
             Some(info) => {
+                // An undated backup row cannot prove it is newer: it only
+                // fills a gap and never overwrites stored progress. (A Replace
+                // imports into new sources, which have no rows yet.) Dated
+                // rows go through `position_set`'s newer-only rule.
+                if updated_at.is_none()
+                    && position_exists(
+                        conn,
+                        id,
+                        info.content_type,
+                        &info.item_id,
+                        episode_id.as_deref(),
+                    )?
+                {
+                    continue;
+                }
                 position_set(
                     conn,
                     &PositionInput {
@@ -1205,7 +1545,7 @@ fn apply_xtream(conn: &Connection, id: &str, us: &Value, misses: &mut Misses) ->
             )?;
         }
     }
-    Ok(())
+    apply_tsrust_state(conn, id, us, true, misses)
 }
 
 // ----- stalker ----------------------------------------------------------------
@@ -1299,7 +1639,7 @@ fn apply_stalker(conn: &Connection, id: &str, us: &Value, misses: &mut Misses) -
             None => misses.add("recently viewed items without an id", "?"),
         }
     }
-    Ok(())
+    apply_tsrust_state(conn, id, us, false, misses)
 }
 
 #[cfg(test)]
@@ -1356,7 +1696,7 @@ mod tests {
             _ => panic!(),
         }
         let e = parse_entry(
-            &json!({"portalType":"m3u","exportedId":"x","title":"T","source":{"kind":"file","rawM3u":"#EXTM3U","filePathHint":"Z:/missing.m3u"}}),
+            &json!({"portalType":"m3u","exportedId":"x","title":"T","source":{"kind":"file","rawM3u":"#EXTM3U\n#EXTINF:-1,A\nhttp://h/a","filePathHint":"Z:/missing.m3u"}}),
             0,
         )
         .unwrap();
@@ -1365,6 +1705,17 @@ mod tests {
             _ => panic!(),
         }
         assert!(parse_entry(&json!({"portalType":"m3u","title":"T","source":{}}), 0).is_err());
+        // Review round 1: unusable text. A header-only playlist with a URL
+        // stays (it can be refreshed); without a URL, or junk text, it is out.
+        for src in [
+            json!({"kind":"text","rawM3u":"#EXTM3U"}),
+            json!({"kind":"text","rawM3u":"this is not a playlist"}),
+            json!({"kind":"url","rawM3u":"this is not a playlist","url":"http://h/p.m3u"}),
+        ] {
+            let v = json!({"portalType":"m3u","title":"T","source":src});
+            let err = parse_entry(&v, 0).err().expect("refused");
+            assert!(err.contains("no channels"), "{err}");
+        }
         assert!(parse_entry(
             &json!({"portalType":"xtream","title":"T","connection":{"serverUrl":"http://h"}}),
             0

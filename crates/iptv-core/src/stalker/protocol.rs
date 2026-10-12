@@ -13,6 +13,9 @@ use regex::Regex;
 use serde_json::Value;
 use url::Url;
 
+/// Shared overflow-safe converters for provider numbers.
+pub use crate::xtream::meta::{archive_days_to_hours, clamp_archive_hours, minutes_to_seconds};
+
 /// User-Agent of a MAG set-top box (SPEC C4 stalker protocol).
 pub const MAG_USER_AGENT: &str = "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3";
 /// `X-User-Agent` header sent with every portal request.
@@ -743,8 +746,17 @@ pub fn f(v: &Value, key: &str) -> Option<f64> {
 }
 
 /// Unix seconds or `YYYY-MM-DD[ HH:MM[:SS]]` (assumed UTC) -> RFC 3339.
+///
+/// Only years 1..=9999 come out: chrono formats later years as `+83158-...`,
+/// which is not RFC 3339 and which neither the UI nor
+/// `DateTime::parse_from_rfc3339` accepts.
 pub fn date_to_rfc3339(v: &Value) -> Option<String> {
-    use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
+    use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, TimeZone, Utc};
+    let out = |d: DateTime<Utc>| -> Option<String> {
+        (1..=9999)
+            .contains(&d.year())
+            .then(|| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+    };
     if let Some(secs) = int_of(v) {
         if secs <= 0 {
             return None;
@@ -755,20 +767,14 @@ pub fn date_to_rfc3339(v: &Value) -> Option<String> {
         } else {
             secs
         };
-        return Utc
-            .timestamp_opt(secs, 0)
-            .single()
-            .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        return Utc.timestamp_opt(secs, 0).single().and_then(out);
     }
     let text = str_of(v)?;
     if text.starts_with("0000") {
         return None;
     }
-    if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&text) {
-        return Some(
-            d.with_timezone(&Utc)
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        );
+    if let Ok(d) = DateTime::parse_from_rfc3339(&text) {
+        return out(d.with_timezone(&Utc));
     }
     for fmt in [
         "%Y-%m-%d %H:%M:%S",
@@ -778,32 +784,26 @@ pub fn date_to_rfc3339(v: &Value) -> Option<String> {
         "%d.%m.%Y %H:%M",
     ] {
         if let Ok(d) = NaiveDateTime::parse_from_str(&text, fmt) {
-            return Some(
-                Utc.from_utc_datetime(&d)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            );
+            return out(Utc.from_utc_datetime(&d));
         }
     }
     for fmt in ["%Y-%m-%d", "%d.%m.%Y"] {
         if let Ok(d) = NaiveDate::parse_from_str(&text, fmt) {
-            let dt = d.and_hms_opt(0, 0, 0)?;
-            return Some(
-                Utc.from_utc_datetime(&dt)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            );
+            return out(Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0)?));
         }
     }
     None
 }
 
-/// First plausible 4-digit year (1900..2100) in a field like `"2019"` or `"2019-05-01"`.
+/// First plausible 4-digit year (1900..=2100, the Xtream reader's range) in a
+/// field like `"2019"`, `"2019-05-01"` or `"20190501"`.
 pub fn year_of(v: &Value) -> Option<i64> {
     let text = str_of(v)?;
     let digits: Vec<char> = text.chars().collect();
     for w in digits.windows(4) {
         if w.iter().all(char::is_ascii_digit) {
             let y: i64 = w.iter().collect::<String>().parse().ok()?;
-            if (1900..2100).contains(&y) {
+            if (1900..=2100).contains(&y) {
                 return Some(y);
             }
         }
@@ -1263,6 +1263,9 @@ mod tests {
         assert_eq!(year_of(&json!("2019-05-01")), Some(2019));
         assert_eq!(year_of(&json!(2001)), Some(2001));
         assert_eq!(year_of(&json!("n/a")), None);
+        // B8-parsers: 2100 was excluded while the doc and Xtream allow it.
+        assert_eq!(year_of(&json!("2100")), Some(2100));
+        assert_eq!(year_of(&json!("2101")), None);
         assert_eq!(list_of(&json!({"data": [1, 2]})).len(), 2);
         assert_eq!(list_of(&json!([1])).len(), 1);
         assert_eq!(split_list("A, B,,C"), vec!["A", "B", "C"]);
@@ -1305,6 +1308,24 @@ mod tests {
             .user_agent
             .as_deref(),
             Some("VLC")
+        );
+    }
+
+    /// B8-parsers: timestamps past year 9999 used to come out as
+    /// `+83158-01-23T21:06:55Z`, which is not RFC 3339.
+    #[test]
+    fn dates_past_year_9999_are_dropped() {
+        assert_eq!(date_to_rfc3339(&json!(2_562_047_788_015_216_i64)), None);
+        assert_eq!(date_to_rfc3339(&json!("4000000000000000.0")), None);
+        // Values over 1e11 are read as milliseconds.
+        assert_eq!(date_to_rfc3339(&json!(253_402_300_800_000_i64)), None);
+        assert_eq!(
+            date_to_rfc3339(&json!(253_402_300_799_000_i64)).as_deref(),
+            Some("9999-12-31T23:59:59Z")
+        );
+        assert_eq!(
+            date_to_rfc3339(&json!(1_700_000_000_000_i64)).as_deref(),
+            Some("2023-11-14T22:13:20Z")
         );
     }
 }

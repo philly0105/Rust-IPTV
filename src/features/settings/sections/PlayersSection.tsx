@@ -2,13 +2,13 @@ import { FolderOpen, ScanSearch } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { invalidate } from '@/api/query';
+import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
 import { Button, IconButton } from '@/ui';
 import { pickExecutableDesktop } from '../../sources/lib/files';
 import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import { cleanPath, optionalStringPatch, validateArgs } from '../lib/patch';
+import { cleanPath, optionalStringPatch, playerPathStatus, validateArgs } from '../lib/patch';
 import { parity, type SectionProps } from './types';
 
 type DetectState = { status: 'idle' } | { status: 'running' } | { status: 'done'; mpv?: string; vlc?: string } | { status: 'failed'; message: string };
@@ -19,6 +19,17 @@ export function PlayersSection({ settings, update }: SectionProps) {
   const [detect, setDetect] = useState<DetectState>({ status: 'idle' });
   const setError = (k: string) => (e: string | null) => setErrors((prev) => ({ ...prev, [k]: e }));
   const err = (k: string) => (errors[k] ? t(errors[k] as string) : null);
+  // A saved path can stop working later (player moved or uninstalled); the core
+  // then quietly uses whatever it detects. Say so next to the field.
+  const caps = useRpcQuery('player.capabilities', undefined, { enabled: Boolean(settings.mpvPath || settings.vlcPath) });
+  const pathWarning = (key: 'mpvPath' | 'vlcPath'): string | null => {
+    if (!caps.data) return null;
+    const player = key === 'mpvPath' ? 'mpv' : 'VLC';
+    const status = playerPathStatus(settings[key], caps.data[key]);
+    if (status.kind === 'fallback') return t('playerPathFallback', { player, path: status.path });
+    if (status.kind === 'missing') return t('playerPathMissing', { player });
+    return null;
+  };
 
   const savePath = async (key: 'mpvPath' | 'vlcPath', raw: string) => {
     if (await update(optionalStringPatch(key, cleanPath(raw)))) void invalidate('player.');
@@ -48,7 +59,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
   };
 
   const pathRow = (key: 'mpvPath' | 'vlcPath', label: string, placeholder: string) => (
-    <SettingsRow label={label} description={isDesktop ? t('playerPathHint') : t('playerPathHintServer')} error={err(key)} stack>
+    <SettingsRow label={label} description={isDesktop ? t('playerPathHint') : t('playerPathHintServer')} error={err(key) ?? pathWarning(key)} stack>
       {({ id, describedBy }) => (
         <div className="flex w-full items-center gap-2">
           <CommitInput

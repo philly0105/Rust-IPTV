@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "Kategorien verwalten ({{count}} ausgeblendet)",
   "manageCategoriesHint": "{{hidden}} von {{total}} ausgeblendet. Ausgeblendete Kategorien erscheinen nicht in Listen und Suche.",
   "noCategoryMatch": "Keine Kategorie passt zu diesem Filter.",
+  "clearFilter": "Filter löschen",
   "saveCategories": "Speichern",
   "categoriesSaved": "Sichtbarkeit der Kategorien gespeichert",
   "categoriesSaveFailed": "Die Sichtbarkeit der Kategorien konnte nicht gespeichert werden",
@@ -61,6 +62,7 @@
   "resume": "Fortsetzen",
   "resumeAt": "Ab {{time}} fortsetzen",
   "startOver": "Von vorn",
+  "startOverEpisode": "{{code}} von vorn",
   "playEpisode": "{{code}} abspielen",
   "resumeEpisode": "{{code}} fortsetzen",
   "nowPlaying": "Wird wiedergegeben",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "Ähnliche Titel benötigen einen TMDB-Schlüssel",
   "tmdbKeyMissingHint": "Fügen Sie unter Einstellungen > Metadaten einen TMDB-Schlüssel hinzu.",
   "addTmdbKey": "TMDB-Schlüssel hinzufügen",
+  "tmdbKeyRejectedTitle": "TMDB hat den API-Schlüssel abgelehnt",
+  "tmdbKeyRejectedHint": "Prüfen oder ersetzen Sie den TMDB-Schlüssel unter Einstellungen > Metadaten.",
   "watched": "Angesehen",
   "markWatched": "Als angesehen markieren",
   "markUnwatched": "Als nicht angesehen markieren",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "Bis zu {{count}} anzeigen",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Diese Titel konnten nicht geladen werden"
+  "pageLoadFailed": "Diese Titel konnten nicht geladen werden",
+  "searchPartialError": "Einige Ergebnisse konnten nicht geladen werden."
 }

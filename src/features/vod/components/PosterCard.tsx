@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 
 import { formatRating } from '../lib/format';
 import { languageName, type ItemLanguage } from '../lib/language';
+import { joinList } from '@/shell/dashboard/cards';
 import { Poster, ProgressBar, Skeleton, cn } from '@/ui';
 
 export interface PosterCardProps {
@@ -55,6 +56,8 @@ export function posterCardLabel(parts: {
   languageLabel?: string | undefined;
   rating?: string | undefined;
   ratedLabel: (rating: string) => string;
+  /** "40% watched" when the title has a saved position. */
+  progressLabel?: string | undefined;
 }): string {
   const yearText = parts.year !== undefined ? String(parts.year) : undefined;
   const name = yearText && !parts.title.includes(yearText) ? `${parts.title} (${yearText})` : parts.title;
@@ -64,6 +67,7 @@ export function posterCardLabel(parts: {
   if (parts.languageLabel) out.push(parts.languageLabel);
   if (parts.badgeLabel) out.push(parts.badgeLabel);
   if (parts.rating) out.push(parts.ratedLabel(parts.rating));
+  if (parts.progressLabel) out.push(parts.progressLabel);
   return out.join(', ');
 }
 
@@ -93,7 +97,18 @@ export function PosterCard({
   const { t, i18n } = useTranslation('vod');
   const r = formatRating(rating, i18n.language);
   const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
-  const label = posterCardLabel({ title: fullTitle ?? title, year, meta, badgeLabel, languageLabel: langName, rating: r ?? undefined, ratedLabel: (v) => t('posterRated', { rating: v }) });
+  const hasProgress = progress !== undefined && Number.isFinite(progress) && progress > 0;
+  const progressLabel = hasProgress ? t('percentWatched', { percent: Math.max(1, Math.round(Math.min(1, progress) * 100)) }) : undefined;
+  const label = posterCardLabel({
+    title: fullTitle ?? title,
+    year,
+    meta,
+    badgeLabel,
+    languageLabel: langName,
+    rating: r ?? undefined,
+    ratedLabel: (v) => t('posterRated', { rating: v }),
+    progressLabel,
+  });
   const secondary = meta ?? year;
   const content = (
     <>
@@ -122,13 +137,13 @@ export function PosterCard({
             aria-hidden
             className={cn(
               'pointer-events-none absolute start-1.5 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-white',
-              progress !== undefined && progress > 0 ? 'bottom-5' : 'bottom-1.5',
+              hasProgress ? 'bottom-5' : 'bottom-1.5',
             )}
           >
             {language.code}
           </div>
         )}
-        {progress !== undefined && progress > 0 && (
+        {hasProgress && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-scrim/60 px-1.5 pb-1.5 pt-1">
             <ProgressBar value={progress} max={1} />
           </div>
@@ -139,7 +154,13 @@ export function PosterCard({
           {title}
         </div>
         <div className="tabular truncate text-xs text-fg-subtle">
-          {secondary !== undefined && secondary !== null && secondary !== '' ? (langName ? <>{secondary} · {langName}</> : secondary) : (langName ?? ' ')}
+          {secondary !== undefined && secondary !== null && secondary !== ''
+            ? langName
+              ? typeof secondary === 'string' || typeof secondary === 'number'
+                ? joinList([secondary, langName], i18n.language)
+                : <>{secondary}{listSeparator(i18n.language)}{langName}</>
+              : secondary
+            : (langName ?? ' ')}
         </div>
       </div>
     </>
@@ -178,4 +199,9 @@ export function PosterCardSkeleton({ className }: { className?: string }) {
       <Skeleton className="h-3 w-2/5 opacity-70" />
     </div>
   );
+}
+
+/** The locale's list separator ("、" in Japanese, "، " in Arabic), for a rich node followed by text. */
+function listSeparator(language: string): string {
+  return joinList(['\u0001', '\u0002'], language).slice(1, -1);
 }

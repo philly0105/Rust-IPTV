@@ -2,7 +2,7 @@
 
 import { k } from '../lib/keys';
 import { History, Trash } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
@@ -10,15 +10,32 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, SkeletonList, useToast } from '../deps';
+import { Button, EmptyState, ErrorState, SkeletonList, usePlayerStore, useToast } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { usePending, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { SourceGoneError, detailPath, openEntry, relativeTime } from '../lib/open';
-import { buildRecentRows, continueForSource, type RecentRow } from '../lib/recent';
+import { useUrlSearch } from '../hooks/useUrlSearch';
+import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
+import {
+  buildRecentRows,
+  collectHistory,
+  continueForSource,
+  removeContinueCard,
+  restoreArgs,
+  restoreHistory,
+  restorePositions,
+  type PositionCalls,
+  type RecentRow,
+} from '../lib/recent';
+
+const positionCalls: PositionCalls = {
+  forSeries: (a) => rpc('positions.forSeries', a),
+  remove: (a) => rpc('positions.remove', a),
+  set: (a) => rpc('positions.set', a),
+};
 
 const HEADER_HEIGHT = 48;
 const RECENT_LIMIT = 500;
@@ -31,12 +48,25 @@ export function RecentPage() {
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const args = useMemo(() => (sourceId ? { sourceId, limit: RECENT_LIMIT } : { limit: RECENT_LIMIT }), [sourceId]);
-  const query = useRpcQuery('recent.list', args);
-  const cont = useRpcQuery('positions.continueWatching', { limit: CONTINUE_LIMIT });
+  // Watching anything changes both lists, so they are read fresh on every visit.
+  const query = useRpcQuery('recent.list', args, { staleTime: 0 });
+  const cont = useRpcQuery('positions.continueWatching', { limit: CONTINUE_LIMIT }, { staleTime: 0 });
   const { pending, run } = usePending<string>();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useUrlSearch();
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+
+  // Playback in the mini player saves positions and history while this page is
+  // open; when it stops or switches title, refresh so progress and finished
+  // items are right.
+  const playingUrl = usePlayerStore((s) => s.source?.url);
+  const seenUrl = useRef(playingUrl);
+  useEffect(() => {
+    if (seenUrl.current === playingUrl) return;
+    seenUrl.current = playingUrl;
+    void invalidate('positions.');
+    void invalidate('recent.');
+  }, [playingUrl]);
 
   const rows = useMemo(() => buildRecentRows(query.data ?? [], search), [query.data, search]);
   const continuing = useMemo(() => continueForSource(cont.data ?? [], sourceId), [cont.data, sourceId]);
@@ -55,7 +85,8 @@ export function RecentPage() {
             action: {
               label: t('undo'),
               onClick: () => {
-                void rpc('recent.add', { ref: e.ref, snapshot: e.snapshot })
+                // The original date goes back too (C7), so the entry returns to its old place.
+                void rpc('recent.add', restoreArgs(e))
                   .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
                   .finally(() => invalidate('recent.'));
               },
@@ -84,15 +115,27 @@ export function RecentPage() {
     [navigate, sources, t, toast],
   );
 
+  // Continue means resume: play from the saved spot (the dashboard rail does
+  // the same). Without a snapshot to title it, the detail page is the way in.
   const openContinue = (p: PlaybackPosition) => {
     const path = detailPath(p.ref);
-    if (path) navigate(path);
-    else if (p.snapshot) open({ ref: p.ref, snapshot: p.snapshot });
+    if (!p.snapshot) {
+      if (path) navigate(path);
+      return;
+    }
+    const title = p.snapshot.title;
+    resumePosition(p, sources.get(p.ref.sourceId)).catch((err: unknown) => {
+      toast({
+        title: t('openFailed', { title }),
+        description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
+        variant: 'error',
+      });
+    });
   };
 
   const removeContinue = async (p: PlaybackPosition) => {
     try {
-      await rpc('positions.remove', p.episodeId ? { ref: p.ref, episodeId: p.episodeId } : { ref: p.ref });
+      const removed = await removeContinueCard(p, positionCalls);
       const label = p.snapshot?.title ?? '';
       toast({
         title: t('continueRemoved', { title: label }),
@@ -100,14 +143,10 @@ export function RecentPage() {
         action: {
           label: t('undo'),
           onClick: () => {
-            void rpc('positions.set', {
-              ref: p.ref,
-              positionSeconds: p.positionSeconds,
-              ...(p.episodeId ? { episodeId: p.episodeId } : {}),
-              ...(p.durationSeconds !== undefined ? { durationSeconds: p.durationSeconds } : {}),
-              ...(p.snapshot ? { snapshot: p.snapshot } : {}),
-            })
-              .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+            void restorePositions(removed, positionCalls.set)
+              .then((n) => {
+                if (n < removed.length) toast({ title: t('undoFailed'), variant: 'error' });
+              })
               .finally(() => invalidate('positions.'));
           },
         },
@@ -119,11 +158,24 @@ export function RecentPage() {
     }
   };
 
+  const undoClear = async (entries: RecentEntry[]) => {
+    const restored = await restoreHistory(entries, (a) => rpc('recent.add', a));
+    await invalidate('recent.');
+    if (restored === entries.length) toast({ title: t('historyRestored'), variant: 'success' });
+    else toast({ title: t('undoFailed'), description: t('historyRestorePartial', { restored, total: entries.length }), variant: 'error' });
+  };
+
   const clearAll = async () => {
     setClearing(true);
     try {
+      // Kept in memory so Undo can put every entry back with its own date.
+      const before = await collectHistory((a) => rpc('recent.list', a), sourceId, sources.keys());
       await rpc('recent.clear', sourceId ? { sourceId } : {});
-      toast({ title: t('historyCleared'), variant: 'success' });
+      toast({
+        title: t('historyCleared'),
+        variant: 'success',
+        ...(before.length > 0 ? { action: { label: t('undo'), onClick: () => void undoClear(before) } } : {}),
+      });
     } catch (err) {
       toast({ title: t('clearFailed'), description: RpcError.from(err).message, variant: 'error' });
     } finally {
@@ -143,7 +195,7 @@ export function RecentPage() {
     [count, t],
   );
   const title = source ? t('sourceRecentTitle', { source: source.name }) : t('recentTitle');
-  usePageHeader(title, query.data ? t('recentCount', { count }) : undefined, headerActions, {
+  usePageHeader(title, query.data && count > 0 ? t('recentCount', { count }) : undefined, headerActions, {
     value: search,
     onChange: setSearch,
     placeholder: t('searchRecent'),

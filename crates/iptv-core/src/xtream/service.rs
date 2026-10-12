@@ -163,18 +163,32 @@ async fn resume_seconds(
     let r = r.clone();
     let ep = episode_id.unwrap_or_default().to_string();
     state
-        .db_call(move |c| {
-            Ok(c.query_row(
-                "SELECT position_seconds FROM playback_positions WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4",
-                rusqlite::params![r.source_id, r.content_type.as_str(), r.item_id, ep],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?)
-        })
+        .db_call(move |c| stored_resume(c, &r, &ep))
         .await
         .ok()
         .flatten()
-        .filter(|s| *s > 0)
+}
+
+/// The stored position to resume from, or `None` when there is none or the
+/// row is finished: C13 keeps a finished episode as a watched row with the
+/// position at the end, and resuming there would start at the credits.
+fn stored_resume(c: &rusqlite::Connection, r: &ItemRef, ep: &str) -> CoreResult<Option<i64>> {
+    let row = c
+        .query_row(
+            "SELECT position_seconds, duration_seconds, watched FROM playback_positions WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4",
+            rusqlite::params![r.source_id, r.content_type.as_str(), r.item_id, ep],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, i64>(2)? != 0,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(row.and_then(|(pos, duration, watched)| {
+        (pos > 0 && !watched && !crate::userstate::is_complete(pos, duration)).then_some(pos)
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +623,35 @@ pub async fn stream_url(
     }
 }
 
+/// Rejects a catch-up start older than the channel's archive window.
+/// `archive_hours` comes from the catalog row; rows stored by older builds
+/// may hold any provider value, so it is clamped before the time math.
+fn check_catchup_window(
+    start_at: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    archive_hours: Option<i64>,
+) -> CoreResult<()> {
+    let Some(hours) = archive_hours.filter(|h| *h > 0) else {
+        return Err(CoreError::invalid("This channel has no catch-up."));
+    };
+    let hours = meta::clamp_archive_hours(hours);
+    let oldest = now
+        .checked_sub_signed(chrono::Duration::hours(hours))
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC);
+    if start_at < oldest {
+        let days = (hours + 23) / 24;
+        let window = if days == 1 {
+            "day".to_string()
+        } else {
+            format!("{days} days")
+        };
+        return Err(CoreError::invalid(format!(
+            "That programme is older than this channel's catch-up window (the last {window})."
+        )));
+    }
+    Ok(())
+}
+
 pub async fn catchup_url(
     state: &Arc<AppState>,
     r: &ItemRef,
@@ -629,20 +672,7 @@ pub async fn catchup_url(
     let duration = (duration_minutes.round() as i64).clamp(1, MAX_CATCHUP_MINUTES);
     let mut cx = ctx(state, r).await?;
     if let Some(n) = &cx.item {
-        let Some(hours) = n.row.archive_hours.filter(|h| *h > 0) else {
-            return Err(CoreError::invalid("This channel has no catch-up."));
-        };
-        if start_at < chrono::Utc::now() - chrono::Duration::hours(hours) {
-            let days = (hours + 23) / 24;
-            let window = if days == 1 {
-                "day".to_string()
-            } else {
-                format!("{days} days")
-            };
-            return Err(CoreError::invalid(format!(
-                "That programme is older than this channel's catch-up window (the last {window})."
-            )));
-        }
+        check_catchup_window(start_at, chrono::Utc::now(), n.row.archive_hours)?;
     }
     if cx.meta.is_none() {
         // First contact since install: learn the server clock, best effort.
@@ -717,7 +747,7 @@ pub fn map_short_epg(
         let secs = ts.filter(|t| *t > 0).or_else(|| {
             local
                 .and_then(parse_server_datetime)
-                .map(|d| d.and_utc().timestamp() - offset_seconds)
+                .and_then(|d| d.and_utc().timestamp().checked_sub(offset_seconds))
         })?;
         Some((secs, unix_to_rfc3339(secs)?))
     };
@@ -873,7 +903,9 @@ fn server_time(
     let wall = non_empty(time_now)?;
     let utc = parse_server_datetime(&wall).and_then(|naive| {
         let offset = timezone.and_then(fixed_offset_seconds)?;
-        let at = naive.and_utc() - chrono::Duration::seconds(offset);
+        let at = naive
+            .and_utc()
+            .checked_sub_signed(chrono::Duration::seconds(offset))?;
         Some(at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
     });
     Some(utc.unwrap_or(wall))
@@ -915,10 +947,16 @@ fn fixed_offset_seconds(tz: &str) -> Option<i64> {
     };
     let (h, m) = match digits.split_once(':') {
         Some((h, m)) => (h, m),
-        None if digits.len() == 4 => digits.split_at(2),
+        // `is_ascii` keeps byte 2 on a char boundary ("1é1" is 4 bytes).
+        None if digits.len() == 4 && digits.is_ascii() => digits.split_at(2),
         None => (digits, "0"),
     };
     if h.is_empty() || h.len() > 2 || m.len() > 2 {
+        return None;
+    }
+    // ASCII digits only: `parse` would take "+5", and the length checks above
+    // count bytes, so a multi-byte char must never reach `split_at`.
+    if !h.bytes().chain(m.bytes()).all(|b| b.is_ascii_digit()) {
         return None;
     }
     let h: i64 = h.parse().ok()?;
@@ -940,12 +978,17 @@ pub fn test_message(err: &CoreError) -> String {
         CoreError::Timeout(_) => {
             "The server did not answer in time. Check the URL and port, then try again.".into()
         }
-        // Transport failures already name the host (http::transport_error).
-        CoreError::Network(m) if m.starts_with("Could not reach ") => m.clone(),
+        // Transport failures already name the host (http::transport_error),
+        // and status errors (429 is Network) already say what to do.
+        CoreError::Network(m) if m.starts_with("Could not reach ") || m.contains(": HTTP ") => {
+            m.clone()
+        }
         CoreError::Network(m) => format!(
             "Could not reach the server ({m}). Check the URL and your connection, then try again."
         ),
-        other => other.to_string(),
+        // 5xx: the status message as is, without the "server: " kind prefix.
+        CoreError::Server(m) => m.clone(),
+        other => crate::sources::error_text(other),
     }
 }
 
@@ -999,6 +1042,41 @@ mod tests {
 
     fn r(ct: ContentType, id: &str) -> ItemRef {
         ItemRef::new("s", ct, id)
+    }
+
+    /// Review R2-2: a finished episode (C13 keeps it as a watched row at
+    /// position = duration) resumed at the end.
+    #[test]
+    fn finished_rows_do_not_resume() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut c).unwrap();
+        c.execute(
+            "INSERT INTO sources (id, kind, name, config_json) VALUES ('s', 'xtream', 'S', '{}')",
+            [],
+        )
+        .unwrap();
+        let put = |ep: &str, pos: i64, dur: Option<i64>, watched: i64| {
+            c.execute(
+                "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, watched) VALUES ('s', 'series', 'show', ?1, ?2, ?3, ?4)",
+                rusqlite::params![ep, pos, dur, watched],
+            )
+            .unwrap();
+        };
+        put("done", 1000, Some(1000), 1);
+        put("watched-early", 300, Some(1000), 1);
+        put("near-end", 960, Some(1000), 0);
+        put("half", 500, Some(1000), 0);
+        put("no-duration", 500, None, 0);
+        put("zero", 0, Some(1000), 0);
+        let show = r(ContentType::Series, "show");
+        let get = |ep: &str| stored_resume(&c, &show, ep).unwrap();
+        assert_eq!(get("done"), None);
+        assert_eq!(get("watched-early"), None);
+        assert_eq!(get("near-end"), None);
+        assert_eq!(get("zero"), None);
+        assert_eq!(get("missing"), None);
+        assert_eq!(get("half"), Some(500));
+        assert_eq!(get("no-duration"), Some(500));
     }
 
     #[test]
@@ -1124,6 +1202,22 @@ mod tests {
         assert!(test_message(&CoreError::NotFound("x".into())).contains("server URL"));
     }
 
+    /// Review R3-1: 503 and 429 showed a "server: " kind prefix (or a
+    /// "Could not reach" wrapper) in Test connection.
+    #[test]
+    fn test_messages_have_no_kind_prefix() {
+        use reqwest::StatusCode as S;
+        for status in [S::SERVICE_UNAVAILABLE, S::BAD_GATEWAY, S::TOO_MANY_REQUESTS] {
+            let err = crate::http::status_error(status, "Xtream account");
+            let m = test_message(&err);
+            assert!(m.starts_with("Xtream account: HTTP "), "{status}: {m}");
+            assert!(
+                !m.contains("server:") && !m.contains("Could not reach"),
+                "{m}"
+            );
+        }
+    }
+
     /// R2 r3 F3: without `timestamp_now`, `time_now` is converted with a
     /// fixed-offset zone and passed through verbatim (no offset, so never
     /// read as UTC or as the viewer's local time) with a named zone.
@@ -1171,5 +1265,49 @@ mod tests {
         assert_eq!(fixed_offset_seconds("America/New_York"), None);
         assert_eq!(fixed_offset_seconds("+0530"), Some(19_800));
         assert_eq!(fixed_offset_seconds("UTC+99"), None);
+    }
+
+    /// B8-parsers: provider timezones with multi-byte characters used to
+    /// panic in `split_at(2)`; signed parts used to parse.
+    #[test]
+    fn fixed_offset_rejects_non_ascii_and_signed_parts() {
+        for tz in [
+            "UTC+1é1",
+            "+1é1",
+            "GMT-é",
+            "UTC+٠٥٣٠",
+            "UTC++5",
+            "UTC+-5",
+            "UTC+05:+3",
+            "+🙂",
+        ] {
+            assert_eq!(fixed_offset_seconds(tz), None, "{tz}");
+        }
+        assert_eq!(fixed_offset_seconds("GMT-03:30"), Some(-12_600));
+        let wall = Some("2026-10-11 18:00:00".to_string());
+        assert_eq!(
+            server_time(None, wall, Some("UTC+1é1")).as_deref(),
+            Some("2026-10-11 18:00:00")
+        );
+    }
+
+    /// B8-parsers: a garbage `archive_hours` in a stored row used to panic in
+    /// `chrono::Duration::hours`.
+    #[test]
+    fn catchup_window_survives_absurd_archive_hours() {
+        let now = chrono::Utc::now();
+        let recent = now - chrono::Duration::hours(2);
+        let ancient = now - chrono::Duration::days(500);
+        for hours in [i64::MAX, i64::MAX / 3600 + 1, 1 << 40] {
+            assert!(check_catchup_window(recent, now, Some(hours)).is_ok());
+            let err = check_catchup_window(ancient, now, Some(hours)).unwrap_err();
+            assert!(err.to_string().contains("366 days"), "{err}");
+        }
+        assert!(check_catchup_window(recent, now, Some(0)).is_err());
+        assert!(check_catchup_window(recent, now, None).is_err());
+        assert!(check_catchup_window(recent, now, Some(24)).is_ok());
+        let err =
+            check_catchup_window(now - chrono::Duration::hours(30), now, Some(24)).unwrap_err();
+        assert!(err.to_string().contains("the last day"), "{err}");
     }
 }

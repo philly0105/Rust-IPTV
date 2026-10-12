@@ -8,9 +8,68 @@ export const DAY = 24 * HOUR;
 
 export type ProgramWhen = 'past' | 'now' | 'future';
 
-export function ms(iso: string): number {
+/** XMLTV's compact form: `20261012100000 +0545` (offset optional, UTC when missing). */
+const XMLTV_COMPACT = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*(?:([+-])(\d{2}):?(\d{2}))?$/;
+
+/** Epoch ms of a programme time; 0 when it cannot be read (see `isValidProgram`). */
+export function ms(iso: string | null | undefined): number {
+  if (!iso) return 0;
   const t = Date.parse(iso);
-  return Number.isNaN(t) ? 0 : t;
+  if (!Number.isNaN(t)) return t;
+  const m = XMLTV_COMPACT.exec(iso.trim());
+  if (!m) return 0;
+  const [, y, mo, d, h, mi, s, sign, oh, om] = m;
+  const utc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s ?? 0));
+  const offset = sign ? (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om)) * MINUTE : 0;
+  const out = utc - offset;
+  return Number.isFinite(out) ? out : 0;
+}
+
+/** Both times readable and the programme has a length. Unreadable times must never read as 1970. */
+export function isValidProgram(p: Pick<EpgProgram, 'start' | 'end'>): boolean {
+  const s = ms(p.start);
+  const e = ms(p.end);
+  return s > 0 && e > s;
+}
+
+// ---- local calendar (the viewer's time zone, DST and :30/:45 offsets included) ----
+
+/** Latest local `step`-minute boundary at or before `t` (10:52 -> 10:30 for 30; Nepal stays on its own :00/:30). */
+export function floorLocal(t: number, stepMinutes: number): number {
+  const d = new Date(t);
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  // Step back by the wall-clock distance, not by rebuilding the wall time: in the repeated hour
+  // of a DST fall-back, "01:30" names two instants and setHours may pick the wrong one.
+  const into = (minutes % stepMinutes) * MINUTE + d.getSeconds() * 1000 + d.getMilliseconds();
+  return t - into;
+}
+
+/** Same local wall time `days` calendar days later (a DST day is 23 or 25 h long). */
+export function addLocalDays(t: number, days: number): number {
+  const d = new Date(t);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  d.setDate(d.getDate() + days);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+
+/** Local calendar key `YYYY-M-D`, for "did the day change between these two instants". */
+export function localDayKey(t: number): string {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** Local whole-hour instants in (from, to): the ribbon's ticks. Skips the hour a DST jump removes. */
+export function localHourTicks(from: number, to: number): number[] {
+  const out: number[] = [];
+  // Each tick re-snaps to the local hour, so a half-hour DST change (Lord Howe) stays on :00.
+  let t = floorLocal(from + HOUR, 60);
+  for (let guard = 0; t < to && guard < 24 * 32; guard++) {
+    if (t > from) out.push(t);
+    t = floorLocal(t + HOUR + MINUTE, 60);
+  }
+  return out;
 }
 
 export function programWhen(p: EpgProgram, now: number): ProgramWhen {
@@ -50,8 +109,15 @@ export function formatClock(t: number, locale?: string): string {
   return f.format(t);
 }
 
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
 export function formatDay(t: number, locale?: string): string {
-  return new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' }).format(t);
+  const key = locale ?? '';
+  let f = dayFormatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+    dayFormatters.set(key, f);
+  }
+  return f.format(t);
 }
 
 export function formatRange(p: EpgProgram, locale?: string): string {
@@ -115,7 +181,7 @@ export function layoutBlocks(programs: EpgProgram[], from: number, to: number, p
   for (const p of sorted) {
     const s = ms(p.start);
     const e = ms(p.end);
-    if (e <= from || s >= to || e <= s) continue;
+    if (e <= from || s >= to || !isValidProgram(p)) continue;
     const start = Math.max(s, from, cursor);
     const end = Math.min(e, to);
     if (end <= start) continue;

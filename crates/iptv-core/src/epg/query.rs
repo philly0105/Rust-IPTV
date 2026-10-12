@@ -56,6 +56,16 @@ struct Row {
     icon: Option<String>,
 }
 
+/// Tidied programmes of `channel_id` overlapping `[from, to)`, at most
+/// `limit`.
+///
+/// After [`tidy`], a programme that starts before `from` can only still be
+/// running at `from` when it is the LAST one to start before `from` (any
+/// later start clips it). So the query takes that one programme (within the
+/// lookback) plus the programmes starting in the range. Taking the earliest
+/// rows of the whole lookback window instead let a `LIMIT` cut the list
+/// before the programme that is actually on (broken feeds whose programmes
+/// overlap by days).
 fn rows(
     conn: &Connection,
     channel_id: &str,
@@ -63,34 +73,45 @@ fn rows(
     to: i64,
     limit: i64,
 ) -> CoreResult<Vec<Row>> {
-    let mut stmt = conn.prepare_cached(
+    let map = |r: &rusqlite::Row<'_>| {
+        Ok(Row {
+            start: r.get(0)?,
+            stop: r.get(1)?,
+            title: r.get(2)?,
+            description: r.get(3)?,
+            category: r.get(4)?,
+            icon: r.get(5)?,
+        })
+    };
+    // Zero-length rows are skipped here as tidy skips them: they clip nothing.
+    let mut before = conn.prepare_cached(
         "SELECT p.start, p.stop, p.title, p.description, p.category, p.icon
          FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
-         WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND p.stop > ?4
-           AND s.enabled = 1 AND s.origin <> ?5
-         ORDER BY p.start, s.rowid LIMIT ?6",
+         WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND p.stop > p.start
+           AND s.enabled = 1 AND s.origin <> ?4
+         ORDER BY p.start DESC, s.rowid LIMIT 1",
     )?;
-    let it = stmt.query_map(
-        params![
-            channel_id,
-            from - MAX_PROGRAMME_SECS,
-            to,
-            from,
-            STAGING_ORIGIN,
-            limit
-        ],
-        |r| {
-            Ok(Row {
-                start: r.get(0)?,
-                stop: r.get(1)?,
-                title: r.get(2)?,
-                description: r.get(3)?,
-                category: r.get(4)?,
-                icon: r.get(5)?,
-            })
-        },
+    let mut list: Vec<Row> = before
+        .query_map(
+            params![channel_id, from - MAX_PROGRAMME_SECS, from, STAGING_ORIGIN],
+            map,
+        )?
+        .collect::<Result<_, _>>()?;
+    let mut inside = conn.prepare_cached(
+        "SELECT p.start, p.stop, p.title, p.description, p.category, p.icon
+         FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
+         WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3
+           AND s.enabled = 1 AND s.origin <> ?4
+         ORDER BY p.start, s.rowid LIMIT ?5",
     )?;
-    Ok(tidy(it.collect::<Result<Vec<_>, _>>()?))
+    for r in inside.query_map(params![channel_id, from, to, STAGING_ORIGIN, limit], map)? {
+        list.push(r?);
+    }
+    let mut out = tidy(list);
+    // A clipped programme may now end before the range.
+    out.retain(|r| r.stop > from);
+    out.truncate(limit.max(0) as usize);
+    Ok(out)
 }
 
 /// Makes a sorted list safe to lay out: duplicates with the same start (two
@@ -243,6 +264,70 @@ mod tests {
             .map(|r| (r.title.as_str(), r.start, r.stop))
             .collect();
         assert_eq!(t, vec![("a", 0, 50), ("b", 50, 150), ("c", 150, 200)]);
+    }
+
+    fn guide(progs: &[(i64, i64, &str)]) -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        for (start, stop, title) in progs {
+            conn.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('u', 'c', ?1, ?2, ?3)",
+                params![start, stop, title],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    /// Review R1-3: with more than 16 starts in the lookback and stops that
+    /// overlap by days, LIMIT 16 cut the list before the programme on air and
+    /// "now" showed one from hours ago.
+    #[test]
+    fn now_next_with_broken_stops_picks_the_programme_on_air() {
+        let now = 1_800_000_000;
+        let h = 3600;
+        let names: Vec<String> = (0..20).map(|i| format!("p{i}")).collect();
+        let mut progs: Vec<(i64, i64, &str)> = (0..20)
+            .map(|i| {
+                let start = now - 20 * h + i * h;
+                (start, start + 3 * 86_400, names[i as usize].as_str())
+            })
+            .collect();
+        progs.push((now + h, now + 2 * h, "later"));
+        let conn = guide(&progs);
+        let nn = now_next(&conn, "c", now).unwrap();
+        let on = nn.now.expect("a programme is on");
+        assert_eq!(on.title, "p19");
+        assert_eq!(on.start, to_rfc3339(now - h));
+        assert_eq!(on.end, to_rfc3339(now + h), "clipped at the next start");
+        assert_eq!(nn.next.unwrap().title, "later");
+        // epg.programs agrees.
+        let list = programs(&conn, "c", now, now + 1).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].title, "p19");
+    }
+
+    /// Review R1-3: a programme clipped by a later start could end before the
+    /// requested range and was still returned.
+    #[test]
+    fn programs_never_returns_rows_outside_the_range() {
+        let from = 1_800_000_000;
+        let conn = guide(&[
+            (from - 7200, from + 18_000, "clipped away"),
+            (from - 3600, from + 3600, "on"),
+            (from + 3600, from + 7200, "after"),
+        ]);
+        let list = programs(&conn, "c", from, from + 7200).unwrap();
+        let titles: Vec<_> = list.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, ["on", "after"]);
+        // A zero-length last row before the range does not hide the one on air.
+        let conn = guide(&[
+            (from - 3600, from + 3600, "on"),
+            (from - 60, from - 60, "zero"),
+        ]);
+        assert_eq!(now_next(&conn, "c", from).unwrap().now.unwrap().title, "on");
     }
 
     #[test]

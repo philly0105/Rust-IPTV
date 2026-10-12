@@ -101,14 +101,23 @@ export interface ThemeApi {
   toggle(): void;
 }
 
-/** Persists a theme choice: local first (instant), then settings.update. */
+let persistSeq = 0;
+
+/**
+ * Persists a theme choice: local first (instant), then settings.update. Only
+ * the newest call writes its response to the settings cache: with Ctrl+Shift+L
+ * pressed twice quickly, an older reply arriving last would otherwise flow
+ * back through ThemeSync and undo the second press.
+ */
 export async function persistTheme(theme: Theme): Promise<void> {
+  const mine = ++persistSeq;
   useThemeStore.getState().set(theme);
   const key = rpcKey('settings.get');
   const prev = queryClient.getQueryData<Settings>(key);
   if (prev) queryClient.setQueryData<Settings>(key, { ...prev, theme });
   try {
     const next = await rpc('settings.update', { patch: { theme } });
+    if (mine !== persistSeq) return;
     queryClient.setQueryData(key, next);
   } catch {
     // Keep the local choice; settings will reconcile on the next load.

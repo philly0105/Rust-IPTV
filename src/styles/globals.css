@@ -16,12 +16,15 @@
   --color-surface: #131c2d;
   --color-surface-2: #1a2539;
   --color-surface-3: #233049;
-  --color-border: #2f3d57;
+  --color-border: #6b7b99;
+  --color-divider: #2f3d57;
   --color-fg: #e9edf5;
   --color-fg-muted: #a9b3c6;
   --color-fg-subtle: #8f9bb2;
   --color-accent: #f5b544;
   --color-accent-hover: #ffc865;
+  --color-accent-pressed: #e09a26;
+  --color-pressed: #2c3b58;
   --color-accent-fg: #1b1204;
   --color-danger: #ff7a7a;
   --color-success: #4fd49b;
@@ -213,6 +216,12 @@ html[data-reduced-motion='true'] *::after {
   scroll-behavior: auto !important;
 }
 
+/* Pressed controls nudge down a pixel under motion-safe; the in-app reduced-motion switch stops that too. */
+html[data-reduced-motion='true'] *:active {
+  translate: none !important;
+  scale: none !important;
+}
+
 /* Set for two frames while the theme flips (theme.tsx), so colours swap at once. */
 html[data-theme-switching='true'] *,
 html[data-theme-switching='true'] *::before,
@@ -279,6 +288,10 @@ html[data-theme-switching='true'] *::after {
 [cmdk-item][data-selected='true'] {
   background: var(--color-surface-3);
   color: var(--color-fg);
+}
+/* Pressed: the hovered item is also the selected one, so this must outrank the rule above. */
+[cmdk-item][data-selected='true']:active {
+  background: var(--color-pressed);
 }
 [cmdk-item][data-disabled='true'] {
   opacity: 0.5;

@@ -6,7 +6,12 @@
 //! is. Edge cases handled (mined from the old app's parser and real lists):
 //!
 //! - UTF-8 BOM, LF / CRLF / CR-only (classic Mac) line endings, blank lines, leading junk before `#EXTM3U`,
-//!   several `#EXTM3U` lines (concatenated playlists), non-UTF-8 bytes (lossy).
+//!   several `#EXTM3U` lines (concatenated playlists). UTF-16 LE/BE input (with
+//!   a byte order mark, or BOM-less starting with `#`) is transcoded; bytes
+//!   that are not valid UTF-8 are decoded as Windows-1252 (Latin-1 playlists),
+//!   while the valid UTF-8 runs around them stay UTF-8.
+//! - Header attributes and detected EPG URLs are deduplicated with sets and
+//!   capped ([`MAX_HEADER_ATTRS`], [`MAX_EPG_URLS`]).
 //! - `#EXTINF:-1`, `#EXTINF:0`, `#EXTINF:-1.000`, `#extinf:` in any case.
 //! - Attribute values quoted with `"` or `'`, unquoted (`tvg-chno=5`), and quoted
 //!   values containing commas (`group-title="News, UK"`); the display name is
@@ -92,6 +97,20 @@ pub struct M3uReader<R: BufRead> {
     after_cr: bool,
     done: bool,
     io_error: Option<std::io::Error>,
+    /// Header attribute keys and EPG URLs already kept.
+    seen_attrs: std::collections::HashSet<String>,
+    seen_epg_urls: std::collections::HashSet<String>,
+    /// The start of the input was checked for a UTF-16 byte order mark.
+    sniffed: bool,
+    /// `Some(little_endian)` for UTF-16 input.
+    utf16_le: Option<bool>,
+    /// First byte of a UTF-16 code unit split across reads.
+    odd_byte: Option<u8>,
+    /// A first byte the BOM check consumed that belongs to the first line.
+    carry: Option<u8>,
+    /// The first code unit of BOM-less UTF-16 input (the `#` of `#EXTM3U`),
+    /// consumed by the check.
+    first_unit: Option<u16>,
 }
 
 impl<R: BufRead> M3uReader<R> {
@@ -107,6 +126,13 @@ impl<R: BufRead> M3uReader<R> {
             after_cr: false,
             done: false,
             io_error: None,
+            seen_attrs: Default::default(),
+            seen_epg_urls: Default::default(),
+            sniffed: false,
+            utf16_le: None,
+            odd_byte: None,
+            carry: None,
+            first_unit: None,
         }
     }
 
@@ -131,6 +157,11 @@ impl<R: BufRead> M3uReader<R> {
         self.buf.clear();
         let mut truncated = false;
         let mut any = false;
+        if let Some(b) = self.carry.take() {
+            // 0xFF / 0xFE / `#` / NUL: never a line break.
+            self.buf.push(b);
+            any = true;
+        }
         loop {
             let available = match self.reader.fill_buf() {
                 Ok(b) => b,
@@ -267,20 +298,260 @@ impl<R: BufRead> M3uReader<R> {
     }
 
     fn parse_header(&mut self, rest: &str) {
+        // Linear in header size: set lookups, and nothing more is parsed once
+        // both lists are full (a hostile playlist can repeat `#EXTM3U` lines
+        // with thousands of attributes each).
+        if self.header.attrs.len() >= MAX_HEADER_ATTRS && self.header.epg_urls.len() >= MAX_EPG_URLS
+        {
+            return;
+        }
         let (attrs, _) = parse_attrs(rest);
         for (k, v) in attrs {
             if matches!(k.as_str(), "url-tvg" | "x-tvg-url" | "tvg-url") {
                 for url in extract_urls(&v) {
-                    if !self.header.epg_urls.contains(&url) {
+                    if self.header.epg_urls.len() >= MAX_EPG_URLS {
+                        break;
+                    }
+                    if self.seen_epg_urls.insert(url.clone()) {
                         self.header.epg_urls.push(url);
                     }
                 }
             }
-            if !self.header.attrs.iter().any(|(ek, _)| *ek == k) {
+            if self.header.attrs.len() < MAX_HEADER_ATTRS && self.seen_attrs.insert(k.clone()) {
                 self.header.attrs.push((k, v));
             }
         }
     }
+
+    /// Detects UTF-16 at the very start of the input: a byte order mark, or a
+    /// NUL-interleaved `#` (BOM-less UTF-16 `#EXTM3U`); see [`utf16_start`].
+    fn sniff_bom(&mut self) -> std::io::Result<()> {
+        self.sniffed = true;
+        let first = match self.peek()? {
+            Some(b @ (0xFF | 0xFE | b'#' | 0)) => b,
+            _ => return Ok(()),
+        };
+        // The mark may straddle two reads (tiny buffers): take the first
+        // byte, and hand it back to the line reader when no mark follows.
+        self.reader.consume(1);
+        self.stats.bytes += 1;
+        match self.peek()?.and_then(|next| utf16_start(first, next)) {
+            Some((le, bom)) => {
+                self.reader.consume(1);
+                self.stats.bytes += 1;
+                self.utf16_le = Some(le);
+                if !bom {
+                    self.first_unit = Some(u16::from(b'#'));
+                }
+            }
+            None => self.carry = Some(first),
+        }
+        Ok(())
+    }
+
+    /// The next byte without consuming it.
+    fn peek(&mut self) -> std::io::Result<Option<u8>> {
+        loop {
+            match self.reader.fill_buf() {
+                Ok(b) => return Ok(b.first().copied()),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// [`Self::read_line`] for UTF-16 input: decodes code units up to the
+    /// next line break into UTF-8 in `self.buf` (unpaired surrogates become
+    /// U+FFFD). At most `MAX_LINE / 2` code units are kept.
+    fn read_line_utf16(&mut self, le: bool) -> std::io::Result<Option<bool>> {
+        self.buf.clear();
+        let mut units: Vec<u16> = Vec::new();
+        let mut truncated = false;
+        let mut any = false;
+        if let Some(u) = self.first_unit.take() {
+            // `#`: never a line break.
+            units.push(u);
+            any = true;
+        }
+        let found = loop {
+            let available = match self.reader.fill_buf() {
+                Ok(b) => b,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+            if available.is_empty() {
+                break false;
+            }
+            let mut used = 0;
+            let mut found = false;
+            for &b in available {
+                used += 1;
+                let Some(first) = self.odd_byte.take() else {
+                    self.odd_byte = Some(b);
+                    continue;
+                };
+                let unit = if le {
+                    u16::from_le_bytes([first, b])
+                } else {
+                    u16::from_be_bytes([first, b])
+                };
+                if std::mem::take(&mut self.after_cr) && unit == 0x0A {
+                    continue;
+                }
+                any = true;
+                if unit == 0x0A || unit == 0x0D {
+                    self.after_cr = unit == 0x0D;
+                    found = true;
+                    break;
+                }
+                if units.len() < MAX_LINE / 2 {
+                    units.push(unit);
+                } else {
+                    truncated = true;
+                }
+            }
+            self.reader.consume(used);
+            self.stats.bytes += used as u64;
+            if found {
+                break true;
+            }
+        };
+        if !found && !any {
+            return Ok(None);
+        }
+        let text: String = char::decode_utf16(units)
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect();
+        self.buf.extend_from_slice(text.as_bytes());
+        Ok(Some(truncated))
+    }
+}
+
+/// Most header attributes kept (real playlists have a handful).
+pub const MAX_HEADER_ATTRS: usize = 256;
+/// Most EPG URLs detected from the header.
+pub const MAX_EPG_URLS: usize = 32;
+
+/// Windows-1252 code points for bytes 0x80..=0x9F (the rest is Latin-1).
+const CP1252_HIGH: [char; 32] = [
+    '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
+    '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}', '\u{017D}', '\u{FFFD}',
+    '\u{FFFD}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
+    '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{FFFD}', '\u{017E}', '\u{0178}',
+];
+
+/// UTF-16 recognised from the first two bytes of a playlist, as
+/// `(little_endian, is_byte_order_mark)`: `FF FE` / `FE FF`, or a
+/// NUL-interleaved `#` (BOM-less UTF-16 starting with `#EXTM3U`).
+pub fn utf16_start(a: u8, b: u8) -> Option<(bool, bool)> {
+    match (a, b) {
+        (0xFF, 0xFE) => Some((true, true)),
+        (0xFE, 0xFF) => Some((false, true)),
+        (b'#', 0) => Some((true, false)),
+        (0, b'#') => Some((false, false)),
+        _ => None,
+    }
+}
+
+/// `bytes` decoded as UTF-16 when [`utf16_start`] recognises its start (the
+/// mark is dropped; a trailing odd byte is ignored, unpaired surrogates
+/// become U+FFFD), else `None`.
+pub fn utf16_text(bytes: &[u8]) -> Option<String> {
+    let (le, bom) = match bytes {
+        [a, b, ..] => utf16_start(*a, *b)?,
+        _ => return None,
+    };
+    let body = if bom { &bytes[2..] } else { bytes };
+    let units = body.chunks_exact(2).map(|p| {
+        if le {
+            u16::from_le_bytes([p[0], p[1]])
+        } else {
+            u16::from_be_bytes([p[0], p[1]])
+        }
+    });
+    Some(
+        char::decode_utf16(units)
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect(),
+    )
+}
+
+/// One line's text, decoded in runs: every valid UTF-8 run stays UTF-8, and
+/// each byte of an invalid sequence (a Latin-1 / Windows-1252 byte) is decoded
+/// as Windows-1252, so a UTF-8 line with one stray cp1252 byte keeps its UTF-8
+/// characters. An incomplete UTF-8 sequence at the very end is dropped only
+/// when [`MAX_LINE`] cut the line there (`truncated`); on a whole line it is
+/// Windows-1252 too (`Caf\xE9`).
+fn line_text(buf: &[u8], truncated: bool) -> std::borrow::Cow<'_, str> {
+    let mut rest = match std::str::from_utf8(buf) {
+        Ok(s) => return s.into(),
+        Err(_) => buf,
+    };
+    let mut out = String::with_capacity(buf.len() + 8);
+    loop {
+        match std::str::from_utf8(rest) {
+            Ok(s) => {
+                out.push_str(s);
+                break;
+            }
+            Err(e) => {
+                let (valid, after) = rest.split_at(e.valid_up_to());
+                // `valid` is UTF-8 by construction.
+                out.push_str(std::str::from_utf8(valid).unwrap_or_default());
+                match e.error_len() {
+                    Some(n) => {
+                        out.push_str(&decode_windows_1252(&after[..n]));
+                        rest = &after[n..];
+                    }
+                    // An incomplete sequence at the end of the buffer.
+                    None => {
+                        if !truncated {
+                            out.push_str(&decode_windows_1252(after));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    out.into()
+}
+
+/// A whole playlist file as text, decoded the way [`M3uReader`] decodes it:
+/// UTF-16 (byte order mark or BOM-less `#EXTM3U`) is transcoded, a UTF-8 BOM
+/// is dropped, and bytes that are not valid UTF-8 are Windows-1252 (see
+/// [`line_text`]).
+pub fn decode_playlist_text(bytes: Vec<u8>) -> String {
+    if let Some(text) = utf16_text(&bytes) {
+        return text;
+    }
+    let start = if bytes.starts_with(b"\xEF\xBB\xBF") {
+        3
+    } else {
+        0
+    };
+    match std::str::from_utf8(&bytes[start..]) {
+        Ok(_) => {
+            let mut bytes = bytes;
+            bytes.drain(..start);
+            String::from_utf8(bytes).unwrap_or_default()
+        }
+        Err(_) => bytes[start..]
+            .split_inclusive(|&b| b == b'\n')
+            .map(|line| line_text(line, false))
+            .collect(),
+    }
+}
+
+/// Decodes Windows-1252 (a superset of the printable Latin-1 range).
+pub fn decode_windows_1252(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|&b| match b {
+            0x80..=0x9F => CP1252_HIGH[(b - 0x80) as usize],
+            _ => b as char,
+        })
+        .collect()
 }
 
 impl<R: BufRead> Iterator for M3uReader<R> {
@@ -288,7 +559,18 @@ impl<R: BufRead> Iterator for M3uReader<R> {
 
     fn next(&mut self) -> Option<M3uEntry> {
         while !self.done {
-            match self.read_line() {
+            if !self.sniffed {
+                if let Err(e) = self.sniff_bom() {
+                    self.done = true;
+                    self.io_error = Some(e);
+                    break;
+                }
+            }
+            let line = match self.utf16_le {
+                Some(le) => self.read_line_utf16(le),
+                None => self.read_line(),
+            };
+            match line {
                 Ok(Some(truncated)) => {
                     self.stats.lines += 1;
                     if truncated {
@@ -298,7 +580,7 @@ impl<R: BufRead> Iterator for M3uReader<R> {
                         );
                     }
                     let buf = std::mem::take(&mut self.buf);
-                    let text = String::from_utf8_lossy(&buf);
+                    let text = line_text(&buf, truncated);
                     let out = self.handle_line(&text, truncated);
                     drop(text);
                     self.buf = buf;
@@ -429,7 +711,11 @@ fn parse_extinf(rest: &str) -> M3uEntry {
     let dur_end = rest
         .find(|c: char| !(c.is_ascii_digit() || c == '-' || c == '.' || c == '+'))
         .unwrap_or(rest.len());
-    let duration = rest[..dur_end].parse::<f64>().ok();
+    // A 400-digit "duration" parses as infinity; keep only finite values.
+    let duration = rest[..dur_end]
+        .parse::<f64>()
+        .ok()
+        .filter(|d| d.is_finite());
     let after = &rest[dur_end..];
     let (attrs, comma) = parse_attrs(after);
     let name = match comma {
@@ -456,7 +742,14 @@ fn parse_extinf(rest: &str) -> M3uEntry {
                         .trim()
                         .parse::<i64>()
                         .ok()
-                        .or_else(|| v.trim().parse::<f64>().ok().map(|f| f as i64))
+                        // "NaN"/"inf" parse as f64 and would cast to 0 / i64::MAX.
+                        .or_else(|| {
+                            v.trim()
+                                .parse::<f64>()
+                                .ok()
+                                .filter(|f| f.is_finite() && f.abs() < 1e15)
+                                .map(|f| f as i64)
+                        })
                 }
             }
             "tvg-shift" => e.tvg_shift = non_empty(&v),
@@ -521,14 +814,18 @@ fn finalize_name(entry: &mut M3uEntry) {
 /// Extracts `http(s)://` / `file://` URLs from a header value (comma or space separated).
 pub fn extract_urls(value: &str) -> Vec<String> {
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for token in value.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
+        if out.len() >= MAX_EPG_URLS {
+            break;
+        }
         let t = token.trim().trim_matches(|c| c == '"' || c == '\'');
-        let lower = t.to_ascii_lowercase();
+        let lower = t.get(..8).unwrap_or(t).to_ascii_lowercase();
         if (lower.starts_with("http://")
             || lower.starts_with("https://")
             || lower.starts_with("file://"))
             && t.len() > 8
-            && !out.iter().any(|u: &String| u == t)
+            && seen.insert(t)
         {
             out.push(t.to_string());
         }
@@ -660,5 +957,203 @@ http://s/path/My%20Movie.mkv?token=1\n";
         assert_eq!(e[0].catchup.as_deref(), Some("default"));
         assert_eq!(e[0].catchup_days, Some(7));
         assert_eq!(e[0].catchup_source.as_deref(), Some("?utc={utc}"));
+    }
+
+    /// B8-parsers: non-finite numbers used to become channel 0 / i64::MAX.
+    #[test]
+    fn non_finite_numbers_are_dropped() {
+        let text = format!(
+            "#EXTM3U\n#EXTINF:{} tvg-chno=\"NaN\",A\nhttp://a\n#EXTINF:-1 tvg-chno=\"inf\",B\nhttp://b\n#EXTINF:-1 tvg-chno=\"1e300\",C\nhttp://c\n#EXTINF:-1 tvg-chno=\"7.0\",D\nhttp://d\n",
+            "9".repeat(400)
+        );
+        let (e, _, _) = parse_str(&text);
+        assert_eq!(e.len(), 4);
+        assert_eq!(e[0].duration, None);
+        assert_eq!(e[0].tvg_chno, None);
+        assert_eq!(e[1].tvg_chno, None);
+        assert_eq!(e[2].tvg_chno, None);
+        assert_eq!(e[3].tvg_chno, Some(7));
+    }
+
+    /// Review R1-1: header attributes and EPG URLs were deduplicated with
+    /// linear scans, so 80k distinct header attributes took ~15 s, and every
+    /// url-tvg URL was kept.
+    #[test]
+    fn header_heavy_playlist_is_linear_and_capped() {
+        let mut text = String::new();
+        for line in 0..160 {
+            text.push_str("#EXTM3U");
+            for i in 0..500 {
+                let n = line * 500 + i;
+                text.push_str(&format!(
+                    " k{n}=\"v\" url-tvg=\"http://epg.example/{n}.xml\""
+                ));
+            }
+            text.push('\n');
+        }
+        text.push_str("#EXTINF:-1,A\nhttp://a\n");
+        let started = std::time::Instant::now();
+        let (e, h, _) = parse_str(&text);
+        let took = started.elapsed();
+        assert_eq!(e.len(), 1);
+        assert_eq!(h.attrs.len(), MAX_HEADER_ATTRS);
+        assert_eq!(h.epg_urls.len(), MAX_EPG_URLS);
+        assert_eq!(h.epg_urls[0], "http://epg.example/0.xml");
+        assert_eq!(h.attrs[0], ("k0".to_string(), "v".to_string()));
+        assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+    }
+
+    fn parse_bytes(bytes: &[u8], cap: usize) -> (Vec<M3uEntry>, M3uHeader) {
+        let mut r = M3uReader::new(std::io::BufReader::with_capacity(cap, bytes));
+        let e: Vec<M3uEntry> = r.by_ref().collect();
+        assert!(r.take_io_error().is_none());
+        (e, r.header().clone())
+    }
+
+    fn utf16(text: &str, le: bool) -> Vec<u8> {
+        let mut out = if le {
+            vec![0xFF, 0xFE]
+        } else {
+            vec![0xFE, 0xFF]
+        };
+        for u in text.encode_utf16() {
+            out.extend(if le { u.to_le_bytes() } else { u.to_be_bytes() });
+        }
+        out
+    }
+
+    /// Review R1-4: UTF-16 playlists (Notepad "Unicode") imported 0 entries.
+    #[test]
+    fn utf16_playlists_are_transcoded() {
+        let text = "#EXTM3U url-tvg=\"http://e/g.xml\"\r\n#EXTINF:-1 group-title=\"Infos\",Télé 1 🎬\r\nhttp://s/1.ts\r\n#EXTINF:-1,Two\r\nhttp://s/2.ts\r\n";
+        for le in [true, false] {
+            // Capacity 1 splits the mark and every code unit across reads.
+            for cap in [1, 3, 64 * 1024] {
+                let (e, h) = parse_bytes(&utf16(text, le), cap);
+                assert_eq!(e.len(), 2, "le={le} cap={cap}");
+                assert_eq!(e[0].name, "Télé 1 🎬");
+                assert_eq!(e[0].group.as_deref(), Some("Infos"));
+                assert_eq!(e[1].url, "http://s/2.ts");
+                assert_eq!(h.epg_urls, ["http://e/g.xml"]);
+            }
+        }
+    }
+
+    /// Review R1-4: Latin-1 / Windows-1252 bytes came out as U+FFFD.
+    #[test]
+    fn non_utf8_lines_are_decoded_as_windows_1252() {
+        let mut bytes =
+            b"#EXTM3U\n#EXTINF:-1 group-title=\"Fran\xe7ais\",T\xe9l\xe9 \x80 \x96\n".to_vec();
+        bytes.extend_from_slice("http://s/1.ts\n#EXTINF:-1,Déjà UTF-8\nhttp://s/2.ts\n".as_bytes());
+        for cap in [1, 64 * 1024] {
+            let (e, _) = parse_bytes(&bytes, cap);
+            assert_eq!(e.len(), 2);
+            assert_eq!(e[0].name, "Télé € –");
+            assert_eq!(e[0].group.as_deref(), Some("Français"));
+            assert_eq!(e[1].name, "Déjà UTF-8", "valid UTF-8 lines are untouched");
+        }
+        // A leading 0xFF that is not a byte order mark stays in the line.
+        let (e, _) = parse_bytes(b"\xffjunk\nhttp://s/x.ts\n", 1);
+        assert_eq!(e.len(), 1);
+        assert_eq!(decode_windows_1252(b"\xff\x81"), "ÿ\u{FFFD}");
+    }
+
+    /// A line cut by MAX_LINE inside a UTF-8 character keeps its valid prefix
+    /// instead of being re-read as Windows-1252.
+    #[test]
+    fn cut_utf8_line_stays_utf8() {
+        let name = "é".repeat(MAX_LINE);
+        let text = format!("#EXTM3U\n#EXTINF:-1,{name}\nhttp://s/1.ts\n");
+        let (e, _, _) = parse_str(&text);
+        assert_eq!(e.len(), 1);
+        assert!(e[0].name.chars().all(|c| c == 'é'), "no mojibake");
+    }
+
+    /// Review R2-4: a whole Windows-1252 line whose last byte is a UTF-8 lead
+    /// byte was taken for a cut UTF-8 line and lost that byte ("Caf").
+    #[test]
+    fn cp1252_line_ending_in_a_lead_byte_keeps_it() {
+        for eol in ["\n", "\r\n", ""] {
+            let mut bytes = b"#EXTM3U\n#EXTINF:-1 group-title=\"Caf\xe9\",Caf\xe9".to_vec();
+            bytes.extend_from_slice(b"\nhttp://s/1.ts");
+            bytes.extend_from_slice(eol.as_bytes());
+            for cap in [1, 64 * 1024] {
+                let (e, _) = parse_bytes(&bytes, cap);
+                assert_eq!(e.len(), 1, "eol={eol:?}");
+                assert_eq!(e[0].name, "Café");
+                assert_eq!(e[0].group.as_deref(), Some("Café"));
+            }
+        }
+    }
+
+    /// Review R3-4: a UTF-8 line with one stray Windows-1252 byte was
+    /// decoded wholly as Windows-1252 ("CafÃ© été").
+    #[test]
+    fn mixed_lines_keep_their_utf8_runs() {
+        let t = |b: &[u8], cut: bool| line_text(b, cut).into_owned();
+        assert_eq!(t(b"Caf\xc3\xa9 \xe9t\xe9", false), "Café été");
+        assert_eq!(t(b"\xe9t\xe9 Caf\xc3\xa9", false), "été Café");
+        // Earlier cases: a whole cp1252 line, a trailing lead byte, 0x80-0x9F.
+        assert_eq!(t(b"T\xe9l\xe9 \x80 \x96", false), "Télé € –");
+        assert_eq!(t(b"Caf\xe9", false), "Café");
+        assert_eq!(t(b"Caf\xc3\xa9 Caf\xe9", false), "Café Café");
+        // A lone lead byte inside the line, and an incomplete 3-byte
+        // sequence (each of its bytes is cp1252).
+        assert_eq!(t(b"a\xc3 b", false), "aÃ b");
+        assert_eq!(t(b"a\xe2\x82 b", false), "aâ‚ b");
+        // Undefined cp1252 bytes become U+FFFD.
+        assert_eq!(t(b"x\x81y", false), "x\u{FFFD}y");
+        // A line cut inside a UTF-8 character drops only the partial tail.
+        assert_eq!(t(b"\xe9t\xe9 Caf\xc3", true), "été Caf");
+        assert_eq!(t(b"Caf\xc3", false), "CafÃ");
+        // Through the reader, and the stored-text decoder.
+        let (e, _) = parse_bytes(
+            b"#EXTM3U\n#EXTINF:-1,Caf\xc3\xa9 \xe9t\xe9\nhttp://s/1.ts\n",
+            1,
+        );
+        assert_eq!(e[0].name, "Café été");
+        assert_eq!(
+            decode_playlist_text(b"#EXTINF:-1,Caf\xc3\xa9 \xe9t\xe9\n".to_vec()),
+            "#EXTINF:-1,Café été\n"
+        );
+    }
+
+    /// Review R2-3: UTF-16 without a byte order mark (NUL-interleaved
+    /// `#EXTM3U`) is UTF-16 too.
+    #[test]
+    fn bomless_utf16_is_transcoded() {
+        let text = "#EXTM3U\r\n#EXTINF:-1,Télé\r\nhttp://s/1.ts\r\n";
+        for le in [true, false] {
+            let bytes = utf16(text, le)[2..].to_vec();
+            for cap in [1, 3, 64 * 1024] {
+                let (e, _) = parse_bytes(&bytes, cap);
+                assert_eq!(e.len(), 1, "le={le} cap={cap}");
+                assert_eq!(e[0].name, "Télé");
+                assert_eq!(e[0].url, "http://s/1.ts");
+            }
+            assert_eq!(utf16_text(&bytes).as_deref(), Some(text));
+        }
+        // A lone `#` line in UTF-8 is not UTF-16.
+        assert_eq!(utf16_start(b'#', b'E'), None);
+        let (e, _) = parse_bytes(b"#\nhttp://s/x.ts\n", 1);
+        assert_eq!(e.len(), 1);
+    }
+
+    /// Review R2-8: the stored raw text decodes like the parser.
+    #[test]
+    fn decode_playlist_text_matches_the_reader() {
+        let text = "#EXTM3U\n#EXTINF:-1,Télé\nhttp://s/1.ts\n";
+        assert_eq!(decode_playlist_text(utf16(text, true)), text);
+        assert_eq!(decode_playlist_text(utf16(text, false)), text);
+        assert_eq!(decode_playlist_text(utf16(text, true)[2..].to_vec()), text);
+        let mut bom = b"\xEF\xBB\xBF".to_vec();
+        bom.extend_from_slice(text.as_bytes());
+        assert_eq!(decode_playlist_text(bom), text);
+        assert_eq!(
+            decode_playlist_text(
+                b"#EXTM3U\n#EXTINF:-1,Caf\xe9\n#EXTINF:-1,D\xc3\xa9j\xc3\xa0\n".to_vec()
+            ),
+            "#EXTM3U\n#EXTINF:-1,Café\n#EXTINF:-1,Déjà\n"
+        );
     }
 }

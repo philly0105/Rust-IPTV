@@ -46,5 +46,10 @@
   "errorHintConflict": "請重新載入以查看最新版本，然後再試一次。",
   "errorHintIo": "請確認資料夾存在，且您有寫入權限。",
   "errorHintDb": "請重新啟動應用程式。若問題持續發生，請在「設定」中還原備份。",
-  "errorHintInternal": "請再試一次。若問題持續發生，請重新啟動應用程式。"
+  "errorHintInternal": "請再試一次。若問題持續發生，請重新啟動應用程式。",
+  "errorCode": "錯誤代碼：{{code}}",
+  "errorTitleEngineMissing": "無法啟動播放器引擎",
+  "errorHintEngineMissing": "影片播放器引擎(mpv)遺失或無法啟動。",
+  "errorTitleServer": "伺服器發生問題",
+  "errorHintServer": "伺服器忙碌中或發生問題。請稍後再試。"
 }

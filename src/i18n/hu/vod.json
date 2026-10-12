@@ -22,6 +22,7 @@
   "manageCategoriesHidden_other": "Kategóriák kezelése ({{count}} rejtett)",
   "manageCategoriesHint": "{{total}} kategóriából {{hidden}} rejtett. A rejtett kategóriák nem jelennek meg a listákban és a keresésben.",
   "noCategoryMatch": "Nincs a szűrőnek megfelelő kategória.",
+  "clearFilter": "Szűrő törlése",
   "saveCategories": "Mentés",
   "categoriesSaved": "Kategóriák láthatósága mentve",
   "categoriesSaveFailed": "Nem sikerült menteni a kategóriák láthatóságát",
@@ -61,6 +62,7 @@
   "resume": "Folytatás",
   "resumeAt": "Folytatás innen: {{time}}",
   "startOver": "Lejátszás az elejéről",
+  "startOverEpisode": "{{code}} elölről",
   "playEpisode": "{{code}} lejátszása",
   "resumeEpisode": "{{code}} folytatása",
   "nowPlaying": "Lejátszás alatt",
@@ -147,6 +149,8 @@
   "tmdbKeyMissingTitle": "A hasonló tartalmakhoz TMDB-kulcs szükséges",
   "tmdbKeyMissingHint": "Adjon meg egy TMDB-kulcsot a Beállítások > Metaadatok részben.",
   "addTmdbKey": "TMDB-kulcs hozzáadása",
+  "tmdbKeyRejectedTitle": "A TMDB elutasította az API-kulcsot",
+  "tmdbKeyRejectedHint": "Ellenőrizze vagy cserélje le a TMDB-kulcsot a Beállítások > Metaadatok részben.",
   "watched": "Megtekintve",
   "markWatched": "Megjelölés megtekintettként",
   "markUnwatched": "Megjelölés nem megtekintettként",
@@ -175,5 +179,6 @@
   "searchShowMore_other": "Legfeljebb {{count}} megjelenítése",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
-  "pageLoadFailed": "Nem sikerült betölteni ezeket a címeket"
+  "pageLoadFailed": "Nem sikerült betölteni ezeket a címeket",
+  "searchPartialError": "Néhány találatot nem sikerült betölteni."
 }

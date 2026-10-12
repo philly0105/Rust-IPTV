@@ -18,6 +18,9 @@ struct RefSnapshot {
     #[serde(rename = "ref")]
     item_ref: ItemRef,
     snapshot: ItemSnapshot,
+    /// C7: RFC 3339; restores an entry's original date (Recent undo).
+    #[serde(default)]
+    viewed_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -34,6 +37,18 @@ struct RefEpisode {
     item_ref: ItemRef,
     #[serde(default)]
     episode_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemovePositionArgs {
+    #[serde(rename = "ref")]
+    item_ref: ItemRef,
+    #[serde(default)]
+    episode_id: Option<String>,
+    /// C13: drop every unfinished row of the item (all episodes of a series).
+    #[serde(default)]
+    all_episodes: bool,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +84,12 @@ struct SetPositionArgs {
     duration_seconds: Option<f64>,
     #[serde(default)]
     snapshot: Option<ItemSnapshot>,
+    /// C14: RFC 3339; undo/restore puts a row back with its original time.
+    #[serde(default)]
+    updated_at: Option<String>,
+    /// Undo of Mark watched/unwatched puts a watched row back as watched.
+    #[serde(default)]
+    watched: bool,
 }
 
 #[derive(Deserialize)]
@@ -145,7 +166,9 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("recent.add", |state, a: RefSnapshot| async move {
         state
-            .db_call(move |c| super::recent_add(c, &a.item_ref, &a.snapshot))
+            .db_call(move |c| {
+                super::recent_add_at(c, &a.item_ref, &a.snapshot, a.viewed_at.as_deref())
+            })
             .await?;
         Ok::<(), RpcError>(())
     });
@@ -177,8 +200,12 @@ pub fn register(r: &mut RpcRouter) {
             position_seconds: secs(a.position_seconds)?,
             duration_seconds: a.duration_seconds.map(secs).transpose()?,
             snapshot_json,
-            updated_at: None,
-            watched: false,
+            updated_at: a
+                .updated_at
+                .as_deref()
+                .map(|t| super::parse_viewed_at(t, "updatedAt"))
+                .transpose()?,
+            watched: a.watched,
         };
         state
             .db_call(move |c| super::position_set(c, &input).map(|_| ()))
@@ -200,12 +227,21 @@ pub fn register(r: &mut RpcRouter) {
             Ok::<Vec<PlaybackPosition>, RpcError>(v)
         },
     );
-    r.add("positions.remove", |state, a: RefEpisode| async move {
-        state
-            .db_call(move |c| super::position_remove(c, &a.item_ref, a.episode_id.as_deref()))
-            .await?;
-        Ok::<(), RpcError>(())
-    });
+    r.add(
+        "positions.remove",
+        |state, a: RemovePositionArgs| async move {
+            state
+                .db_call(move |c| {
+                    if a.all_episodes {
+                        super::position_remove_unfinished(c, &a.item_ref).map(|_| ())
+                    } else {
+                        super::position_remove(c, &a.item_ref, a.episode_id.as_deref())
+                    }
+                })
+                .await?;
+            Ok::<(), RpcError>(())
+        },
+    );
     r.add(
         "userstate.setWatched",
         |state, a: SetWatchedArgs| async move {

@@ -43,7 +43,8 @@ requests get 10 s to finish.
 ### `POST /api/rpc/{cmd}`
 Body is the JSON args; an empty body means `null`. 200 with the JSON result.
 Errors return the `RpcError` JSON with the C1 status: NotFound 404, Invalid 400,
-Auth 401, Timeout 504, Network 502, Unsupported 501, Conflict 409, else 500.
+Auth 401, Timeout 504, Network 502, Server 502, EngineMissing 503, Unsupported 501,
+Conflict 409, and Io, Db or Internal 500 (`RpcErrorCode::http_status` in error.rs).
 A body that is not JSON is 400 `invalid`. Limit 256 MiB (backup imports,
 pasted playlists). Errors are logged with the command name and message, never
 the args.

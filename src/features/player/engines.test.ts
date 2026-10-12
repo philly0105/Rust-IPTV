@@ -52,7 +52,7 @@ const mpegtsMock = {
 vi.mock('mpegts.js', () => ({ default: mpegtsMock }));
 
 const engines = await import('./engines');
-const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS } = engines;
+const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS, knownTsLive, rememberTsLive, resetTsLiveOrigins } = engines;
 
 function src(url: string, extra: Partial<PlayerSource> = {}): PlayerSource {
   return { url, kind: 'direct', title: 't', isLive: true, isRadio: false, ...extra };
@@ -127,6 +127,22 @@ describe('engine selection', () => {
   it('forceMpegts routes an extensionless stream through mpegts.js', async () => {
     const engine = await createEngine(video(), src('http://h/live/u/p/101'), 'http://h/live/u/p/101', cb(), { captions: false, forceMpegts: true });
     expect(engine.kind).toBe('mpegts');
+  });
+
+  it('remembers live MPEG-TS origins per source and host', () => {
+    resetTsLiveOrigins();
+    const ref = { sourceId: 's1', contentType: 'live' as const, itemId: '1' };
+    const first = src('http://h/live/u/p/101', { ref });
+    expect(knownTsLive(first)).toBe(false);
+    rememberTsLive(first);
+    expect(knownTsLive(src('http://h/live/u/p/102', { ref: { ...ref, itemId: '2' } }))).toBe(true);
+    // Another source, another host, a URL with a known container, or VOD: not assumed.
+    expect(knownTsLive(src('http://h/live/u/p/102', { ref: { ...ref, sourceId: 's2' } }))).toBe(false);
+    expect(knownTsLive(src('http://other/live/u/p/102', { ref }))).toBe(false);
+    expect(knownTsLive(src('http://h/live/u/p/102.m3u8', { ref }))).toBe(false);
+    expect(knownTsLive(src('http://h/movie/u/p/9', { ref, isLive: false }))).toBe(false);
+    resetTsLiveOrigins();
+    expect(knownTsLive(first)).toBe(false);
   });
 
   it('falls back to the element without MSE, and for plain mp4', async () => {

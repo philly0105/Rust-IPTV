@@ -302,11 +302,10 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return;
         };
+        // Only a minimized window drops to Low: an unfocused window is often
+        // still showing video (picture-in-picture, a second monitor), and Low
+        // or a working-set trim there makes playback and the UI fault back in.
         match event {
-            WindowEvent::Focused(false) => {
-                memory::set_webview_memory_low(&webview, true);
-                memory::trim_working_set();
-            }
             WindowEvent::Focused(true) => memory::set_webview_memory_low(&webview, false),
             WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
                 memory::set_webview_memory_low(&webview, true);
@@ -414,7 +413,12 @@ fn checkpoint_wal(state: &AppState) {
                 log_frames = log,
                 checkpointed = done,
                 "WAL checkpointed"
-            )
+            );
+            // A complete checkpoint means the file on disk is the whole
+            // database: the next start can skip its integrity scan.
+            if busy == 0 {
+                iptv_core::db::mark_clean_exit(&state.db_path());
+            }
         }
         Err(err) => tracing::warn!(%err, "WAL checkpoint on exit failed"),
     }

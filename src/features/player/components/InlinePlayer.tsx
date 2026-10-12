@@ -11,8 +11,10 @@ import {
   createEngine,
   EMPTY_TRACKS,
   fetchFailureReason,
+  knownTsLive,
   looksLikeMpegTs,
   mseSupported,
+  rememberTsLive,
   withReason,
   worthSniffingAsMpegTs,
   type Engine,
@@ -109,7 +111,7 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
         },
         onError: onFatal,
       },
-      { captions: captionsDefault, signal: abort.signal, forceMpegts: sniffedRef.current === mediaKey(src) },
+      { captions: captionsDefault, signal: abort.signal, forceMpegts: sniffedRef.current === mediaKey(src) || knownTsLive(src) },
     ).then((engine) => {
       if (disposed) {
         engine.destroy();
@@ -193,6 +195,7 @@ export function InlinePlayer({ as = 'video', className }: InlinePlayerProps) {
       const k = mediaKey(s);
       if (code === 4 && sniffedRef.current !== k && mseSupported() && worthSniffingAsMpegTs(s)) {
         sniffedRef.current = k;
+        rememberTsLive(s);
         setRetryNonce((n) => n + 1);
         return;
       }

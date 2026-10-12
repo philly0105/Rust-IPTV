@@ -893,7 +893,9 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
             args.push(cat.clone().into());
             where_sql.push_str(&format!(" AND i.category_id = ?{}", args.len()));
         } else if !q.include_hidden {
-            where_sql.push_str(" AND COALESCE(c.hidden, 0) = 0");
+            // Same rows as `COALESCE(c.hidden, 0) = 0` on the join, but without
+            // a categories lookup per item, so the count below needs no join.
+            where_sql.push_str(" AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden = 1)");
         }
         if let Some(min) = q.min_rating.filter(|r| r.is_finite() && *r > 0.0) {
             args.push(min.into());
@@ -914,20 +916,24 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
                 }
             }
         }
-        let count_sql = format!(
-            "SELECT count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE {where_sql}"
-        );
-        let total: i64 =
-            conn.query_row(&count_sql, rusqlite::params_from_iter(args.iter()), |r| {
-                r.get(0)
-            })?;
+        let count_sql = format!("SELECT count(*) FROM items i WHERE {where_sql}");
+        let total: i64 = conn
+            .prepare_cached(&count_sql)?
+            .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
         if total == 0 && i + 1 < attempts.len() {
             continue;
         }
+        // LIMIT/OFFSET are bound, not formatted in, so every page of a list
+        // reuses one cached statement instead of compiling (and evicting) its own.
+        let n = args.len();
         let sql = format!(
-            "{SELECT_NAMED} WHERE {where_sql} ORDER BY {} LIMIT {limit} OFFSET {offset}",
-            order_clause(&q.page)
+            "{SELECT_NAMED} WHERE {where_sql} ORDER BY {} LIMIT ?{} OFFSET ?{}",
+            order_clause(&q.page),
+            n + 1,
+            n + 2
         );
+        args.push(limit.into());
+        args.push(offset.into());
         let mut stmt = conn.prepare_cached(&sql)?;
         let items = stmt
             .query_map(rusqlite::params_from_iter(args.iter()), read_named)?

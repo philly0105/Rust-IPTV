@@ -645,6 +645,39 @@ export function worthSniffingAsMpegTs(source: Pick<PlayerSource, 'kind' | 'url'>
   return !KNOWN_NON_TS.test(urlPath(source.url));
 }
 
+/**
+ * Live streams whose extensionless URLs turned out to be raw MPEG-TS, per source and host.
+ * The next channel from the same place skips the doomed `<video>` attempt and its second
+ * connection, and goes straight to mpegts.js (zapping through an extensionless playlist).
+ */
+const tsLiveOrigins = new Set<string>();
+
+function tsOriginKey(s: Pick<PlayerSource, 'url' | 'ref' | 'isLive'>): string | null {
+  if (!s.isLive) return null;
+  try {
+    return `${s.ref?.sourceId ?? ''}|${new URL(s.url).host}`;
+  } catch {
+    return null;
+  }
+}
+
+/** The element rejected this live source and it is being retried through mpegts.js. */
+export function rememberTsLive(s: Pick<PlayerSource, 'url' | 'ref' | 'isLive'>): void {
+  const k = tsOriginKey(s);
+  if (k) tsLiveOrigins.add(k);
+}
+
+/** A live, extensionless source from a place already known to serve MPEG-TS. */
+export function knownTsLive(s: Pick<PlayerSource, 'kind' | 'url' | 'ref' | 'isLive'>): boolean {
+  const k = tsOriginKey(s);
+  return k !== null && tsLiveOrigins.has(k) && worthSniffingAsMpegTs(s);
+}
+
+/** Test hook: forget every remembered origin. */
+export function resetTsLiveOrigins(): void {
+  tsLiveOrigins.clear();
+}
+
 /** Media Source Extensions, which mpegts.js needs to feed the element. */
 export function mseSupported(): boolean {
   return typeof window !== 'undefined' && ('MediaSource' in window || 'ManagedMediaSource' in window);

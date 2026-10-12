@@ -4,10 +4,10 @@
 //! utility processes), not the app. Two levers the app controls:
 //!
 //! - `ICoreWebView2_19::MemoryUsageTargetLevel`: `Low` while the window is
-//!   in the background asks WebView2 to drop caches and trim its processes;
-//!   `Normal` again on focus.
+//!   minimized asks WebView2 to drop caches and trim its processes; `Normal`
+//!   again on focus. Not on blur: an unfocused window may still be playing.
 //! - `SetProcessWorkingSetSize(-1, -1)` on the app process after startup and
-//!   on blur, which releases pages touched only during boot.
+//!   on minimize, which releases pages touched only during boot.
 //!
 //! Static Chromium flags that keep the process tree small live in
 //! `tauri.conf.json` (`additionalBrowserArgs`).

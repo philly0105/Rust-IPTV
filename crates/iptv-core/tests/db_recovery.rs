@@ -1,10 +1,11 @@
 //! Database boot recovery: a file with a valid header but garbage pages is
 //! quarantined at open, a runtime corruption error flags the next boot for a
-//! full check, and a schema newer than this build is refused.
+//! full check, a clean exit lets the next boot skip its scan once, and a
+//! schema newer than this build is refused.
 
 use iptv_core::db::{
-    self, latest_version, note_error, open_and_migrate, recovery_flag_path, schema_version,
-    DB_FILE, NEWER_SCHEMA_MESSAGE,
+    self, clean_exit_path, latest_version, mark_clean_exit, note_error, open_and_migrate,
+    recovery_flag_path, schema_version, DB_FILE, NEWER_SCHEMA_MESSAGE,
 };
 use iptv_core::{AppState, CoreError, NoopSink};
 use std::io::{Seek, SeekFrom, Write};
@@ -40,23 +41,44 @@ fn populate(path: &Path) {
     drop(pool);
 }
 
+/// Writes 64 KiB of garbage into the middle of the file, header intact.
+fn smash_middle(path: &Path) {
+    let len = std::fs::metadata(path).unwrap().len();
+    assert!(len > 1_000_000, "test database is big enough ({len} bytes)");
+    let mut f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    f.seek(SeekFrom::Start(len / 2)).unwrap();
+    let garbage: Vec<u8> = (0..64 * 1024u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
+    f.write_all(&garbage).unwrap();
+    f.sync_all().unwrap();
+}
+
+#[test]
+fn clean_exit_marker_skips_one_boot_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(DB_FILE);
+    populate(&path);
+    // Damage the file, then claim a clean exit: the check is skipped, so the
+    // file is kept, and the marker is consumed.
+    smash_middle(&path);
+    mark_clean_exit(&path);
+    assert!(clean_exit_path(&path).exists());
+    drop(open_and_migrate(&path).unwrap());
+    assert!(!clean_exit_path(&path).exists(), "boot consumes the marker");
+    assert!(corrupt_backups(dir.path()).is_empty(), "no check ran");
+    // The next boot without a new marker checks again and quarantines.
+    drop(open_and_migrate(&path).unwrap());
+    assert_eq!(corrupt_backups(dir.path()).len(), 1);
+}
+
 #[test]
 fn garbage_pages_mid_file_are_quarantined_at_open() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(DB_FILE);
     populate(&path);
 
-    let len = std::fs::metadata(&path).unwrap().len();
-    assert!(len > 1_000_000, "test database is big enough ({len} bytes)");
-    {
-        let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        f.seek(SeekFrom::Start(len / 2)).unwrap();
-        let garbage: Vec<u8> = (0..64 * 1024u32)
-            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
-            .collect();
-        f.write_all(&garbage).unwrap();
-        f.sync_all().unwrap();
-    }
+    smash_middle(&path);
     // The header is intact: a plain open and schema read still succeed.
     {
         let c = rusqlite::Connection::open(&path).unwrap();

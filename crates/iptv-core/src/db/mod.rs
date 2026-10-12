@@ -19,6 +19,8 @@ pub type PooledConn = r2d2::PooledConnection<SqliteConnectionManager>;
 pub const DB_FILE: &str = "iptv.db";
 /// Maximum pooled connections.
 pub const POOL_MAX: u32 = 8;
+/// Prepared statements cached per connection.
+const STATEMENT_CACHE: usize = 128;
 /// SQLite busy timeout applied to every connection.
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(5000);
 
@@ -52,6 +54,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0004_position_watched",
         sql: include_str!("migrations/0004_position_watched.sql"),
     },
+    Migration {
+        version: 5,
+        name: "0005_items_position_index",
+        sql: include_str!("migrations/0005_items_position_index.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -63,6 +70,12 @@ pub const NEWER_SCHEMA_MESSAGE: &str =
 /// integrity check and quarantines the file when it fails.
 pub const RECOVERY_FLAG_SUFFIX: &str = ".needs-recovery";
 
+/// Suffix of the marker written next to the database after a clean exit
+/// (`iptv.db.clean-exit`, see [`mark_clean_exit`]). Boot consumes it: when it
+/// is there, the previous run closed the database normally and the boot-time
+/// `quick_check`, which reads every page of the file, is skipped.
+pub const CLEAN_EXIT_SUFFIX: &str = ".clean-exit";
+
 /// Latest schema version known to this build.
 pub fn latest_version() -> i64 {
     MIGRATIONS.last().map(|m| m.version).unwrap_or(0)
@@ -71,6 +84,10 @@ pub fn latest_version() -> i64 {
 /// Applies the per-connection pragmas.
 pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.busy_timeout(BUSY_TIMEOUT)?;
+    // rusqlite keeps 16 prepared statements by default; the app has more hot
+    // queries than that (catalog pages, EPG now/next, favorites, positions),
+    // so the default cache keeps evicting and recompiling them.
+    conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY;",
     )?;
@@ -167,7 +184,8 @@ fn corrupt_error(detail: &str) -> CoreError {
 /// Runs `PRAGMA quick_check` (or the slower `integrity_check`, which also
 /// verifies index contents) and turns any finding into a corruption error.
 /// A file with a valid header but garbage pages opens fine and only fails on
-/// the first query that touches a bad page, so this runs on every boot.
+/// the first query that touches a bad page, so this runs on every boot that
+/// does not follow a clean exit (see [`mark_clean_exit`]).
 fn check_integrity(conn: &Connection, full: bool) -> CoreResult<()> {
     let pragma = if full {
         "PRAGMA integrity_check(1)"
@@ -182,14 +200,27 @@ fn check_integrity(conn: &Connection, full: bool) -> CoreResult<()> {
     }
 }
 
-fn try_open_and_migrate(path: &Path, full_check: bool) -> CoreResult<DbPool> {
+/// Which integrity check boot runs.
+#[derive(Clone, Copy)]
+enum Check {
+    /// The previous run exited cleanly: no page scan.
+    Skip,
+    Quick,
+    Full,
+}
+
+fn try_open_and_migrate(path: &Path, check: Check) -> CoreResult<DbPool> {
     // Validate and migrate on a dedicated connection first: a corrupt file fails
     // fast here instead of stalling inside the pool builder.
     {
         let mut conn = Connection::open(path)?;
         configure(&mut conn)?;
         conn.query_row("PRAGMA schema_version", [], |r| r.get::<_, i64>(0))?;
-        check_integrity(&conn, full_check)?;
+        match check {
+            Check::Skip => {}
+            Check::Quick => check_integrity(&conn, false)?,
+            Check::Full => check_integrity(&conn, true)?,
+        }
         if schema_version(&conn)? > latest_version() {
             return Err(newer_schema_error());
         }
@@ -234,6 +265,24 @@ pub fn recovery_flag_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{name}{RECOVERY_FLAG_SUFFIX}"))
 }
 
+/// Path of the clean-exit marker for the database at `path`.
+pub fn clean_exit_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| DB_FILE.to_string());
+    path.with_file_name(format!("{name}{CLEAN_EXIT_SUFFIX}"))
+}
+
+/// Records that the database at `path` was closed normally (call after the
+/// exit checkpoint). The next boot skips its `quick_check`; a crash, a kill,
+/// or a power loss leaves no marker, so the check runs after those.
+pub fn mark_clean_exit(path: &Path) {
+    if let Err(err) = std::fs::write(clean_exit_path(path), b"ok") {
+        tracing::warn!(%err, "could not write the database clean-exit marker");
+    }
+}
+
 /// Call with any error a query on the database at `db_path` returned. When it
 /// is a corruption error (`SQLITE_CORRUPT` / `SQLITE_NOTADB`), writes the
 /// recovery flag so the next boot checks the whole file and quarantines it.
@@ -269,12 +318,24 @@ pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
     if flagged {
         tracing::warn!("previous run reported database corruption; running a full integrity check");
     }
-    let result = match try_open_and_migrate(path, flagged) {
+    // The marker is consumed whatever happens next, so only an exit that
+    // writes a new one lets the following boot skip the check again. When it
+    // cannot be removed, check anyway: a stale marker must not stick.
+    let marker = clean_exit_path(path);
+    let clean_exit = marker.exists() && std::fs::remove_file(&marker).is_ok();
+    let check = if flagged {
+        Check::Full
+    } else if clean_exit {
+        Check::Skip
+    } else {
+        Check::Quick
+    };
+    let result = match try_open_and_migrate(path, check) {
         Ok(pool) => Ok(pool),
         Err(err) if is_corruption(&err) => {
             let moved = quarantine(path)?;
             tracing::warn!(error = %err, backup = %moved.display(), "database was corrupt; moved aside and recreating");
-            try_open_and_migrate(path, false)
+            try_open_and_migrate(path, Check::Quick)
         }
         Err(err) => Err(err),
     };

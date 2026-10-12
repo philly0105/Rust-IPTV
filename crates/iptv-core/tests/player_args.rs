@@ -355,6 +355,19 @@ fn embedded_args_contain_c4_flags_after_user_args() {
     assert!(unmuted.contains(&"--mute=no".to_string()));
 }
 
+#[test]
+fn embedded_args_keep_the_users_hwdec() {
+    let pipe = mpv_pipe_name(1);
+    for user in ["--hwdec=d3d11va", "--hwdec=no", "--no-hwdec"] {
+        let args = embedded_mpv_args(1, &pipe, user, 50.0, false);
+        assert!(args.contains(&user.to_string()), "{args:?}");
+        assert!(
+            !args.contains(&"--hwdec=auto-safe".to_string()),
+            "auto-safe must not override {user}: {args:?}"
+        );
+    }
+}
+
 // ---- recording -----------------------------------------------------------------
 
 #[test]

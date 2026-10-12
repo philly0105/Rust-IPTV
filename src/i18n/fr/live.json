@@ -121,6 +121,7 @@
   "searchInGroup": "Rechercher dans {{group}}",
   "shortcutArea": "TV en direct",
   "shortcutDigits": "Saisir un numéro de chaîne (validé après 1,5 s)",
+  "shortcutFocusSearch": "Rechercher des chaînes",
   "shortcutToggleSidebar": "Afficher ou masquer la barre latérale des groupes",
   "stage": "Lecteur",
   "stageIdle": "Aucune lecture en cours",

@@ -544,3 +544,76 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     expect(within(overlay).getByRole('region', { name: 'Shortcut list' }).tabIndex).toBe(0);
   });
 });
+
+describe('polish pass (B7)', () => {
+  it('rail shows a retry when sources fail, and retrying recovers the list', async () => {
+    let fail = true;
+    const ok = rpcMock.handlers['sources.list']!;
+    rpcMock.handlers['sources.list'] = (a) => {
+      if (fail) throw new Error('boom');
+      return ok(a);
+    };
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const box = await within(nav).findByTestId('rail-sources-error');
+    expect(within(box).getByText("Sources didn't load")).toBeTruthy();
+    fail = false;
+    fireEvent.click(within(box).getByRole('button', { name: 'Try again' }));
+    expect(await within(nav).findByText('Night Portal')).toBeTruthy();
+    expect(within(nav).queryByTestId('rail-sources-error')).toBeNull();
+  });
+
+  it('palette matches titles and keywords, not internal ids', async () => {
+    const { paletteFilter } = await import('../CommandPalette');
+    const sep = '\u001f';
+    expect(paletteFilter(`Favorites${sep}nav.favorites`, 'nav')).toBe(0);
+    expect(paletteFilter(`Favorites${sep}nav.favorites`, 'fav')).toBeGreaterThan(0);
+    expect(paletteFilter(`Home${sep}nav.dashboard`, 'home')).toBeGreaterThan(0);
+    expect(paletteFilter(`Add source${sep}nav.addSource`, 'm3u', ['playlist', 'm3u'])).toBeGreaterThan(0);
+  });
+
+  it('palette shows the empty state with a search fallback for unmatched text', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'navx' } });
+    expect(await within(palette).findByText('Search for "navx"')).toBeTruthy();
+    expect(within(palette).queryByText('Favorites')).toBeNull();
+  });
+
+  it('overlay lists captions and channel zap, with labelled sections', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setHelpOpen(true));
+    const overlay = await screen.findByTestId('shortcut-overlay');
+    for (const combo of ['c', 'pageup', 'pagedown', 'mod+b', 'digit', '/']) expect(overlay.querySelector(`[data-combo="${combo}"]`), combo).toBeTruthy();
+    expect(within(overlay).getByText('Back 10 seconds')).toBeTruthy();
+    expect(within(overlay).getByText('Exit picture in picture')).toBeTruthy();
+    expect(within(overlay).getByText('Search channels')).toBeTruthy();
+    expect(within(overlay).getAllByText('In the search box: move to the list')).toHaveLength(2);
+    for (const section of overlay.querySelectorAll('section')) {
+      const ids = section.getAttribute('aria-labelledby')!.split(/\s+/);
+      expect(ids).toHaveLength(1);
+      expect(document.getElementById(ids[0]!)?.textContent).toBeTruthy();
+    }
+    expect(within(overlay).getByRole('region', { name: 'Live TV' })).toBeTruthy();
+  });
+});
+
+describe('startup without layout jumps (B7)', () => {
+  it('the pending startup frame uses the dashboard hero skeleton geometry', async () => {
+    rpcMock.handlers['settings.get'] = () => new Promise(() => {});
+    renderRoutes([{ path: '/', element: <StartupOnly /> }], '/');
+    const pending = await screen.findByTestId('startup-pending');
+    expect(pending.querySelector('[data-testid="hero-skeleton"]')).toBeTruthy();
+    expect(pending.className).toContain('gap-10');
+    expect(pending.className).toContain('pt-8');
+  });
+});
+
+function StartupOnly() {
+  const { StartupRedirect } = startupModule;
+  return <StartupRedirect />;
+}
+const startupModule = await import('../StartupRedirect');

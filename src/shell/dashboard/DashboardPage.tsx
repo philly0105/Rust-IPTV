@@ -17,12 +17,13 @@ import {
 } from '@/api/types';
 import { playItem } from '@/features/player';
 import { RpcError } from '@/api/transport';
-import { Badge, Button, EmptyState, ErrorState, Poster, ProgressBar, Skeleton, buttonClass, useToast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, Poster, ProgressBar, buttonClass, useToast } from '@/ui';
 
 import { useShell } from '../store';
 import { useSettings } from '../useSettings';
 import { ChannelCard, PosterCard, SourceCard, itemPath } from './cards';
 import { DashboardRail } from './DashboardRail';
+import { HeroSkeleton } from './HeroSkeleton';
 
 const RAIL_LIMIT = 24;
 
@@ -151,20 +152,6 @@ function Hero({
         </div>
       </div>
     </section>
-  );
-}
-
-function HeroSkeleton() {
-  return (
-    <div className="mx-8 flex items-end gap-8 rounded-lg border border-border bg-surface p-8" aria-hidden>
-      <Skeleton className="hidden aspect-[2/3] w-[150px] rounded-md md:block" />
-      <div className="flex flex-1 flex-col gap-3">
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-10 w-2/3" />
-        <Skeleton className="h-4 w-1/2" />
-        <Skeleton className="mt-3 h-12 w-40 rounded-md" />
-      </div>
-    </div>
   );
 }
 

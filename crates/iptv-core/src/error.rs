@@ -205,7 +205,19 @@ impl From<tokio::task::JoinError> for CoreError {
 }
 
 impl From<CoreError> for RpcError {
+    /// Last line of defence for "messages must never contain secrets": the
+    /// message is passed through [`crate::logging::redact_text`].
     fn from(err: CoreError) -> Self {
+        let mut rpc = Self::from_unredacted(err);
+        if let std::borrow::Cow::Owned(clean) = crate::logging::redact_text(&rpc.message) {
+            rpc.message = clean;
+        }
+        rpc
+    }
+}
+
+impl RpcError {
+    fn from_unredacted(err: CoreError) -> Self {
         match err {
             CoreError::NotFound(m) => RpcError::not_found(m),
             CoreError::Invalid(m) => RpcError::invalid(m),
@@ -270,6 +282,12 @@ mod tests {
         assert_eq!(v["code"], "network");
         assert_eq!(v["retryable"], true);
         assert_eq!(v["details"]["host"], "x");
+        // B8: secrets in a core message never cross the RPC boundary.
+        let leaked = RpcError::from(CoreError::Network(
+            "upstream said: bad request ?username=bob&password=hunter2".into(),
+        ));
+        assert!(!leaked.message.contains("hunter2") && !leaked.message.contains("bob"));
+        assert_eq!(leaked.code, RpcErrorCode::Network);
         let nf = serde_json::to_value(RpcError::not_found("x")).unwrap();
         assert_eq!(nf["code"], "not_found");
         assert!(nf.get("details").is_none());

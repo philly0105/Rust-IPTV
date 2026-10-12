@@ -51,7 +51,10 @@ export function Kbd({ combo, children, className }: KbdProps) {
   if (combo) {
     const keys = comboKeys(combo);
     return (
-      <span className={cn('inline-flex items-center gap-1', className)} aria-label={keys.join(' + ')}>
+      // A plain span cannot carry aria-label (prohibited on the generic role), so the
+      // spoken form is visually hidden text and the key caps are hidden from AT.
+      <span className={cn('inline-flex items-center gap-1', className)}>
+        <span className="sr-only">{keys.join(' + ')}</span>
         {keys.map((k, i) => (
           <kbd key={`${k}-${i}`} className={keyClass} aria-hidden>
             {k}

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Dialog, Kbd, SearchInput } from '@/ui';
+import { comboKeys, Dialog, Kbd, SearchInput } from '@/ui';
 
 import { normalizeCombo, useShortcutList, type ShortcutInfo } from './shortcuts';
 import { useShellStore } from './store';
@@ -20,34 +20,76 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'escape', descKey: 'scEscape', area: 'Global' },
   { combo: 'mod+shift+l', descKey: 'scTheme', area: 'Global' },
   { combo: 'f8', descKey: 'scNotifications', area: 'Global' },
-  { combo: 'mod+b', descKey: 'scSidebar', area: 'Navigation' },
-  { combo: 'digit', descKey: 'scDigits', area: 'Navigation' },
+  { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
+  { combo: 'digit', descKey: 'scDigits', area: 'Live' },
+  { combo: '/', descKey: 'live:shortcutFocusSearch', area: 'Live' },
+  { combo: 'enter', descKey: 'scSearchToList', area: 'Live' },
+  { combo: 'arrowdown', descKey: 'scSearchToList', area: 'Live' },
+  { combo: 'escape', descKey: 'scSearchClear', area: 'Live' },
+  { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
+  { combo: 'shift+n', descKey: 'sources:shortcutAddSource', area: 'Sources' },
+  { combo: 'alt+arrowup', descKey: 'library:shortcutMoveUp', area: 'Favorites' },
+  { combo: 'alt+arrowdown', descKey: 'library:shortcutMoveDown', area: 'Favorites' },
+  { combo: 'p', descKey: 'library:shortcutPause', area: 'Downloads' },
+  { combo: 'r', descKey: 'library:shortcutRetry', area: 'Downloads' },
+  { combo: 'x', descKey: 'library:shortcutCancel', area: 'Downloads' },
+  { combo: 'delete', descKey: 'library:shortcutRemove', area: 'Downloads' },
+  { combo: 'backspace', descKey: 'library:backToLibrary', area: 'My videos' },
   { combo: 'space', descKey: 'scPlayPause', area: 'Playback' },
   { combo: 'k', descKey: 'scPlayPause', area: 'Playback' },
   { combo: 'f', descKey: 'scFullscreen', area: 'Playback' },
   { combo: 'arrowleft', descKey: 'scSeekBack', area: 'Playback' },
   { combo: 'arrowright', descKey: 'scSeekForward', area: 'Playback' },
+  // Bound by the focused seek bar (SeekBar.tsx, SEEK_STEP_LARGE).
+  { combo: 'shift+arrowleft', descKey: 'scSeekBackLarge', area: 'Playback' },
+  { combo: 'shift+arrowright', descKey: 'scSeekForwardLarge', area: 'Playback' },
   { combo: 'arrowup', descKey: 'scVolumeUp', area: 'Playback' },
   { combo: 'arrowdown', descKey: 'scVolumeDown', area: 'Playback' },
   { combo: 'm', descKey: 'scMute', area: 'Playback' },
+  { combo: 'c', descKey: 'scCaptions', area: 'Playback' },
+  { combo: 'pageup', descKey: 'scChannelUp', area: 'Playback' },
+  { combo: 'pagedown', descKey: 'scChannelDown', area: 'Playback' },
+  // Bound by pip.ts only while picture-in-picture is on.
+  { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
   { combo: 'arrowup', descKey: 'scListMove', area: 'Dialogs and lists' },
   { combo: 'arrowdown', descKey: 'scListMove', area: 'Dialogs and lists' },
   { combo: 'enter', descKey: 'scListRun', area: 'Dialogs and lists' },
   { combo: 'escape', descKey: 'scListClose', area: 'Dialogs and lists' },
 ];
 
-const AREA_ORDER = ['Global', 'Navigation', 'Live', 'Playback', 'Dialogs and lists'];
-const AREA_KEYS: Record<string, string> = {
-  Global: 'areaGlobal',
-  Navigation: 'areaNavigation',
-  Live: 'areaLive',
-  Playback: 'areaPlayback',
-  'Dialogs and lists': 'areaDialogs',
+const AREA_ORDER = ['Global', 'Navigation', 'Live', 'Vod', 'Sources', 'Favorites', 'Downloads', 'My videos', 'Playback', 'Dialogs and lists'];
+/**
+ * Area id -> fully namespaced i18n key of its display label. Feature areas
+ * reuse the label the feature registers under, so documented and registered
+ * entries merge. Usable with `t()` from any namespace (Settings imports it).
+ */
+export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
+  Global: 'shell:areaGlobal',
+  Navigation: 'shell:areaNavigation',
+  Live: 'shell:areaLive',
+  Vod: 'shell:areaVod',
+  Sources: 'sources:title',
+  Favorites: 'library:favoritesTitle',
+  Downloads: 'library:title',
+  'My videos': 'library:myVideosTitle',
+  Playback: 'shell:areaPlayback',
+  'Dialogs and lists': 'shell:areaDialogs',
 };
+const AREA_KEYS = SHORTCUT_AREA_KEYS;
 
-/** Merges registered and documented shortcuts and groups them by area. */
-export function groupShortcuts(registered: ShortcutInfo[], documented: ShortcutInfo[]): [string, ShortcutInfo[]][] {
-  const areaOf = (a: string) => a.trim().toLowerCase();
+/**
+ * Merges registered and documented shortcuts and groups them by area.
+ * `label` maps an area id to its display name. Areas are compared by label,
+ * so a feature that registers under its own translated area name (Live TV
+ * uses `live:shortcutArea`) lands in the same group as the documented `Live`
+ * entries and replaces them instead of listing them twice.
+ */
+export function groupShortcuts(
+  registered: ShortcutInfo[],
+  documented: ShortcutInfo[],
+  label: (area: string) => string = (a) => a,
+): [string, ShortcutInfo[]][] {
+  const areaOf = (a: string) => label(a).trim().toLowerCase();
   const seen = new Set(registered.map((r) => `${areaOf(r.area)}|${normalizeCombo(r.combo)}`));
   const all = [...registered];
   for (const d of documented) {
@@ -57,16 +99,23 @@ export function groupShortcuts(registered: ShortcutInfo[], documented: ShortcutI
     all.push(d);
   }
   const map = new Map<string, ShortcutInfo[]>();
+  const rankOf = new Map<string, number>();
   for (const s of all) {
-    const list = map.get(s.area) ?? [];
+    const name = label(s.area);
+    const list = map.get(name) ?? [];
     list.push(s);
-    map.set(s.area, list);
+    map.set(name, list);
+    const i = AREA_ORDER.indexOf(s.area);
+    const r = i < 0 ? AREA_ORDER.length : i;
+    rankOf.set(name, Math.min(rankOf.get(name) ?? r, r));
   }
-  const rank = (a: string) => {
-    const i = AREA_ORDER.indexOf(a);
-    return i < 0 ? AREA_ORDER.length : i;
-  };
+  const rank = (a: string) => rankOf.get(a) ?? AREA_ORDER.length;
   return [...map.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
+}
+
+/** Text the overlay filter matches: the description, the combo, and its printed keys ("Ctrl", "PgUp"). */
+export function shortcutHaystack(s: ShortcutInfo): string {
+  return `${s.description} ${s.combo} ${comboKeys(s.combo).join(' ')}`.toLowerCase();
 }
 
 export function ShortcutOverlay() {
@@ -75,12 +124,17 @@ export function ShortcutOverlay() {
   const setOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useShortcutList();
   const [filter, setFilter] = useState('');
+  const idBase = useId();
 
   const groups = useMemo(() => {
     const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
+    const label = (area: string) => {
+      const key = AREA_KEYS[area];
+      return key ? t(key) : area;
+    };
     const q = filter.trim().toLowerCase();
-    return groupShortcuts(registered, documented)
-      .map(([area, list]) => [area, q ? list.filter((s) => `${s.description} ${s.combo}`.toLowerCase().includes(q)) : list] as const)
+    return groupShortcuts(registered, documented, label)
+      .map(([area, list]) => [area, q ? list.filter((s) => shortcutHaystack(s).includes(q)) : list] as const)
       .filter(([, list]) => list.length > 0);
   }, [registered, filter, t]);
 
@@ -107,10 +161,11 @@ export function ShortcutOverlay() {
           tabIndex={0}
           className="grid gap-x-8 gap-y-6 rounded-md md:grid-cols-2"
         >
-          {groups.map(([area, list]) => (
-            <section key={area} aria-labelledby={`sc-area-${area}`}>
-              <h3 id={`sc-area-${area}`} className="mb-2 text-sm font-semibold text-accent">
-                {AREA_KEYS[area] ? t(AREA_KEYS[area]) : area}
+          {groups.map(([area, list], gi) => (
+            // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.
+            <section key={area} aria-labelledby={`${idBase}-area-${gi}`}>
+              <h3 id={`${idBase}-area-${gi}`} className="mb-2 text-sm font-semibold text-accent">
+                {area}
               </h3>
               <dl className="flex flex-col">
                 {list.map((s) => (

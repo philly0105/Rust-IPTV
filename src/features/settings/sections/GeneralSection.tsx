@@ -147,7 +147,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
         <RecordingsFolderRow value={extra.recordingsDir} update={update} />
       </SettingsGroup>
 
-      <SettingsGroup title={t('dashboard')} description={t('dashboardHint')}>
+      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>
         <SwitchRow
           label={t('showDashboard')}
           description={t('showDashboardHint')}

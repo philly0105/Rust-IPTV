@@ -45,7 +45,8 @@ export interface MediaState {
   /** Embedded mpv: when the current `mpv.record` began (ms epoch), for the REC timer. */
   recordStartedAt?: number;
   upNext?: { source: PlayerSource; deadline: number };
-  osd?: { primary: string; secondary?: string; key: number };
+  /** `at`: when it was raised (ms epoch), so chrome that mounts a moment later still shows it. */
+  osd?: { primary: string; secondary?: string; key: number; at?: number };
   channelPanelOpen: boolean;
   externalRuns: ExternalRun[];
   commands: MediaCommands | null;
@@ -85,7 +86,8 @@ export function resetMedia(): void {
 
 let osdKey = 0;
 export function showOsd(primary: string, secondary?: string): void {
-  useMediaStore.setState({ osd: secondary ? { primary, secondary, key: ++osdKey } : { primary, key: ++osdKey } });
+  const at = Date.now();
+  useMediaStore.setState({ osd: secondary ? { primary, secondary, key: ++osdKey, at } : { primary, key: ++osdKey, at } });
 }
 
 export const UP_NEXT_SECONDS = 10;

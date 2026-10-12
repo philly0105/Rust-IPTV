@@ -174,5 +174,6 @@
   "searchShowMore_one": "Εμφάνιση έως {{count}}",
   "searchShowMore_other": "Εμφάνιση έως {{count}}",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "Δεν ήταν δυνατή η φόρτωση αυτών των τίτλων"
 }

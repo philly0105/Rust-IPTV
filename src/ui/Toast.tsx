@@ -1,5 +1,5 @@
 import { CircleAlert, CircleCheck, Info, X } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
@@ -37,6 +37,20 @@ interface ToastStore {
 
 const MAX_VISIBLE = 5;
 
+/**
+ * Trims the stack to MAX_VISIBLE. The oldest toast that would time out anyway
+ * goes first, so a persistent one (import progress, `duration: 0`) is not
+ * pushed out by a burst of short notices. Exported for tests.
+ */
+export function evictOverflow(list: ToastRecord[]): ToastRecord[] {
+  const next = list.slice();
+  while (next.length > MAX_VISIBLE) {
+    const i = next.findIndex((x, idx) => idx < next.length - 1 && defaultDuration(x) > 0);
+    next.splice(i >= 0 ? i : 0, 1);
+  }
+  return next;
+}
+
 export const useToastStore = create<ToastStore>((set) => ({
   toasts: [],
   upsert: (t) =>
@@ -47,7 +61,7 @@ export const useToastStore = create<ToastStore>((set) => ({
         next[i] = { ...t, createdAt: s.toasts[i]!.createdAt };
         return { toasts: next };
       }
-      return { toasts: [...s.toasts, t].slice(-MAX_VISIBLE) };
+      return { toasts: evictOverflow([...s.toasts, t]) };
     }),
   // No-op (same state, no re-render) when the id is not showing.
   dismiss: (id) => set((s) => (s.toasts.some((t) => t.id === id) ? { toasts: s.toasts.filter((t) => t.id !== id) } : s)),
@@ -124,7 +138,7 @@ function defaultDuration(t: ToastRecord): number {
   return t.variant === 'error' ? 8000 : 5000;
 }
 
-function ToastItem({ t }: { t: ToastRecord }) {
+function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
   const { t: tr } = useTranslation('common');
   const dismiss = useToastStore((s) => s.dismiss);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,16 +177,21 @@ function ToastItem({ t }: { t: ToastRecord }) {
 
   const arm = () => {
     if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
     if (duration > 0) timer.current = setTimeout(close, duration);
   };
+  const pause = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
 
+  // Hovering anywhere over the stack pauses every toast; focus inside one keeps it.
+  // Re-arms whenever the toast content is updated in place or the pointer leaves.
   useEffect(() => {
-    arm();
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-    // Re-arm whenever the toast content is updated in place.
-  }, [t, duration]);
+    if (paused || liRef.current?.contains(document.activeElement)) pause();
+    else arm();
+    return pause;
+  }, [t, duration, paused]);
 
   const Icon = t.variant === 'success' ? CircleCheck : t.variant === 'error' ? CircleAlert : Info;
   return (
@@ -182,13 +201,10 @@ function ToastItem({ t }: { t: ToastRecord }) {
       onKeyDown={onKeyDown}
       role={t.variant === 'error' ? 'alert' : 'status'}
       aria-live={t.variant === 'error' ? 'assertive' : 'polite'}
-      onMouseEnter={() => timer.current && clearTimeout(timer.current)}
-      onMouseLeave={(e) => {
-        if (!e.currentTarget.contains(document.activeElement)) arm();
-      }}
-      onFocus={() => timer.current && clearTimeout(timer.current)}
+      data-paused={paused || undefined}
+      onFocus={pause}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
+        if (!paused && !e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
       }}
       className={cn(
         'pointer-events-auto relative flex w-full gap-3 overflow-hidden rounded-md border border-border bg-surface-2 py-3 pe-2 ps-4 shadow-2',
@@ -229,7 +245,7 @@ function ToastItem({ t }: { t: ToastRecord }) {
               t.action?.onClick();
               close();
             }}
-            className="mt-1 self-start rounded-sm text-sm font-semibold text-accent hover:underline"
+            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline"
           >
             {t.action.label}
           </button>
@@ -239,7 +255,8 @@ function ToastItem({ t }: { t: ToastRecord }) {
         type="button"
         aria-label={tr('dismiss')}
         onClick={close}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg"
+        data-toast-dismiss=""
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg"
       >
         <X aria-hidden size={14} />
       </button>
@@ -251,6 +268,11 @@ function ToastItem({ t }: { t: ToastRecord }) {
 export function ToastViewport() {
   const { t } = useTranslation('common');
   const toasts = useToastStore((s) => s.toasts);
+  const [hovered, setHovered] = useState(false);
+  // The last toast leaving while hovered never fires mouseleave; reset so the next stack starts unpaused.
+  useEffect(() => {
+    if (toasts.length === 0) setHovered(false);
+  }, [toasts.length]);
   if (typeof document === 'undefined') return null;
   return createPortal(
     <section
@@ -258,9 +280,9 @@ export function ToastViewport() {
       aria-keyshortcuts="F8"
       data-toast-viewport=""
       className="pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]">
-      <ol className="flex flex-col gap-2">
+      <ol className="flex flex-col gap-2" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         {toasts.map((x) => (
-          <ToastItem key={x.id} t={x} />
+          <ToastItem key={x.id} t={x} paused={hovered} />
         ))}
       </ol>
     </section>,

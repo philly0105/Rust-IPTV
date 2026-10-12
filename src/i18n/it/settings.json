@@ -310,5 +310,8 @@
   "epgClearConfirmBody": "Verranno eliminati tutti i programmi di tutte le guide. Le associazioni dei canali e gli indirizzi delle guide restano.",
   "epgClearConfirm": "Cancella dati della guida",
   "epgClearDone": "Dati della guida cancellati",
-  "epgClearFailed": "Impossibile cancellare i dati della guida"
+  "epgClearFailed": "Impossibile cancellare i dati della guida",
+  "saving": "Salvataggio…",
+  "saved": "Salvato",
+  "railsOffHint": "Attiva la dashboard per usare queste righe."
 }

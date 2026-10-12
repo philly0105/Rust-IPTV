@@ -19,7 +19,7 @@ import {
   type EngineError,
 } from '../engines';
 import { tryFailover } from '../failover';
-import { safeImageUrl } from '../format';
+import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
 import {
   handleEnded,
@@ -330,6 +330,9 @@ function ErrorOverlay({
 }) {
   const { t } = useTranslation('player');
   const { toast } = useToast();
+  const retryRef = useRef<HTMLButtonElement>(null);
+  // Keyboard users land on Retry instead of hunting for it (only when the player has focus).
+  useEffect(() => focusIfPlayerOwnsFocus(retryRef.current), []);
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
   const hint = isRawTs
@@ -381,6 +384,7 @@ function ErrorOverlay({
         {message && <p className="font-mono text-xs break-all text-white/70">{message}</p>}
         <div className="mt-1 flex flex-wrap gap-2">
           <button
+            ref={retryRef}
             type="button"
             onClick={onRetry}
             className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"

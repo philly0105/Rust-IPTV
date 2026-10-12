@@ -194,5 +194,12 @@
   "removeFailed": "Could not remove the item",
   "sourceRemoved": "Source removed",
   "sourceRemovedHint": "The source for this item was removed. Add it again to open the item.",
-  "tryAgain": "Try again"
+  "tryAgain": "Try again",
+  "browseChannels": "Browse channels",
+  "addSourceAction": "Add a source",
+  "emptyNoSourcesBody": "Add a playlist or portal first. Anything you open or star then shows up here.",
+  "recentRemoved": "Removed {{title}} from history",
+  "continueRemoved": "Removed {{title}} from continue watching",
+  "undoFailed": "Could not undo that",
+  "clearSearch": "Clear search"
 }

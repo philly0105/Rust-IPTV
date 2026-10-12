@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "Tüm rehberlerdeki tüm programlar silinir. Kanal eşleştirmeleri ve rehber adresleri korunur.",
   "epgClearConfirm": "Rehber verilerini temizle",
   "epgClearDone": "Rehber verileri temizlendi",
-  "epgClearFailed": "Rehber verileri temizlenemedi"
+  "epgClearFailed": "Rehber verileri temizlenemedi",
+  "saving": "Kaydediliyor…",
+  "saved": "Kaydedildi",
+  "railsOffHint": "Bu satırları kullanmak için panoyu açın."
 }

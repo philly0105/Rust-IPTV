@@ -16,6 +16,9 @@
 mod memory;
 #[cfg(windows)]
 mod mpv_window;
+mod pip_state;
+#[cfg(windows)]
+mod pip_window;
 mod proxy;
 
 use iptv_core::events::{AppEvent, EventSink};
@@ -53,6 +56,40 @@ impl EventSink for TauriSink {
 /// Keeps the log writer alive for the life of the app.
 struct LogGuardState {
     _guard: parking_lot::Mutex<Option<LogGuard>>,
+}
+
+/// `invoke('pip_window', { on, restore })`: picture-in-picture window
+/// behaviour. `restore` (on enter) is the normal geometry to put back if the
+/// app quits while in PiP (`pip_state`); turning PiP off forgets it. On
+/// Windows it also locks the aspect ratio and makes the video follow resizes.
+#[tauri::command]
+fn pip_window(
+    window: tauri::WebviewWindow,
+    pip: tauri::State<'_, pip_state::PipState>,
+    on: bool,
+    restore: Option<pip_state::NormalGeometry>,
+) -> Result<(), String> {
+    match (on, restore) {
+        (true, Some(geometry)) => pip.begin(geometry),
+        (true, None) => {}
+        (false, _) => pip.end(),
+    }
+    #[cfg(windows)]
+    return pip_window::set(window, on);
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        Ok(())
+    }
+}
+
+/// `invoke('pip_window_saved')`: the pre-PiP geometry while PiP is on, so a
+/// reloaded webview can bring the window back.
+#[tauri::command]
+fn pip_window_saved(
+    pip: tauri::State<'_, pip_state::PipState>,
+) -> Option<pip_state::NormalGeometry> {
+    pip.saved()
 }
 
 /// The single IPC entry point: `invoke('rpc', { cmd, args })`.
@@ -134,6 +171,24 @@ async fn allow_known_media_dirs(app: AppHandle, state: Arc<AppState>) {
         }
         Err(err) => tracing::warn!(%err, "could not read download folders for the asset scope"),
     }
+}
+
+/// A quit while fullscreen saves the monitor's size as the window size. Open
+/// such a window maximized over a normal default size instead, so its title
+/// bar shows and "restore" gives a usable window.
+fn unstick_fullscreen_size(w: &tauri::WebviewWindow) {
+    let (Ok(Some(monitor)), Ok(size)) = (w.current_monitor(), w.outer_size()) else {
+        return;
+    };
+    if w.is_maximized().unwrap_or(false)
+        || size.width < monitor.size().width
+        || size.height < monitor.size().height
+    {
+        return;
+    }
+    let _ = w.set_size(tauri::LogicalSize::new(1280.0, 800.0));
+    let _ = w.center();
+    let _ = w.maximize();
 }
 
 /// Brings the main window to the front.
@@ -241,6 +296,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     app.manage(Arc::clone(&state));
     app.manage(Arc::new(build_router()));
+    app.manage(pip_state::PipState::default());
 
     // Deep links (`iptv://...`) arrive here on first launch and, through
     // single-instance, from later launches. Until the UI has pulled
@@ -281,6 +337,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // window-state plugin can restore its size and position first; showing it
     // now avoids the visible jump from the default geometry.
     if let Some(w) = app.get_webview_window("main") {
+        unstick_fullscreen_size(&w);
         let _ = w.show();
         let _ = w.set_focus();
     }
@@ -338,7 +395,16 @@ pub fn run() {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+        // Decorations and fullscreen are not restored: PiP and the player's
+        // fullscreen turn the frame off, and the app must always open framed.
+        use tauri_plugin_window_state::StateFlags;
+        builder = builder.plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::all() - StateFlags::DECORATIONS - StateFlags::FULLSCREEN,
+                )
+                .build(),
+        );
     }
 
     // Updater (feature `updater`): tauri.conf.json carries `plugins.updater`
@@ -355,7 +421,7 @@ pub fn run() {
     }
 
     let app = builder
-        .invoke_handler(tauri::generate_handler![rpc])
+        .invoke_handler(tauri::generate_handler![rpc, pip_window, pip_window_saved])
         .on_window_event(on_window_event)
         .setup(setup)
         .build(tauri::generate_context!())
@@ -363,6 +429,12 @@ pub fn run() {
 
     let mut cleaned_up = false;
     app.run(move |app, event| {
+        // The window-state plugin has already saved by now (plugins see Exit
+        // before this callback); undo the PiP geometry it may have written.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if matches!(event, RunEvent::Exit) {
+            pip_state::persist_on_exit(app);
+        }
         if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) && !cleaned_up {
             cleaned_up = true;
             shutdown(app);

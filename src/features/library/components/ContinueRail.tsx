@@ -9,6 +9,13 @@ import { IconButton, Poster, ProgressBar } from '../deps';
 import { formatClock } from '../lib/format';
 import { watchedFraction } from '../lib/recent';
 
+/** Moves focus to the neighbouring card (next, else previous) so it is not lost when this one goes away. */
+function focusNeighbour(from: HTMLElement): void {
+  const li = from.closest('li');
+  const next = (li?.nextElementSibling ?? li?.previousElementSibling)?.querySelector<HTMLElement>('[data-continue-open]');
+  next?.focus();
+}
+
 export const CONTINUE_RAIL_HEIGHT = 300;
 
 export function ContinueRail({
@@ -36,6 +43,13 @@ export function ContinueRail({
               <button
                 type="button"
                 onClick={() => onOpen(p)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Delete') return;
+                  e.preventDefault();
+                  focusNeighbour(e.currentTarget);
+                  onRemove(p);
+                }}
+                data-continue-open=""
                 className="flex w-full flex-col gap-2 rounded-lg text-start"
                 aria-label={t('continueTitle', { title, time: formatClock(p.positionSeconds) })}
               >
@@ -55,7 +69,10 @@ export function ContinueRail({
                 variant="secondary"
                 label={t('removeContinue', { title })}
                 icon={<X size={14} aria-hidden />}
-                onClick={() => onRemove(p)}
+                onClick={(e) => {
+                  focusNeighbour(e.currentTarget);
+                  onRemove(p);
+                }}
                 className="absolute end-1.5 top-1.5 h-7 w-7 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
               />
             </li>

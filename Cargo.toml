@@ -84,5 +84,11 @@ opt-level = "s"
 panic = "unwind"
 strip = true
 
+# Debug builds keep line tables for our crates (readable backtraces) and no
+# debug info for dependencies. Full PDBs for every test binary filled tens of GB.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 1
+debug = false

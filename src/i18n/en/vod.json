@@ -174,5 +174,6 @@
   "searchShowMore_one": "Show up to {{count}}",
   "searchShowMore_other": "Show up to {{count}}",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "Couldn't load these titles"
 }

@@ -14,3 +14,4 @@ export { useTheme, persistTheme, resolveTheme } from './theme';
 export type { ResolvedTheme, ThemeApi } from './theme';
 export { useSettings } from './useSettings';
 export { ShellLayout, openPalette, openShortcutHelp } from './ShellLayout';
+export { DOCUMENTED_SHORTCUTS, SHORTCUT_AREA_KEYS, groupShortcuts } from './ShortcutOverlay';

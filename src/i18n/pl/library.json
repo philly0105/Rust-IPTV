@@ -222,5 +222,12 @@
   "removeFailed": "Nie udało się usunąć elementu",
   "sourceRemoved": "Usunięto źródło",
   "sourceRemovedHint": "Źródło tego elementu zostało usunięte. Dodaj je ponownie, aby otworzyć element.",
-  "tryAgain": "Spróbuj ponownie"
+  "tryAgain": "Spróbuj ponownie",
+  "browseChannels": "Przeglądaj kanały",
+  "addSourceAction": "Dodaj źródło",
+  "emptyNoSourcesBody": "Najpierw dodaj playlistę lub portal. Wszystko, co otworzysz lub oznaczysz gwiazdką, pojawi się tutaj.",
+  "recentRemoved": "Usunięto {{title}} z historii",
+  "continueRemoved": "Usunięto {{title}} z Oglądaj dalej",
+  "undoFailed": "Nie udało się cofnąć",
+  "clearSearch": "Wyczyść wyszukiwanie"
 }

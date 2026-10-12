@@ -117,6 +117,7 @@
   "searchInGroup": "Search in {{group}}",
   "shortcutArea": "Live TV",
   "shortcutDigits": "Type a channel number (commits after 1.5 s)",
+  "shortcutFocusSearch": "Search channels",
   "shortcutToggleSidebar": "Show or hide the groups sidebar",
   "stage": "Player",
   "stageIdle": "Nothing playing",

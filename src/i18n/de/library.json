@@ -194,5 +194,12 @@
   "removeFailed": "Der Eintrag konnte nicht entfernt werden",
   "sourceRemoved": "Quelle entfernt",
   "sourceRemovedHint": "Die Quelle dieses Eintrags wurde entfernt. Fügen Sie sie erneut hinzu, um den Eintrag zu öffnen.",
-  "tryAgain": "Erneut versuchen"
+  "tryAgain": "Erneut versuchen",
+  "browseChannels": "Sender durchsuchen",
+  "addSourceAction": "Quelle hinzufügen",
+  "emptyNoSourcesBody": "Füge zuerst eine Playlist oder ein Portal hinzu. Alles, was du öffnest oder markierst, erscheint dann hier.",
+  "recentRemoved": "{{title}} aus dem Verlauf entfernt",
+  "continueRemoved": "{{title}} aus „Weiterschauen“ entfernt",
+  "undoFailed": "Rückgängig machen fehlgeschlagen",
+  "clearSearch": "Suche löschen"
 }

@@ -6,7 +6,12 @@
 //! - `/stalker/...` Stalker / Ministra portal. MAC `00:1A:79:00:00:01`,
 //!   token `mock-token-1`. See [`stalker`].
 //! - `/m3u/...` and `/xmltv/...` playlists and guides, including streamed
-//!   large variants. See [`playlists`].
+//!   large variants and the 10k-channel fixture `/m3u/10k.m3u`. See
+//!   [`playlists`].
+//! - `/fail/...` failure modes for tests: slow, stalled and drip-fed bodies,
+//!   401/403/404/503 and any status, empty, malformed and broken playlists,
+//!   an HTML login page, an endless video stream, an HLS stream playlist,
+//!   malformed XMLTV. See [`failures`] for the full table.
 //! - `/files/...` download targets with Range, a flaky one and a chunked one.
 //!   See [`files`].
 //! - `/media/...`, `/img/...` sample media and generated artwork.
@@ -18,6 +23,7 @@
 //! with [`router`] the base is derived from each request's `Host` header.
 
 pub mod catalog;
+pub mod failures;
 pub mod files;
 pub mod gen;
 pub mod images;
@@ -161,6 +167,7 @@ pub fn router_with_base(base: String) -> Router {
         .merge(xtream::routes())
         .merge(stalker::routes())
         .merge(playlists::routes())
+        .merge(failures::routes())
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), count))
         .layer(CorsLayer::permissive().expose_headers(tower_http::cors::Any))

@@ -174,5 +174,6 @@
   "searchShowMore_one": "Bis zu {{count}} anzeigen",
   "searchShowMore_other": "Bis zu {{count}} anzeigen",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "Diese Titel konnten nicht geladen werden"
 }

@@ -44,6 +44,17 @@ function clampPos(p: MiniPos, w: number, h: number): MiniPos {
   return { right: Math.min(maxRight, Math.max(MARGIN, p.right)), bottom: Math.min(maxBottom, Math.max(MARGIN, p.bottom)) };
 }
 
+/**
+ * Moves the player host node. A DOM move blurs whatever was focused inside it (the PiP or
+ * expand button the user just pressed), so focus is put back on the same element afterwards.
+ */
+export function moveKeepingFocus(host: HTMLElement, target: Element): void {
+  const active = document.activeElement;
+  const had = active instanceof HTMLElement && host.contains(active) ? active : null;
+  target.appendChild(host);
+  if (had && document.activeElement !== had && had.isConnected) had.focus({ preventScroll: true });
+}
+
 function ExpandButton({ label }: { label: string }) {
   const inRouter = useInRouterContext();
   return inRouter ? <RouterExpand label={label} /> : <ExpandBase label={label} onExpand={() => usePlayerStore.getState().toggleFullscreen()} />;
@@ -131,7 +142,7 @@ export function PlayerDock() {
     setRehome((removed, next) => {
       if (host.parentNode !== removed) return;
       const target = next ?? miniSlotRef.current;
-      target?.appendChild(host);
+      if (target) moveKeepingFocus(host, target);
     });
     return () => setRehome(null);
   }, [host]);
@@ -140,7 +151,7 @@ export function PlayerDock() {
   const inPip = pip && visible;
   useLayoutEffect(() => {
     const target = inPip ? pipSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
-    if (target && host.parentNode !== target) target.appendChild(host);
+    if (target && host.parentNode !== target) moveKeepingFocus(host, target);
   }, [inPip, inStage, stageTarget, host]);
 
   // Nothing left to show in the small window: give the app its window back.

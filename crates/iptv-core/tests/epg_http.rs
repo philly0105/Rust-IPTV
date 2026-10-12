@@ -206,6 +206,13 @@ async fn gzip_body_retry_and_http_errors() {
 
     let err = epg::refresh_now(state.clone(), &urls[2]).await.unwrap_err();
     assert!(matches!(err, iptv_core::CoreError::NotFound(_)), "{err}");
+    // B8: the message names the host and says what to do.
+    let msg = err.to_string();
+    assert!(
+        msg.contains("127.0.0.1 answered the guide (EPG) download: HTTP 404")
+            && msg.contains("Check the guide URL"),
+        "{msg}"
+    );
     let err = epg::refresh_now(state.clone(), &urls[3]).await.unwrap_err();
     assert!(matches!(err, iptv_core::CoreError::Auth(_)), "{err}");
 

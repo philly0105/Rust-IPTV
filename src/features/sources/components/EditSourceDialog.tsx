@@ -7,10 +7,19 @@ import { RpcError, isDesktop, rpc } from '@/api/transport';
 import type { EpgLinks, Source } from '@/api/types';
 
 import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
-import { buildUpdatePatch, draftFromSource, patchNeedsRefresh, type DraftErrors, type SourceDraft } from '../lib/draft';
+import {
+  blurError,
+  buildUpdatePatch,
+  clearChangedErrors,
+  draftFromSource,
+  patchNeedsRefresh,
+  withFieldError,
+  type DraftErrors,
+  type SourceDraft,
+} from '../lib/draft';
 import { epgPatch } from '../lib/epgLinks';
 import { newlyEnabledEpgUrls, refreshGuides } from '../lib/epgRefresh';
-import { nextStepKey } from '../lib/errors';
+import { fieldForError, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
 import { AccountPanel, hasAccountInfo } from './AccountPanel';
@@ -55,7 +64,17 @@ export function EditSourceDialog({
     // Only re-seed when a different source opens, not on background refetches.
   }, [sourceId, initialTab]);
 
+  // An inline error goes away as soon as the user edits its field.
+  const prevDraft = useRef(draft);
+  useEffect(() => {
+    const prev = prevDraft.current;
+    prevDraft.current = draft;
+    if (prev && draft && prev !== draft) setErrors((e) => clearChangedErrors(prev, draft, e));
+  }, [draft]);
+
   if (!source || !draft || !epg) return null;
+
+  const onFieldBlur = (path: string) => setErrors((e) => withFieldError(e, path, blurError(draft, path, source.stalker?.macAddress)));
 
   const save = async () => {
     setSaveError(null);
@@ -88,7 +107,14 @@ export function EditSourceDialog({
       });
       onClose();
     } catch (e) {
-      setSaveError(RpcError.from(e));
+      const err = RpcError.from(e);
+      setSaveError(err);
+      const field = fieldForError(err, source.kind, source.m3u?.origin);
+      if (field) {
+        setErrors((prev) => ({ ...prev, [field]: summaryKey(err) }));
+        setTab('details');
+        nextFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+      }
     } finally {
       setSaving(false);
     }
@@ -150,10 +176,18 @@ export function EditSourceDialog({
                 errors={errors}
                 isDesktop={isDesktop}
                 disabled={saving}
+                onFieldBlur={onFieldBlur}
               />
             ) : null}
             {source.kind === 'xtream' ? (
-              <XtreamForm value={draft.xtream} onChange={(xtream) => setDraft({ ...draft, xtream })} errors={errors} onErrors={setErrors} disabled={saving} />
+              <XtreamForm
+                value={draft.xtream}
+                onChange={(xtream) => setDraft({ ...draft, xtream })}
+                errors={errors}
+                onErrors={setErrors}
+                disabled={saving}
+                onFieldBlur={onFieldBlur}
+              />
             ) : null}
             {source.kind === 'stalker' ? (
               <StalkerForm
@@ -163,6 +197,7 @@ export function EditSourceDialog({
                 onErrors={setErrors}
                 disabled={saving}
                 storedMac={source.stalker?.macAddress}
+                onFieldBlur={onFieldBlur}
               />
             ) : null}
             <Toggle
@@ -180,12 +215,30 @@ export function EditSourceDialog({
         )}
 
         {saveError ? (
-          <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm">
+          <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm" data-testid="edit-source-error">
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
             <div className="flex min-w-0 flex-col gap-1">
               <p className="font-medium text-fg">{t('saveFailed')}</p>
-              <p className="break-words text-fg-muted">{redactText(saveError.message)}</p>
+              {/* "Something went wrong while importing" does not describe a save; the core's text does. */}
+              {saveError.code === 'internal' ? (
+                <p className="break-words text-fg-muted">{redactText(saveError.message)}</p>
+              ) : (
+                <>
+                  <p className="text-fg">{t(summaryKey(saveError))}</p>
+                  <details className="text-fg-muted">
+                    <summary className="w-fit cursor-pointer select-none text-xs">{t('technicalDetails')}</summary>
+                    <p className="mt-1 break-words font-mono text-xs" dir="ltr">
+                      {redactText(saveError.message)}
+                    </p>
+                  </details>
+                </>
+              )}
               <p className="text-fg-muted">{t(nextStepKey(saveError))}</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" loading={saving} onClick={() => void save()} data-testid="edit-source-retry">
+                  {t('tryAgain')}
+                </Button>
+              </div>
             </div>
           </div>
         ) : null}

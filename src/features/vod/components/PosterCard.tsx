@@ -1,5 +1,5 @@
 import { Star } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -27,12 +27,19 @@ export interface PosterCardProps {
   /** Audio language from the provider title or category (`itemLanguage`): a code badge on the poster and the name in the caption. */
   language?: ItemLanguage | undefined;
   index?: number;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
   className?: string;
   /** Hold focus by keyboard without being in the tab order (roving). */
   tabIndex?: number;
   /** Keyboard cursor of a listbox grid (aria-activedescendant) rests here. */
   active?: boolean;
+  /**
+   * False inside a listbox option (VirtualGrid): render a plain block instead
+   * of a link, because an interactive element inside an option is
+   * `nested-interactive`. The grid's onSelect/Enter does the navigation, and
+   * the card text becomes the option's accessible name.
+   */
+  interactive?: boolean;
 }
 
 /**
@@ -81,22 +88,15 @@ export function PosterCard({
   className,
   tabIndex,
   active,
+  interactive = true,
 }: PosterCardProps) {
   const { t, i18n } = useTranslation('vod');
   const r = formatRating(rating, i18n.language);
   const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
   const label = posterCardLabel({ title: fullTitle ?? title, year, meta, badgeLabel, languageLabel: langName, rating: r ?? undefined, ratedLabel: (v) => t('posterRated', { rating: v }) });
   const secondary = meta ?? year;
-  return (
-    <Link
-      to={href}
-      onClick={onClick}
-      data-grid-index={index}
-      tabIndex={tabIndex}
-      className={cn('group flex min-w-0 flex-col gap-2 rounded-md outline-none', className)}
-      title={fullTitle ?? title}
-      aria-label={label}
-    >
+  const content = (
+    <>
       <div
         className={cn(
           'relative overflow-hidden rounded-md shadow-1 ring-1 ring-border/60',
@@ -142,6 +142,29 @@ export function PosterCard({
           {secondary !== undefined && secondary !== null && secondary !== '' ? (langName ? <>{secondary} · {langName}</> : secondary) : (langName ?? ' ')}
         </div>
       </div>
+    </>
+  );
+  const classes = cn('group flex min-w-0 flex-col gap-2 rounded-md outline-none', className);
+  if (!interactive) {
+    return (
+      // A named, non-interactive group: its label becomes the option's accessible name.
+      <div role="group" aria-label={label} data-grid-index={index} data-poster-card="" className={classes} title={fullTitle ?? title}>
+        {content}
+      </div>
+    );
+  }
+  return (
+    <Link
+      to={href}
+      onClick={onClick}
+      data-grid-index={index}
+      tabIndex={tabIndex}
+      // The focus ring is drawn on the artwork (group-focus-visible below), not around the caption.
+      className={classes}
+      title={fullTitle ?? title}
+      aria-label={label}
+    >
+      {content}
     </Link>
   );
 }

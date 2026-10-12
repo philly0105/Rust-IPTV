@@ -1,23 +1,38 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Kbd, comboKeys } from '@/ui';
-import { useShortcutList } from '@/shell';
+import { Kbd } from '@/ui';
+import { DOCUMENTED_SHORTCUTS, groupShortcuts, useShortcutList } from '@/shell';
 import { SettingsGroup, SettingsSection } from '../components';
 import type { SectionProps } from './types';
 
+/** Area ids used by the shell and features, mapped to their `shell` label keys (same as the ? overlay). */
+const AREA_KEYS: Record<string, string> = {
+  Global: 'areaGlobal',
+  Navigation: 'areaNavigation',
+  Live: 'areaLive',
+  Vod: 'areaVod',
+  Playback: 'areaPlayback',
+  'Dialogs and lists': 'areaDialogs',
+};
+
+/**
+ * The full shortcut reference: registered shortcuts merged with the documented
+ * ones (so keys bound only on other screens, like PiP Escape or Live search,
+ * still show), grouped and labelled exactly like the ? overlay.
+ */
 export function ShortcutsSection(_props: SectionProps) {
   const { t } = useTranslation('settings');
-  const list = useShortcutList();
+  const { t: ts } = useTranslation('shell');
+  const registered = useShortcutList();
   const groups = useMemo(() => {
-    const byArea = new Map<string, { combo: string; description: string }[]>();
-    for (const s of list) {
-      const arr = byArea.get(s.area) ?? [];
-      if (!arr.some((x) => x.combo === s.combo && x.description === s.description)) arr.push(s);
-      byArea.set(s.area, arr);
-    }
-    return [...byArea.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [list]);
+    const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: ts(d.descKey) }));
+    const label = (area: string) => {
+      const key = AREA_KEYS[area];
+      return key ? ts(key) : area;
+    };
+    return groupShortcuts(registered, documented, label);
+  }, [registered, ts]);
 
   return (
     <SettingsSection title={t('sectionShortcuts')} description={t('sectionShortcutsLead')} testId="settings-shortcuts">
@@ -26,14 +41,12 @@ export function ShortcutsSection(_props: SectionProps) {
       ) : (
         groups.map(([area, items]) => (
           <SettingsGroup key={area} title={area}>
-            <dl className="flex flex-col divide-y divide-border">
+            <dl className="flex flex-col divide-y divide-border" data-testid="shortcut-group">
               {items.map((s) => (
-                <div key={`${s.combo}|${s.description}`} className="flex items-center justify-between gap-4 px-4 py-2.5">
+                <div key={`${s.combo}|${s.description}`} data-combo={s.combo} className="flex items-center justify-between gap-4 px-4 py-2.5">
                   <dt className="text-fg">{s.description}</dt>
-                  <dd className="flex shrink-0 items-center gap-1">
-                    {comboKeys(s.combo).map((k, i) => (
-                      <Kbd key={i}>{k}</Kbd>
-                    ))}
+                  <dd className="shrink-0">
+                    <Kbd combo={s.combo} />
                   </dd>
                 </div>
               ))}

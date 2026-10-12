@@ -174,5 +174,6 @@
   "searchShowMore_one": "Tot {{count}} tonen",
   "searchShowMore_other": "Tot {{count}} tonen",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "Deze titels konden niet worden geladen"
 }

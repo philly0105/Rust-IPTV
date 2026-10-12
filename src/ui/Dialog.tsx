@@ -100,7 +100,13 @@ export function Dialog({
       closingRef.current = true;
       openCount -= 1;
       if (openCount === 0) html.style.overflow = prevOverflow;
-      if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+      if (previous && document.contains(previous)) {
+        previous.focus({ preventScroll: true });
+      } else if (previous && openCount === 0) {
+        // The opener is gone (a menu item, a row that re-rendered): land on the
+        // main region instead of <body>, so the next Tab starts somewhere sensible.
+        document.getElementById('main')?.focus({ preventScroll: true });
+      }
     };
     // initialFocus is a ref; it is read once on open.
   }, [open]);

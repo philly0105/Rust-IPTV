@@ -310,5 +310,8 @@
   "epgClearConfirmBody": "Todos os programas de todos os guias serão excluídos. As associações de canais e os endereços dos guias são mantidos.",
   "epgClearConfirm": "Limpar dados do guia",
   "epgClearDone": "Dados do guia limpos",
-  "epgClearFailed": "Não foi possível limpar os dados do guia"
+  "epgClearFailed": "Não foi possível limpar os dados do guia",
+  "saving": "A guardar…",
+  "saved": "Guardado",
+  "railsOffHint": "Ative o painel para usar estas linhas."
 }

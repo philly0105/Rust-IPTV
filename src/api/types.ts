@@ -528,6 +528,8 @@ export interface MpvState {
   recordPath: string | null;
   /** What mpv's cache can seek in, on the timePos clock; for live TV, the rewind window. */
   seekable?: { start: number; end: number };
+  /** True while mpv is paused waiting for its cache to fill (buffering); omitted when unknown. */
+  buffering?: boolean;
 }
 
 /** Child-window rectangle in CSS pixels (`mpv.attach`, `mpv.setBounds`). */
@@ -736,6 +738,8 @@ export interface AppEventMap {
   'mpv.state': MpvState;
   /** Left click on the embedded mpv video. */
   'mpv.click': EmptyEvent;
+  /** Double click on the embedded mpv video (follows an `mpv.click`). */
+  'mpv.dblclick': EmptyEvent;
   'settings.changed': Settings;
   'player.external': PlayerExternalEvent;
   'deeplink.open': DeepLinkEvent;

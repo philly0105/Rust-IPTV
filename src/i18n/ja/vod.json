@@ -174,5 +174,6 @@
   "searchShowMore_one": "最大{{count}}件まで表示",
   "searchShowMore_other": "最大{{count}}件まで表示",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "これらのタイトルを読み込めませんでした"
 }

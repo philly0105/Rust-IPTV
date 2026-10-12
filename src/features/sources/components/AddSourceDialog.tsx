@@ -9,9 +9,18 @@ import { RpcError, isDesktop, rpc } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
 import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
-import { buildAddArgs, buildUpdatePatch, emptyDraft, type DraftErrors, type SourceDraft } from '../lib/draft';
+import {
+  blurError,
+  buildAddArgs,
+  buildUpdatePatch,
+  clearChangedErrors,
+  emptyDraft,
+  withFieldError,
+  type DraftErrors,
+  type SourceDraft,
+} from '../lib/draft';
 import { enabledEpgUrls, refreshGuides, useGuideProgressFeed } from '../lib/epgRefresh';
-import { claimImportErrors, failedSourceId, nextStepKey, summaryKey } from '../lib/errors';
+import { claimImportErrors, failedSourceId, fieldForError, nextStepKey, summaryKey } from '../lib/errors';
 import { useImportProgressFeed, useImportProgressStore, useNewSourceProgress, useSourceProgress } from '../lib/progress';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
@@ -119,6 +128,15 @@ export function AddSourceDialog({
 
   const suggest = (input: string) => setSuggested(suggestName(input));
 
+  // An inline error goes away as soon as the user edits its field.
+  const prevDraft = useRef(draft);
+  useEffect(() => {
+    const prev = prevDraft.current;
+    prevDraft.current = draft;
+    if (prev !== draft) setErrors((e) => clearChangedErrors(prev, draft, e));
+  }, [draft]);
+  const onFieldBlur = (path: string) => setErrors((e) => withFieldError(e, path, blurError(draft, path)));
+
   const setKind = (kind: SourceKind) => {
     setDraft((d) => ({ ...d, kind }));
     setErrors({});
@@ -167,6 +185,12 @@ export function AddSourceDialog({
     } catch (e) {
       const err = RpcError.from(e);
       setSubmitError(err);
+      // Point at the field to fix (the login for rejected credentials, the address for a dead server).
+      const field = fieldForError(err, built.value.kind, built.value.m3u?.origin);
+      if (field) {
+        setErrors((prev) => ({ ...prev, [field]: summaryKey(err) }));
+        focusFirstInvalid();
+      }
       // The core keeps a source whose import failed (with lastError) and names it in the error.
       // Remember it so the next submit retries it rather than adding a duplicate. A transport
       // failure (proxy 504, network blip during a long import) names nothing although the core
@@ -297,6 +321,7 @@ export function AddSourceDialog({
             isDesktop={isDesktop}
             disabled={submitting}
             onSuggestName={suggest}
+            onFieldBlur={onFieldBlur}
             onUseXtream={(xtream) => {
               setDraft((d) => ({ ...d, kind: 'xtream', xtream }));
               setSuggested(suggestName(xtream.serverUrl));
@@ -312,6 +337,7 @@ export function AddSourceDialog({
             onErrors={setErrors}
             disabled={submitting}
             onSuggestName={suggest}
+            onFieldBlur={onFieldBlur}
           />
         ) : null}
         {draft.kind === 'stalker' ? (
@@ -322,6 +348,7 @@ export function AddSourceDialog({
             onErrors={setErrors}
             disabled={submitting}
             onSuggestName={suggest}
+            onFieldBlur={onFieldBlur}
           />
         ) : null}
 
@@ -351,6 +378,14 @@ export function AddSourceDialog({
                 <summary className="cursor-pointer select-none text-xs">{t('technicalDetails')}</summary>
                 <p className="mt-1 break-words font-mono text-xs">{redactText(submitError.message)}</p>
               </details>
+              {/* With a failed source on file the footer button already reads "Try again". */}
+              {failed ? null : (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => void submit()} data-testid="add-source-retry">
+                    {t('tryAgain')}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         ) : null}

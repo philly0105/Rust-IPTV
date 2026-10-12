@@ -1,7 +1,7 @@
 import { Clapperboard, ListFilter, Search, Tv } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams } from 'react-router';
+import { Link, useLocation, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { SeriesItem, VodItem } from '@/api/types';
@@ -13,6 +13,7 @@ import { itemLanguage } from '../lib/language';
 import { PosterRail } from '../components/PosterRail';
 import { useRecentlyAdded, useSource } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '@/ui';
@@ -62,6 +63,25 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   }, [cats.data, filter, kind, sourceCount, t]);
 
   const hrefFor = (id: string) => `/s/${encodeURIComponent(sourceId)}/${section}/c/${encodeURIComponent(id)}`;
+
+  // Back from a category: same scroll offset, focus on the category you opened.
+  const { pathname } = useLocation();
+  useScrollMemory({
+    key: pathname,
+    getScroller: () => scrollRef.current,
+    ready: !!cats.data && !filter.trim(),
+    onRestored: (spot, scroller) => {
+      if (spot.index === undefined) return;
+      scroller.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
+    },
+  });
+  // Enter on a focused link also fires click, so this covers the keyboard too.
+  const rememberCategory = (e: MouseEvent<HTMLElement>) => {
+    const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
+    const index = Number(cell?.dataset['gridIndex']);
+    // Indices shift while the filter is on, so only unfiltered positions are kept.
+    if (cell && Number.isFinite(index) && !filter.trim()) rememberSpot(pathname, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
+  };
 
   if (source.isError) {
     return (
@@ -154,7 +174,9 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               ) : entries.length === 0 ? (
                 <p className="py-8 text-center text-sm text-fg-muted">{t('noCategoryMatch')}</p>
               ) : (
-                <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} />
+                <div onClickCapture={rememberCategory}>
+                  <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} />
+                </div>
               )}
             </section>
           </>

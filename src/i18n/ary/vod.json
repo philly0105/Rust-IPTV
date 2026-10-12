@@ -174,5 +174,6 @@
   "searchShowMore_one": "ورّي حتى لـ {{count}}",
   "searchShowMore_other": "ورّي حتى لـ {{count}}",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين"
 }

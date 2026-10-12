@@ -75,6 +75,15 @@ export function resolveTheme(theme: Theme, prefersDark: boolean): ResolvedTheme 
 export function applyThemeToDocument(resolved: ResolvedTheme, reducedMotion: boolean): void {
   if (typeof document === 'undefined') return;
   const html = document.documentElement;
+  const previous = html.dataset['theme'];
+  if (previous && previous !== resolved) {
+    // Swap every colour in one frame: without this each control with
+    // transition-colors fades on its own and the page shimmers through the change.
+    html.dataset['themeSwitching'] = 'true';
+    const done = () => delete html.dataset['themeSwitching'];
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(done));
+    else setTimeout(done, 32);
+  }
   html.dataset['theme'] = resolved;
   if (reducedMotion) html.dataset['reducedMotion'] = 'true';
   else delete html.dataset['reducedMotion'];

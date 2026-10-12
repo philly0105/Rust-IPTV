@@ -46,7 +46,7 @@ export async function openMovieFromGrid(page: Page, sourceId: string, title: str
   await page.getByRole('region', { name: 'Categories' }).getByRole('link', { name: /^All movies/ }).click();
   await expect(page.getByTestId('vod-grid-movie')).toBeVisible();
   await expect(page.getByTestId('page-title')).toHaveText('All movies');
-  const card = page.getByTestId('vod-grid-movie').getByRole('link', { name: new RegExp(title) }).first();
+  const card = page.getByTestId('vod-grid-movie').getByRole('listbox').getByRole('option', { name: new RegExp(title) }).first();
   await expect(card).toBeVisible();
   await card.click();
   await expect(page.getByTestId('vod-movie-detail')).toBeVisible();

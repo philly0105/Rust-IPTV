@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "すべての番組表のすべての番組が削除されます。チャンネルの対応付けと番組表のアドレスは残ります。",
   "epgClearConfirm": "番組表データを削除",
   "epgClearDone": "番組表データを削除しました",
-  "epgClearFailed": "番組表データを削除できませんでした"
+  "epgClearFailed": "番組表データを削除できませんでした",
+  "saving": "保存中…",
+  "saved": "保存しました",
+  "railsOffHint": "これらの行を使うにはダッシュボードをオンにしてください。"
 }

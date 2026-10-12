@@ -3,7 +3,7 @@
 //! records the header EPG URLs. A failure anywhere rolls the transaction back,
 //! so the previous catalog survives a failed refresh.
 
-use super::body::MinRate;
+use super::body::{sniff, too_large_error, MinRate, MAX_PLAYLIST_BYTES, SNIFF_BYTES};
 use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
@@ -789,14 +789,11 @@ fn playlist_status_error(status: reqwest::StatusCode, host: &str) -> CoreError {
         408 | 429 | 500..=599 => "The server is busy or down; try again later.",
         _ => "Check the playlist URL.",
     };
-    match crate::http::status_error(status, &format!("{host} answered the playlist download")) {
-        CoreError::Auth(m) => CoreError::Auth(format!("{m}. {hint}")),
-        CoreError::NotFound(m) => CoreError::NotFound(format!("{m}. {hint}")),
-        CoreError::Timeout(m) => CoreError::Timeout(format!("{m}. {hint}")),
-        CoreError::Network(m) => CoreError::Network(format!("{m}. {hint}")),
-        CoreError::Invalid(m) => CoreError::Invalid(format!("{m}. {hint}")),
-        other => other,
-    }
+    crate::http::status_error_with_hint(
+        status,
+        &format!("{host} answered the playlist download"),
+        hint,
+    )
 }
 
 /// Downloads `url` with the source headers into `dest` (streamed, never held
@@ -832,6 +829,14 @@ async fn fetch_to_file(
             return Err((playlist_status_error(resp.status(), &host), false));
         }
         let total = resp.content_length();
+        if total.is_some_and(|n| n > MAX_PLAYLIST_BYTES) {
+            return Err((too_large_error(&host), false));
+        }
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let mut file = tokio::fs::File::create(dest)
             .await
             .map_err(|e| (e.into(), false))?;
@@ -839,6 +844,8 @@ async fn fetch_to_file(
         let mut done: u64 = 0;
         let mut last_report: u64 = 0;
         let mut rate = MinRate::standard();
+        // The first bytes, until judged by `sniff` (None once judged).
+        let mut head: Option<Vec<u8>> = Some(Vec::with_capacity(SNIFF_BYTES));
         let mut stream = resp.bytes_stream();
         loop {
             let chunk = match crate::http::next_body_chunk(&mut stream, &host, BODY_IDLE).await {
@@ -850,6 +857,19 @@ async fn fetch_to_file(
                 }
             };
             rate.on_bytes(chunk.len(), &host).map_err(|e| (e, true))?;
+            if let Some(buf) = head.as_mut() {
+                let take = (SNIFF_BYTES - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+                if buf.len() >= SNIFF_BYTES {
+                    if let Some(err) = sniff(buf, content_type.as_deref(), &host) {
+                        return Err((err, false));
+                    }
+                    head = None;
+                }
+            }
+            if done + chunk.len() as u64 > MAX_PLAYLIST_BYTES {
+                return Err((too_large_error(&host), false));
+            }
             hasher.update(&chunk);
             file.write_all(&chunk)
                 .await
@@ -858,6 +878,11 @@ async fn fetch_to_file(
             if done - last_report >= 1024 * 1024 {
                 last_report = done;
                 sources::progress(state, source_id, "fetching", done, total, None);
+            }
+        }
+        if let Some(buf) = head.as_ref() {
+            if let Some(err) = sniff(buf, content_type.as_deref(), &host) {
+                return Err((err, false));
             }
         }
         file.flush().await.map_err(|e| (e.into(), false))?;
@@ -1009,6 +1034,75 @@ mod tests {
             took >= crate::m3u::body::MIN_RATE_WINDOW && took < std::time::Duration::from_secs(6),
             "{took:?}"
         );
+    }
+
+    /// B8: a channel's stream URL pasted as the playlist URL fails at once
+    /// with a next step instead of downloading forever; no retries.
+    #[tokio::test]
+    async fn endless_video_stream_is_refused_early() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\n\r\n")
+                        .await;
+                    let mut packet = [0u8; 188];
+                    packet[0] = 0x47;
+                    loop {
+                        if sock.write_all(&packet).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let (r, took) = fetch(&format!("http://127.0.0.1:{port}/live/1.ts")).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("MPEG-TS") && m.contains("playlist URL")),
+            "{err:?}"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "retried");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    /// B8: a login page served with 200 says so instead of "not an M3U".
+    #[tokio::test]
+    async fn web_page_instead_of_playlist_is_named() {
+        let (url, _) = raw_stub(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 46\r\nConnection: close\r\n\r\n<!DOCTYPE html><html><body>Login</body></html>",
+        )
+        .await;
+        let (r, _) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("web page") && m.contains("127.0.0.1")),
+            "{err:?}"
+        );
+    }
+
+    /// B8: a declared size over the cap is refused before downloading.
+    #[tokio::test]
+    async fn oversized_playlist_is_refused_up_front() {
+        let (url, _) =
+            raw_stub("HTTP/1.1 200 OK\r\nContent-Length: 5000000000\r\n\r\n#EXTM3U\n").await;
+        let (r, took) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("too large")),
+            "{err:?}"
+        );
+        assert!(took < std::time::Duration::from_secs(2), "{took:?}");
     }
 
     /// An HTTP error status names the host and says what to do; 5xx retries.

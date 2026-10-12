@@ -1,7 +1,7 @@
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, SearchX, Star } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -9,8 +9,10 @@ import { useRpcQuery } from '@/api/query';
 import type { CoverSize, ItemRef, SeriesItem, VodItem } from '@/api/types';
 
 import { PosterCard, PosterCardSkeleton } from '../components/PosterCard';
-import { useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
+import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
+import { useEscapeBack } from '../hooks/useBackKey';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { formatRating } from '../lib/format';
 import { itemLanguage } from '../lib/language';
 import {
@@ -38,15 +40,55 @@ const SEARCH_DEBOUNCE_MS = 250;
 /** Below this many visible titles, a rating-filtered Stalker grid keeps loading pages on its own. */
 const FILTERED_MIN_VISIBLE = 60;
 
+/**
+ * Grid cell for a page that failed to load (a later page timing out on a slow
+ * portal). It sits inside a listbox option, so it holds no button of its own:
+ * clicking the cell or pressing Enter on it retries through the grid's onSelect.
+ */
+function GridCellError() {
+  const { t } = useTranslation('vod');
+  const { t: tc } = useTranslation('common');
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-testid="vod-grid-cell-error">
+      <div
+        className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-md bg-surface-2 p-3 text-center ring-1 ring-border/60 hover:ring-fg-subtle"
+        style={{ aspectRatio: 2 / 3 }}
+      >
+        <TriangleAlert aria-hidden size={20} className="text-warning" />
+        <p className="text-xs text-fg-muted">{t('pageLoadFailed')}</p>
+        <span className={buttonClass('secondary', 'sm')}>
+          <RotateCw aria-hidden size={14} />
+          {tc('retry')}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+interface GridCellProps {
+  input: GridQueryInput;
+  index: number;
+  pageSize: number;
+  active: boolean;
+  resume: Map<string, number>;
+}
+
 /** One grid cell: subscribes to the page that contains `index`, so only pages near the viewport stay loaded. */
-function GridCell({ input, index, pageSize, active }: { input: GridQueryInput; index: number; pageSize: number; active: boolean }) {
+function GridCell({ input, index, pageSize, active, resume }: GridCellProps) {
   const page = pageOf(index, pageSize);
   const q = useVodPage(input, page);
   const item = q.data?.items[index - page * pageSize];
-  if (!item) return <PosterCardSkeleton />;
+  if (!item) {
+    if (q.isError && !q.isFetching) return <GridCellError />;
+    return <PosterCardSkeleton />;
+  }
+  return <GridPoster item={item} active={active} resume={resume} />;
+}
+
+function GridPoster({ item, active, resume }: { item: VodItem | SeriesItem; active: boolean; resume: Map<string, number> }) {
   return (
     <PosterCard
-      tabIndex={-1}
+      interactive={false}
       active={active}
       title={item.titleBase || item.title}
       fullTitle={item.title}
@@ -54,6 +96,7 @@ function GridCell({ input, index, pageSize, active }: { input: GridQueryInput; i
       posterUrl={item.posterUrl}
       year={item.year}
       rating={item.rating}
+      progress={resume.get(resumeKey(item.ref))}
       language={itemLanguage(item.title, item.categoryName)}
     />
   );
@@ -157,6 +200,12 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     return data?.items[i - page * pageSize];
   };
 
+  const retryPageOf = (i: number) => {
+    if (!input) return;
+    const { cmd, args } = buildPageRequest(input, pageOf(i, pageSize));
+    void qc.refetchQueries({ queryKey: [cmd, args], exact: true });
+  };
+
   const category = cats.data?.find((c) => c.id === categoryId);
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
@@ -176,6 +225,34 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const coverWidth = COVER_WIDTH[settings.coverSize] ?? COVER_WIDTH.medium;
   const backHref = `/s/${encodeURIComponent(sourceId)}/${section}`;
   const dirLabel = dir === 'asc' ? t('sortAscending') : t('sortDescending');
+  const resume = useResumeMap(sourceId, kind);
+
+  // Back from a detail view: put the grid where it was and the keyboard cursor
+  // on the title you opened. The grid's listbox is the scroller.
+  const location = useLocation();
+  const memoryKey = `${location.pathname}${location.search}`;
+  const gridWrapRef = useRef<HTMLDivElement>(null);
+  const getListbox = () => gridWrapRef.current?.querySelector<HTMLElement>('[role="listbox"]') ?? null;
+  const gridShown = firstReady && total > 0;
+  useScrollMemory({
+    key: memoryKey,
+    getScroller: getListbox,
+    ready: gridShown,
+    // The cursor itself comes back through VirtualGrid's initialActiveIndex.
+    onRestored: (_spot, listbox) => listbox.focus({ preventScroll: true }),
+  });
+  /** Title opened from this grid last time (read by VirtualGrid on mount only). */
+  const restoredIndex = recallSpot(memoryKey)?.index;
+  const openTitle = (ref: ItemRef | undefined, index: number) => {
+    const href = ref && detailHref(ref);
+    if (!href) return;
+    rememberSpot(memoryKey, { scrollTop: getListbox()?.scrollTop ?? 0, index });
+    navigate(href);
+  };
+  const focusGrid = () => getListbox()?.focus();
+
+  // Escape on the grid returns to the category list.
+  useEscapeBack(true, () => navigate(backHref));
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
@@ -198,6 +275,14 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           size="sm"
           className="w-full sm:w-64"
           placeholder={t('searchInCategory')}
+          onSubmit={focusGrid}
+          onKeyDown={(e) => {
+            // ArrowDown leaves the search box for the posters.
+            if (e.key === 'ArrowDown' && getListbox()) {
+              e.preventDefault();
+              focusGrid();
+            }
+          }}
         />
         <Select
           aria-label={t('sortBy')}
@@ -233,7 +318,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 px-4 pt-4 md:px-8">
+      <div ref={gridWrapRef} className="min-h-0 flex-1 px-4 pt-4 md:px-8">
         {source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
           <ErrorState
             error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
@@ -287,20 +372,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             aspect="poster"
             label={categoryName}
             testId="vod-grid"
+            initialActiveIndex={restoredIndex}
             getKey={(item) => item.ref.itemId}
-            render={(item, _index, state) => (
-              <PosterCard
-                tabIndex={-1}
-                active={state.active}
-                title={item.titleBase || item.title}
-                fullTitle={item.title}
-                href={detailHref(item.ref) ?? '#'}
-                posterUrl={item.posterUrl}
-                year={item.year}
-                rating={item.rating}
-                language={itemLanguage(item.title, item.categoryName)}
-              />
-            )}
+            render={(item, _index, state) => <GridPoster item={item} active={state.active} resume={resume} />}
             onEndReached={() => {
               if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
             }}
@@ -311,10 +385,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 </p>
               ) : undefined
             }
-            onSelect={(item) => {
-              const href = detailHref(item.ref);
-              if (href) navigate(href);
-            }}
+            onSelect={(item, index) => openTitle(item.ref, index)}
             className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
           />
         ) : (
@@ -325,11 +396,13 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             aspect="poster"
             label={categoryName}
             testId="vod-grid"
-            render={(i, _index, state) => <GridCell input={input} index={i} pageSize={pageSize} active={state.active} />}
+            initialActiveIndex={restoredIndex}
+            render={(i, _index, state) => <GridCell input={input} index={i} pageSize={pageSize} active={state.active} resume={resume} />}
             onSelect={(i) => {
               const item = queryItem(i);
-              const href = item && detailHref(item.ref);
-              if (href) navigate(href);
+              // A cell whose page failed: selecting it retries that page.
+              if (!item) return retryPageOf(i);
+              openTitle(item.ref, i);
             }}
             className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
           />

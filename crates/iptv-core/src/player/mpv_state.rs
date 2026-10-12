@@ -13,6 +13,7 @@ pub const OBSERVED_PROPERTIES: &[(u64, &str)] = &[
     (6, "track-list"),
     (7, "fullscreen"),
     (8, "demuxer-cache-state"),
+    (9, "paused-for-cache"),
 ];
 
 /// Applies one `property-change` to `state`. `data` is `None` when mpv
@@ -59,6 +60,9 @@ pub fn apply_property(state: &mut MpvState, name: &str, data: Option<&Value>) ->
         }
         "demuxer-cache-state" => {
             state.seekable = data.and_then(|d| seekable_range(d, state.time_pos));
+        }
+        "paused-for-cache" => {
+            state.buffering = data.and_then(Value::as_bool);
         }
         _ => return false,
     }
@@ -138,6 +142,7 @@ pub fn apply_event(state: &mut MpvState, event: &Value) -> bool {
             state.loaded = false;
             state.error = None;
             state.seekable = None;
+            state.buffering = None;
         }
         "file-loaded" => {
             state.loaded = true;
@@ -145,6 +150,7 @@ pub fn apply_event(state: &mut MpvState, event: &Value) -> bool {
         }
         "end-file" => {
             state.loaded = false;
+            state.buffering = None;
             if event.get("reason").and_then(Value::as_str) == Some("error") {
                 let detail = event
                     .get("file_error")

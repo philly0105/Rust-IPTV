@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import {
   CalendarClock,
+  Check,
   Clapperboard,
   DatabaseBackup,
   Info,
@@ -12,12 +13,13 @@ import {
   Smartphone,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, type ComponentType } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, NavLink, useParams } from 'react-router';
 
 import { useShell } from '@/shell';
 import { SectionError, SectionSkeleton } from './components';
+import type { SettingsPatch } from './lib/patch';
 import { useSettingsQuery, useUpdateSettings } from './lib/useUpdateSettings';
 import { AboutSection } from './sections/AboutSection';
 import { AppearanceSection } from './sections/AppearanceSection';
@@ -87,12 +89,74 @@ export function SettingsNav({ current, variant = 'panel' }: { current: SectionId
   );
 }
 
+/** How long the "Saved" confirmation stays up after the last successful save. */
+export const SAVED_VISIBLE_MS = 2000;
+
+type SaveState = 'idle' | 'saving' | 'saved';
+
+/**
+ * Wraps `update` so the page can confirm every save: "Saving..." while any
+ * request is in flight, then "Saved" for a moment. Failures already toast with
+ * a retry, so they just clear the indicator.
+ */
+function useSaveStatus(update: (patch: SettingsPatch) => Promise<boolean>) {
+  const [state, setState] = useState<SaveState>('idle');
+  const inFlight = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  const tracked = useCallback(
+    async (patch: SettingsPatch): Promise<boolean> => {
+      if (timer.current) clearTimeout(timer.current);
+      inFlight.current += 1;
+      setState('saving');
+      let ok = false;
+      try {
+        ok = await update(patch);
+      } finally {
+        inFlight.current -= 1;
+        if (inFlight.current === 0) {
+          setState(ok ? 'saved' : 'idle');
+          if (ok) timer.current = setTimeout(() => setState('idle'), SAVED_VISIBLE_MS);
+        }
+      }
+      return ok;
+    },
+    [update],
+  );
+  return { state, update: tracked };
+}
+
+/** Polite live region confirming saves; always mounted so screen readers hear the change. */
+function SaveStatus({ state }: { state: SaveState }) {
+  const { t } = useTranslation('settings');
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      data-testid="settings-save-status"
+      data-state={state}
+      className={clsx(
+        'pointer-events-none fixed bottom-6 end-6 z-20 flex items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-sm font-medium text-fg shadow-1 motion-safe:transition-opacity',
+        state === 'idle' ? 'opacity-0' : 'opacity-100',
+      )}
+    >
+      {state === 'saved' ? <Check aria-hidden className="size-4 text-success" /> : null}
+      {state === 'saving' ? t('saving') : state === 'saved' ? t('saved') : ''}
+    </p>
+  );
+}
+
 export function SettingsPage() {
   const { section } = useParams();
   const { t } = useTranslation('settings');
   const { setHeader, setContextPanel } = useShell();
   const query = useSettingsQuery();
-  const update = useUpdateSettings();
+  const save = useSaveStatus(useUpdateSettings());
   const valid = isSectionId(section);
   const current: SectionId = valid ? section : 'general';
 
@@ -128,8 +192,9 @@ export function SettingsPage() {
       ) : query.isError ? (
         <SectionError error={query.error} onRetry={() => void query.refetch()} />
       ) : (
-        <Section settings={query.data} update={update} />
+        <Section settings={query.data} update={save.update} />
       )}
+      <SaveStatus state={save.state} />
     </div>
   );
 }

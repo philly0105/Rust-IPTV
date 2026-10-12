@@ -210,5 +210,6 @@
   "searchCountMore_two": "{{count}}+",
   "searchCountMore_few": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "تعذر تحميل هذه العناوين"
 }

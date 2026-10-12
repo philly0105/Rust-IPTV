@@ -32,11 +32,12 @@ export interface ChannelRowProps {
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
 }
 
-function RowSkeleton() {
+/** Same columns and height as a loaded row, so nothing moves when the data lands. */
+export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
   return (
-    <div className="flex h-full items-center gap-3 px-3" aria-hidden>
-      <span className="h-3 w-6 rounded bg-surface-3" />
-      <span className="size-9 rounded-md bg-surface-3" />
+    <div className={`flex h-full items-center gap-3 ps-3 pe-3 ${pulse ? 'motion-safe:animate-pulse' : ''}`} aria-hidden>
+      <span className="h-3 w-8 shrink-0 rounded bg-surface-3" />
+      <span className="size-9 shrink-0 rounded-md bg-surface-3" />
       <span className="flex flex-1 flex-col gap-1.5">
         <span className="h-3 w-2/5 rounded bg-surface-3" />
         <span className="h-2.5 w-3/5 rounded bg-surface-2" />

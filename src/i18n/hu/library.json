@@ -194,5 +194,12 @@
   "removeFailed": "Nem sikerült eltávolítani az elemet",
   "sourceRemoved": "Forrás eltávolítva",
   "sourceRemovedHint": "Az elem forrását eltávolították. Az elem megnyitásához adja hozzá újra a forrást.",
-  "tryAgain": "Újrapróbálkozás"
+  "tryAgain": "Újrapróbálkozás",
+  "browseChannels": "Csatornák böngészése",
+  "addSourceAction": "Forrás hozzáadása",
+  "emptyNoSourcesBody": "Először adj hozzá egy lejátszási listát vagy portált. Amit megnyitsz vagy csillagozol, itt jelenik meg.",
+  "recentRemoved": "{{title}} eltávolítva az előzményekből",
+  "continueRemoved": "{{title}} eltávolítva a Folytatás listából",
+  "undoFailed": "Nem sikerült visszavonni",
+  "clearSearch": "Keresés törlése"
 }

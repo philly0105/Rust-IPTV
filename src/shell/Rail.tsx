@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  RotateCw,
   Search,
   Settings as SettingsIcon,
   type LucideIcon,
@@ -219,7 +220,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
               to="/sources?add=1"
               title={t('addSource')}
               aria-label={t('addSource')}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg"
             >
               <Plus aria-hidden size={16} />
             </Link>
@@ -230,7 +231,24 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
               <Skeleton className="h-6 w-4/5" />
             </div>
           ) : sources.isError ? (
-            <p className={cn('px-3 text-[13px] text-danger', collapsed && 'sr-only')}>{t('sourcesLoadFailed')}</p>
+            <div
+              data-testid="rail-sources-error"
+              className={cn('flex items-center gap-2', collapsed ? 'justify-center' : 'justify-between ps-3 pe-1')}
+            >
+              <p role="alert" className={cn('min-w-0 text-[13px] text-danger', collapsed && 'sr-only')}>
+                {t('sourcesLoadFailed')}
+              </p>
+              <button
+                type="button"
+                onClick={() => void sources.refetch()}
+                disabled={sources.isFetching}
+                title={t('retry', { ns: 'common' })}
+                aria-label={t('retry', { ns: 'common' })}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+              >
+                <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
+              </button>
+            </div>
           ) : sources.data && sources.data.length > 0 ? (
             <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
               {sources.data.map((s) => (

@@ -14,8 +14,8 @@ import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { FavoriteEntry, ItemRef } from '@/api/types';
 
-import { EmptyState, ErrorState, SkeletonList, useShortcut, useToast } from '../deps';
-import { PageTitle, SectionHeading } from '../components/bits';
+import { Button, EmptyState, ErrorState, SkeletonList, useShortcut, useToast } from '../deps';
+import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { usePending, useSourcesById } from '../hooks/useLibraryData';
@@ -40,7 +40,7 @@ export function FavoritesPage() {
   const { sourceId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const args = useMemo(() => (sourceId ? { sourceId } : {}), [sourceId]);
   const query = useRpcQuery('favorites.list', args);
   const { pending, run } = usePending<string>();
@@ -88,9 +88,11 @@ export function FavoritesPage() {
             action: {
               label: t('undo'),
               onClick: () => {
-                void rpc('favorites.toggle', { ref: entry.ref, snapshot: entry.snapshot }).then(() =>
-                  queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('favorites.') }),
-                );
+                void rpc('favorites.toggle', { ref: entry.ref, snapshot: entry.snapshot })
+                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+                  .finally(() =>
+                    queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('favorites.') }),
+                  );
               },
             },
           });
@@ -202,10 +204,21 @@ export function FavoritesPage() {
       <EmptyState
         icon={<Star size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
-        description={sourceId ? t('favoritesEmptySourceBody') : t('favoritesEmptyBody')}
+        description={sourceId ? t('favoritesEmptySourceBody') : sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
+        action={<BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />}
       />
     );
-  else if (rows.length === 0) body = <EmptyState title={t('noMatchTitle')} description={t('noMatchSearch', { query: search })} />;
+  else if (rows.length === 0) body = (
+      <EmptyState
+        title={t('noMatchTitle')}
+        description={t('noMatchSearch', { query: search })}
+        action={
+          <Button onClick={() => setSearch('')} data-testid="library-clear-search">
+            {t('clearSearch')}
+          </Button>
+        }
+      />
+    );
   else
     body = (
       <VirtualRows

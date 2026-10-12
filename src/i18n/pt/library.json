@@ -208,5 +208,12 @@
   "removeFailed": "Não foi possível remover o item",
   "sourceRemoved": "Fonte removida",
   "sourceRemovedHint": "A fonte deste item foi removida. Adicione-a novamente para abrir o item.",
-  "tryAgain": "Tentar novamente"
+  "tryAgain": "Tentar novamente",
+  "browseChannels": "Explorar canais",
+  "addSourceAction": "Adicionar uma fonte",
+  "emptyNoSourcesBody": "Adicione primeiro uma playlist ou um portal. Tudo o que abrir ou marcar com estrela aparece aqui.",
+  "recentRemoved": "{{title}} removido do histórico",
+  "continueRemoved": "{{title}} removido de Continuar a ver",
+  "undoFailed": "Não foi possível desfazer",
+  "clearSearch": "Limpar pesquisa"
 }

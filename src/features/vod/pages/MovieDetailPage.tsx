@@ -1,7 +1,7 @@
 import { Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useNavigate, useParams } from 'react-router';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -26,8 +26,10 @@ import {
   useTwinProbe,
 } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useSourcePin } from '../hooks/useSourcePin';
+import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { formatClock, isResumable, isWatched } from '../lib/format';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
@@ -38,6 +40,7 @@ export function MovieDetailPage() {
   const { t } = useTranslation('vod');
   const navigate = useNavigate();
   const { sourceId = '', itemId = '' } = useParams();
+  const detailScrollRef = useRef<HTMLDivElement>(null);
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'movie', itemId }), [sourceId, itemId]);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
@@ -87,6 +90,10 @@ export function MovieDetailPage() {
   const pinnedWatch = useWatchState(pinnedOther?.ref ?? ref);
   const watching = ownWatch.active || (!!pinnedOther && pinnedWatch.active);
   useEscapeToClose(watching, playback.stop);
+  useDetailEscapeBack(!watching, `/s/${encodeURIComponent(sourceId)}/movies`);
+  // Back from an actor or a similar title: the page opens where you left it.
+  const { pathname } = useLocation();
+  useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
 
   // Until the title is known, the page (sr-only h1) and the shell header both read the section name.
   const pageTitle = model?.title ?? t('movies');
@@ -157,7 +164,7 @@ export function MovieDetailPage() {
   );
 
   return (
-    <div className="isolate h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
+    <div ref={detailScrollRef} className="isolate h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
       {watching ? (
         <>
           <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />

@@ -2,7 +2,10 @@
  * Design tokens (SPEC C10). Visual direction: "Night Tuner".
  * Deep ink-navy surfaces, one amber accent borrowed from a backlit radio dial,
  * Bahnschrift (DIN-style, ships with Windows) for channel numbers and display type.
- * Every fg/bg pair below meets WCAG AA (4.5:1 for text, 3:1 for UI borders/focus).
+ * Every text colour meets WCAG AA (4.5:1) on bg and all surfaces, and the focus
+ * colour meets 3:1 (src/ui/test/polish.test.tsx checks both). --color-border is a
+ * decorative divider at about 1.2-1.7:1 (dark) and 1.3-1.6:1 (light); it does NOT
+ * meet the 3:1 non-text contrast for control boundaries.
  */
 
 :root,
@@ -15,14 +18,14 @@
   --color-border: #2f3d57;
   --color-fg: #e9edf5;
   --color-fg-muted: #a9b3c6;
-  --color-fg-subtle: #8692a9;
+  --color-fg-subtle: #8f9bb2;
   --color-accent: #f5b544;
   --color-accent-hover: #ffc865;
   --color-accent-fg: #1b1204;
   --color-danger: #ff7a7a;
   --color-success: #4fd49b;
   --color-warning: #eccb5c;
-  --color-live: #ff5a61;
+  --color-live: #ff6a70;
 
   /* Derived (not in C10; used by shell chrome). */
   --color-scrim: rgb(4 8 16 / 0.72);

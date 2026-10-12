@@ -219,7 +219,7 @@ describe('Guide settings never show an Xtream password', () => {
     ];
     renderAt(settingsRoutes, '/settings/epg');
     const row = await screen.findByTestId('epg-status-row');
-    expect(within(row).getByTestId('epg-status-url').textContent).toBe('http://xt.example.com/xmltv.php?username=alice&password=***');
+    expect(within(row).getByTestId('epg-status-url').textContent).toBe('http://xt.example.com/xmltv.php?username=***&password=***');
     const page = screen.getByTestId('settings-epg');
     expect(page.textContent).not.toContain('pw-secret');
     expect(page.textContent).not.toContain('hunter2');

@@ -5,7 +5,7 @@ import { rpc } from '@/api/transport';
 
 import { Input, Toggle } from '@/ui';
 import { buildStalkerConfig, type DraftErrors, type StalkerDraft } from '../lib/draft';
-import { INFOMIR_MAC_OUI, formatMacInput, hasInfomirOui, looksLikeFullPortal, normalizeMac } from '../lib/validate';
+import { INFOMIR_MAC_OUI, formatMacInput, hasEdgeSpace, hasInfomirOui, looksLikeFullPortal, normalizeMac } from '../lib/validate';
 import { ConnectionTest } from './ConnectionTest';
 import { Field } from './Field';
 import { HeadersFields } from './HeadersFields';
@@ -21,6 +21,7 @@ export function StalkerForm({
   disabled,
   storedMac,
   onSuggestName,
+  onFieldBlur,
 }: {
   value: StalkerDraft;
   onChange: (next: StalkerDraft) => void;
@@ -30,6 +31,8 @@ export function StalkerForm({
   /** Edit mode: the MAC already on the wire stays valid even if malformed. */
   storedMac?: string;
   onSuggestName?: (input: string) => void;
+  /** Validates one field (error path, e.g. `stalker.macAddress`) when the user leaves it. */
+  onFieldBlur?: (path: string) => void;
 }) {
   const { t } = useTranslation('sources');
   const set = (patch: Partial<StalkerDraft>) => onChange({ ...value, ...patch });
@@ -71,7 +74,10 @@ export function StalkerForm({
             placeholder="http://portal.example/c/"
             value={value.portalUrl}
             onChange={(e) => onPortalChange(e.target.value)}
-            onBlur={() => onSuggestName?.(value.portalUrl)}
+            onBlur={() => {
+              onSuggestName?.(value.portalUrl);
+              onFieldBlur?.('stalker.portalUrl');
+            }}
           />
         )}
       </Field>
@@ -87,6 +93,7 @@ export function StalkerForm({
             className="font-mono tracking-wide"
             value={value.macAddress}
             onChange={(e) => onMacChange(e.target.value)}
+            onBlur={() => onFieldBlur?.('stalker.macAddress')}
           />
         )}
       </Field>
@@ -110,7 +117,12 @@ export function StalkerForm({
             />
           )}
         </Field>
-        <Field label={t('password')} optional optionalLabel={t('optional')}>
+        <Field
+          label={t('password')}
+          optional
+          optionalLabel={t('optional')}
+          hint={hasEdgeSpace(value.password) ? t('passwordSpaceHint') : undefined}
+        >
           {(p) => <SecretInput {...p} disabled={disabled} value={value.password} onChange={(e) => set({ password: e.target.value })} />}
         </Field>
       </div>
@@ -150,6 +162,7 @@ export function StalkerForm({
 
       <ConnectionTest
         disabled={disabled}
+        inputs={JSON.stringify(value)}
         run={() => {
           const built = buildStalkerConfig(value, storedMac);
           onErrors(built.errors);

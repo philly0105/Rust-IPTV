@@ -1,8 +1,25 @@
 import type { RpcError } from '@/api/transport';
-import type { RpcErrorCode } from '@/api/types';
+import type { M3uOrigin, RpcErrorCode, SourceKind } from '@/api/types';
+
+/** What the error helpers read: the code, plus the core's text when there is one. */
+type ErrLike = Pick<RpcError, 'code'> & { message?: string };
+
+/**
+ * The core's `Invalid` texts for an address that does not lead to a channel list: a single
+ * stream (MPEG-TS, HLS media playlist, video data), binary data, a web page (login or error
+ * page), or a download over the 1 GiB playlist cap (`crates/iptv-core/src/m3u/body.rs`), plus
+ * an Xtream server that answers with HTML. All mean the URL is the wrong one.
+ */
+export const WRONG_URL = /not a channel list|not an M3U playlist|web page instead of|too large to be a channel list/i;
+
+/** True when the error says the address points at something that is not a playlist. */
+export function isWrongUrl(err: ErrLike): boolean {
+  return (err.code === 'invalid' || err.code === 'internal') && WRONG_URL.test(err.message ?? '');
+}
 
 /** i18n key (sources ns) with the next action for a failed source operation. */
-export function nextStepKey(err: Pick<RpcError, 'code'>): string {
+export function nextStepKey(err: ErrLike): string {
+  if (isWrongUrl(err)) return 'hintWrongUrl';
   switch (err.code) {
     case 'network':
       return 'hintNetwork';
@@ -24,7 +41,8 @@ export function nextStepKey(err: Pick<RpcError, 'code'>): string {
 }
 
 /** i18n key (sources ns) with a plain summary of what went wrong; the raw message is only technical detail. */
-export function summaryKey(err: Pick<RpcError, 'code'>): string {
+export function summaryKey(err: ErrLike): string {
+  if (isWrongUrl(err)) return 'errorSummaryWrongUrl';
   switch (err.code) {
     case 'network':
       return 'errorSummaryNetwork';
@@ -45,6 +63,36 @@ export function summaryKey(err: Pick<RpcError, 'code'>): string {
   }
 }
 
+/**
+ * The form field a failed add or save most likely points at, so the dialog can mark it and move
+ * focus there: the login for rejected credentials, the address for a missing or unreachable server.
+ * Null when the failure says nothing about a single field (or the field is not in the form).
+ */
+export function fieldForError(
+  err: Pick<RpcError, 'code' | 'details'> & { message?: string },
+  kind: SourceKind,
+  m3uOrigin: M3uOrigin = 'url',
+): string | null {
+  // The app could not reach its own backend: nothing in the form is wrong.
+  const d = err.details;
+  if (d && typeof d === 'object' && 'transport' in d) return null;
+  // A stream, web page or oversized file instead of a playlist: the address is the thing to fix.
+  const code = isWrongUrl(err) ? 'not_found' : err.code;
+  switch (code) {
+    case 'auth':
+      if (kind === 'xtream') return 'xtream.password';
+      if (kind === 'stalker') return 'stalker.macAddress';
+      return null;
+    case 'not_found':
+    case 'network':
+      if (kind === 'xtream') return 'xtream.serverUrl';
+      if (kind === 'stalker') return 'stalker.portalUrl';
+      return m3uOrigin === 'url' ? 'm3u.url' : null;
+    default:
+      return null;
+  }
+}
+
 /** Id of the source `sources.add` created before its import failed (the core keeps it, with `lastError`). */
 export function failedSourceId(err: Pick<RpcError, 'details'>): string | null {
   const d = err.details;
@@ -62,7 +110,9 @@ export function failedSourceId(err: Pick<RpcError, 'details'>): string | null {
 export function importErrorCode(message: string | undefined): RpcErrorCode {
   const m = (message ?? '').toLowerCase();
   if (!m) return 'internal';
-  if (/timed? ?out|timeout|deadline/.test(m)) return 'timeout';
+  // Before the auth check: the web-page text mentions a "login or error page".
+  if (WRONG_URL.test(m)) return 'invalid';
+  if (/timed? ?out|timeout|deadline|sending the playlist too slowly/.test(m)) return 'timeout';
   if (/\b40[13]\b|unauthori[sz]ed|forbidden|authenticat|credential|password|login|account (is )?(expired|disabled|banned)/.test(m)) return 'auth';
   if (/\b404\b|not found|no such file/.test(m)) return 'not_found';
   if (/already exists|duplicate|conflict/.test(m)) return 'conflict';
@@ -74,7 +124,7 @@ export function importErrorCode(message: string | undefined): RpcErrorCode {
 
 /** i18n key (sources ns) summarizing an `import.progress` error message. */
 export function importSummaryKey(message: string | undefined): string {
-  return summaryKey({ code: importErrorCode(message) });
+  return summaryKey({ code: importErrorCode(message), message });
 }
 
 type ImportErrorClaim = (sourceId: string) => boolean;

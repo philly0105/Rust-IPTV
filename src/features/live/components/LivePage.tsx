@@ -19,7 +19,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { sameRef, type Channel, type ContentType, type EpgNowNext, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, useToast } from '@/ui';
 import { PlayerStage, RadioPlayer, useChannelZap, usePlayerStore } from '@/features/player';
 import { registerCommands, useShell, useShortcut } from '@/shell';
 import { useDebounced } from '../hooks/useDebounced';
@@ -38,6 +38,7 @@ import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
+import { CHANNEL_ROW_HEIGHT, RowSkeleton } from './ChannelRow';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
@@ -69,6 +70,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const category = useMemo(() => categories.data?.find((c) => c.id === categoryId), [categories.data, categoryId]);
 
   const [search, setSearch] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const debouncedSearch = useDebounced(search.trim(), 250);
   useEffect(() => setSearch(''), [sourceId, categoryId]);
 
@@ -92,7 +94,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const playingItem = useRpcQuery('catalog.item', { ref: playingRef ?? EMPTY_REF }, { enabled: !!playingRef, staleTime: 5 * 60_000 });
   const playingChannel = playingRef ? (playingItem.data as Channel | undefined) : undefined;
   const [activeChannel, setActiveChannel] = useState<Channel | undefined>(undefined);
-  const ribbonChannel = playingChannel ?? activeChannel;
+  // Holding an arrow key walks the cursor through many rows; the guide follows once it settles
+  // instead of asking for (and flashing a skeleton for) every channel passed on the way.
+  const settledActive = useDebounced(activeChannel, 200);
+  const ribbonChannel = playingChannel ?? settledActive;
   const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   const offset = prefs.epgOffsetMinutes;
   const playingNowNext = useRpcQuery(
@@ -204,6 +209,11 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     e.preventDefault();
     toggleSidebar();
   }, { description: t('shortcutToggleSidebar'), area: shortcutArea });
+  useShortcut('/', (e) => {
+    e.preventDefault();
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, { description: t('shortcutFocusSearch'), area: shortcutArea });
   useShortcut('digit', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     digits.push(e.key);
@@ -366,14 +376,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     listBody = <ErrorState error={paged.error} onRetry={paged.retry} />;
   } else if (paged.isLoading) {
     listBody = (
-      <div className="flex flex-col gap-3 p-3" aria-busy="true" aria-label={t('loadingChannels')}>
-        {Array.from({ length: 10 }, (_, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <Skeleton className="size-9" />
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Skeleton className="h-3 w-2/5" />
-              <Skeleton className="h-2.5 w-3/5" />
-            </div>
+      <div className="min-h-0 flex-1 overflow-hidden" role="status" aria-busy="true" aria-label={t('loadingChannels')} data-testid="channel-list-loading">
+        {Array.from({ length: 12 }, (_, i) => (
+          <div key={i} className="border-b border-border/60" style={{ height: CHANNEL_ROW_HEIGHT }}>
+            <RowSkeleton pulse />
           </div>
         ))}
       </div>
@@ -392,7 +398,20 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       />
     );
   } else if (listEmpty && categoryId) {
-    listBody = <EmptyState icon={<ListTree className="size-6" />} title={t('emptyGroup')} />;
+    listBody = (
+      <EmptyState
+        icon={<ListTree className="size-6" />}
+        title={t('emptyGroup')}
+        action={
+          <Link
+            to={hrefFor(undefined)}
+            className="inline-flex h-8 items-center rounded-md border border-border bg-surface-2 px-3 text-sm font-medium text-fg hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            {isRadio ? t('allStations') : t('allChannels')}
+          </Link>
+        }
+      />
+    );
   } else if (listEmpty && hiddenCount > 0) {
     listBody = (
       <EmptyState
@@ -422,7 +441,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     listBody = (
       <ChannelList
         paged={paged}
-        resetKey={`${sourceId}|${categoryId ?? ''}|${debouncedSearch}`}
+        resetKey={`${contentType}|${sourceId}|${categoryId ?? ''}|${debouncedSearch}`}
         playingRef={playingRef}
         openOnDoubleClick={settings.data?.openStreamOnDoubleClick ?? false}
         now={now}
@@ -480,17 +499,35 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
+                const toList = () =>
                   document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
+                if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.nativeEvent.isComposing)) {
+                  e.preventDefault();
+                  toList();
+                } else if (e.key === 'Escape') {
+                  // First Escape clears the query, the second hands focus back to the list.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (search) setSearch('');
+                  else toList();
                 }
               }}
+              ref={searchRef}
               placeholder={category ? t('searchInGroup', { group: category.name }) : t('searchChannels')}
               aria-label={t('searchChannels')}
               className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-fg-subtle [&::-webkit-search-cancel-button]:hidden"
             />
             {search ? (
-              <button type="button" aria-label={t('clearSearch')} onClick={() => setSearch('')} className="text-fg-subtle hover:text-fg">
+              <button
+                type="button"
+                aria-label={t('clearSearch')}
+                title={t('clearSearch')}
+                onClick={() => {
+                  setSearch('');
+                  searchRef.current?.focus();
+                }}
+                className="inline-flex size-5 items-center justify-center rounded-sm text-fg-subtle hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+              >
                 <X className="size-3.5" />
               </button>
             ) : null}

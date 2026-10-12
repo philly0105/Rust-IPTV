@@ -204,7 +204,16 @@ async fn download(
         return Ok(Fetched::NotModified);
     }
     if !status.is_success() {
-        return Err(crate::http::status_error(status, "EPG download"));
+        let host = resp.url().host_str().unwrap_or("the server");
+        let context = format!("{host} answered the guide (EPG) download");
+        return Err(match status.as_u16() {
+            404 | 410 => crate::http::status_error_with_hint(
+                status,
+                &context,
+                "Check the guide URL; the provider may have changed it.",
+            ),
+            _ => crate::http::status_error(status, &context),
+        });
     }
     if resp
         .content_length()

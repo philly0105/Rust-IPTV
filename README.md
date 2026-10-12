@@ -72,14 +72,29 @@ Press `?` in the app for the full list. The main ones:
 | Ctrl+K | Command palette |
 | Ctrl+F | Global search |
 | Ctrl+R | Recently watched |
+| Ctrl+Shift+L | Switch light / dark theme |
+| F8 | Move focus to notifications |
+| ? | Shortcut help |
 | Ctrl+B | Toggle the live TV group sidebar |
+| / | Focus the live TV channel search |
 | 0-9 | Type a channel number to zap |
+| Page Up / Page Down | Previous / next channel (live TV) |
 | Space or K | Play / pause |
-| F | Fullscreen |
-| Left / Right | Seek 5 s |
+| F | Fullscreen (in picture-in-picture: back to the full window) |
+| Left / Right | Seek 10 s |
+| Shift+Left / Shift+Right | Seek 30 s while the seek bar has focus |
 | Up / Down | Volume 5 % |
 | M | Mute |
-| Esc | Close the open dialog or overlay |
+| C | Captions on / off (in fullscreen live TV: the channel panel) |
+| Shift+N | Add a source (Sources page) |
+| Alt+Up / Alt+Down | Move the focused favorite up / down (Favorites) |
+| P / R / X / Delete | Pause or resume / retry / cancel / remove the focused download (Downloads) |
+| Backspace | Back to My Videos from a video's page |
+| Esc | Close the open dialog or overlay; leave picture-in-picture; on a movie or series page, go back to where you came from (a grid returns to the title you opened) |
+
+## Picture-in-picture
+
+The PiP button in the player controls shrinks the window to a small always-on-top player. Resizing keeps the video's aspect ratio. Esc, F, or the restore button in the PiP title bar returns to the full window at its previous size and position. If you quit while in PiP, the next launch opens at the normal window size, not the PiP size: the saved window state never records PiP bounds.
 
 ## Remote control
 
@@ -88,6 +103,16 @@ Settings > Remote turns on a small web remote served at `http://127.0.0.1:7310/`
 ## Backups and migrating from IPTVnator
 
 Settings > Backup exports and imports the IPTVnator playlist backup format (`iptvnator-playlist-backup`, version 1). A backup exported from IPTVnator imports here with its playlists, favorites, recently viewed items, hidden groups, playback positions, and EPG URLs, and a backup exported here opens in IPTVnator. Export leaves passwords out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See `docs/architecture/backup.md`.
+
+## Troubleshooting sources
+
+A source that fails to load keeps its name and details, and its card on the Sources page says what went wrong with a Try again button. Edit fixes the details without removing the source or its favorites.
+
+- Timeouts ("didn't answer in time"): the app gives a server 10 s to accept the connection and 15 s to start answering, then stops waiting instead of hanging. Check that the server address and port are right and that the server is online in a browser, then use Try again. Large playlists are not cut off by these limits; only a stalled download is.
+- Bad credentials (Xtream username or password, Stalker MAC): the portal answers 401 or 403, or reports the account as expired or disabled. Fix the details with Edit; a Stalker portal only accepts the MAC registered with your provider.
+- Not found (404): the playlist or portal address is wrong. For Xtream the server address is `http://host:port` (pasting a full `get.php` link fills in the fields for you); for Stalker use the portal address ending in `/c/`.
+- A single stream address (an `.m3u8`, `.ts` or `.mp4` link) pasted as a playlist URL fails right away with a hint instead of downloading the stream. Use the address of the playlist that lists your channels.
+- "Answered with a web page instead of a playlist": the address points at a login or error page, not an M3U file. Use the playlist URL your provider gives you (it usually ends in `.m3u`, `.m3u8` or `get.php?...&type=m3u`).
 
 ## TMDB
 

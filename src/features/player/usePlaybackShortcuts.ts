@@ -1,14 +1,14 @@
 import { useTranslation } from 'react-i18next';
 
 import { useShortcut } from '@/shell/shortcuts';
-import { targetOwnsKey, type KeyKind } from './format';
+import { positionReadout, SEEK_STEP, targetOwnsKey, type KeyKind } from './format';
 import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
 import { usePlayerStore, zap } from './store';
 
 const AREA = 'Playback';
-/** Seconds the left and right arrows skip. */
-export const SEEK_STEP = 10;
+/** Seconds the left and right arrows skip (shared with the seek bar). */
+export { SEEK_STEP };
 
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down).
@@ -42,6 +42,15 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     const { volume, muted } = s();
     showOsd(muted ? t('muted') : t('volumePercent', { percent: Math.round(volume * 100) }));
   };
+  /** Transient readout after an arrow seek: the step, then where playback now is. */
+  const seekOsd = (delta: number): void => {
+    const { positionSeconds, durationSeconds, source } = s();
+    const w = useMediaStore.getState().seekable;
+    showOsd(
+      t(delta < 0 ? 'seekBack' : 'seekForward', { count: Math.abs(delta) }),
+      positionReadout(t, { position: positionSeconds, duration: durationSeconds, liveEnd: source?.isLive && w ? w.end : undefined }),
+    );
+  };
   const seekWindow = (): boolean => {
     if (seekable) return true;
     const w = useMediaStore.getState().seekable;
@@ -56,14 +65,18 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   useShortcut(
     'arrowleft',
     guard('arrow', () => {
-      if (seekWindow()) s().seekBy(-SEEK_STEP);
+      if (!seekWindow()) return;
+      s().seekBy(-SEEK_STEP);
+      seekOsd(-SEEK_STEP);
     }),
     { ...base, description: t('shortcutSeekBack') },
   );
   useShortcut(
     'arrowright',
     guard('arrow', () => {
-      if (seekWindow()) s().seekBy(SEEK_STEP);
+      if (!seekWindow()) return;
+      s().seekBy(SEEK_STEP);
+      seekOsd(SEEK_STEP);
     }),
     { ...base, description: t('shortcutSeekForward') },
   );

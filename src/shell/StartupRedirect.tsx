@@ -2,8 +2,7 @@ import { useEffect } from 'react';
 import { Navigate } from 'react-router';
 
 import type { Settings } from '@/api/types';
-import { Skeleton } from '@/ui';
-
+import { HeroSkeleton } from './dashboard/HeroSkeleton';
 import { consumeStartupDeepLink, isRestorableRoute, useStartupDeepLink } from './effects';
 import { useSettings } from './useSettings';
 
@@ -30,9 +29,9 @@ export function StartupRedirect() {
   if (link.path) return <Navigate to={link.path} replace />;
   if (settings.isPending || !link.settled) {
     return (
-      <div className="flex flex-col gap-4 p-8" aria-busy="true">
-        <Skeleton className="h-56 w-full rounded-lg" />
-        <Skeleton className="h-5 w-48" />
+      // Same frame as the dashboard's loading state, the most common landing page.
+      <div className="flex flex-col gap-10 pt-8" aria-busy="true" data-testid="startup-pending">
+        <HeroSkeleton />
       </div>
     );
   }

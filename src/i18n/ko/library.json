@@ -194,5 +194,12 @@
   "removeFailed": "항목을 삭제할 수 없습니다",
   "sourceRemoved": "소스가 삭제됨",
   "sourceRemovedHint": "이 항목의 소스가 삭제되었습니다. 항목을 열려면 소스를 다시 추가하세요.",
-  "tryAgain": "다시 시도"
+  "tryAgain": "다시 시도",
+  "browseChannels": "채널 둘러보기",
+  "addSourceAction": "소스 추가",
+  "emptyNoSourcesBody": "먼저 재생목록이나 포털을 추가하세요. 열거나 즐겨찾기한 항목이 여기에 표시됩니다.",
+  "recentRemoved": "{{title}}을(를) 기록에서 삭제했습니다",
+  "continueRemoved": "{{title}}을(를) 이어 보기에서 삭제했습니다",
+  "undoFailed": "실행 취소하지 못했습니다",
+  "clearSearch": "검색 지우기"
 }

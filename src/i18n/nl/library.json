@@ -194,5 +194,12 @@
   "removeFailed": "Kan het item niet verwijderen",
   "sourceRemoved": "Bron verwijderd",
   "sourceRemovedHint": "De bron van dit item is verwijderd. Voeg de bron opnieuw toe om het item te openen.",
-  "tryAgain": "Opnieuw proberen"
+  "tryAgain": "Opnieuw proberen",
+  "browseChannels": "Zenders bekijken",
+  "addSourceAction": "Bron toevoegen",
+  "emptyNoSourcesBody": "Voeg eerst een playlist of portal toe. Alles wat je opent of markeert verschijnt dan hier.",
+  "recentRemoved": "{{title}} verwijderd uit de geschiedenis",
+  "continueRemoved": "{{title}} verwijderd uit Verder kijken",
+  "undoFailed": "Ongedaan maken mislukt",
+  "clearSearch": "Zoekopdracht wissen"
 }

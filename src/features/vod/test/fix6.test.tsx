@@ -11,6 +11,7 @@ import type { Category, Page, PageQuery, VodItem } from '@/api/types';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { SearchPage } from '../pages/SearchPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
+import { forgetSpots } from '../hooks/useScrollMemory';
 import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -50,6 +51,7 @@ const cats: Category[] = [{ id: 'c1', sourceId: 'src1', contentType: 'movie', na
 
 beforeAll(installDomStubs);
 beforeEach(() => {
+  forgetSpots();
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;
@@ -100,7 +102,8 @@ describe('F5: cards show the title without the year suffix', () => {
     renderAt('/s/src1/movies/c/c1', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
     const caption = await screen.findByText('Alpha Movie 1');
     expect(screen.queryByText('Alpha Movie 1 (2021)')).toBeNull();
-    expect(caption.closest('a')?.getAttribute('title')).toBe('Alpha Movie 1 (2021)');
+    // Inside the grid the card is a named group in a listbox option, not a link (axe nested-interactive).
+    expect(caption.closest('[data-poster-card]')?.getAttribute('title')).toBe('Alpha Movie 1 (2021)');
   });
 
   it('search and recently-added rails use titleBase', async () => {

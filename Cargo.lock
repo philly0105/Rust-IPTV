@@ -2158,6 +2158,7 @@ dependencies = [
  "futures",
  "hex",
  "iptv-fixtures",
+ "iptv-mock",
  "memchr",
  "memory-stats",
  "once_cell",

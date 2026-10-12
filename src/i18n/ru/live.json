@@ -125,6 +125,7 @@
   "searchInGroup": "Поиск в {{group}}",
   "shortcutArea": "Прямой эфир",
   "shortcutDigits": "Ввести номер канала (переход через 1,5 с)",
+  "shortcutFocusSearch": "Поиск каналов",
   "shortcutToggleSidebar": "Показать или скрыть панель групп",
   "stage": "Плеер",
   "stageIdle": "Ничего не воспроизводится",

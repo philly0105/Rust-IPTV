@@ -19,14 +19,14 @@
   --color-border: #2f3d57;
   --color-fg: #e9edf5;
   --color-fg-muted: #a9b3c6;
-  --color-fg-subtle: #8692a9;
+  --color-fg-subtle: #8f9bb2;
   --color-accent: #f5b544;
   --color-accent-hover: #ffc865;
   --color-accent-fg: #1b1204;
   --color-danger: #ff7a7a;
   --color-success: #4fd49b;
   --color-warning: #eccb5c;
-  --color-live: #ff5a61;
+  --color-live: #ff6a70;
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
 
@@ -196,7 +196,9 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }
@@ -205,8 +207,17 @@ html[data-reduced-motion='true'] *::before,
 html[data-reduced-motion='true'] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
   transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
   scroll-behavior: auto !important;
+}
+
+/* Set for two frames while the theme flips (theme.tsx), so colours swap at once. */
+html[data-theme-switching='true'] *,
+html[data-theme-switching='true'] *::before,
+html[data-theme-switching='true'] *::after {
+  transition: none !important;
 }
 
 /*

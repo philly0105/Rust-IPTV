@@ -11,7 +11,7 @@ import type { EngineTracks, TrackOption } from '../engines';
 import { modalOpen } from '../format';
 import { setMediaCommands, useMediaStore } from '../media';
 import { measureMpvBounds, measureMpvLayout } from '../mpvBounds';
-import { togglePip } from '../pip';
+import { exitPip, togglePip, usePipStore } from '../pip';
 import {
   ENDED_EPSILON,
   handleEnded,
@@ -138,10 +138,22 @@ export function MpvSurface({ className }: { className?: string }) {
       if (disposed || !ready) return;
       applyState(st);
     });
-    // A left click on the video (bound inside mpv, whose window takes the mouse).
+    // Clicks on the native video window. A click toggles pause at once; the double click that
+    // follows puts the play state back and toggles fullscreen (or leaves PiP).
+    let lastClick: { at: number; wasPaused: boolean } | null = null;
     const unClick = onAppEvent('mpv.click', () => {
       if (disposed || !ready) return;
+      lastClick = { at: Date.now(), wasPaused: useMediaStore.getState().mpv?.paused ?? false };
       usePlayerStore.getState().togglePlay();
+    });
+    const unDouble = onAppEvent('mpv.dblclick', () => {
+      if (disposed || !ready) return;
+      if (lastClick && Date.now() - lastClick.at < 1000) {
+        void rpc('mpv.setProperty', { name: 'pause', value: lastClick.wasPaused }).catch(() => undefined);
+      }
+      lastClick = null;
+      if (usePipStore.getState().active) void exitPip();
+      else usePlayerStore.getState().toggleFullscreen();
     });
 
     const applyState = (st: MpvState, initial = false): void => {
@@ -150,7 +162,8 @@ export function MpvSurface({ className }: { className?: string }) {
         mpv: st,
         tracks: mpvTracks(st, { audio: (i) => t('audioFallback', { index: i }), sub: (i) => t('subtitleFallback', { index: i }) }),
         captionsOn: st.tracks.some((x) => x.type === 'sub' && x.selected),
-        waiting: !st.loaded,
+        // Mid-stream stalls (mpv's paused-for-cache) count as waiting too.
+        waiting: !st.loaded || !!st.buffering,
         seekable: st.seekable,
         recordStartedAt: st.recording ? (prev?.recording ? useMediaStore.getState().recordStartedAt : undefined) ?? Date.now() : undefined,
       });
@@ -230,6 +243,7 @@ export function MpvSurface({ className }: { className?: string }) {
       dpr.removeEventListener('change', onDpr);
       unState();
       unClick();
+      unDouble();
       unController();
       unCommands();
       useMediaStore.setState({ mpv: undefined, recordStartedAt: undefined });

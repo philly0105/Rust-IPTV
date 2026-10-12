@@ -310,5 +310,8 @@
   "epgClearConfirmBody": "Se eliminan todos los programas de todas las guías. Las asociaciones de canales y las direcciones de las guías se conservan.",
   "epgClearConfirm": "Borrar datos de la guía",
   "epgClearDone": "Datos de la guía borrados",
-  "epgClearFailed": "No se pudieron borrar los datos de la guía"
+  "epgClearFailed": "No se pudieron borrar los datos de la guía",
+  "saving": "Guardando…",
+  "saved": "Guardado",
+  "railsOffHint": "Activa el panel de inicio para usar estas filas."
 }

@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "所有節目表中的全部節目都會被刪除。頻道對應與節目表位址會保留。",
   "epgClearConfirm": "清除節目表資料",
   "epgClearDone": "已清除節目表資料",
-  "epgClearFailed": "無法清除節目表資料"
+  "epgClearFailed": "無法清除節目表資料",
+  "saving": "正在儲存…",
+  "saved": "已儲存",
+  "railsOffHint": "開啟儀表板後才能使用這些列。"
 }

@@ -35,6 +35,35 @@ export function useSettings(): Settings {
   return q.data ?? DEFAULT_SETTINGS;
 }
 
+/** How many continue-watching entries a grid reads to mark resumable posters. */
+const RESUME_LOOKUP_LIMIT = 500;
+
+/** `sourceId|contentType|itemId` for matching saved positions to grid items. */
+export function resumeKey(ref: ItemRef): string {
+  return `${ref.sourceId}|${ref.contentType}|${ref.itemId}`;
+}
+
+/**
+ * Watched fraction per title for one source and kind, from continue watching
+ * (newest first, so a series shows the episode you were last in). Grids draw
+ * it as the thin progress bar on the poster.
+ */
+export function useResumeMap(sourceId: string, kind: 'movie' | 'series'): Map<string, number> {
+  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { staleTime: 15_000, enabled: !!sourceId });
+  return useMemo(() => {
+    const out = new Map<string, number>();
+    for (const p of q.data ?? []) {
+      if (p.ref.sourceId !== sourceId || p.ref.contentType !== kind || p.watched) continue;
+      if (!p.durationSeconds || p.durationSeconds <= 0) continue;
+      const key = resumeKey(p.ref);
+      if (out.has(key)) continue;
+      const f = Math.min(1, Math.max(0, p.positionSeconds / p.durationSeconds));
+      if (f > 0) out.set(key, f);
+    }
+    return out;
+  }, [q.data, sourceId, kind]);
+}
+
 export function useSource(sourceId: string | undefined): UseQueryResult<Source, RpcError> {
   return useRpcQuery('sources.get', { id: sourceId ?? '' }, { enabled: !!sourceId, staleTime: 60_000 });
 }

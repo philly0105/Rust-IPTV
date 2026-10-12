@@ -208,5 +208,12 @@
   "removeFailed": "Impossible de supprimer l'élément",
   "sourceRemoved": "Source supprimée",
   "sourceRemovedHint": "La source de cet élément a été supprimée. Ajoutez-la de nouveau pour ouvrir l'élément.",
-  "tryAgain": "Réessayer"
+  "tryAgain": "Réessayer",
+  "browseChannels": "Parcourir les chaînes",
+  "addSourceAction": "Ajouter une source",
+  "emptyNoSourcesBody": "Ajoutez d’abord une playlist ou un portail. Tout ce que vous ouvrez ou mettez en favori apparaîtra ici.",
+  "recentRemoved": "{{title}} retiré de l’historique",
+  "continueRemoved": "{{title}} retiré de Reprendre la lecture",
+  "undoFailed": "Impossible d’annuler",
+  "clearSearch": "Effacer la recherche"
 }

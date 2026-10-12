@@ -11,7 +11,9 @@
  * useful detail.
  */
 
-export type SourceErrorKind = 'refused' | 'dns' | 'network' | 'timeout' | 'auth' | 'notFound' | 'server' | 'unknown';
+import { WRONG_URL } from './errors';
+
+export type SourceErrorKind = 'wrongUrl' | 'refused' | 'dns' | 'network' | 'timeout' | 'auth' | 'notFound' | 'server' | 'unknown';
 
 export interface SourceErrorInfo {
   kind: SourceErrorKind;
@@ -21,6 +23,7 @@ export interface SourceErrorInfo {
 
 /** Locale key in the `sources` namespace for each mapped kind. */
 export const SOURCE_ERROR_KEYS: Record<Exclude<SourceErrorKind, 'unknown'>, string> = {
+  wrongUrl: 'sourceErrorWrongUrl',
   refused: 'sourceErrorRefused',
   dns: 'sourceErrorDns',
   network: 'sourceErrorNetwork',
@@ -48,11 +51,14 @@ const HOST_PATTERNS: readonly RegExp[] = [
   /^(\S+?) accepted the connection but did not answer/,
   /^(\S+?) stopped sending data/,
   /^(\S+?) answered the playlist download: HTTP/,
+  /^(\S+?) sent /,
+  /^(\S+?) is sending /,
+  /^(\S+?) answered with a web page/,
 ];
 
 const AUTH = /HTTP 40[13]\b|rejected the username or password|refused the request after a fresh login|refused the handshake|Authorization failed/i;
 const NOT_FOUND = /HTTP 404\b|HTTP 410\b|\bfile not found\b/i;
-const TIMEOUT = /did not respond in time|did not answer within|stopped sending data|HTTP 408\b|HTTP 504\b|timed out/i;
+const TIMEOUT = /sending the playlist too slowly|did not respond in time|did not answer within|stopped sending data|HTTP 408\b|HTTP 504\b|timed out/i;
 const SERVER = /HTTP 429\b|HTTP 5\d\d\b/;
 const REFUSED = /connection refused|actively refused|os error 10061|os error 111\b|ECONNREFUSED/i;
 const DNS = /dns error|failed to lookup address|No such host|os error 11001|Name or service not known|nodename nor servname/i;
@@ -104,6 +110,8 @@ export function classifySourceError(text: string): SourceErrorInfo {
     if (kind === 'network' && DNS.test(detail)) return withHost('dns');
     return withHost(kind);
   }
+  // First: the web-page text also says "login", and none of these is a connection problem.
+  if (WRONG_URL.test(detail)) return withHost('wrongUrl');
   if (AUTH.test(detail)) return withHost('auth');
   if (NOT_FOUND.test(detail)) return withHost('notFound');
   if (TIMEOUT.test(detail)) return withHost('timeout');

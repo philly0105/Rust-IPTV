@@ -243,10 +243,19 @@ export function Segmented<T extends string>({
             onClick={() => onChange(o.value)}
             onKeyDown={(e) => {
               const i = options.findIndex((x) => x.value === value);
-              const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
-              if (!step) return;
+              // Arrow keys follow the visual direction, so they flip in right-to-left locales.
+              const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
+              const fwd = rtl ? 'ArrowLeft' : 'ArrowRight';
+              const back = rtl ? 'ArrowRight' : 'ArrowLeft';
+              let target: number | null = null;
+              if (e.key === fwd || e.key === 'ArrowDown') target = (i + 1) % options.length;
+              else if (e.key === back || e.key === 'ArrowUp') target = (i - 1 + options.length) % options.length;
+              else if (e.key === 'Home') target = 0;
+              else if (e.key === 'End') target = options.length - 1;
+              if (target === null) return;
               e.preventDefault();
-              const next = options[(i + step + options.length) % options.length];
+              const next = options[target];
+              if (next?.value === value) return;
               if (next) {
                 onChange(next.value);
                 const group = e.currentTarget.parentElement;

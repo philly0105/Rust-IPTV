@@ -238,12 +238,18 @@ pub fn year_from_date(s: Option<&str>) -> Option<i64> {
     let s = s?;
     let bytes = s.as_bytes();
     (0..bytes.len().saturating_sub(3)).find_map(|i| {
-        let w = &s[i..i + 4];
-        let digits = w.bytes().all(|b| b.is_ascii_digit());
+        // Check bytes first: slicing `s` at an arbitrary byte panics inside a
+        // multi-byte character (Arabic dates, for one).
+        let w = &bytes[i..i + 4];
+        let digits = w.iter().all(u8::is_ascii_digit);
         let left_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
         let right_ok = i + 4 == bytes.len() || !bytes[i + 4].is_ascii_digit();
         if digits && left_ok && right_ok {
-            w.parse::<i64>().ok().filter(|y| (1900..=2100).contains(y))
+            std::str::from_utf8(w)
+                .ok()?
+                .parse::<i64>()
+                .ok()
+                .filter(|y| (1900..=2100).contains(y))
         } else {
             None
         }
@@ -315,6 +321,8 @@ mod tests {
         assert_eq!(year_from_date(Some("2019-05-01")), Some(2019));
         assert_eq!(year_from_date(Some("01/05/1999")), Some(1999));
         assert_eq!(year_from_date(Some("12345")), None);
+        assert_eq!(year_from_date(Some("جمعة 2019")), Some(2019));
+        assert_eq!(year_from_date(Some("ج")), None);
         assert_eq!(duration_to_seconds(Some("01:30:05")), Some(5405));
         assert_eq!(duration_to_seconds(Some("95 min")), Some(5700));
         assert_eq!(duration_to_seconds(Some("")), None);

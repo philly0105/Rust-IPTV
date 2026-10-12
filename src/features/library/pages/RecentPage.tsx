@@ -11,7 +11,7 @@ import { RpcError, rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
 
 import { Button, EmptyState, ErrorState, SkeletonList, useToast } from '../deps';
-import { ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
+import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -29,7 +29,7 @@ export function RecentPage() {
   const { sourceId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const args = useMemo(() => (sourceId ? { sourceId, limit: RECENT_LIMIT } : { limit: RECENT_LIMIT }), [sourceId]);
   const query = useRpcQuery('recent.list', args);
   const cont = useRpcQuery('positions.continueWatching', { limit: CONTINUE_LIMIT });
@@ -49,6 +49,18 @@ export function RecentPage() {
       void run(key, async () => {
         try {
           await rpc('recent.remove', { ref: e.ref });
+          toast({
+            title: t('recentRemoved', { title: e.snapshot.title }),
+            variant: 'info',
+            action: {
+              label: t('undo'),
+              onClick: () => {
+                void rpc('recent.add', { ref: e.ref, snapshot: e.snapshot })
+                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+                  .finally(() => invalidate('recent.'));
+              },
+            },
+          });
         } catch (err) {
           toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
         } finally {
@@ -81,6 +93,25 @@ export function RecentPage() {
   const removeContinue = async (p: PlaybackPosition) => {
     try {
       await rpc('positions.remove', p.episodeId ? { ref: p.ref, episodeId: p.episodeId } : { ref: p.ref });
+      const label = p.snapshot?.title ?? '';
+      toast({
+        title: t('continueRemoved', { title: label }),
+        variant: 'info',
+        action: {
+          label: t('undo'),
+          onClick: () => {
+            void rpc('positions.set', {
+              ref: p.ref,
+              positionSeconds: p.positionSeconds,
+              ...(p.episodeId ? { episodeId: p.episodeId } : {}),
+              ...(p.durationSeconds !== undefined ? { durationSeconds: p.durationSeconds } : {}),
+              ...(p.snapshot ? { snapshot: p.snapshot } : {}),
+            })
+              .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+              .finally(() => invalidate('positions.'));
+          },
+        },
+      });
     } catch (err) {
       toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
     } finally {
@@ -144,8 +175,25 @@ export function RecentPage() {
   if (query.isLoading) body = <SkeletonList rows={8} className="pt-2" />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (count === 0 && !rail)
-    body = <EmptyState icon={<History size={28} aria-hidden />} title={t('recentEmptyTitle')} description={t('recentEmptyBody')} />;
-  else if (rows.length === 0 && search) body = <EmptyState title={t('noMatchTitle')} description={t('noMatchSearch', { query: search })} />;
+    body = (
+      <EmptyState
+        icon={<History size={28} aria-hidden />}
+        title={t('recentEmptyTitle')}
+        description={!sourceId && sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('recentEmptyBody')}
+        action={<BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />}
+      />
+    );
+  else if (rows.length === 0 && search) body = (
+      <EmptyState
+        title={t('noMatchTitle')}
+        description={t('noMatchSearch', { query: search })}
+        action={
+          <Button onClick={() => setSearch('')} data-testid="library-clear-search">
+            {t('clearSearch')}
+          </Button>
+        }
+      />
+    );
   else
     body = (
       <VirtualRows

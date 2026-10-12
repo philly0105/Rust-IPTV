@@ -250,5 +250,12 @@
   "removeFailed": "تعذّرت إزالة العنصر",
   "sourceRemoved": "أُزيل المصدر",
   "sourceRemovedHint": "أُزيل مصدر هذا العنصر. أضفه مجددًا لفتح العنصر.",
-  "tryAgain": "إعادة المحاولة"
+  "tryAgain": "إعادة المحاولة",
+  "browseChannels": "تصفح القنوات",
+  "addSourceAction": "أضف مصدرًا",
+  "emptyNoSourcesBody": "أضف قائمة تشغيل أو بوابة أولًا. كل ما تفتحه أو تميزه بنجمة يظهر هنا.",
+  "recentRemoved": "تمت إزالة {{title}} من السجل",
+  "continueRemoved": "تمت إزالة {{title}} من متابعة المشاهدة",
+  "undoFailed": "تعذر التراجع",
+  "clearSearch": "مسح البحث"
 }

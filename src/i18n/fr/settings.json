@@ -310,5 +310,8 @@
   "epgClearConfirmBody": "Tous les programmes de tous les guides sont supprimés. Les correspondances de chaînes et les adresses des guides sont conservées.",
   "epgClearConfirm": "Effacer les données du guide",
   "epgClearDone": "Données du guide effacées",
-  "epgClearFailed": "Impossible d'effacer les données du guide"
+  "epgClearFailed": "Impossible d'effacer les données du guide",
+  "saving": "Enregistrement…",
+  "saved": "Enregistré",
+  "railsOffHint": "Activez le tableau de bord pour utiliser ces rangées."
 }

@@ -40,6 +40,11 @@ export interface VirtualGridProps<T> {
   footer?: ReactNode;
   initialRect?: { width: number; height: number };
   testId?: string;
+  /**
+   * Keyboard cursor on first mount (e.g. the title that was open before going
+   * back). Read once; does not scroll (restore the scroll offset separately).
+   */
+  initialActiveIndex?: number;
 }
 
 /**
@@ -65,11 +70,14 @@ export function VirtualGrid<T>({
   footer,
   initialRect = { width: 960, height: 720 },
   testId,
+  initialActiveIndex,
 }: VirtualGridProps<T>) {
   const parentRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const [width, setWidth] = useState(initialRect.width);
-  const [active, setActive] = useState(-1);
+  const [active, setActive] = useState(() =>
+    initialActiveIndex !== undefined && initialActiveIndex >= 0 && initialActiveIndex < items.length ? initialActiveIndex : -1,
+  );
 
   useLayoutEffect(() => {
     const el = parentRef.current;

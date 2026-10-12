@@ -17,7 +17,7 @@ import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
 import { SourceCard } from './components/SourceCard';
 import { newlyEnabledEpgUrls, refreshGuides, useGuideProgressFeed } from './lib/epgRefresh';
-import { nextStepKey } from './lib/errors';
+import { nextStepKey, summaryKey } from './lib/errors';
 import {
   DEFAULT_VIEW,
   KIND_FILTERS,
@@ -71,7 +71,9 @@ export function SourcesPage() {
   const progress = useImportProgressStore((s) => s.bySource);
 
   const [refreshing, setRefreshing] = useState<ReadonlySet<string>>(new Set());
-  const [refreshingAll, setRefreshingAll] = useState(false);
+  // 1-based position in a running "Refresh all", or null when none runs.
+  const [refreshAllStep, setRefreshAllStep] = useState<{ current: number; total: number } | null>(null);
+  const refreshingAll = refreshAllStep !== null;
   const [editing, setEditing] = useState<Source | null>(null);
   const [editTab, setEditTab] = useState<EditTab>('details');
   const [view, setViewState] = useState<ListView>(() => loadView());
@@ -146,11 +148,17 @@ export function SourcesPage() {
       return !updated.lastError;
     } catch (e) {
       const err = RpcError.from(e);
+      // Unknown failures keep the core's text: the generic summary would hide the only detail.
+      const what = err.code === 'internal' ? redactText(err.message) : t(summaryKey(err));
       toast({
         variant: 'error',
         title: t('refreshFailedTitle', { name: s.name }),
-        description: `${redactText(err.message)} ${t(nextStepKey(err))}`,
-        action: err.retryable ? { label: t('tryAgain'), onClick: () => void refreshOne(s) } : undefined,
+        description: `${what} ${t(nextStepKey(err))}`,
+        // Bad credentials or a wrong address will fail the same way again: send the user to the settings.
+        action:
+          err.code === 'auth' || err.code === 'not_found' || err.code === 'invalid'
+            ? { label: t('checkSettings'), onClick: () => openEdit(s) }
+            : { label: t('tryAgain'), onClick: () => void refreshOne(s) },
       });
       void invalidate('sources.');
       return false;
@@ -163,16 +171,18 @@ export function SourcesPage() {
     }
   };
 
+  // Pasted playlists have nothing to fetch again.
+  const refreshable = sources.filter((s) => s.m3u?.origin !== 'text');
   const refreshAll = async () => {
-    const targets = sources.filter((s) => s.m3u?.origin !== 'text');
+    const targets = refreshable;
     if (targets.length === 0) return;
-    setRefreshingAll(true);
     let failed = 0;
     // One at a time: imports hold a write transaction each, and portals rate-limit.
-    for (const s of targets) {
+    for (const [i, s] of targets.entries()) {
+      setRefreshAllStep({ current: i + 1, total: targets.length });
       if (!(await refreshOne(s))) failed += 1;
     }
-    setRefreshingAll(false);
+    setRefreshAllStep(null);
     toast(
       failed === 0
         ? { variant: 'success', title: t('refreshAllDone', { count: targets.length }) }
@@ -191,7 +201,12 @@ export function SourcesPage() {
       await rpc('sources.reorder', { ids });
     } catch (e) {
       setCache(before);
-      toast({ variant: 'error', title: t('reorderFailed'), description: RpcError.from(e).message });
+      toast({
+        variant: 'error',
+        title: t('reorderFailed'),
+        description: redactText(RpcError.from(e).message),
+        action: { label: t('tryAgain'), onClick: () => void commitOrder(ids, movedId) },
+      });
     } finally {
       void invalidate('sources.');
     }
@@ -255,7 +270,12 @@ export function SourcesPage() {
       await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
     } catch (e) {
       const err = RpcError.from(e);
-      toast({ variant: 'error', title: t('removeFailed', { name: target.name }), description: err.message });
+      toast({
+        variant: 'error',
+        title: t('removeFailed', { name: target.name }),
+        // The confirm dialog stays open, so pressing Remove again is the retry.
+        description: redactText(err.message),
+      });
     } finally {
       setRemoveBusy(false);
     }
@@ -272,7 +292,12 @@ export function SourcesPage() {
       toast({ variant: 'success', title: t('removedAllTitle', { count: before.length }) });
       await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
     } catch (e) {
-      toast({ variant: 'error', title: t('removeAllFailed'), description: RpcError.from(e).message });
+      toast({
+        variant: 'error',
+        title: t('removeAllFailed'),
+        // The confirm dialog stays open for another try.
+        description: redactText(RpcError.from(e).message),
+      });
       void invalidate('sources.');
     } finally {
       setRemoveAllBusy(false);
@@ -320,10 +345,11 @@ export function SourcesPage() {
               variant="secondary"
               icon={<RefreshCw aria-hidden className="size-4" />}
               loading={refreshingAll}
+              disabled={refreshable.length === 0}
               onClick={() => void refreshAll()}
               data-testid="sources-refresh-all"
             >
-              {t('refreshAll')}
+              {refreshAllStep && refreshAllStep.total > 1 ? t('refreshAllProgress', refreshAllStep) : t('refreshAll')}
             </Button>
             <Button variant="primary" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
               {t('addSource')}

@@ -4,8 +4,10 @@ import { k } from '../lib/keys';
 import { Clapperboard, Film, Radio, Tv } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 
 import type { ContentType, DownloadStatus, Source, SourceKind } from '@/api/types';
+import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
 import { Badge, Button, Dialog } from '../deps';
@@ -106,5 +108,29 @@ export function SectionHeading({ title, count, hint }: { title: string; count: n
       <span className="font-display text-[13px] tabular-nums text-fg-subtle">{count}</span>
       {hint && <span className="ms-auto truncate text-xs text-fg-subtle">{hint}</span>}
     </div>
+  );
+}
+
+/**
+ * Empty-state action for Favorites and History: points at where items come
+ * from. Inside a source (or when any source exists) it opens that source's
+ * channels; with no sources at all it leads to adding one. Renders nothing
+ * while sources are still loading so the button never flips.
+ */
+export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string | undefined; sources: ReadonlyMap<string, Source>; loading?: boolean }) {
+  const { t } = useTranslation('library');
+  if (loading && !sourceId) return null;
+  const target = sourceId ?? sources.keys().next().value;
+  if (target) {
+    return (
+      <Link to={`/s/${encodeURIComponent(target)}/live`} className={buttonClass('primary', 'md')} data-testid="library-empty-browse">
+        {t('browseChannels')}
+      </Link>
+    );
+  }
+  return (
+    <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="library-empty-add-source">
+      {t('addSourceAction')}
+    </Link>
   );
 }

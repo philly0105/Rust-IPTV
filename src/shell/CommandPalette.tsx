@@ -1,4 +1,4 @@
-import { Command as Cmdk } from 'cmdk';
+import { Command as Cmdk, defaultFilter } from 'cmdk';
 import {
   CalendarRange,
   CornerDownLeft,
@@ -42,6 +42,17 @@ export const SETTINGS_SECTIONS = [
   'shortcuts',
   'about',
 ] as const;
+
+/** Separates an item's title from its id inside the cmdk value (the id keeps values unique). */
+const VALUE_SEP = '';
+
+/**
+ * Fuzzy score for an item value: matches the visible title and keywords only,
+ * so internal ids (`nav.*`, `settings.*`) never make unrelated items match.
+ */
+export function paletteFilter(value: string, search: string, keywords?: string[]): number {
+  return defaultFilter(value.split(VALUE_SEP)[0] ?? value, search, keywords);
+}
 
 interface PaletteItem {
   id: string;
@@ -151,7 +162,7 @@ export function CommandPalette() {
         vimBindings off: cmdk's Ctrl+K (move up) would claim the key, and the
         shell's mod+k must reach the registry to toggle the palette closed.
       */}
-      <Cmdk label={t('commandPalette')} loop vimBindings={false} className="flex flex-col">
+      <Cmdk label={t('commandPalette')} loop vimBindings={false} filter={paletteFilter} className="flex flex-col">
         <div className="flex items-center gap-3 border-b border-border px-4">
           <Search aria-hidden size={18} className="shrink-0 text-fg-subtle" />
           <Cmdk.Input
@@ -172,7 +183,7 @@ export function CommandPalette() {
                 return (
                   <Cmdk.Item
                     key={it.id}
-                    value={`${it.title} ${it.id}`}
+                    value={`${it.title}${VALUE_SEP}${it.id}`}
                     keywords={it.keywords}
                     onSelect={() => run(it.run)}
                     className="flex h-11 cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-fg-muted"

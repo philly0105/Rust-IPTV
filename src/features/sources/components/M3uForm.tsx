@@ -25,9 +25,11 @@ export interface M3uFormProps {
   onUseXtream?: (cfg: { serverUrl: string; username: string; password: string }) => void;
   /** Lets the dialog suggest a name from a URL or file. */
   onSuggestName?: (input: string) => void;
+  /** Validates one field (error path, e.g. `m3u.url`) when the user leaves it. */
+  onFieldBlur?: (path: string) => void;
 }
 
-export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName }: M3uFormProps) {
+export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur }: M3uFormProps) {
   const { t } = useTranslation('sources');
   const fileInput = useRef<HTMLInputElement>(null);
   const fileHintId = useId();
@@ -103,7 +105,10 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
                 placeholder="https://provider.example/playlist.m3u"
                 value={value.url}
                 onChange={(e) => set({ url: e.target.value })}
-                onBlur={() => onSuggestName?.(value.url)}
+                onBlur={() => {
+                  onSuggestName?.(value.url);
+                  onFieldBlur?.('m3u.url');
+                }}
               />
             )}
           </Field>

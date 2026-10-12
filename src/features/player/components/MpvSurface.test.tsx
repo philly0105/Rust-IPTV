@@ -29,12 +29,14 @@ vi.mock('@/api/transport', () => ({
   proxiedUrl: (s: { url: string }) => s.url,
 }));
 const clickListeners = new Set<() => void>();
+const doubleListeners = new Set<() => void>();
 vi.mock('@/api/events', () => ({
   onAppEvent: (type: string, l: (st: MpvState) => void) => {
-    if (type === 'mpv.click') {
+    if (type === 'mpv.click' || type === 'mpv.dblclick') {
+      const set = type === 'mpv.click' ? clickListeners : doubleListeners;
       const c = l as unknown as () => void;
-      clickListeners.add(c);
-      return () => clickListeners.delete(c);
+      set.add(c);
+      return () => set.delete(c);
     }
     if (type !== 'mpv.state') return () => undefined;
     stateListeners.add(l);
@@ -44,7 +46,12 @@ vi.mock('@/api/events', () => ({
 
 /** Where the desktop cursor is, in viewport CSS px (the root measures as BOX). */
 let cursor = { x: 10, y: 10 };
-vi.mock('@/api/window', () => ({ cursorInViewport: async () => cursor }));
+vi.mock('@/api/window', () => ({
+  cursorInViewport: async () => cursor,
+  enterPipWindow: async () => true,
+  exitPipWindow: async () => undefined,
+  recoverPipWindow: async () => false,
+}));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore } = await import('../media');
@@ -136,7 +143,8 @@ afterEach(() => {
   document.querySelectorAll('[aria-modal]').forEach((n) => n.remove());
   vi.unstubAllGlobals();
   __resetPlayerForTests();
-  useMediaStore.setState({ mpv: undefined, upNext: undefined });
+  useMediaStore.setState({ mpv: undefined, upNext: undefined, osd: undefined });
+  vi.useRealTimers();
 });
 
 describe('MpvSurface bounds', () => {
@@ -258,6 +266,21 @@ describe('MpvSurface attach', () => {
     toggle.mockRestore();
   });
 
+  it('a double click restores the play state and toggles fullscreen', async () => {
+    render(surfaceTree);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    const wasFullscreen = usePlayerStore.getState().isFullscreen;
+    const wasPaused = useMediaStore.getState().mpv?.paused ?? false;
+    act(() => {
+      for (const l of clickListeners) l();
+      for (const l of doubleListeners) l();
+    });
+    expect(usePlayerStore.getState().isFullscreen).toBe(!wasFullscreen);
+    expect(calls('mpv.setProperty').map((c) => c[1])).toContainEqual({ name: 'pause', value: wasPaused });
+  });
+
   it('a StrictMode double mount never detaches the live session', async () => {
     let open!: () => void;
     attachGate = new Promise((r) => (open = r));
@@ -347,5 +370,184 @@ describe('fullscreen overlay chrome', () => {
     cursor = { x: 300, y: 200 };
     await advance(400);
     expect(chrome()).toBeTruthy();
+  });
+
+  const startFullscreen = async (): Promise<(ms: number) => Promise<void>> => {
+    vi.useFakeTimers();
+    cursor = { x: 10, y: 10 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isFullscreen: true, status: 'playing' }));
+    render(surfaceTree);
+    const advance = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    await advance(100);
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    return advance;
+  };
+
+  it('keyboard focus on a control keeps the chrome up', async () => {
+    const advance = await startFullscreen();
+    fireEvent.keyDown(document.body, { key: 'Tab' });
+    act(() => screen.getByRole('button', { name: 'Pause' }).focus());
+    await advance(3000);
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeTruthy();
+  });
+
+  it('when the chrome hides under a clicked control, focus lands on the player, not the page', async () => {
+    const advance = await startFullscreen();
+    const pause = screen.getByRole('button', { name: 'Pause' });
+    fireEvent.pointerDown(pause);
+    act(() => pause.focus());
+    await advance(3000);
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId('mpv-player'));
+  });
+
+  it('leaving fullscreen puts focus back on the same control', async () => {
+    const advance = await startFullscreen();
+    fireEvent.keyDown(document.body, { key: 'Tab' });
+    act(() => screen.getByRole('button', { name: 'Exit fullscreen' }).focus());
+    act(() => usePlayerStore.setState({ isFullscreen: false }));
+    await advance(50);
+    expect(document.activeElement?.getAttribute('data-ctl')).toBe('fullscreen');
+  });
+});
+
+describe('embedded mpv readouts and errors', () => {
+  it('shows volume and seek readouts inside the bar, then clears them', async () => {
+    vi.useFakeTimers();
+    render(surfaceTree);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const { showOsd } = await import('../media');
+    act(() => showOsd('Volume 40%'));
+    expect(screen.getByTestId('bar-readout').textContent).toBe('Volume 40%');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByTestId('bar-readout').textContent).toBe('');
+    vi.useRealTimers();
+  });
+
+  it('a key that brings hidden fullscreen chrome back still shows its readout; a stale one does not', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 10, y: 10 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isFullscreen: true, status: 'playing' }));
+    render(surfaceTree);
+    const advance = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    await advance(100);
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    const { showOsd } = await import('../media');
+    act(() => showOsd('Old'));
+    await advance(3000);
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
+
+    // The same key press raises the readout and (via keydown) the chrome.
+    act(() => {
+      showOsd('Volume 55%');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' }));
+    });
+    expect(screen.getByTestId('bar-readout').textContent).toBe('Volume 55%');
+    vi.useRealTimers();
+  });
+
+  it('in PiP the readout briefly replaces the title in the bar', async () => {
+    vi.useFakeTimers();
+    const { usePipStore } = await import('../pip');
+    act(() => usePipStore.setState({ active: true }));
+    render(surfaceTree);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const bar = screen.getByTestId('pip-bar');
+    expect(bar.textContent).toContain('Movie');
+    const { showOsd } = await import('../media');
+    act(() => showOsd('Muted'));
+    expect(bar.textContent).toContain('Muted');
+    expect(bar.textContent).not.toContain('Movie');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(bar.textContent).toContain('Movie');
+    act(() => usePipStore.setState({ active: false }));
+    vi.useRealTimers();
+  });
+
+  it('shows a buffering strip when mpv stalls mid-stream, and clears it when data returns', async () => {
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true, buffering: true }));
+    expect(useMediaStore.getState().waiting).toBe(true);
+    const label = screen.getByTestId('mpv-buffering');
+    expect(label.textContent).toBe('Buffering');
+    // Docked: an in-flow reserved strip, never over the native surface.
+    expect(label.closest('[data-mpv-reserved]')).toBeTruthy();
+    expect(screen.queryByTestId('bar-readout')?.contains(label)).toBe(false);
+
+    act(() => emitState({ ...mpvState, loaded: true, buffering: false }));
+    expect(screen.queryByTestId('mpv-buffering')).toBeNull();
+    expect(useMediaStore.getState().waiting).toBe(false);
+  });
+
+  it('in fullscreen a stall shows in the bar readout and keeps the chrome up', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 10, y: 10 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isFullscreen: true, status: 'playing' }));
+    render(surfaceTree);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    act(() => emitState({ ...mpvState, loaded: true, buffering: true }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeTruthy();
+    expect(screen.getByTestId('bar-readout').textContent).toBe('Buffering');
+
+    // Data is back: the readout clears and the idle chrome is free to hide again.
+    act(() => emitState({ ...mpvState, loaded: true, buffering: false }));
+    expect(screen.queryByTestId('mpv-buffering')).toBeNull();
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
+  });
+
+  it('in PiP a stall replaces the title in the bar', async () => {
+    const { usePipStore } = await import('../pip');
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePipStore.setState({ active: true }));
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true, buffering: true }));
+    expect(screen.getByTestId('pip-bar').textContent).toContain('Buffering');
+    act(() => emitState({ ...mpvState, loaded: true, buffering: false }));
+    expect(screen.getByTestId('pip-bar').textContent).toContain('Movie');
+    act(() => usePipStore.setState({ active: false }));
+  });
+
+  it('focuses Retry when the stream fails and focus was lost', async () => {
+    render(surfaceTree);
+    await tick();
+    act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 404' }));
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    expect(document.activeElement).toBe(retry);
+    // A headline says what happened; mpv's terse reason follows.
+    expect(screen.getByRole('alert').textContent).toContain('This stream did not play');
+    expect(screen.getByTestId('mpv-error-detail').textContent).toBe('HTTP 404');
+
+    // Retry reloads and says so, even though mpv still reports the old load.
+    mpvState = { ...mpvState, loaded: true };
+    fireEvent.click(retry);
+    expect(rpcMock.mock.calls.some((c) => c[0] === 'mpv.load')).toBe(true);
+    expect(screen.getByText('Opening the stream in MPV')).toBeTruthy();
   });
 });

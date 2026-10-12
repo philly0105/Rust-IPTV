@@ -86,6 +86,8 @@ export interface ErrorStateProps {
   size?: 'page' | 'inline';
   /** Overrides the code-derived title. */
   title?: ReactNode;
+  /** A retry is in flight: Retry shows a spinner and ignores presses (focus stays on it). */
+  retrying?: boolean;
 }
 
 /**
@@ -102,7 +104,7 @@ export function isServerUnreachable(err: RpcError): boolean {
  * server is unreachable the body and hint are translated and the raw browser text moves into a
  * details disclosure.
  */
-export function ErrorState({ error, onRetry, action, className, size = 'page', title }: ErrorStateProps) {
+export function ErrorState({ error, onRetry, action, className, size = 'page', title, retrying = false }: ErrorStateProps) {
   const { t } = useTranslation('common');
   const err = RpcError.from(error);
   const unreachable = isServerUnreachable(err);
@@ -140,7 +142,13 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
       {(onRetry || action) && (
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
           {onRetry && (
-            <Button variant="primary" size={size === 'page' ? 'md' : 'sm'} icon={<RotateCw size={16} aria-hidden />} onClick={onRetry}>
+            <Button
+              variant="primary"
+              size={size === 'page' ? 'md' : 'sm'}
+              icon={<RotateCw size={16} aria-hidden />}
+              loading={retrying}
+              onClick={onRetry}
+            >
               {t('retry')}
             </Button>
           )}

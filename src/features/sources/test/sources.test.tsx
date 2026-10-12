@@ -302,7 +302,7 @@ describe('Xtream guide URL never shows the password', () => {
     fireEvent.click(await screen.findByTestId('source-edit'));
     fireEvent.click(within(dialog()).getByRole('tab', { name: 'Guide' }));
     const shown = within(dialog()).getByTestId('epg-link-url');
-    expect(shown.textContent).toBe('http://xt.example.com:8080/xmltv.php?username=alice&password=***');
+    expect(shown.textContent).toBe('http://xt.example.com:8080/xmltv.php?username=***&password=***');
     expect(shown.getAttribute('title')).not.toContain('pw-secret');
     expect(within(dialog()).getByRole('switch').getAttribute('aria-label') ?? '').not.toContain('pw-secret');
     // Nothing on the page except the password input itself carries the secret.

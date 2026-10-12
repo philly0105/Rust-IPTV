@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "Every programme from every guide is deleted. Channel matches and guide addresses stay.",
   "epgClearConfirm": "Clear guide data",
   "epgClearDone": "Guide data cleared",
-  "epgClearFailed": "Could not clear guide data"
+  "epgClearFailed": "Could not clear guide data",
+  "saving": "Saving…",
+  "saved": "Saved",
+  "railsOffHint": "Turn on the dashboard to use these rows."
 }

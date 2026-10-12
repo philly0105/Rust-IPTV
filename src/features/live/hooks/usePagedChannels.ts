@@ -39,6 +39,11 @@ export interface PagedChannels {
   /** Report the rendered index range; at most two pages are requested at once. */
   setVisibleRange(start: number, end: number): void;
   isLoading: boolean;
+  /**
+   * The previous list's rows are still on screen while the new list (search, category) loads.
+   * Lets the view dim them instead of flashing a skeleton on every keystroke.
+   */
+  refreshing: boolean;
   error: unknown;
   retry(): void;
   /** Channels currently held in memory, in index order. */
@@ -83,16 +88,21 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     radio: args.radio || undefined,
     query: { offset: page * size, limit: size, search: args.search || undefined },
   });
-  const qa = useRpcQuery('catalog.channels', query(a), { enabled: !!args.sourceId });
+  // keepPrevious: a new search or group keeps the old rows up until its first page lands.
+  const qa = useRpcQuery('catalog.channels', query(a), { enabled: !!args.sourceId, keepPrevious: true });
   const qb = useRpcQuery('catalog.channels', query(b), { enabled: !!args.sourceId && b !== a });
   const pageA = qa.data;
   const pageB = b !== a ? qb.data : undefined;
 
   // Remember the total per list so the scroll height survives page switches.
   const totals = useRef(new Map<string, number>());
+  // Placeholder data from another list must not be recorded as this list's total.
+  const realDataKey = useRef<string | undefined>(undefined);
+  if (qa.data && !qa.isPlaceholderData) realDataKey.current = listKey;
+  const placeholderFromOtherList = qa.isPlaceholderData && !!pageA && realDataKey.current !== listKey;
   const freshTotal = pageA?.total ?? pageB?.total;
-  if (freshTotal !== undefined) totals.current.set(listKey, freshTotal);
-  const total = freshTotal ?? totals.current.get(listKey);
+  if (freshTotal !== undefined && !placeholderFromOtherList) totals.current.set(listKey, freshTotal);
+  const total = placeholderFromOtherList ? freshTotal : (freshTotal ?? totals.current.get(listKey));
 
   const extrasOn = args.withExtras ?? true;
   const offsetMs = (args.epgOffsetMinutes ?? 0) * MINUTE;
@@ -169,6 +179,7 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     isFavorite,
     setVisibleRange,
     isLoading: total === undefined && !error,
+    refreshing: placeholderFromOtherList && !error,
     error,
     retry: () => {
       void qa.refetch();

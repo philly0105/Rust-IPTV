@@ -194,5 +194,12 @@
   "removeFailed": "項目を削除できませんでした",
   "sourceRemoved": "ソースが削除されました",
   "sourceRemovedHint": "この項目のソースは削除されています。開くには、ソースを再度追加してください。",
-  "tryAgain": "再試行"
+  "tryAgain": "再試行",
+  "browseChannels": "チャンネルを見る",
+  "addSourceAction": "ソースを追加",
+  "emptyNoSourcesBody": "まずプレイリストかポータルを追加してください。開いたりお気に入りにしたものがここに表示されます。",
+  "recentRemoved": "{{title}} を履歴から削除しました",
+  "continueRemoved": "{{title}} を「続きを見る」から削除しました",
+  "undoFailed": "元に戻せませんでした",
+  "clearSearch": "検索をクリア"
 }

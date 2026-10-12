@@ -174,5 +174,6 @@
   "searchShowMore_one": "최대 {{count}}개 보기",
   "searchShowMore_other": "최대 {{count}}개 보기",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "이 타이틀을 불러오지 못했습니다"
 }

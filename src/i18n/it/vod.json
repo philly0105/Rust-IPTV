@@ -183,5 +183,6 @@
   "searchShowMore_other": "Mostra fino a {{count}}",
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "Impossibile caricare questi titoli"
 }

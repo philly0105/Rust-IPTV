@@ -70,6 +70,13 @@ export function CategorySidebar(props: CategorySidebarProps) {
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && filter) {
+                e.preventDefault();
+                e.stopPropagation();
+                setFilter('');
+              }
+            }}
             placeholder={t('filterGroups')}
             aria-label={t('filterGroups')}
             className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-fg-subtle"
@@ -87,9 +94,12 @@ export function CategorySidebar(props: CategorySidebarProps) {
       {props.error ? (
         <ErrorState error={props.error} onRetry={props.onRetry} />
       ) : props.isLoading ? (
-        <div className="flex flex-col gap-2 px-3 pt-2" aria-busy="true" aria-label={t('loadingGroups')}>
+        <div className="flex flex-col px-2 pt-0.5" aria-busy="true" aria-label={t('loadingGroups')}>
           {Array.from({ length: 10 }, (_, i) => (
-            <Skeleton key={i} className="h-6" />
+            // One 36px slot per row, like the loaded links, so the column does not shift.
+            <div key={i} className="flex items-center px-2.5" style={{ height: ROW }}>
+              <Skeleton className="h-3.5 flex-1" />
+            </div>
           ))}
         </div>
       ) : allHidden ? (
@@ -101,7 +111,12 @@ export function CategorySidebar(props: CategorySidebarProps) {
           </Button>
         </div>
       ) : visible.length === 0 && filter ? (
-        <p className="px-4 pt-3 text-sm text-fg-muted">{t('noGroupsMatch', { query: filter })}</p>
+        <div className="flex flex-col items-start gap-2 px-4 pt-3 text-sm text-fg-muted">
+          <p>{t('noGroupsMatch', { query: filter })}</p>
+          <Button size="sm" onClick={() => setFilter('')}>
+            {t('clearSearch')}
+          </Button>
+        </div>
       ) : (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>

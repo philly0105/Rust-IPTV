@@ -218,7 +218,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
                   }}
                   className={cn(
                     'flex h-9 cursor-pointer items-center gap-3 rounded-sm px-3 text-sm outline-none select-none',
-                    'hover:bg-surface-2 focus:bg-surface-3 aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
+                    'hover:bg-surface-2 focus:bg-surface-3 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
                     item.danger ? 'text-danger' : 'text-fg',
                   )}
                 >

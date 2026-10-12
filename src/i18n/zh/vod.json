@@ -174,5 +174,6 @@
   "searchShowMore_one": "最多显示 {{count}} 个",
   "searchShowMore_other": "最多显示 {{count}} 个",
   "searchCountMore_one": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "无法加载这些影片"
 }

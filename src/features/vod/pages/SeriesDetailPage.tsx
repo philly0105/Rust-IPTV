@@ -1,7 +1,7 @@
 import { ListVideo, Play, MonitorPlay } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useParams } from 'react-router';
+import { Navigate, useLocation, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Episode, ItemRef } from '@/api/types';
@@ -25,7 +25,9 @@ import {
   useTwinProbe,
 } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
+import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
@@ -78,13 +80,23 @@ export function SeriesDetailPage() {
   const start = resumeTarget(order, positionList);
 
   const watch = useWatchState(ref);
-  const [season, setSeason] = useState<number | undefined>(undefined);
+  const seasonKey = `${sourceId}|${itemId}`;
+  const [season, setSeasonState] = useState<number | undefined>(() => recallSeason(seasonKey));
+  // A season you picked is kept for this series until the app restarts (back from an actor or a similar title).
+  const setSeason = (n: number) => {
+    rememberSeason(seasonKey, n);
+    setSeasonState(n);
+  };
+  // Another series in the same page instance (similar titles): start from its own pick.
+  useEffect(() => setSeasonState(recallSeason(seasonKey)), [seasonKey]);
   const playingSeason = order.find((e) => e.id === watch.episodeId)?.season;
-  const selectedSeason = season ?? playingSeason ?? start?.episode.season ?? seasons[0]?.number;
+  // A remembered pick that the provider no longer lists falls back to the default choice.
+  const pickedSeason = season !== undefined && seasons.some((x) => x.number === season) ? season : undefined;
+  const selectedSeason = pickedSeason ?? playingSeason ?? start?.episode.season ?? seasons[0]?.number;
   // Follow the playing episode into its season (autoplay crossing a season boundary).
   useEffect(() => {
     const s = order.find((e) => e.id === watch.episodeId)?.season;
-    if (s !== undefined) setSeason(s);
+    if (s !== undefined) setSeasonState(s);
   }, [watch.episodeId, order]);
 
   const seasonObj = seasons.find((s) => s.number === selectedSeason);
@@ -104,6 +116,10 @@ export function SeriesDetailPage() {
   const playback = usePlayback(target);
   const downloads = useItemDownloads(ref, playback.canDownload);
   useEscapeToClose(watch.active, playback.stop);
+  useDetailEscapeBack(!watch.active, `/s/${encodeURIComponent(sourceId)}/series`);
+  // Back from an actor or a similar title: the page opens where you left it.
+  const { pathname } = useLocation();
+  useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item });
 
   // Until the title is known, the page (sr-only h1) and the shell header both read the section name.
   const pageTitle = model?.title ?? t('series');

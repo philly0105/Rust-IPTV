@@ -132,7 +132,9 @@ describe('Controls live rewind', () => {
     const seekTo = vi.spyOn(usePlayerStore.getState(), 'seekTo');
     render(<Controls variant="dock" visible />);
     expect(screen.getByRole('slider', { name: /seek/i })).toBeTruthy();
-    expect(screen.getByTestId('behind-live').textContent).toBe('-1:30');
+    // A readable readout, and a labelled button rather than a bare "-1:30".
+    expect(screen.getByTestId('behind-live').textContent).toBe('1:30 behind live');
+    expect(screen.getByRole('button', { name: 'Jump to live' }).textContent).toContain('Jump to live');
     fireEvent.click(screen.getByRole('button', { name: 'Jump to live' }));
     // A second short of the cache end, so mpv does not stall waiting for data.
     expect(seekTo).toHaveBeenCalledWith(1089);
@@ -146,7 +148,9 @@ describe('Controls live rewind', () => {
     });
     const { rerender } = render(<Controls variant="dock" visible />);
     expect(screen.queryByTestId('behind-live')).toBeNull();
-    expect((screen.getByRole('button', { name: 'Live' }) as HTMLButtonElement).disabled).toBe(true);
+    // At the edge LIVE is a status badge, not a disabled button.
+    expect(screen.getByTestId('live-badge').textContent).toBe('Live');
+    expect(screen.queryByRole('button', { name: /live/i })).toBeNull();
 
     act(() => useMediaStore.setState({ seekable: { start: 1070, end: 1090 } }));
     rerender(<Controls variant="dock" visible />);

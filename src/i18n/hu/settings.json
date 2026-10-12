@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "Minden műsorújság összes műsora törlődik. A csatorna-hozzárendelések és a műsorújságok címei megmaradnak.",
   "epgClearConfirm": "Műsorújság-adatok törlése",
   "epgClearDone": "Műsorújság-adatok törölve",
-  "epgClearFailed": "Nem sikerült törölni a műsorújság-adatokat"
+  "epgClearFailed": "Nem sikerült törölni a műsorújság-adatokat",
+  "saving": "Mentés…",
+  "saved": "Mentve",
+  "railsOffHint": "Kapcsold be az irányítópultot a sorok használatához."
 }

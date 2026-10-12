@@ -194,5 +194,12 @@
   "removeFailed": "無法移除此項目",
   "sourceRemoved": "播放來源已移除",
   "sourceRemovedHint": "此項目的播放來源已被移除。請重新新增該播放來源以開啟此項目。",
-  "tryAgain": "重試"
+  "tryAgain": "重試",
+  "browseChannels": "瀏覽頻道",
+  "addSourceAction": "新增來源",
+  "emptyNoSourcesBody": "請先新增播放清單或入口網站。你開啟或收藏的內容會顯示在這裡。",
+  "recentRemoved": "已從觀看紀錄移除 {{title}}",
+  "continueRemoved": "已從繼續觀看移除 {{title}}",
+  "undoFailed": "無法復原",
+  "clearSearch": "清除搜尋"
 }

@@ -334,6 +334,65 @@ export function buildUpdatePatch(source: Source, draft: SourceDraft, ctx: BuildC
   return { ok: true, value: patch, errors };
 }
 
+/** Value behind an error path (`xtream.serverUrl`, `m3u.headers.origin`, `name`); `m3u.file` covers both file fields. */
+function valueAt(draft: SourceDraft, path: string): unknown {
+  if (path === 'm3u.file') return `${draft.m3u.filePath}\u0000${draft.m3u.fileText}`;
+  let cur: unknown = draft;
+  for (const part of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur;
+}
+
+/**
+ * Drops the errors whose field the user just changed, so an inline message does not
+ * linger while the value is being corrected. Returns `errors` itself when nothing changed.
+ */
+export function clearChangedErrors(prev: SourceDraft, next: SourceDraft, errors: DraftErrors): DraftErrors {
+  let out: DraftErrors | null = null;
+  for (const path of Object.keys(errors)) {
+    if (valueAt(prev, path) === valueAt(next, path)) continue;
+    out ??= { ...errors };
+    delete out[path];
+  }
+  return out ?? errors;
+}
+
+/**
+ * Error for one field when the user leaves it. Empty values stay quiet (tabbing through
+ * an empty form shows nothing); required fields are checked on submit.
+ */
+export function blurError(draft: SourceDraft, path: string, grandfatheredMac?: string): string | null {
+  const raw = valueAt(draft, path);
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  if (path === 'stalker.macAddress' && grandfatheredMac !== undefined && raw === grandfatheredMac) return null;
+  switch (path) {
+    case 'm3u.url':
+    case 'stalker.portalUrl': {
+      const r = checkHttpUrl(raw);
+      return r.ok ? null : r.error;
+    }
+    case 'xtream.serverUrl': {
+      const r = normalizeXtreamServer(raw);
+      return r.ok ? null : r.error;
+    }
+    case 'stalker.macAddress':
+      return normalizeMac(raw) ? null : 'errorMac';
+    default:
+      return null;
+  }
+}
+
+/** Sets or clears one field's error, keeping identity when nothing changes. */
+export function withFieldError(errors: DraftErrors, path: string, error: string | null): DraftErrors {
+  if ((errors[path] ?? null) === error) return errors;
+  const out = { ...errors };
+  if (error) out[path] = error;
+  else delete out[path];
+  return out;
+}
+
 /**
  * True when the patch changes how the catalog is fetched (a refresh is advisable). Pass the
  * source as it was before the edit: M3U request headers apply at play time, so a header-only

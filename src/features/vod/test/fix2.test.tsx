@@ -10,6 +10,7 @@ import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
+import { forgetSpots } from '../hooks/useScrollMemory';
 import { installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -45,6 +46,7 @@ const ep = (id: string, season: number, episode: number) => ({ id, seriesRef: sr
 
 beforeAll(installDomStubs);
 beforeEach(() => {
+  forgetSpots();
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   const src = makeSource('src1', 'xtream', 'Alpha IPTV');

@@ -37,7 +37,7 @@ export function useWatchState(ref: ItemRef): WatchState {
   );
 }
 
-/** Escape closes the inline player while the page is in watch state (unless a dialog or input owns the key). */
+/** Escape closes the inline player while the page is in watch state (unless a dialog, an input, fullscreen or PiP owns the key). */
 export function useEscapeToClose(active: boolean, onClose: () => void): void {
   const cb = useRef(onClose);
   cb.current = onClose;
@@ -49,6 +49,9 @@ export function useEscapeToClose(active: boolean, onClose: () => void): void {
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       if (document.fullscreenElement) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      // In PiP, Escape belongs to the PiP window (leave PiP), not to "stop playback".
+      if (document.querySelector('[data-pip-layer]:not([hidden])')) return;
+      e.preventDefault();
       cb.current();
     };
     document.addEventListener('keydown', onKey);

@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "所有节目指南中的全部节目都将被删除。频道匹配和节目指南地址会保留。",
   "epgClearConfirm": "清除节目指南数据",
   "epgClearDone": "节目指南数据已清除",
-  "epgClearFailed": "无法清除节目指南数据"
+  "epgClearFailed": "无法清除节目指南数据",
+  "saving": "正在保存…",
+  "saved": "已保存",
+  "railsOffHint": "开启仪表板后才能使用这些行。"
 }

@@ -134,9 +134,54 @@ fn observed_properties_match_contract() {
             "mute",
             "track-list",
             "fullscreen",
-            "demuxer-cache-state"
+            "demuxer-cache-state",
+            "paused-for-cache"
         ]
     );
+}
+
+/// B8 (C3 additive): `paused-for-cache` drives `buffering`; it is absent
+/// from the JSON until mpv reports it and cleared when the file changes.
+#[test]
+fn paused_for_cache_sets_buffering() {
+    let mut st = MpvState::default();
+    assert!(serde_json::to_value(&st)
+        .unwrap()
+        .get("buffering")
+        .is_none());
+    assert!(apply_property(
+        &mut st,
+        "paused-for-cache",
+        Some(&json!(true))
+    ));
+    assert_eq!(st.buffering, Some(true));
+    assert_eq!(serde_json::to_value(&st).unwrap()["buffering"], true);
+    assert!(!apply_property(
+        &mut st,
+        "paused-for-cache",
+        Some(&json!(true))
+    ));
+    assert!(apply_property(
+        &mut st,
+        "paused-for-cache",
+        Some(&json!(false))
+    ));
+    assert_eq!(st.buffering, Some(false));
+    assert!(apply_property(&mut st, "paused-for-cache", None));
+    assert_eq!(st.buffering, None);
+    apply_property(&mut st, "paused-for-cache", Some(&json!(true)));
+    assert!(apply_event(&mut st, &json!({"event": "start-file"})));
+    assert_eq!(st.buffering, None);
+    apply_property(&mut st, "paused-for-cache", Some(&json!(true)));
+    apply_event(&mut st, &json!({"event": "end-file", "reason": "eof"}));
+    assert_eq!(st.buffering, None);
+    // Older clients' JSON without the field still deserializes.
+    let old: MpvState = serde_json::from_value(json!({
+        "attached": true, "loaded": true, "paused": false, "timePos": 1.0,
+        "volume": 50.0, "muted": false, "fullscreen": false
+    }))
+    .unwrap();
+    assert_eq!(old.buffering, None);
 }
 
 // ---- fake mpv ---------------------------------------------------------------------

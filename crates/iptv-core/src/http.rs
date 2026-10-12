@@ -136,10 +136,28 @@ pub fn apply_source_headers(
     req
 }
 
+/// What the user can do about a non-success HTTP status.
+pub fn status_hint(status: reqwest::StatusCode) -> &'static str {
+    match status.as_u16() {
+        401 | 403 => "The server refused access. Check the username, password or MAC address, and that the subscription is still active.",
+        404 | 410 => "The server does not know this address. Check the URL; the provider may have changed it.",
+        408 | 504 => "The server took too long to answer. Try again later.",
+        429 => "The server is rate limiting requests. Wait a minute, then try again.",
+        500..=599 => "The server is busy or down. Try again later.",
+        _ => "Check the address and settings, then try again.",
+    }
+}
+
 /// Maps a non-success HTTP status to a `CoreError` (401/403 Auth, 404 NotFound,
-/// 408/504 Timeout, 5xx and 429 Network (retryable), other 4xx Invalid).
+/// 408/504 Timeout, 5xx and 429 Network (retryable), other 4xx Invalid). The
+/// message is `"{context}: HTTP {status}. {hint}"` ([`status_hint`]).
 pub fn status_error(status: reqwest::StatusCode, context: &str) -> CoreError {
-    let msg = format!("{context}: HTTP {status}");
+    status_error_with_hint(status, context, status_hint(status))
+}
+
+/// [`status_error`] with a caller-chosen next step.
+pub fn status_error_with_hint(status: reqwest::StatusCode, context: &str, hint: &str) -> CoreError {
+    let msg = format!("{context}: HTTP {status}. {hint}");
     match status.as_u16() {
         401 | 403 => CoreError::Auth(msg),
         404 => CoreError::NotFound(msg),
@@ -162,6 +180,7 @@ pub fn transport_error(host: &str, err: reqwest::Error) -> CoreError {
         ));
     }
     let detail = root_cause(&err.without_url());
+    let detail = crate::logging::redact_text(&detail);
     CoreError::Network(format!(
         "Could not reach {host}. Check the address and that the server is online, then try again. ({detail})"
     ))
@@ -821,6 +840,30 @@ mod tests {
         ));
         assert!(status_error(reqwest::StatusCode::BAD_GATEWAY, "x").is_retryable());
         assert!(!status_error(reqwest::StatusCode::BAD_REQUEST, "x").is_retryable());
+    }
+
+    /// B8: every status error keeps "HTTP <code>" (the UI classifies on it)
+    /// and ends with a next step.
+    #[test]
+    fn status_errors_say_what_to_do() {
+        use reqwest::StatusCode as S;
+        let msg = |s: S| status_error(s, "Xtream get_live_streams").to_string();
+        let m = msg(S::UNAUTHORIZED);
+        assert!(
+            m.contains("Xtream get_live_streams: HTTP 401") && m.contains("password"),
+            "{m}"
+        );
+        assert!(msg(S::FORBIDDEN).contains("subscription"));
+        assert!(
+            msg(S::NOT_FOUND).contains("HTTP 404") && msg(S::NOT_FOUND).contains("Check the URL")
+        );
+        assert!(msg(S::GATEWAY_TIMEOUT).contains("Try again later"));
+        assert!(msg(S::TOO_MANY_REQUESTS).contains("Wait a minute"));
+        assert!(msg(S::SERVICE_UNAVAILABLE).contains("busy or down"));
+        let custom = status_error_with_hint(S::NOT_FOUND, "ctx", "Do X.");
+        assert!(
+            matches!(custom, CoreError::NotFound(ref m) if m == "ctx: HTTP 404 Not Found. Do X.")
+        );
     }
 
     /// A server that accepts TCP and never answers fails after the header

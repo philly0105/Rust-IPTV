@@ -208,12 +208,17 @@ export function BackupSection(_props: SectionProps) {
       </SettingsGroup>
 
       {importError ? (
-        <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-4 text-sm">
+        <div role="alert" className="flex flex-wrap items-start gap-3 rounded-md border border-danger/50 bg-danger/10 p-4 text-sm" data-testid="backup-import-error">
           <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-medium text-fg">{t('backupImportFailed')}</p>
             <p className="text-fg-muted">{importError.message}</p>
           </div>
+          {picked ? (
+            <Button size="sm" variant="secondary" loading={importing} onClick={start} data-testid="backup-import-retry">
+              {t('retry')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

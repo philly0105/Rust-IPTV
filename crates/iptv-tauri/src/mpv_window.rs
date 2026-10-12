@@ -22,24 +22,27 @@
 #![cfg(windows)]
 
 use iptv_core::player::{Bounds, ChildWindowFactory};
-use iptv_core::{CoreError, CoreResult};
+use iptv_core::{AppEvent, CoreError, CoreResult};
 use std::sync::mpsc::sync_channel;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{
-    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM,
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRectRgn, DeleteObject, GetStockObject, SetWindowRgn, BLACK_BRUSH, HBRUSH,
-    HGDIOBJ, RGN_DIFF,
+    ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, GetStockObject, SetWindowRgn,
+    BLACK_BRUSH, HBRUSH, HGDIOBJ, RGN_DIFF,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{DragDetect, ReleaseCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, IsWindow, LoadCursorW, RegisterClassExW,
-    SetWindowPos, CS_HREDRAW, CS_VREDRAW, HTTRANSPARENT, HWND_TOP, IDC_ARROW, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, WM_NCHITTEST, WNDCLASSEXW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetAncestor, GetClientRect, GetWindow,
+    IsWindow, LoadCursorW, RegisterClassExW, SendMessageW, SetWindowPos, CS_DBLCLKS, CS_HREDRAW,
+    CS_VREDRAW, GA_ROOT, GW_CHILD, HTCAPTION, HWND_TOP, IDC_ARROW, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_NCLBUTTONDOWN, WM_SIZE, WNDCLASSEXW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
     WS_EX_NOPARENTNOTIFY, WS_VISIBLE,
 };
 
@@ -47,13 +50,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const MAIN_WINDOW: &str = "main";
 
 /// Window class shared by every mpv host window.
-const CLASS_NAME: PCWSTR = w!("TsrustIptvMpvHost");
+pub(crate) const CLASS_NAME: PCWSTR = w!("TsrustIptvMpvHost");
 
 /// How long a caller waits for the main thread before giving up.
 const MAIN_THREAD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Class registration result, computed once per process.
 static CLASS: OnceLock<Result<(), String>> = OnceLock::new();
+
+/// App handle for the window procedure, which turns clicks into app events.
+static APP: OnceLock<AppHandle> = OnceLock::new();
 
 /// Creates, moves, and destroys mpv's child window inside the main window.
 pub struct MpvWindowFactory {
@@ -62,6 +68,7 @@ pub struct MpvWindowFactory {
 
 impl MpvWindowFactory {
     pub fn new(app: tauri::AppHandle) -> Self {
+        let _ = APP.set(app.clone());
         Self { app }
     }
 
@@ -131,7 +138,7 @@ impl ChildWindowFactory for MpvWindowFactory {
     }
 
     fn set_bounds(&self, hwnd: isize, bounds: Bounds) -> CoreResult<()> {
-        self.on_main("move mpv window", move |_parent, scale| {
+        self.on_main("move mpv window", move |parent, scale| {
             let hwnd = HWND(hwnd as *mut core::ffi::c_void);
             // SAFETY: IsWindow accepts any value.
             if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
@@ -139,7 +146,17 @@ impl ChildWindowFactory for MpvWindowFactory {
                     "the mpv window no longer exists".into(),
                 ));
             }
-            let (x, y, w, h) = scaled(bounds, scale);
+            let on_screen = bounds.x + bounds.width > 0 && bounds.y + bounds.height > 0;
+            let (x, y, w, h) = if on_screen && crate::pip_window::is_on() {
+                // PiP sizes the video natively on every WM_SIZE; a measurement
+                // the webview took a frame ago would make it jump back.
+                let mut r = RECT::default();
+                // SAFETY: `parent` is the live main window.
+                let _ = unsafe { GetClientRect(parent, &mut r) };
+                (0, 0, r.right.max(1), r.bottom.max(1))
+            } else {
+                scaled(bounds, scale)
+            };
             // SAFETY: `hwnd` is a live window owned by this (main) thread.
             unsafe {
                 SetWindowPos(
@@ -240,7 +257,7 @@ fn register_class() -> CoreResult<()> {
                     GetModuleHandleW(None).map(Into::into).unwrap_or_default();
                 let class = WNDCLASSEXW {
                     cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-                    style: CS_HREDRAW | CS_VREDRAW,
+                    style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
                     lpfnWndProc: Some(wnd_proc),
                     hInstance: instance,
                     hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
@@ -261,19 +278,77 @@ fn register_class() -> CoreResult<()> {
         .map_err(other)
 }
 
-/// Paints black (class brush) and lets mouse hit-testing fall through our
-/// host window; mpv's own video window inside it handles its area.
+/// Paints black (class brush), keeps mpv's video window filling ours, and
+/// turns mouse clicks into `mpv.click` / `mpv.dblclick` app events.
+///
+/// mpv disables its own embedded window, so the mouse lands here. In PiP a
+/// press that turns into a drag moves the (frameless) main window instead.
 unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if msg == WM_NCHITTEST {
-        return LRESULT(HTTRANSPARENT as isize);
+    match msg {
+        WM_LBUTTONDOWN => {
+            if crate::pip_window::is_on() {
+                let mut pt = POINT {
+                    x: i32::from(lparam.0 as i16),
+                    y: i32::from((lparam.0 >> 16) as i16),
+                };
+                // SAFETY: plain window calls on the thread that owns `hwnd`.
+                unsafe {
+                    let _ = ClientToScreen(hwnd, &mut pt);
+                    if DragDetect(hwnd, pt).as_bool() {
+                        let _ = ReleaseCapture();
+                        SendMessageW(
+                            GetAncestor(hwnd, GA_ROOT),
+                            WM_NCLBUTTONDOWN,
+                            Some(WPARAM(HTCAPTION as usize)),
+                            None,
+                        );
+                        return LRESULT(0);
+                    }
+                }
+            }
+            emit("mpv.click");
+            return LRESULT(0);
+        }
+        WM_LBUTTONDBLCLK => {
+            emit("mpv.dblclick");
+            return LRESULT(0);
+        }
+        WM_SIZE => {
+            let w = (lparam.0 & 0xffff) as i32;
+            let h = ((lparam.0 >> 16) & 0xffff) as i32;
+            // mpv only notices a parent resize later; resize its window now so
+            // the video tracks the frame. Async: it belongs to mpv's process.
+            // SAFETY: GetWindow/SetWindowPos accept any window handle.
+            unsafe {
+                if let Ok(video) = GetWindow(hwnd, GW_CHILD) {
+                    let _ = SetWindowPos(
+                        video,
+                        None,
+                        0,
+                        0,
+                        w.max(1),
+                        h.max(1),
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+                    );
+                }
+            }
+        }
+        _ => {}
     }
     // SAFETY: forwarding the unmodified message to the default procedure.
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// Sends a payload-less app event to the webview.
+fn emit(kind: &str) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(crate::APP_EVENT, AppEvent::new(kind, serde_json::json!({})));
+    }
 }
 
 fn win_err(call: &str, e: windows::core::Error) -> CoreError {

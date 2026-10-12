@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "Alle Sendungen aus allen Programmführern werden gelöscht. Senderzuordnungen und Programmführer-Adressen bleiben erhalten.",
   "epgClearConfirm": "Programmführerdaten löschen",
   "epgClearDone": "Programmführerdaten gelöscht",
-  "epgClearFailed": "Die Programmführerdaten konnten nicht gelöscht werden"
+  "epgClearFailed": "Die Programmführerdaten konnten nicht gelöscht werden",
+  "saving": "Wird gespeichert…",
+  "saved": "Gespeichert",
+  "railsOffHint": "Schalte das Dashboard ein, um diese Zeilen zu nutzen."
 }

@@ -7,7 +7,7 @@ import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
 
 import { cn } from '../cn';
-import { safeImageUrl } from '../format';
+import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
 
@@ -105,6 +105,24 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
     }
   }, [open, ensure]);
 
+  // Closing makes the panel inert, which drops focus from its search field to <body>:
+  // give it back to whatever had it before the panel opened.
+  const panelRef = useRef<HTMLElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (open) {
+      const a = document.activeElement;
+      returnTo.current = a instanceof HTMLElement && !panelRef.current?.contains(a) ? a : null;
+      return;
+    }
+    const panel = panelRef.current;
+    const back = returnTo.current;
+    returnTo.current = null;
+    if (!back?.isConnected) return;
+    const a = document.activeElement;
+    if (focusIsLost() || (panel && a && panel.contains(a))) back.focus({ preventScroll: true });
+  }, [open]);
+
   useEffect(
     () => () => {
       if (dwell.current) clearTimeout(dwell.current);
@@ -172,6 +190,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
         />
       )}
       <aside
+        ref={panelRef}
         aria-label={t('channelPanel')}
         aria-hidden={!open}
         inert={!open}

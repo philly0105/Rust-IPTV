@@ -2,7 +2,7 @@ import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } 
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '../cn';
-import { formatTime } from '../format';
+import { formatTime, positionReadout, SEEK_STEP, SEEK_STEP_LARGE } from '../format';
 import type { TimeRange } from '../media';
 
 export interface SeekBarProps {
@@ -59,7 +59,7 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    const step = e.shiftKey ? 30 : 5;
+    const step = e.shiftKey ? SEEK_STEP_LARGE : SEEK_STEP;
     let next: number | null = null;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = value - step;
     else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = value + step;
@@ -73,12 +73,7 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
     onSeek(Math.min(max, Math.max(min, next)));
   };
 
-  const behind = live ? Math.max(0, max - shown) : 0;
-  const valueText = live
-    ? behind < 3
-      ? t('live')
-      : t('behindLive', { time: formatTime(behind) })
-    : `${formatTime(shown)} / ${formatTime(max)}`;
+  const valueText = positionReadout(t, { position: shown, duration: max, liveEnd: live ? max : undefined });
 
   return (
     <div
@@ -99,6 +94,14 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
       onKeyDown={onKeyDown}
     >
       <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/20 motion-safe:transition-[height] group-hover/seek:h-1.5 group-focus-visible/seek:h-1.5">
+        {live && buffered.length === 0 && (
+          // Live rewind without buffered ranges (mpv's cache): everything up to the edge is cached.
+          <div
+            data-testid="rewind-cached"
+            className="absolute inset-y-0 bg-white/30"
+            style={{ left: `${pct(shown)}%`, width: `${Math.max(0, 100 - pct(shown))}%` }}
+          />
+        )}
         {buffered.map((r) => (
           <div
             key={`${r.start}-${r.end}`}
@@ -115,10 +118,21 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
         style={{ left: `${pct(shown)}%`, opacity: preview !== null ? 1 : undefined }}
       />
       {live && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live"
-        />
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live"
+          />
+          {/* How far back the rewind window reaches, at its start (shown with the needle). */}
+          <div
+            aria-hidden
+            data-testid="rewind-depth"
+            className="pointer-events-none absolute bottom-6 left-0 rounded-sm bg-black/85 px-1.5 py-0.5 font-display text-xs text-white/80 tabular-nums opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
+            style={{ opacity: hover && hover.x < 64 ? 0 : undefined }}
+          >
+            -{formatTime(span)}
+          </div>
+        </>
       )}
       {hover && (
         <div

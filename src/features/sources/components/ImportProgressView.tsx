@@ -30,12 +30,19 @@ export function ImportProgressView({ entry, compact }: { entry: ProgressEntry | 
 
   return (
     <div className={compact ? 'flex flex-col gap-1' : 'flex flex-col gap-2'} data-testid="import-progress" data-phase={phase}>
-      <div className="flex items-baseline justify-between gap-3 text-sm" aria-live="polite">
-        <span className={phase === 'error' ? 'text-danger' : 'text-fg'}>{label}</span>
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        {/* Only the phase is live: counts tick many times a second on a big import and would flood a screen reader. */}
+        <span aria-live="polite" className={phase === 'error' ? 'text-danger' : 'text-fg'} data-testid="import-progress-phase">
+          {label}
+        </span>
         {counts ? <span className="font-display tabular-nums text-fg-muted">{counts}</span> : null}
       </div>
       <ProgressBar value={(fraction ?? 0) * 100} indeterminate={fraction === undefined} max={100} label={label} />
-      {entry?.message && !compact ? <p className="truncate text-xs text-fg-subtle">{redactText(entry.message)}</p> : null}
+      {entry?.message && !compact ? (
+        <p className="truncate text-xs text-fg-subtle" title={redactText(entry.message)}>
+          {redactText(entry.message)}
+        </p>
+      ) : null}
     </div>
   );
 }

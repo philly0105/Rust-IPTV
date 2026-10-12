@@ -1099,6 +1099,11 @@ pub struct MpvState {
     /// the `time_pos` clock). For live TV this is the rewind window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seekable: Option<MpvSeekRange>,
+    /// mpv's `paused-for-cache`: true while playback waits for the network
+    /// to refill the cache (show a buffering indicator). `None` until mpv
+    /// reports it (no file loaded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffering: Option<bool>,
 }
 
 /// One seekable range of mpv's demuxer cache.
@@ -1124,6 +1129,7 @@ impl Default for MpvState {
             recording: false,
             record_path: None,
             seekable: None,
+            buffering: None,
         }
     }
 }

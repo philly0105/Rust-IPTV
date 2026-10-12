@@ -194,5 +194,12 @@
   "removeFailed": "无法移除该项目",
   "sourceRemoved": "播放源已移除",
   "sourceRemovedHint": "此项目的播放源已被移除。请重新添加该播放源以打开此项目。",
-  "tryAgain": "重试"
+  "tryAgain": "重试",
+  "browseChannels": "浏览频道",
+  "addSourceAction": "添加来源",
+  "emptyNoSourcesBody": "请先添加播放列表或门户。你打开或收藏的内容会显示在这里。",
+  "recentRemoved": "已从历史记录中移除 {{title}}",
+  "continueRemoved": "已从继续观看中移除 {{title}}",
+  "undoFailed": "无法撤销",
+  "clearSearch": "清除搜索"
 }

@@ -117,6 +117,7 @@
   "searchInGroup": "{{group}}에서 검색",
   "shortcutArea": "라이브 TV",
   "shortcutDigits": "채널 번호 입력 (1.5초 후 적용)",
+  "shortcutFocusSearch": "채널 검색",
   "shortcutToggleSidebar": "그룹 사이드바 표시/숨기기",
   "stage": "플레이어",
   "stageIdle": "재생 중인 항목 없음",

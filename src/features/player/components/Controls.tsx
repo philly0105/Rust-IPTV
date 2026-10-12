@@ -39,6 +39,21 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const LIVE_EDGE_SLACK = 6;
 const LIVE_EDGE_SLACK_MPV = 10;
 
+/** Key names as shown in tooltips, and their `aria-keyshortcuts` form. */
+const KEYS = {
+  playPause: { hint: 'Space', aria: 'Space K' },
+  fullscreen: { hint: 'F', aria: 'F' },
+  exitPip: { hint: 'F', aria: 'F' },
+  mute: { hint: 'M', aria: 'M' },
+  captions: { hint: 'C', aria: 'C' },
+} as const;
+export type CtlShortcut = keyof typeof KEYS;
+
+/** Tooltip text: the label, plus the key that does the same thing. */
+export function ctlTitle(label: string, shortcut?: CtlShortcut): string {
+  return shortcut ? `${label} (${KEYS[shortcut].hint})` : label;
+}
+
 export function CtlButton({
   label,
   onClick,
@@ -46,6 +61,8 @@ export function CtlButton({
   pressed,
   disabled,
   className,
+  shortcut,
+  id,
 }: {
   label: string;
   onClick(): void;
@@ -53,12 +70,18 @@ export function CtlButton({
   pressed?: boolean;
   disabled?: boolean;
   className?: string;
+  /** Adds the key to the tooltip and `aria-keyshortcuts`. */
+  shortcut?: CtlShortcut;
+  /** Stable control id (`data-ctl`) so focus can be put back after the chrome re-renders. */
+  id?: string;
 }) {
   return (
     <button
       type="button"
+      data-ctl={id}
       aria-label={label}
-      title={label}
+      title={ctlTitle(label, shortcut)}
+      aria-keyshortcuts={shortcut ? KEYS[shortcut].aria : undefined}
       aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
@@ -81,7 +104,7 @@ function VolumeControl() {
   const Icon = shown === 0 ? VolumeX : shown < 0.5 ? Volume1 : Volume2;
   return (
     <div className="group/vol flex items-center">
-      <CtlButton label={muted ? t('unmute') : t('mute')} onClick={() => usePlayerStore.getState().toggleMute()}>
+      <CtlButton id="mute" shortcut="mute" label={muted ? t('unmute') : t('mute')} onClick={() => usePlayerStore.getState().toggleMute()}>
         <Icon />
       </CtlButton>
       <input
@@ -169,6 +192,57 @@ export function RecordControl({ compact }: { compact?: boolean }) {
         </CtlButton>
       )}
     </>
+  );
+}
+
+/** How long the in-bar readout stays after a volume, seek or zap change. */
+export const BAR_READOUT_MS = 1800;
+
+/**
+ * The OSD for embedded mpv: nothing can float over the native video, so volume, seek, zap and
+ * resume readouts show briefly inside the control bar instead.
+ */
+export function BarReadout({
+  fallback,
+  className,
+  dragRegion,
+}: {
+  /** Shown while there is no readout (the PiP bar's title). */
+  fallback?: ReactNode;
+  className?: string;
+  /** Inside the borderless PiP bar: the readout area still moves the window. */
+  dragRegion?: boolean;
+} = {}) {
+  const osd = useMediaStore((s) => s.osd);
+  const [shown, setShown] = useState<typeof osd>(undefined);
+  useEffect(() => {
+    // Recent readouts only: the key press that raised it may also be what mounted this bar
+    // (fullscreen chrome comes back on any key), but an old one must not reappear.
+    const left = osd?.at !== undefined ? BAR_READOUT_MS - (Date.now() - osd.at) : 0;
+    if (!osd || left <= 0) {
+      setShown(undefined);
+      return;
+    }
+    setShown(osd);
+    const id = setTimeout(() => setShown(undefined), left);
+    return () => clearTimeout(id);
+  }, [osd]);
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      data-testid="bar-readout"
+      data-tauri-drag-region={dragRegion ? '' : undefined}
+      className={cn('me-2 min-w-0 truncate font-display text-sm whitespace-nowrap text-white tabular-nums', className)}
+    >
+      {!shown && fallback}
+      {shown && (
+        <span key={shown.key} className="motion-safe:animate-fade-in">
+          <span className={cn(/^\d+$/.test(shown.primary) && 'text-accent-hover')}>{shown.primary}</span>
+          {shown.secondary && <span className="ms-2 text-white/70">{shown.secondary}</span>}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -347,9 +421,21 @@ export interface ControlsProps {
   /** Compact chrome for the mini player. */
   compact?: boolean;
   onMenuOpenChange?(open: boolean): void;
+  /** Dock bar: a lasting status (embedded mpv buffering) shown in the readout when no transient one is up. */
+  readoutIdle?: ReactNode;
 }
 
-export function Controls({ variant, visible, compact, onMenuOpenChange }: ControlsProps) {
+/** Small sweeping dial for inline status text (the loading spinner's style, bar sized). */
+export function InlineSpinner() {
+  return (
+    <svg viewBox="0 0 48 48" className="inline size-3.5 shrink-0 text-accent motion-safe:animate-spin" style={{ animationDuration: '1.4s' }} aria-hidden>
+      <circle cx="24" cy="24" r="20" fill="none" stroke="rgb(255 255 255 / 0.15)" strokeWidth="5" />
+      <path d="M24 4 a20 20 0 0 1 20 20" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function Controls({ variant, visible, compact, onMenuOpenChange, readoutIdle }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -444,51 +530,61 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
       )}
       <div className="flex min-w-0 items-center gap-0.5">
         {prev && !compact && (
-          <CtlButton label={t('previous')} onClick={() => store.prev()}>
+          <CtlButton id="prev" label={t('previous')} onClick={() => store.prev()}>
             <SkipBack />
           </CtlButton>
         )}
         {ended ? (
-          <CtlButton label={t('replay')} onClick={replay}>
+          <CtlButton id="play" label={t('replay')} onClick={replay}>
             <RotateCcw />
           </CtlButton>
         ) : (
-          <CtlButton label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
+          <CtlButton id="play" shortcut="playPause" label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
             {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
           </CtlButton>
         )}
         {next && !compact && (
-          <CtlButton label={t('next')} onClick={() => store.next()}>
+          <CtlButton id="next" label={t('next')} onClick={() => store.next()}>
             <SkipForward />
           </CtlButton>
         )}
         {!compact && (
-          <CtlButton label={t('stop')} onClick={() => store.stop()}>
+          <CtlButton id="stop" label={t('stop')} onClick={() => store.stop()}>
             <Square className="size-4! fill-current" />
           </CtlButton>
         )}
         <VolumeControl />
 
         {isLive ? (
-          <button
-            type="button"
-            onClick={() => liveWindow && store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end)}
-            disabled={atLiveEdge}
-            aria-label={atLiveEdge ? t('live') : t('goLive')}
-            className={cn(
-              'ms-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-display text-xs font-semibold tracking-wide',
-              atLiveEdge ? 'text-white' : 'text-white/70 hover:text-white',
-            )}
-          >
-            <span className={cn('size-2 rounded-full', atLiveEdge ? 'bg-live motion-safe:animate-live-pulse' : 'bg-white/50')} />
-            {t('live')}
-          </button>
-        ) : null}
-        {isLive ? (
-          !atLiveEdge && (
-            <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums" data-testid="behind-live">
-              -{formatTime(behindLive)}
+          atLiveEdge ? (
+            // At the edge there is nothing to jump to: a status badge, not a dead button.
+            <span
+              data-testid="live-badge"
+              className="ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-display text-xs font-semibold tracking-wide text-white"
+            >
+              <span className="size-2 rounded-full bg-live motion-safe:animate-live-pulse" aria-hidden />
+              {t('live')}
             </span>
+          ) : (
+            <>
+              <button
+                type="button"
+                data-ctl="golive"
+                onClick={() => liveWindow && store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end)}
+                aria-label={t('goLive')}
+                title={t('goLive')}
+                className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
+              >
+                <span className="size-2 rounded-full bg-white/50" aria-hidden />
+                {compact ? t('live') : t('goLive')}
+              </button>
+              <span
+                className="ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums"
+                data-testid="behind-live"
+              >
+                {compact ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
+              </span>
+            </>
           )
         ) : source.isRadio ? (
           <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
@@ -504,9 +600,13 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
         {canRecord && <RecordControl compact={compact} />}
 
         <div className="flex-1" />
+        {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
 
         {tracks.text.length > 0 && !compact && (
           <CtlButton
+            id="captions"
+            // In live fullscreen, C opens the channel list instead.
+            shortcut={isLive && isFullscreen ? undefined : 'captions'}
             label={captionsOn ? t('captionsOff') : t('captionsOn')}
             pressed={captionsOn}
             onClick={() => {
@@ -518,17 +618,28 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
           </CtlButton>
         )}
         {hasOptions && !compact && (
-          <CtlButton label={t('settingsMenu')} pressed={menu !== null} onClick={() => setMenu(menu ? null : 'root')}>
+          <CtlButton id="options" label={t('settingsMenu')} pressed={menu !== null} onClick={() => setMenu(menu ? null : 'root')}>
             <Settings2 />
           </CtlButton>
         )}
         {canPip && (variant === 'overlay' || !compact) && (
-          <CtlButton label={inPip ? t('exitPip') : t('pip')} pressed={inPip} onClick={() => commands?.togglePip()}>
+          <CtlButton
+            id="pip"
+            shortcut={windowPip ? 'exitPip' : undefined}
+            label={inPip ? t('exitPip') : t('pip')}
+            pressed={inPip}
+            onClick={() => commands?.togglePip()}
+          >
             <PictureInPicture2 />
           </CtlButton>
         )}
         {!windowPip && (
-          <CtlButton label={isFullscreen ? t('exitFullscreen') : t('fullscreen')} onClick={() => store.toggleFullscreen()}>
+          <CtlButton
+            id="fullscreen"
+            shortcut="fullscreen"
+            label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
+            onClick={() => store.toggleFullscreen()}
+          >
             {isFullscreen ? <Minimize /> : <Maximize />}
           </CtlButton>
         )}

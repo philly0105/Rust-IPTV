@@ -9,6 +9,7 @@ import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { isResumable, progressFraction } from '../lib/format';
 import { resumeTarget } from '../lib/merge';
 import { effectiveMinRating, filterByRating } from '../lib/paging';
+import { forgetSpots } from '../hooks/useScrollMemory';
 import { currentLocation, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -84,6 +85,7 @@ function useKind(kind: 'xtream' | 'stalker' | 'm3u') {
 
 beforeAll(installDomStubs);
 beforeEach(() => {
+  forgetSpots();
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;

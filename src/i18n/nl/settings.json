@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "Alle programma's uit alle gidsen worden verwijderd. Kanaalkoppelingen en gidsadressen blijven bewaard.",
   "epgClearConfirm": "Gidsgegevens wissen",
   "epgClearDone": "Gidsgegevens gewist",
-  "epgClearFailed": "Kan de gidsgegevens niet wissen"
+  "epgClearFailed": "Kan de gidsgegevens niet wissen",
+  "saving": "Opslaan…",
+  "saved": "Opgeslagen",
+  "railsOffHint": "Zet het dashboard aan om deze rijen te gebruiken."
 }

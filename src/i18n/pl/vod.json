@@ -192,5 +192,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_few": "{{count}}+",
   "searchCountMore_many": "{{count}}+",
-  "searchCountMore_other": "{{count}}+"
+  "searchCountMore_other": "{{count}}+",
+  "pageLoadFailed": "Nie udało się wczytać tych tytułów"
 }

@@ -9,6 +9,7 @@ import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
+import { forgetSpots } from '../hooks/useScrollMemory';
 import { vodRoutes } from '../routes';
 import { currentLocation, i18n, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
@@ -99,6 +100,7 @@ function baseHandlers(sourceKind: 'xtream' | 'stalker' = 'xtream') {
 beforeAll(installDomStubs);
 beforeEach(() => {
   baseHandlers();
+  forgetSpots();
   played.length = 0;
   usePlayerStore.setState({ source: undefined, status: 'idle', mode: 'inline', positionSeconds: 0 });
   localStorage.clear();
@@ -349,9 +351,9 @@ describe('U4-fix1: stalker VOD-as-series, episode downloads, TMDB attribution', 
       { path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> },
       { path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> },
     ]);
-    const card = (await screen.findByText('Severance')).closest('a')!;
-    expect(card.getAttribute('href')).toBe('/s/src1/series/7001');
-    expect((await screen.findByText('Movie 1')).closest('a')!.getAttribute('href')).toBe('/s/src1/movie/m1');
+    // Grid cells are listbox options (no links inside); selecting one navigates by the item's own content type.
+    const card = await screen.findByRole('option', { name: 'Severance' });
+    expect(screen.getByRole('option', { name: /^Movie 1 / })).toBeTruthy();
     fireEvent.click(card);
     await screen.findByRole('heading', { name: 'Severance', level: 1 });
     expect(callsOf('stalker.seriesDetail')[0]!.args).toEqual({ ref: sref });

@@ -13,6 +13,7 @@ import { onAppEvent, onConnectionState } from '@/api/events';
 import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, WindowState } from '@/api/types';
+import { usePipStore } from '@/features/player/pip';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { applyLanguage, languageUnresolved } from '@/i18n';
 import { dismissToast, toast } from '@/ui';
@@ -369,15 +370,22 @@ export function useWindowStatePersistence(): void {
         let lastNormal: WindowState | null = await rpc('window.getState').catch(() => null);
         if (disposed) return;
 
+        // The small always-on-top PiP window is not a geometry to come back to:
+        // while PiP is on nothing is recorded, so lastNormal keeps the size from
+        // before PiP and a quit-in-PiP relaunches at the normal size.
+        const inPip = () => usePipStore.getState().active;
         const save = () => {
           if (timer) clearTimeout(timer);
+          if (inPip()) return;
           timer = setTimeout(async () => {
             try {
-              if (await win.isMinimized()) return;
+              if (inPip() || (await win.isMinimized())) return;
               const maximized = await win.isMaximized();
               if (!maximized && !(await win.isFullscreen())) {
                 const pos = await win.outerPosition();
                 const size = await win.innerSize();
+                // PiP may have started while the window was being measured.
+                if (inPip()) return;
                 lastNormal = { x: pos.x, y: pos.y, width: size.width, height: size.height, maximized: false };
               }
               if (!lastNormal) return;

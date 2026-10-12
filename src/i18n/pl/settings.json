@@ -314,5 +314,8 @@
   "epgClearConfirmBody": "Wszystkie programy ze wszystkich przewodników zostaną usunięte. Dopasowania kanałów i adresy przewodników pozostaną.",
   "epgClearConfirm": "Wyczyść dane przewodnika",
   "epgClearDone": "Wyczyszczono dane przewodnika",
-  "epgClearFailed": "Nie udało się wyczyścić danych przewodnika"
+  "epgClearFailed": "Nie udało się wyczyścić danych przewodnika",
+  "saving": "Zapisywanie…",
+  "saved": "Zapisano",
+  "railsOffHint": "Włącz pulpit, aby korzystać z tych wierszy."
 }

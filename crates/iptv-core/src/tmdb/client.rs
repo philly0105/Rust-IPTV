@@ -143,7 +143,7 @@ impl TmdbClient {
         }
         if !status.is_success() {
             return Err(match status.as_u16() {
-                401 => CoreError::Auth(
+                401 | 403 => CoreError::Auth(
                     "TMDB rejected the API key. Check it in Settings > TMDB.".into(),
                 ),
                 404 => CoreError::NotFound(format!("TMDB has no entry at {path}")),

@@ -290,7 +290,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           }))}
         />
         {activeGroup && (
-          <div {...tabPanelProps('search-results', activeGroup.kind)} className="outline-none">
+          <div {...tabPanelProps('search-results', activeGroup.kind)} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
             {activeGroup.kind === 'live' ? (
               <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} onPlayChannel={playChannel} scrollRef={scrollRef} />
             ) : (

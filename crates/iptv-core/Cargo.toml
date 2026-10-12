@@ -51,4 +51,5 @@ strsim = { workspace = true }
 tempfile = { workspace = true }
 memory-stats = { workspace = true }
 iptv-fixtures = { workspace = true }
+iptv-mock = { workspace = true }
 tokio = { workspace = true }

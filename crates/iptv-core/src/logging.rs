@@ -133,7 +133,48 @@ const SECRET_PARAMS: &[&str] = &[
     "auth",
     "mac",
     "signature",
+    "passwd",
+    "access_token",
+    "sn",
+    "serial",
+    "device_id",
+    "device_id2",
 ];
+
+/// Masks credentials inside free text (error messages, upstream answers):
+/// `name=value` pairs of [`SECRET_PARAMS`], `Bearer` tokens, URL userinfo,
+/// and the username/password segments of Xtream stream paths. Text without
+/// secrets comes back unchanged.
+pub fn redact_text(text: &str) -> std::borrow::Cow<'_, str> {
+    use regex::Regex;
+    static PATTERNS: OnceLock<[(Regex, &'static str); 4]> = OnceLock::new();
+    let patterns = PATTERNS.get_or_init(|| {
+        let names = SECRET_PARAMS.join("|");
+        let re = |s: &str| Regex::new(s).expect("static redaction pattern");
+        [
+            (
+                re(&format!(r#"(?i)(^|[^A-Za-z0-9_])({names})=([^&\s"'<>#]+)"#)),
+                "$1$2=***",
+            ),
+            (re(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+"), "$1 ***"),
+            (
+                re(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@:]+:[^/\s@]*@"),
+                "$1***:***@",
+            ),
+            (
+                re(r"/(live|movie|series|timeshift)/[^/\s?#]+/[^/\s?#]+/"),
+                "/$1/***/***/",
+            ),
+        ]
+    });
+    let mut out = std::borrow::Cow::Borrowed(text);
+    for (re, rep) in patterns {
+        if re.is_match(&out) {
+            out = std::borrow::Cow::Owned(re.replace_all(&out, *rep).into_owned());
+        }
+    }
+    out
+}
 
 /// Xtream path prefixes followed by `/{username}/{password}/`.
 const XTREAM_PATH_PREFIXES: &[&str] = &["live", "movie", "series", "timeshift"];
@@ -206,6 +247,32 @@ mod tests {
         assert!(!r.contains("hunter2"), "{r}");
 
         assert_eq!(redact_url("not a url"), "<unparseable url>");
+    }
+
+    #[test]
+    fn redacts_secrets_in_free_text() {
+        let t = redact_text(
+            "GET http://h:8080/player_api.php?username=bob&password=hunter2&action=x failed; Authorization: Bearer tok.123-abc; see http://al:pw@h/x and http://h/live/bob/hunter2/1.ts (passwd=p2, sn=SER1, mac=00:1A:79:00:00:01)",
+        );
+        for secret in [
+            "bob", "hunter2", "tok.123", "al:pw", "p2,", "SER1", "00:1A:79",
+        ] {
+            assert!(!t.contains(secret), "{secret} in {t}");
+        }
+        assert!(
+            t.contains("action=x") && t.contains("Bearer ***") && t.contains("1.ts"),
+            "{t}"
+        );
+        // Ordinary messages are untouched (and not copied).
+        let plain = "Could not reach h. Check the address (connection refused)";
+        assert!(matches!(redact_text(plain), std::borrow::Cow::Borrowed(_)));
+        // Words that only end in a secret name are left alone.
+        assert_eq!(redact_text("monkey=1 subpass=2"), "monkey=1 subpass=2");
+        let r = redact_url("http://h/portal.php?type=stb&token=abc&sn=X1&device_id=D1");
+        assert!(
+            !r.contains("abc") && !r.contains("X1") && !r.contains("D1"),
+            "{r}"
+        );
     }
 
     #[test]

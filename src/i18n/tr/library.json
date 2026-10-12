@@ -194,5 +194,12 @@
   "removeFailed": "Öğe kaldırılamadı",
   "sourceRemoved": "Kaynak kaldırıldı",
   "sourceRemovedHint": "Bu öğenin kaynağı kaldırıldı. Öğeyi açmak için kaynağı yeniden ekleyin.",
-  "tryAgain": "Yeniden dene"
+  "tryAgain": "Yeniden dene",
+  "browseChannels": "Kanallara göz at",
+  "addSourceAction": "Kaynak ekle",
+  "emptyNoSourcesBody": "Önce bir oynatma listesi veya portal ekleyin. Açtığınız ya da yıldızladığınız her şey burada görünür.",
+  "recentRemoved": "{{title}} geçmişten kaldırıldı",
+  "continueRemoved": "{{title}} İzlemeye devam et listesinden kaldırıldı",
+  "undoFailed": "Geri alınamadı",
+  "clearSearch": "Aramayı temizle"
 }

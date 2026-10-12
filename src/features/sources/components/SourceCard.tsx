@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { CircleAlert, GripVertical, IdCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import type { DragEvent, KeyboardEvent } from 'react';
+import { useId, type DragEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -112,6 +112,8 @@ export function SourceCard(props: SourceCardProps) {
   const lang = i18n.language;
   const busy = refreshing || (progress !== undefined && progress.phase !== 'done' && progress.phase !== 'error');
   const guide = useSourceGuide(s.epg);
+  // Names the source for the error strip's buttons: several cards can show "Try again" at once.
+  const nameId = useId();
 
   // `channelCount` is live channels only; radio gets its own stat when the source has any.
   const radio = radioCount(s);
@@ -188,6 +190,7 @@ export function SourceCard(props: SourceCardProps) {
           <div className="flex min-w-0 items-center gap-2">
             <Link
               to={`/s/${s.id}/live`}
+              id={nameId}
               className="truncate font-display text-lg font-semibold text-fg hover:text-accent"
               data-testid="source-name"
             >
@@ -262,11 +265,11 @@ export function SourceCard(props: SourceCardProps) {
           <CircleAlert aria-hidden className="size-4 shrink-0 text-danger" />
           <SourceErrorText source={s} />
           <div className="flex gap-2">
-            <Button size="sm" variant="ghost" onClick={props.onEdit}>
+            <Button size="sm" variant="ghost" onClick={props.onEdit} aria-describedby={nameId}>
               {t('checkSettings')}
             </Button>
             {s.m3u?.origin !== 'text' ? (
-              <Button size="sm" variant="secondary" onClick={props.onRefresh}>
+              <Button size="sm" variant="secondary" onClick={props.onRefresh} aria-describedby={nameId} data-testid="source-error-retry">
                 {t('tryAgain')}
               </Button>
             ) : null}

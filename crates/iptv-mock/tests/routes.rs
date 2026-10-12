@@ -549,3 +549,103 @@ async fn live_hls_is_continuous() {
         prev = Some((n, pts));
     }
 }
+
+/// B8: the `/fail/...` routes answer with the failure they document.
+#[tokio::test]
+async fn failure_routes_answer_as_documented() {
+    use iptv_mock::failures::{LOGIN_HTML, MALFORMED_M3U};
+    let m = spawn().await;
+    let c = client();
+    let get = |p: &str| c.get(format!("{}{p}", m.base)).send();
+    for (path, code) in [
+        ("/fail/401.m3u", 401),
+        ("/fail/403.m3u", 403),
+        ("/fail/404.m3u", 404),
+        ("/fail/503.m3u", 503),
+        ("/fail/status/410", 410),
+        ("/fail/status/429", 429),
+    ] {
+        let r = get(path).await.unwrap();
+        assert_eq!(r.status().as_u16(), code, "{path}");
+        assert_eq!(
+            r.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*",
+            "{path}"
+        );
+    }
+    let r = get("/fail/401.m3u").await.unwrap();
+    assert!(r.headers().contains_key(header::WWW_AUTHENTICATE));
+    assert_eq!(get("/fail/status/9999").await.unwrap().status(), 400);
+
+    assert_eq!(
+        get("/fail/empty.m3u").await.unwrap().text().await.unwrap(),
+        ""
+    );
+    assert_eq!(
+        get("/fail/malformed.m3u")
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        MALFORMED_M3U
+    );
+    assert_eq!(
+        get("/fail/login.m3u").await.unwrap().text().await.unwrap(),
+        LOGIN_HTML
+    );
+    let broken = get("/fail/broken.m3u").await.unwrap().text().await.unwrap();
+    assert!(broken.starts_with("#EXTM3U") && broken.contains("garbage line"));
+    let hls = get("/fail/hls.m3u8").await.unwrap().text().await.unwrap();
+    assert!(hls.contains("#EXT-X-TARGETDURATION"));
+    let xml = get("/fail/malformed.xml")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(xml.starts_with("<?xml") && !xml.contains("</tv>"));
+
+    // The endless stream starts with MPEG-TS sync bytes.
+    let mut r = get("/fail/stream.ts").await.unwrap();
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp2t");
+    let first = r.chunk().await.unwrap().unwrap();
+    assert_eq!(first[0], 0x47);
+    assert_eq!(first[188], 0x47);
+    drop(r);
+
+    // Slow answers wait for the requested delay.
+    let started = std::time::Instant::now();
+    let body = get("/fail/slow.m3u?ms=300")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_millis(300));
+    assert!(body.starts_with("#EXTM3U"));
+
+    // A stalled body sends its first line, then nothing.
+    let mut r = get("/fail/stall.m3u").await.unwrap();
+    assert_eq!(&r.chunk().await.unwrap().unwrap()[..], b"#EXTM3U\n");
+    let next = tokio::time::timeout(std::time::Duration::from_millis(300), r.chunk()).await;
+    assert!(next.is_err(), "stall.m3u kept sending");
+}
+
+/// B8: `/m3u/10k.m3u` is the 10 000-entry fixture.
+#[tokio::test]
+async fn ten_k_playlist_has_ten_thousand_entries() {
+    let m = spawn().await;
+    let text = client()
+        .get(format!("{}/m3u/10k.m3u", m.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(
+        text.matches("#EXTINF").count(),
+        iptv_mock::playlists::TEN_K_CHANNELS
+    );
+}

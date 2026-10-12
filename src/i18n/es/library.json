@@ -208,5 +208,12 @@
   "removeFailed": "No se pudo quitar el elemento",
   "sourceRemoved": "Fuente quitada",
   "sourceRemovedHint": "Se quitó la fuente de este elemento. Vuelve a añadirla para abrirlo.",
-  "tryAgain": "Reintentar"
+  "tryAgain": "Reintentar",
+  "browseChannels": "Explorar canales",
+  "addSourceAction": "Añadir una fuente",
+  "emptyNoSourcesBody": "Añade primero una lista o un portal. Todo lo que abras o marques aparecerá aquí.",
+  "recentRemoved": "{{title}} se quitó del historial",
+  "continueRemoved": "{{title}} se quitó de Seguir viendo",
+  "undoFailed": "No se pudo deshacer",
+  "clearSearch": "Borrar búsqueda"
 }

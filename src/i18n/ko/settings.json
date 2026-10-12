@@ -306,5 +306,8 @@
   "epgClearConfirmBody": "모든 가이드의 프로그램이 삭제됩니다. 채널 연결과 가이드 주소는 유지됩니다.",
   "epgClearConfirm": "가이드 데이터 삭제",
   "epgClearDone": "가이드 데이터를 삭제했습니다",
-  "epgClearFailed": "가이드 데이터를 삭제할 수 없습니다"
+  "epgClearFailed": "가이드 데이터를 삭제할 수 없습니다",
+  "saving": "저장 중…",
+  "saved": "저장됨",
+  "railsOffHint": "이 행을 사용하려면 대시보드를 켜세요."
 }

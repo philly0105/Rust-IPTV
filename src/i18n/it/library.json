@@ -208,5 +208,12 @@
   "removeFailed": "Impossibile rimuovere l'elemento",
   "sourceRemoved": "Sorgente rimossa",
   "sourceRemovedHint": "La sorgente di questo elemento è stata rimossa. Aggiungila di nuovo per aprire l'elemento.",
-  "tryAgain": "Riprova"
+  "tryAgain": "Riprova",
+  "browseChannels": "Sfoglia i canali",
+  "addSourceAction": "Aggiungi una sorgente",
+  "emptyNoSourcesBody": "Aggiungi prima una playlist o un portale. Tutto ciò che apri o aggiungi ai preferiti comparirà qui.",
+  "recentRemoved": "{{title}} rimosso dalla cronologia",
+  "continueRemoved": "{{title}} rimosso da Continua a guardare",
+  "undoFailed": "Impossibile annullare",
+  "clearSearch": "Cancella ricerca"
 }

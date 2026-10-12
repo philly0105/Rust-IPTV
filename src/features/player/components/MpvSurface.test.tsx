@@ -28,13 +28,23 @@ vi.mock('@/api/transport', () => ({
   isDesktop: true,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+const clickListeners = new Set<() => void>();
 vi.mock('@/api/events', () => ({
   onAppEvent: (type: string, l: (st: MpvState) => void) => {
+    if (type === 'mpv.click') {
+      const c = l as unknown as () => void;
+      clickListeners.add(c);
+      return () => clickListeners.delete(c);
+    }
     if (type !== 'mpv.state') return () => undefined;
     stateListeners.add(l);
     return () => stateListeners.delete(l);
   },
 }));
+
+/** Where the desktop cursor is, in viewport CSS px (the root measures as BOX). */
+let cursor = { x: 10, y: 10 };
+vi.mock('@/api/window', () => ({ cursorInViewport: async () => cursor }));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore } = await import('../media');
@@ -235,6 +245,19 @@ describe('MpvSurface attach', () => {
     expect(usePlayerStore.getState()).toMatchObject({ volume: 0.5, muted: false });
   });
 
+  it('a click on the video toggles play and pause once attached', async () => {
+    render(surfaceTree);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    const toggle = vi.spyOn(usePlayerStore.getState(), 'togglePlay');
+    act(() => {
+      for (const l of clickListeners) l();
+    });
+    expect(toggle).toHaveBeenCalledTimes(1);
+    toggle.mockRestore();
+  });
+
   it('a StrictMode double mount never detaches the live session', async () => {
     let open!: () => void;
     attachGate = new Promise((r) => (open = r));
@@ -291,5 +314,38 @@ describe('MpvSurface recording', () => {
     render(surfaceTree);
     await tick();
     expect(screen.queryByRole('button', { name: 'Record this stream' })).toBeNull();
+  });
+});
+
+describe('fullscreen overlay chrome', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('hides when the mouse rests and returns only for movement over the player', async () => {
+    vi.useFakeTimers();
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isFullscreen: true, status: 'playing' }));
+    render(surfaceTree);
+    const advance = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    await advance(100);
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    const chrome = (): HTMLElement | null => screen.queryByTestId('mpv-overlay-chrome');
+    expect(chrome()).toBeTruthy();
+
+    await advance(3000);
+    expect(chrome()).toBeNull();
+
+    // Moving on another monitor (outside the player) does not bring it back.
+    cursor = { x: 1900, y: 40 };
+    await advance(400);
+    expect(chrome()).toBeNull();
+
+    // Moving over the video does.
+    cursor = { x: 300, y: 200 };
+    await advance(400);
+    expect(chrome()).toBeTruthy();
   });
 });

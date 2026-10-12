@@ -31,7 +31,10 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM,
 };
-use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH, HBRUSH};
+use windows::Win32::Graphics::Gdi::{
+    CombineRgn, CreateRectRgn, DeleteObject, GetStockObject, SetWindowRgn, BLACK_BRUSH, HBRUSH,
+    HGDIOBJ, RGN_DIFF,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, IsWindow, LoadCursorW, RegisterClassExW,
@@ -150,6 +153,40 @@ impl ChildWindowFactory for MpvWindowFactory {
                 )
             }
             .map_err(|e| win_err("SetWindowPos", e))
+        })
+    }
+
+    fn set_holes(&self, hwnd: isize, holes: Vec<Bounds>) -> CoreResult<()> {
+        self.on_main("cut mpv window", move |_parent, scale| {
+            let hwnd = HWND(hwnd as *mut core::ffi::c_void);
+            // SAFETY: IsWindow accepts any value.
+            if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+                return Err(CoreError::NotFound(
+                    "the mpv window no longer exists".into(),
+                ));
+            }
+            if holes.is_empty() {
+                // SAFETY: a null region restores the full window.
+                unsafe { SetWindowRgn(hwnd, None, true) };
+                return Ok(());
+            }
+            // SAFETY: regions are created and combined here; SetWindowRgn takes
+            // ownership of `region` on success, so only the hole regions and a
+            // region the system rejected are deleted.
+            unsafe {
+                let region = CreateRectRgn(0, 0, 1 << 15, 1 << 15);
+                for hole in holes {
+                    let (x, y, w, h) = scaled(hole, scale);
+                    let cut = CreateRectRgn(x, y, x + w, y + h);
+                    CombineRgn(Some(region), Some(region), Some(cut), RGN_DIFF);
+                    let _ = DeleteObject(HGDIOBJ(cut.0));
+                }
+                if SetWindowRgn(hwnd, Some(region), true) == 0 {
+                    let _ = DeleteObject(HGDIOBJ(region.0));
+                    return Err(other("SetWindowRgn failed".to_string()));
+                }
+            }
+            Ok(())
         })
     }
 

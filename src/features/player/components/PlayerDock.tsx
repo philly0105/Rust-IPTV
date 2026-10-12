@@ -10,6 +10,7 @@ import { cn } from '../cn';
 import { bindExternalEvents } from '../external';
 import { useMediaStore } from '../media';
 import { bindRemote } from '../remote';
+import { exitPip, usePipStore } from '../pip';
 import { getLastStagePath, setRehome, useStageTarget } from '../stage';
 import { flushProgress, reportFullscreen, usePlayerStore } from '../store';
 import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
@@ -89,6 +90,7 @@ export function PlayerDock() {
   const dock = usePlayerStore((s) => s.dock);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const zapContext = usePlayerStore((s) => s.zapContext);
+  const pip = usePipStore((s) => s.active);
   const settings = usePlayerSettings();
   const stageTarget = useStageTarget();
   const [host] = useState(() => {
@@ -98,6 +100,7 @@ export function PlayerDock() {
     return el;
   });
   const miniSlotRef = useRef<HTMLDivElement>(null);
+  const pipSlotRef = useRef<HTMLDivElement>(null);
   const miniRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MiniPos>(readPos);
 
@@ -133,11 +136,17 @@ export function PlayerDock() {
     return () => setRehome(null);
   }, [host]);
 
-  // Place the host node.
+  // Place the host node: the picture-in-picture layer wins over the stage and the mini frame.
+  const inPip = pip && visible;
   useLayoutEffect(() => {
-    const target = inStage ? stageTarget : miniSlotRef.current;
+    const target = inPip ? pipSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
     if (target && host.parentNode !== target) target.appendChild(host);
-  }, [inStage, stageTarget, host]);
+  }, [inPip, inStage, stageTarget, host]);
+
+  // Nothing left to show in the small window: give the app its window back.
+  useEffect(() => {
+    if (pip && !visible) void exitPip();
+  }, [pip, visible]);
 
   useEffect(
     () => () => {
@@ -217,7 +226,8 @@ export function PlayerDock() {
 
   return (
     <>
-      {createPortal(<PlayerSurface compact={inMini} channelPanelAvailable={channelPanelAvailable} />, host)}
+      {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
+      {createPortal(<PlayerSurface compact={inMini && !isFullscreen && !inPip} channelPanelAvailable={channelPanelAvailable} />, host)}
       <div
         ref={miniRef}
         role="region"
@@ -277,6 +287,8 @@ export function PlayerDock() {
         </div>
         <div ref={miniSlotRef} className={cn('relative bg-black', isRadio ? 'h-16' : mode === 'embedded-mpv' ? 'aspect-[16/11]' : 'aspect-video')} />
       </div>
+      {/* Picture-in-picture: the player covers the whole (shrunken, borderless) window. */}
+      <div ref={pipSlotRef} data-pip-layer="" hidden={!inPip} className="fixed inset-0 z-[2147483000] bg-black" />
     </>
   );
 }

@@ -112,13 +112,15 @@ test.describe.serial('keyboard shortcuts', () => {
     await page.keyboard.press('k');
     await expect.poll(async () => (await media()).paused).toBe(true);
 
-    // Arrow left/right seek 5 s (while paused, so the clock does not move).
-    const t0 = (await media()).currentTime;
+    // Arrow left/right seek 10 s (while paused, so the clock does not move). The clip is
+    // shorter than 10 s past t0, so the right arrow stops at the end and the left arrow,
+    // from there, must land at least 10 s back (or at the start).
+    const { currentTime: t0, duration } = await media();
     await page.keyboard.press('ArrowRight');
-    await expect.poll(async () => (await media()).currentTime).toBeGreaterThanOrEqual(t0 + 4.5);
+    await expect.poll(async () => (await media()).currentTime).toBeGreaterThanOrEqual(Math.min(t0 + 9.5, (duration ?? Infinity) - 0.5));
     const t1 = (await media()).currentTime;
     await page.keyboard.press('ArrowLeft');
-    await expect.poll(async () => (await media()).currentTime).toBeLessThanOrEqual(t1 - 4.5);
+    await expect.poll(async () => (await media()).currentTime).toBeLessThanOrEqual(Math.max(0, t1 - 10) + 0.5);
 
     // Arrow up/down change volume by 5 %.
     await page.keyboard.press('ArrowDown');

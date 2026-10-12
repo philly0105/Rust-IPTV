@@ -267,6 +267,15 @@ pub fn embedded_mpv_args(
     args
 }
 
+/// Per-file mpv options that turn the demuxer cache into a rewind buffer for
+/// live streams.
+pub const LIVE_TIMESHIFT_OPTIONS: &[(&str, &str)] = &[
+    ("cache", "yes"),
+    ("demuxer-max-back-bytes", "1GiB"),
+    ("demuxer-seekable-cache", "yes"),
+    ("force-seekable", "yes"),
+];
+
 /// Per-file options for `loadfile` in embedded mode: `force-media-title`,
 /// `user-agent`, `referrer`, `http-header-fields`, and `start=+<seconds>`
 /// for a resume position (live sources never seek).
@@ -293,6 +302,14 @@ pub fn loadfile_options(source: &PlayerSource) -> serde_json::Map<String, serde_
             opts.insert("start".into(), Value::String(format!("+{s}")));
         }
         _ => {}
+    }
+    if source.is_live {
+        // Timeshift: keep what was watched in the cache and let mpv seek in it,
+        // so live TV can rewind (about 20 minutes of a 6 Mbit/s stream) and
+        // jump back to the live edge.
+        for (k, v) in LIVE_TIMESHIFT_OPTIONS {
+            opts.insert((*k).into(), Value::String((*v).to_string()));
+        }
     }
     opts
 }

@@ -119,7 +119,9 @@ export async function searchFindsMovie(page: Page, query: string, title: string,
   await page.goto('/search');
   const box = page.getByRole('banner').getByRole('searchbox');
   await box.fill(query);
-  const movies = page.getByRole('main').getByRole('region', { name: /^Movies/ });
+  const tab = page.getByRole('main').getByRole('tab', { name: /^Movies/ });
+  await tab.click();
+  const movies = page.getByRole('main').getByRole('tabpanel', { name: /^Movies/ });
   await expect(movies).toBeVisible();
   const hit = movies.getByRole('link', { name: new RegExp(title) }).first();
   await expect(hit).toBeVisible();

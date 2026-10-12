@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
-import { rpc } from '@/api/transport';
+import { isDesktop, rpc } from '@/api/transport';
 import type { Bounds, MpvState, MpvTrack } from '@/api/types';
 
 import { useToast } from '@/ui/Toast';
@@ -10,7 +10,8 @@ import { cn } from '../cn';
 import type { EngineTracks, TrackOption } from '../engines';
 import { modalOpen } from '../format';
 import { setMediaCommands, useMediaStore } from '../media';
-import { measureMpvBounds } from '../mpvBounds';
+import { measureMpvBounds, measureMpvLayout } from '../mpvBounds';
+import { togglePip } from '../pip';
 import {
   ENDED_EPSILON,
   handleEnded,
@@ -91,15 +92,21 @@ export function MpvSurface({ className }: { className?: string }) {
     let ready = false;
     let unController: () => void = () => undefined;
     let lastSent: Bounds | null = null;
+    let lastHoles = '[]';
     let raf = 0;
 
     const send = (): void => {
       raf = 0;
       if (disposed || !ref.current) return;
-      const b = surfaceBounds(ref.current);
-      if (boundsEqual(lastSent, b)) return;
+      // Fullscreen chrome over the video is cut out of the native window (holes) instead of shrinking it.
+      const layout = modalOpen() || ref.current.getClientRects().length === 0 ? null : measureMpvLayout(ref.current);
+      const b = layout?.bounds ?? HIDDEN_BOUNDS;
+      const holes = layout?.bounds ? layout.holes : [];
+      const holesKey = JSON.stringify(holes);
+      if (boundsEqual(lastSent, b) && holesKey === lastHoles) return;
       lastSent = b;
-      rpc('mpv.setBounds', { bounds: b }).catch(() => undefined);
+      lastHoles = holesKey;
+      rpc('mpv.setBounds', { bounds: b, holes }).catch(() => undefined);
     };
     const schedule = (): void => {
       if (!raf) raf = requestAnimationFrame(send);
@@ -131,6 +138,11 @@ export function MpvSurface({ className }: { className?: string }) {
       if (disposed || !ready) return;
       applyState(st);
     });
+    // A left click on the video (bound inside mpv, whose window takes the mouse).
+    const unClick = onAppEvent('mpv.click', () => {
+      if (disposed || !ready) return;
+      usePlayerStore.getState().togglePlay();
+    });
 
     const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
@@ -139,6 +151,7 @@ export function MpvSurface({ className }: { className?: string }) {
         tracks: mpvTracks(st, { audio: (i) => t('audioFallback', { index: i }), sub: (i) => t('subtitleFallback', { index: i }) }),
         captionsOn: st.tracks.some((x) => x.type === 'sub' && x.selected),
         waiting: !st.loaded,
+        seekable: st.seekable,
         recordStartedAt: st.recording ? (prev?.recording ? useMediaStore.getState().recordStartedAt : undefined) ?? Date.now() : undefined,
       });
       const src = usePlayerStore.getState().source;
@@ -161,13 +174,14 @@ export function MpvSurface({ className }: { className?: string }) {
         useMediaStore.setState({ rate: r });
         void rpc('mpv.setProperty', { name: 'speed', value: r }).catch(() => undefined);
       },
-      togglePip: () => undefined,
+      togglePip: () => void togglePip(),
       retry: () => {
         const src = usePlayerStore.getState().source;
         if (src) void rpc('mpv.load', { source: src }).catch(() => undefined);
       },
     });
-    useMediaStore.setState({ canPip: false });
+    // Window picture-in-picture (the native video cannot use the browser's).
+    useMediaStore.setState({ canPip: isDesktop });
 
     const initial = surfaceBounds(el);
     const { volume, muted } = usePlayerStore.getState();
@@ -215,6 +229,7 @@ export function MpvSurface({ className }: { className?: string }) {
       document.removeEventListener('fullscreenchange', schedule);
       dpr.removeEventListener('change', onDpr);
       unState();
+      unClick();
       unController();
       unCommands();
       useMediaStore.setState({ mpv: undefined, recordStartedAt: undefined });

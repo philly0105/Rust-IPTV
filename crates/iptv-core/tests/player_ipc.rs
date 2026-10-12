@@ -5,7 +5,7 @@ use iptv_core::error::CoreError;
 use iptv_core::model::{MpvState, MpvTrackType};
 use iptv_core::player::ipc::{encode_command, parse_line, IpcMessage, MpvClient};
 use iptv_core::player::mpv_state::{
-    apply_event, apply_property, parse_tracks, OBSERVED_PROPERTIES,
+    apply_event, apply_property, parse_tracks, seekable_range, OBSERVED_PROPERTIES,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -133,7 +133,8 @@ fn observed_properties_match_contract() {
             "volume",
             "mute",
             "track-list",
-            "fullscreen"
+            "fullscreen",
+            "demuxer-cache-state"
         ]
     );
 }
@@ -375,4 +376,31 @@ async fn update_state_wakes_emitter_only_on_change() {
     assert_eq!(*emitted.lock(), 0);
     client.update_state(|s| s.loaded = true);
     eventually(|| *emitted.lock() == 1).await;
+}
+
+#[test]
+fn demuxer_cache_state_gives_the_rewind_window() {
+    let cache =
+        json!({"seekable-ranges": [{"start": 10.0, "end": 40.0}, {"start": 100.0, "end": 400.5}]});
+    // The range holding the playback position wins; otherwise the newest.
+    assert_eq!(
+        seekable_range(&cache, 20.0).map(|r| (r.start, r.end)),
+        Some((10.0, 40.0))
+    );
+    assert_eq!(
+        seekable_range(&cache, 60.0).map(|r| (r.start, r.end)),
+        Some((100.0, 400.5))
+    );
+    assert_eq!(seekable_range(&json!({"seekable-ranges": []}), 0.0), None);
+    assert_eq!(seekable_range(&json!({}), 0.0), None);
+
+    let mut st = MpvState {
+        time_pos: 300.0,
+        ..MpvState::default()
+    };
+    assert!(apply_property(&mut st, "demuxer-cache-state", Some(&cache)));
+    assert_eq!(st.seekable.map(|r| r.end), Some(400.5));
+    // A new file starts without a window.
+    assert!(apply_event(&mut st, &json!({"event": "start-file"})));
+    assert_eq!(st.seekable, None);
 }

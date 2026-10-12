@@ -67,7 +67,7 @@ test.describe.serial('stalker flow', () => {
     const hit = page.getByRole('main').getByRole('link', { name: /The Lantern Keepers/ }).first();
     await expect(hit).toBeVisible();
     await expect(hit).toHaveAttribute('href', new RegExp(`^/s/${source.id}/series/`));
-    await expect(page.getByRole('main').getByRole('region', { name: /^Series/ }).getByRole('link', { name: /The Lantern Keepers/ })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('tabpanel', { name: /^Series/ }).getByRole('link', { name: /The Lantern Keepers/ })).toBeVisible();
     await hit.click();
 
     const detail = page.getByTestId('vod-series-detail');

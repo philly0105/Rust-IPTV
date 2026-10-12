@@ -23,7 +23,7 @@ test.describe.serial('resume after reload', () => {
     const src = await playMovieOnDetail(page);
     expect(src).toContain(`/${MOCK_FACTS.firstMovie.id}.mp4`);
 
-    // Seek to 30 s: pause, then six 5 s steps with the arrow key from the start.
+    // Seek to 30 s: pause, then three 10 s steps with the arrow key from the start.
     await blurFocus(page);
     await page.keyboard.press('k');
     await expect.poll(async () => (await mediaState(page))?.paused).toBe(true);
@@ -31,7 +31,7 @@ test.describe.serial('resume after reload', () => {
       const v = document.querySelector('video');
       if (v) v.currentTime = 0;
     });
-    for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
     await expect.poll(async () => Math.round((await mediaState(page))?.currentTime ?? 0)).toBe(30);
     await page.keyboard.press('k');
     await expectPlaying(page, { advance: 1 });

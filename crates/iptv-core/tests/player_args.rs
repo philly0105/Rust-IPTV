@@ -7,7 +7,7 @@ use iptv_core::player::args::{
     mpv_header_fields, mpv_pipe_name, split_shell_args, validate_play_url, vlc_external_args,
 };
 use iptv_core::player::embedded::{
-    legacy_options, recording_file_name, stream_record_command, validate_command,
+    is_click_message, legacy_options, recording_file_name, stream_record_command, validate_command,
     validate_property, SETTABLE_PROPERTIES,
 };
 use iptv_core::player::external::{build_args, ExternalPlayer};
@@ -433,7 +433,12 @@ fn loadfile_options_never_seek_live_or_zero() {
     let mut src = source("http://h/live", "Live", None);
     src.resume_seconds = Some(120);
     assert!(!loadfile_options(&src).contains_key("start"));
+    // Live gets the timeshift cache instead.
+    let live = loadfile_options(&src);
+    assert_eq!(live["force-seekable"], json!("yes"));
+    assert_eq!(live["demuxer-max-back-bytes"], json!("1GiB"));
     src.is_live = false;
+    assert!(!loadfile_options(&src).contains_key("force-seekable"));
     src.resume_seconds = Some(0);
     assert!(!loadfile_options(&src).contains_key("start"));
 }
@@ -599,4 +604,20 @@ fn raw_commands_are_an_allowlist() {
     assert!(validate_command(&[json!("seek"), json!(42.5), json!("absolute")]).is_ok());
     assert!(validate_command(&[json!("get_property"), json!("time-pos")]).is_ok());
     assert!(validate_command(&[json!("multiply"), json!("speed"), json!(2)]).is_ok());
+}
+
+#[test]
+fn only_our_script_message_counts_as_a_video_click() {
+    assert!(is_click_message(
+        &json!({"event": "client-message", "args": ["tsrust-click"]})
+    ));
+    assert!(!is_click_message(
+        &json!({"event": "client-message", "args": ["other"]})
+    ));
+    assert!(!is_click_message(
+        &json!({"event": "client-message", "args": []})
+    ));
+    assert!(!is_click_message(
+        &json!({"event": "property-change", "name": "pause"})
+    ));
 }

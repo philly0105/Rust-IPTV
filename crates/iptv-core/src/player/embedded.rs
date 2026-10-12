@@ -41,6 +41,10 @@ const PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long `mpv.detach` waits for mpv to quit before killing it.
 const QUIT_GRACE: Duration = Duration::from_secs(2);
 
+/// mpv's window takes the mouse over the video, so a left click there is bound
+/// to this script message and comes back over IPC as `mpv.click`.
+const CLICK_MESSAGE: &str = "tsrust-click";
+
 /// IPC commands `mpv.command` accepts besides [`PROPERTY_COMMANDS`]: what
 /// the player UI sends (`seek`) and read-only property queries. Everything
 /// else is refused, including mpv's command prefixes (`no-osd`, `async`,
@@ -112,6 +116,8 @@ struct Session {
     pid: u32,
     detaching: AtomicBool,
     emitter: Mutex<Option<JoinHandle<()>>>,
+    /// Forwards clicks on the video as `mpv.click`.
+    clicks: Mutex<Option<JoinHandle<()>>>,
     watcher: Mutex<Option<JoinHandle<()>>>,
     /// Title of the loaded item (names recordings).
     title: Mutex<String>,
@@ -132,6 +138,9 @@ impl Session {
     /// watcher.
     fn stop_tasks(&self, from_watcher: bool) {
         if let Some(t) = self.emitter.lock().take() {
+            t.abort();
+        }
+        if let Some(t) = self.clicks.lock().take() {
             t.abort();
         }
         let watcher = self.watcher.lock().take();
@@ -275,6 +284,7 @@ pub async fn attach(
         pid,
         detaching: AtomicBool::new(false),
         emitter: Mutex::new(None),
+        clicks: Mutex::new(None),
         watcher: Mutex::new(None),
         title: Mutex::new(String::new()),
     });
@@ -296,8 +306,21 @@ pub async fn attach(
         s.attached = true;
         emit_state.emit("mpv.state", s);
     });
+    let clicks = spawn_click_forwarder(Arc::clone(state), &client);
+    // Older mpv builds lack `keybind`; the video then just ignores clicks.
+    if let Err(e) = client
+        .command(vec![
+            json!("keybind"),
+            json!("MBTN_LEFT"),
+            json!(format!("script-message {CLICK_MESSAGE}")),
+        ])
+        .await
+    {
+        tracing::warn!(error = %e, "mpv did not accept the click binding");
+    }
     let watcher = tokio::spawn(watch_session(Arc::clone(state), Arc::clone(&session)));
     *session.emitter.lock() = Some(emitter);
+    *session.clicks.lock() = Some(clicks);
     *session.watcher.lock() = Some(watcher);
     *mgr.session.lock() = Some(Arc::clone(&session));
 
@@ -548,10 +571,17 @@ pub async fn set_property(state: &Arc<AppState>, name: &str, value: Value) -> Co
 }
 
 /// `mpv.setBounds`.
-pub async fn set_bounds(state: &Arc<AppState>, bounds: Bounds) -> CoreResult<()> {
+pub async fn set_bounds(
+    state: &Arc<AppState>,
+    bounds: Bounds,
+    holes: Vec<Bounds>,
+) -> CoreResult<()> {
     ensure_platform()?;
     let s = current(&manager(state)).ok_or_else(not_attached)?;
-    set_window_bounds(&s.factory, s.hwnd, bounds).await
+    set_window_bounds(&s.factory, s.hwnd, bounds).await?;
+    let f = Arc::clone(&s.factory);
+    let hwnd = s.hwnd;
+    tokio::task::spawn_blocking(move || f.set_holes(hwnd, holes)).await?
 }
 
 /// `mpv.detach`: asks mpv to quit, kills it after 2 s, destroys the window.
@@ -654,6 +684,34 @@ async fn wait_exit(s: &Session, limit: Duration) -> bool {
 
 /// Watches for mpv exiting (or its pipe closing) without a detach and turns
 /// it into an error state plus a full teardown.
+/// Emits `mpv.click` for every `script-message tsrust-click` mpv sends.
+fn spawn_click_forwarder(state: Arc<AppState>, client: &Arc<MpvClient>) -> JoinHandle<()> {
+    let mut events = client.subscribe_events();
+    tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(ev) => {
+                    if is_click_message(&ev) {
+                        state.emit("mpv.click", json!({}));
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
+}
+
+/// True for `{"event":"client-message","args":["tsrust-click"]}`.
+pub fn is_click_message(ev: &Value) -> bool {
+    ev.get("event").and_then(Value::as_str) == Some("client-message")
+        && ev
+            .get("args")
+            .and_then(|a| a.get(0))
+            .and_then(Value::as_str)
+            == Some(CLICK_MESSAGE)
+}
+
 async fn watch_session(state: Arc<AppState>, s: Arc<Session>) {
     loop {
         tokio::select! {

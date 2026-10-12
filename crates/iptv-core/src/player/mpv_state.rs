@@ -1,6 +1,6 @@
 //! Pure reducers from mpv JSON IPC events to [`MpvState`].
 
-use crate::model::{MpvState, MpvTrack, MpvTrackType};
+use crate::model::{MpvSeekRange, MpvState, MpvTrack, MpvTrackType};
 use serde_json::Value;
 
 /// Properties the embedded session observes, with their observer ids.
@@ -12,6 +12,7 @@ pub const OBSERVED_PROPERTIES: &[(u64, &str)] = &[
     (5, "mute"),
     (6, "track-list"),
     (7, "fullscreen"),
+    (8, "demuxer-cache-state"),
 ];
 
 /// Applies one `property-change` to `state`. `data` is `None` when mpv
@@ -56,9 +57,33 @@ pub fn apply_property(state: &mut MpvState, name: &str, data: Option<&Value>) ->
                 state.fullscreen = b;
             }
         }
+        "demuxer-cache-state" => {
+            state.seekable = data.and_then(|d| seekable_range(d, state.time_pos));
+        }
         _ => return false,
     }
     *state != before
+}
+
+/// The cached range from `demuxer-cache-state.seekable-ranges` that holds
+/// `pos` (else the newest one), or `None` when nothing is seekable.
+pub fn seekable_range(cache_state: &Value, pos: f64) -> Option<MpvSeekRange> {
+    let ranges: Vec<MpvSeekRange> = cache_state
+        .get("seekable-ranges")?
+        .as_array()?
+        .iter()
+        .filter_map(|r| {
+            let start = r.get("start")?.as_f64()?;
+            let end = r.get("end")?.as_f64()?;
+            (start.is_finite() && end.is_finite() && end > start)
+                .then_some(MpvSeekRange { start, end })
+        })
+        .collect();
+    ranges
+        .iter()
+        .find(|r| r.start <= pos && pos <= r.end)
+        .or_else(|| ranges.iter().max_by(|a, b| a.end.total_cmp(&b.end)))
+        .copied()
 }
 
 /// Parses mpv's `track-list` array. Entries with an unknown type or no id
@@ -112,6 +137,7 @@ pub fn apply_event(state: &mut MpvState, event: &Value) -> bool {
         "start-file" => {
             state.loaded = false;
             state.error = None;
+            state.seekable = None;
         }
         "file-loaded" => {
             state.loaded = true;

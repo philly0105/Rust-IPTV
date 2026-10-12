@@ -1095,6 +1095,17 @@ pub struct MpvState {
     /// File being recorded, `null` when not recording.
     #[serde(default)]
     pub record_path: Option<String>,
+    /// Stretch of the stream mpv holds in its cache and can seek in (seconds on
+    /// the `time_pos` clock). For live TV this is the rewind window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seekable: Option<MpvSeekRange>,
+}
+
+/// One seekable range of mpv's demuxer cache.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MpvSeekRange {
+    pub start: f64,
+    pub end: f64,
 }
 
 impl Default for MpvState {
@@ -1112,6 +1123,7 @@ impl Default for MpvState {
             error: None,
             recording: false,
             record_path: None,
+            seekable: None,
         }
     }
 }

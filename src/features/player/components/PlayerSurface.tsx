@@ -1,18 +1,23 @@
-import { AlertTriangle, Play, RotateCcw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import { cursorInViewport } from '@/api/window';
 
 import { cn } from '../cn';
 import { formatTime } from '../format';
 import { UP_NEXT_SECONDS, useMediaStore } from '../media';
+import { exitPip, usePipStore } from '../pip';
 import { replay, selectEnded, usePlayerStore } from '../store';
-import { Controls } from './Controls';
+import { Controls, CtlButton } from './Controls';
 import { FullscreenChannelPanel } from './FullscreenChannelPanel';
 import { InlinePlayer } from './InlinePlayer';
 import { MpvSurface } from './MpvSurface';
 import { RadioPlayer } from './RadioPlayer';
 
 const HIDE_AFTER_MS = 2600;
+/** How often fullscreen mpv checks whether the mouse moved over the native video window. */
+const CURSOR_POLL_MS = 200;
 const CLICK_DELAY_MS = 220;
 
 /** Big tuner readout after a zap or volume change. */
@@ -223,6 +228,122 @@ function Tuning({ label }: { label: string }) {
   );
 }
 
+/**
+ * Embedded mpv with its chrome. Docked: the native window on top, every bit of DOM chrome
+ * in reserved strips below it. Fullscreen and picture-in-picture: the video fills the screen
+ * (or the shrunken window) and the notices and controls float over its bottom edge (cut out
+ * of the native window as holes by `measureMpvLayout`). They hide after a few seconds and
+ * come back only when the mouse moves over the video or a key is pressed, staying while the
+ * pointer is on the bar, a menu is open, or playback is not running. The surface stays the
+ * first child in every layout, so switching never remounts it (that would restart mpv).
+ */
+function MpvPlayer({ compact }: { compact: boolean }) {
+  const { t } = useTranslation('player');
+  const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const status = usePlayerStore((s) => s.status);
+  const title = usePlayerStore((s) => s.source?.title);
+  const pip = usePipStore((s) => s.active);
+  const [idle, setIdle] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [onBar, setOnBar] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const overlay = (isFullscreen || pip) && !compact;
+  const small = compact || pip;
+
+  const poke = useCallback((): void => {
+    setIdle(false);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setIdle(true), HIDE_AFTER_MS);
+  }, []);
+
+  // The native window swallows mouse moves over the video, so the cursor is polled instead;
+  // only movement inside the player counts (not on another monitor or over another app).
+  useEffect(() => {
+    if (!overlay) return;
+    poke();
+    let last: string | undefined;
+    let stopped = false;
+    const id = setInterval(() => {
+      void cursorInViewport().then((p) => {
+        const root = rootRef.current;
+        if (stopped || !p || !root) return;
+        const key = `${p.x},${p.y}`;
+        const moved = last !== undefined && key !== last;
+        last = key;
+        if (!moved) return;
+        const r = root.getBoundingClientRect();
+        if (p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom) poke();
+      });
+    }, CURSOR_POLL_MS);
+    window.addEventListener('keydown', poke);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      window.removeEventListener('keydown', poke);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [overlay, poke]);
+
+  const chromeShown = !overlay || !idle || onBar || menuOpen || status !== 'playing';
+  const barEvents = {
+    onPointerEnter: () => setOnBar(true),
+    onPointerLeave: () => {
+      setOnBar(false);
+      poke();
+    },
+    onPointerMove: poke,
+  };
+
+  return (
+    <div ref={rootRef} className={cn('h-full w-full bg-black', overlay ? 'relative' : 'flex flex-col')}>
+      <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
+      {overlay ? (
+        chromeShown && (
+          <>
+            {pip && (
+              // Borderless window: this strip moves it, and holds the way back to the full app.
+              <div
+                data-mpv-reserved=""
+                data-tauri-drag-region=""
+                data-testid="pip-bar"
+                className="absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-0.5 bg-[#070b12] ps-3 pe-1 text-white"
+                {...barEvents}
+              >
+                <span data-tauri-drag-region="" className="min-w-0 flex-1 truncate text-xs font-medium" title={title}>
+                  {title}
+                </span>
+                <CtlButton label={t('exitPip')} onClick={() => void exitPip()} className="size-8 [&_svg]:size-4">
+                  <PictureInPicture2 />
+                </CtlButton>
+                <CtlButton
+                  label={t('close')}
+                  onClick={() => {
+                    usePlayerStore.getState().stop();
+                    void exitPip();
+                  }}
+                  className="size-8 [&_svg]:size-4"
+                >
+                  <X />
+                </CtlButton>
+              </div>
+            )}
+            <div data-testid="mpv-overlay-chrome" className="absolute inset-x-0 bottom-0 z-10" {...barEvents}>
+              <MpvNotices compact={small} />
+              <Controls variant="dock" visible compact={small} onMenuOpenChange={setMenuOpen} />
+            </div>
+          </>
+        )
+      ) : (
+        <>
+          <MpvNotices compact={compact} />
+          <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} />
+        </>
+      )}
+    </div>
+  );
+}
+
 export interface PlayerSurfaceProps {
   compact: boolean;
   channelPanelAvailable: boolean;
@@ -289,14 +410,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   }
 
   if (mode === 'embedded-mpv') {
-    return (
-      // Native window on top, every bit of DOM chrome in reserved strips below it.
-      <div ref={rootRef} className="flex h-full w-full flex-col bg-black">
-        <MpvSurface className="min-h-0 flex-1" />
-        <MpvNotices compact={compact} />
-        <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} />
-      </div>
-    );
+    return <MpvPlayer compact={compact} />;
   }
 
   if (mode === 'external') return null;

@@ -59,6 +59,10 @@ struct StopExternalResult {
 #[serde(rename_all = "camelCase")]
 struct BoundsArgs {
     bounds: Bounds,
+    /// Rects inside `bounds` (relative to its top-left, CSS px) cut out of the
+    /// window so DOM chrome under them shows over the video.
+    #[serde(default)]
+    holes: Vec<Bounds>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,7 +163,7 @@ pub fn register(r: &mut RpcRouter) {
 
     r.add("mpv.setBounds", |state, a: BoundsArgs| async move {
         ensure_desktop(&state)?;
-        embedded::set_bounds(&state, a.bounds).await?;
+        embedded::set_bounds(&state, a.bounds, a.holes).await?;
         Ok::<_, RpcError>(())
     });
 

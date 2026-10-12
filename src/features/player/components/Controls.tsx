@@ -19,6 +19,7 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,10 +30,14 @@ import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import { formatTime } from '../format';
 import { useMediaStore } from '../media';
+import { usePipStore } from '../pip';
 import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '../store';
 import { SeekBar } from './SeekBar';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+/** Seconds behind the end of the seekable window that still count as live. */
+const LIVE_EDGE_SLACK = 6;
+const LIVE_EDGE_SLACK_MPV = 10;
 
 export function CtlButton({
   label,
@@ -204,9 +209,14 @@ function MenuChoice({ label, selected, onClick }: { label: string; selected: boo
   );
 }
 
-/** Quality, audio, subtitles, speed. Overlay: popover above the bar. Dock: rendered by the caller inline. */
+/**
+ * Quality, audio, subtitles, speed. Overlay: popover above the bar. Dock: rendered by the caller
+ * inline above the bar. Picking a choice closes the menu; the header X closes it too, since
+ * Escape may never reach the webview while the native mpv window has focus.
+ */
 function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: MenuView | null): void; isVod: boolean }) {
   const { t } = useTranslation('player');
+  const { t: tc } = useTranslation('common');
   const tracks = useMediaStore((s) => s.tracks);
   const rate = useMediaStore((s) => s.rate);
   const commands = useMediaStore((s) => s.commands);
@@ -220,15 +230,35 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
   const audioValue = tracks.audio.find((a) => a.selected)?.label ?? t('trackDefault');
   const textValue = tracks.text.find((a) => a.selected)?.label ?? t('off');
 
-  const back = (
-    <button
-      type="button"
-      onClick={() => setView('root')}
-      className="mb-1 flex w-full items-center gap-1 rounded-sm border-b border-white/10 px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
-    >
-      <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
-      {view === 'quality' ? t('quality') : view === 'audio' ? t('audioTrack') : view === 'text' ? t('subtitles') : t('speed')}
-    </button>
+  const pick = (run: () => void): void => {
+    run();
+    setView(null);
+  };
+
+  const header = (
+    <div className="mb-1 flex items-center gap-1 border-b border-white/10">
+      {view === 'root' ? (
+        <span className="flex-1 px-2 py-2 text-sm font-medium text-white">{t('settingsMenu')}</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setView('root')}
+          className="flex flex-1 items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
+        >
+          <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
+          {view === 'quality' ? t('quality') : view === 'audio' ? t('audioTrack') : view === 'text' ? t('subtitles') : t('speed')}
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label={tc('close')}
+        title={tc('close')}
+        onClick={() => setView(null)}
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
+      >
+        <X className="size-4" aria-hidden />
+      </button>
+    </div>
   );
 
   return (
@@ -254,6 +284,7 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
     >
       {view === 'root' && (
         <>
+          {header}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}
           {tracks.audio.length > 0 && <MenuRow label={t('audioTrack')} value={audioValue} onClick={() => setView('audio')} />}
           {tracks.text.length > 0 && <MenuRow label={t('subtitles')} value={textValue} onClick={() => setView('text')} />}
@@ -268,39 +299,39 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
       )}
       {view === 'quality' && (
         <>
-          {back}
-          <MenuChoice label={t('qualityAuto')} selected={tracks.qualityAuto} onClick={() => commands?.setQuality('auto')} />
+          {header}
+          <MenuChoice label={t('qualityAuto')} selected={tracks.qualityAuto} onClick={() => pick(() => commands?.setQuality('auto'))} />
           {[...tracks.qualities].reverse().map((q) => (
-            <MenuChoice key={q.id} label={q.label} selected={!tracks.qualityAuto && q.selected} onClick={() => commands?.setQuality(q.id)} />
+            <MenuChoice key={q.id} label={q.label} selected={!tracks.qualityAuto && q.selected} onClick={() => pick(() => commands?.setQuality(q.id))} />
           ))}
         </>
       )}
       {view === 'audio' && (
         <>
-          {back}
+          {header}
           {tracks.audio.map((a) => (
-            <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => commands?.setAudio(a.id)} />
+            <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => pick(() => commands?.setAudio(a.id))} />
           ))}
         </>
       )}
       {view === 'text' && (
         <>
-          {back}
-          <MenuChoice label={t('off')} selected={!tracks.text.some((x) => x.selected)} onClick={() => commands?.setText(null)} />
+          {header}
+          <MenuChoice label={t('off')} selected={!tracks.text.some((x) => x.selected)} onClick={() => pick(() => commands?.setText(null))} />
           {tracks.text.map((a) => (
-            <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => commands?.setText(a.id)} />
+            <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => pick(() => commands?.setText(a.id))} />
           ))}
         </>
       )}
       {view === 'speed' && (
         <>
-          {back}
+          {header}
           {SPEEDS.map((s) => (
             <MenuChoice
               key={s}
               label={s === 1 ? t('speedNormal') : t('speedValue', { speed: s })}
               selected={rate === s}
-              onClick={() => commands?.setRate(s)}
+              onClick={() => pick(() => commands?.setRate(s))}
             />
           ))}
         </>
@@ -333,7 +364,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
   const seekable = useMediaStore((s) => s.seekable);
   const tracks = useMediaStore((s) => s.tracks);
   const canPip = useMediaStore((s) => s.canPip);
-  const inPip = useMediaStore((s) => s.inPip);
+  const browserPip = useMediaStore((s) => s.inPip);
+  const windowPip = usePipStore((s) => s.active);
+  const inPip = browserPip || windowPip;
   const commands = useMediaStore((s) => s.commands);
   const [menu, setMenuState] = useState<MenuView | null>(null);
 
@@ -357,7 +390,10 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
 
   // Live DVR window: scrub only when the window is at least 30 s.
   const liveWindow = isLive && seekable && seekable.end - seekable.start >= 30 ? seekable : undefined;
-  const atLiveEdge = !liveWindow || liveWindow.end - position < 6;
+  // mpv's cache runs a few seconds ahead of playback even at the live edge.
+  const edgeSlack = mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK;
+  const behindLive = liveWindow ? Math.max(0, liveWindow.end - position) : 0;
+  const atLiveEdge = !liveWindow || behindLive < edgeSlack;
   const showSeek = isVod ? !!duration : !!liveWindow;
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
   const showTime = !!duration || position > 0 || status !== 'loading';
@@ -386,108 +422,117 @@ export function Controls({ variant, visible, compact, onMenuOpenChange }: Contro
         </div>
       )}
 
-      {menu && variant === 'dock' ? (
-        // A native surface sits above the DOM, so dock menus replace the row instead of popping over the video.
-        <div className="flex max-h-48 items-start overflow-y-auto py-1">
+      {menu && variant === 'dock' && (
+        // A native surface sits above the DOM, so dock menus grow the dock upward instead of popping over
+        // the video. The bar stays below so the options button can always close it; the surface shrinks
+        // to fit because MpvSurface re-measures the reserved strip on resize.
+        <div className="flex max-h-48 items-start justify-end overflow-y-auto py-1">
           <OptionsMenu view={menu} setView={setMenu} isVod={isVod} />
         </div>
-      ) : (
-        <>
-          {showSeek && (
-            <SeekBar
-              min={liveWindow ? liveWindow.start : 0}
-              max={liveWindow ? liveWindow.end : (duration ?? 0)}
-              value={position}
-              buffered={buffered}
-              live={!!liveWindow}
-              onSeek={(s) => store.seekTo(s)}
-              className="mb-0.5"
-            />
-          )}
-          <div className="flex min-w-0 items-center gap-0.5">
-            {prev && !compact && (
-              <CtlButton label={t('previous')} onClick={() => store.prev()}>
-                <SkipBack />
-              </CtlButton>
-            )}
-            {ended ? (
-              <CtlButton label={t('replay')} onClick={replay}>
-                <RotateCcw />
-              </CtlButton>
-            ) : (
-              <CtlButton label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
-                {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
-              </CtlButton>
-            )}
-            {next && !compact && (
-              <CtlButton label={t('next')} onClick={() => store.next()}>
-                <SkipForward />
-              </CtlButton>
-            )}
-            {!compact && (
-              <CtlButton label={t('stop')} onClick={() => store.stop()}>
-                <Square className="size-4! fill-current" />
-              </CtlButton>
-            )}
-            <VolumeControl />
-
-            {isLive ? (
-              <button
-                type="button"
-                onClick={() => liveWindow && store.seekTo(liveWindow.end)}
-                disabled={atLiveEdge}
-                aria-label={atLiveEdge ? t('live') : t('goLive')}
-                className={cn(
-                  'ms-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-display text-xs font-semibold tracking-wide',
-                  atLiveEdge ? 'text-white' : 'text-white/70 hover:text-white',
-                )}
-              >
-                <span className={cn('size-2 rounded-full', atLiveEdge ? 'bg-live motion-safe:animate-live-pulse' : 'bg-white/50')} />
-                {t('live')}
-              </button>
-            ) : source.isRadio ? (
-              <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
-                <Radio className="size-4" aria-hidden />
-                {t('radio')}
-              </span>
-            ) : showTime ? (
-              <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
-                {formatTime(position)}
-                <span className="text-white/70"> / {formatTime(duration)}</span>
-              </span>
-            ) : null}
-            {canRecord && <RecordControl compact={compact} />}
-
-            <div className="flex-1" />
-
-            {tracks.text.length > 0 && !compact && (
-              <CtlButton
-                label={captionsOn ? t('captionsOff') : t('captionsOn')}
-                pressed={captionsOn}
-                onClick={() => {
-                  const first = tracks.text[0];
-                  commands?.setText(captionsOn || !first ? null : first.id);
-                }}
-              >
-                {captionsOn ? <Captions /> : <CaptionsOff />}
-              </CtlButton>
-            )}
-            {hasOptions && !compact && (
-              <CtlButton label={t('settingsMenu')} pressed={menu !== null} onClick={() => setMenu(menu ? null : 'root')}>
-                <Settings2 />
-              </CtlButton>
-            )}
-            {canPip && variant === 'overlay' && (
-              <CtlButton label={inPip ? t('exitPip') : t('pip')} pressed={inPip} onClick={() => commands?.togglePip()}>
-                <PictureInPicture2 />
-              </CtlButton>
-            )}
-            <CtlButton label={isFullscreen ? t('exitFullscreen') : t('fullscreen')} onClick={() => store.toggleFullscreen()}>
-              {isFullscreen ? <Minimize /> : <Maximize />}
-            </CtlButton>
-          </div>
-        </>
       )}
+
+      {showSeek && (
+        <SeekBar
+          min={liveWindow ? liveWindow.start : 0}
+          max={liveWindow ? liveWindow.end : (duration ?? 0)}
+          value={position}
+          buffered={buffered}
+          live={!!liveWindow}
+          onSeek={(s) => store.seekTo(s)}
+          className="mb-0.5"
+        />
+      )}
+      <div className="flex min-w-0 items-center gap-0.5">
+        {prev && !compact && (
+          <CtlButton label={t('previous')} onClick={() => store.prev()}>
+            <SkipBack />
+          </CtlButton>
+        )}
+        {ended ? (
+          <CtlButton label={t('replay')} onClick={replay}>
+            <RotateCcw />
+          </CtlButton>
+        ) : (
+          <CtlButton label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
+            {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
+          </CtlButton>
+        )}
+        {next && !compact && (
+          <CtlButton label={t('next')} onClick={() => store.next()}>
+            <SkipForward />
+          </CtlButton>
+        )}
+        {!compact && (
+          <CtlButton label={t('stop')} onClick={() => store.stop()}>
+            <Square className="size-4! fill-current" />
+          </CtlButton>
+        )}
+        <VolumeControl />
+
+        {isLive ? (
+          <button
+            type="button"
+            onClick={() => liveWindow && store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end)}
+            disabled={atLiveEdge}
+            aria-label={atLiveEdge ? t('live') : t('goLive')}
+            className={cn(
+              'ms-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-display text-xs font-semibold tracking-wide',
+              atLiveEdge ? 'text-white' : 'text-white/70 hover:text-white',
+            )}
+          >
+            <span className={cn('size-2 rounded-full', atLiveEdge ? 'bg-live motion-safe:animate-live-pulse' : 'bg-white/50')} />
+            {t('live')}
+          </button>
+        ) : null}
+        {isLive ? (
+          !atLiveEdge && (
+            <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums" data-testid="behind-live">
+              -{formatTime(behindLive)}
+            </span>
+          )
+        ) : source.isRadio ? (
+          <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
+            <Radio className="size-4" aria-hidden />
+            {t('radio')}
+          </span>
+        ) : showTime ? (
+          <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
+            {formatTime(position)}
+            <span className="text-white/70"> / {formatTime(duration)}</span>
+          </span>
+        ) : null}
+        {canRecord && <RecordControl compact={compact} />}
+
+        <div className="flex-1" />
+
+        {tracks.text.length > 0 && !compact && (
+          <CtlButton
+            label={captionsOn ? t('captionsOff') : t('captionsOn')}
+            pressed={captionsOn}
+            onClick={() => {
+              const first = tracks.text[0];
+              commands?.setText(captionsOn || !first ? null : first.id);
+            }}
+          >
+            {captionsOn ? <Captions /> : <CaptionsOff />}
+          </CtlButton>
+        )}
+        {hasOptions && !compact && (
+          <CtlButton label={t('settingsMenu')} pressed={menu !== null} onClick={() => setMenu(menu ? null : 'root')}>
+            <Settings2 />
+          </CtlButton>
+        )}
+        {canPip && (variant === 'overlay' || !compact) && (
+          <CtlButton label={inPip ? t('exitPip') : t('pip')} pressed={inPip} onClick={() => commands?.togglePip()}>
+            <PictureInPicture2 />
+          </CtlButton>
+        )}
+        {!windowPip && (
+          <CtlButton label={isFullscreen ? t('exitFullscreen') : t('fullscreen')} onClick={() => store.toggleFullscreen()}>
+            {isFullscreen ? <Minimize /> : <Maximize />}
+          </CtlButton>
+        )}
+      </div>
     </div>
   );
 }

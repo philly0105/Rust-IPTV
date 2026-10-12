@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
+import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
 import { Poster, Skeleton, cn } from '@/ui';
 import { CastRow } from './CastRow';
@@ -35,6 +36,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
   const formatRuntime = useFormatRuntime();
   const runtime = formatRuntime(model.durationSeconds);
   const rating = formatRating(model.rating, i18n.language);
+  const language = model.language ? languageName(model.language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
   const plotLong = (model.plot?.length ?? 0) > 360;
 
   return (
@@ -71,6 +73,14 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
                   <Star aria-hidden size={14} className="fill-current text-accent" />
                   {rating}
                   <span className="sr-only">{t('ratingOutOfTen')}</span>
+                </span>
+              )}
+              {language && (
+                <span data-testid="vod-detail-language" className="inline-flex items-center gap-1.5 text-fg">
+                  <span aria-hidden className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[11px] font-semibold tracking-wide">
+                    {model.language?.code}
+                  </span>
+                  {language}
                 </span>
               )}
               {model.genres.length > 0 && <span>{model.genres.slice(0, 4).join(', ')}</span>}

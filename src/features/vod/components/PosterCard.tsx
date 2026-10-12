@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { formatRating } from '../lib/format';
+import { languageName, type ItemLanguage } from '../lib/language';
 import { Poster, ProgressBar, Skeleton, cn } from '@/ui';
 
 export interface PosterCardProps {
@@ -23,6 +24,8 @@ export interface PosterCardProps {
   badgeLabel?: string;
   /** Secondary line under the title (overrides year). */
   meta?: ReactNode;
+  /** Audio language from the provider title or category (`itemLanguage`): a code badge on the poster and the name in the caption. */
+  language?: ItemLanguage | undefined;
   index?: number;
   onClick?: () => void;
   className?: string;
@@ -42,6 +45,7 @@ export function posterCardLabel(parts: {
   year?: number | undefined;
   meta?: ReactNode;
   badgeLabel?: string | undefined;
+  languageLabel?: string | undefined;
   rating?: string | undefined;
   ratedLabel: (rating: string) => string;
 }): string {
@@ -50,6 +54,7 @@ export function posterCardLabel(parts: {
   const out = [name];
   const meta = typeof parts.meta === 'string' || typeof parts.meta === 'number' ? String(parts.meta).trim() : '';
   if (meta && !name.includes(meta)) out.push(meta);
+  if (parts.languageLabel) out.push(parts.languageLabel);
   if (parts.badgeLabel) out.push(parts.badgeLabel);
   if (parts.rating) out.push(parts.ratedLabel(parts.rating));
   return out.join(', ');
@@ -70,6 +75,7 @@ export function PosterCard({
   badge,
   badgeLabel,
   meta,
+  language,
   index,
   onClick,
   className,
@@ -78,7 +84,9 @@ export function PosterCard({
 }: PosterCardProps) {
   const { t, i18n } = useTranslation('vod');
   const r = formatRating(rating, i18n.language);
-  const label = posterCardLabel({ title: fullTitle ?? title, year, meta, badgeLabel, rating: r ?? undefined, ratedLabel: (v) => t('posterRated', { rating: v }) });
+  const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
+  const label = posterCardLabel({ title: fullTitle ?? title, year, meta, badgeLabel, languageLabel: langName, rating: r ?? undefined, ratedLabel: (v) => t('posterRated', { rating: v }) });
+  const secondary = meta ?? year;
   return (
     <Link
       to={href}
@@ -109,6 +117,17 @@ export function PosterCard({
             {r}
           </div>
         )}
+        {language && (
+          <div
+            aria-hidden
+            className={cn(
+              'pointer-events-none absolute start-1.5 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-white',
+              progress !== undefined && progress > 0 ? 'bottom-5' : 'bottom-1.5',
+            )}
+          >
+            {language.code}
+          </div>
+        )}
         {progress !== undefined && progress > 0 && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-scrim/60 px-1.5 pb-1.5 pt-1">
             <ProgressBar value={progress} max={1} />
@@ -119,7 +138,9 @@ export function PosterCard({
         <div dir="auto" className="line-clamp-2 text-match-parent text-[13px] leading-snug font-medium text-fg group-hover:text-fg">
           {title}
         </div>
-        <div className="tabular truncate text-xs text-fg-subtle">{meta ?? year ?? ' '}</div>
+        <div className="tabular truncate text-xs text-fg-subtle">
+          {secondary !== undefined && secondary !== null && secondary !== '' ? (langName ? <>{secondary} · {langName}</> : secondary) : (langName ?? ' ')}
+        </div>
       </div>
     </Link>
   );

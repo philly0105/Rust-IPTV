@@ -12,6 +12,7 @@ import { PosterCard, PosterCardSkeleton } from '../components/PosterCard';
 import { useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatRating } from '../lib/format';
+import { itemLanguage } from '../lib/language';
 import {
   ALL_CATEGORIES,
   ALL_RATINGS_PARAM,
@@ -53,6 +54,7 @@ function GridCell({ input, index, pageSize, active }: { input: GridQueryInput; i
       posterUrl={item.posterUrl}
       year={item.year}
       rating={item.rating}
+      language={itemLanguage(item.title, item.categoryName)}
     />
   );
 }
@@ -296,6 +298,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 posterUrl={item.posterUrl}
                 year={item.year}
                 rating={item.rating}
+                language={itemLanguage(item.title, item.categoryName)}
               />
             )}
             onEndReached={() => {

@@ -526,6 +526,8 @@ export interface MpvState {
   /** True while `mpv.record` writes the stream to disk. */
   recording: boolean;
   recordPath: string | null;
+  /** What mpv's cache can seek in, on the timePos clock; for live TV, the rewind window. */
+  seekable?: { start: number; end: number };
 }
 
 /** Child-window rectangle in CSS pixels (`mpv.attach`, `mpv.setBounds`). */
@@ -732,6 +734,8 @@ export interface AppEventMap {
   'downloads.progress': DownloadProgressEvent;
   'remote.command': RemoteCommandEvent;
   'mpv.state': MpvState;
+  /** Left click on the embedded mpv video. */
+  'mpv.click': EmptyEvent;
   'settings.changed': Settings;
   'player.external': PlayerExternalEvent;
   'deeplink.open': DeepLinkEvent;

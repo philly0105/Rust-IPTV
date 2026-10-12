@@ -102,18 +102,76 @@ export const GLOBAL_RESERVED_SELECTOR = '[data-toast-viewport] [data-toast-id], 
  * document. Kept separate from the math so tests can stub rects.
  */
 export function measureMpvBounds(surface: Element): Bounds | null {
+  const { surfaceRect, clip, reserved } = measureParts(surface);
+  return computeMpvBounds(surfaceRect, { clip, reserved });
+}
+
+/**
+ * Same measurements; in fullscreen the chrome over the video becomes holes in the native
+ * window (`computeMpvOverlay`) instead of shrinking it, everywhere else `holes` is empty.
+ */
+export function measureMpvLayout(surface: Element): MpvLayout {
+  const { surfaceRect, clip, reserved } = measureParts(surface);
+  const layer = topLayer();
+  if (layer && layer.contains(surface)) return computeMpvOverlay(surfaceRect, { clip, reserved });
+  return { bounds: computeMpvBounds(surfaceRect, { clip, reserved }), holes: [] };
+}
+
+/**
+ * The layer the player fills the screen or window from: the fullscreen element, or the
+ * picture-in-picture layer (`data-pip-layer`) that covers the whole shrunken window.
+ */
+function topLayer(): Element | null {
+  return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])');
+}
+
+function measureParts(surface: Element): { surfaceRect: Rect; clip: Rect[]; reserved: Rect[] } {
   const clip: Rect[] = [{ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }];
+  const layer = topLayer();
   for (let el = surface.parentElement; el && el !== document.documentElement; el = el.parentElement) {
     const cs = getComputedStyle(el);
     if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') clip.push(rectOf(el.getBoundingClientRect()));
+    // A fullscreen element sits in the top layer: the ancestors it left behind (the docked
+    // stage, the page scroller) no longer clip it, so their rects would pin the video to the
+    // old docked rectangle.
+    if (el === layer) break;
   }
   const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
   const reserved: Rect[] = [];
   const nodes = [...Array.from(host.querySelectorAll(RESERVED_SELECTOR)), ...Array.from(document.querySelectorAll(GLOBAL_RESERVED_SELECTOR))];
+  // In fullscreen only the top layer is visible: chrome outside it (the toast stack) is
+  // hidden underneath, and cutting it out would leave a black band where nothing shows.
   for (const node of nodes) {
     if (node === surface || surface.contains(node)) continue;
+    if (layer && !layer.contains(node)) continue;
     const b = node.getBoundingClientRect();
     if (b.width > 0 && b.height > 0) reserved.push(rectOf(b));
   }
-  return computeMpvBounds(rectOf(surface.getBoundingClientRect()), { clip, reserved });
+  return { surfaceRect: rectOf(surface.getBoundingClientRect()), clip, reserved };
+}
+
+/** Native window rectangle plus the rects cut out of it (relative to its top-left). */
+export interface MpvLayout {
+  bounds: Bounds | null;
+  holes: Bounds[];
+}
+
+/**
+ * Fullscreen overlay mode: the video keeps the whole surface and the chrome over it is
+ * cut out of the native window as holes, so the controls show over the picture without
+ * shrinking or moving it. Rects are rounded outward so no pixel row of the bar is covered.
+ */
+export function computeMpvOverlay(surface: Rect, opts: { clip?: Rect[]; reserved?: Rect[] } = {}): MpvLayout {
+  const bounds = computeMpvBounds(surface, { clip: opts.clip ?? [] });
+  if (!bounds) return { bounds, holes: [] };
+  const frame = rectOf({ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height });
+  const holes: Bounds[] = [];
+  for (const cut of opts.reserved ?? []) {
+    const r = intersect(frame, cut);
+    if (!r) continue;
+    const left = Math.floor(r.left);
+    const top = Math.floor(r.top);
+    holes.push({ x: left - bounds.x, y: top - bounds.y, width: Math.ceil(r.right) - left, height: Math.ceil(r.bottom) - top });
+  }
+  return { bounds, holes };
 }

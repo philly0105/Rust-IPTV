@@ -9,6 +9,7 @@ import type { SeriesItem, VodItem } from '@/api/types';
 import { CategoryIndex, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { PosterCard } from '../components/PosterCard';
+import { itemLanguage } from '../lib/language';
 import { PosterRail } from '../components/PosterRail';
 import { useRecentlyAdded, useSource } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -115,6 +116,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   posterUrl={item.posterUrl}
                   year={item.year}
                   rating={item.rating}
+                  language={itemLanguage(item.title, item.categoryName)}
                 />
               )}
             />

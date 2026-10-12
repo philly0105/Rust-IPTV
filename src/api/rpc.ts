@@ -387,7 +387,7 @@ export interface RpcMap {
   /** Raw mpv JSON IPC command. */
   'mpv.command': Cmd<{ cmd: MpvArg[] }, unknown>;
   'mpv.setProperty': Cmd<{ name: string; value: unknown }, void>;
-  'mpv.setBounds': Cmd<{ bounds: Bounds }, void>;
+  'mpv.setBounds': Cmd<{ bounds: Bounds; holes?: Bounds[] }, void>;
   'mpv.detach': Cmd<void, void>;
   'mpv.state': Cmd<void, MpvState>;
   /** Starts/stops writing the live stream to `<recordingsDir>/<title>-<yyyyMMdd-HHmm>.ts`. */

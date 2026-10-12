@@ -3,9 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { useShortcut } from '@/shell/shortcuts';
 import { targetOwnsKey, type KeyKind } from './format';
 import { showOsd, useMediaStore } from './media';
+import { exitPip, usePipStore } from './pip';
 import { usePlayerStore, zap } from './store';
 
 const AREA = 'Playback';
+/** Seconds the left and right arrows skip. */
+export const SEEK_STEP = 10;
 
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down).
@@ -48,18 +51,19 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   const base = { area: AREA, enabled: active };
   useShortcut('space', guard('space', () => s().togglePlay()), { ...base, description: t('shortcutPlayPause') });
   useShortcut('k', guard('letter', () => s().togglePlay()), { ...base, description: t('shortcutPlayPauseK') });
-  useShortcut('f', guard('letter', () => s().toggleFullscreen()), { ...base, description: t('shortcutFullscreen') });
+  // In picture-in-picture, f returns to the full app window instead.
+  useShortcut('f', guard('letter', () => (usePipStore.getState().active ? void exitPip() : s().toggleFullscreen())), { ...base, description: t('shortcutFullscreen') });
   useShortcut(
     'arrowleft',
     guard('arrow', () => {
-      if (seekWindow()) s().seekBy(-5);
+      if (seekWindow()) s().seekBy(-SEEK_STEP);
     }),
     { ...base, description: t('shortcutSeekBack') },
   );
   useShortcut(
     'arrowright',
     guard('arrow', () => {
-      if (seekWindow()) s().seekBy(5);
+      if (seekWindow()) s().seekBy(SEEK_STEP);
     }),
     { ...base, description: t('shortcutSeekForward') },
   );

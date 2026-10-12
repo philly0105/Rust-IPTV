@@ -261,15 +261,49 @@ describe('SearchPage', () => {
         : { items: [], total: 0, offset: 0, limit: 14 };
   });
 
-  it('groups global results with source badges and portal results', async () => {
+  it('groups global results into type tabs with source badges and portal results', async () => {
     renderAt('/search?q=dune', [{ path: '/search', element: <SearchPage /> }]);
-    await screen.findByText('Dune TV');
-    expect(screen.getByRole('heading', { name: /Movies/ })).toBeTruthy();
-    expect(await screen.findByText('Portal Show')).toBeTruthy();
+    // Movies come first and fill the page as a vertical grid; the other types wait behind their tabs.
+    const moviesTab = await screen.findByRole('tab', { name: /Movies\s*2/ });
+    expect(moviesTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('vod-search-movies')).toBeTruthy();
+    expect(await screen.findByText('Movie 1')).toBeTruthy();
     expect(screen.getAllByText('Beta Portal').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Dune TV')).toBeNull();
     expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'dune', limit: 61 });
-    fireEvent.click(screen.getByRole('button', { name: /Dune TV/ }));
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Series\s*1/ }));
+    expect(await screen.findByText('Portal Show')).toBeTruthy();
+    expect(currentLocation).toBe('/search?q=dune&type=series');
+
+    fireEvent.click(screen.getByRole('tab', { name: /Channels\s*1/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Dune TV/ }));
     await waitFor(() => expect(played).toHaveLength(1));
+  });
+
+  it('labels each search result with the language the provider gives it', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({
+      live: [],
+      movies: [
+        { ...movie(1), title: 'EN - Interstellar (2014)', titleBase: 'Interstellar' },
+        { ...movie(2), title: 'IT - Interstellar (2014)', titleBase: 'Interstellar', categoryName: 'VOD - FILM [IT]' },
+        { ...movie(3), title: 'NF - Interstellar (2014)', titleBase: 'Interstellar', categoryName: 'VOD - NETFLIX [MULTISUB]' },
+        { ...movie(4), title: 'Interstellar (2014)', titleBase: 'Interstellar', categoryName: 'VOD - GERMANY [DE]' },
+      ],
+      series: [],
+    });
+    renderAt('/search?q=interstellar', [{ path: '/search', element: <SearchPage /> }]);
+    const grid = await screen.findByTestId('vod-search-movies');
+    await within(grid).findByRole('link', { name: /English/ });
+    const names = within(grid).getAllByRole('link').map((a) => a.getAttribute('aria-label'));
+    expect(names).toEqual([
+      expect.stringMatching(/English/),
+      expect.stringMatching(/Italian/),
+      expect.stringMatching(/Multi-sub/),
+      expect.stringMatching(/German/),
+    ]);
+    expect(within(grid).getByText('EN')).toBeTruthy();
+    expect(within(grid).getByText('IT')).toBeTruthy();
   });
 
   it('scopes to one source and asks a stalker portal directly', async () => {
@@ -455,22 +489,23 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       };
       rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
       renderAt('/search?q=news', [{ path: '/search', element: <SearchPage /> }]);
+      fireEvent.click(await screen.findByRole('tab', { name: /Channels/ }));
       await screen.findByText('News 0');
       expect(callsOf('catalog.search')[0]!.args).toEqual({ query: 'news', limit: 61 });
       // Capped at 60 on screen; the 61st probe row is not rendered.
       expect(within(screen.getByTestId('vod-search-channels')).getAllByRole('listitem')[0]!.getAttribute('aria-setsize')).toBe('60');
       expect(screen.queryByText('News 60')).toBeNull();
-      expect(screen.getByRole('heading', { name: /Channels\s*60\+/ })).toBeTruthy();
-      expect(screen.getByRole('heading', { name: /Movies\s*5$/ })).toBeTruthy();
+      expect(screen.getByRole('tab', { name: /Channels\s*60\+/ })).toBeTruthy();
+      expect(screen.getByRole('tab', { name: /Movies\s*5$/ })).toBeTruthy();
       const notice = screen.getByTestId('vod-search-capped');
       expect(within(notice).getByText(/Showing the first 60 results of each type/)).toBeTruthy();
 
       fireEvent.click(within(notice).getByRole('button', { name: 'Show up to 200' }));
-      await screen.findByRole('heading', { name: /Channels\s*200\+/ });
+      await screen.findByRole('tab', { name: /Channels\s*200\+/ });
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'news', limit: 201 });
 
       fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 1000' }));
-      await screen.findByRole('heading', { name: /Channels\s*1000\+/ });
+      await screen.findByRole('tab', { name: /Channels\s*1000\+/ });
       // The 1000 step still probes one row past the cap, which the 1001 server clamp allows.
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'news', limit: 1001 });
       // Rows are virtualized: a thousand channels mount only a window of buttons.
@@ -488,7 +523,7 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: many(60), series: [] });
       rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
       renderAt('/search?q=dune', [{ path: '/search', element: <SearchPage /> }]);
-      await screen.findByRole('heading', { name: /Movies\s*60$/ });
+      await screen.findByRole('tab', { name: /Movies\s*60$/ });
       expect(screen.queryByTestId('vod-search-capped')).toBeNull();
     });
 
@@ -508,7 +543,7 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       expect(within(chips).getByRole('button', { name: /Alpha IPTV\s*60\+/ })).toBeTruthy();
 
       fireEvent.click(within(chips).getByRole('button', { name: /Beta Portal/ }));
-      await screen.findByRole('heading', { name: /Movies\s*60\+/ });
+      await screen.findByRole('tab', { name: /Movies\s*60\+/ });
       expect(currentLocation).toBe('/search?q=movie&source=src2');
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 61 });
       // Every card belongs to the facet's source, and the chips still list both sources.
@@ -520,7 +555,7 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
 
       // "Show more" steps the facet's own search.
       fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 200' }));
-      await screen.findByRole('heading', { name: /Movies\s*100$/ });
+      await screen.findByRole('tab', { name: /Movies\s*100$/ });
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 201 });
     });
   });

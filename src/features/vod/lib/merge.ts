@@ -28,11 +28,14 @@ import type {
 } from '@/api/types';
 
 import { isResumable, isWatched } from './format';
+import { itemLanguage, type ItemLanguage } from './language';
 
 export interface DetailModel {
   title: string;
   /** Title without the year/tags the provider appends ("Black Harbor" for "Black Harbor (2026)"); the year shows as its own chip. */
   titleBase?: string;
+  /** Audio language from the provider title or category. */
+  language?: ItemLanguage;
   mediaType: 'movie' | 'tv';
   year?: number;
   rating?: number;
@@ -113,6 +116,7 @@ function mergeCast(provider: Person[], tmdb: Person[] | undefined): Person[] {
 interface CommonInput {
   title: string;
   titleBase?: string;
+  categoryName?: string | undefined;
   mediaType: 'movie' | 'tv';
   year?: number;
   rating?: number;
@@ -158,6 +162,8 @@ function mergeCommon(
   if (tmdbPoster !== undefined && tmdbPoster !== poster) model.posterFallbackUrl = tmdbPoster;
   const titleBase = firstText(p.titleBase);
   if (titleBase !== undefined) model.titleBase = titleBase;
+  const language = itemLanguage(p.title, p.categoryName);
+  if (language) model.language = language;
   if (backdrops[0] !== undefined) model.backdropUrl = backdrops[0];
   const director = firstText(p.director, tmdbDirector);
   if (director !== undefined) model.director = director;
@@ -175,6 +181,7 @@ export function mergeMovieDetail(detail: VodDetail, tmdb?: TmdbMovie | null): De
     {
       title: item.title,
       titleBase: item.titleBase,
+      categoryName: item.categoryName,
       year: item.year,
       rating: item.rating,
       plot: item.plot,
@@ -202,6 +209,7 @@ export function mergeSeriesDetail(detail: SeriesDetail, tmdb?: TmdbTv | null): D
     {
       title: item.title,
       titleBase: item.titleBase,
+      categoryName: item.categoryName,
       year: item.year,
       rating: item.rating,
       plot: item.plot,

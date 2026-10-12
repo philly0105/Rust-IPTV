@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { boundsClear, computeMpvBounds, intersect, measureMpvBounds, rectOf, subtract, type Rect } from './mpvBounds';
+import { boundsClear, computeMpvBounds, computeMpvOverlay, intersect, measureMpvBounds, measureMpvLayout, rectOf, subtract, type Rect } from './mpvBounds';
 
 const R = (left: number, top: number, width: number, height: number): Rect => rectOf({ left, top, width, height });
 
@@ -120,5 +120,127 @@ describe('measureMpvBounds with app-level overlays', () => {
     expect(measureMpvBounds(surface)).toEqual({ x: 0, y: 0, width: 800, height: 450 });
     document.getElementById('toast')!.remove();
     expect(measureMpvBounds(surface)).toEqual({ x: 0, y: 0, width: 800, height: 450 });
+  });
+});
+
+describe('measureMpvBounds in fullscreen', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('ignores the clipping ancestors the fullscreen host left behind', () => {
+    // The docked stage (right half, overflow hidden) still holds the host in the DOM, but the
+    // host is in the top layer and fills the 1920x1080 screen.
+    document.body.innerHTML = `
+      <div id="stage" style="overflow: hidden">
+        <div data-player-host="" id="host" style="overflow: hidden">
+          <div data-mpv-surface="" id="surface"></div>
+          <div data-player-controls="" id="controls"></div>
+        </div>
+      </div>`;
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      stage: { left: 873, top: 83, width: 1047, height: 670 },
+      host: { left: 0, top: 0, width: 1920, height: 1080 },
+      surface: { left: 0, top: 0, width: 1920, height: 1030 },
+      controls: { left: 0, top: 1030, width: 1920, height: 50 },
+    };
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1920);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(1080);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const r = rects[this.id] ?? { left: 0, top: 0, width: 1920, height: 1080 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    });
+    const host = document.getElementById('host')!;
+    const surface = document.getElementById('surface')!;
+    const setFullscreen = (el: Element | null) => Object.defineProperty(document, 'fullscreenElement', { value: el, configurable: true });
+    setFullscreen(host);
+    expect(measureMpvBounds(surface)).toEqual({ x: 0, y: 0, width: 1920, height: 1030 });
+    // Out of fullscreen, the stage clips it again.
+    setFullscreen(null);
+    expect(measureMpvBounds(surface)).toEqual({ x: 873, y: 83, width: 1047, height: 670 });
+  });
+
+  it('does not cut out toasts hidden under the fullscreen layer', () => {
+    document.body.innerHTML = `
+      <div data-player-host="" id="host">
+        <div data-mpv-surface="" id="surface"></div>
+        <div data-player-controls="" id="controls"></div>
+      </div>
+      <section data-toast-viewport=""><ol><li data-toast-id="t1" id="toast"></li></ol></section>`;
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      host: { left: 0, top: 0, width: 1920, height: 1080 },
+      surface: { left: 0, top: 0, width: 1920, height: 1030 },
+      controls: { left: 0, top: 1030, width: 1920, height: 50 },
+      toast: { left: 1520, top: 800, width: 380, height: 200 },
+    };
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1920);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(1080);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const r = rects[this.id] ?? { left: 0, top: 0, width: 1920, height: 1080 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    });
+    const surface = document.getElementById('surface')!;
+    Object.defineProperty(document, 'fullscreenElement', { value: document.getElementById('host'), configurable: true });
+    expect(measureMpvBounds(surface)).toEqual({ x: 0, y: 0, width: 1920, height: 1030 });
+    Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+    expect(measureMpvBounds(surface)).toEqual({ x: 0, y: 0, width: 1520, height: 1030 });
+  });
+});
+
+describe('computeMpvOverlay', () => {
+  it('keeps the whole surface and cuts the bar out as a hole relative to the window', () => {
+    const surface = { left: 0, top: 0, right: 1920, bottom: 1080 };
+    const bar = { left: 0, top: 1030.4, right: 1920, bottom: 1080 };
+    expect(computeMpvOverlay(surface, { reserved: [bar] })).toEqual({
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      // Rounded outward: the hole covers the bar's fractional top row.
+      holes: [{ x: 0, y: 1030, width: 1920, height: 50 }],
+    });
+  });
+
+  it('skips chrome outside the window and clips holes to it', () => {
+    const surface = { left: 100, top: 50, right: 1100, bottom: 650 };
+    const menu = { left: 900, top: 400, right: 1300, bottom: 700 };
+    const away = { left: 0, top: 700, right: 50, bottom: 760 };
+    expect(computeMpvOverlay(surface, { reserved: [menu, away] })).toEqual({
+      bounds: { x: 100, y: 50, width: 1000, height: 600 },
+      holes: [{ x: 800, y: 350, width: 200, height: 250 }],
+    });
+  });
+});
+
+describe('measureMpvLayout in picture-in-picture', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('floats the chrome over the video as holes while the PiP layer is shown', () => {
+    document.body.innerHTML = `
+      <div data-pip-layer="" id="layer">
+        <div data-player-host="" id="host">
+          <div data-mpv-surface="" id="surface"></div>
+          <div data-player-controls="" id="controls"></div>
+        </div>
+      </div>`;
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      surface: { left: 0, top: 0, width: 480, height: 270 },
+      controls: { left: 0, top: 220, width: 480, height: 50 },
+    };
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(480);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(270);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const r = rects[this.id] ?? { left: 0, top: 0, width: 480, height: 270 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    });
+    const surface = document.getElementById('surface')!;
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 480, height: 270 },
+      holes: [{ x: 0, y: 220, width: 480, height: 50 }],
+    });
+    // A hidden layer (PiP off) is ignored: the bar is subtracted as when docked.
+    document.getElementById('layer')!.hidden = true;
+    expect(measureMpvLayout(surface)).toEqual({ bounds: { x: 0, y: 0, width: 480, height: 220 }, holes: [] });
   });
 });

@@ -53,6 +53,11 @@ pub trait ChildWindowFactory: Send + Sync {
     /// Creates a child window and returns its HWND.
     fn create(&self, bounds: Bounds) -> CoreResult<isize>;
     fn set_bounds(&self, hwnd: isize, bounds: Bounds) -> CoreResult<()>;
+    /// Cuts `holes` (relative to the window, CSS px) out of the window so the
+    /// webview under them shows through; an empty list restores the full window.
+    fn set_holes(&self, _hwnd: isize, _holes: Vec<Bounds>) -> CoreResult<()> {
+        Ok(())
+    }
     fn destroy(&self, hwnd: isize) -> CoreResult<()>;
 }
 

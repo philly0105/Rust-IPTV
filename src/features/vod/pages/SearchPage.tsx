@@ -1,7 +1,7 @@
 import { useQueries } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Radio, Search, SearchX, Tv } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useSearchParams } from 'react-router';
 
@@ -12,10 +12,10 @@ import type { Channel, Page, SeriesItem, Source, VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
 
 import { PosterCard } from '../components/PosterCard';
-import { PosterRail } from '../components/PosterRail';
-import { useSource, useSourcesList } from '../hooks/queries';
+import { useSettings, useSource, useSourcesList } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { handleGridKeyDown } from '../lib/gridNav';
+import { itemLanguage } from '../lib/language';
 import {
   SEARCH_LIMIT,
   capSearchResult,
@@ -25,12 +25,13 @@ import {
   searchRequestLimit,
   sourceFacets,
   splitStalkerResults,
-  type SearchGroup,
+  type SearchGroupKind,
   type SearchHit,
   type SearchMore,
   type SourceSearch,
 } from '../lib/search';
-import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, cn, gridLayout, useToast } from '@/ui';
+import { COVER_WIDTH } from './CategoryGridPage';
+import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useToast } from '@/ui';
 
 const DEBOUNCE_MS = 250;
 
@@ -69,6 +70,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
   const facet = scoped ? undefined : (params.get('source') ?? undefined);
+  const typeParam = params.get('type');
   const [draft, setDraft] = useState(q);
   const query = normalizeQuery(q);
 
@@ -192,6 +194,16 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     [draft, placeholder, scopeName],
   );
 
+  const setType = (kind: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('type', kind);
+        return next;
+      },
+      { replace: true },
+    );
+
   const setFacet = (id: string | undefined) =>
     setParams(
       (prev) => {
@@ -211,6 +223,9 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   };
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const coverWidth = COVER_WIDTH[useSettings().coverSize];
+  // One result type at a time, chosen by tab; a type missing from these results falls back to the first one present.
+  const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
 
@@ -263,17 +278,26 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
             ))}
           </div>
         )}
-        {groups.map((g) => (
-          <ResultGroup
-            key={g.kind}
-            group={g}
-            more={capped.more[g.kind]}
-            showBadges={showBadges}
-            onPlayChannel={playChannel}
-            pendingMore={stalker.pending && g.kind !== 'live'}
-            scrollRef={scrollRef}
-          />
-        ))}
+        <Tabs
+          label={t('search')}
+          panelIdPrefix="search-results"
+          value={activeGroup?.kind ?? ''}
+          onChange={setType}
+          items={groups.map((g) => ({
+            id: g.kind,
+            label: t(`group_${g.kind}`),
+            badge: capped.more[g.kind] ? t('searchCountMore', { count: g.hits.length }) : g.hits.length,
+          }))}
+        />
+        {activeGroup && (
+          <div {...tabPanelProps('search-results', activeGroup.kind)} className="outline-none">
+            {activeGroup.kind === 'live' ? (
+              <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} onPlayChannel={playChannel} scrollRef={scrollRef} />
+            ) : (
+              <PosterGrid key={activeGroup.kind} kind={activeGroup.kind} hits={activeGroup.hits} showBadges={showBadges} minWidth={coverWidth} scrollRef={scrollRef} />
+            )}
+          </div>
+        )}
         <CappedNotice
           more={capped.more}
           limit={dataLimit}
@@ -351,81 +375,37 @@ function CappedNotice({
   );
 }
 
-function ResultGroup({
-  group,
-  more,
-  showBadges,
-  onPlayChannel,
-  pendingMore,
-  scrollRef,
-}: {
-  group: SearchGroup;
-  /** The type hit its cap; the count reads `60+`. */
-  more: boolean;
-  showBadges: boolean;
-  onPlayChannel: (c: Channel, hit: SearchHit) => void;
-  pendingMore: boolean;
-  /** The page scroller; the channel grid virtualizes its rows against it. */
-  scrollRef: RefObject<HTMLDivElement | null>;
-}) {
-  const { t } = useTranslation('vod');
-  const title = (
-    <>
-      {t(`group_${group.kind}`)}
-      <span className="tabular ms-2 text-sm font-normal text-fg-subtle">
-        {more ? t('searchCountMore', { count: group.hits.length }) : group.hits.length}
-      </span>
-    </>
-  );
-  if (group.kind !== 'live') {
-    return (
-      <PosterRail<SearchHit>
-        title={title}
-        items={group.hits}
-        loading={pendingMore && group.hits.length === 0}
-        render={(h, i) => (
-          <PosterCard
-            index={i}
-            title={(h.item as VodItem | SeriesItem).titleBase || h.title}
-            fullTitle={h.title}
-            href={h.href ?? '#'}
-            posterUrl={h.imageUrl}
-            meta={h.meta}
-            badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
-          />
-        )}
-      />
-    );
-  }
-  return (
-    <section aria-label={t('group_live')} className="flex flex-col gap-3">
-      <h2 className="text-lg text-fg">{title}</h2>
-      <ChannelGrid hits={group.hits} showBadges={showBadges} onPlayChannel={onPlayChannel} scrollRef={scrollRef} />
-    </section>
-  );
-}
-
 const CHANNEL_MIN_WIDTH = 260;
 const CHANNEL_GAP = 8;
 /** One channel button: 48px logo plus padding and border. Rows are measured after render; this is the estimate. */
 const CHANNEL_ROW_HEIGHT = 66;
+const POSTER_GAP = 16;
+/** Title (two lines) and meta line under a poster; rows are measured after render. */
+const POSTER_CAPTION_HEIGHT = 64;
 
 /**
- * Channel hits in a responsive grid whose rows are virtualized against the
- * page scroller, so a 1000-result step mounts only the rows near the
- * viewport. Arrow keys still move by cell and row (`handleGridKeyDown`
- * scrolls the page when the target row is not mounted yet).
+ * Hits in a responsive grid whose rows are virtualized against the page
+ * scroller, so a 1000-result step mounts only the rows near the viewport.
+ * Arrow keys still move by cell and row (`handleGridKeyDown` scrolls the page
+ * when the target row is not mounted yet).
  */
-function ChannelGrid({
+function HitGrid({
   hits,
-  showBadges,
-  onPlayChannel,
+  minWidth,
+  gap,
+  rowHeight,
+  renderCell,
   scrollRef,
+  testId,
 }: {
   hits: SearchHit[];
-  showBadges: boolean;
-  onPlayChannel: (c: Channel, hit: SearchHit) => void;
+  minWidth: number;
+  gap: number;
+  /** Estimated row height (without the gap) for a cell width. */
+  rowHeight: (cellWidth: number) => number;
+  renderCell: (hit: SearchHit, index: number) => ReactNode;
   scrollRef: RefObject<HTMLDivElement | null>;
+  testId: string;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
@@ -444,7 +424,7 @@ function ChannelGrid({
     return () => ro.disconnect();
   }, []);
 
-  // Offset of the grid inside the page scroller; rails and facets above it can change height between renders.
+  // Offset of the grid inside the page scroller; the tabs, facets and notices above it can change height between renders.
   useLayoutEffect(() => {
     const el = listRef.current;
     const scroller = scrollRef.current;
@@ -453,12 +433,12 @@ function ChannelGrid({
     if (margin !== scrollMargin) setScrollMargin(margin);
   });
 
-  const { columns } = gridLayout(width, CHANNEL_MIN_WIDTH, CHANNEL_GAP);
+  const { columns, cellWidth } = gridLayout(width, minWidth, gap);
   const rowCount = Math.ceil(hits.length / columns);
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => CHANNEL_ROW_HEIGHT + CHANNEL_GAP,
+    estimateSize: () => rowHeight(cellWidth) + gap,
     overscan: 4,
     scrollMargin,
     initialRect: { width: 960, height: 720 },
@@ -466,13 +446,13 @@ function ChannelGrid({
 
   useEffect(() => {
     virtualizer.measure();
-  }, [columns, virtualizer]);
+  }, [columns, cellWidth, virtualizer]);
 
   return (
     <div
       ref={listRef}
       role="list"
-      data-testid="vod-search-channels"
+      data-testid={testId}
       data-columns={columns}
       style={{ position: 'relative', height: virtualizer.getTotalSize() }}
       onKeyDown={(e) => handleGridKeyDown(e, { count: hits.length })}
@@ -485,38 +465,23 @@ function ChannelGrid({
             role="presentation"
             data-index={row.index}
             ref={virtualizer.measureElement}
-            className="grid gap-2"
+            className="grid"
             style={{
               position: 'absolute',
               top: 0,
               left: 0,
               width: '100%',
-              paddingBottom: CHANNEL_GAP,
+              columnGap: gap,
+              paddingBottom: gap,
               transform: `translateY(${row.start - scrollMargin}px)`,
               gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
             }}
           >
             {hits.slice(first, first + columns).map((h, j) => {
               const i = first + j;
-              const c = h.item as Channel;
               return (
                 <div key={h.key} role="listitem" aria-posinset={i + 1} aria-setsize={hits.length} className="min-w-0">
-                  <button
-                    type="button"
-                    data-grid-index={i}
-                    onClick={() => onPlayChannel(c, h)}
-                    className="flex w-full items-center gap-3 rounded-md border border-border bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
-                  >
-                    <div className="w-12 shrink-0">
-                      <Poster src={h.imageUrl} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>
-                      <div className="tabular truncate text-xs text-fg-subtle">{h.meta}</div>
-                    </div>
-                    {showBadges && <Badge variant="outline" className="max-w-[110px] shrink-0 truncate">{h.sourceName}</Badge>}
-                    {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
-                  </button>
+                  {renderCell(h, i)}
                 </div>
               );
             })}
@@ -527,23 +492,108 @@ function ChannelGrid({
   );
 }
 
+/** Movie or series hits as poster cards, with the language the provider gives each title. */
+function PosterGrid({
+  kind,
+  hits,
+  showBadges,
+  minWidth,
+  scrollRef,
+}: {
+  kind: Exclude<SearchGroupKind, 'live'>;
+  hits: SearchHit[];
+  showBadges: boolean;
+  minWidth: number;
+  scrollRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <HitGrid
+      hits={hits}
+      minWidth={minWidth}
+      gap={POSTER_GAP}
+      rowHeight={(w) => w * 1.5 + POSTER_CAPTION_HEIGHT}
+      scrollRef={scrollRef}
+      testId={`vod-search-${kind}`}
+      renderCell={(h, i) => {
+        const item = h.item as VodItem | SeriesItem;
+        return (
+          <PosterCard
+            index={i}
+            title={item.titleBase || h.title}
+            fullTitle={h.title}
+            href={h.href ?? '#'}
+            posterUrl={h.imageUrl}
+            meta={h.meta}
+            language={itemLanguage(item.title, item.categoryName)}
+            badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
+            badgeLabel={showBadges ? h.sourceName : undefined}
+          />
+        );
+      }}
+    />
+  );
+}
+
+/** Channel hits; choosing one plays it. */
+function ChannelGrid({
+  hits,
+  showBadges,
+  onPlayChannel,
+  scrollRef,
+}: {
+  hits: SearchHit[];
+  showBadges: boolean;
+  onPlayChannel: (c: Channel, hit: SearchHit) => void;
+  scrollRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <HitGrid
+      hits={hits}
+      minWidth={CHANNEL_MIN_WIDTH}
+      gap={CHANNEL_GAP}
+      rowHeight={() => CHANNEL_ROW_HEIGHT}
+      scrollRef={scrollRef}
+      testId="vod-search-channels"
+      renderCell={(h, i) => {
+        const c = h.item as Channel;
+        return (
+          <button
+            type="button"
+            data-grid-index={i}
+            onClick={() => onPlayChannel(c, h)}
+            className="flex w-full items-center gap-3 rounded-md border border-border bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <div className="w-12 shrink-0">
+              <Poster src={h.imageUrl} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>
+              <div className="tabular truncate text-xs text-fg-subtle">{h.meta}</div>
+            </div>
+            {showBadges && <Badge variant="outline" className="max-w-[110px] shrink-0 truncate">{h.sourceName}</Badge>}
+            {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
+          </button>
+        );
+      }}
+    />
+  );
+}
+
 function SearchSkeleton() {
   const { t } = useTranslation('vod');
   return (
     <div role="status" aria-busy="true" className="flex flex-col gap-8">
       <span className="sr-only">{t('searching')}</span>
-      {[0, 1].map((r) => (
-        <div key={r} className="flex flex-col gap-3">
-          <Skeleton className="h-5 w-40" />
-          <div className="flex gap-4 overflow-hidden">
-            {Array.from({ length: 8 }, (_, i) => (
-              <div key={i} className="w-[150px] shrink-0">
-                <div className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: 2 / 3 }} />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="flex gap-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-8 w-28" />
+        ))}
+      </div>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+        {Array.from({ length: 18 }, (_, i) => (
+          <div key={i} className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: 2 / 3 }} />
+        ))}
+      </div>
     </div>
   );
 }

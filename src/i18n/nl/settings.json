@@ -285,6 +285,8 @@
   "backupFileFilter": "Backupbestanden",
   "stripCountryPrefix": "Landcodes in kanaalnamen verbergen",
   "stripCountryPrefixHint": "Toont “UK: BBC One”, “UK | BBC One” en “[UK] BBC One” als “BBC One”.",
+  "englishOnly": "Alleen Engels",
+  "englishOnlyHint": "Verbergt zenders, films en series waarvan de naam of categorie een andere taal aangeeft. Alles zonder duidelijke taal blijft zichtbaar.",
   "vodGroup": "Films en series",
   "vodGroupHint": "Geldt voor elk raster met films en series.",
   "vodMinRating": "Minimale score",

@@ -48,6 +48,7 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `playerReuseInstance` | `true` | External launch closes the previous external player first. |
 | `showExternalBar` | `true` | External-playback footer visible. |
 | `vodMinRating` | `0` | VOD grids hide items rated below this. |
+| `englishOnly` | `false` | Channel lists, VOD grids, categories, search, neighbours, recently added and `allLiveChannels` drop items whose title or category clearly marks another language (`catalog::language`, SQL function `non_english`). Items without a clear language, multi-subtitle and African groups stay. Categories left empty are dropped and `itemCount` counts what remains. Stalker VOD grids filter loaded pages in the UI. |
 | `recordingsDir` | `null` | `null` = `<downloadsDir>/recordings`. Serialized as `null`, not omitted. |
 | `sourceRefreshIntervalHours` | `12` | Hours between scheduled refreshes of `autoRefresh` sources; 0 = only at startup. 0..168, else `Invalid`. See sources.md. |
 | `accountExpiryWarnDays` | `7` | Days before a subscription's expiry date that the dashboard and source cards warn; 0 = off. 0..60, else `Invalid`. |
@@ -61,7 +62,7 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `reminderLeadMinutes` | `2` | Minutes before the start a reminder fires. 0..60, else `Invalid`. |
 | `reminderAction` | `"notify"` | `"notify"` shows a notification; `"switch"` tunes to the channel. |
 
-`sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback` and the five recording and reminder fields are in `backup::APP_SETTING_KEYS`, so they round-trip through `backup.export` / `backup.import`. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
+`englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback` and the five recording and reminder fields are in `backup::APP_SETTING_KEYS`, so they round-trip through `backup.export` / `backup.import`. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
 
 Stored JSON from older builds reads with these defaults (struct-level `#[serde(default)]`).
 

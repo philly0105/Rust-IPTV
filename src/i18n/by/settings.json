@@ -295,6 +295,8 @@
   "backupFileFilter": "Файлы рэзервовых копій",
   "stripCountryPrefix": "Хаваць пазнакі краін у назвах каналаў",
   "stripCountryPrefixHint": "Паказвае «UK: BBC One», «UK | BBC One» і «[UK] BBC One» як «BBC One».",
+  "englishOnly": "Толькі англійская",
+  "englishOnlyHint": "Хавае каналы, фільмы і серыялы, назва або катэгорыя якіх паказвае іншую мову. Усё без яўнай мовы застаецца бачным.",
   "vodGroup": "Фільмы і серыялы",
   "vodGroupHint": "Дзейнічае для ўсіх сетак фільмаў і серыялаў.",
   "vodMinRating": "Мінімальны рэйтынг",

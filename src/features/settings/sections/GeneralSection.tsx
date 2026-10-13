@@ -207,6 +207,13 @@ export function GeneralSection({ settings, update }: SectionProps) {
           onChange={(stripCountryPrefix) => void update({ stripCountryPrefix })}
           testId="toggle-stripCountryPrefix"
         />
+        <SwitchRow
+          label={t('englishOnly')}
+          description={t('englishOnlyHint')}
+          checked={settings.englishOnly === true}
+          onChange={(englishOnly) => void update({ englishOnly })}
+          testId="toggle-englishOnly"
+        />
       </SettingsGroup>
 
       {/* account: background refresh and subscription warnings. */}

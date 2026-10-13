@@ -285,6 +285,8 @@
   "backupFileFilter": "Backup-Dateien",
   "stripCountryPrefix": "Länderkürzel in Sendernamen ausblenden",
   "stripCountryPrefixHint": "Zeigt „UK: BBC One“, „UK | BBC One“ und „[UK] BBC One“ als „BBC One“ an.",
+  "englishOnly": "Nur Englisch",
+  "englishOnlyHint": "Blendet Sender, Filme und Serien aus, deren Name oder Kategorie eine andere Sprache angibt. Alles ohne eindeutige Sprache bleibt sichtbar.",
   "vodGroup": "Filme und Serien",
   "vodGroupHint": "Gilt für alle Film- und Serienraster.",
   "vodMinRating": "Mindestbewertung",

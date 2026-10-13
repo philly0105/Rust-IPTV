@@ -75,6 +75,15 @@ describe('Parity settings', () => {
     await waitFor(() => expect(patches()).toEqual([{ stripCountryPrefix: true }]));
   });
 
+  it('Interface: English only', async () => {
+    renderAt(settingsRoutes, '/settings/general');
+    await screen.findByTestId('settings-general');
+    const sw = screen.getByTestId('toggle-englishOnly');
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(sw);
+    await waitFor(() => expect(patches()).toEqual([{ englishOnly: true }]));
+  });
+
   it('VOD: minimum rating saves on release, clamped to half steps', async () => {
     renderAt(settingsRoutes, '/settings/general');
     await screen.findByTestId('settings-general');

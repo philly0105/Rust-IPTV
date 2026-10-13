@@ -14,7 +14,7 @@ import { useEscapeBack } from '../hooks/useBackKey';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { formatRating } from '../lib/format';
-import { itemLanguage } from '../lib/language';
+import { isNonEnglish, itemLanguage } from '../lib/language';
 import {
   ALL_CATEGORIES,
   ALL_RATINGS_PARAM,
@@ -159,13 +159,16 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     [source.data, kind, sourceId, categoryId, sort, dir, search, minRating],
   );
   // m3u/xtream filter in SQLite and page like any grid. Stalker portals cannot
-  // filter by rating, so only there the grid loads pages in order and filters them.
-  const clientFiltered = filtered && !!source.data && !ratingFilterInCore(source.data.kind);
+  // filter by rating or language, so only there the grid loads pages in order and filters them.
+  const stalker = !!source.data && !ratingFilterInCore(source.data.kind);
+  const englishOnly = stalker && settings.englishOnly === true;
+  const clientFiltered = stalker && (filtered || englishOnly);
   const inOrder = useVodPagesInOrder(input, clientFiltered);
-  const filteredItems = useMemo(
-    () => (clientFiltered ? filterByRating((inOrder.data?.pages ?? []).flatMap((p) => p.items), minRating) : []),
-    [clientFiltered, inOrder.data, minRating],
-  );
+  const filteredItems = useMemo(() => {
+    if (!clientFiltered) return [];
+    const rated = filterByRating((inOrder.data?.pages ?? []).flatMap((p) => p.items), minRating);
+    return englishOnly ? rated.filter((i) => !isNonEnglish(i.title, i.categoryName)) : rated;
+  }, [clientFiltered, englishOnly, inOrder.data, minRating]);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = inOrder;
   // Keep loading while the filter leaves too few titles to fill the view.
   useEffect(() => {
@@ -366,7 +369,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           )
         ) : clientFiltered ? (
           <VirtualGrid<VodItem | SeriesItem>
-            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}`}
+            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${englishOnly}`}
             items={filteredItems}
             minColumnWidth={coverWidth}
             aspect="poster"

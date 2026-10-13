@@ -285,6 +285,8 @@
   "backupFileFilter": "Yedek dosyaları",
   "stripCountryPrefix": "Kanal adlarındaki ülke etiketlerini gizle",
   "stripCountryPrefixHint": "\"UK: BBC One\", \"UK | BBC One\" ve \"[UK] BBC One\" adlarını \"BBC One\" olarak gösterir.",
+  "englishOnly": "Yalnızca İngilizce",
+  "englishOnlyHint": "Adı veya kategorisi başka bir dili belirten kanalları, filmleri ve dizileri gizler. Dili belli olmayanlar görünmeye devam eder.",
   "vodGroup": "Filmler ve diziler",
   "vodGroupHint": "Tüm film ve dizi ızgaralarına uygulanır.",
   "vodMinRating": "En düşük puan",

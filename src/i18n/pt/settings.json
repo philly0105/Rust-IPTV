@@ -290,6 +290,8 @@
   "backupFileFilter": "Arquivos de backup",
   "stripCountryPrefix": "Ocultar tags de país nos nomes dos canais",
   "stripCountryPrefixHint": "Mostra \"UK: BBC One\", \"UK | BBC One\" e \"[UK] BBC One\" como \"BBC One\".",
+  "englishOnly": "Só inglês",
+  "englishOnlyHint": "Oculta canais, filmes e séries cujo nome ou categoria indica outro idioma. O que não tem idioma claro continua visível.",
   "vodGroup": "Filmes e séries",
   "vodGroupHint": "Vale para todas as grades de filmes e séries.",
   "vodMinRating": "Avaliação mínima",

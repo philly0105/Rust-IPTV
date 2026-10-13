@@ -285,6 +285,8 @@
   "backupFileFilter": "ملفات النسخ الاحتياطي",
   "stripCountryPrefix": "خبّي رموز البلدان فأسماء القنوات",
   "stripCountryPrefixHint": "كيورّي «UK: BBC One» و«UK | BBC One» و«[UK] BBC One» بحال «BBC One».",
+  "englishOnly": "غير بالنجليزية",
+  "englishOnlyHint": "كيخبي القنوات والأفلام والمسلسلات اللي سميتها ولا الفئة ديالها كتبين لغة أخرى. اللي ما بانتش اللغة ديالو كيبقى باين.",
   "vodGroup": "الأفلام والسلاسل",
   "vodGroupHint": "كيتطبق على كل شبكات الأفلام والسلاسل.",
   "vodMinRating": "أقل تقييم",

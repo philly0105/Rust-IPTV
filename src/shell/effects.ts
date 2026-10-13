@@ -160,9 +160,16 @@ export function useShellEvents(): void {
     // position, a recent channel) drops its "skip the skeleton" flag right away.
     offs.push(bindRailEmptySync(queryClient));
 
+    // englishOnly filters in the core, so catalog lists refetch when it flips.
+    // Tracked here because the settings cache is already updated optimistically.
+    let englishOnly = queryClient.getQueryData<Settings>(rpcKey('settings.get'))?.englishOnly;
     offs.push(
       onAppEvent('settings.changed', (s: Settings) => {
         queryClient.setQueryData(rpcKey('settings.get'), s);
+        if (s.englishOnly !== englishOnly) {
+          englishOnly = s.englishOnly;
+          void invalidate('catalog.');
+        }
       }),
     );
 

@@ -285,6 +285,8 @@
   "backupFileFilter": "備份檔案",
   "stripCountryPrefix": "隱藏頻道名稱中的國家標籤",
   "stripCountryPrefixHint": "將「UK: BBC One」、「UK | BBC One」和「[UK] BBC One」顯示為「BBC One」。",
+  "englishOnly": "僅英文",
+  "englishOnlyHint": "隱藏名稱或分類標示其他語言的頻道、電影和影集。語言不明確的內容仍會顯示。",
   "vodGroup": "電影與影集",
   "vodGroupHint": "套用到所有電影與影集的格狀檢視。",
   "vodMinRating": "最低評分",

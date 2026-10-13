@@ -460,6 +460,11 @@ export interface Settings {
   showExternalBar: boolean;
   /** VOD grids hide items rated below this (0..10; 0 shows everything). */
   vodMinRating: number;
+  /**
+   * Lists, grids, categories and search hide items whose title or category
+   * clearly marks another language; items without a clear language stay.
+   */
+  englishOnly: boolean;
   /** `null` = `<downloadsDir>/recordings`. Desktop only. */
   recordingsDir: string | null;
   // failover: smart reconnect and live failover.
@@ -527,6 +532,7 @@ export const DEFAULT_SETTINGS: Settings = {
   playerReuseInstance: true,
   showExternalBar: true,
   vodMinRating: 0,
+  englishOnly: false,
   recordingsDir: null,
   // failover: smart reconnect and live failover.
   liveFailover: true,

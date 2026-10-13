@@ -285,6 +285,8 @@
   "backupFileFilter": "Biztonsági mentés fájlok",
   "stripCountryPrefix": "Országjelölők elrejtése a csatornanevekben",
   "stripCountryPrefixHint": "A „UK: BBC One”, „UK | BBC One” és „[UK] BBC One” neveket „BBC One” formában jeleníti meg.",
+  "englishOnly": "Csak angol",
+  "englishOnlyHint": "Elrejti azokat a csatornákat, filmeket és sorozatokat, amelyek neve vagy kategóriája más nyelvet jelöl. Ami nem egyértelmű nyelvű, látható marad.",
   "vodGroup": "Filmek és sorozatok",
   "vodGroupHint": "Minden film- és sorozatrácsra vonatkozik.",
   "vodMinRating": "Minimális értékelés",

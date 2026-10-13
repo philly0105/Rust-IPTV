@@ -285,6 +285,8 @@
   "backupFileFilter": "백업 파일",
   "stripCountryPrefix": "채널 이름에서 국가 태그 숨기기",
   "stripCountryPrefixHint": "\"UK: BBC One\", \"UK | BBC One\", \"[UK] BBC One\"을 \"BBC One\"으로 표시합니다.",
+  "englishOnly": "영어만",
+  "englishOnlyHint": "이름이나 카테고리가 다른 언어를 나타내는 채널, 영화, 시리즈를 숨깁니다. 언어가 분명하지 않은 항목은 계속 표시됩니다.",
   "vodGroup": "영화 및 시리즈",
   "vodGroupHint": "모든 영화 및 시리즈 그리드에 적용됩니다.",
   "vodMinRating": "최소 평점",

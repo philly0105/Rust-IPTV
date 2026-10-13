@@ -285,6 +285,8 @@
   "backupFileFilter": "备份文件",
   "stripCountryPrefix": "隐藏频道名称中的国家标签",
   "stripCountryPrefixHint": "将“UK: BBC One”“UK | BBC One”和“[UK] BBC One”显示为“BBC One”。",
+  "englishOnly": "仅英语",
+  "englishOnlyHint": "隐藏名称或分类标明其他语言的频道、电影和剧集。语言不明确的内容仍会显示。",
   "vodGroup": "电影和剧集",
   "vodGroupHint": "适用于所有电影和剧集网格。",
   "vodMinRating": "最低评分",

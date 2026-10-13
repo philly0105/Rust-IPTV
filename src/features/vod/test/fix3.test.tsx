@@ -376,3 +376,36 @@ describe('U4-fix3: minimum rating filter', () => {
     expect(screen.queryByTestId('vod-rating-filter')).toBeNull();
   });
 });
+
+describe('English only on Stalker grids', () => {
+  // Even items are tagged French; the portal pages them unfiltered.
+  const item = (i: number): VodItem => ({
+    ref: { sourceId: 'src1', contentType: 'movie', itemId: `l${i}` },
+    title: i % 2 === 0 ? `FR - Film ${i}` : `Film ${i}`,
+    categoryId: 'c1',
+  });
+  beforeEach(() => {
+    useKind('stalker');
+    rpcMock.handlers['catalog.categories'] = () => [];
+    rpcMock.handlers['stalker.movies'] = (a) => {
+      const q = (a as { query: PageQuery }).query;
+      const all = Array.from({ length: 60 }, (_, i) => item(i));
+      return { items: all.slice(q.offset, q.offset + q.limit), total: all.length, offset: q.offset, limit: q.limit };
+    };
+  });
+  const gridRoute = [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }];
+
+  it('filters loaded pages when the setting is on', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ englishOnly: true });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    await screen.findByText('Film 1');
+    expect(screen.queryByText('FR - Film 0')).toBeNull();
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('30')).toBeTruthy());
+  });
+
+  it('shows everything when the setting is off', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ englishOnly: false });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    await screen.findByText('FR - Film 0');
+  });
+});

@@ -8,6 +8,7 @@
 //! behind the rpc commands (neighbors, channel by number, recently added,
 //! same title). See `docs/architecture/catalog.md`.
 
+pub mod language;
 pub mod rpc;
 mod title;
 
@@ -248,6 +249,9 @@ pub struct CatalogQuery {
     /// Keep only items rated at least this (unrated items drop out). `None`
     /// or a value <= 0 disables the filter.
     pub min_rating: Option<f64>,
+    /// Drop items that are clearly in another language (`englishOnly`, see
+    /// [`language`]); `total` counts what is left.
+    pub english_only: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -753,6 +757,55 @@ pub fn categories(
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// [`categories`] for the English-only mode. Where the items are stored,
+/// `item_count` counts only items that are not clearly in another language
+/// and categories left with none are dropped. Where they are not (Stalker
+/// VOD pages live from the portal), categories whose own name is clearly in
+/// another language are dropped and counts stay as they are.
+pub fn english_categories(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    include_hidden: bool,
+) -> CoreResult<Vec<Category>> {
+    let all = categories(conn, source_id, content_type, include_hidden)?;
+    let stored: bool = conn
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM items WHERE source_id = ?1 AND content_type = ?2)",
+        )?
+        .query_row(params![source_id, content_type.as_str()], |r| r.get(0))?;
+    if !stored {
+        return Ok(all
+            .into_iter()
+            .filter(|c| !language::is_non_english("", Some(&c.name)))
+            .collect());
+    }
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    {
+        let mut stmt = conn.prepare_cached(
+            "SELECT i.category_id, count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE i.source_id = ?1 AND i.content_type = ?2 AND non_english(i.title, c.name) = 0 GROUP BY i.category_id",
+        )?;
+        let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (id, n) = row?;
+            counts.insert(id, n);
+        }
+    }
+    Ok(all
+        .into_iter()
+        .filter_map(|mut c| {
+            let n = counts.get(&c.id).copied().unwrap_or(0);
+            if n == 0 && c.item_count > 0 {
+                return None;
+            }
+            c.item_count = n;
+            Some(c)
+        })
+        .collect())
+}
+
 /// Sets `hidden` on one category. NotFound when it does not exist.
 pub fn set_category_hidden(
     conn: &Connection,
@@ -802,6 +855,16 @@ pub fn set_categories_hidden(
 // ---------------------------------------------------------------------------
 
 pub(crate) const SELECT_NAMED: &str = "SELECT i.source_id, i.content_type, i.item_id, i.category_id, i.title, i.title_base, i.number, i.logo_url, i.poster_url, i.backdrop_url, i.rating, i.added, i.year, i.epg_channel_id, i.url, i.container_extension, i.is_radio, i.archive_hours, i.extra_json, i.position, c.name FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id";
+
+/// `AND` clause of the English-only filter, or nothing. Needs the `c` join of
+/// [`SELECT_NAMED`].
+fn english_clause(english_only: bool) -> &'static str {
+    if english_only {
+        language::ENGLISH_ONLY_SQL
+    } else {
+        ""
+    }
+}
 
 pub(crate) fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
     let ct: String = r.get(1)?;
@@ -950,6 +1013,7 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
             args.push(min.into());
             where_sql.push_str(&format!(" AND i.rating >= ?{}", args.len()));
         }
+        where_sql.push_str(english_clause(q.english_only));
         if let Some(s) = search {
             match m {
                 Match::Fts => {
@@ -966,8 +1030,12 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
             }
         }
         // The join only adds the category name; it cannot change the count
-        // (categories' key is unique).
-        let count_sql = format!("SELECT count(*) FROM items i WHERE {where_sql}");
+        // (categories' key is unique). Only the English-only filter reads it.
+        let count_sql = if q.english_only {
+            format!("SELECT count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE {where_sql}")
+        } else {
+            format!("SELECT count(*) FROM items i WHERE {where_sql}")
+        };
         let total: i64 = conn
             .prepare_cached(&count_sql)?
             .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
@@ -1020,19 +1088,21 @@ pub fn search(
     types: &[ContentType],
     limit: usize,
 ) -> CoreResult<Vec<ItemRow>> {
-    Ok(search_named(conn, query, source_id, types, limit)?
+    Ok(search_named(conn, query, source_id, types, limit, false)?
         .into_iter()
         .map(|n| n.row)
         .collect())
 }
 
-/// [`search`] with category names joined.
+/// [`search`] with category names joined; `english_only` drops items that are
+/// clearly in another language.
 pub fn search_named(
     conn: &Connection,
     query: &str,
     source_id: Option<&str>,
     types: &[ContentType],
     limit: usize,
+    english_only: bool,
 ) -> CoreResult<Vec<NamedRow>> {
     let text = query.trim();
     if text.is_empty() || limit == 0 {
@@ -1048,6 +1118,7 @@ pub fn search_named(
     let fts = fts_query(text);
 
     let mut filter = String::from(" AND COALESCE(c.hidden, 0) = 0");
+    filter.push_str(english_clause(english_only));
     let mut base_args: Vec<SqlValue> = Vec::new();
     let placeholders: Vec<String> = types
         .iter()
@@ -1121,10 +1192,12 @@ pub fn channel_by_number(
 
 /// Previous and next channel around `r` in playlist order, inside `category_id`
 /// when given (else across visible categories). Wraps around at both ends.
+/// `english_only` skips channels that are clearly in another language.
 pub fn neighbors(
     conn: &Connection,
     r: &ItemRef,
     category_id: Option<&str>,
+    english_only: bool,
 ) -> CoreResult<(Option<NamedRow>, Option<NamedRow>)> {
     let Some(current) = get(conn, r)? else {
         return Err(CoreError::NotFound(format!("item {} not found", r.item_id)));
@@ -1141,6 +1214,7 @@ pub fn neighbors(
         }
         None => scope.push_str(" AND COALESCE(c.hidden, 0) = 0"),
     }
+    scope.push_str(english_clause(english_only));
     let pos_idx = args.len() + 1;
     let id_idx = args.len() + 2;
     let pick = |cmp: &str, order: &str, wrap: bool| -> CoreResult<Option<NamedRow>> {
@@ -1175,16 +1249,21 @@ pub fn neighbors(
 }
 
 /// Most recently added movies or series (rows with an `added` date), hidden
-/// categories excluded.
+/// categories excluded, and with `english_only` titles clearly in another
+/// language too.
 pub fn recently_added(
     conn: &Connection,
     source_id: Option<&str>,
     content_type: ContentType,
     limit: usize,
+    english_only: bool,
 ) -> CoreResult<Vec<NamedRow>> {
     let limit = limit.clamp(1, MAX_PAGE_LIMIT as usize);
     let mut args: Vec<SqlValue> = vec![content_type.as_str().to_string().into()];
-    let mut sql = format!("{SELECT_NAMED} WHERE i.content_type = ?1 AND i.added IS NOT NULL AND COALESCE(c.hidden, 0) = 0");
+    let mut sql = format!(
+        "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.added IS NOT NULL AND COALESCE(c.hidden, 0) = 0{}",
+        english_clause(english_only)
+    );
     if let Some(sid) = source_id {
         args.push(sid.to_string().into());
         sql.push_str(" AND i.source_id = ?2");
@@ -1223,9 +1302,15 @@ pub fn same_title(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<NamedRow>> {
 }
 
 /// Every visible live channel of a source in playlist order (capped at 20 000).
-pub fn all_live_channels(conn: &Connection, source_id: &str) -> CoreResult<Vec<NamedRow>> {
+/// `english_only` drops channels that are clearly in another language.
+pub fn all_live_channels(
+    conn: &Connection,
+    source_id: &str,
+    english_only: bool,
+) -> CoreResult<Vec<NamedRow>> {
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0 ORDER BY i.position LIMIT {ALL_LIVE_CAP}"
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
+        english_clause(english_only)
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt

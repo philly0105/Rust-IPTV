@@ -58,12 +58,13 @@ pub const EXT_HIDDEN_CATEGORIES: &str = "tsrustHiddenCategories";
 /// App-level settings carried in the manifest's `settings` object next to
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
 /// specific values (player paths, folders) are deliberately not exported.
-pub const APP_SETTING_KEYS: [&str; 13] = [
+pub const APP_SETTING_KEYS: [&str; 14] = [
     "stripCountryPrefix",
     "epgOffsetMinutes",
     "playerReuseInstance",
     "showExternalBar",
     "vodMinRating",
+    "englishOnly",
     // account:
     "sourceRefreshIntervalHours",
     "accountExpiryWarnDays",

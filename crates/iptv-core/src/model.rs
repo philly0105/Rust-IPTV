@@ -1012,6 +1012,10 @@ pub struct Settings {
     pub show_external_bar: bool,
     /// VOD grids hide items rated below this (0..=10; 0 shows everything).
     pub vod_min_rating: f64,
+    /// Channel lists, movie and series grids, categories and search hide items
+    /// whose title or category clearly marks another language. Items without
+    /// a clear language stay (`catalog::language`).
+    pub english_only: bool,
     // failover:
     /// A live channel that fails switches to the same channel on another source.
     pub live_failover: bool,
@@ -1077,6 +1081,7 @@ impl Default for Settings {
             epg_offset_minutes: 0,
             show_external_bar: true,
             vod_min_rating: 0.0,
+            english_only: false,
             // failover:
             live_failover: true,
             stream_reconnect: true,

@@ -163,9 +163,10 @@ pub fn latest_version() -> i64 {
     MIGRATIONS.last().map(|m| m.version).unwrap_or(0)
 }
 
-/// Applies the per-connection pragmas.
+/// Applies the per-connection pragmas and registers the app's SQL functions.
 pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.busy_handler(Some(busy_wait))?;
+    crate::catalog::language::register(conn)?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY;",
     )?;

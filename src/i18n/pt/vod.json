@@ -189,5 +189,6 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Não foi possível carregar estes títulos",
-  "searchPartialError": "Não foi possível carregar alguns resultados."
+  "searchPartialError": "Não foi possível carregar alguns resultados.",
+  "previousEpisode": "Episódio anterior"
 }

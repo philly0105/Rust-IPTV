@@ -21,10 +21,11 @@ import {
 } from '../store';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { BarReadout, Controls, CtlButton, InlineSpinner } from './Controls';
-import { FullscreenChannelPanel } from './FullscreenChannelPanel';
 import { InlinePlayer } from './InlinePlayer';
+import { FullscreenChannelPanel, StreamInfoPanel } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
 import { RadioPlayer } from './RadioPlayer';
+import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
 
 const HIDE_AFTER_MS = 2600;
 /** How often fullscreen mpv checks whether the mouse moved over the native video window. */
@@ -224,6 +225,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const mpv = useMediaStore((s) => s.mpv);
   const retryRef = useRef<HTMLButtonElement>(null);
   const buffering = useMpvBuffering();
+  const reconnecting = useReconnectLabel(); // failover:
   const isError = status === 'error';
   const view = useStreamError(null);
   const retry = useCallback((): void => {
@@ -284,6 +286,15 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
           <RotateCcw className="size-3.5" aria-hidden />
           {t('replay')}
         </button>
+      </div>
+    );
+  }
+  // failover: smart reconnect / failover progress replaces the plain loading line.
+  if (reconnecting && status === 'loading') {
+    return (
+      <div role="status" aria-live="polite" data-mpv-reserved="" data-testid="reconnect-notice" className={cn(strip, 'text-white/80')}>
+        <InlineSpinner />
+        <span className="min-w-0 truncate">{reconnecting}</span>
       </div>
     );
   }
@@ -411,7 +422,7 @@ function MpvPlayer({ compact }: { compact: boolean }) {
       ref={rootRef}
       tabIndex={-1}
       data-testid="mpv-player"
-      className={cn('h-full w-full bg-black outline-none', overlay ? 'relative' : 'flex flex-col')}
+      className={cn('relative h-full w-full bg-black outline-none', !overlay && 'flex flex-col')}
       onFocus={(e) => {
         focusInside.current = true;
         if (e.target !== e.currentTarget) lastCtl.current = e.target.closest('[data-ctl]')?.getAttribute('data-ctl') ?? null;
@@ -424,6 +435,8 @@ function MpvPlayer({ compact }: { compact: boolean }) {
       }}
     >
       <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
+      {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
+      <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
       {overlay ? (
         chromeShown && (
           <>
@@ -614,6 +627,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
       {/* Click surface sits above the video so clicks never reach native controls. */}
       <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
       {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
+      {/* failover: smart reconnect / failover progress under the dial. */}
+      <ReconnectNotice compact={compact} />
 
       {!compact && (
         <div
@@ -635,6 +650,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
       )}
 
       <Osd />
+      <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
       <EndedOverlay compact={compact} />
       <UpNextCard compact={compact} />
 

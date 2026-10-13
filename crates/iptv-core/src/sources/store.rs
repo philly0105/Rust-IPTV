@@ -8,7 +8,7 @@ use crate::model::{
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
-const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio'), s.last_error_code FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
+const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio'), s.last_error_code, s.last_error_at FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
 
 /// Kind-specific configuration of a source.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +59,10 @@ fn read_source(r: &Row<'_>) -> rusqlite::Result<(Source, String)> {
                     .get::<_, Option<String>>(15)?
                     .as_deref()
                     .and_then(RpcErrorCode::parse),
+                None => None,
+            },
+            last_error_at: match r.get::<_, Option<String>>(8)? {
+                Some(_) => r.get::<_, Option<String>>(16)?.map(|s| to_rfc3339(&s)),
                 None => None,
             },
             channel_count: r.get(11)?,
@@ -193,7 +197,7 @@ pub fn record_import(conn: &Connection, id: &str, error: Option<&str>) -> CoreRe
     match error {
         None => {
             conn.execute(
-                "UPDATE sources SET last_refresh_at = ?2, last_error = NULL, last_error_code = NULL WHERE id = ?1",
+                "UPDATE sources SET last_refresh_at = ?2, last_error = NULL, last_error_code = NULL, last_error_at = NULL WHERE id = ?1",
                 params![id, now_rfc3339()],
             )?;
             catalog::update_counts(conn, id)?;
@@ -202,8 +206,8 @@ pub fn record_import(conn: &Connection, id: &str, error: Option<&str>) -> CoreRe
             // Redacted here too: importers outside `sources` record errors
             // directly, and lastError is shown and exported.
             conn.execute(
-                "UPDATE sources SET last_error = ?2, last_error_code = NULL WHERE id = ?1",
-                params![id, crate::logging::redact_text(msg)],
+                "UPDATE sources SET last_error = ?2, last_error_code = NULL, last_error_at = ?3 WHERE id = ?1",
+                params![id, crate::logging::redact_text(msg), now_rfc3339()],
             )?;
         }
     }
@@ -219,8 +223,8 @@ pub fn record_import_error(
     code: RpcErrorCode,
 ) -> CoreResult<()> {
     conn.execute(
-        "UPDATE sources SET last_error = ?2, last_error_code = ?3 WHERE id = ?1",
-        params![id, crate::logging::redact_text(msg), code.as_str()],
+        "UPDATE sources SET last_error = ?2, last_error_code = ?3, last_error_at = ?4 WHERE id = ?1",
+        params![id, crate::logging::redact_text(msg), code.as_str(), now_rfc3339()],
     )?;
     Ok(())
 }
@@ -290,6 +294,11 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
     forget_session(&tx, id)?;
     tx.execute(
         "DELETE FROM app_state WHERE key = 'backup_pending:' || ?1",
+        [id],
+    )?;
+    // account: cached subscription status.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'account_status:' || ?1",
         [id],
     )?;
     tx.commit()?;

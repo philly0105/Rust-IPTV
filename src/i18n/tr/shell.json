@@ -57,6 +57,7 @@
   "settingsPlayback": "Oynatma",
   "settingsPlayers": "Harici oynatıcılar",
   "settingsEpg": "TV rehberi",
+  "settingsRecording": "Kayıt",
   "settingsMetadata": "Meta veri",
   "settingsAppearance": "Görünüm",
   "settingsRemote": "Uzaktan kontrol",
@@ -177,5 +178,13 @@
   "trayQuit": "Çıkış",
   "dashboardLoadFailed": "Ana sayfa yüklenemedi",
   "dashboardLocalDataHint": "Geçmişiniz, favorileriniz ve kitaplığınız bu bilgisayarda saklanır. Tekrar deneyin; sorun devam ederse uygulamayı yeniden başlatın.",
-  "ratedLabel": "puan {{rating}}"
+  "ratedLabel": "puan {{rating}}",
+  "accountAlertsLabel": "Abonelik uyarıları",
+  "accountAlertExpiredTitle": "{{name}} aboneliğinin süresi doldu",
+  "accountAlertExpiringTitle": "{{name}} aboneliği bitiyor: {{when}}",
+  "accountAlertExpiredBody": "Sağlayıcınızla yenileyene kadar kanalları ve filmleri oynatılmaz.",
+  "accountAlertExpiringBody": "Kesintisiz izlemeye devam etmek için sağlayıcınızla yenileyin.",
+  "accountAlertOpen": "Aboneliği görüntüle",
+  "accountAlertDismiss": "{{name}} uyarısını kapat",
+  "navScheduled": "Planlananlar"
 }

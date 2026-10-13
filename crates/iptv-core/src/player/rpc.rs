@@ -23,6 +23,7 @@ pub const COMMANDS: &[&str] = &[
     "mpv.detach",
     "mpv.state",
     "mpv.record",
+    "mpv.stats",
 ];
 
 /// External and embedded players run on the user's machine, so only the
@@ -182,5 +183,11 @@ pub fn register(r: &mut RpcRouter) {
     r.add("mpv.record", |state, a: RecordArgs| async move {
         ensure_desktop(&state)?;
         Ok::<_, RpcError>(embedded::record(&state, a.start).await?)
+    });
+
+    // player: stream info overlay (polled while its panel is open).
+    r.add("mpv.stats", |state, _: ()| async move {
+        ensure_desktop(&state)?;
+        Ok::<_, RpcError>(embedded::stats(&state).await?)
     });
 }

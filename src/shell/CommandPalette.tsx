@@ -1,5 +1,6 @@
 import { Command as Cmdk, defaultFilter } from 'cmdk';
 import {
+  AlarmClock,
   CalendarRange,
   CornerDownLeft,
   Download,
@@ -30,11 +31,16 @@ import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
 import { persistTheme } from './theme';
 
+/**
+ * Every Settings section, in page order. A copy of the settings feature's `SECTION_IDS` (importing
+ * it would pull that module into the main chunk); a shell test fails when the two drift apart.
+ */
 export const SETTINGS_SECTIONS = [
   'general',
   'playback',
   'players',
   'epg',
+  'recording',
   'metadata',
   'appearance',
   'remote',
@@ -89,6 +95,7 @@ export function usePaletteItems(): PaletteItem[] {
       { id: 'nav.recent', title: t('navRecent'), group: nav, icon: History, shortcut: 'mod+r', run: go('/recent'), keywords: ['history'] },
       { id: 'nav.downloads', title: t('navDownloads'), group: nav, icon: Download, run: go('/downloads') },
       { id: 'nav.myVideos', title: t('navMyVideos'), group: nav, icon: HardDrive, run: go('/my-videos'), keywords: ['offline'] },
+      { id: 'nav.scheduled', title: t('navScheduled'), group: nav, icon: AlarmClock, run: go('/scheduled'), keywords: ['recordings', 'reminders'] },
       { id: 'nav.sources', title: t('manageSources'), group: nav, icon: ListVideo, run: go('/sources'), keywords: ['playlists'] },
       { id: 'nav.addSource', title: t('addSource'), group: nav, icon: Plus, run: go('/sources?add=1'), keywords: ['playlist', 'm3u', 'xtream', 'stalker', 'portal'] },
       { id: 'nav.settings', title: t('navSettings'), group: nav, icon: SettingsIcon, run: go('/settings'), keywords: ['preferences'] },

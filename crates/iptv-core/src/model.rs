@@ -103,6 +103,27 @@ pub struct M3uSourceConfig {
     pub file_path: Option<String>,
     #[serde(default)]
     pub headers: RequestHeaders,
+    // guide:
+    /// Per-source catch-up override for every live channel of the playlist
+    /// (see `crate::catchup::m3u`). Absent = use the playlist's attributes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catchup: Option<CatchupOverride>,
+}
+
+// guide:
+/// Source-wide M3U catch-up override. `kind` is `default`, `append`,
+/// `shift`, `flussonic`, `xc` or `none` (catch-up off for every channel).
+/// `template` replaces each channel's `catchup-source` and `days` its
+/// `catchup-days`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatchupOverride {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days: Option<i64>,
 }
 
 /// Xtream Codes source configuration. `password` is a secret: never log it.
@@ -192,6 +213,11 @@ pub struct Source {
     /// or it was recorded before codes existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error_code: Option<crate::error::RpcErrorCode>,
+    // account:
+    /// When `last_error` was recorded (RFC 3339); absent without an error or
+    /// for errors recorded before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error_at: Option<String>,
     /// Live channels only (radio stations are counted in `radio_count`).
     #[serde(default)]
     pub channel_count: i64,
@@ -850,6 +876,16 @@ pub enum CoverSize {
 }
 string_enum!(CoverSize { Small => "small", Medium => "medium", Large => "large" });
 
+// recording:
+/// What a due guide reminder does (`Settings.reminderAction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReminderAction {
+    Notify,
+    Switch,
+}
+string_enum!(ReminderAction { Notify => "notify", Switch => "switch" });
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -976,6 +1012,35 @@ pub struct Settings {
     pub show_external_bar: bool,
     /// VOD grids hide items rated below this (0..=10; 0 shows everything).
     pub vod_min_rating: f64,
+    // failover:
+    /// A live channel that fails switches to the same channel on another source.
+    pub live_failover: bool,
+    /// A dropped or stalled stream is retried quietly before the error shows.
+    pub stream_reconnect: bool,
+    // remote:
+    /// The remote control also listens on this computer's private network
+    /// addresses so paired phones can use it (desktop only; off by default).
+    pub remote_lan_enabled: bool,
+    // account:
+    /// Auto-refresh sources are re-imported when their last refresh is older
+    /// than this many hours (0 = only at startup).
+    pub source_refresh_interval_hours: u32,
+    /// Warn this many days before a subscription expires (0 = off).
+    pub account_expiry_warn_days: u32,
+    // guide:
+    /// Xtream channels without XMLTV programmes use the panel's short EPG.
+    pub epg_short_fallback: bool,
+    // recording:
+    /// Minutes a scheduled recording starts before the programme (0..=60).
+    pub recording_padding_before_minutes: u32,
+    /// Minutes a scheduled recording runs past the programme end (0..=120).
+    pub recording_padding_after_minutes: u32,
+    /// Guide reminders fire while the app runs.
+    pub reminders_enabled: bool,
+    /// Minutes before the start a reminder fires (0..=60).
+    pub reminder_lead_minutes: u32,
+    /// Notify, or switch to the channel.
+    pub reminder_action: ReminderAction,
 }
 
 impl Default for Settings {
@@ -1012,6 +1077,22 @@ impl Default for Settings {
             epg_offset_minutes: 0,
             show_external_bar: true,
             vod_min_rating: 0.0,
+            // failover:
+            live_failover: true,
+            stream_reconnect: true,
+            // remote:
+            remote_lan_enabled: false,
+            // account:
+            source_refresh_interval_hours: 12,
+            account_expiry_warn_days: 7,
+            // guide:
+            epg_short_fallback: true,
+            // recording:
+            recording_padding_before_minutes: 1,
+            recording_padding_after_minutes: 5,
+            reminders_enabled: true,
+            reminder_lead_minutes: 2,
+            reminder_action: ReminderAction::Notify,
         }
     }
 }

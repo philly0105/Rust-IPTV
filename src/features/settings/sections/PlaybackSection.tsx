@@ -16,6 +16,9 @@ const TOGGLES: { key: BoolKey; label: string; hint: string }[] = [
   { key: 'playerAutoplayNextEpisode', label: 'autoplayNext', hint: 'autoplayNextHint' },
   { key: 'playerUpNextRail', label: 'upNextRail', hint: 'upNextRailHint' },
   { key: 'vodAutoFailover', label: 'vodAutoFailover', hint: 'vodAutoFailoverHint' },
+  // failover: smart reconnect and live failover.
+  { key: 'streamReconnect', label: 'streamReconnect', hint: 'streamReconnectHint' },
+  { key: 'liveFailover', label: 'liveFailover', hint: 'liveFailoverHint' },
   { key: 'playerAmbientMode', label: 'ambientMode', hint: 'ambientModeHint' },
   { key: 'fullscreenChannelPanel', label: 'fullscreenChannelPanel', hint: 'fullscreenChannelPanelHint' },
   { key: 'showCaptions', label: 'showCaptions', hint: 'showCaptionsHint' },

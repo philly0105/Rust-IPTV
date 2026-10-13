@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
-const EXPECTED: [&str; 12] = [
+const EXPECTED: [&str; 13] = [
     "mpv.attach",
     "mpv.command",
     "mpv.detach",
@@ -24,6 +24,7 @@ const EXPECTED: [&str; 12] = [
     "mpv.setBounds",
     "mpv.setProperty",
     "mpv.state",
+    "mpv.stats",
     "player.capabilities",
     "player.detect",
     "player.openExternal",
@@ -76,6 +77,7 @@ async fn server_mode_refuses_every_player_command() {
         ("mpv.detach", Value::Null),
         ("mpv.state", Value::Null),
         ("mpv.record", json!({"start": true})),
+        ("mpv.stats", Value::Null),
         ("player.stopExternal", Value::Null),
     ] {
         let err = r.dispatch(Arc::clone(&state), cmd, args).await.unwrap_err();
@@ -228,6 +230,7 @@ async fn mpv_commands_without_session() {
             ("mpv.setProperty", json!({"name": "pause", "value": true})),
             ("mpv.setBounds", bounds.clone()),
             ("mpv.record", json!({"start": true})),
+            ("mpv.stats", Value::Null),
         ] {
             let err = r.dispatch(Arc::clone(&state), cmd, args).await.unwrap_err();
             assert_eq!(err.code, RpcErrorCode::Conflict, "{cmd}: {err:?}");
@@ -558,6 +561,39 @@ async fn embedded_session_end_to_end_with_real_mpv() {
         .await
         .unwrap();
     assert_eq!(title, json!("Test, Pattern"));
+
+    // Stream info snapshot (player slice): what the clip is, never its path.
+    let stats = r
+        .dispatch(Arc::clone(&state), "mpv.stats", Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(stats["width"], json!(160), "{stats}");
+    assert_eq!(stats["height"], json!(120), "{stats}");
+    assert!(
+        stats["videoCodec"].as_str().is_some_and(|c| !c.is_empty()),
+        "{stats}"
+    );
+    assert_eq!(stats["container"], json!("mpegts"), "{stats}");
+    assert!(!stats.to_string().contains("clip"), "{stats}");
+    // Audio and subtitle delay (seconds) go through the property allowlist.
+    for name in ["audio-delay", "sub-delay"] {
+        r.dispatch(
+            Arc::clone(&state),
+            "mpv.setProperty",
+            json!({"name": name, "value": 0.3}),
+        )
+        .await
+        .unwrap();
+        let v = r
+            .dispatch(
+                Arc::clone(&state),
+                "mpv.command",
+                json!({"cmd": ["get_property", name]}),
+            )
+            .await
+            .unwrap();
+        assert!((v.as_f64().unwrap() - 0.3).abs() < 1e-6, "{name}: {v}");
+    }
 
     // Recording (stream-record) into settings.recordingsDir.
     let rec_dir = dir.path().join("rec");

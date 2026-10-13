@@ -59,6 +59,12 @@ The whole remote body is never held in a `String` while downloading or parsing.
 
 `tests/m3u_perf.rs` imports a generated 50,000-channel file through `sources.add`. On this machine a release build takes about 1.1 s with a peak RSS delta of about 31 MB; the limits are 3 s and 200 MB. The fast path relies on the FTS trigger suspension and `temp_store=MEMORY` described in catalog.md.
 
+## Catch-up override
+
+`M3uSourceConfig.catchup {type, template?, days?}` overrides every live channel's catch-up attributes; the source edit dialog sets it ("Catch-up override"). `type` is `default`, `append`, `shift`, `flussonic`, `xc` or `none` (catch-up off). `template` (at most 2048 characters, no control characters) replaces `catchup-source` and `days` (1..366) replaces `catchup-days`. `sources.add`/`sources.update` validate it (`catchup::m3u::validate_override`). It is applied when channel rows are read (`catchup::m3u::apply_overrides` on every catalog read path and on `live.alternates`), so changing it never needs a re-import, and an edit that changes only the override does not cancel a running refresh. Backups export and import it with the source.
+
+The archive URL builder exists twice, in `catchup/m3u.rs` and `src/features/live/lib/catchup.ts`. Both are tested against `fixtures/catchup-url-cases.json`; override cases list the `effective` channel attributes after the override.
+
 ## rpc
 
 - `m3u.raw {sourceId}` returns `{text, sha256, fetchedAt}`, or NotFound before the first successful fetch.

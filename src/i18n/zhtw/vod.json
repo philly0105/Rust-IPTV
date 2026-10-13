@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "無法載入這些影片",
-  "searchPartialError": "部分結果無法載入。"
+  "searchPartialError": "部分結果無法載入。",
+  "previousEpisode": "上一集"
 }

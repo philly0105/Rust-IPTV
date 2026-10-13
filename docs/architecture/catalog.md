@@ -73,3 +73,5 @@ Stalker sources are the exception: their VOD and series are not stored, so `upda
 ## rpc
 
 `catalog.categories`, `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type), `channelByNumber` (`contentType?: 'live' | 'radio'`; null when none), `neighbors`, `search` (default 30 per type, max 1001 so the UI can probe its 1000-row step with one extra row; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.
+
+`live.alternates {ref}` (module `live`, failover slice) reads the catalog too: the same live or radio channel on other sources (and duplicates in the same one), found through `idx_items_epg`, `epg_channel_map` and `items_fts`. See `failover.md`.

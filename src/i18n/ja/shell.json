@@ -57,6 +57,7 @@
   "settingsPlayback": "再生",
   "settingsPlayers": "外部プレーヤー",
   "settingsEpg": "番組表",
+  "settingsRecording": "録画",
   "settingsMetadata": "メタデータ",
   "settingsAppearance": "外観",
   "settingsRemote": "リモートコントロール",
@@ -177,5 +178,13 @@
   "trayQuit": "終了",
   "dashboardLoadFailed": "ホームを読み込めませんでした",
   "dashboardLocalDataHint": "視聴履歴、お気に入り、ライブラリはこのコンピューターに保存されています。もう一度お試しください。それでも失敗する場合は、アプリを再起動してください。",
-  "ratedLabel": "評価 {{rating}}"
+  "ratedLabel": "評価 {{rating}}",
+  "accountAlertsLabel": "サブスクリプションの通知",
+  "accountAlertExpiredTitle": "{{name}} の期限が切れました",
+  "accountAlertExpiringTitle": "{{name}} は{{when}}に期限切れになります",
+  "accountAlertExpiredBody": "プロバイダーで更新するまで、このソースのチャンネルと映画は再生できません。",
+  "accountAlertExpiringBody": "途切れずに視聴を続けるには、プロバイダーで更新してください。",
+  "accountAlertOpen": "サブスクリプションを表示",
+  "accountAlertDismiss": "{{name}} の通知を閉じる",
+  "navScheduled": "予定"
 }

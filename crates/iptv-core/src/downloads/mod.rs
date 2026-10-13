@@ -563,7 +563,7 @@ pub async fn reveal(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     open_folder(&dir, select.as_deref())
 }
 
-fn open_folder(dir: &Path, select: Option<&Path>) -> CoreResult<()> {
+pub(crate) fn open_folder(dir: &Path, select: Option<&Path>) -> CoreResult<()> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = std::process::Command::new("explorer");

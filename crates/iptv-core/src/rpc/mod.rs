@@ -150,6 +150,14 @@ pub fn build_router() -> RpcRouter {
     crate::tmdb::rpc::register(&mut r);
     crate::remote::rpc::register(&mut r);
     crate::player::rpc::register(&mut r);
+    // failover:
+    crate::live::rpc::register(&mut r);
+    // account:
+    crate::account::rpc::register(&mut r);
+    // guide:
+    crate::catchup::rpc::register(&mut r);
+    // recording:
+    crate::recording::rpc::register(&mut r);
     r
 }
 
@@ -172,6 +180,8 @@ pub async fn init_all(state: Arc<AppState>) -> CoreResult<()> {
     run_init("downloads", crate::downloads::init(state.clone())).await;
     run_init("tmdb", crate::tmdb::init(state.clone())).await;
     run_init("remote", crate::remote::init(state.clone())).await;
+    // recording:
+    run_init("recording", crate::recording::init(state.clone())).await;
     run_init("player", crate::player::init(state)).await;
     tracing::info!("module init complete");
     Ok(())
@@ -301,6 +311,11 @@ mod tests {
             for c in list {
                 assert!(names.iter().any(|n| n == c), "{c} is not registered");
             }
+        }
+
+        // guide:
+        for c in crate::catchup::rpc::COMMANDS {
+            assert!(names.iter().any(|n| n == c), "{c} is not registered");
         }
 
         // The router and the TypeScript RpcMap list are the same set.

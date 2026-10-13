@@ -18,8 +18,9 @@ import {
   type Engine,
   type EngineError,
 } from '../engines';
-import { tryFailover } from '../failover';
+import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
+import { noteEngineError } from '../reconnect';
 import { canShareSource } from '../shareable';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
 import {
@@ -58,12 +59,10 @@ export interface InlinePlayerProps {
  * registers itself as the store's PlaybackController. Chrome is rendered by the caller.
  */
 export function InlinePlayer({ as = 'video', className, compact = false }: InlinePlayerProps) {
-  const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
   const settings = usePlayerSettings();
-  const { toast } = useToast();
   const elRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
@@ -73,20 +72,16 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
   const key = mediaKey(source);
   const captionsDefault = settings?.showCaptions ?? false;
 
-  /** Fatal error: show the overlay, then try one automatic switch to the same title elsewhere. */
+  /**
+   * Fatal error: report it. Smart reconnect and failover (`reconnect.ts`) take it from there and
+   * either recover quietly or leave the overlay up.
+   */
+  // failover: the recovery module owns retries and switching; it needs the engine's error kind.
   const failRef = useRef<(src: PlayerSource, err: EngineError) => void>(() => undefined);
-  failRef.current = (src, err) => {
+  failRef.current = (_src, err) => {
     setErrorKind(err.kind);
+    noteEngineError(err.kind);
     reportStatus('error', err.message);
-    void tryFailover(src).then((res) => {
-      if (!res) return;
-      toast({
-        title: t('failoverSwitched'),
-        description: t('failoverSwitchedDetail', { title: src.title, source: res.sourceName }),
-        variant: 'info',
-        action: { label: t('undo'), onClick: res.undo },
-      });
-    });
   };
 
   // Engine lifecycle: one per media url (and per retry).
@@ -263,6 +258,8 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       },
       retry: () => setRetryNonce((n) => n + 1),
     });
+    // Subtitle delay (Sync menu) and the stream info overlay.
+    const unExtras = bindInlineExtras(el, () => engineRef.current);
 
     return () => {
       el.removeEventListener('timeupdate', onTime);
@@ -279,6 +276,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       el.removeEventListener('leavepictureinpicture', onLeavePip);
       unController();
       unCommands();
+      unExtras();
       if (document.pictureInPictureElement === el) void document.exitPictureInPicture().catch(() => undefined);
     };
   }, [as]);

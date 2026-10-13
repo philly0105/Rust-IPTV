@@ -211,8 +211,15 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
         include_hidden: a.include_hidden,
         min_rating: None,
     };
-    let page = state.db_call(move |c| super::query_named(c, &q)).await?;
-    Ok(page.map(NamedRow::into_channel))
+    // guide: M3U catch-up overrides are applied on read.
+    let page = state
+        .db_call(move |c| {
+            let mut page = super::query_named(c, &q)?.map(NamedRow::into_channel);
+            crate::catchup::m3u::apply_overrides(c, &mut page.items)?;
+            Ok(page)
+        })
+        .await?;
+    Ok(page)
 }
 
 pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem>, RpcError> {
@@ -244,8 +251,17 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
 pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError> {
     let r = a.item_ref;
     let id = r.item_id.clone();
-    let row = state.db_call(move |c| super::get_named(c, &r)).await?;
-    row.map(to_any).ok_or_else(|| {
+    let row = state
+        .db_call(move |c| {
+            let mut item = super::get_named(c, &r)?.map(to_any);
+            // guide: M3U catch-up overrides are applied on read.
+            if let Some(AnyItem::Channel(ch)) = &mut item {
+                crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
+            }
+            Ok(item)
+        })
+        .await?;
+    row.ok_or_else(|| {
         RpcError::not_found(format!("catalog item {id} not found; refresh the source"))
     })
 }
@@ -255,9 +271,15 @@ pub async fn channel_by_number(
     a: ChannelByNumberArgs,
 ) -> Result<Option<Channel>, RpcError> {
     let row = state
-        .db_call(move |c| super::channel_by_number(c, &a.source_id, a.number, a.content_type))
+        .db_call(move |c| {
+            let mut ch = super::channel_by_number(c, &a.source_id, a.number, a.content_type)?
+                .map(NamedRow::into_channel);
+            // guide: M3U catch-up overrides are applied on read.
+            crate::catchup::m3u::apply_overrides(c, ch.as_mut_slice())?;
+            Ok(ch)
+        })
         .await?;
-    Ok(row.map(NamedRow::into_channel))
+    Ok(row)
 }
 
 pub async fn neighbors(
@@ -266,17 +288,20 @@ pub async fn neighbors(
 ) -> Result<NeighborsResult, RpcError> {
     let (prev, next) = state
         .db_call(move |c| {
-            super::neighbors(
+            let (prev, next) = super::neighbors(
                 c,
                 &a.item_ref,
                 a.category_id.as_deref().filter(|s| !s.is_empty()),
-            )
+            )?;
+            let mut prev = prev.map(NamedRow::into_channel);
+            let mut next = next.map(NamedRow::into_channel);
+            // guide: M3U catch-up overrides are applied on read.
+            crate::catchup::m3u::apply_overrides(c, prev.as_mut_slice())?;
+            crate::catchup::m3u::apply_overrides(c, next.as_mut_slice())?;
+            Ok((prev, next))
         })
         .await?;
-    Ok(NeighborsResult {
-        prev: prev.map(NamedRow::into_channel),
-        next: next.map(NamedRow::into_channel),
-    })
+    Ok(NeighborsResult { prev, next })
 }
 
 pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult, RpcError> {
@@ -299,6 +324,8 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                         .into_iter()
                         .map(NamedRow::into_channel)
                         .collect();
+                // guide: M3U catch-up overrides are applied on read.
+                crate::catchup::m3u::apply_overrides(c, &mut out.live)?;
             }
             if wanted.contains(&ContentType::Movie) {
                 out.movies = super::search_named(
@@ -363,9 +390,17 @@ pub async fn all_live_channels(
     a: SourceArgs,
 ) -> Result<Vec<Channel>, RpcError> {
     let rows = state
-        .db_call(move |c| super::all_live_channels(c, &a.source_id))
+        .db_call(move |c| {
+            let mut v: Vec<Channel> = super::all_live_channels(c, &a.source_id)?
+                .into_iter()
+                .map(NamedRow::into_channel)
+                .collect();
+            // guide: M3U catch-up overrides are applied on read.
+            crate::catchup::m3u::apply_overrides(c, &mut v)?;
+            Ok(v)
+        })
         .await?;
-    Ok(rows.into_iter().map(NamedRow::into_channel).collect())
+    Ok(rows)
 }
 
 /// Registers every `catalog.*` command of C4.

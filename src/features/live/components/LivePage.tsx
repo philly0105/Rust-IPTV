@@ -2,6 +2,7 @@ import {
   CalendarClock,
   Copy,
   ExternalLink,
+  History,
   Link2,
   ListTree,
   Play,
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
@@ -30,10 +31,13 @@ import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { usePortalEpg } from '../hooks/usePortalEpg';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
+import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { MINUTE } from '../lib/epgTime';
 import { playChannel, resolveChannelSource } from '../lib/playback';
+import { needsFallback } from '../lib/shortEpg';
+import { archivePath, canBrowseArchive } from '../lib/archive';
 import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
@@ -88,6 +92,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const focusListPending = useRef(false);
 
   const kind = source.data?.kind;
+  // guide: Xtream channels without XMLTV show the panel's short EPG.
+  const shortEpgOn = useShortEpgEnabled(kind);
   const paged = usePagedChannels({
     sourceId,
     categoryId,
@@ -95,6 +101,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     radio: isRadio,
     now,
     stalkerEpg: kind === 'stalker',
+    shortEpg: shortEpgOn,
     epgOffsetMinutes: prefs.epgOffsetMinutes,
   });
   useEffect(() => {
@@ -136,11 +143,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     { ref: playingRef ?? EMPTY_REF, limit: PREVIEW_FETCH_SIZE },
     { enabled: !!playingRef && kind === 'stalker', staleTime: 60_000 },
   );
+  const playingXmltv = playingNowNext.data ? Object.values(playingNowNext.data)[0] : undefined;
+  // guide: the panel's short EPG once XMLTV answered without anything airing.
+  const playingShortEpg = useShortEpg(playingRef, shortEpgOn && !!playingNowNext.data && needsFallback(playingXmltv));
   // Unshifted programmes: the one shown as airing is the one airing at `now - offset`.
   const currentNowNext = playingRef
     ? preferNowNext(
         kind === 'stalker' ? nowNextFrom(playingPortalEpg.data, now - offset * MINUTE) : undefined,
-        playingNowNext.data ? Object.values(playingNowNext.data)[0] : undefined,
+        preferNowNext(playingXmltv, nowNextFrom(playingShortEpg, now - offset * MINUTE)),
       )
     : undefined;
 
@@ -386,6 +396,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   );
   const closeMenu = useCallback(() => setMenu(null), []);
 
+  const navigate = useNavigate();
   const menuItems: MenuItem[] = useMemo(() => {
     if (!menu || !source.data) return [];
     const ch = menu.channel;
@@ -400,6 +411,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     };
     return [
       { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => play(ch) },
+      // guide: the channel's catch-up archive browser.
+      ...(canBrowseArchive(ch, src.kind)
+        ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => navigate(archivePath(ch.ref)) }]
+        : []),
       { id: 'mpv', label: t('playIn', { player: 'MPV' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv')() },
       { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc')() },
       {
@@ -434,7 +449,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         : []),
       { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => setMapping(ch) },
     ];
-  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite]);
+  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate]);
 
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).

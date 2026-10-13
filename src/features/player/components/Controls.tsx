@@ -5,6 +5,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  History,
   Maximize,
   Minimize,
   Pause,
@@ -29,10 +30,15 @@ import { isDesktop, rpc } from '@/api/transport';
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
+import { setHistoryOpen, useHistoryStore } from '../history';
 import { useMediaStore } from '../media';
 import { usePipStore } from '../pip';
 import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '../store';
+import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
+// failover: AlternatesMenu, AlternatesRow
+import { AlternatesMenu, AlternatesRow, ChannelHistory } from './lazyParts';
 import { SeekBar } from './SeekBar';
+import { SyncRows, useSyncSummary } from './SyncMenu';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -43,6 +49,9 @@ const KEYS = {
   exitPip: { hint: 'F', aria: 'F' },
   mute: { hint: 'M', aria: 'M' },
   captions: { hint: 'C', aria: 'C' },
+  history: { hint: 'Shift+B', aria: 'Shift+B' },
+  previousItem: { hint: 'Shift+P', aria: 'Shift+P' },
+  nextItem: { hint: 'N', aria: 'N' },
 } as const;
 export type CtlShortcut = keyof typeof KEYS;
 
@@ -254,7 +263,7 @@ export function BarReadout({
   );
 }
 
-type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'speed';
+type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'speed' | 'sync' | 'sources'; // failover: + 'sources'
 
 /** A row that opens a submenu (shared with the video's context menu). */
 export function MenuRow({ label, value, onClick }: { label: string; value?: string; onClick(): void }) {
@@ -270,6 +279,24 @@ export function MenuRow({ label, value, onClick }: { label: string; value?: stri
         {value}
         <ChevronRight className="size-4 rtl:rotate-180" aria-hidden />
       </span>
+    </button>
+  );
+}
+
+/** An on/off row (shared with the video's context menu). */
+export function MenuToggle({ label, checked, hint, onClick }: { label: string; checked: boolean; hint?: string; onClick(): void }) {
+  return (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      aria-keyshortcuts={hint}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-sm text-white hover:bg-white/10"
+    >
+      <Check className={cn('size-4 shrink-0', !checked && 'invisible', checked && 'dark:text-accent-hover')} aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {hint && <kbd className="font-sans text-xs text-white/50">{hint}</kbd>}
     </button>
   );
 }
@@ -304,10 +331,15 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
   const tracks = useMediaStore((s) => s.tracks);
   const rate = useMediaStore((s) => s.rate);
   const commands = useMediaStore((s) => s.commands);
+  const statsOpen = useStreamInfoStore((s) => s.open);
+  const syncSummary = useSyncSummary();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
+    // The first item that can take focus (Sync rows may all be disabled, Sources may still be
+    // loading), else the header's Back: focus must stay in the menu for its arrow keys and Escape.
+    const menu = ref.current;
+    (menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back])') ?? menu?.querySelector<HTMLElement>('[data-menu-back]'))?.focus();
   }, [view]);
 
   const qualityValue = tracks.qualityAuto ? t('qualityAuto') : (tracks.qualities.find((q) => q.selected)?.label ?? t('qualityAuto'));
@@ -326,11 +358,23 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
       ) : (
         <button
           type="button"
+          role="menuitem"
+          data-menu-back
           onClick={() => setView('root')}
           className="flex flex-1 items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
         >
           <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
-          {view === 'quality' ? t('quality') : view === 'audio' ? t('audioTrack') : view === 'text' ? t('subtitles') : t('speed')}
+          {view === 'quality'
+            ? t('quality')
+            : view === 'audio'
+              ? t('audioTrack')
+              : view === 'text'
+                ? t('subtitles')
+                : view === 'sync'
+                  ? t('sync')
+                  : view === 'sources'
+                    ? t('alternateSources')
+                    : t('speed')}
         </button>
       )}
       <button
@@ -358,7 +402,7 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
-          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button') ?? []);
+          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []);
           const i = items.indexOf(document.activeElement as HTMLElement);
           const next = items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
           next?.focus();
@@ -379,6 +423,22 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
               onClick={() => setView('speed')}
             />
           )}
+          <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
+          {/* failover: other copies of the live channel. */}
+          <AlternatesRow onOpen={() => setView('sources')} />
+        </>
+      )}
+      {view === 'sync' && (
+        <>
+          {header}
+          <SyncRows />
+        </>
+      )}
+      {view === 'sources' && (
+        <>
+          {header}
+          <AlternatesMenu onDone={() => setView(null)} />
         </>
       )}
       {view === 'quality' && (
@@ -464,16 +524,34 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const windowPip = usePipStore((s) => s.active);
   const inPip = browserPip || windowPip;
   const commands = useMediaStore((s) => s.commands);
+  const historyOpen = useHistoryStore((s) => s.open);
   const [menu, setMenuState] = useState<MenuView | null>(null);
 
   const setMenu = (v: MenuView | null): void => {
     setMenuState(v);
-    onMenuOpenChange?.(v !== null);
+    if (v !== null) setHistoryOpen(false);
+    onMenuOpenChange?.(v !== null || useHistoryStore.getState().open);
   };
 
   useEffect(() => {
     if (!visible && menu) setMenu(null);
   }, [visible]);
+
+  // The history popover (also opened by Shift+B) keeps the chrome up like a menu, and only one
+  // of them is open at a time.
+  const live = !!source?.isLive;
+  const showHistory = historyOpen && live;
+  useEffect(() => {
+    if (showHistory) {
+      setMenuState(null);
+      onMenuOpenChange?.(true);
+    } else onMenuOpenChange?.(menu !== null);
+  }, [showHistory]);
+  // Leaving live TV (or the player) closes it.
+  useEffect(() => {
+    if (!live && historyOpen) setHistoryOpen(false);
+  }, [live]);
+  useEffect(() => () => setHistoryOpen(false), []);
 
   if (!source) return null;
   const isLive = source.isLive;
@@ -482,7 +560,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const prev = prevInQueue();
   const next = nextInQueue();
   const captionsOn = tracks.text.some((x) => x.selected);
-  const hasOptions = tracks.qualities.length > 0 || tracks.audio.length > 0 || tracks.text.length > 0 || isVod;
+  // Sync and Stream info are always there.
+  const hasOptions = true;
+  const episodic = !!source.episodeId;
 
   // Live DVR window: scrub only when the window is at least 30 s.
   const liveWindow = isLive && seekable && seekable.end - seekable.start >= 30 ? seekable : undefined;
@@ -518,6 +598,18 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
         </div>
       )}
 
+      {showHistory && variant === 'overlay' && (
+        <div className="absolute start-3 bottom-full z-10 mb-1 sm:start-4">
+          <ChannelHistory />
+        </div>
+      )}
+
+      {showHistory && variant === 'dock' && (
+        <div className="flex max-h-48 items-start justify-start overflow-y-auto py-1">
+          <ChannelHistory />
+        </div>
+      )}
+
       {menu && variant === 'dock' && (
         // A native surface sits above the DOM, so dock menus grow the dock upward instead of popping over
         // the video. The bar stays below so the options button can always close it; the surface shrinks
@@ -541,7 +633,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       )}
       <div className="flex min-w-0 items-center gap-0.5">
         {prev && !compact && (
-          <CtlButton id="prev" label={t('previous')} onClick={() => store.prev()}>
+          <CtlButton id="prev" shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
             <SkipBack />
           </CtlButton>
         )}
@@ -555,7 +647,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
           </CtlButton>
         )}
         {next && !compact && (
-          <CtlButton id="next" label={t('next')} onClick={() => store.next()}>
+          <CtlButton id="next" shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
             <SkipForward />
           </CtlButton>
         )}
@@ -616,6 +708,11 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
           </span>
         ) : null}
         {canRecord && <RecordControl compact={compact} />}
+        {isLive && !compact && (
+          <CtlButton id="history" shortcut="history" label={t('channelHistory')} pressed={showHistory} onClick={() => setHistoryOpen(!historyOpen)}>
+            <History />
+          </CtlButton>
+        )}
 
         <div className="flex-1" />
         {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}

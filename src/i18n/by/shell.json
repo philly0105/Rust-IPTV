@@ -57,6 +57,7 @@
   "settingsPlayback": "Прайграванне",
   "settingsPlayers": "Знешнія плэеры",
   "settingsEpg": "Праграма перадач",
+  "settingsRecording": "Запіс",
   "settingsMetadata": "Метаданыя",
   "settingsAppearance": "Выгляд",
   "settingsRemote": "Аддаленае кіраванне",
@@ -187,5 +188,13 @@
   "trayQuit": "Выйсці",
   "dashboardLoadFailed": "Не ўдалося загрузіць галоўную старонку",
   "dashboardLocalDataHint": "Ваша гісторыя, выбранае і бібліятэка захоўваюцца на гэтым камп’ютары. Паспрабуйце яшчэ раз; калі памылка не знікне, перазапусціце праграму.",
-  "ratedLabel": "рэйтынг {{rating}}"
+  "ratedLabel": "рэйтынг {{rating}}",
+  "accountAlertsLabel": "Апавяшчэнні пра падпіску",
+  "accountAlertExpiredTitle": "Падпіска {{name}} скончылася",
+  "accountAlertExpiringTitle": "Падпіска {{name}} скончыцца {{when}}",
+  "accountAlertExpiredBody": "Яго каналы і фільмы не будуць прайгравацца, пакуль вы не падоўжыце падпіску ў правайдара.",
+  "accountAlertExpiringBody": "Падоўжыце падпіску ў правайдара, каб глядзець без перапынку.",
+  "accountAlertOpen": "Паказаць падпіску",
+  "accountAlertDismiss": "Закрыць апавяшчэнне для {{name}}",
+  "navScheduled": "Запланаванае"
 }

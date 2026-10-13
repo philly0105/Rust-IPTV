@@ -1,0 +1,339 @@
+/**
+ * /scheduled: guide reminders and scheduled recordings. Recordings writing now
+ * come first (elapsed time, size, stop), then everything upcoming by day,
+ * then recently finished recordings with their outcome.
+ */
+
+import { AlarmClock, Bell, CalendarRange, Square, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
+
+import { invalidate } from '@/api/query';
+import { RpcError, rpc } from '@/api/transport';
+import type { Recording, RecordingStatus, Reminder } from '@/api/types';
+import { buttonClass } from '@/ui/Button';
+import { cn } from '@/ui/cn';
+
+import {
+  Badge,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  ProgressBar,
+  SkeletonList,
+  clockDuration,
+  elapsedSeconds,
+  finishedRecordings,
+  groupByDay,
+  recordingFraction,
+  recordingNow,
+  upcoming,
+  useRecordingCapabilities,
+  useRecordingProgress,
+  useRecordings,
+  useReminders,
+  useScheduleActions,
+  useToast,
+  type UpcomingEntry,
+} from '../deps';
+import { PageTitle } from '../components/bits';
+import { usePageHeader } from '../hooks/usePageHeader';
+import { k } from '../lib/keys';
+import { formatBytes } from '../lib/format';
+import { recordingNote } from '../lib/recordingNote';
+
+const STATUS_VARIANT: Record<RecordingStatus, 'accent' | 'neutral' | 'warning' | 'danger' | 'outline' | 'success' | 'live'> = {
+  scheduled: 'neutral',
+  recording: 'live',
+  completed: 'success',
+  failed: 'danger',
+  missed: 'warning',
+  cancelled: 'outline',
+};
+
+function useClock(everyMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(id);
+  }, [everyMs]);
+  return now;
+}
+
+function timeOf(iso: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(Date.parse(iso));
+}
+
+function dayLabel(day: number, now: number, lang: string): string {
+  const today = new Date(now);
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const diff = Math.round((day - start) / 86_400_000);
+  if (diff === 0 || diff === 1) return new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }).format(diff, 'day');
+  return new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long' }).format(day);
+}
+
+export function ScheduledPage() {
+  const { t, i18n } = useTranslation('library');
+  const lang = i18n.language;
+  const reminders = useReminders();
+  const recordings = useRecordings();
+  const caps = useRecordingCapabilities();
+  const now = useClock(1000);
+
+  const title = t('scheduledTitle');
+  const nowList = useMemo(() => recordingNow(recordings.data), [recordings.data]);
+  const next = useMemo(() => upcoming(reminders.data, recordings.data), [reminders.data, recordings.data]);
+  const done = useMemo(() => finishedRecordings(recordings.data).slice(0, 50), [recordings.data]);
+  const subtitle = reminders.data && recordings.data ? t('scheduledSummary', { count: next.length + nowList.length }) : undefined;
+  usePageHeader(title, subtitle);
+
+  const loading = reminders.isLoading || recordings.isLoading;
+  const error = reminders.error ?? recordings.error;
+
+  let body;
+  if (loading) {
+    body = <SkeletonList rows={5} className="pt-2" />;
+  } else if (error) {
+    body = (
+      <ErrorState
+        error={error}
+        retrying={reminders.isFetching || recordings.isFetching}
+        onRetry={() => {
+          void reminders.refetch();
+          void recordings.refetch();
+        }}
+      />
+    );
+  } else if (nowList.length === 0 && next.length === 0 && done.length === 0) {
+    body = (
+      <EmptyState
+        icon={<AlarmClock size={28} aria-hidden />}
+        title={t('scheduledEmptyTitle')}
+        description={t('scheduledEmptyBody')}
+        action={
+          <Link to="/epg" className={buttonClass('primary', 'md')}>
+            <CalendarRange size={16} aria-hidden />
+            {t('scheduledOpenGuide')}
+          </Link>
+        }
+      />
+    );
+  } else {
+    body = (
+      <div className="flex flex-col gap-8">
+        {nowList.length > 0 ? (
+          <Section title={t('scheduledNow')} count={nowList.length} testId="scheduled-now">
+            {nowList.map((r) => (
+              <RecordingNowRow key={r.id} recording={r} now={now} />
+            ))}
+          </Section>
+        ) : null}
+        <Section title={t('scheduledUpcoming')} count={next.length} testId="scheduled-upcoming">
+          {next.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-fg-muted">{t('scheduledUpcomingEmpty')}</p>
+          ) : (
+            groupByDay(next).map((g) => (
+              <div key={g.day} role="group" aria-label={dayLabel(g.day, now, lang)}>
+                <p className="bg-surface-2/50 px-4 py-1.5 text-xs font-medium text-fg-muted first-letter:uppercase">{dayLabel(g.day, now, lang)}</p>
+                {g.entries.map((e) => (
+                  <UpcomingRow key={`${e.type}:${e.id}`} entry={e} />
+                ))}
+              </div>
+            ))
+          )}
+        </Section>
+        {done.length > 0 ? (
+          <Section title={t('scheduledFinished')} count={done.length} testId="scheduled-finished">
+            {done.map((r) => (
+              <FinishedRow key={r.id} recording={r} />
+            ))}
+          </Section>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-[1100px] min-w-0 flex-col gap-6 px-6 pb-8 pt-4">
+      <PageTitle>{title}</PageTitle>
+      {caps.data && !caps.data.supported ? (
+        <p role="note" className="rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg-muted" data-testid="scheduled-no-recording">
+          {t('scheduledServerNoMpv')}
+        </p>
+      ) : null}
+      {body}
+    </div>
+  );
+}
+
+function Section({ title, count, testId, children }: { title: string; count: number; testId: string; children: React.ReactNode }) {
+  const id = `${testId}-title`;
+  return (
+    <section aria-labelledby={id} data-testid={testId} className="flex flex-col gap-2">
+      <div className="flex items-baseline gap-3 px-1">
+        <h2 id={id} className="font-display text-[15px] font-semibold text-fg">
+          {title}
+        </h2>
+        <span className="font-display text-[13px] tabular-nums text-fg-subtle">{count}</span>
+      </div>
+      <div className="flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-border bg-surface">{children}</div>
+    </section>
+  );
+}
+
+function RecordingNowRow({ recording: r, now }: { recording: Recording; now: number }) {
+  const { t, i18n } = useTranslation('library');
+  const actions = useScheduleActions();
+  const live = useRecordingProgress((s) => s.byId[r.id]);
+  const name = r.title ?? r.channelName;
+  const bytes = live?.bytes ?? r.bytes;
+  const elapsed = elapsedSeconds(r, now);
+  const reconnecting = r.errorCode === 'reconnecting';
+  return (
+    <div className="flex items-center gap-4 px-4 py-3" data-testid="recording-now-row" data-recording-id={r.id}>
+      <span aria-hidden className="block size-2.5 shrink-0 rounded-full bg-live motion-safe:animate-pulse" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span dir="auto" className="truncate text-sm font-medium text-fg">
+            {name}
+          </span>
+          {r.title ? (
+            <span dir="auto" className="hidden truncate text-[13px] text-fg-muted sm:inline">
+              {r.channelName}
+            </span>
+          ) : null}
+        </div>
+        <ProgressBar value={recordingFraction(r, now) * 100} tone="accent" label={t('scheduledProgressFor', { title: name })} />
+        <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
+          <span className="font-display tabular-nums text-fg">{clockDuration(elapsed)}</span>
+          <span className="font-display tabular-nums">{formatBytes(bytes, i18n.language)}</span>
+          <span className="tabular-nums">{t('scheduledUntil', { time: timeOf(new Date(Date.parse(r.end) + r.paddingAfterMinutes * 60_000).toISOString(), i18n.language) })}</span>
+          {reconnecting ? <span className="truncate text-warning">{t('scheduledReconnecting')}</span> : null}
+        </div>
+      </div>
+      <IconButton
+        label={t('scheduledStop', { title: name })}
+        icon={<Square size={16} aria-hidden />}
+        onClick={() => void actions.cancelRecording(r)}
+        data-testid="recording-stop"
+      />
+    </div>
+  );
+}
+
+function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
+  const { t, i18n } = useTranslation('library');
+  const { toast } = useToast();
+  const actions = useScheduleActions();
+  const lang = i18n.language;
+  const isReminder = entry.type === 'reminder';
+  const item: Reminder | Recording = isReminder ? entry.reminder : entry.recording;
+  const name = (isReminder ? entry.reminder.title : entry.recording.title) ?? item.channelName;
+  const range = `${timeOf(item.start, lang)}–${timeOf(item.end, lang)}`;
+
+  const cancel = async () => {
+    if (entry.type === 'recording') {
+      await actions.cancelRecording(entry.recording);
+      return;
+    }
+    try {
+      await rpc('reminders.remove', { id: entry.reminder.id });
+      toast({ title: t('scheduledReminderRemoved', { title: name }) });
+    } catch (e) {
+      toast({ variant: 'error', title: t('scheduledCancelFailed'), description: RpcError.from(e).message });
+    } finally {
+      void invalidate('reminders.');
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4 px-4 py-3" data-testid="upcoming-row" data-kind={entry.type}>
+      <span className="w-14 shrink-0 font-display text-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
+      <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
+        {isReminder ? <Bell size={16} className="text-accent" /> : <span className="block size-2.5 rounded-full bg-live" />}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span dir="auto" className="truncate text-sm font-medium text-fg">
+          {name}
+        </span>
+        <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
+          <span dir="auto" className="truncate">
+            {item.channelName}
+          </span>
+          <span className="shrink-0 tabular-nums">{range}</span>
+          {entry.type === 'recording' && entry.recording.kind === 'programme' && (entry.recording.paddingBeforeMinutes > 0 || entry.recording.paddingAfterMinutes > 0) ? (
+            <span className="hidden truncate text-fg-subtle md:inline">
+              {t('scheduledPadding', { before: entry.recording.paddingBeforeMinutes, after: entry.recording.paddingAfterMinutes })}
+            </span>
+          ) : null}
+        </span>
+      </div>
+      <Badge variant={isReminder ? 'outline' : 'neutral'} className="hidden shrink-0 sm:inline-flex">
+        {isReminder ? t('scheduledKindReminder') : t('scheduledKindRecording')}
+      </Badge>
+      <IconButton
+        label={isReminder ? t('scheduledCancelReminder', { title: name }) : t('scheduledCancelRecording', { title: name })}
+        icon={<X size={16} aria-hidden />}
+        onClick={() => void cancel()}
+        data-testid="upcoming-cancel"
+      />
+    </div>
+  );
+}
+
+function FinishedRow({ recording: r }: { recording: Recording }) {
+  const { t, i18n } = useTranslation('library');
+  const { toast } = useToast();
+  const lang = i18n.language;
+  const name = r.title ?? r.channelName;
+  const when = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(r.start));
+  const note = recordingNote(r, t);
+
+  const remove = async () => {
+    try {
+      await rpc('recordings.remove', { id: r.id });
+    } catch (e) {
+      toast({ variant: 'error', title: t('scheduledRemoveFailed'), description: RpcError.from(e).message });
+    } finally {
+      void invalidate('recordings.');
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4 px-4 py-3" data-testid="finished-row" data-status={r.status}>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span dir="auto" className="truncate text-sm font-medium text-fg">
+            {name}
+          </span>
+          <Badge variant={STATUS_VARIANT[r.status]} className="shrink-0" data-status={r.status}>
+            {t(k('recStatus', r.status))}
+          </Badge>
+        </div>
+        <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
+          {r.title ? (
+            <span dir="auto" className="truncate">
+              {r.channelName}
+            </span>
+          ) : null}
+          <span className="shrink-0 tabular-nums">{when}</span>
+          {r.bytes > 0 ? <span className="shrink-0 font-display tabular-nums">{formatBytes(r.bytes, lang)}</span> : null}
+        </span>
+        {note ? (
+          <span className={cn('truncate text-xs', r.status === 'failed' ? 'text-danger' : 'text-fg-subtle')} title={r.error}>
+            {note}
+          </span>
+        ) : null}
+      </div>
+      {r.status === 'completed' && r.fileNames.length > 0 ? (
+        <Link to="/my-videos?filter=recordings" className={buttonClass('ghost', 'sm')}>
+          {t('scheduledShowFiles')}
+        </Link>
+      ) : null}
+      <IconButton label={t('scheduledRemove', { title: name })} icon={<Trash2 size={16} aria-hidden />} onClick={() => void remove()} data-testid="finished-remove" />
+    </div>
+  );
+}
+
+export default ScheduledPage;

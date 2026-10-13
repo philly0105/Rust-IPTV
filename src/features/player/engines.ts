@@ -5,7 +5,7 @@
  * hls.js, shaka and mpegts.js are code-split; a direct mp4 never loads any of them.
  */
 
-import type { PlayerSource } from '@/api/types';
+import type { MpvStats, PlayerSource } from '@/api/types';
 
 export interface TrackOption {
   id: string;
@@ -48,6 +48,8 @@ export interface Engine {
    * pipeline restarts the element clock at 0, the shown position must not jump back.
    */
   timeOffset?(): number;
+  /** What the library knows about the stream now (stream info overlay); the element adds the rest. */
+  stats?(): Partial<MpvStats>;
   destroy(): void;
 }
 
@@ -457,6 +459,21 @@ async function hlsEngine(
       hls.startLoad();
       hls.recoverMediaError();
     },
+    stats() {
+      const level = hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel];
+      const out: Partial<MpvStats> = {};
+      if (level?.videoCodec) out.videoCodec = level.videoCodec;
+      if (level?.audioCodec) out.audioCodec = level.audioCodec;
+      if (level?.width && level.height) {
+        out.width = level.width;
+        out.height = level.height;
+      }
+      if (level?.frameRate) out.fps = level.frameRate;
+      if (level?.bitrate) out.videoBitrate = level.bitrate;
+      const channels = Number.parseInt(hls.audioTracks[hls.audioTrack]?.channels ?? '', 10);
+      if (channels > 0) out.audioChannels = channels;
+      return out;
+    },
     destroy() {
       destroyed = true;
       hls.destroy();
@@ -608,6 +625,20 @@ async function shakaEngine(
     },
     recover() {
       void player.retryStreaming();
+    },
+    stats() {
+      const active = player.getVariantTracks().find((v) => v.active);
+      const st = player.getStats();
+      const out: Partial<MpvStats> = {};
+      if (active?.videoCodec) out.videoCodec = active.videoCodec;
+      if (active?.audioCodec) out.audioCodec = active.audioCodec;
+      if (active?.frameRate) out.fps = active.frameRate;
+      if (active?.channelsCount) out.audioChannels = active.channelsCount;
+      if (active?.videoBandwidth) out.videoBitrate = active.videoBandwidth;
+      else if (st.streamBandwidth > 0) out.videoBitrate = st.streamBandwidth;
+      if (active?.audioBandwidth) out.audioBitrate = active.audioBandwidth;
+      if (Number.isFinite(st.droppedFrames) && st.droppedFrames >= 0) out.droppedFrames = st.droppedFrames;
+      return out;
     },
     destroy() {
       destroyed = true;
@@ -826,6 +857,29 @@ async function mpegtsEngine(
       if (restartTimer) clearTimeout(restartTimer);
       restartTimer = null;
       restart({ message: 'Recovery failed', fatal: true, kind: 'other' });
+    },
+    stats() {
+      const info = (player as { mediaInfo?: Record<string, unknown> } | null)?.mediaInfo;
+      const out: Partial<MpvStats> = {};
+      if (!info) return out;
+      const num = (k: string): number | undefined => {
+        const v = info[k];
+        return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+      };
+      const vCodec = info['videoCodec'];
+      if (typeof vCodec === 'string' && vCodec) out.videoCodec = vCodec;
+      const aCodec = info['audioCodec'];
+      if (typeof aCodec === 'string' && aCodec) out.audioCodec = aCodec;
+      const fps = num('fps');
+      if (fps) out.fps = fps;
+      const channels = num('audioChannelCount');
+      if (channels) out.audioChannels = channels;
+      // mpegts.js reports data rates in kbit/s.
+      const vRate = num('videoDataRate');
+      if (vRate) out.videoBitrate = vRate * 1000;
+      const aRate = num('audioDataRate');
+      if (aRate) out.audioBitrate = aRate * 1000;
+      return out;
     },
     timeOffset() {
       // While reconnecting the display holds at the anchor whatever the element reports.

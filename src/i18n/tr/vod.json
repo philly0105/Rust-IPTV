@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Bu başlıklar yüklenemedi",
-  "searchPartialError": "Bazı sonuçlar yüklenemedi."
+  "searchPartialError": "Bazı sonuçlar yüklenemedi.",
+  "previousEpisode": "Önceki bölüm"
 }

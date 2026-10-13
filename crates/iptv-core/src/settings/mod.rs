@@ -49,6 +49,11 @@ const MAX_WINDOW_COORD: i32 = 100_000;
 pub const EPG_OFFSET_RANGE: std::ops::RangeInclusive<i32> = -720..=720;
 /// Accepted `vodMinRating` range.
 pub const VOD_RATING_RANGE: std::ops::RangeInclusive<f64> = 0.0..=10.0;
+// account:
+/// Largest accepted `sourceRefreshIntervalHours` (one week).
+pub const MAX_REFRESH_INTERVAL_HOURS: u32 = 168;
+/// Largest accepted `accountExpiryWarnDays`.
+pub const MAX_EXPIRY_WARN_DAYS: u32 = 60;
 
 /// Fields only the desktop app may change: they name executables, their
 /// arguments, and folders on the machine running the core. In server (PWA)
@@ -345,6 +350,37 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
     }
     if !next.vod_min_rating.is_finite() || !VOD_RATING_RANGE.contains(&next.vod_min_rating) {
         return Err(CoreError::invalid("vodMinRating must be between 0 and 10"));
+    }
+    // account:
+    if next.source_refresh_interval_hours > MAX_REFRESH_INTERVAL_HOURS {
+        return Err(CoreError::invalid(format!(
+            "sourceRefreshIntervalHours must be between 0 and {MAX_REFRESH_INTERVAL_HOURS}"
+        )));
+    }
+    if next.account_expiry_warn_days > MAX_EXPIRY_WARN_DAYS {
+        return Err(CoreError::invalid(format!(
+            "accountExpiryWarnDays must be between 0 and {MAX_EXPIRY_WARN_DAYS}"
+        )));
+    }
+    // recording:
+    for (field, value, max) in [
+        (
+            "recordingPaddingBeforeMinutes",
+            next.recording_padding_before_minutes,
+            60,
+        ),
+        (
+            "recordingPaddingAfterMinutes",
+            next.recording_padding_after_minutes,
+            120,
+        ),
+        ("reminderLeadMinutes", next.reminder_lead_minutes, 60),
+    ] {
+        if value > max {
+            return Err(CoreError::invalid(format!(
+                "{field} must be between 0 and {max}"
+            )));
+        }
     }
     let changed = |a: &Option<String>, b: &Option<String>| a != b;
     if changed(&current.mpv_path, &next.mpv_path) {

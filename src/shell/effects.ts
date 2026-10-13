@@ -25,6 +25,9 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
   'sources.changed': ['sources.', 'catalog.', 'favorites.', 'recent.', 'positions.', 'xtream.', 'stalker.'],
   'epg.changed': ['epg.'],
   'downloads.update': ['downloads.', 'myvideos.'],
+  // account: a new subscription check; the refresh interval moves every next-refresh time.
+  'account.changed': ['account.'],
+  'settings.changed': ['sources.schedule'],
 };
 
 /** Maps an `iptv://` URL to an in-app path, or null when unsupported. */

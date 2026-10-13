@@ -198,5 +198,6 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Не ўдалося загрузіць гэтыя назвы",
-  "searchPartialError": "Некаторыя вынікі не атрымалася загрузіць."
+  "searchPartialError": "Некаторыя вынікі не атрымалася загрузіць.",
+  "previousEpisode": "Папярэдні эпізод"
 }

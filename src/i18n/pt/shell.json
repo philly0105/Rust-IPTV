@@ -57,6 +57,7 @@
   "settingsPlayback": "Reprodução",
   "settingsPlayers": "Reprodutores externos",
   "settingsEpg": "Guia de TV",
+  "settingsRecording": "Gravação",
   "settingsMetadata": "Metadados",
   "settingsAppearance": "Aparência",
   "settingsRemote": "Controle remoto",
@@ -182,5 +183,13 @@
   "trayQuit": "Sair",
   "dashboardLoadFailed": "Não foi possível carregar o início",
   "dashboardLocalDataHint": "Seu histórico, favoritos e biblioteca ficam salvos neste computador. Tente novamente; se continuar falhando, reinicie o aplicativo.",
-  "ratedLabel": "avaliação {{rating}}"
+  "ratedLabel": "avaliação {{rating}}",
+  "accountAlertsLabel": "Alertas de assinatura",
+  "accountAlertExpiredTitle": "{{name}} expirou",
+  "accountAlertExpiringTitle": "{{name}} expira {{when}}",
+  "accountAlertExpiredBody": "Os canais e filmes dela não vão reproduzir até você renovar com seu provedor.",
+  "accountAlertExpiringBody": "Renove com seu provedor para continuar assistindo sem interrupção.",
+  "accountAlertOpen": "Ver assinatura",
+  "accountAlertDismiss": "Dispensar o alerta de {{name}}",
+  "navScheduled": "Agendados"
 }

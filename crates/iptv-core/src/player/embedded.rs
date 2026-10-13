@@ -17,6 +17,7 @@ use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name, validate_p
 use super::detect::{find_mpv, DetectEnv};
 use super::ipc::MpvClient;
 use super::mpv_state::OBSERVED_PROPERTIES;
+use super::stats::{MpvStats, STATS_PROPERTIES};
 use super::{embedded_unavailable_reason, window_factory, Bounds, ChildWindowFactory};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{MpvState, PlayerSource};
@@ -640,6 +641,27 @@ pub async fn set_property(state: &Arc<AppState>, name: &str, value: Value) -> Co
     s.client.set_property(name.trim(), value).await
 }
 
+/// How long `mpv.stats` waits for all of its property reads.
+const STATS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// `mpv.stats`: reads [`STATS_PROPERTIES`] once (concurrently, outside the op
+/// lock, like `mpv.command`). A property mpv cannot give is left out.
+pub async fn stats(state: &Arc<AppState>) -> CoreResult<MpvStats> {
+    ensure_platform()?;
+    let s = current(&manager(state)).ok_or_else(not_attached)?;
+    let reads = STATS_PROPERTIES
+        .iter()
+        .map(|name| s.client.get_property(name));
+    let replies = tokio::time::timeout(STATS_TIMEOUT, futures::future::join_all(reads))
+        .await
+        .map_err(|_| CoreError::Timeout("mpv did not answer the stats request in time".into()))?;
+    if s.client.is_closed() {
+        return Err(not_attached());
+    }
+    let values: Vec<Option<Value>> = replies.into_iter().map(Result::ok).collect();
+    Ok(MpvStats::from_values(&values))
+}
+
 /// `mpv.setBounds`.
 pub async fn set_bounds(
     state: &Arc<AppState>,
@@ -1038,6 +1060,14 @@ mod platform {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
+}
+
+// recording:
+/// Puts a recording mpv into the kill-on-close job that holds embedded mpv,
+/// so it never outlives the app.
+#[cfg(windows)]
+pub fn job_assign(process: std::os::windows::io::RawHandle) -> std::io::Result<()> {
+    platform::job::assign(process)
 }
 
 #[cfg(not(windows))]

@@ -12,6 +12,8 @@ import { clampRating, diffSettings, railsPatch, type SettingsPatch } from '../li
 import { useResetSettings } from '../lib/useUpdateSettings';
 import { DownloadsFolderRow } from './DownloadsFolderRow';
 import { RecordingsFolderRow } from './RecordingsFolderRow';
+// account:
+import { SourceRefreshGroup } from './SourceRefreshGroup';
 import { parity, type SectionProps } from './types';
 
 const RAILS: (keyof DashboardRails)[] = [
@@ -206,6 +208,9 @@ export function GeneralSection({ settings, update }: SectionProps) {
           testId="toggle-stripCountryPrefix"
         />
       </SettingsGroup>
+
+      {/* account: background refresh and subscription warnings. */}
+      <SourceRefreshGroup settings={settings} update={update} />
 
       <SettingsGroup title={t('vodGroup')} description={t('vodGroupHint')}>
         <MinRatingRow value={extra.vodMinRating} update={update} />

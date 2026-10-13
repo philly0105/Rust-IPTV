@@ -1,4 +1,4 @@
-import { ListVideo, Play, MonitorPlay, RotateCcw } from 'lucide-react';
+import { ListVideo, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useParams } from 'react-router';
@@ -31,7 +31,7 @@ import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlay
 import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
-import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
+import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
 import { Button, EmptyState, ErrorState, useToast } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
@@ -157,6 +157,7 @@ export function SeriesDetailPage() {
     void playback.download({ episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), extension: ep.containerExtension });
 
   const next = nextEpisode(seasons, watch.episodeId);
+  const previous = previousEpisode(seasons, watch.episodeId);
   const [dismissedFor, setDismissedFor] = useState<string | undefined>(undefined);
   // When the player's queue already holds the next episode, the player shows its own Up next card.
   const queuedNext = usePlayerStore((s) => !!next && (s.queue ?? []).some((q) => q.episodeId === next.id && sameRef(q.ref, ref)));
@@ -253,7 +254,22 @@ export function SeriesDetailPage() {
             onDismiss={() => setDismissedFor(watch.episodeId)}
           />
         )}
-        {watch.active && <div className="flex flex-wrap items-center gap-2">{favorite}</div>}
+        {watch.active && (
+          <div className="flex flex-wrap items-center gap-2">
+            {previous && (
+              <Button
+                variant="secondary"
+                icon={<SkipBack aria-hidden size={18} />}
+                title={`${episodeCode(previous.season, previous.episode)} (Shift+P)`}
+                aria-keyshortcuts="Shift+P"
+                onClick={() => playEpisode(previous)}
+              >
+                {t('previousEpisode')}
+              </Button>
+            )}
+            {favorite}
+          </div>
+        )}
 
         <section aria-labelledby="vod-episodes-heading" className="relative flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-2">

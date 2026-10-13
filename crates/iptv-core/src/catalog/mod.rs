@@ -801,9 +801,9 @@ pub fn set_categories_hidden(
 // Readers
 // ---------------------------------------------------------------------------
 
-const SELECT_NAMED: &str = "SELECT i.source_id, i.content_type, i.item_id, i.category_id, i.title, i.title_base, i.number, i.logo_url, i.poster_url, i.backdrop_url, i.rating, i.added, i.year, i.epg_channel_id, i.url, i.container_extension, i.is_radio, i.archive_hours, i.extra_json, i.position, c.name FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id";
+pub(crate) const SELECT_NAMED: &str = "SELECT i.source_id, i.content_type, i.item_id, i.category_id, i.title, i.title_base, i.number, i.logo_url, i.poster_url, i.backdrop_url, i.rating, i.added, i.year, i.epg_channel_id, i.url, i.container_extension, i.is_radio, i.archive_hours, i.extra_json, i.position, c.name FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id";
 
-fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
+pub(crate) fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
     let ct: String = r.get(1)?;
     let content_type = ct.parse::<ContentType>().map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(

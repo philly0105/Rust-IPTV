@@ -8,6 +8,7 @@ import '../player.css';
 
 import { cn } from '../cn';
 import { bindExternalEvents } from '../external';
+import { bindRecovery } from '../reconnect';
 import { useMediaStore } from '../media';
 import { bindRemote } from '../remote';
 import { exitPip, usePipStore } from '../pip';
@@ -128,6 +129,9 @@ export function PlayerDock() {
     bindExternalEvents();
     return bindRemote();
   }, []);
+
+  // failover: smart reconnect and live failover follow the player from here.
+  useEffect(() => bindRecovery(), []);
 
   useEffect(() => {
     const onHide = (): void => {

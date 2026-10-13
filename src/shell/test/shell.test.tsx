@@ -598,6 +598,21 @@ describe('polish pass (B7)', () => {
     expect(within(palette).queryByText('Favorites')).toBeNull();
   });
 
+  it('palette reaches every settings section and the Scheduled page', async () => {
+    const { SETTINGS_SECTIONS } = await import('../CommandPalette');
+    const { SECTION_IDS } = await import('@/features/settings/sections/types');
+    expect([...SETTINGS_SECTIONS]).toEqual([...SECTION_IDS]);
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    const input = within(palette).getByPlaceholderText('Type a command or search');
+    fireEvent.change(input, { target: { value: 'recording' } });
+    expect(await within(palette).findByText('Settings: Recording')).toBeTruthy();
+    fireEvent.change(input, { target: { value: 'scheduled' } });
+    expect(await within(palette).findByText('Scheduled')).toBeTruthy();
+  });
+
   it('overlay lists captions and channel zap, with labelled sections', async () => {
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');

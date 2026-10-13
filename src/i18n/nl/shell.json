@@ -57,6 +57,7 @@
   "settingsPlayback": "Afspelen",
   "settingsPlayers": "Externe spelers",
   "settingsEpg": "Programmagids",
+  "settingsRecording": "Opnemen",
   "settingsMetadata": "Metadata",
   "settingsAppearance": "Weergave",
   "settingsRemote": "Afstandsbediening",
@@ -177,5 +178,13 @@
   "trayQuit": "Afsluiten",
   "dashboardLoadFailed": "Het startscherm kon niet worden geladen",
   "dashboardLocalDataHint": "Je geschiedenis, favorieten en bibliotheek staan op deze computer. Probeer het opnieuw; blijft het mislukken, start de app dan opnieuw.",
-  "ratedLabel": "beoordeling {{rating}}"
+  "ratedLabel": "beoordeling {{rating}}",
+  "accountAlertsLabel": "Abonnementsmeldingen",
+  "accountAlertExpiredTitle": "{{name}} is verlopen",
+  "accountAlertExpiringTitle": "{{name}} verloopt {{when}}",
+  "accountAlertExpiredBody": "De zenders en films ervan spelen pas weer af als je verlengt bij je provider.",
+  "accountAlertExpiringBody": "Verleng bij je provider om zonder onderbreking te blijven kijken.",
+  "accountAlertOpen": "Abonnement bekijken",
+  "accountAlertDismiss": "Melding voor {{name}} sluiten",
+  "navScheduled": "Gepland"
 }

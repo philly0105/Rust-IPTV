@@ -9,6 +9,8 @@
 //! `sources.changed`. See `docs/architecture/sources.md`.
 
 pub mod rpc;
+// account:
+pub mod schedule;
 pub mod store;
 
 use crate::error::{CoreError, CoreResult, RpcError, RpcErrorCode};
@@ -272,6 +274,8 @@ fn check_http_url(raw: &str, what: &str) -> CoreResult<url::Url> {
 /// Validates and normalizes an m3u config (without pasted text).
 pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
     let headers = clean_headers(cfg.headers);
+    // guide:
+    let catchup = crate::catchup::m3u::validate_override(cfg.catchup)?;
     match cfg.origin {
         M3uOrigin::Url => {
             let url = trimmed(cfg.url.as_deref())
@@ -291,6 +295,7 @@ pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
                 url: Some(url),
                 file_path: None,
                 headers,
+                catchup,
             })
         }
         M3uOrigin::File => {
@@ -310,6 +315,7 @@ pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
                 url: None,
                 file_path: Some(path),
                 headers,
+                catchup,
             })
         }
         M3uOrigin::Text => Ok(M3uSourceConfig {
@@ -317,6 +323,7 @@ pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
             url: None,
             file_path: None,
             headers,
+            catchup,
         }),
     }
 }
@@ -847,6 +854,7 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
                 url: input.url,
                 file_path: input.file_path,
                 headers: input.headers.unwrap_or_default(),
+                catchup: None,
             })?;
             (SourceConfig::M3u(cfg), text)
         }
@@ -909,8 +917,27 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
 /// cancelled run leaves the previous catalog intact. It emits
 /// `import.progress` `phase: "cancelled"` and records no `lastError`.
 pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, ImportSummary)> {
-    let lock = lock_for(&state, id);
-    let guard = lock.lock().await;
+    let guard = lock_for(&state, id).lock_owned().await;
+    run_import_locked(state, id, guard).await
+}
+
+/// [`run_import`] unless an import, refresh, partial sync or remove of `id`
+/// holds its lock right now; then `None` and nothing runs. The scheduled
+/// refresh uses it so it never queues behind (and then repeats) a manual
+/// refresh.
+pub async fn try_run_import(
+    state: Arc<AppState>,
+    id: &str,
+) -> Option<CoreResult<(Source, ImportSummary)>> {
+    let guard = lock_for(&state, id).try_lock_owned().ok()?;
+    Some(run_import_locked(state, id, guard).await)
+}
+
+async fn run_import_locked(
+    state: Arc<AppState>,
+    id: &str,
+    guard: tokio::sync::OwnedMutexGuard<()>,
+) -> CoreResult<(Source, ImportSummary)> {
     let token = current_token(&state, id);
     if token.is_cancelled() {
         // Queued behind an import that `remove` cancelled.
@@ -981,6 +1008,8 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
             emit_changed(&state);
             let source = get(&state, id).await?;
             spawn_guide_refresh(&state, &source);
+            // account:
+            crate::account::after_import(&state, &source);
             Ok((source, summary))
         }
         Err(err) if token.is_cancelled() => {
@@ -1179,6 +1208,18 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             s, stored_mac,
         )?));
     }
+    // Only the M3U catch-up override changed: it applies when channels are
+    // read, so a running import of the same playlist carries on.
+    let catchup_only = match (&current.m3u, &config) {
+        (Some(old), Some(SourceConfig::M3u(new))) => {
+            let strip = |c: &M3uSourceConfig| M3uSourceConfig {
+                catchup: None,
+                ..c.clone()
+            };
+            strip(old) == strip(new)
+        }
+        _ => false,
+    };
     // Another portal (URL or MAC): rows listed by the old one must go.
     let portal_changed = match (&current.stalker, &config) {
         (Some(old), Some(SourceConfig::Stalker(new))) => {
@@ -1264,10 +1305,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             Ok((store::get(c, &sid)?, config_changed))
         })
         .await?;
-    if config_changed {
+    if config_changed && !catchup_only {
         // An import still running fetches the old address (and may be stuck
         // on it); stop it so the next refresh uses the new settings.
         cancel_imports(state, id, false);
+        // Cached panel guide answers may belong to another server/account.
+        crate::catchup::forget_source(state, id);
     }
     if portal_changed {
         crate::stalker::forget_source(state, id).await;
@@ -1289,6 +1332,9 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     deleted?;
     crate::m3u::remove_cached_playlist(state, id);
     crate::stalker::forget_source(state, id).await;
+    crate::catchup::forget_source(state, id);
+    // recording: drop its reminders, cancel or stop its recordings.
+    crate::recording::forget_source(state, id).await;
     if let Some(locks) = state.ext::<LockMap>(LOCKS_KEY) {
         locks.remove(id);
     }
@@ -1359,7 +1405,8 @@ pub async fn counts(state: &AppState, id: &str) -> CoreResult<SourceCounts> {
 }
 
 /// Schedules the startup refresh of auto-refresh sources 3 s after boot (in
-/// the background; boot does not wait for it).
+/// the background; boot does not wait for it), then the periodic refresh
+/// every `sourceRefreshIntervalHours` (see [`schedule`]; 0 = startup only).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     if state.ext::<()>("sources.started").is_some() {
         return Ok(());
@@ -1367,7 +1414,7 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     state.set_ext("sources.started", Arc::new(()));
     tokio::spawn(async move {
         tokio::time::sleep(STARTUP_REFRESH_DELAY).await;
-        match refresh_all(state).await {
+        match refresh_all(state.clone()).await {
             Ok(r) if r.refreshed.is_empty() && r.failed.is_empty() => {}
             Ok(r) => tracing::info!(
                 refreshed = r.refreshed.len(),
@@ -1376,6 +1423,10 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
             ),
             Err(err) => tracing::warn!(%err, "startup refresh failed"),
         }
+        // account: the periodic refresh. Weak: the loop ends when the app state is dropped.
+        let weak = Arc::downgrade(&state);
+        drop(state);
+        schedule::run(weak, schedule::TICK).await;
     });
     Ok(())
 }

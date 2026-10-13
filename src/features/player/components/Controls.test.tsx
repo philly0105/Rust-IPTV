@@ -91,10 +91,40 @@ describe('Controls options menu', () => {
     render(<Controls variant="dock" visible />);
     openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
-    fireEvent.click(screen.getByRole('button', { name: /playback speed/i }));
-    expect(screen.getByRole('menuitem', { name: /playback speed/i })).toBeTruthy();
+    // In the submenu, the header's Back carries the view's name.
+    fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
+    expect(screen.getByRole('menuitem', { name: /^sync/i })).toBeTruthy();
     fireEvent.keyDown(menu()!, { key: 'Escape' });
     expect(menu()).toBeNull();
+  });
+
+  it('Sync with nothing to adjust keeps focus in the menu, and Escape only leaves the view', () => {
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^sync/i }));
+    // Built-in player, no subtitles: every step button is disabled; focus goes to Back.
+    expect(document.activeElement?.hasAttribute('data-menu-back')).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(menu()).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /playback speed/i })).toBeTruthy();
+  });
+
+  it('Reset moves focus to the row’s Later button instead of dropping it', () => {
+    act(() => {
+      useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: true }] } });
+    });
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^sync/i }));
+    const row = screen.getByTestId('sync-sub');
+    const [, later, reset] = Array.from(row.querySelectorAll('button'));
+    // Focus lands on the first enabled step button (subtitles: Earlier).
+    expect(document.activeElement).toBe(row.querySelector('button'));
+    fireEvent.click(later!);
+    reset!.focus();
+    fireEvent.click(reset!);
+    expect(reset!.hasAttribute('disabled')).toBe(true);
+    expect(document.activeElement).toBe(later);
   });
 });
 

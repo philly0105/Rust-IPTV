@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Nem sikerült betölteni ezeket a címeket",
-  "searchPartialError": "Néhány találatot nem sikerült betölteni."
+  "searchPartialError": "Néhány találatot nem sikerült betölteni.",
+  "previousEpisode": "Előző epizód"
 }

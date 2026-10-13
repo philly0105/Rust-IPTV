@@ -1029,7 +1029,7 @@ export async function restorePlayback(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 /** Title of the programme airing now on `ref` (shifted by `epgOffsetMinutes`), if the guide has one. */
-async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined): Promise<string | undefined> {
+export async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined): Promise<string | undefined> {
   try {
     const res = await rpc('epg.nowNext', offsetMinutes ? { refs: [ref], offsetMinutes } : { refs: [ref] });
     return res[itemKey(ref)]?.now?.title || undefined;

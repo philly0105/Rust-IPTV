@@ -66,6 +66,10 @@ Username and password are percent-encoded as path segments.
 
 `get_short_epg` titles and descriptions are base64; text that does not decode to UTF-8 is kept as is. Times come from `start_timestamp` / `stop_timestamp` (unix) when present, otherwise from the server-local `start` / `end` strings minus the clock offset. Output is RFC 3339, sorted by start and deduplicated.
 
+Guide fallback (`catchup/`): `epg.shortEpg {ref, limit?}` returns the programmes that have not ended yet on the guide clock (`now - settings.epgOffsetMinutes`, so with a positive offset the programme the UI shows as airing is kept; default 4, max 10) for channels whose XMLTV guide has nothing airing. It is empty when `settings.epgShortFallback` is off or the source is not Xtream. Answers are cached per `(source, stream)` for 20 minutes, or until every programme in them has ended. Concurrent asks for one channel share one panel call, at most 3 panel calls run at once, and errors are not cached. Both caches drop a source's answers when its server or account changes, when it is removed, and when a backup restore re-creates it. The UI asks only for visible rows, through the same throttled preview queue Stalker rows use, and marks the result "From the provider's guide" (`EpgProgram.fromProvider`).
+
+`catchup.programs {ref, from, to}` returns the archive programmes overlapping `[from, to)` from `get_simple_data_table` (decoded like the short EPG, at most 5000 rows per answer, cached 20 minutes, 2 concurrent calls). The archive browser uses it when XMLTV has nothing for the chosen day.
+
 ## Errors, retries, secrets
 
 - Requests go through `http::with_retry` (3 attempts; 1 for `xtream.test`) and retry only Network and Timeout errors, which include 5xx responses.
@@ -81,5 +85,7 @@ Username and password are percent-encoded as path segments.
 Series info is cached for 10 minutes (at most 64 entries) so `streamUrl` for an episode does not refetch what the detail page loaded. `seriesDetail` always refetches. A sync clears the cache for that source.
 
 ## Tests and the mock
+
+The mock panel also accepts the users `expiring` (trial, expires in 3 days, 1 of 2 connections), `expired` (status `Expired`, two days ago) and `full` (2 of 2 connections; its live, VOD and timeshift streams answer 403 "Max connections reached"), all with password `secret`; `account_status.rs` uses them.
 
 The integration tests use `iptv_fixtures::spawn_mock()` when it serves `/xtream/player_api.php` for `demo` / `secret`, and otherwise an embedded axum stub in `tests/xtream_stub.rs` with the same C13 shapes plus real-panel quirks. The stub also provides a `flaky` user whose first account request returns 503, for the retry test, and a `slow` user whose `get_vod_streams` answer is delayed, so `xtream_sync_lock.rs` can show a concurrent `sources.refresh` waits for a running subset sync.

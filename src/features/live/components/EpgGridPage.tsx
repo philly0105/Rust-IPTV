@@ -2,7 +2,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { CalendarClock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, History, Play, Radio, Tv, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type EpgProgram, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
@@ -15,6 +15,7 @@ import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
+import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
 import {
@@ -35,10 +36,13 @@ import {
   programWhen,
   shiftPrograms,
 } from '../lib/epgTime';
+import { archivePath, canBrowseArchive } from '../lib/archive';
 import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 import { GuideUnavailableNotice } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
+// recording:
+import { ProgramActions, ScheduleMark } from '@/features/recording';
 
 export const GRID_ROW = 56;
 export const GRID_SLOT_MIN = 30;
@@ -218,6 +222,23 @@ export function EpgGridPage() {
   const archiveQuery = stalkerArchiveQuery(start - offsetMs, end - offsetMs, now, portalLimit);
   const plainPortal = useStalkerPreviews(sourceId, isStalker, plainRefs, now, portalLimit);
   const archivePortal = useStalkerPreviews(sourceId, isStalker, archiveRefs, now, archiveQuery.limit, archiveQuery.from);
+  // guide: Xtream short-EPG fallback for visible rows the XMLTV guide leaves empty, while the
+  // window reaches now or later (the provider's short guide starts at the airing programme).
+  const shortEpgOn = useShortEpgEnabled(kind) && end > now;
+  const shortRefs = useMemo(() => {
+    const out: ItemRef[] = [];
+    if (!shortEpgOn) return out;
+    for (let i = first; i <= last; i++) {
+      const ch = getChannel(i);
+      if (!ch) continue;
+      const k = itemKey(ch.ref);
+      const list = gridA.data?.[k] ?? gridB.data?.[k];
+      if (list && list.length === 0) out.push(ch.ref);
+    }
+    return out;
+  }, [shortEpgOn, first, last, getChannel, gridA.data, gridB.data]);
+  const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
+  const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
   const programsFor = useCallback(
     (ch: Channel | undefined): EpgProgram[] | undefined => {
       if (!ch) return undefined;
@@ -225,14 +246,18 @@ export function EpgGridPage() {
       const list = gridA.data?.[k] ?? gridB.data?.[k];
       const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
       if (portal && portal.length > 0) return shiftPrograms(mergePrograms(portal, list ?? []), prefs.epgOffsetMinutes);
+      // guide: an empty XMLTV row takes the provider's short guide.
+      const short = shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
+      if (short && short.length > 0) return shiftPrograms([...short], prefs.epgOffsetMinutes);
       if (list) return shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), prefs.epgOffsetMinutes);
       return gridA.data || gridB.data ? [] : undefined;
     },
-    [gridA.data, gridB.data, isStalker, plainPortal, archivePortal, prefs.epgOffsetMinutes],
+    [gridA.data, gridB.data, isStalker, plainPortal, archivePortal, prefs.epgOffsetMinutes, shortEpgOn, shortFor],
   );
   const gridError = gridA.error ?? gridB.error;
   const noEpgAnywhere =
     !isStalker &&
+    !hasShortData && // guide
     !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
 
   // ---- navigation ---------------------------------------------------------
@@ -633,6 +658,8 @@ export function EpgGridPage() {
                               <span className="flex items-center gap-1 truncate text-xs font-medium">
                                 {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
                                 <span dir="auto" className="truncate text-match-parent">{b.program.title}</span>
+                                {/* recording: */}
+                                <ScheduleMark channelRef={ch?.ref} program={b.program} />
                               </span>
                               <span className={`block truncate text-[11px] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{formatRange(b.program, i18n.language)}</span>
                             </span>
@@ -698,6 +725,7 @@ function ProgramPopover({
   onCatchup(): void;
 }) {
   const { t, i18n } = useTranslation('live');
+  const navigate = useNavigate(); // guide: "Browse archive"
   const ref = useRef<HTMLDivElement>(null);
   const { program, channel, rect } = selection;
   const when = programWhen(program, now);
@@ -764,6 +792,8 @@ function ProgramPopover({
           <p className="text-xs tabular-nums text-fg-muted">{joinList([channelName, formatRange(program, i18n.language)], i18n.language)}</p>
           <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
           {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}
+          {/* guide: programmes from the provider's own guide, not XMLTV. */}
+          {program.fromProvider ? <p className="text-xs text-fg-subtle" data-testid="program-from-provider">{t('fromProvider')}</p> : null}
         </div>
         <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-surface-2">
           <X className="size-4" />
@@ -786,6 +816,14 @@ function ProgramPopover({
             {t('playChannel', { name: channelName })}
           </Button>
         ) : null}
+        {/* guide: K6, the one archive entry point of the programme dialog. */}
+        {canBrowseArchive(channel, kind) ? (
+          <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref))} data-testid="program-browse-archive">
+            {t('browseArchive')}
+          </Button>
+        ) : null}
+        {/* recording: */}
+        <ProgramActions channelRef={channel.ref} channelName={channelName} program={program} now={now} />
         {when === 'past' && !catchupOk ? <p className="w-full text-xs text-fg-subtle">{t('noCatchup')}</p> : null}
         {when === 'future' ? <p className="w-full text-xs text-fg-subtle">{t('startsAt', { time: formatClock(ms(program.start), i18n.language) })}</p> : null}
       </div>

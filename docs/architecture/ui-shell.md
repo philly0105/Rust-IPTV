@@ -114,6 +114,8 @@ Wire them as:
 - recently added: `catalog.recentlyAdded` for movies and series, merged
 - trending: `tmdb.trending`, only when TMDB is enabled
 
+Above the rails, `AccountAlerts` lists Xtream and Stalker subscriptions that expired or expire within `settings.accountExpiryWarnDays` (from `account.statusAll`; nothing when that is 0 or every source is M3U), expired first. Each row links to `/sources?account=<id>`, which opens that source's subscription tab, and can be dismissed. A dismissal is stored in localStorage (`tsrust.accountAlerts.dismissed`) per source and expiry date, so a renewed subscription warns again. See account.md.
+
 Rails show a skeleton while loading and an inline error with retry on failure, and they render nothing when empty. With no sources, the page shows a welcome state that links to `/sources?add=1`. Keyboard: each rail is one tab stop. Left, Right, Home, and End move within a rail (RTL-aware; the step buttons read `Math.abs(scrollLeft)`, and a rail at its start is put back at 0 when its items reorder, since scroll snapping would otherwise follow the old first card), and Up and Down jump to the same position in the neighboring rail. Play actions call `playItem` from `@/features/player` with the source kind.
 
 ## i18n

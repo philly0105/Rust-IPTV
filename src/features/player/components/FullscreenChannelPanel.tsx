@@ -10,6 +10,7 @@ import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
+import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
 
 const PAGE = 100;
 const ROW = 52;
@@ -248,7 +249,9 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
             </div>
           ) : (
             <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-              {items.map((v) => {
+              {/* guide: now line per row (XMLTV, else the provider's short guide). */}
+              <PanelNowLines sourceId={sourceId} first={first} last={last} rowAt={rowAt}>
+              {(nowFor) => items.map((v) => {
                 const c = rowAt(v.index);
                 return (
                   <div
@@ -275,7 +278,15 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         ) : (
                           <span className="size-8 shrink-0 rounded-sm bg-white/5" aria-hidden />
                         )}
-                        <span dir="auto" className="truncate text-sm text-match-parent">{c.name}</span>
+                        {/* guide: name over the programme on now. */}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span dir="auto" className="truncate text-sm text-match-parent">{c.name}</span>
+                          {nowFor(c.ref) ? (
+                            <span dir="auto" className="truncate text-xs text-white/60 text-match-parent" data-testid="panel-now">
+                              {nowFor(c.ref)?.title}
+                            </span>
+                          ) : null}
+                        </span>
                       </button>
                     ) : (
                       <div className="mt-1 h-10 rounded-md bg-white/6" aria-hidden />
@@ -283,9 +294,12 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                   </div>
                 );
               })}
+              </PanelNowLines>
             </div>
           )}
         </div>
+        {/* guide: archive of the playing channel. */}
+        {open ? <PanelArchiveButton /> : null}
       </aside>
     </>
   );

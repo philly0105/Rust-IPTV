@@ -58,12 +58,23 @@ pub const EXT_HIDDEN_CATEGORIES: &str = "tsrustHiddenCategories";
 /// App-level settings carried in the manifest's `settings` object next to
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
 /// specific values (player paths, folders) are deliberately not exported.
-pub const APP_SETTING_KEYS: [&str; 5] = [
+pub const APP_SETTING_KEYS: [&str; 13] = [
     "stripCountryPrefix",
     "epgOffsetMinutes",
     "playerReuseInstance",
     "showExternalBar",
     "vodMinRating",
+    // account:
+    "sourceRefreshIntervalHours",
+    "accountExpiryWarnDays",
+    // guide:
+    "epgShortFallback",
+    // recording:
+    "recordingPaddingBeforeMinutes",
+    "recordingPaddingAfterMinutes",
+    "remindersEnabled",
+    "reminderLeadMinutes",
+    "reminderAction",
 ];
 
 /// `backup.import` mode.
@@ -131,6 +142,7 @@ fn source_from_row(row: &Row<'_>) -> rusqlite::Result<(Source, String)> {
                 .get::<_, Option<String>>(11)?
                 .as_deref()
                 .and_then(crate::error::RpcErrorCode::parse),
+            last_error_at: None,
             channel_count: 0,
             movie_count: 0,
             series_count: 0,

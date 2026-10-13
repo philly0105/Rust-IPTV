@@ -23,6 +23,7 @@ import { fieldForError, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
 import { AccountPanel, hasAccountInfo } from './AccountPanel';
+import { CatchupOverrideFields } from './CatchupOverrideFields';
 import { EpgLinksEditor } from './EpgLinksEditor';
 import { Field } from './Field';
 import { M3uForm } from './M3uForm';
@@ -177,6 +178,15 @@ export function EditSourceDialog({
                 isDesktop={isDesktop}
                 disabled={saving}
                 onFieldBlur={onFieldBlur}
+              />
+            ) : null}
+            {/* guide: per-source catch-up override for M3U channels. */}
+            {source.kind === 'm3u' ? (
+              <CatchupOverrideFields
+                value={draft.m3u.catchup}
+                onChange={(catchup) => setDraft({ ...draft, m3u: { ...draft.m3u, catchup } })}
+                errors={errors}
+                disabled={saving}
               />
             ) : null}
             {source.kind === 'xtream' ? (

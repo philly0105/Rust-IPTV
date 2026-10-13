@@ -11,4 +11,5 @@ export const liveRoutes: RouteObject[] = [
   { path: 's/:sourceId/live/:categoryId', lazy: livePage('live') },
   { path: 's/:sourceId/radio', lazy: livePage('radio') },
   { path: 'epg', lazy: async () => ({ Component: (await import('./components/EpgGridPage')).EpgGridPage }) },
+  { path: 'live/archive/:sourceId/:channelId', lazy: async () => ({ Component: (await import('./components/ArchivePage')).ArchivePage }) },
 ];

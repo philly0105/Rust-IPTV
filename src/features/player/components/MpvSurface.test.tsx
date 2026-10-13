@@ -809,7 +809,7 @@ describe('wheel and context menu over the native video', () => {
     expect(m!.style.left).toBe('200px');
     expect(m!.style.top).toBe('120px');
     const items = Array.from(m!.querySelectorAll('[role="menuitem"]')).map((n) => n.textContent);
-    expect(items).toEqual(['Pause', 'Fullscreen', 'Picture in picture', 'Copy stream link']);
+    expect(items).toEqual(['Pause', 'Fullscreen', 'Picture in picture', 'Sync', 'Copy stream link']);
     await tick(30);
     const last = calls('mpv.setBounds').at(-1)?.[1] as { bounds: Bounds; holes: Bounds[] } | undefined;
     expect(last?.holes.length).toBeGreaterThan(0);

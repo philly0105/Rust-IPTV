@@ -135,6 +135,18 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0008_drop_epg_url_index",
         sql: include_str!("migrations/0008_drop_epg_url_index.sql"),
     },
+    // account:
+    Migration {
+        version: 9,
+        name: "0009_source_error_at",
+        sql: include_str!("migrations/0009_source_error_at.sql"),
+    },
+    // recording:
+    Migration {
+        version: 10,
+        name: "0010_recordings",
+        sql: include_str!("migrations/0010_recordings.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

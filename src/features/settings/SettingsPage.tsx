@@ -3,6 +3,8 @@ import {
   CalendarClock,
   Check,
   Clapperboard,
+  // recording:
+  CircleDot,
   DatabaseBackup,
   Info,
   Keyboard,
@@ -29,6 +31,8 @@ import { GeneralSection } from './sections/GeneralSection';
 import { MetadataSection } from './sections/MetadataSection';
 import { PlaybackSection } from './sections/PlaybackSection';
 import { PlayersSection } from './sections/PlayersSection';
+// recording:
+import { RecordingSection } from './sections/RecordingSection';
 import { RemoteSection } from './sections/RemoteSection';
 import { ShortcutsSection } from './sections/ShortcutsSection';
 import { SECTION_IDS, isSectionId, type SectionId, type SectionProps } from './sections/types';
@@ -38,6 +42,8 @@ const SECTIONS: Record<SectionId, { icon: LucideIcon; label: string; component: 
   playback: { icon: Play, label: 'sectionPlayback', component: PlaybackSection },
   players: { icon: MonitorPlay, label: 'sectionPlayers', component: PlayersSection },
   epg: { icon: CalendarClock, label: 'sectionEpg', component: EpgSection },
+  // recording:
+  recording: { icon: CircleDot, label: 'sectionRecording', component: RecordingSection },
   metadata: { icon: Clapperboard, label: 'sectionMetadata', component: MetadataSection },
   appearance: { icon: Palette, label: 'sectionAppearance', component: AppearanceSection },
   remote: { icon: Smartphone, label: 'sectionRemote', component: RemoteSection },

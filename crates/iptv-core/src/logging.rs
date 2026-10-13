@@ -141,6 +141,9 @@ const SECRET_PARAMS: &[&str] = &[
     "device_id",
     "device_id2",
     "metrics",
+    // remote: LAN pairing code (`/?pair=`) and the session cookie
+    "pair",
+    "tsr_remote",
 ];
 
 /// Masks credentials inside free text (error messages, upstream answers, log
@@ -519,6 +522,20 @@ mod tests {
             !r.contains("abc") && !r.contains("X1") && !r.contains("D1"),
             "{r}"
         );
+    }
+
+    // remote:
+    #[test]
+    fn redacts_remote_pairing_code_and_session_cookie() {
+        let code = "Zx9_k-3LqP0aBcDeFgHiJk";
+        let u = redact_url(&format!("http://192.168.1.5:7310/?pair={code}"));
+        assert!(!u.contains(code) && u.contains("pair=***"), "{u}");
+        let line = format!("GET /?pair={code} cookie: tsr_remote=abcDEF123-_x; other=1");
+        let t = redact_text(&line);
+        assert!(!t.contains(code) && !t.contains("abcDEF123"), "{t}");
+        assert!(t.contains("other=1"), "{t}");
+        // Words merely containing the name are left alone.
+        assert_eq!(redact_text("repair=1"), "repair=1");
     }
 
     /// B9: forms the first version missed.

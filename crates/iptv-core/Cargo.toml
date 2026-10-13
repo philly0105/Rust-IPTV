@@ -46,6 +46,9 @@ dashmap = { workspace = true }
 parking_lot = { workspace = true }
 once_cell = { workspace = true }
 strsim = { workspace = true }
+# remote: LAN remote control
+if-addrs = { workspace = true }
+qrcodegen = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

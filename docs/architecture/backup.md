@@ -56,7 +56,7 @@ Without `path`, `backup.export` returns the manifest as `json` and a suggested `
 
 A UI that gets a non-empty `json` back (a core that predates `path`) falls back to the download.
 
-`settings` always carries `epgUrls` (possibly empty; IPTVnator reads it unconditionally) plus the app-level preferences `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar` and `vodMinRating` (`backup::APP_SETTING_KEYS`). Player paths, arguments and folders are machine specific and never exported.
+`settings` always carries `epgUrls` (possibly empty; IPTVnator reads it unconditionally) plus the 13 app-level preferences in `backup::APP_SETTING_KEYS`: `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, `recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes` and `reminderAction`. Player paths, arguments and folders are machine specific and never exported. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are deliberately excluded too: they describe this machine's playback and network setup, and importing a backup must never open the remote control to the LAN. The remote pairing token is a secret and never appears in a backup.
 
 Secrets (the Xtream password, and the Stalker password and signatures) are written only when `includeSecrets` is true. Nothing in this module logs a connection or a secret. Log lines carry counts and source ids only.
 

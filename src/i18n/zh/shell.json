@@ -57,6 +57,7 @@
   "settingsPlayback": "播放",
   "settingsPlayers": "外部播放器",
   "settingsEpg": "节目指南",
+  "settingsRecording": "录制",
   "settingsMetadata": "元数据",
   "settingsAppearance": "外观",
   "settingsRemote": "远程控制",
@@ -177,5 +178,13 @@
   "trayQuit": "退出",
   "dashboardLoadFailed": "无法加载首页",
   "dashboardLocalDataHint": "观看记录、收藏和媒体库都保存在这台电脑上。请重试；如果仍然失败，请重新启动应用。",
-  "ratedLabel": "评分 {{rating}}"
+  "ratedLabel": "评分 {{rating}}",
+  "accountAlertsLabel": "订阅提醒",
+  "accountAlertExpiredTitle": "{{name}} 已过期",
+  "accountAlertExpiringTitle": "{{name}} 将于{{when}}到期",
+  "accountAlertExpiredBody": "在你向提供商续订之前，其频道和电影将无法播放。",
+  "accountAlertExpiringBody": "请向提供商续订，以便不间断地继续观看。",
+  "accountAlertOpen": "查看订阅",
+  "accountAlertDismiss": "关闭 {{name}} 的提醒",
+  "navScheduled": "预约"
 }

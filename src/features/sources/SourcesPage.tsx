@@ -7,10 +7,11 @@ import { useSearchParams } from 'react-router';
 import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw } from '@/api/transport';
-import type { Source, SourceKind } from '@/api/types';
+import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
 
 import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
+import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
@@ -76,6 +77,13 @@ export function SourcesPage() {
   const sources = useMemo(() => (query.data ?? []).filter((s) => !hidden.has(s.id)), [query.data, hidden]);
   const progress = useImportProgressStore((s) => s.bySource);
   const cancelling = useImportProgressStore((s) => s.cancelling);
+  // account: subscription status, the refresh schedule and the expiry warning window, for the cards.
+  const accounts = useRpcQuery('account.statusAll', undefined);
+  const schedule = useRpcQuery('sources.schedule', undefined);
+  const settings = useRpcQuery('settings.get', undefined, { staleTime: Infinity });
+  const accountById = useMemo(() => new Map((accounts.data ?? []).map((a) => [a.sourceId, a])), [accounts.data]);
+  const scheduleById = useMemo(() => new Map((schedule.data?.sources ?? []).map((e) => [e.sourceId, e])), [schedule.data]);
+  const warnDays = settings.data?.accountExpiryWarnDays ?? DEFAULT_SETTINGS.accountExpiryWarnDays;
 
   const [refreshing, setRefreshing] = useState<ReadonlySet<string>>(new Set());
   // 1-based position in a running "Refresh all", or null when none runs.
@@ -125,6 +133,19 @@ export function SourcesPage() {
     },
     [params, setParams],
   );
+  // account: `?account=<id>` (the dashboard's expiry alert) opens that source's subscription details.
+  const accountParam = params.get('account');
+  useEffect(() => {
+    if (accountParam === null || !query.data) return;
+    const target = query.data.find((s) => s.id === accountParam);
+    const next = new URLSearchParams(params);
+    next.delete('account');
+    setParams(next, { replace: true });
+    if (target) {
+      setEditTab(hasAccountInfo(target) ? 'account' : 'details');
+      setEditing(target);
+    }
+  }, [accountParam, query.data, params, setParams]);
   const closeAdd = () => {
     const next = new URLSearchParams(params);
     next.delete('add');
@@ -507,6 +528,9 @@ export function SourcesPage() {
               onDragOver={onDragOver(s.id)}
               onDrop={onDrop(s.id)}
               onDragEnd={() => setDrag(null)}
+              account={accountById.get(s.id)}
+              warnDays={warnDays}
+              schedule={scheduleById.get(s.id)}
             />
           ))}
         </ul>

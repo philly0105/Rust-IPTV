@@ -1,0 +1,116 @@
+/**
+ * Live channels watched this session, most recent first: the previous-channel key (B) and the
+ * channel history popover (Shift+B, the History button). Kept in memory only; a restart starts
+ * a new history.
+ */
+
+import { create } from 'zustand';
+
+import { itemKey, type ItemKey, type ItemRef, type PlayerSource } from '@/api/types';
+
+import { failoverSwitchKey } from './failover';
+import { showOsd } from './media';
+import { getSettings, nowTitle, playItem, sourceKindOf, usePlayerStore, type PlayItemArgs } from './store';
+
+export const HISTORY_LIMIT = 10;
+
+export interface HistoryEntry {
+  key: ItemKey;
+  ref: ItemRef;
+  title: string;
+  posterUrl?: string;
+  isRadio: boolean;
+}
+
+interface HistoryState {
+  entries: HistoryEntry[];
+  /** The history popover of the live controls. */
+  open: boolean;
+}
+
+export const useHistoryStore = create<HistoryState>()(() => ({ entries: [], open: false }));
+
+export function setHistoryOpen(open: boolean): void {
+  if (useHistoryStore.getState().open !== open) useHistoryStore.setState({ open });
+}
+
+/**
+ * `entries` with `source` moved (or added) to the front, capped at HISTORY_LIMIT. `replaces`:
+ * the entry this visit stands in for (another copy of the same channel), dropped. Pure.
+ */
+export function withVisit(entries: readonly HistoryEntry[], source: PlayerSource, replaces?: ItemKey): HistoryEntry[] {
+  if (!source.isLive || !source.ref || !source.url) return [...entries];
+  const key = itemKey(source.ref);
+  const entry: HistoryEntry = { key, ref: source.ref, title: source.title, isRadio: source.isRadio };
+  const old = entries.find((e) => e.key === key);
+  const poster = source.posterUrl ?? old?.posterUrl;
+  if (poster) entry.posterUrl = poster;
+  return [entry, ...entries.filter((e) => e.key !== key && e.key !== replaces)].slice(0, HISTORY_LIMIT);
+}
+
+/** The channel B goes back to: the most recent entry that is not `currentKey`. Pure. */
+export function previousEntry(entries: readonly HistoryEntry[], currentKey: ItemKey | undefined): HistoryEntry | undefined {
+  return entries.find((e) => e.key !== currentKey);
+}
+
+/** Key of the live channel playing now, if any. */
+export function currentLiveKey(): ItemKey | undefined {
+  const s = usePlayerStore.getState().source;
+  return s?.isLive && s.ref ? itemKey(s.ref) : undefined;
+}
+
+export function recordVisit(source: PlayerSource | undefined, replaces?: ItemKey): void {
+  if (!source?.isLive || !source.ref || !source.url) return;
+  const { entries } = useHistoryStore.getState();
+  const next = withVisit(entries, source, replaces);
+  const head = entries[0];
+  const same = head && next[0] && head.key === next[0].key && head.title === next[0].title && head.posterUrl === next[0].posterUrl;
+  if (!same || next.length !== entries.length) useHistoryStore.setState({ entries: next });
+}
+
+/**
+ * The entry a source change stands in for: failover moving a channel to another copy (or a pin
+ * redirect, or its undo) is still the same channel, so B must not lead back to the copy it left.
+ */
+function replacedBy(source: PlayerSource | undefined, prev: PlayerSource | undefined): ItemKey | undefined {
+  const key = source?.ref ? itemKey(source.ref) : undefined;
+  if (!key || key !== failoverSwitchKey() || !prev?.isLive || !prev.ref) return undefined;
+  const prevKey = itemKey(prev.ref);
+  return prevKey === key ? undefined : prevKey;
+}
+
+let lastSource = usePlayerStore.getState().source;
+recordVisit(lastSource);
+usePlayerStore.subscribe((s) => {
+  if (s.source === lastSource) return;
+  const prev = lastSource;
+  lastSource = s.source;
+  recordVisit(s.source, replacedBy(s.source, prev));
+  // Leaving live TV (or the player, or for radio, which has no popover) closes the popover, so
+  // a Shift+B pressed meanwhile cannot pop it up later.
+  if (useHistoryStore.getState().open && (!s.source?.isLive || s.mode === 'radio')) setHistoryOpen(false);
+});
+
+/** Plays a history entry, titled like a zap: the channel name, subtitled with what airs now. */
+export async function playHistoryEntry(entry: HistoryEntry): Promise<void> {
+  showOsd(entry.title);
+  const settings = await getSettings();
+  const [sourceKind, subtitle] = await Promise.all([sourceKindOf(entry.ref.sourceId), nowTitle(entry.ref, settings?.epgOffsetMinutes)]);
+  const args: PlayItemArgs = { ref: entry.ref, title: entry.title, isLive: true, isRadio: entry.isRadio, sourceKind };
+  if (entry.posterUrl) args.posterUrl = entry.posterUrl;
+  if (subtitle) args.subtitle = subtitle;
+  await playItem(args);
+}
+
+/** Switches to the previous channel. Returns it, or undefined when there is none yet. */
+export function playPreviousChannel(): HistoryEntry | undefined {
+  const entry = previousEntry(useHistoryStore.getState().entries, currentLiveKey());
+  if (entry) void playHistoryEntry(entry).catch(() => undefined);
+  return entry;
+}
+
+/** Testing only. */
+export function __resetHistoryForTests(): void {
+  lastSource = undefined;
+  useHistoryStore.setState({ entries: [], open: false });
+}

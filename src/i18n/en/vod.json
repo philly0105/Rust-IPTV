@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Couldn't load these titles",
-  "searchPartialError": "Some results could not be loaded."
+  "searchPartialError": "Some results could not be loaded.",
+  "previousEpisode": "Previous episode"
 }

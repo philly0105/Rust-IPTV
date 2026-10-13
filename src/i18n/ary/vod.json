@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين",
-  "searchPartialError": "شي نتائج ما تشارجاوش."
+  "searchPartialError": "شي نتائج ما تشارجاوش.",
+  "previousEpisode": "الحلقة اللي قبل"
 }

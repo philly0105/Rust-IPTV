@@ -57,6 +57,7 @@
   "settingsPlayback": "التشغيل",
   "settingsPlayers": "المشغلات الخارجية",
   "settingsEpg": "دليل البرامج",
+  "settingsRecording": "التسجيل",
   "settingsMetadata": "البيانات الوصفية",
   "settingsAppearance": "المظهر",
   "settingsRemote": "التحكم عن بعد",
@@ -197,5 +198,13 @@
   "trayQuit": "إنهاء",
   "dashboardLoadFailed": "تعذّر تحميل الصفحة الرئيسية",
   "dashboardLocalDataHint": "يُحفظ سجل المشاهدة والمفضلة والمكتبة على هذا الكمبيوتر. أعد المحاولة، وإذا استمر الخطأ فأعد تشغيل التطبيق.",
-  "ratedLabel": "التقييم {{rating}}"
+  "ratedLabel": "التقييم {{rating}}",
+  "accountAlertsLabel": "تنبيهات الاشتراك",
+  "accountAlertExpiredTitle": "انتهى اشتراك {{name}}",
+  "accountAlertExpiringTitle": "ينتهي اشتراك {{name}} {{when}}",
+  "accountAlertExpiredBody": "لن تعمل قنواته وأفلامه حتى تجدّد الاشتراك لدى مزوّدك.",
+  "accountAlertExpiringBody": "جدّد الاشتراك لدى مزوّدك لتواصل المشاهدة دون انقطاع.",
+  "accountAlertOpen": "عرض الاشتراك",
+  "accountAlertDismiss": "تجاهل تنبيه {{name}}",
+  "navScheduled": "المجدول"
 }

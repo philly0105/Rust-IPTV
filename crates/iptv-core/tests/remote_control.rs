@@ -410,7 +410,7 @@ async fn rpc_lifecycle_and_registration() {
             .iter()
             .filter(|n| n.starts_with("remote."))
             .count(),
-        5
+        remote::rpc::COMMANDS.len()
     );
 
     let st = router

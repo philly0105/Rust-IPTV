@@ -5,6 +5,8 @@
 
 import type { SourcePatch, SourcesAddArgs, M3uAddInput } from '@/api/rpc';
 import type {
+  CatchupOverride,
+  CatchupOverrideType,
   M3uOrigin,
   M3uSourceConfig,
   RequestHeaders,
@@ -38,6 +40,50 @@ export interface M3uDraft {
   fileName: string;
   text: string;
   headers: HeadersDraft;
+  /** Catch-up override for every live channel (edit dialog only). */
+  catchup: CatchupDraft;
+}
+
+/** Catch-up override fields: `type` '' keeps what the playlist says. `days` is the raw input. */
+export interface CatchupDraft {
+  type: CatchupOverrideType | '';
+  template: string;
+  days: string;
+}
+
+export const CATCHUP_OVERRIDE_TYPES: readonly CatchupOverrideType[] = ['default', 'append', 'shift', 'flussonic', 'xc', 'none'];
+/** Same limits as core (`catchup::m3u::validate_override`). */
+export const CATCHUP_TEMPLATE_MAX = 2048;
+export const CATCHUP_DAYS_MAX = 366;
+
+export const emptyCatchup = (): CatchupDraft => ({ type: '', template: '', days: '' });
+
+export function catchupDraftFrom(o: CatchupOverride | undefined): CatchupDraft {
+  if (!o) return emptyCatchup();
+  return { type: o.type, template: o.template ?? '', days: o.days ? String(o.days) : '' };
+}
+
+/**
+ * The stored override for a draft, or `undefined` for "playlist default". `none` carries
+ * nothing else. Errors land on `m3u.catchup.template` / `m3u.catchup.days`.
+ */
+export function buildCatchupOverride(d: CatchupDraft, errors: DraftErrors): CatchupOverride | undefined {
+  if (d.type === '') return undefined;
+  if (d.type === 'none') return { type: 'none' };
+  const out: CatchupOverride = { type: d.type };
+  const template = d.template.trim();
+  if (template) {
+    // eslint-disable-next-line no-control-regex
+    if (template.length > CATCHUP_TEMPLATE_MAX || /[\u0000-\u001f\u007f]/.test(template)) errors['m3u.catchup.template'] = 'errorCatchupTemplate';
+    else out.template = template;
+  }
+  const days = d.days.trim();
+  if (days) {
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1 || n > CATCHUP_DAYS_MAX) errors['m3u.catchup.days'] = 'errorCatchupDays';
+    else out.days = n;
+  }
+  return out;
 }
 
 export interface XtreamDraft {
@@ -79,7 +125,7 @@ export function emptyDraft(kind: SourceKind = 'm3u'): SourceDraft {
     kind,
     name: '',
     autoRefresh: false,
-    m3u: { origin: 'url', url: '', filePath: '', fileText: '', fileName: '', text: '', headers: emptyHeaders() },
+    m3u: { origin: 'url', url: '', filePath: '', fileText: '', fileName: '', text: '', headers: emptyHeaders(), catchup: emptyCatchup() },
     xtream: { serverUrl: '', username: '', password: '' },
     stalker: {
       portalUrl: '',
@@ -113,6 +159,7 @@ export function draftFromSource(s: Source): SourceDraft {
       url: s.m3u.url ?? '',
       filePath: s.m3u.filePath ?? '',
       headers: headersDraftFrom(s.m3u.headers),
+      catchup: catchupDraftFrom(s.m3u.catchup),
     };
   }
   if (s.xtream) d.xtream = { ...s.xtream };
@@ -322,6 +369,9 @@ export function buildUpdatePatch(source: Source, draft: SourceDraft, ctx: BuildC
     } else if (source.m3u.origin === 'file' && ctx.isDesktop && draft.m3u.filePath) {
       next.filePath = draft.m3u.filePath;
     }
+    const catchup = buildCatchupOverride(draft.m3u.catchup, errors);
+    if (catchup) next.catchup = catchup;
+    else delete next.catchup;
     if (!sameConfig(next, source.m3u)) patch.m3u = next;
   } else if (source.kind === 'xtream') {
     const x = buildXtream(draft.xtream, errors);
@@ -404,5 +454,6 @@ export function patchNeedsRefresh(patch: SourcePatch, before?: Pick<Source, 'm3u
   if (m3u === undefined) return false;
   if ((m3u.origin ?? before?.m3u?.origin) === 'text') return false;
   if (!before?.m3u) return true;
-  return !sameConfig({ ...m3u, headers: undefined }, { ...before.m3u, headers: undefined });
+  // The catch-up override applies when channels are read, so it needs no refresh either.
+  return !sameConfig({ ...m3u, headers: undefined, catchup: undefined }, { ...before.m3u, headers: undefined, catchup: undefined });
 }

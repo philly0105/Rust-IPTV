@@ -3,13 +3,18 @@ import { useTranslation } from 'react-i18next';
 
 import { useShortcut } from '@/shell/shortcuts';
 import { LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, positionReadout, SEEK_STEP, SEEK_STEP_LARGE, targetOwnsKey, type KeyKind } from './format';
+import { playPreviousChannel, setHistoryOpen, useHistoryStore } from './history';
 import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
-import { nextInQueue, usePlayerStore, zap } from './store';
+import { nextInQueue, prevInQueue, usePlayerStore, zap } from './store';
+import { toggleStreamInfo } from './streamInfo';
+import { adjustDelay, formatDelay, type DelayKind } from './sync';
 
 const AREA = 'Playback';
 /** Seconds the left and right arrows skip (shared with the seek bar). */
 export { SEEK_STEP };
+/** Seconds J and L skip. */
+export const SEEK_STEP_JL = 10;
 /** Volume change per arrow press or wheel notch. */
 export const VOLUME_STEP = 0.05;
 
@@ -25,15 +30,36 @@ export function stepVolume(steps: number, t: TFunction<'player'>): void {
 }
 
 /**
- * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down).
- * Registered once by the dock; active while something plays in-app.
+ * Steps the audio or subtitle delay and shows the new value. When the current player cannot
+ * apply it (audio delay outside embedded mpv, no subtitles), the readout says why instead.
+ */
+export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'player'>, locale?: string): void {
+  const label = kind === 'audio' ? t('syncAudio') : t('syncSubtitles');
+  if (kind === 'audio' && usePlayerStore.getState().mode !== 'embedded-mpv') {
+    showOsd(label, t('syncAudioNeedsMpv'));
+    return;
+  }
+  if (kind === 'sub' && useMediaStore.getState().tracks.text.length === 0) {
+    showOsd(label, t('syncNoSubtitles'));
+    return;
+  }
+  showOsd(label, formatDelay(adjustDelay(kind, steps), locale));
+}
+
+/**
+ * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down; and the player
+ * slice's j/l, g/h, i, b, shift+b, shift+p). Registered once by the dock; active while
+ * something plays in-app.
  */
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
-  const { t } = useTranslation('player');
+  const { t, i18n } = useTranslation('player');
   const active = usePlayerStore((s) => !!s.source && s.mode !== 'external');
   const live = usePlayerStore((s) => !!s.source?.isLive);
+  // Radio shows neither the history popover nor the stream info panel.
+  const video = usePlayerStore((s) => s.mode !== 'radio');
   const seekable = usePlayerStore((s) => !!s.source && !s.source.isLive && !s.source.isRadio);
   const hasNext = usePlayerStore((s) => s.queue.length > 1 && !!s.source && !!nextInQueue());
+  const hasPrev = usePlayerStore((s) => s.queue.length > 1 && !!s.source && !!prevInQueue());
 
   /** Wrap a handler: skip when the focused element owns the key, else prevent default and run. */
   const guard =
@@ -139,6 +165,47 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
       showOsd(on ? t('captionsOff') : t('captionsOn'));
     }),
     { ...base, description: opts.channelPanelAvailable ? t('shortcutChannelPanel') : t('shortcutCaptions') },
+  );
+  // J/L: 10 s, like most video sites. Live only inside a rewind window.
+  const seekJL = (delta: number) => () => {
+    if (!seekWindow()) {
+      showOsd(t('seekUnavailable'));
+      return;
+    }
+    s().seekBy(delta);
+    seekOsd(delta);
+  };
+  useShortcut('j', guard('letter', seekJL(-SEEK_STEP_JL)), { ...base, description: t('shortcutSeekBack10') });
+  useShortcut('l', guard('letter', seekJL(SEEK_STEP_JL)), { ...base, description: t('shortcutSeekForward10') });
+  // Previous episode (or item), mirroring N.
+  useShortcut(
+    'shift+p',
+    guard('letter', () => {
+      const prev = prevInQueue();
+      if (!prev) return;
+      showOsd(t('previous'), prev.subtitle ? `${prev.subtitle} ${prev.title}` : prev.title);
+      s().prev();
+    }),
+    { ...base, enabled: active && hasPrev, description: t('shortcutPrevItem') },
+  );
+  // Sync: G/H move the subtitles, Shift+G/H the sound, 100 ms per press (VLC's keys).
+  const locale = i18n.language;
+  useShortcut('g', guard('letter', () => stepSyncDelay('sub', -1, t, locale)), { ...base, description: t('shortcutSubDelayDown') });
+  useShortcut('h', guard('letter', () => stepSyncDelay('sub', 1, t, locale)), { ...base, description: t('shortcutSubDelayUp') });
+  useShortcut('shift+g', guard('letter', () => stepSyncDelay('audio', -1, t, locale)), { ...base, description: t('shortcutAudioDelayDown') });
+  useShortcut('shift+h', guard('letter', () => stepSyncDelay('audio', 1, t, locale)), { ...base, description: t('shortcutAudioDelayUp') });
+  useShortcut('i', guard('letter', () => void toggleStreamInfo()), { ...base, enabled: active && video, description: t('shortcutStreamInfo') });
+  useShortcut(
+    'b',
+    guard('letter', () => {
+      if (!playPreviousChannel()) showOsd(t('lastChannel'), t('noPreviousChannel'));
+    }),
+    { ...base, description: t('shortcutPrevChannel') },
+  );
+  useShortcut(
+    'shift+b',
+    guard('letter', () => setHistoryOpen(!useHistoryStore.getState().open)),
+    { ...base, enabled: active && live && video, description: t('shortcutChannelHistory') },
   );
   useShortcut('pageup', guard('arrow', () => void zap('up').catch(() => undefined)), {
     ...base,

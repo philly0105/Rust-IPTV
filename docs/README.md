@@ -25,6 +25,7 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | [tmdb.md](architecture/tmdb.md) | TMDB client, matching, cache, attribution |
 | [remote-control.md](architecture/remote-control.md) | Loopback remote control server and page |
 | [players.md](architecture/players.md) | mpv/VLC detection, external launch, embedded mpv on Windows |
+| [recording.md](architecture/recording.md) | Guide reminders, scheduled recordings (headless mpv or HTTP copy), Scheduled page, My Videos > Recordings |
 
 ## Hosts and UI
 

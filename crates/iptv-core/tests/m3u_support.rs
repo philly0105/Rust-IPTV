@@ -57,6 +57,7 @@ pub async fn bare_source(state: &AppState, id: &str) {
                 url: None,
                 file_path: None,
                 headers: RequestHeaders::default(),
+                catchup: None,
             });
             store::insert(c, &id, &id, false, &cfg, None)
         })

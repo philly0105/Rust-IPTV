@@ -13,6 +13,7 @@
 //! - [`mpv_state`]: pure reducers from IPC events to [`MpvState`].
 //! - [`embedded`]: the embedded session lifecycle (`mpv.*` commands).
 //! - [`rpc`]: `player.*` and `mpv.*` registrations.
+//! - [`stats`]: the `mpv.stats` snapshot (stream info overlay).
 //!
 //! The items between the "contract" markers are shared with `settings`
 //! (B2) and `iptv-tauri` and keep their signatures (amendment A1).
@@ -24,6 +25,7 @@ pub mod external;
 pub mod ipc;
 pub mod mpv_state;
 pub mod rpc;
+pub mod stats;
 
 use crate::error::CoreResult;
 use crate::model::Settings;

@@ -89,4 +89,11 @@ pub fn register(r: &mut RpcRouter) {
     r.add("sources.refreshAll", refresh_all);
     r.add("sources.counts", counts);
     r.add("sources.cancelImport", cancel_import);
+    // account:
+    r.add(
+        "sources.schedule",
+        |s: Arc<AppState>, _a: NoArgs| async move {
+            Ok::<super::schedule::ScheduleView, RpcError>(super::schedule::view(&s).await?)
+        },
+    );
 }

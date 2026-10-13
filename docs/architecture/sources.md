@@ -57,14 +57,26 @@ The importer then runs. If it fails, the source is kept with `last_error` set, a
 
 - `sources.update {id, patch}` validates a config patch the same way. The patch must match the source's kind. `position` moves the source and renumbers the rest. `epg` lists are trimmed and de-duplicated, and only the given lists change. Config changes do not re-import; the UI calls `sources.refresh` for that. When the stored config actually changes (URL, MAC, credentials, headers), the cached portal session `stalker_token:<id>` in `app_state` is deleted in the same transaction, so the next portal call handshakes with the new settings. A rename or an identical config keeps it.
 - `sources.reorder {ids}` puts the listed ids first in the given order. Unknown ids are ignored, and unlisted sources keep their relative order after them. Positions are renumbered from 0.
-- `sources.remove {id}` cancels a running import of that source (and any queued one), waits for it to stop, then deletes it. Items, categories, `m3u_raw`, `source_counts`, favorites, recent entries, positions and EPG mappings cascade. The `stalker_token:<id>` and `backup_pending:<id>` keys in `app_state` are removed too, and so is the on-disk playlist copy of a large m3u (`data_dir/playlists/<id>.m3u`). `sources.add` stores pasted text over `RAW_INLINE_MAX` (8 MB) in that copy with `m3u_raw.raw = ''` (`store::insert` through `m3u::place_raw_text`), so neither the add nor later refreshes keep it in SQLite.
+- `sources.remove {id}` cancels a running import of that source (and any queued one), waits for it to stop, then deletes it. Items, categories, `m3u_raw`, `source_counts`, favorites, recent entries, positions and EPG mappings cascade. The `stalker_token:<id>`, `backup_pending:<id>` and `account_status:<id>` keys in `app_state` are removed too, and so is the on-disk playlist copy of a large m3u (`data_dir/playlists/<id>.m3u`). `sources.add` stores pasted text over `RAW_INLINE_MAX` (8 MB) in that copy with `m3u_raw.raw = ''` (`store::insert` through `m3u::place_raw_text`), so neither the add nor later refreshes keep it in SQLite.
 - `sources.removeAll` removes every source through the same path as `sources.remove` (one at a time, each cancelling its import), then emits `sources.changed`. Returns null.
 
 ## refresh
 
 - `sources.refresh {id}` re-imports one source and returns it. It works for any source, whatever its `autoRefresh` setting.
 - `sources.refreshAll` re-imports every `autoRefresh` source, one at a time, and returns `{refreshed: [id], failed: [{id, error}]}`.
-- `init` spawns a background task that runs `refresh_all` 3 s after boot. Boot does not wait for it. A second `init` call on the same state does nothing.
+- `init` spawns a background task that runs `refresh_all` 3 s after boot, then starts the scheduled refresh (below), whose first pass is 10 minutes later. Boot does not wait for it. A second `init` call on the same state does nothing.
+- `try_run_import(state, id)` is `run_import` unless an import, refresh, partial sync or remove of that source holds its lock right now; then it returns `None` and runs nothing.
+- A failed import stores `lastError`, `lastErrorCode` and `lastErrorAt` (RFC 3339, migration 0009); a successful one clears all three.
+
+### Scheduled refresh
+
+`sources::schedule` refreshes `autoRefresh` sources every `sourceRefreshIntervalHours` (0..168, default 12; 0 = only the startup pass). The loop holds a `Weak` app state and ends when the state is dropped. It keeps running while the window is hidden in the tray.
+
+- A tick (every `TICK`, 10 min) plans the due sources, longest overdue first: never refreshed, or `lastRefreshAt + interval` passed. Pasted-text M3U sources and sources with `autoRefresh` off are never scheduled.
+- Each source is re-read right before it runs (it may have been removed or switched off) and runs through `try_run_import`, so a manual import or refresh of the same source is skipped, never queued behind or repeated. Sources run one at a time with `STAGGER` (20 s) between them.
+- A failure is recorded exactly like a manual refresh (`record_import_error`) and backs off: 30 min, doubling per consecutive failure, capped at the interval. Backoff state is in memory; after a restart a stored `lastErrorAt` still delays the next try by 30 min. A cancelled scheduled run is not a failure and waits a full interval.
+- Decisions take a `Clock`, so tests drive time with a fixed clock.
+- `sources.schedule` returns `{intervalHours, sources: [{sourceId, nextRefreshAt, retrying}]}` for the scheduled sources; the Sources page shows "Next refresh in ..." and "Retrying in ..." from it, and "Failed 2 hours ago" from `lastErrorAt`. `settings.changed` invalidates it, and the scheduler emits one more `sources.changed` after each scheduled run once its backoff is stored (the import's own event fires before that).
 
 ## Counts
 

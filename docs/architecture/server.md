@@ -35,6 +35,7 @@ requests get 10 s to finish.
 | `src/proxy/target.rs` | SSRF rules, guarded DNS resolver |
 | `src/proxy/hls.rs` | Streaming HLS playlist rewriter |
 | `src/files.rs` | `/api/files/{downloadId}` |
+| `src/recordings.rs` | `/api/recordings/{id}` (recording slice) |
 | `src/static_files.rs` | Built UI, SPA fallback, cache headers |
 | `tests/server.rs` | End-to-end tests over real sockets |
 
@@ -148,6 +149,13 @@ Range, `If-Range`, conditional GET and HEAD are handled by
 audio and image types) or `attachment` (anything else) with an RFC 5987
 filename, plus the sandbox CSP and `nosniff`. Downloads whose extension is not
 a media/subtitle type are saved as `.bin`.
+
+### `GET /api/recordings/{id}`
+Serves a recording file for the web player (`recordings.playSource` returns
+`/api/recordings/{id}` in server mode). `id` is a `recordings.library` entry id;
+the core resolves it to a path inside the recordings folder, never taking a
+path from the request. Unknown id or missing file: 404. Range handling and
+headers as for `/api/files`.
 
 ### Everything else: the UI
 `ServeDir` over `--static` with precompressed `.br`/`.gz` support.

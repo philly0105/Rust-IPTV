@@ -1,6 +1,6 @@
 # Tsrust IPTV
 
-An IPTV player for Windows, rebuilt from the IPTVnator fork on Tauri 2 with a Rust core. It plays M3U/M3U8 playlists, Xtream Codes accounts, and Stalker/Ministra portals. It has live TV with an EPG, movies and series, catch-up, downloads with an offline library, optional TMDB metadata, and a loopback remote control. The same core also runs as a small web server, so the UI works in a browser (self-hosted PWA mode).
+An IPTV player for Windows, rebuilt from the IPTVnator fork on Tauri 2 with a Rust core. It plays M3U/M3U8 playlists, Xtream Codes accounts, and Stalker/Ministra portals. It has live TV with an EPG, movies and series, catch-up, downloads with an offline library, optional TMDB metadata, and a remote control for a browser on this computer or, after QR pairing, phones on the local network. The same core also runs as a small web server, so the UI works in a browser (self-hosted PWA mode).
 
 The Rust core (`crates/iptv-core`) owns parsing, storage, portals, EPG, downloads, TMDB, remote control, and players. The React UI never holds a whole catalog: it pages rows out of SQLite over one `rpc(cmd, args)` call.
 
@@ -50,10 +50,20 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 
 - Movies and episodes remember where you stopped. The detail page offers "Resume from m:ss" and "Start over".
 - Near the end of an episode, an Up next card counts down to the next one. Use "Play now" to skip the countdown, or press N to play the next item in the queue.
+- A stream that drops or stalls is reconnected quietly (up to three tries in about 20 s), and a movie picks up where it stopped. Settings > Playback > "Reconnect dropped streams".
+- When a live channel stops working, the player switches to the same channel on another of your sources and says so, with Undo. The player's settings menu lists "Alternate sources" for the channel and can pin a preferred source. Settings > Playback > "Switch live channels to another source".
 - An import or refresh can be cancelled while it runs. A cancelled run keeps the catalog the source had before, and a cancelled add leaves no source behind. "Refresh all" has a Stop button.
+- Sources with auto refresh on refresh in the background every 12 hours, also while the app is in the tray (Settings > General > Sources: only at startup, 6, 12, 24 or 48 hours). A source refreshes at most once at a time, a manual refresh always wins, and a failing source retries later with a growing delay. Source cards show "Next refresh in ..." and when a refresh last failed.
+- Xtream and Stalker source cards show when the subscription expires, whether it is a trial, and how many connections are in use. The dashboard warns 7 days before a subscription expires (Settings > General > Sources; 0 days turns it off), and the warning can be dismissed until the next expiry date. When a stream fails because every connection is in use, the player says so ("Connection limit reached (2 of 2 in use)").
 - Removing a source hides it and shows an Undo toast. The source is deleted 8 seconds later unless you press Undo, or right away when the app closes or reloads.
+- Catch-up archive: right-click a channel with catch-up and choose "Browse archive" (also in the fullscreen channel list and the guide's programme dialog). Pick a day, then play any past programme, or "Watch from start" on the one airing now.
+- When an Xtream channel has nothing in the XMLTV guide, the app shows the provider's own now and next, marked "From the provider's guide". Turn it off in Settings > Guide.
+- An M3U playlist whose catch-up does not work as tagged can be overridden in the source's Edit dialog under "Catch-up override" (type, URL template and days).
 - By default the app returns to the screen you last used (Settings > General > On startup). A fresh install opens the dashboard.
 - The window reopens at its last size and position. If that spot is no longer on any monitor (for example, a screen was unplugged), it is moved back onto one.
+- Sync (settings menu or right-click menu) shifts subtitles and audio in 100 ms steps. Audio delay needs the MPV player; subtitle delay works in every player. Both go back to zero when the stream changes.
+- Stream info (I, or the settings and right-click menus) shows the engine, codecs, resolution, frame rate, bitrates, channels, hardware decoding, dropped frames, buffer, container and server host. It never shows the full URL or credentials.
+- B returns to the last live channel. Shift+B, or the history button in the live controls, lists the last 10 channels with what is on now. The series page and Shift+P go back one episode.
 
 ## Data
 
@@ -95,6 +105,13 @@ Press `?` in the app for the full list. The main ones:
 | Left / Right | Seek 10 s |
 | Shift+Left / Shift+Right | Seek 30 s |
 | N | Play the next episode in the queue |
+| Shift+P | Play the previous episode in the queue |
+| J / L | Seek 10 s (live TV only when the stream can seek) |
+| B | Back to the last live channel |
+| Shift+B | Channel history (live TV) |
+| G / H | Subtitles 100 ms earlier / later |
+| Shift+G / Shift+H | Audio 100 ms earlier / later (MPV player) |
+| I | Show or hide stream info |
 | Up / Down | Volume 5 % |
 | M | Mute |
 | C | Captions on / off (in fullscreen live TV: the channel panel) |
@@ -110,7 +127,9 @@ The PiP button in the player controls shrinks the window to a small always-on-to
 
 ## Remote control
 
-Settings > Remote turns on a small web remote served at `http://127.0.0.1:7310/` (the port is configurable). Open it in another browser tab or window on the same machine to change channels, type a number, and set volume. It binds to 127.0.0.1 only and rejects requests whose `Host` or `Origin` is not loopback, so other devices on the network cannot use it. See `docs/architecture/remote-control.md`.
+Settings > Remote turns on a small web remote served at `http://127.0.0.1:7310/` (the port is configurable). Open it in another browser tab or window on the same machine to change channels, type a number, and set volume. By default it binds to 127.0.0.1 only and rejects requests whose `Host` or `Origin` is not loopback, so other devices on the network cannot use it.
+
+To use a phone, turn on "Allow phones on this network" under Settings > Remote (desktop app only, off by default). The app then also listens on this computer's private network addresses (home Wi-Fi or Ethernet, never public ones). Click Show pairing code and scan the QR code with the phone's camera; the code works once, expires after 5 minutes, and is hidden again after use. Each paired phone appears in the list below the code, where you can revoke it, and Reset pairing signs out every phone. Unpaired devices on the network see a "Not paired" page and cannot control playback. Windows may ask to allow access on private networks the first time; choose Allow. In server mode this option is hidden. See `docs/architecture/remote-control.md`.
 
 ## Backups and migrating from IPTVnator
 
@@ -153,6 +172,16 @@ Start at `docs/README.md`. It links the build spec (`docs/SPEC.md`) and one docu
 ## Recording
 
 In the desktop app, embedded mpv can record the playing stream (`mpv.record`). Files go to the folder set in Settings > General (Recordings folder), or `<downloads folder>/recordings` when that is not set, named `<title>-YYYYMMDD-HHMM.ts`. mpv copies the stream as is and starts at the next keyframe; its recorder is marked experimental upstream.
+
+Scheduled recordings and reminders:
+
+- In the TV guide, the programme dialog and the now/next ribbon offer "Remind me" and "Record". The ribbon's record menu can also record the channel for 30 minutes to 3 hours. A bell or a red dot marks those programmes in the grid and list views.
+- Reminders fire a few minutes before the start (Settings > Recording) while the app runs, including when it is hidden in the tray. They show a Windows notification and a toast with "Watch now", or switch to the channel with Undo.
+- Recordings run without the player, through a headless mpv (or a direct copy for plain MPEG-TS streams), with 1 minute of padding before and 5 after by default. Files are named `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`. A dropped stream is retried into part files. A recording that was due while the app was closed is marked missed.
+- Library > Scheduled lists what is recording now, what is coming up, and recent results. My Videos > Recordings plays, shows and deletes the files (to the Recycle Bin, with Undo).
+- In the browser (server mode), recording needs mpv on the server. Without it Record is hidden. Reminders show in-app only.
+
+See `docs/architecture/recording.md`.
 
 ## Updates
 

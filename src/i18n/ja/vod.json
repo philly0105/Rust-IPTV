@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "これらのタイトルを読み込めませんでした",
-  "searchPartialError": "一部の結果を読み込めませんでした。"
+  "searchPartialError": "一部の結果を読み込めませんでした。",
+  "previousEpisode": "前のエピソード"
 }

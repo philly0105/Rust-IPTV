@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Δεν ήταν δυνατή η φόρτωση αυτών των τίτλων",
-  "searchPartialError": "Ορισμένα αποτελέσματα δεν φορτώθηκαν."
+  "searchPartialError": "Ορισμένα αποτελέσματα δεν φορτώθηκαν.",
+  "previousEpisode": "Προηγούμενο επεισόδιο"
 }

@@ -225,6 +225,15 @@ struct Entry {
     label: String,
 }
 
+/// guide: a backup's `catchupOverride` object; dropped when it is not a valid override.
+fn catchup_of(v: &Value) -> Option<crate::model::CatchupOverride> {
+    let o = v.get("catchupOverride")?;
+    let parsed = serde_json::from_value(o.clone()).ok()?;
+    crate::catchup::m3u::validate_override(Some(parsed))
+        .ok()
+        .flatten()
+}
+
 fn headers_of(v: &Value) -> RequestHeaders {
     RequestHeaders {
         user_agent: s_field(v, "userAgent"),
@@ -290,12 +299,15 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
             }
             let file_hint = s_field(&src, "filePathHint");
             let headers = headers_of(&src);
+            // guide: the source-wide catch-up override (absent in older backups).
+            let catchup = catchup_of(&src);
             let final_cfg = match (src_kind.as_str(), &url, &file_hint) {
                 (_, Some(u), _) if url_kind => M3uSourceConfig {
                     origin: M3uOrigin::Url,
                     url: Some(u.clone()),
                     file_path: None,
                     headers: headers.clone(),
+                    catchup: catchup.clone(),
                 },
                 ("file", _, Some(p)) if !probe_files || std::path::Path::new(p).is_file() => {
                     M3uSourceConfig {
@@ -303,6 +315,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
                         url: None,
                         file_path: Some(p.clone()),
                         headers: headers.clone(),
+                        catchup: catchup.clone(),
                     }
                 }
                 _ => M3uSourceConfig {
@@ -310,6 +323,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
                     url: None,
                     file_path: None,
                     headers: headers.clone(),
+                    catchup: catchup.clone(),
                 },
             };
             let fp = match &url {
@@ -776,6 +790,7 @@ async fn import_entry(
             url: None,
             file_path: None,
             headers: final_cfg.headers.clone(),
+            catchup: final_cfg.catchup.clone(),
         })?,
         Config::Xtream(c) => serde_json::to_string(c)?,
         Config::Stalker(c) => serde_json::to_string(c)?,
@@ -984,6 +999,8 @@ async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Resu
         // remembered in memory for the old one must not answer for it.
         crate::stalker::Runtime::get(state).forget_source(id);
     }
+    // guide: a replaced id may point at another panel; drop its cached guide answers.
+    crate::catchup::forget_source(state, id);
     match imp.import(state.clone(), &source).await {
         Ok(summary) => {
             tracing::info!(source_id = %id, %kind, channels = summary.channels, movies = summary.movies, series = summary.series, "backup source imported");

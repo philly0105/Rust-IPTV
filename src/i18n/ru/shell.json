@@ -57,6 +57,7 @@
   "settingsPlayback": "Воспроизведение",
   "settingsPlayers": "Внешние плееры",
   "settingsEpg": "Телегид",
+  "settingsRecording": "Запись",
   "settingsMetadata": "Метаданные",
   "settingsAppearance": "Оформление",
   "settingsRemote": "Удалённое управление",
@@ -187,5 +188,13 @@
   "trayQuit": "Выйти",
   "dashboardLoadFailed": "Не удалось загрузить главную страницу",
   "dashboardLocalDataHint": "История, избранное и библиотека хранятся на этом компьютере. Попробуйте ещё раз; если ошибка повторяется, перезапустите приложение.",
-  "ratedLabel": "рейтинг {{rating}}"
+  "ratedLabel": "рейтинг {{rating}}",
+  "accountAlertsLabel": "Уведомления о подписке",
+  "accountAlertExpiredTitle": "Подписка {{name}} истекла",
+  "accountAlertExpiringTitle": "Подписка {{name}} истекает {{when}}",
+  "accountAlertExpiredBody": "Его каналы и фильмы не будут воспроизводиться, пока вы не продлите подписку у провайдера.",
+  "accountAlertExpiringBody": "Продлите подписку у провайдера, чтобы смотреть без перерыва.",
+  "accountAlertOpen": "Открыть подписку",
+  "accountAlertDismiss": "Скрыть уведомление для {{name}}",
+  "navScheduled": "Запланированное"
 }

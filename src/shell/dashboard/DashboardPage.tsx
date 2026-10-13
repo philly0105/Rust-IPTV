@@ -22,6 +22,8 @@ import { Badge, Button, EmptyState, ErrorState, Poster, ProgressBar, buttonClass
 import { useShell } from '../store';
 import { useVisibleSources } from '../useVisibleSources';
 import { useSettings } from '../useSettings';
+// account:
+import { AccountAlerts } from './AccountAlerts';
 import { ChannelCard, PosterCard, SourceCard, itemPath, joinList } from './cards';
 import { DashboardRail } from './DashboardRail';
 import { HeroSkeleton } from './HeroSkeleton';
@@ -334,6 +336,8 @@ function DashboardBody() {
 
   return (
     <div className="flex flex-col gap-10 pt-8 pb-16" data-testid="dashboard">
+      {/* account: subscription expiry alerts, above everything else. */}
+      {hasSources && <AccountAlerts sources={sources.data ?? []} />}
       {/*
         The shared error takes the hero's place in the normal flow. With the hero on,
         an invisible hero skeleton shares its grid cell, so the slot keeps at least the

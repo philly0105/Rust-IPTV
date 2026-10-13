@@ -1,0 +1,176 @@
+[
+  {
+    "name": "default with an absolute source is the template",
+    "url": "http://live.example/ch1.m3u8",
+    "archive": true,
+    "catchup": { "type": "default", "source": "http://arc.example/ch1/{Y}/{m}/{d}/{H}{M}.m3u8?dur={duration:60}" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://arc.example/ch1/2026/10/11/1000.m3u8?dur=90"
+  },
+  {
+    "name": "default with a relative source is appended",
+    "url": "http://live.example/ch1.m3u8",
+    "archive": true,
+    "catchup": { "type": "default", "source": "?utc={utc}" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://live.example/ch1.m3u8?utc=1791712800"
+  },
+  {
+    "name": "default without a source shifts",
+    "url": "http://live.example/ch1.m3u8",
+    "archive": true,
+    "catchup": { "type": "default" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://live.example/ch1.m3u8?utc=1791712800&lutc=1791720000"
+  },
+  {
+    "name": "append joins an existing query with &",
+    "url": "http://l/x.m3u8?token=a",
+    "archive": true,
+    "catchup": { "type": "append", "source": "?start={start}&end={end}" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://l/x.m3u8?token=a&start=1791712800&end=1791718200"
+  },
+  {
+    "name": "append without a source is not playable",
+    "url": "http://l/x.m3u8",
+    "archive": true,
+    "catchup": { "type": "append" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": null
+  },
+  {
+    "name": "an archive without a type shifts",
+    "url": "http://l/x.ts?a=1",
+    "archive": true,
+    "catchup": null,
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://l/x.ts?a=1&utc=1791712800&lutc=1791720000"
+  },
+  {
+    "name": "xc with a live prefix keeps m3u8",
+    "url": "http://h:8080/live/user/pass/101.m3u8",
+    "archive": true,
+    "catchup": { "type": "xc" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://h:8080/timeshift/user/pass/90/2026-10-11:10-00/101.m3u8"
+  },
+  {
+    "name": "xc without a live prefix keeps the query",
+    "url": "http://h/user/pass/7.ts?x=1",
+    "archive": true,
+    "catchup": { "type": "xc" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://h/timeshift/user/pass/90/2026-10-11:10-00/7.ts?x=1"
+  },
+  {
+    "name": "flussonic hls",
+    "url": "http://fs.example/ch1/index.m3u8",
+    "archive": true,
+    "catchup": { "type": "flussonic" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://fs.example/ch1/index-1791712800-5400.m3u8"
+  },
+  {
+    "name": "flussonic mpegts",
+    "url": "http://fs.example/ch1/mpegts?token=t",
+    "archive": true,
+    "catchup": { "type": "fs" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://fs.example/ch1/timeshift_abs-1791712800.ts?token=t"
+  },
+  {
+    "name": "an unknown type is not playable",
+    "url": "http://l/x.m3u8",
+    "archive": true,
+    "catchup": { "type": "vod" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": null
+  },
+  {
+    "name": "no archive is not playable",
+    "url": "http://l/x.m3u8",
+    "archive": false,
+    "catchup": { "type": "shift" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": null
+  },
+  {
+    "name": "shift needs an http stream",
+    "url": "rtmp://x/y",
+    "archive": true,
+    "catchup": { "type": "shift" },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": null
+  },
+  {
+    "name": "override shift turns catch-up on with days",
+    "url": "http://l/x.ts",
+    "archive": false,
+    "catchup": null,
+    "override": { "type": "shift", "days": 3 },
+    "effective": { "archive": true, "catchup": { "type": "shift", "days": 3 } },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://l/x.ts?utc=1791712800&lutc=1791720000"
+  },
+  {
+    "name": "override none turns catch-up off",
+    "url": "http://h/live/user/pass/101.ts",
+    "archive": true,
+    "catchup": { "type": "xc", "days": 7 },
+    "override": { "type": "none" },
+    "effective": { "archive": false, "catchup": null },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": null
+  },
+  {
+    "name": "override template replaces the channel source",
+    "url": "http://l/a.m3u8",
+    "archive": true,
+    "catchup": { "type": "append", "source": "?utc={utc}" },
+    "override": { "type": "default", "template": "http://arc/{utc}-{utcend}.ts" },
+    "effective": { "archive": true, "catchup": { "type": "default", "source": "http://arc/{utc}-{utcend}.ts" } },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://arc/1791712800-1791718200.ts"
+  },
+  {
+    "name": "override flussonic on a playlist without catch-up",
+    "url": "http://fs.example/ch1/index.m3u8",
+    "archive": false,
+    "catchup": null,
+    "override": { "type": "flussonic" },
+    "effective": { "archive": true, "catchup": { "type": "flussonic" } },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://fs.example/ch1/index-1791712800-5400.m3u8"
+  },
+  {
+    "name": "override append with an offset template",
+    "url": "http://l/a.m3u8",
+    "archive": false,
+    "catchup": null,
+    "override": { "type": "append", "template": "?offset={offset:60}" },
+    "effective": { "archive": true, "catchup": { "type": "append", "source": "?offset={offset:60}" } },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://l/a.m3u8?offset=120"
+  },
+  {
+    "name": "override xc on a stream that is not an xc url",
+    "url": "http://l/a.m3u8",
+    "archive": true,
+    "catchup": null,
+    "override": { "type": "xc", "days": 2 },
+    "effective": { "archive": false, "catchup": { "type": "xc", "days": 2 } },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": null
+  },
+  {
+    "name": "override without a template keeps the channel source",
+    "url": "http://l/a.m3u8",
+    "archive": true,
+    "catchup": { "type": "append", "source": "?utc={utc}" },
+    "override": { "type": "default" },
+    "effective": { "archive": true, "catchup": { "type": "default", "source": "?utc={utc}" } },
+    "start": 1791712800000, "end": 1791718200000, "now": 1791720000000,
+    "expected": "http://l/a.m3u8?utc=1791712800"
+  }
+]

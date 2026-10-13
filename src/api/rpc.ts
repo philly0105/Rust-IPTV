@@ -51,6 +51,18 @@ import type {
   VodItem,
   WindowState,
   XtreamSourceConfig,
+  // failover:
+  LiveAlternates,
+} from './types';
+// recording:
+import type {
+  Recording,
+  RecordingCapabilities,
+  RecordingFile,
+  Reminder,
+  ReminderFiredEvent,
+  ScheduleRecordingArgs,
+  ScheduleRecordingResult,
 } from './types';
 
 /** One command: payload and resolved value. */
@@ -127,6 +139,40 @@ export interface StalkerAccountInfo {
   raw: Record<string, unknown>;
 }
 
+// account: cached subscription status and the refresh schedule.
+/** Cached provider account status (`account.status`); Xtream and Stalker sources only. */
+export interface AccountStatus {
+  sourceId: string;
+  kind: SourceKind;
+  /** Provider status text ("Active", "Expired", "Banned", ...). */
+  status?: string;
+  /** RFC 3339; absent = no expiry reported. */
+  expDate?: string;
+  isTrial: boolean;
+  /** Connections in use (Xtream only). */
+  activeCons?: number;
+  /** Connection limit (Xtream only; absent or 0 = unlimited). */
+  maxConnections?: number;
+  /** When the provider was last asked (RFC 3339). */
+  checkedAt: string;
+  /** Why the last check failed (redacted); the other fields come from the last good check. */
+  error?: string;
+}
+
+export interface ScheduleEntry {
+  sourceId: string;
+  /** RFC 3339. The scheduler checks every 10 minutes, so a refresh starts up to that long after this. */
+  nextRefreshAt: string;
+  /** The next attempt is a retry after a failure. */
+  retrying: boolean;
+}
+
+/** `sources.schedule`: scheduled sources only (auto-refresh on, interval above 0). */
+export interface ScheduleView {
+  intervalHours: number;
+  sources: ScheduleEntry[];
+}
+
 export interface ConnectionTestResult {
   ok: boolean;
   message?: string;
@@ -175,6 +221,44 @@ export interface RemotePublishedChannel {
   name: string;
   number?: number;
   logoUrl?: string;
+}
+
+// remote: LAN pairing
+/** A private network address the remote control listens on. */
+export interface RemoteLanAddress {
+  ip: string;
+  /** Network adapter name, e.g. "Wi-Fi". */
+  interface: string;
+  url: string;
+}
+
+export interface RemoteServerStatus {
+  running: boolean;
+  url?: string;
+  port: number;
+  /** LAN mode on and listening: the addresses, best first. */
+  lanAddresses?: RemoteLanAddress[];
+  /** LAN mode on but not (fully) listening. */
+  lanError?: string;
+}
+
+/** `remote.pairingCode`: one-time pairing link and its QR code. */
+export interface RemotePairing {
+  /** `http://<lan-ip>:<port>/?pair=<code>` */
+  url: string;
+  address: string;
+  expiresAt: string;
+  expiresInSecs: number;
+  /** Dark modules as one SVG path in a `size` x `size` grid, without quiet zone. */
+  qr: { size: number; path: string };
+}
+
+export interface RemoteDevice {
+  id: string;
+  /** Fixed browser and OS names read from the user agent; empty browser = unknown. */
+  name: { browser: string; os?: string };
+  pairedAt: string;
+  lastSeen: string;
 }
 
 export interface BackupImportResult {
@@ -386,9 +470,14 @@ export interface RpcMap {
   // ---- remote (B8) --------------------------------------------------------
   'remote.start': Cmd<void, { url: string }>;
   'remote.stop': Cmd<void, void>;
-  'remote.status': Cmd<void, { running: boolean; url?: string; port: number }>;
+  'remote.status': Cmd<void, RemoteServerStatus>;
   'remote.reportStatus': Cmd<{ status: RemoteStatus }, void>;
   'remote.publishChannels': Cmd<{ channels: RemotePublishedChannel[] }, void>;
+  // remote: LAN pairing (desktop only; `unsupported` in server mode)
+  'remote.pairingCode': Cmd<{ address?: string }, RemotePairing>;
+  'remote.devices': Cmd<void, RemoteDevice[]>;
+  'remote.revokeDevice': Cmd<{ id: string }, void>;
+  'remote.resetPairing': Cmd<void, void>;
 
   // ---- player (B9) --------------------------------------------------------
   'player.capabilities': Cmd<void, PlayerCapabilities>;
@@ -409,6 +498,50 @@ export interface RpcMap {
   'mpv.state': Cmd<void, MpvState>;
   /** Starts/stops writing the live stream to `<recordingsDir>/<title>-<yyyyMMdd-HHmm>.ts`. */
   'mpv.record': Cmd<{ start: boolean }, { recording: boolean; path: string | null }>;
+  // player: stream info overlay snapshot (desktop only; Unsupported in server mode).
+  'mpv.stats': Cmd<void, import('./types').MpvStats>;
+  // failover: the same live channel on other sources, best first.
+  'live.alternates': Cmd<{ ref: ItemRef }, LiveAlternates>;
+
+  // account: subscription status and the scheduled refresh.
+  /**
+   * Cached account status; null for M3U sources. `refresh: true` asks the provider now
+   * (at most once per 20 s per source). Emits `account.changed` `{ sourceId }` on change.
+   */
+  'account.status': Cmd<{ sourceId: string; refresh?: boolean }, AccountStatus | null>;
+  /** Cached status of every Xtream and Stalker source that has one. */
+  'account.statusAll': Cmd<void, AccountStatus[]>;
+  /** When each auto-refresh source is next refreshed (`sourceRefreshIntervalHours`). */
+  'sources.schedule': Cmd<void, ScheduleView>;
+
+  // guide:
+  /** Xtream panel now/next for channels without XMLTV (cached in core); [] when `epgShortFallback` is off or not Xtream. */
+  'epg.shortEpg': Cmd<{ ref: ItemRef; limit?: number }, EpgProgram[]>;
+  /** Xtream archive table (`get_simple_data_table`) overlapping [from, to); [] for other kinds. */
+  'catchup.programs': Cmd<{ ref: ItemRef; from: string; to: string }, EpgProgram[]>;
+
+  // recording:
+  'reminders.list': Cmd<void, Reminder[]>;
+  /** A future programme; returns the existing reminder when one is set. */
+  'reminders.add': Cmd<{ ref: ItemRef; channelName: string; title: string; start: string; end: string }, Reminder>;
+  'reminders.remove': Cmd<{ id: string }, void>;
+  /** Reminders fired in this run that no window handled yet (one may fire before the UI listens). */
+  'reminders.unhandled': Cmd<void, ReminderFiredEvent[]>;
+  /** A window handled this fired reminder. */
+  'reminders.ack': Cmd<{ id: string }, void>;
+  'recordings.capabilities': Cmd<void, RecordingCapabilities>;
+  'recordings.list': Cmd<void, Recording[]>;
+  'recordings.schedule': Cmd<ScheduleRecordingArgs, ScheduleRecordingResult>;
+  /** Cancels a scheduled recording, or stops a running one (keeping what was recorded). */
+  'recordings.cancel': Cmd<{ id: string }, void>;
+  /** Forgets a finished row; its files stay. */
+  'recordings.remove': Cmd<{ id: string }, void>;
+  'recordings.library': Cmd<void, RecordingFile[]>;
+  'recordings.playSource': Cmd<{ id: string }, PlayerSource>;
+  /** Desktop only. */
+  'recordings.reveal': Cmd<{ id: string }, void>;
+  /** Moves the file to the Recycle Bin (deletes it on a server that is not Windows). */
+  'recordings.delete': Cmd<{ id: string }, void>;
 }
 
 /** Every command name, for runtime checks and tests. Kept in sync with `RpcMap` by the type below. */
@@ -524,6 +657,10 @@ export const RPC_COMMANDS = [
   'remote.status',
   'remote.reportStatus',
   'remote.publishChannels',
+  'remote.pairingCode',
+  'remote.devices',
+  'remote.revokeDevice',
+  'remote.resetPairing',
   'player.capabilities',
   'player.detect',
   'player.openExternal',
@@ -536,6 +673,27 @@ export const RPC_COMMANDS = [
   'mpv.detach',
   'mpv.state',
   'mpv.record',
+  'mpv.stats',
+  'live.alternates',
+  'account.status',
+  'account.statusAll',
+  'sources.schedule',
+  'epg.shortEpg',
+  'catchup.programs',
+  'reminders.list',
+  'reminders.add',
+  'reminders.remove',
+  'reminders.unhandled',
+  'reminders.ack',
+  'recordings.capabilities',
+  'recordings.list',
+  'recordings.schedule',
+  'recordings.cancel',
+  'recordings.remove',
+  'recordings.library',
+  'recordings.playSource',
+  'recordings.reveal',
+  'recordings.delete',
 ] as const satisfies readonly (keyof RpcMap)[];
 
 // Compile-time check that RPC_COMMANDS lists every RpcMap key.

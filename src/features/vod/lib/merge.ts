@@ -287,6 +287,22 @@ export function nextEpisode(seasons: Season[], episodeId: string | undefined): E
 }
 
 /**
+ * The episode Previous goes back to, mirroring the player queue (`previousEpisodes` in
+ * episodeQueue.ts): the one before in the same season, else the previous season's last.
+ * Specials (season 0, sorted last) never lead back into a regular season, or the reverse.
+ */
+export function previousEpisode(seasons: Season[], episodeId: string | undefined): Episode | undefined {
+  if (!episodeId) return undefined;
+  const order = episodeOrder(seasons);
+  const i = order.findIndex((e) => e.id === episodeId);
+  const current = order[i];
+  const before = i > 0 ? order[i - 1] : undefined;
+  if (!current || !before) return undefined;
+  if ((before.season > 0) !== (current.season > 0)) return undefined;
+  return before;
+}
+
+/**
  * Where "Play" should start: the most recent unfinished episode (from the
  * start when it ran under `MIN_RESUME_SECONDS`); else, after the most recent finished one, the
  * first episode not marked watched; else

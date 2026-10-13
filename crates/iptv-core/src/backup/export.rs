@@ -228,6 +228,10 @@ fn m3u_entry(conn: &Connection, data_dir: &Path, s: &Source) -> CoreResult<Value
         put_str(&mut source, "referrer", c.headers.referrer.as_deref());
         put_str(&mut source, "origin", c.headers.origin.as_deref());
         put_str(&mut source, "filePathHint", c.file_path.as_deref());
+        // guide: the source-wide catch-up override.
+        if let Some(o) = &c.catchup {
+            source.insert("catchupOverride".into(), serde_json::to_value(o)?);
+        }
     }
 
     // Favorites are channel URLs (the old app's `favorites: string[]`).

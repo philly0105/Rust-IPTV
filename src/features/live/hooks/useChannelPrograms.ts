@@ -6,6 +6,8 @@ import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 import { mergePrograms } from '../lib/epgMerge';
 import { ms } from '../lib/epgTime';
 import { usePortalEpg } from './usePortalEpg';
+import { useShortEpg } from './useShortEpg';
+import { hasAiring } from '../lib/shortEpg';
 
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** `stalker.epg` caps its answer at 50 programmes. */
@@ -27,8 +29,16 @@ export interface ChannelPrograms {
  *   archived programmes since `from` for a channel with an archive), merged with the XMLTV guide
  *   when one resolves for the channel (a global EPG URL or a manual mapping). The portal wins
  *   where both cover the same time; XMLTV fills the rest.
+ * - xtream with `shortEpg.enabled`: when XMLTV has nothing airing at `shortEpg.guideNow`, the
+ *   provider's short guide (`epg.shortEpg`) fills the gaps; XMLTV keeps priority.
  */
-export function useChannelPrograms(channel: Channel | undefined, kind: SourceKind | undefined, from: number, to: number): ChannelPrograms {
+export function useChannelPrograms(
+  channel: Channel | undefined,
+  kind: SourceKind | undefined,
+  from: number,
+  to: number,
+  shortEpg?: { enabled: boolean; guideNow: number },
+): ChannelPrograms {
   const ref = channel?.ref ?? EMPTY_REF;
   const isStalker = kind === 'stalker';
   const xmltv = useRpcQuery(
@@ -42,12 +52,18 @@ export function useChannelPrograms(channel: Channel | undefined, kind: SourceKin
   // ribbon keeps showing that; without, it shows the error and its retry button.
   const portal = usePortalEpg({ ref, limit: STALKER_RIBBON_LIMIT, ...past }, { enabled: !!channel && isStalker, staleTime: 5 * 60_000 });
 
+  // guide: Xtream short-EPG fallback, asked only once XMLTV answered without an airing programme.
+  const wantShort = kind === 'xtream' && !!shortEpg?.enabled && !!xmltv.data && !hasAiring(xmltv.data, shortEpg.guideNow);
+  const short = useShortEpg(channel?.ref, wantShort);
+
   const programs = useMemo(() => {
     const inWindow = (p: EpgProgram) => ms(p.end) > from && ms(p.start) < to;
     const base = (xmltv.data ?? []).filter(inWindow);
+    const fallback = wantShort ? (short ?? []).filter(inWindow) : [];
+    if (fallback.length > 0) return mergePrograms(base, fallback);
     if (!isStalker) return [...base].sort((a, b) => ms(a.start) - ms(b.start));
     return mergePrograms((portal.data ?? []).filter(inWindow), base);
-  }, [xmltv.data, portal.data, isStalker, from, to]);
+  }, [xmltv.data, portal.data, isStalker, from, to, wantShort, short]);
 
   if (!isStalker) {
     return {

@@ -5,6 +5,8 @@ import { itemKey, type Channel, type EpgNowNext, type ItemKey, type ItemRef, typ
 
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { MINUTE, ms } from '../lib/epgTime';
+import { needsFallback } from '../lib/shortEpg';
+import { useShortEpgPreviews } from './useShortEpg';
 import { useStalkerPreviews } from './useStalkerPreviews';
 
 export const CHANNEL_PAGE_SIZE = 120;
@@ -23,6 +25,11 @@ export interface PagedChannelsArgs {
    * (`stalker.epg`, throttled) and show it where XMLTV has nothing airing.
    */
   stalkerEpg?: boolean;
+  /**
+   * guide: Xtream short-EPG fallback is on for this source: visible rows with nothing airing in
+   * XMLTV ask the panel's short EPG (`epg.shortEpg`, throttled) instead.
+   */
+  shortEpg?: boolean;
   /**
    * `settings.epgOffsetMinutes`: rows show programmes moved by it, so "now" is picked on the
    * shifted clock (`epg.nowNext` `offsetMinutes`, and the portal previews at `now - offset`).
@@ -114,16 +121,26 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
 
   // Stalker: the portal's guide for the visible rows (the XMLTV now/next above covers the rest).
   const stalkerOn = extrasOn && !!args.stalkerEpg;
+  const shortOn = extrasOn && !!args.shortEpg && !stalkerOn;
+  const previewOn = stalkerOn || shortOn;
   const visibleRefs = useMemo(() => {
-    if (!stalkerOn || range.key !== listKey) return [] as ItemRef[];
+    if (!previewOn || range.key !== listKey) return [] as ItemRef[];
     const out: ItemRef[] = [];
     for (let i = range.start; i <= range.end; i++) {
-      const ch = inPage(pageA, i) ?? inPage(pageB, i);
-      if (ch) out.push(ch.ref);
+      const fromA = inPage(pageA, i);
+      const ch = fromA ?? inPage(pageB, i);
+      if (!ch) continue;
+      if (shortOn) {
+        // Only rows whose XMLTV answer arrived without anything airing need the panel.
+        const map = fromA ? exA.nowNext : exB.nowNext;
+        if (!map || !needsFallback(map[itemKey(ch.ref)])) continue;
+      }
+      out.push(ch.ref);
     }
     return out;
-  }, [stalkerOn, range, listKey, pageA, pageB]);
+  }, [previewOn, shortOn, range, listKey, pageA, pageB, exA.nowNext, exB.nowNext]);
   const portalPrograms = useStalkerPreviews(args.sourceId, stalkerOn, visibleRefs, args.now ?? 0);
+  const shortPrograms = useShortEpgPreviews(args.sourceId, shortOn, visibleRefs, args.now ?? 0);
 
   const rangeTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(rangeTimer.current), []);
@@ -132,7 +149,7 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
       const na = Math.max(0, Math.floor(start / size));
       const nb = Math.max(na, Math.floor(Math.max(start, end) / size));
       setPages((p) => (p.key === listKey && p.a === na && p.b === nb ? p : { key: listKey, a: na, b: nb }));
-      if (!stalkerOn) return;
+      if (!previewOn) return;
       // The portal guide follows the visible rows once scrolling pauses: a range update per row of
       // a held arrow key would queue a render of the page behind every keystroke (React #185).
       window.clearTimeout(rangeTimer.current);
@@ -141,7 +158,7 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
         STALKER_RANGE_SETTLE_MS,
       );
     },
-    [listKey, size, stalkerOn],
+    [listKey, size, previewOn],
   );
 
   const getChannel = useCallback((i: number) => inPage(pageA, i) ?? inPage(pageB, i), [pageA, pageB]);
@@ -152,11 +169,12 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
       const ch = fromA ?? inPage(pageB, i);
       if (!ch) return undefined;
       const xmltv = (fromA ? exA.nowNext : exB.nowNext)?.[itemKey(ch.ref)];
+      if (shortOn) return preferNowNext(xmltv, nowNextFrom(shortPrograms(ch.ref), (nowForPreviews ?? Date.now()) - offsetMs));
       if (!stalkerOn) return xmltv;
       // Programmes come back unshifted: the one shown as airing is the one airing at `now - offset`.
       return preferNowNext(nowNextFrom(portalPrograms.get(ch.ref), (nowForPreviews ?? Date.now()) - offsetMs), xmltv);
     },
-    [pageA, pageB, exA.nowNext, exB.nowNext, stalkerOn, portalPrograms, nowForPreviews, offsetMs],
+    [pageA, pageB, exA.nowNext, exB.nowNext, stalkerOn, shortOn, portalPrograms, shortPrograms, nowForPreviews, offsetMs],
   );
   const isFavorite = useCallback(
     (i: number) => {

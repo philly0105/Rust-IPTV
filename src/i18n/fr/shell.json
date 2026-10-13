@@ -57,6 +57,7 @@
   "settingsPlayback": "Lecture",
   "settingsPlayers": "Lecteurs externes",
   "settingsEpg": "Guide TV",
+  "settingsRecording": "Enregistrement",
   "settingsMetadata": "Métadonnées",
   "settingsAppearance": "Apparence",
   "settingsRemote": "Télécommande",
@@ -182,5 +183,13 @@
   "trayQuit": "Quitter",
   "dashboardLoadFailed": "Impossible de charger l'accueil",
   "dashboardLocalDataHint": "Votre historique, vos favoris et votre bibliothèque sont stockés sur cet ordinateur. Réessayez ; si le problème persiste, redémarrez l'application.",
-  "ratedLabel": "note {{rating}}"
+  "ratedLabel": "note {{rating}}",
+  "accountAlertsLabel": "Alertes d'abonnement",
+  "accountAlertExpiredTitle": "{{name}} a expiré",
+  "accountAlertExpiringTitle": "{{name}} expire {{when}}",
+  "accountAlertExpiredBody": "Ses chaînes et films ne seront plus lus tant que vous n'aurez pas renouvelé auprès de votre fournisseur.",
+  "accountAlertExpiringBody": "Renouvelez auprès de votre fournisseur pour continuer à regarder sans interruption.",
+  "accountAlertOpen": "Voir l'abonnement",
+  "accountAlertDismiss": "Ignorer l'alerte pour {{name}}",
+  "navScheduled": "Programmés"
 }

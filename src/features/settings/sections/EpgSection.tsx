@@ -308,6 +308,14 @@ export function EpgSection({ settings, update }: SectionProps) {
             </div>
           )}
         </SettingsRow>
+        {/* guide: Xtream short-EPG fallback. */}
+        <SwitchRow
+          label={t('epgShortFallback')}
+          description={t('epgShortFallbackHint')}
+          checked={settings.epgShortFallback !== false}
+          onChange={(epgShortFallback) => void update({ epgShortFallback })}
+          testId="toggle-epgShortFallback"
+        />
       </SettingsGroup>
 
       <SettingsGroup title={t('epgClearTitle')}>

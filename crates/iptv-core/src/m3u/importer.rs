@@ -1033,6 +1033,7 @@ mod tests {
             url: Some(url.into()),
             file_path: None,
             headers: Default::default(),
+            catchup: None,
         };
         let started = std::time::Instant::now();
         let r = fetch_to_file(&state, "s", url, &cfg, &tmp.path().join("x.part")).await;
@@ -1214,6 +1215,7 @@ mod tests {
             url: Some(url.clone()),
             file_path: None,
             headers: Default::default(),
+            catchup: None,
         };
         let err = fetch_to_file(&state, "s", &url, &cfg, &tmp.path().join("x.part"))
             .await

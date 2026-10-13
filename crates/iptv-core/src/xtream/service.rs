@@ -6,7 +6,7 @@ use super::meta::{
     self, added_to_rfc3339, duration_to_seconds, parse_instant, parse_server_datetime,
     unix_to_rfc3339, year_from_date, ServerMeta,
 };
-use super::raw::{RawEpgListing, RawSeriesInfo, RawShortEpg, RawVodInfo};
+use super::raw::{RawAccount, RawEpgListing, RawSeriesInfo, RawShortEpg, RawVodInfo};
 use super::sync::{load_source, XtreamSourceRow};
 use super::url::{catchup_stamp, clean_extension, episode_url, live_url, movie_url, timeshift_url};
 use crate::catalog::{self, NamedRow};
@@ -717,9 +717,16 @@ pub async fn catchup_url(
 // ---------------------------------------------------------------------------
 
 /// Decodes a base64 EPG field; returns the input when it is not base64 text.
+///
+/// Line breaks inside the value are ignored (some panels wrap long base64 at
+/// 76 columns); spaces are not, so a plain title is never read as base64.
 pub fn decode_b64_text(s: &str) -> String {
     let t = s.trim();
-    match B64.decode(t) {
+    let compact: String = t
+        .chars()
+        .filter(|c| !matches!(c, '\n' | '\r' | '\t'))
+        .collect();
+    match B64.decode(compact.as_bytes()) {
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(text)
                 if !text.trim().is_empty()
@@ -744,6 +751,8 @@ pub fn map_short_epg(
     limit: usize,
 ) -> Vec<EpgProgram> {
     let to_utc = |ts: Option<i64>, local: Option<&str>| -> Option<(i64, String)> {
+        // A few panels send milliseconds; no programme airs in the year 5138.
+        let ts = ts.map(|t| if t > 100_000_000_000 { t / 1000 } else { t });
         let secs = ts.filter(|t| *t > 0).or_else(|| {
             local
                 .and_then(parse_server_datetime)
@@ -755,7 +764,11 @@ pub fn map_short_epg(
         .into_iter()
         .filter_map(|l| {
             let (start_secs, start) = to_utc(l.start_timestamp, l.start.as_deref())?;
-            let (_, end) = to_utc(l.stop(), l.end.as_deref())?;
+            let (end_secs, end) = to_utc(l.stop(), l.end.as_deref())?;
+            // An empty or backwards slot would draw nothing and confuse now/next.
+            if end_secs <= start_secs {
+                return None;
+            }
             let title = l
                 .title
                 .as_deref()
@@ -823,6 +836,36 @@ pub async fn short_epg(
     ))
 }
 
+/// Most programmes kept from one `get_simple_data_table` answer (a panel
+/// with a two-week archive lists a few thousand).
+pub const DATA_TABLE_MAX: usize = 5000;
+
+/// guide: the panel's full archive table for a live channel
+/// (`get_simple_data_table`), decoded like the short EPG.
+pub async fn simple_data_table(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Vec<EpgProgram>> {
+    expect_type(r, &[ContentType::Live], "catchup.programs")?;
+    let cx = ctx(state, r).await?;
+    let raw: RawShortEpg = cx
+        .client
+        .get(
+            Some("get_simple_data_table"),
+            &[("stream_id", r.item_id.clone())],
+        )
+        .await?;
+    let fallback = cx
+        .item
+        .as_ref()
+        .and_then(|n| n.row.epg_channel_id.clone())
+        .unwrap_or_else(|| r.item_id.clone());
+    let offset = cx.meta.as_ref().map_or(0, |m| m.offset_seconds);
+    Ok(map_short_epg(
+        raw.epg_listings.items,
+        &fallback,
+        offset,
+        DATA_TABLE_MAX,
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Account and test
 // ---------------------------------------------------------------------------
@@ -865,16 +908,21 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
     let client = XtreamClient::new(http, &source.config)?;
     let acc = client.account().await?;
     let m = ServerMeta::from_account(&acc);
-    let allowed_output_formats = m.allowed_output_formats.clone();
     let rt = meta::runtime(state);
     let sid = source_id.to_string();
     state
         .db_call(move |c| meta::store_meta(c, &rt, &sid, &m))
         .await?;
+    Ok(info_from_raw(acc))
+}
 
+/// `xtream.accountInfo` fields of a `player_api.php` account reply (also
+/// used by the sync to refresh the cached account status).
+pub fn info_from_raw(acc: RawAccount) -> XtreamAccountInfo {
+    let allowed_output_formats = ServerMeta::from_account(&acc).allowed_output_formats;
     let u = acc.user_info.unwrap_or_default();
     let s = acc.server_info.unwrap_or_default();
-    Ok(XtreamAccountInfo {
+    XtreamAccountInfo {
         status: non_empty(u.status).unwrap_or_else(|| "Active".into()),
         exp_date: u.exp_date.and_then(unix_to_rfc3339),
         active_cons: u.active_cons.unwrap_or(0).max(0),
@@ -884,7 +932,7 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
         server_time: server_time(s.timestamp_now, s.time_now, s.timezone.as_deref()),
         timezone: non_empty(s.timezone),
         allowed_output_formats,
-    })
+    }
 }
 
 /// `serverTime` of `xtream.accountInfo`: RFC 3339 from `timestamp_now`, or
@@ -1085,6 +1133,56 @@ mod tests {
         assert_eq!(decode_b64_text("TW9ybmluZyBOZXdz\n"), "Morning News");
         assert_eq!(decode_b64_text("Q2Fmw6k"), "Café"); // unpadded
         assert_eq!(decode_b64_text("Plain title!"), "Plain title!");
+        // guide: wrapped base64, plain words, and garbage that decodes to binary.
+        assert_eq!(decode_b64_text("TW9ybmlu\r\nZyBOZXdz"), "Morning News");
+        assert_eq!(decode_b64_text("Morning News"), "Morning News");
+        assert_eq!(decode_b64_text("AAEC"), "AAEC");
+        assert_eq!(decode_b64_text("  "), "");
+    }
+
+    #[test]
+    fn short_epg_drops_bad_slots_and_reads_milliseconds() {
+        let listings: RawShortEpg = serde_json::from_value(json!({"epg_listings": [
+            {"title": "QmFja3dhcmRz", "start_timestamp": 1700007200, "stop_timestamp": 1700003600},
+            {"title": "RW1wdHk=", "start_timestamp": 1700003600, "stop_timestamp": 1700003600},
+            {"title": "TWlsbGlz", "start_timestamp": 1700003600000_i64, "stop_timestamp": "1700007200000"},
+            {"title": "Tm8gZW5k", "start_timestamp": 1700010000},
+            {"title": "QmFkIGRhdGU=", "start": "not a date", "end": "2023-11-15 00:13:20"},
+            "garbage",
+            {"title": 42, "start_timestamp": -5, "stop_timestamp": 10}
+        ]}))
+        .unwrap();
+        let p = map_short_epg(listings.epg_listings.items, "f", 0, 10);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].title, "Millis");
+        assert_eq!(p[0].start, "2023-11-14T23:13:20Z");
+        assert_eq!(p[0].end, "2023-11-15T00:13:20Z");
+    }
+
+    #[test]
+    fn short_epg_offset_applies_to_local_strings_only() {
+        let listings: RawShortEpg = serde_json::from_value(json!({"epg_listings": [
+            {"title": "TG9jYWw=", "start": "2023-11-15 01:00:00", "end": "2023-11-15 02:00:00"},
+            {"title": "U3RhbXA=", "start": "2023-11-15 05:00:00", "end": "2023-11-15 06:00:00",
+             "start_timestamp": 1700024400, "stop_timestamp": 1700028000}
+        ]}))
+        .unwrap();
+        // Server two hours east of UTC: 01:00 local is 23:00 UTC the day before.
+        let p = map_short_epg(listings.epg_listings.items, "f", 7200, 10);
+        assert_eq!(p[0].title, "Local");
+        assert_eq!(p[0].start, "2023-11-14T23:00:00Z");
+        // Timestamps win over the local strings and ignore the offset.
+        assert_eq!(p[1].title, "Stamp");
+        assert_eq!(p[1].start, "2023-11-15T05:00:00Z");
+        // A limit cuts after sorting.
+        let one: RawShortEpg = serde_json::from_value(json!({"epg_listings": [
+            {"title": "Qg==", "start_timestamp": 1700010000, "stop_timestamp": 1700013600},
+            {"title": "QQ==", "start_timestamp": 1700000000, "stop_timestamp": 1700003600}
+        ]}))
+        .unwrap();
+        let p = map_short_epg(one.epg_listings.items, "f", 0, 1);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].title, "A");
     }
 
     #[test]

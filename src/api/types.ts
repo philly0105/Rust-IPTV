@@ -27,6 +27,22 @@ export interface M3uSourceConfig {
   url?: string;
   filePath?: string;
   headers: RequestHeaders;
+  // guide:
+  /** Source-wide catch-up override; absent = the playlist's own attributes. Applied by core to channel rows. */
+  catchup?: CatchupOverride;
+}
+
+// guide:
+/** `none` turns catch-up off; the others are the M3U catch-up types (see `features/live/lib/catchup.ts`). */
+export type CatchupOverrideType = 'default' | 'append' | 'shift' | 'flussonic' | 'xc' | 'none';
+
+// guide:
+export interface CatchupOverride {
+  type: CatchupOverrideType;
+  /** Replaces each channel's `catchup-source` (placeholders: {utc} {lutc} {utcend} {duration} {offset} {Y}{m}{d}{H}{M}{S}). */
+  template?: string;
+  /** Replaces each channel's `catchup-days` (1..366). */
+  days?: number;
 }
 
 export interface XtreamSourceConfig {
@@ -67,6 +83,9 @@ export interface Source {
   lastError?: string;
   /** Classified code for `lastError` (C10); absent when there is no error or it predates codes. */
   lastErrorCode?: RpcErrorCode;
+  // account:
+  /** When `lastError` was recorded (RFC 3339); absent without an error. */
+  lastErrorAt?: string;
   /** Live channels only; radio stations are in `radioCount`. */
   channelCount: number;
   radioCount: number;
@@ -262,6 +281,9 @@ export interface EpgProgram {
   description?: string;
   category?: string;
   icon?: string;
+  // guide:
+  /** UI only, never sent by core: the programme came from the provider's short EPG, not XMLTV. */
+  fromProvider?: boolean;
 }
 
 export interface EpgNowNext {
@@ -440,6 +462,32 @@ export interface Settings {
   vodMinRating: number;
   /** `null` = `<downloadsDir>/recordings`. Desktop only. */
   recordingsDir: string | null;
+  // failover: smart reconnect and live failover.
+  /** Live channels switch to the same channel on another source when the stream fails. */
+  liveFailover: boolean;
+  /** Dropped or stalled streams are retried quietly before an error shows. */
+  streamReconnect: boolean;
+  // remote:
+  /** Remote control also listens on private network addresses for paired phones. Desktop only. */
+  remoteLanEnabled: boolean;
+  // account:
+  /** Hours between scheduled source refreshes (0 = only at startup; 0..168). */
+  sourceRefreshIntervalHours: number;
+  /** Warn this many days before a subscription expires (0 = off; 0..60). */
+  accountExpiryWarnDays: number;
+  // guide:
+  /** Xtream channels without XMLTV programmes show the provider's short EPG. */
+  epgShortFallback: boolean;
+  // recording:
+  /** Minutes a scheduled recording starts early (0..60). */
+  recordingPaddingBeforeMinutes: number;
+  /** Minutes a scheduled recording runs past the programme end (0..120). */
+  recordingPaddingAfterMinutes: number;
+  /** Guide reminders fire while the app runs. */
+  remindersEnabled: boolean;
+  /** Minutes before the start a reminder fires (0..60). */
+  reminderLeadMinutes: number;
+  reminderAction: ReminderAction;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -480,6 +528,22 @@ export const DEFAULT_SETTINGS: Settings = {
   showExternalBar: true,
   vodMinRating: 0,
   recordingsDir: null,
+  // failover: smart reconnect and live failover.
+  liveFailover: true,
+  streamReconnect: true,
+  // remote:
+  remoteLanEnabled: false,
+  // account:
+  sourceRefreshIntervalHours: 12,
+  accountExpiryWarnDays: 7,
+  // guide:
+  epgShortFallback: true,
+  // recording:
+  recordingPaddingBeforeMinutes: 1,
+  recordingPaddingAfterMinutes: 5,
+  remindersEnabled: true,
+  reminderLeadMinutes: 2,
+  reminderAction: 'notify',
 };
 
 export interface WindowState {
@@ -532,6 +596,27 @@ export interface MpvState {
   seekable?: { start: number; end: number };
   /** True while mpv is paused waiting for its cache to fill (buffering); omitted when unknown. */
   buffering?: boolean;
+}
+
+// player: `mpv.stats` result (stream info overlay). Fields are omitted when mpv does not know them.
+export interface MpvStats {
+  videoCodec?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  /** Bits per second. */
+  videoBitrate?: number;
+  audioCodec?: string;
+  audioChannels?: number;
+  /** Bits per second. */
+  audioBitrate?: number;
+  /** Hardware decoder in use; omitted for software decoding. */
+  hwdec?: string;
+  /** True once mpv reported its decoder state. */
+  hwdecKnown: boolean;
+  droppedFrames?: number;
+  cacheSeconds?: number;
+  container?: string;
 }
 
 /** Child-window rectangle in CSS pixels (`mpv.attach`, `mpv.setBounds`). */
@@ -774,6 +859,11 @@ export interface AppEventMap {
   'player.external': PlayerExternalEvent;
   'deeplink.open': DeepLinkEvent;
   'events.lagged': EventsLaggedEvent;
+  // recording:
+  'reminders.update': EmptyEvent;
+  'reminders.fire': ReminderFiredEvent;
+  'recordings.update': EmptyEvent;
+  'recordings.progress': RecordingProgressEvent;
 }
 
 export type AppEventType = keyof AppEventMap;
@@ -782,4 +872,131 @@ export type AppEventType = keyof AppEventMap;
 export interface AppEvent<T = unknown> {
   type: string;
   payload: T;
+}
+
+// failover: `live.alternates` result (crates/iptv-core/src/live).
+/** Quality tier read from a channel name (HD, FHD, 4K...). */
+export type ChannelQuality = 'sd' | 'hd' | 'fhd' | 'uhd';
+
+/** The same channel on another source (or a duplicate in the same one). */
+export interface LiveAlternate {
+  channel: Channel;
+  sourceName: string;
+  sourceKind: SourceKind;
+  quality?: ChannelQuality;
+  matchedBy: 'epg' | 'name';
+}
+
+export interface LiveAlternates {
+  /** Normalized channel name ("sky sports 1"); source pins are keyed by it. */
+  key: string;
+  quality?: ChannelQuality;
+  /** Best first: same quality tier, then source order. */
+  alternates: LiveAlternate[];
+}
+
+// recording:
+/** What a due guide reminder does (`settings.reminderAction`). */
+export type ReminderAction = 'notify' | 'switch';
+
+export type ReminderStatus = 'pending' | 'fired' | 'missed';
+
+/** A guide reminder. `start`/`end` are RFC 3339 display times (EPG offset applied). */
+export interface Reminder {
+  id: string;
+  ref: ItemRef;
+  channelName: string;
+  title: string;
+  start: string;
+  end: string;
+  status: ReminderStatus;
+}
+
+export type RecordingStatus = 'scheduled' | 'recording' | 'completed' | 'failed' | 'missed' | 'cancelled';
+
+export type RecordingKind = 'programme' | 'channel';
+
+/** Code of a status message the core wrote on a recording (`Recording.errorCode`), for translation. */
+export type RecordingErrorCode =
+  | 'reconnecting'
+  | 'engineMissing'
+  | 'missedNotRunning'
+  | 'stoppedShutdown'
+  | 'closedEarly'
+  | 'closedNothing'
+  | 'nothingRecorded'
+  | 'stopped'
+  | 'sourceRemoved'
+  | 'streamDropped';
+
+/** A scheduled (or finished) recording. `start`/`end` exclude padding. */
+export interface Recording {
+  id: string;
+  ref: ItemRef;
+  channelName: string;
+  title?: string;
+  kind: RecordingKind;
+  start: string;
+  end: string;
+  paddingBeforeMinutes: number;
+  paddingAfterMinutes: number;
+  status: RecordingStatus;
+  error?: string;
+  /** Set when `error` is one of the core's own messages; free-text stream errors have none. */
+  errorCode?: RecordingErrorCode;
+  fileNames: string[];
+  bytes: number;
+  startedAt?: string;
+  endedAt?: string;
+  engine?: string;
+}
+
+/** `recordings.schedule`: a programme (`title`, `start`, `end`) or a channel for `durationMinutes`. */
+export interface ScheduleRecordingArgs {
+  ref: ItemRef;
+  channelName: string;
+  title?: string;
+  start?: string;
+  end?: string;
+  durationMinutes?: number;
+}
+
+export interface ScheduleRecordingResult {
+  recording: Recording;
+  /** More overlapping recordings on this account than it allows connections (not blocking). */
+  warning?: { maxConnections: number; overlapping: number };
+}
+
+export interface RecordingCapabilities {
+  supported: boolean;
+  mpv: boolean;
+  reason?: string;
+}
+
+/** A recording file in My Videos: a scheduled recording's file, or a loose file in the recordings folder. */
+export interface RecordingFile {
+  id: string;
+  fileName: string;
+  recordingId?: string;
+  channelName?: string;
+  title?: string;
+  part?: number;
+  sizeBytes: number;
+  date: string;
+  durationSeconds?: number;
+  fileAvailable: boolean;
+  status?: RecordingStatus;
+}
+
+export interface ReminderFiredEvent {
+  reminder: Reminder;
+  action: ReminderAction;
+  /** When it fired; with the reminder id, tells one firing from a later one of the same reminder. */
+  firedAt?: string;
+}
+
+export interface RecordingProgressEvent {
+  id: string;
+  bytes: number;
+  elapsedSeconds: number;
 }

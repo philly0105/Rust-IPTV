@@ -57,6 +57,7 @@
   "settingsPlayback": "Riproduzione",
   "settingsPlayers": "Lettori esterni",
   "settingsEpg": "Guida TV",
+  "settingsRecording": "Registrazione",
   "settingsMetadata": "Metadati",
   "settingsAppearance": "Aspetto",
   "settingsRemote": "Telecomando",
@@ -182,5 +183,13 @@
   "trayQuit": "Esci",
   "dashboardLoadFailed": "Impossibile caricare la Home",
   "dashboardLocalDataHint": "Cronologia, preferiti e libreria sono salvati su questo computer. Riprova; se il problema persiste, riavvia l'app.",
-  "ratedLabel": "valutazione {{rating}}"
+  "ratedLabel": "valutazione {{rating}}",
+  "accountAlertsLabel": "Avvisi sull'abbonamento",
+  "accountAlertExpiredTitle": "{{name}} è scaduto",
+  "accountAlertExpiringTitle": "{{name}} scade {{when}}",
+  "accountAlertExpiredBody": "I suoi canali e film non verranno riprodotti finché non rinnovi con il tuo provider.",
+  "accountAlertExpiringBody": "Rinnova con il tuo provider per continuare a guardare senza interruzioni.",
+  "accountAlertOpen": "Vedi abbonamento",
+  "accountAlertDismiss": "Ignora l'avviso per {{name}}",
+  "navScheduled": "Programmati"
 }

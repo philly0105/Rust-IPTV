@@ -5,6 +5,14 @@
  * Inputs, strongest first: the browser's connectivity, the core's RPC error code, an HTTP
  * status in the message (hls.js, mpegts.js, shaka and our proxy all write `HTTP <code>`),
  * known phrases from engines and mpv, then the engine's coarse error kind.
+ *
+ * account: a provider that refuses a stream because every connection of the subscription is
+ * in use answers with a plain 403 (or 458/509) more often than with a readable body, so the
+ * player asks `account.status` right after the failure and passes the counts in `connections`.
+ * Connections the app itself holds (`own`: the stream that just dropped, running recordings)
+ * may be among them. Only the rest, when they fill the limit, relabel a failure for certain;
+ * when the limit is only full counting our own, a refused stream (auth class) reads "may be
+ * reached" and every other class keeps its own text.
  */
 
 import type { RpcErrorCode } from '@/api/types';
@@ -22,7 +30,9 @@ export type StreamErrorClass =
   | 'network'
   | 'media'
   | 'crashed'
-  | 'generic';
+  | 'generic'
+  // account:
+  | 'connectionLimit';
 
 export interface StreamErrorInput {
   message?: string | undefined;
@@ -30,6 +40,9 @@ export interface StreamErrorInput {
   code?: RpcErrorCode | undefined;
   /** `navigator.onLine`; only `false` means offline. */
   online?: boolean | undefined;
+  // account: connections in use and the limit, from `account.status` checked after the failure;
+  // `own` = how many of them may be this app's (its dropped stream, its recordings).
+  connections?: { active: number; max: number; own?: number } | null | undefined;
 }
 
 const RPC_CODES: readonly RpcErrorCode[] = [
@@ -109,14 +122,42 @@ const PHRASES: readonly [RegExp, StreamErrorClass][] = [
   [/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|name not resolved|\bdns\b/i, 'offline'],
 ];
 
+// account: provider wording for "every connection is in use", and the classes a full account hides behind.
+const CONNECTION_LIMIT = /max(?:imum)?[\s_-]*connections?|connections? limit|too many (?:connections|streams|devices)|connection limit|max_connections/i;
+const CONNECTION_LIMIT_STATUSES: readonly number[] = [458, 509];
+const MASKED_BY_FULL_ACCOUNT: readonly StreamErrorClass[] = ['auth', 'server', 'network', 'timeout', 'generic'];
+
+/** The provider's own words or status say the limit is reached. */
+function providerSaysLimit(message: string | undefined, status: number | undefined): boolean {
+  return CONNECTION_LIMIT.test(message ?? '') || (status !== undefined && CONNECTION_LIMIT_STATUSES.includes(status));
+}
+
+/** Every connection of the account is in use by someone other than this app. */
+export function connectionsFull(c: StreamErrorInput['connections']): boolean {
+  return !!c && c.max > 0 && c.active - (c.own ?? 0) >= c.max;
+}
+
+/** The limit is reached only if this app's own connections are still counted. */
+export function connectionsMaybeFull(c: StreamErrorInput['connections']): boolean {
+  return !!c && c.max > 0 && c.active >= c.max && !connectionsFull(c);
+}
+
 /** One class per failure; see the module comment for the order of evidence. */
 export function classifyStreamError(input: StreamErrorInput): StreamErrorClass {
   // A missing player fails the same way online or offline, whatever code it came with.
   if (input.code === 'engine_missing' || ENGINE_MISSING.test(input.message ?? '')) return 'engineMissing';
   if (input.online === false) return 'offline';
+  // account:
+  const status = httpStatusOf(input.message);
+  if (providerSaysLimit(input.message, status)) return 'connectionLimit';
+  const base = classifyBase(input, status);
+  if (connectionsFull(input.connections) && MASKED_BY_FULL_ACCOUNT.includes(base)) return 'connectionLimit';
+  return connectionsMaybeFull(input.connections) && base === 'auth' ? 'connectionLimit' : base;
+}
+
+function classifyBase(input: StreamErrorInput, status: number | undefined): StreamErrorClass {
   const byCode = input.code ? fromCode(input.code) : undefined;
   if (byCode) return byCode;
-  const status = httpStatusOf(input.message);
   const byStatus = status !== undefined ? fromStatus(status) : undefined;
   if (byStatus) return byStatus;
   const message = input.message ?? '';
@@ -133,8 +174,14 @@ export function classifyStreamError(input: StreamErrorInput): StreamErrorClass {
   }
 }
 
-/** i18n keys (namespace `player`) for a class: the headline and what to do next. */
-export function errorCopyKeys(cls: StreamErrorClass): { title: string; hint: string } {
+/**
+ * i18n keys (namespace `player`) for a class: the headline and what to do next. `params`
+ * (account: the connection counts) go to both keys when present.
+ */
+export function errorCopyKeys(
+  cls: StreamErrorClass,
+  input?: Pick<StreamErrorInput, 'connections' | 'message'>,
+): { title: string; hint: string; params?: Record<string, number> } {
   switch (cls) {
     case 'engineMissing':
       // The surface falls back to the built-in player, which this text says.
@@ -159,6 +206,16 @@ export function errorCopyKeys(cls: StreamErrorClass): { title: string; hint: str
       return { title: 'errorCrashedTitle', hint: 'errorCrashed' };
     case 'generic':
       return { title: 'errorTitle', hint: 'errorGeneric' };
+    // account:
+    case 'connectionLimit': {
+      const c = input?.connections;
+      if (!c || c.max <= 0) return { title: 'errorConnLimitTitle', hint: 'errorConnLimit' };
+      const params = { active: c.active, max: c.max };
+      // The provider said so, or nobody else could fill the limit: say it plainly.
+      const certain = connectionsFull(c) || providerSaysLimit(input?.message, httpStatusOf(input?.message));
+      if (certain) return c.active >= c.max ? { title: 'errorConnLimitTitleCount', hint: 'errorConnLimit', params } : { title: 'errorConnLimitTitle', hint: 'errorConnLimit' };
+      return connectionsMaybeFull(c) ? { title: 'errorConnLimitMaybeTitle', hint: 'errorConnLimitMaybe', params } : { title: 'errorConnLimitTitle', hint: 'errorConnLimit' };
+    }
     default: {
       const _exhaustive: never = cls;
       return _exhaustive;

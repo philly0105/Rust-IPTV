@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+// account:
+import { useConnectionCounts } from './connectionLimit';
 import type { EngineError } from './engines';
 import { browserOnline, classifyStreamError, errorCopyKeys, type StreamErrorClass } from './errors';
 import { useMediaStore } from './media';
@@ -33,9 +35,12 @@ export function useStreamError(kind?: EngineError['kind'] | null): StreamErrorVi
   const message = usePlayerStore((s) => s.error);
   const code = useMediaStore((s) => s.errorCode);
   const online = useOnline();
-  const cls = classifyStreamError({ message, kind, code, online });
-  const keys = errorCopyKeys(cls);
-  return { cls, title: t(keys.title), hint: t(keys.hint) };
+  // account: a full account turns a bare 403/5xx into "Connection limit reached (2 of 2 in use)".
+  const sourceId = usePlayerStore((s) => s.source?.ref?.sourceId);
+  const connections = useConnectionCounts({ message, kind, code, online }, sourceId);
+  const cls = classifyStreamError({ message, kind, code, online, connections });
+  const keys = errorCopyKeys(cls, { connections, message });
+  return { cls, title: t(keys.title, keys.params), hint: t(keys.hint, keys.params) };
 }
 
 /**

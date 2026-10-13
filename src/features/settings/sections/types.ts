@@ -30,7 +30,7 @@ export interface SectionProps {
   update: (patch: SettingsPatch) => Promise<boolean>;
 }
 
-export const SECTION_IDS = ['general', 'playback', 'players', 'epg', 'metadata', 'appearance', 'remote', 'backup', 'shortcuts', 'about'] as const;
+export const SECTION_IDS = ['general', 'playback', 'players', 'epg', 'recording', 'metadata', 'appearance', 'remote', 'backup', 'shortcuts', 'about'] as const;
 export type SectionId = (typeof SECTION_IDS)[number];
 
 export function isSectionId(v: string | undefined): v is SectionId {

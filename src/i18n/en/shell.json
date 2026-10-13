@@ -57,6 +57,7 @@
   "settingsPlayback": "Playback",
   "settingsPlayers": "External players",
   "settingsEpg": "TV guide",
+  "settingsRecording": "Recording",
   "settingsMetadata": "Metadata",
   "settingsAppearance": "Appearance",
   "settingsRemote": "Remote control",
@@ -177,5 +178,13 @@
   "trayQuit": "Quit",
   "dashboardLoadFailed": "Couldn't load your dashboard",
   "dashboardLocalDataHint": "Your history, favorites and library are stored on this computer. Try again; if it keeps failing, restart the app.",
-  "ratedLabel": "rated {{rating}}"
+  "ratedLabel": "rated {{rating}}",
+  "accountAlertsLabel": "Subscription alerts",
+  "accountAlertExpiredTitle": "{{name}} has expired",
+  "accountAlertExpiringTitle": "{{name}} expires {{when}}",
+  "accountAlertExpiredBody": "Its channels and movies won't play until you renew with your provider.",
+  "accountAlertExpiringBody": "Renew with your provider to keep watching without a break.",
+  "accountAlertOpen": "View subscription",
+  "accountAlertDismiss": "Dismiss the alert for {{name}}",
+  "navScheduled": "Scheduled"
 }

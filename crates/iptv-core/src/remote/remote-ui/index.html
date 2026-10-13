@@ -173,6 +173,24 @@
   .skel { height: 56px; margin: 4px 0; border-radius: 14px; background: linear-gradient(90deg, var(--key) 0%, var(--key-hi) 50%, var(--key) 100%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
   @keyframes shimmer { to { background-position: -200% 0; } }
 
+  /* Pairing gate: shown instead of the remote when this phone has no session */
+  .gate { display: none; max-width: 420px; margin: 0 auto; padding: 8px 4px; }
+  body.unpaired .gate { display: grid; gap: 18px; }
+  body.unpaired .remote { display: none; }
+  .gate__icon { width: 64px; height: 64px; border-radius: 20px; background: var(--lcd-bg); color: var(--lcd);
+    display: grid; place-items: center; box-shadow: inset 0 0 0 1px #3b2f1a; }
+  .gate__icon svg { width: 34px; height: 34px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .gate h1 { margin: 0; font-size: 1.625rem; line-height: 1.2; font-weight: 650; }
+  .gate p { margin: 0; color: var(--ink-muted); font-size: 1rem; line-height: 1.5; }
+  .gate__why { color: var(--ink); }
+  .gate ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; counter-reset: step; }
+  .gate li { counter-increment: step; display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start;
+    background: var(--shell); border-radius: 16px; padding: 14px; line-height: 1.45; }
+  .gate li::before { content: counter(step); width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--key); color: var(--lcd); font-family: var(--font-num); font-weight: 600; }
+  .gate li b { font-weight: 600; }
+  .gate__status { min-height: 1.4em; font-size: 0.9375rem; color: var(--ink-muted); }
+
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
   @media (min-width: 700px) { body { padding-top: 32px; } }
@@ -183,6 +201,21 @@
 </style>
 </head>
 <body>
+<section class="gate" id="gate" aria-labelledby="gateTitle">
+  <div class="gate__icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>
+  </div>
+  <h1 id="gateTitle">Not paired</h1>
+  <p class="gate__why" id="gateWhy" role="alert">This phone isn't paired with Tsrust IPTV yet.</p>
+  <ol>
+    <li><span>On the computer, open Tsrust IPTV and go to <b>Settings &gt; Remote</b>.</span></li>
+    <li><span>Turn on <b>Allow phones on this network</b>.</span></li>
+    <li><span>Choose <b>Show pairing code</b> and scan the QR code with this phone's camera. It opens this page already paired.</span></li>
+  </ol>
+  <button class="key wide" id="recheck" data-act="recheck">Check again</button>
+  <p class="gate__status" id="gateStatus" aria-live="polite"></p>
+</section>
+
 <main class="remote" aria-label="Remote control">
   <div class="banner" id="banner" role="alert">
     <span><b>Can't reach Tsrust IPTV.</b> Keep the desktop app open with remote control turned on. Retrying in <span id="retryIn">1</span> s.</span>
@@ -314,6 +347,8 @@
       if (!res.ok) {
         const err = new Error(data.message || ("Request failed with status " + res.status));
         err.status = res.status;
+        err.code = data.error;
+        if (res.status === 401 && data.error === "unpaired") showUnpaired();
         throw err;
       }
       return data;
@@ -322,11 +357,51 @@
     }
   }
 
+  // ---- pairing -------------------------------------------------------------
+
+  let unpaired = false;
+
+  function showUnpaired(why) {
+    unpaired = true;
+    clearTimeout(pollTimer);
+    $("banner").classList.remove("show");
+    if (why) $("gateWhy").textContent = why;
+    if (!document.body.classList.contains("unpaired")) {
+      document.body.classList.add("unpaired");
+      closeList();
+    }
+  }
+
+  function showRemote() {
+    unpaired = false;
+    document.body.classList.remove("unpaired");
+  }
+
+  // `?pair=<code>` comes from the QR code. Trade it for a session cookie,
+  // and drop it from the address bar so it is not bookmarked or shared.
+  async function pairFromUrl() {
+    const params = new URLSearchParams(location.search);
+    const code = params.get("pair");
+    if (!code) return;
+    history.replaceState(null, "", location.pathname);
+    try {
+      await request("/pair", { code });
+      showRemote();
+      toast("Paired. This phone is now a remote for Tsrust IPTV.");
+    } catch (err) {
+      if (err.status === 429) showUnpaired(err.message.charAt(0).toUpperCase() + err.message.slice(1) + ".");
+      else if (err.status === 401) showUnpaired("That pairing code was already used or has expired. Show the QR code again on the computer and scan it.");
+      else if (err.status === 400 && err.code === "invalid") return; // opened on the computer itself
+      else if (err.status === 503) showUnpaired("The app couldn't read its paired phones just now. Wait a moment, then scan the same QR code again.");
+      else showUnpaired("Pairing didn't finish because the app did not answer. Check that the computer is on the same network.");
+    }
+  }
+
   // ---- status polling ------------------------------------------------------
 
   function scheduleNext() {
     clearTimeout(pollTimer);
-    if (document.hidden) return;
+    if (document.hidden || unpaired) return;
     const delay = failures === 0 ? POLL_MS : Math.min(MAX_BACKOFF_MS, POLL_MS * 2 ** failures);
     if (failures > 0) $("retryIn").textContent = String(Math.round(delay / 1000));
     pollTimer = setTimeout(poll, delay);
@@ -339,10 +414,13 @@
       status = await request("/status");
       failures = 0;
       $("banner").classList.remove("show");
+      if (unpaired) showRemote();
       render();
-    } catch (_) {
-      failures += 1;
-      if (failures >= 2) $("banner").classList.add("show");
+    } catch (err) {
+      if (err.status !== 401) {
+        failures += 1;
+        if (failures >= 2) $("banner").classList.add("show");
+      }
     } finally {
       inFlight = false;
       scheduleNext();
@@ -351,8 +429,10 @@
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) clearTimeout(pollTimer);
-    else { failures = Math.min(failures, 1); poll(); }
+    else if (!unpaired) { failures = Math.min(failures, 1); poll(); }
   });
+  // Back online (Wi-Fi reconnected, app restarted): try at once.
+  window.addEventListener("online", () => { if (!unpaired) { failures = Math.min(failures, 1); poll(); } });
 
   function volumePercent(v) {
     if (typeof v !== "number" || !isFinite(v)) return null;
@@ -407,6 +487,7 @@
       return true;
     } catch (err) {
       if (button) flash(button, "failed");
+      if (err.status === 401) return false;
       toast(err.status === 403
         ? "This page must be opened at the address shown in the app's settings."
         : (err.name === "AbortError" ? "The app did not answer. Check that it is still open." : err.message), true);
@@ -604,6 +685,20 @@
     closeList: () => closeList(),
     back: () => backDigit(),
     go: () => commit(),
+    recheck: async () => {
+      $("gateStatus").textContent = "Checking...";
+      try {
+        status = await request("/status");
+        showRemote();
+        failures = 0;
+        render();
+        scheduleNext();
+      } catch (err) {
+        $("gateStatus").textContent = err.status === 401
+          ? "Still not paired. Scan the QR code on the computer."
+          : "Can't reach the app. Check that the computer is on and on the same network.";
+      }
+    },
   };
 
   document.addEventListener("click", (e) => {
@@ -614,7 +709,7 @@
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || unpaired) return;
     const sheetOpen = $("sheet").classList.contains("open");
     if (sheetOpen) {
       if (e.key === "Escape") { e.preventDefault(); closeList(); }
@@ -634,7 +729,7 @@
   });
 
   render();
-  poll();
+  pairFromUrl().finally(() => { if (!unpaired) poll(); });
 })();
 </script>
 </body>

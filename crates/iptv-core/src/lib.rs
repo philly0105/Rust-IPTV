@@ -18,12 +18,18 @@ pub mod rpc;
 pub mod state;
 
 // Feature modules (wave 1). Each exposes `rpc::register` and `init`.
+// account:
+pub mod account;
 pub mod backup;
 pub mod catalog;
+// guide:
+pub mod catchup;
 pub mod downloads;
 pub mod epg;
 pub mod m3u;
 pub mod player;
+// recording:
+pub mod recording;
 pub mod remote;
 pub mod settings;
 pub mod sources;
@@ -31,6 +37,9 @@ pub mod stalker;
 pub mod tmdb;
 pub mod userstate;
 pub mod xtream;
+
+// failover: live channel alternates (`live.alternates`).
+pub mod live;
 
 pub use error::{CoreError, CoreResult, RpcError, RpcErrorCode};
 pub use events::{AppEvent, BroadcastSink, EventSink, NoopSink};

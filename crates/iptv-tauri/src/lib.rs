@@ -49,6 +49,12 @@ impl EventSink for TauriSink {
                 }
             }
         }
+        // recording: a reminder set to switch brings the window forward.
+        if event.kind == "reminders.fire"
+            && event.payload.get("action").and_then(|v| v.as_str()) == Some("switch")
+        {
+            show_main(&self.0);
+        }
         if let Err(err) = self.0.emit(APP_EVENT, &event) {
             tracing::warn!(kind = %event.kind, %err, "failed to emit app event");
         }
@@ -172,6 +178,27 @@ fn tray_labels(
         .map_err(|e| e.to_string())
 }
 
+// recording:
+/// `invoke('native_notify', { title, body })`: a system notification for a
+/// guide reminder (the webview sends the translated text). Control
+/// characters are dropped and the text is capped.
+#[tauri::command]
+fn native_notify(app: AppHandle, title: String, body: Option<String>) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    let clean = |s: &str, max: usize| -> String {
+        s.chars().filter(|c| !c.is_control()).take(max).collect()
+    };
+    let mut builder = app.notification().builder().title(clean(&title, 120));
+    if let Some(body) = body
+        .as_deref()
+        .map(|b| clean(b, 240))
+        .filter(|b| !b.is_empty())
+    {
+        builder = builder.body(body);
+    }
+    builder.show().map_err(|e| e.to_string())
+}
+
 /// `invoke('pip_window_saved')`: the pre-PiP geometry while PiP is on, so a
 /// reloaded webview can bring the window back.
 #[tauri::command]
@@ -259,6 +286,15 @@ async fn allow_known_media_dirs(app: AppHandle, state: Arc<AppState>) {
             }
         }
         Err(err) => tracing::warn!(%err, "could not read download folders for the asset scope"),
+    }
+    // recording: folders of recorded parts (an earlier recordings folder).
+    match iptv_core::recording::known_dirs(&state).await {
+        Ok(dirs) => {
+            for dir in dirs {
+                allow_media_dir(&app, &dir);
+            }
+        }
+        Err(err) => tracing::warn!(%err, "could not read recording folders for the asset scope"),
     }
 }
 
@@ -717,7 +753,9 @@ pub fn run() {
     builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        // recording:
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -759,7 +797,9 @@ pub fn run() {
             pip_window_saved,
             pip_aspect,
             tray_labels,
-            quit_flush::flush_done
+            quit_flush::flush_done,
+            // recording:
+            native_notify
         ])
         .on_window_event(on_window_event)
         .on_page_load(|webview, payload| {
@@ -798,6 +838,8 @@ fn shutdown(app: &AppHandle) {
         return;
     };
     let state = Arc::clone(&state);
+    // recording: stop scheduled recordings and save their final state first.
+    tauri::async_runtime::block_on(iptv_core::recording::shutdown(&state));
     iptv_core::player::kill_embedded(&state);
     let stop = iptv_core::remote::stop(Arc::clone(&state));
     let stopped = tauri::async_runtime::block_on(async {

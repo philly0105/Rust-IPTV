@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "无法加载这些影片",
-  "searchPartialError": "部分结果无法加载。"
+  "searchPartialError": "部分结果无法加载。",
+  "previousEpisode": "上一集"
 }

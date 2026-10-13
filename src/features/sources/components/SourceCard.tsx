@@ -4,6 +4,7 @@ import { useId, type DragEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
+import type { AccountStatus, ScheduleEntry } from '@/api/rpc';
 import type { Source, SourceKind } from '@/api/types';
 
 import { Badge, Button, IconButton } from '@/ui';
@@ -14,6 +15,7 @@ import { isRunningPhase, type ProgressEntry } from '../lib/progress';
 import { redactText } from '../lib/redact';
 import { SOURCE_ERROR_KEYS, classifySourceError, sourceErrorDetail, splitErrorText } from '../lib/sourceError';
 import { displayHost } from '../lib/validate';
+import { AccountBadges } from './AccountBadges';
 import { hasAccountInfo } from './AccountPanel';
 import { GuideProgressView } from './GuideProgressView';
 import { ImportProgressView } from './ImportProgressView';
@@ -151,6 +153,24 @@ export interface SourceCardProps {
   onDragOver: (e: DragEvent<HTMLElement>) => void;
   onDrop: (e: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
+  /** Cached subscription status (Xtream and Stalker). */
+  account?: AccountStatus | null;
+  /** `accountExpiryWarnDays`; 0 turns the expiring badge off. */
+  warnDays?: number;
+  /** When the scheduled refresh runs next; absent when the source is not scheduled. */
+  schedule?: ScheduleEntry;
+}
+
+/**
+ * "Next refresh in 4 hours", or "Retrying in 30 minutes" after a failure. A time already
+ * passed reads as soon: the scheduler checks every 10 minutes.
+ */
+function nextRefreshText(entry: ScheduleEntry, lang: string, t: (k: string, o?: Record<string, unknown>) => string, now: number = Date.now()): string | undefined {
+  const at = Date.parse(entry.nextRefreshAt);
+  if (Number.isNaN(at)) return undefined;
+  if (at <= now + 60_000) return t('nextRefreshSoon');
+  const when = relativeTime(entry.nextRefreshAt, lang, now);
+  return when ? t(entry.retrying ? 'nextRefreshRetry' : 'nextRefreshIn', { when }) : undefined;
 }
 
 export function SourceCard(props: SourceCardProps) {
@@ -194,6 +214,8 @@ export function SourceCard(props: SourceCardProps) {
   };
 
   const refreshed = relativeTime(s.lastRefreshAt, lang);
+  const failed = s.lastError ? relativeTime(s.lastErrorAt, lang) : undefined;
+  const next = s.autoRefresh && props.schedule && !busy ? nextRefreshText(props.schedule, lang, t) : undefined;
 
   return (
     <li
@@ -238,7 +260,7 @@ export function SourceCard(props: SourceCardProps) {
         </span>
 
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Link
               to={`/s/${s.id}/live`}
               id={nameId}
@@ -250,6 +272,7 @@ export function SourceCard(props: SourceCardProps) {
             </Link>
             <span className="sr-only">{t(`kindLabel_${s.kind}`)}</span>
             {s.autoRefresh ? <Badge>{t('autoRefreshBadge')}</Badge> : null}
+            <AccountBadges status={props.account} warnDays={props.warnDays ?? 0} />
           </div>
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 text-sm text-fg-muted">
             <span className="truncate" dir="auto">
@@ -259,6 +282,16 @@ export function SourceCard(props: SourceCardProps) {
             {refreshed || !s.lastError ? (
               <span className="text-fg-subtle" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
                 {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
+              </span>
+            ) : null}
+            {failed ? (
+              <span className="text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
+                {t('failedAgo', { when: failed })}
+              </span>
+            ) : null}
+            {next ? (
+              <span className="text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
+                {next}
               </span>
             ) : null}
           </p>

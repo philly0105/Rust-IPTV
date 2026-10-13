@@ -1,4 +1,6 @@
 import {
+  // recording:
+  AlarmClock,
   CalendarRange,
   ChevronDown,
   Download,
@@ -43,6 +45,8 @@ const PRIMARY: PrimaryLink[] = [
   { to: '/recent', labelKey: 'navRecent', icon: History },
   { to: '/downloads', labelKey: 'navDownloads', icon: Download },
   { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive },
+  // recording:
+  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock },
 ];
 
 const KIND_LABEL: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'XC', stalker: 'STB' };

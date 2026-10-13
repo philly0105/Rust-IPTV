@@ -119,6 +119,9 @@ pub async fn sync_source(
     progress(&state, source_id, "fetching", 0, None, Some("account"));
     let account = client.account().await?;
     let server_meta = ServerMeta::from_account(&account);
+    // account: the reply doubles as a fresh subscription status.
+    crate::account::remember_xtream(&state, source_id, super::service::info_from_raw(account))
+        .await;
     let rt = meta::runtime(&state);
     {
         let rt = rt.clone();

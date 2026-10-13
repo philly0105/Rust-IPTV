@@ -57,6 +57,7 @@
   "settingsPlayback": "播放",
   "settingsPlayers": "外部播放器",
   "settingsEpg": "節目表",
+  "settingsRecording": "錄影",
   "settingsMetadata": "中繼資料",
   "settingsAppearance": "外觀",
   "settingsRemote": "遠端控制",
@@ -177,5 +178,13 @@
   "trayQuit": "結束",
   "dashboardLoadFailed": "無法載入首頁",
   "dashboardLocalDataHint": "觀看記錄、我的最愛和媒體庫都儲存在這台電腦上。請再試一次；如果仍然失敗，請重新啟動應用程式。",
-  "ratedLabel": "評分 {{rating}}"
+  "ratedLabel": "評分 {{rating}}",
+  "accountAlertsLabel": "訂閱提醒",
+  "accountAlertExpiredTitle": "{{name}} 已過期",
+  "accountAlertExpiringTitle": "{{name}} 將於{{when}}到期",
+  "accountAlertExpiredBody": "在你向供應商續訂之前，其頻道和電影將無法播放。",
+  "accountAlertExpiringBody": "請向供應商續訂，以便不間斷地繼續觀看。",
+  "accountAlertOpen": "查看訂閱",
+  "accountAlertDismiss": "關閉 {{name}} 的提醒",
+  "navScheduled": "預約"
 }

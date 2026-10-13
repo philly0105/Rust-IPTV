@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Deze titels konden niet worden geladen",
-  "searchPartialError": "Sommige resultaten konden niet worden geladen."
+  "searchPartialError": "Sommige resultaten konden niet worden geladen.",
+  "previousEpisode": "Vorige aflevering"
 }

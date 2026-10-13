@@ -11,6 +11,8 @@ import type { EngineTracks, TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
 import { modalOpen } from '../format';
 import { setMediaCommands, useMediaStore } from '../media';
+import { bindMpvExtras } from '../mpvExtras';
+import { useStreamInfoStore } from '../streamInfo';
 import { measureMpvBounds, measureMpvLayout } from '../mpvBounds';
 import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
 import {
@@ -26,7 +28,7 @@ import {
   usePlayerStore,
 } from '../store';
 import { stepVolume } from '../usePlaybackShortcuts';
-import { VideoContextMenu } from './VideoContextMenu';
+import { VideoContextMenu } from './lazyParts';
 
 /** Off-screen bounds while a modal dialog needs the whole window (the native surface paints above the DOM). */
 export const HIDDEN_BOUNDS: Bounds = { x: -16000, y: -16000, width: 16, height: 16 };
@@ -142,6 +144,7 @@ export function MpvSurface({ className }: { className?: string }) {
     /** False until `mpv.attach` resolved and its state was applied: earlier events describe a session not yet configured. */
     let ready = false;
     let unController: () => void = () => undefined;
+    let unExtras: () => void = () => undefined;
     let lastSent: Bounds | null = null;
     let lastHoles = '[]';
     let raf = 0;
@@ -345,6 +348,8 @@ export function MpvSurface({ className }: { className?: string }) {
             setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
             setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
           });
+          unExtras();
+          unExtras = bindMpvExtras();
           setAttached(true);
           setSessionNonce((n) => n + 1);
           schedule();
@@ -384,6 +389,7 @@ export function MpvSurface({ className }: { className?: string }) {
       unAspect();
       remeasure.current = () => undefined;
       unController();
+      unExtras();
       unCommands();
       useMediaStore.setState({ mpv: undefined, recordStartedAt: undefined });
       if (session === attachSeq) void rpc('mpv.detach').catch(() => undefined);
@@ -431,6 +437,9 @@ export function MpvSurface({ className }: { className?: string }) {
     menuOpen.current = menuAt !== null;
     remeasure.current();
   }, [menuAt]);
+  // The stream info panel over the video is cut out of it as it opens and given back as it closes.
+  const statsOpen = useStreamInfoStore((s) => s.open);
+  useEffect(() => remeasure.current(), [statsOpen]);
   // A new item (or none) closes the menu of the old one.
   useEffect(() => setMenuAt(null), [loadKey, hasSource]);
 

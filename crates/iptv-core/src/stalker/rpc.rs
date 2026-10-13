@@ -131,7 +131,9 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
         Ok::<Page<Value>, RpcError>(search(&s, a).await?)
     });
     r.add("stalker.accountInfo", |s, a: SourceArgs| async move {
-        Ok::<StalkerAccountInfo, RpcError>(playback::account_info(&s, &a.source_id).await?)
+        let info = playback::account_info(&s, &a.source_id).await?;
+        crate::account::remember_stalker(&s, &a.source_id, &info).await;
+        Ok::<StalkerAccountInfo, RpcError>(info)
     });
     r.add("stalker.test", |s, a: TestArgs| async move {
         Ok::<ConnectionTestResult, RpcError>(playback::test(&s, a.config).await)

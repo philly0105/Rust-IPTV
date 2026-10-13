@@ -37,6 +37,8 @@ tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = { workspace = true }
 tauri-plugin-opener = { workspace = true }
 tauri-plugin-deep-link = { workspace = true }
+# recording: native reminder notifications
+tauri-plugin-notification = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

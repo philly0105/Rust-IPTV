@@ -57,6 +57,7 @@
   "settingsPlayback": "Αναπαραγωγή",
   "settingsPlayers": "Εξωτερικά προγράμματα αναπαραγωγής",
   "settingsEpg": "Οδηγός προγράμματος",
+  "settingsRecording": "Εγγραφή",
   "settingsMetadata": "Μεταδεδομένα",
   "settingsAppearance": "Εμφάνιση",
   "settingsRemote": "Τηλεχειριστήριο",
@@ -177,5 +178,13 @@
   "trayQuit": "Έξοδος",
   "dashboardLoadFailed": "Δεν ήταν δυνατή η φόρτωση της αρχικής σελίδας",
   "dashboardLocalDataHint": "Το ιστορικό, τα αγαπημένα και η βιβλιοθήκη σας αποθηκεύονται σε αυτόν τον υπολογιστή. Δοκιμάστε ξανά· αν συνεχίσει να αποτυγχάνει, επανεκκινήστε την εφαρμογή.",
-  "ratedLabel": "βαθμολογία {{rating}}"
+  "ratedLabel": "βαθμολογία {{rating}}",
+  "accountAlertsLabel": "Ειδοποιήσεις συνδρομής",
+  "accountAlertExpiredTitle": "Το {{name}} έληξε",
+  "accountAlertExpiringTitle": "Το {{name}} λήγει {{when}}",
+  "accountAlertExpiredBody": "Τα κανάλια και οι ταινίες του δεν θα παίζουν μέχρι να ανανεώσετε τη συνδρομή στον πάροχό σας.",
+  "accountAlertExpiringBody": "Ανανεώστε στον πάροχό σας για να συνεχίσετε να βλέπετε χωρίς διακοπή.",
+  "accountAlertOpen": "Προβολή συνδρομής",
+  "accountAlertDismiss": "Απόρριψη ειδοποίησης για {{name}}",
+  "navScheduled": "Προγραμματισμένα"
 }

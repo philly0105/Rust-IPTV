@@ -22,6 +22,8 @@ pub mod api;
 pub mod files;
 pub mod guard;
 pub mod proxy;
+// recording:
+pub mod recordings;
 pub mod static_files;
 
 use axum::extract::DefaultBodyLimit;
@@ -152,6 +154,8 @@ pub fn router(server: Server) -> Router {
         .route("/health", get(api::health))
         .route("/proxy", get(proxy::handler))
         .route("/files/{id}", get(files::handler))
+        // recording:
+        .route("/recordings/{id}", get(recordings::handler))
         .route("/{*rest}", any(api::not_found))
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .layer(middleware::from_fn_with_state(

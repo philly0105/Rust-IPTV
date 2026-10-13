@@ -16,6 +16,8 @@ import { useMyVideos } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes } from '../lib/format';
 import { buildLibrary, entryTargetId, filterLibrary, librarySize, type LibraryFilter } from '../lib/myvideos';
+// recording:
+import { RecordingsPanel } from '../components/RecordingsPanel';
 
 const FILTERS: readonly LibraryFilter[] = ['all', 'movies', 'series', 'missing'];
 
@@ -33,6 +35,8 @@ export function MyVideosPage() {
   const [search, setSearch] = useState(() => params.get('q') ?? '');
   const rawFilter = params.get('filter');
   const filter: LibraryFilter = isFilter(rawFilter) ? rawFilter : 'all';
+  // recording:
+  const showRecordings = rawFilter === 'recordings';
 
   const library = useMemo(() => buildLibrary(query.data ?? []), [query.data]);
   const visible = useMemo(() => filterLibrary(library, filter, search), [library, filter, search]);
@@ -89,7 +93,10 @@ export function MyVideosPage() {
   usePageHeader(title, subtitle, headerActions, { value: search, onChange: onSearch, placeholder: t('searchLibrary') });
 
   let body;
-  if (query.isLoading) {
+  // recording:
+  if (showRecordings) {
+    body = <RecordingsPanel search={search} />;
+  } else if (query.isLoading) {
     body = <SkeletonGrid count={12} minColumnWidth={168} className="pt-2" />;
   } else if (query.isError) {
     body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
@@ -148,13 +155,17 @@ export function MyVideosPage() {
       <Tabs
         variant="pill"
         label={t('filterLabel')}
-        value={filter}
+        value={showRecordings ? 'recordings' : filter}
         onChange={setFilter}
-        items={FILTERS.filter((f) => f !== 'missing' || counts.missing > 0).map((f) => ({
-          id: f,
-          label: t(k('filter', f)),
-          badge: <span className="font-display tabular-nums">{counts[f]}</span>,
-        }))}
+        items={[
+          ...FILTERS.filter((f) => f !== 'missing' || counts.missing > 0).map((f) => ({
+            id: f,
+            label: t(k('filter', f)),
+            badge: <span className="font-display tabular-nums">{counts[f]}</span>,
+          })),
+          // recording:
+          { id: 'recordings', label: t('filterRecordings') },
+        ]}
       />
       {body}
     </div>

@@ -198,5 +198,6 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Nie udało się wczytać tych tytułów",
-  "searchPartialError": "Nie udało się wczytać części wyników."
+  "searchPartialError": "Nie udało się wczytać części wyników.",
+  "previousEpisode": "Poprzedni odcinek"
 }

@@ -24,3 +24,19 @@ export {
 } from '@/ui';
 export { useShell, useShortcut } from '@/shell';
 export { PlayerStage, playItem, playSource, usePlayerStore } from '@/features/player';
+// recording:
+export {
+  clockDuration,
+  elapsedSeconds,
+  finishedRecordings,
+  groupByDay,
+  recordingFraction,
+  recordingNow,
+  upcoming,
+  useRecordingCapabilities,
+  useRecordingProgress,
+  useRecordings,
+  useReminders,
+  useScheduleActions,
+  type UpcomingEntry,
+} from '@/features/recording';

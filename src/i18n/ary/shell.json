@@ -57,6 +57,7 @@
   "settingsPlayback": "التشغيل",
   "settingsPlayers": "المشغلات الخارجية",
   "settingsEpg": "دليل البرامج",
+  "settingsRecording": "التسجيل",
   "settingsMetadata": "الميتاداتا",
   "settingsAppearance": "المظهر",
   "settingsRemote": "التحكم عن بعد",
@@ -177,5 +178,13 @@
   "trayQuit": "خروج",
   "dashboardLoadFailed": "ما قدرناش نحملو الصفحة الرئيسية",
   "dashboardLocalDataHint": "السجل والمفضلة والمكتبة ديالك محفوظين فهاد الحاسوب. عاود جرّب، وإلا بقا كيطيح، عاود شغّل التطبيق.",
-  "ratedLabel": "التقييم {{rating}}"
+  "ratedLabel": "التقييم {{rating}}",
+  "accountAlertsLabel": "تنبيهات ديال الاشتراك",
+  "accountAlertExpiredTitle": "الاشتراك ديال {{name}} سالا",
+  "accountAlertExpiringTitle": "الاشتراك ديال {{name}} غادي يسالي {{when}}",
+  "accountAlertExpiredBody": "القنوات والأفلام ديالو ما غاديش يخدمو حتى تجدد مع المزود ديالك.",
+  "accountAlertExpiringBody": "جدد مع المزود ديالك باش تبقى تتفرج بلا ما يتقطع.",
+  "accountAlertOpen": "شوف الاشتراك",
+  "accountAlertDismiss": "سدّ التنبيه ديال {{name}}",
+  "navScheduled": "المبرمج"
 }

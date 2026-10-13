@@ -54,6 +54,17 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'c', descKey: 'scCaptions', area: 'Playback' },
   { combo: 'pageup', descKey: 'scChannelUp', area: 'Playback' },
   { combo: 'pagedown', descKey: 'scChannelDown', area: 'Playback' },
+  // player: navigation, sync and stream info shortcuts (usePlaybackShortcuts.ts).
+  { combo: 'j', descKey: 'player:shortcutSeekBack10', area: 'Playback' },
+  { combo: 'l', descKey: 'player:shortcutSeekForward10', area: 'Playback' },
+  { combo: 'shift+p', descKey: 'player:shortcutPrevItem', area: 'Playback' },
+  { combo: 'b', descKey: 'player:shortcutPrevChannel', area: 'Playback' },
+  { combo: 'shift+b', descKey: 'player:shortcutChannelHistory', area: 'Playback' },
+  { combo: 'g', descKey: 'player:shortcutSubDelayDown', area: 'Playback' },
+  { combo: 'h', descKey: 'player:shortcutSubDelayUp', area: 'Playback' },
+  { combo: 'shift+g', descKey: 'player:shortcutAudioDelayDown', area: 'Playback' },
+  { combo: 'shift+h', descKey: 'player:shortcutAudioDelayUp', area: 'Playback' },
+  { combo: 'i', descKey: 'player:shortcutStreamInfo', area: 'Playback' },
   // Bound by pip.ts only while picture-in-picture is on.
   { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
   // Bound by the focused seek bar (SeekBar.tsx onKeyDown). Its own area: PgUp/PgDn mean channel up/down in Playback.

@@ -57,6 +57,7 @@
   "settingsPlayback": "Lejátszás",
   "settingsPlayers": "Külső lejátszók",
   "settingsEpg": "Műsorújság",
+  "settingsRecording": "Felvétel",
   "settingsMetadata": "Metaadatok",
   "settingsAppearance": "Megjelenés",
   "settingsRemote": "Távvezérlés",
@@ -177,5 +178,13 @@
   "trayQuit": "Kilépés",
   "dashboardLoadFailed": "Nem sikerült betölteni a kezdőlapot",
   "dashboardLocalDataHint": "Az előzmények, a kedvencek és a könyvtár ezen a számítógépen vannak tárolva. Próbálja újra; ha továbbra sem sikerül, indítsa újra az alkalmazást.",
-  "ratedLabel": "értékelés: {{rating}}"
+  "ratedLabel": "értékelés: {{rating}}",
+  "accountAlertsLabel": "Előfizetési figyelmeztetések",
+  "accountAlertExpiredTitle": "A(z) {{name}} lejárt",
+  "accountAlertExpiringTitle": "A(z) {{name}} lejár: {{when}}",
+  "accountAlertExpiredBody": "A csatornái és filmjei addig nem játszhatók le, amíg meg nem újítja az előfizetést a szolgáltatónál.",
+  "accountAlertExpiringBody": "Újítsa meg a szolgáltatónál, hogy megszakítás nélkül nézhessen tovább.",
+  "accountAlertOpen": "Előfizetés megtekintése",
+  "accountAlertDismiss": "Figyelmeztetés elvetése: {{name}}",
+  "navScheduled": "Ütemezett"
 }

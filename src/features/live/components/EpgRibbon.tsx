@@ -10,6 +10,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
+import { useShortEpgEnabled } from '../hooks/useShortEpg';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { displayChannelName } from '../lib/channelName';
@@ -34,6 +35,8 @@ import {
 } from '../lib/epgTime';
 import { playCatchup } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
+// recording:
+import { RibbonActions, ScheduleMark } from '@/features/recording';
 
 export const RIBBON_PX_PER_MIN = 4;
 const AHEAD = 12 * HOUR;
@@ -71,7 +74,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
   // so the guide is asked for the window that lands there once shifted (as the /epg grid does).
   const offsetMs = prefs.epgOffsetMinutes * MINUTE;
   // XMLTV for every kind; a Stalker portal's own guide on top (see useChannelPrograms).
-  const programs = useChannelPrograms(channel, sourceKind, from - offsetMs, to - offsetMs);
+  // guide: Xtream channels without an airing XMLTV programme fall back to the provider's short guide.
+  const shortEpgOn = useShortEpgEnabled(sourceKind);
+  const programs = useChannelPrograms(channel, sourceKind, from - offsetMs, to - offsetMs, { enabled: shortEpgOn, guideNow: now - offsetMs });
   const list = useMemo(() => shiftPrograms(programs.programs, prefs.epgOffsetMinutes), [programs.programs, prefs.epgOffsetMinutes]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
@@ -136,6 +141,12 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   {shown.category}
                 </span>
               ) : null}
+              {/* guide: the provider's short guide, not XMLTV. */}
+              {shown.fromProvider ? (
+                <span className="min-w-0 truncate whitespace-nowrap text-fg-subtle" data-testid="ribbon-from-provider">
+                  {t('fromProvider')}
+                </span>
+              ) : null}
             </p>
             <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg">
               {shown.title}
@@ -151,6 +162,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {/* recording: */}
+        {channel ? <RibbonActions channel={channel} channelName={channelName} program={shown} now={now} /> : null}
         {channel && !props.watchingLive ? (
           // Icon-only below 1440 px, where the pane is too narrow for the label and the programme line together.
           // "Back to live" only means something while this channel's catch-up plays; otherwise it starts the stream.
@@ -458,6 +471,8 @@ function TimelineBlock({
         <span dir="auto" className="truncate text-match-parent">
           {p.title}
         </span>
+        {/* recording: */}
+        <ScheduleMark channelRef={channel.ref} program={p} />
       </span>
       {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
       <span className={`relative block truncate text-[11px] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
@@ -524,8 +539,12 @@ function ProgramList(props: ViewProps) {
                   <span>{formatRange(p, i18n.language)}</span>
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span dir="auto" className="truncate text-match-parent text-sm font-medium">
-                    {p.title}
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span dir="auto" className="truncate text-match-parent text-sm font-medium">
+                      {p.title}
+                    </span>
+                    {/* recording: */}
+                    <ScheduleMark channelRef={channel.ref} program={p} />
                   </span>
                   {when === 'now' ? (
                     <span className="mt-1 h-[3px] w-full max-w-48 overflow-hidden rounded-full bg-surface-3" aria-hidden>

@@ -57,6 +57,7 @@
   "settingsPlayback": "Wiedergabe",
   "settingsPlayers": "Externe Player",
   "settingsEpg": "Programmführer",
+  "settingsRecording": "Aufnahme",
   "settingsMetadata": "Metadaten",
   "settingsAppearance": "Darstellung",
   "settingsRemote": "Fernsteuerung",
@@ -177,5 +178,13 @@
   "trayQuit": "Beenden",
   "dashboardLoadFailed": "Die Startseite konnte nicht geladen werden",
   "dashboardLocalDataHint": "Verlauf, Favoriten und Mediathek sind auf diesem Computer gespeichert. Versuchen Sie es erneut; wenn es weiterhin fehlschlägt, starten Sie die App neu.",
-  "ratedLabel": "Bewertung {{rating}}"
+  "ratedLabel": "Bewertung {{rating}}",
+  "accountAlertsLabel": "Abo-Hinweise",
+  "accountAlertExpiredTitle": "{{name}} ist abgelaufen",
+  "accountAlertExpiringTitle": "{{name}} läuft {{when}} ab",
+  "accountAlertExpiredBody": "Sender und Filme dieser Quelle spielen erst wieder, wenn Sie beim Anbieter verlängern.",
+  "accountAlertExpiringBody": "Verlängern Sie beim Anbieter, um ohne Unterbrechung weiterzuschauen.",
+  "accountAlertOpen": "Abo anzeigen",
+  "accountAlertDismiss": "Hinweis für {{name}} ausblenden",
+  "navScheduled": "Geplant"
 }

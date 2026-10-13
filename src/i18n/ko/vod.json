@@ -180,5 +180,6 @@
   "searchCountMore_one": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "이 타이틀을 불러오지 못했습니다",
-  "searchPartialError": "일부 결과를 불러오지 못했습니다."
+  "searchPartialError": "일부 결과를 불러오지 못했습니다.",
+  "previousEpisode": "이전 에피소드"
 }

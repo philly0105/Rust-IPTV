@@ -57,6 +57,7 @@
   "settingsPlayback": "Odtwarzanie",
   "settingsPlayers": "Zewnętrzne odtwarzacze",
   "settingsEpg": "Przewodnik TV",
+  "settingsRecording": "Nagrywanie",
   "settingsMetadata": "Metadane",
   "settingsAppearance": "Wygląd",
   "settingsRemote": "Zdalne sterowanie",
@@ -187,5 +188,13 @@
   "trayQuit": "Zakończ",
   "dashboardLoadFailed": "Nie udało się wczytać strony głównej",
   "dashboardLocalDataHint": "Historia, ulubione i biblioteka są zapisane na tym komputerze. Spróbuj ponownie; jeśli błąd się powtarza, uruchom aplikację ponownie.",
-  "ratedLabel": "ocena {{rating}}"
+  "ratedLabel": "ocena {{rating}}",
+  "accountAlertsLabel": "Alerty subskrypcji",
+  "accountAlertExpiredTitle": "Subskrypcja {{name}} wygasła",
+  "accountAlertExpiringTitle": "Subskrypcja {{name}} wygasa {{when}}",
+  "accountAlertExpiredBody": "Jego kanały i filmy nie będą odtwarzane, dopóki nie odnowisz subskrypcji u dostawcy.",
+  "accountAlertExpiringBody": "Odnów subskrypcję u dostawcy, aby oglądać bez przerwy.",
+  "accountAlertOpen": "Pokaż subskrypcję",
+  "accountAlertDismiss": "Odrzuć alert dla {{name}}",
+  "navScheduled": "Zaplanowane"
 }

@@ -216,5 +216,6 @@
   "searchCountMore_many": "{{count}}+",
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "تعذر تحميل هذه العناوين",
-  "searchPartialError": "تعذّر تحميل بعض النتائج."
+  "searchPartialError": "تعذّر تحميل بعض النتائج.",
+  "previousEpisode": "الحلقة السابقة"
 }

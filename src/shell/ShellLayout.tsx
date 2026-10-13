@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate } from 'react-router';
 
@@ -17,6 +17,9 @@ import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings } from './useSettings';
+
+// recording: renders nothing; split out so the recording hooks and schedule logic stay out of the main chunk.
+const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 
 /** Opens the command palette from anywhere. */
 export function openPalette(): void {
@@ -210,6 +213,10 @@ export function ShellLayout() {
       <CommandPalette />
       <ShortcutOverlay />
       <ToastViewport />
+      {/* recording: */}
+      <Suspense fallback={null}>
+        <RecordingWatcher />
+      </Suspense>
     </div>
   );
 }

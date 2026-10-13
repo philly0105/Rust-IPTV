@@ -12,6 +12,8 @@
 //!   401/403/404/503 and any status, empty, malformed and broken playlists,
 //!   an HTML login page, an endless video stream, an HLS stream playlist,
 //!   malformed XMLTV. See [`failures`] for the full table.
+//! - `/live/timed.ts?seconds=N` a live TS stream that ends after N s (for
+//!   recording tests). See [`live`].
 //! - `/files/...` download targets with Range, a flaky one and a chunked one.
 //!   See [`files`].
 //! - `/media/...`, `/img/...` sample media and generated artwork.
@@ -27,6 +29,7 @@ pub mod failures;
 pub mod files;
 pub mod gen;
 pub mod images;
+pub mod live;
 pub mod media;
 pub mod playlists;
 pub mod stalker;
@@ -168,6 +171,7 @@ pub fn router_with_base(base: String) -> Router {
         .merge(stalker::routes())
         .merge(playlists::routes())
         .merge(failures::routes())
+        .merge(live::routes())
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), count))
         .layer(CorsLayer::permissive().expose_headers(tower_http::cors::Any))

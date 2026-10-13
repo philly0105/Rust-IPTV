@@ -103,7 +103,9 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<Vec<EpgProgram>, RpcError>(service::short_epg(&s, &a.item_ref, a.limit).await?)
     });
     r.add("xtream.accountInfo", |s, a: SourceArgs| async move {
-        Ok::<XtreamAccountInfo, RpcError>(service::account_info(&s, &a.source_id).await?)
+        let info = service::account_info(&s, &a.source_id).await?;
+        crate::account::remember_xtream(&s, &a.source_id, info.clone()).await;
+        Ok::<XtreamAccountInfo, RpcError>(info)
     });
     r.add("xtream.test", |s, a: TestArgs| async move {
         Ok::<ConnectionTestResult, RpcError>(service::test(&s, &a.config).await?)

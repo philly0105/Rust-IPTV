@@ -9,6 +9,7 @@ import { RpcError, isDesktop, rpc } from '@/api/transport';
 import { Button, IconButton, Skeleton, useToast } from '@/ui';
 import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { remotePatch, validatePort } from '../lib/patch';
+import { RemoteLanPanel } from './RemoteLanPanel';
 import type { SectionProps } from './types';
 
 export function RemoteSection({ settings, update }: SectionProps) {
@@ -136,11 +137,14 @@ export function RemoteSection({ settings, update }: SectionProps) {
                   </Button>
                 </div>
               ) : null}
-              <p className="text-sm text-fg-muted">{t('remoteLoopbackNote')}</p>
+              <p className="text-sm text-fg-muted">{t(isDesktop ? 'remoteLoopbackNote' : 'remoteLoopbackNoteServer')}</p>
             </>
           )}
         </div>
       </SettingsGroup>
+
+      {/* remote: LAN mode and pairing */}
+      <RemoteLanPanel settings={settings} update={update} status={status.data} />
     </SettingsSection>
   );
 }

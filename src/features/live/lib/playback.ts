@@ -55,6 +55,8 @@ export function playChannel(channel: Channel, kind: SourceKind, nowTitle?: strin
     isLive: true,
     isRadio: channel.isRadio,
     sourceKind: kind,
+    // The parental gate checks group locks with it (C2).
+    ...(channel.categoryId ? { categoryId: channel.categoryId } : {}),
   });
 }
 

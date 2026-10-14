@@ -30,6 +30,7 @@ Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `download
 - `lastRoute` must start with `/` and be at most 2048 characters.
 - `sourceRefreshIntervalHours` 0..=168, `accountExpiryWarnDays` 0..=60.
 - `recordingPaddingBeforeMinutes` 0..=60, `recordingPaddingAfterMinutes` 0..=120, `reminderLeadMinutes` 0..=60.
+- `uiScale` is rounded to 4 decimal places first (slider noise such as `1.2500000000000002`), then must be finite and in 0.9..=1.25 (`UI_SCALE_RANGE`).
 - Unknown enum values or wrong types fail deserialization.
 - Window state: width and height 1..=32768 px, and |x|, |y| <= 100000.
 
@@ -61,8 +62,16 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `remindersEnabled` | `true` | Guide reminders fire while the app runs. |
 | `reminderLeadMinutes` | `2` | Minutes before the start a reminder fires. 0..60, else `Invalid`. |
 | `reminderAction` | `"notify"` | `"notify"` shows a notification; `"switch"` tunes to the channel. |
+| `accent` | `"amber"` | Accent colour: `amber`, `teal`, `violet`, `rose`, `lime`, `sky` or `coral`. Settings > Appearance; see appearance.md. |
+| `oledBlack` | `false` | Pure black surfaces whenever the dark theme is in effect. |
+| `density` | `"comfortable"` | `"compact"` tightens spacing in lists, rails and rows. |
+| `uiScale` | `1` | Interface size, 0.9..1.25 (the root font size is 15 px times it). |
+| `zapBanner` | `true` | The player shows the channel's logo, number and now/next for 5 s after each live channel change. Settings > Playback. |
+| `dashboardRails.myList` | `true` | The dashboard's My List rail (Settings > General, dashboard rails). |
 
-`englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback` and the five recording and reminder fields are in `backup::APP_SETTING_KEYS`, so they round-trip through `backup.export` / `backup.import`. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
+Parental controls are not part of `Settings`: their options and PIN live in the `parental_config` table and change only through the `parental.*` commands (see parental.md); Settings > Parental is their page.
+
+`englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields, and the five appearance and playback fields above (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`) are in `backup::APP_SETTING_KEYS`, so they round-trip through `backup.export` / `backup.import`. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
 
 Stored JSON from older builds reads with these defaults (struct-level `#[serde(default)]`).
 

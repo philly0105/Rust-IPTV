@@ -19,13 +19,15 @@ import {
   setPaused,
   usePlayerStore,
 } from '../store';
+import { useStreamInfoStore } from '../streamInfo';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { BarReadout, Controls, CtlButton, InlineSpinner } from './Controls';
 import { InlinePlayer } from './InlinePlayer';
-import { FullscreenChannelPanel, StreamInfoPanel } from './lazyParts';
+import { FullscreenChannelPanel, SleepPrompt, StreamInfoPanel, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
 import { RadioPlayer } from './RadioPlayer';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
+import { useZapBannerShown, useZapHover } from './zapHooks';
 
 const HIDE_AFTER_MS = 2600;
 /** How often fullscreen mpv checks whether the mouse moved over the native video window. */
@@ -107,12 +109,12 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
       data-testid="up-next"
       aria-label={t('nextEpisode')}
       className={cn(
-        'overflow-hidden text-white',
+        'player-glass-strong overflow-hidden text-white',
         tight
-          ? 'absolute inset-x-0 bottom-0 z-30 bg-[rgb(9_13_21/0.94)]'
+          ? 'absolute inset-x-0 bottom-0 z-30 border-t'
           : variant === 'overlay'
-            ? 'absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-lg border border-white/10 bg-[rgb(9_13_21/0.94)] shadow-2 motion-safe:animate-pop-in'
-            : 'shrink-0 border-t border-white/10 bg-[#070b12]',
+            ? 'player-glass-edge absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-xl border motion-safe:animate-pop-in'
+            : 'shrink-0 border-t',
       )}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -128,7 +130,7 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
       </div>
       <div className={variant === 'overlay' && !tight ? 'p-3' : 'flex items-center gap-2 px-3 py-2'}>
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-white/70">{t('nextEpisodeIn', { count: left })}</p>
+          <p className="player-on-glass-muted text-xs">{t('nextEpisodeIn', { count: left })}</p>
           {!tight && (
             <p className="mt-0.5 truncate font-display text-base" title={name}>
               {name}
@@ -240,7 +242,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
 
   if (upNext && status !== 'error') return <UpNextCard variant="strip" />;
 
-  const strip = 'flex shrink-0 items-center gap-2 border-t border-white/10 bg-[#070b12] px-3 py-1.5 text-sm text-white';
+  const strip = 'player-glass-strong flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-sm text-white';
   if (status === 'error') {
     return (
       <div role="alert" data-mpv-reserved="" data-error-class={view.cls} className={strip}>
@@ -356,6 +358,8 @@ function MpvPlayer({ compact }: { compact: boolean }) {
   /** Whether focus was last inside the player, and on which control (`data-ctl`). */
   const focusInside = useRef(false);
   const lastCtl = useRef<string | null>(null);
+  const titleHover = useZapHover();
+  const statsOpen = useStreamInfoStore((x) => x.open);
 
   const poke = useCallback((): void => {
     setIdle(false);
@@ -437,6 +441,13 @@ function MpvPlayer({ compact }: { compact: boolean }) {
       <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
       {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
       <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
+      {/* Zap banner (C5): over the picture's top corner, cut out of the native video while up. */}
+      <ZapBanner
+        compact={small}
+        className={small ? cn('inset-x-2', pip ? 'top-11' : 'top-2') : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
+      />
+      {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+      {overlay && <SleepPrompt small={small} className={pip ? 'bottom-14' : 'bottom-28'} />}
       {overlay ? (
         chromeShown && (
           <>
@@ -446,7 +457,7 @@ function MpvPlayer({ compact }: { compact: boolean }) {
                 data-mpv-reserved=""
                 data-tauri-drag-region=""
                 data-testid="pip-bar"
-                className="absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-0.5 bg-[#070b12] ps-3 pe-1 text-white"
+                className="player-glass-strong absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-0.5 border-b ps-3 pe-1 text-white"
                 {...barEvents}
               >
                 {/* The PiP bar has no room for a readout of its own: volume and seek feedback replace the title briefly. */}
@@ -457,7 +468,7 @@ function MpvPlayer({ compact }: { compact: boolean }) {
                     buffering ? (
                       <BufferingLabel />
                     ) : (
-                      <span data-tauri-drag-region="" title={title}>
+                      <span data-tauri-drag-region="" title={title} {...titleHover}>
                         {title}
                       </span>
                     )
@@ -515,6 +526,10 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const waiting = useMediaStore((s) => s.waiting);
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
+  const statsOpen = useStreamInfoStore((s) => s.open);
+  const pip = usePipStore((s) => s.active);
+  const zapShown = useZapBannerShown();
+  const titleHover = useZapHover();
   const [idle, setIdle] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [onBar, setOnBar] = useState(false);
@@ -633,17 +648,21 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
       {!compact && (
         <div
           className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/75 to-transparent px-4 pt-3 pb-10 text-white motion-safe:transition-opacity motion-safe:duration-200',
-            !chromeVisible && 'opacity-0',
+            'player-scrim-top pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pt-3 pb-10 text-white motion-safe:transition-opacity motion-safe:duration-200',
+            // The zap banner takes this corner while it is up: it says all the title says.
+            (!chromeVisible || zapShown) && 'opacity-0',
           )}
         >
           <div className="flex items-center gap-2">
             {source.isLive && (
-              <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px font-display text-[11px] font-semibold text-white dark:text-bg">
+              <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px font-display text-[calc(11rem/15)] font-semibold text-white dark:text-bg">
                 {t('live')}
               </span>
             )}
-            <h2 className="truncate font-display text-base sm:text-lg">{source.title}</h2>
+            {/* Hovering the channel title brings up the zap banner (live TV). */}
+            <h2 className="pointer-events-auto min-w-0 truncate font-display text-base sm:text-lg" {...titleHover}>
+              {source.title}
+            </h2>
           </div>
           {source.subtitle && <p className="truncate text-sm text-white/70">{source.subtitle}</p>}
         </div>
@@ -651,6 +670,15 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
       <Osd />
       <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
+      {/* Zap banner (C5): the title's corner, or the far one while the channel list or stream info holds it. */}
+      <ZapBanner
+        compact={compact || pip}
+        className={
+          compact || pip ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+        }
+      />
+      {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+      {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : 'bottom-28'} />}
       <EndedOverlay compact={compact} />
       <UpNextCard compact={compact} />
 

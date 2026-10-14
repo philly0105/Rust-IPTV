@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { ErrorState, Skeleton, cn } from '@/ui';
+import { ErrorState, Skeleton, cn, useScaledPx } from '@/ui';
 
 import { readRailEmpty, writeRailEmpty } from './railEmpty';
 
@@ -37,7 +37,10 @@ export interface DashboardRailProps<T> {
   items: readonly T[] | undefined;
   getKey: (item: T) => string;
   renderCard: (item: T, props: RailCardProps) => ReactNode;
-  /** Card width in px (the rail scrolls horizontally). */
+  /**
+   * Card width in px at 100 % UI scale and comfortable density (the rail scrolls
+   * horizontally). The rail applies the active scale and density (C1).
+   */
   cardWidth: number;
   /** Placeholder card aspect while loading (width / height). */
   skeletonAspect: number;
@@ -103,6 +106,7 @@ export function DashboardRail<T>({
   meta,
 }: DashboardRailProps<T>) {
   const { t } = useTranslation('shell');
+  const width = useScaledPx(cardWidth, true);
   const sectionRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLUListElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -208,7 +212,7 @@ export function DashboardRail<T>({
       data-testid={`dashboard-rail-${id}`}
       className="group/rail relative flex flex-col gap-3"
     >
-      <div className="flex items-baseline justify-between gap-4 px-8">
+      <div className="flex items-baseline justify-between gap-4 px-4 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
           <h2 id={headingId} className="truncate text-lg">
             {title}
@@ -216,7 +220,7 @@ export function DashboardRail<T>({
           {meta}
         </div>
         {seeAll && (
-          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent active:text-accent-pressed">
+          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent active:text-accent-pressed motion-safe:transition-colors">
             {seeAll.label ?? t('seeAll')}
           </Link>
         )}
@@ -225,10 +229,10 @@ export function DashboardRail<T>({
       {error ? (
         // One grid cell holds an invisible skeleton card and the error, so the error box is
         // at least as tall as the skeleton it replaces; the row layout keeps it from being taller.
-        <div className="mx-8 grid rounded-lg border border-divider bg-surface" data-testid="dashboard-rail-error">
+        <div className="mx-4 grid rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-rail-error">
           {/* -my-px: the box's 1px border plus this cell equal the bare skeleton row. */}
           <div aria-hidden className="invisible col-start-1 row-start-1 -my-px" data-rail-error-spacer="">
-            <SkeletonCard width={cardWidth} aspect={skeletonAspect} />
+            <SkeletonCard width={width} aspect={skeletonAspect} />
           </div>
           <ErrorState
             error={error}
@@ -239,9 +243,9 @@ export function DashboardRail<T>({
           />
         </div>
       ) : loading && count === 0 ? (
-        <div className="flex gap-4 overflow-hidden px-8" aria-busy="true" aria-label={t('loadingRail', { title })}>
+        <div className="flex gap-4 overflow-hidden px-4 sm:px-8" aria-busy="true" aria-label={t('loadingRail', { title })}>
           {Array.from({ length: 8 }, (_, i) => (
-            <SkeletonCard key={i} width={cardWidth} aspect={skeletonAspect} />
+            <SkeletonCard key={i} width={width} aspect={skeletonAspect} />
           ))}
         </div>
       ) : (
@@ -255,10 +259,10 @@ export function DashboardRail<T>({
               if (i >= 0 && i !== focusIndex) setFocusIndex(i);
             }}
             aria-labelledby={headingId}
-            className="flex snap-x snap-mandatory scroll-px-8 gap-4 overflow-x-auto overflow-y-visible px-8 pt-1 pb-3 scrollbar-none motion-safe:scroll-smooth"
+            className="flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto overflow-y-visible px-4 pt-1 pb-3 scrollbar-none sm:scroll-px-8 sm:px-8 motion-safe:scroll-smooth"
           >
             {items!.map((item, i) => (
-              <li key={getKey(item)} className="shrink-0 snap-start" style={{ width: cardWidth }}>
+              <li key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
                 {renderCard(item, { tabIndex: i === focusIndex ? 0 : -1, 'data-rail-card': '' })}
               </li>
             ))}

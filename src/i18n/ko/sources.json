@@ -289,6 +289,10 @@
   "removedAllTitle_one": "재생목록 {{count}}개를 삭제했습니다",
   "removedAllTitle_other": "재생목록 {{count}}개를 삭제했습니다",
   "removeAllFailed": "재생목록을 삭제할 수 없습니다",
+  "removeLockedTitle": "{{name}}을(를) 삭제하려면 PIN 입력",
+  "removeAllLockedTitle": "재생목록을 삭제하려면 PIN 입력",
+  "removeLockedText": "자녀 보호 잠금은 재생목록과 함께 삭제되므로 먼저 PIN으로 자녀 보호를 해제합니다.",
+  "removeLockedConfirm": "잠금 해제",
 
   "phaseCancelled": "가져오기가 취소됨",
   "phaseCancelling": "취소하는 중…",

@@ -64,6 +64,8 @@
   "settingsBackup": "Backup and restore",
   "settingsShortcuts": "Shortcuts",
   "settingsAbout": "About",
+  "settingsParental": "Parental controls",
+  "lockParentalNow": "Lock parental controls now",
 
   "shortcutsIntro": "Shortcuts work anywhere except while you type in a text field.",
   "filterShortcuts": "Filter shortcuts",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Volume down",
   "scMute": "Mute or unmute",
   "scCaptions": "Turn captions on or off",
+  "scSleepTimer": "Sleep timer (off, 15, 30, 45, 60, 90 min)",
   "scChannelUp": "Previous channel",
   "scChannelDown": "Next channel",
   "scTheme": "Switch between light and dark theme",
@@ -137,6 +140,17 @@
   "emptySource": "Nothing imported yet",
 
   "heroEyebrow": "Pick up where you left off",
+  "heroNewIn": "New in {{source}}",
+  "heroNew": "Just added",
+  "heroLabel": "Featured",
+  "heroCarousel": "carousel",
+  "heroSlide": "slide",
+  "heroSlideOf": "{{index}} of {{total}}",
+  "heroControls": "Slides",
+  "heroPrevious": "Previous slide",
+  "heroNext": "Next slide",
+  "heroPause": "Pause slideshow",
+  "heroPlayRotation": "Play slideshow",
   "play": "Play",
   "resume": "Resume",
   "details": "Details",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "Renew with your provider to keep watching without a break.",
   "accountAlertOpen": "View subscription",
   "accountAlertDismiss": "Dismiss the alert for {{name}}",
-  "navScheduled": "Scheduled"
+  "navScheduled": "Scheduled",
+  "navMultiview": "Multi-view",
+  "navMyList": "My List"
 }

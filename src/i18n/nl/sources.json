@@ -289,6 +289,10 @@
   "removedAllTitle_one": "{{count}} afspeellijst verwijderd",
   "removedAllTitle_other": "{{count}} afspeellijsten verwijderd",
   "removeAllFailed": "Kan de afspeellijsten niet verwijderen",
+  "removeLockedTitle": "Voer de pincode in om {{name}} te verwijderen",
+  "removeAllLockedTitle": "Voer de pincode in om de afspeellijsten te verwijderen",
+  "removeLockedText": "Vergrendelingen van ouderlijk toezicht worden met de afspeellijst verwijderd, dus de pincode ontgrendelt eerst het ouderlijk toezicht.",
+  "removeLockedConfirm": "Ontgrendelen",
 
   "phaseCancelled": "Import geannuleerd",
   "phaseCancelling": "Annuleren…",

@@ -289,6 +289,10 @@
   "removedAllTitle_one": "{{count}}件のプレイリストを削除しました",
   "removedAllTitle_other": "{{count}}件のプレイリストを削除しました",
   "removeAllFailed": "プレイリストを削除できませんでした",
+  "removeLockedTitle": "{{name}}を削除するにはPINを入力",
+  "removeAllLockedTitle": "プレイリストを削除するにはPINを入力",
+  "removeLockedText": "ペアレンタルロックはプレイリストと一緒に削除されるため、先にPINでペアレンタルコントロールのロックを解除します。",
+  "removeLockedConfirm": "ロック解除",
 
   "phaseCancelled": "インポートをキャンセルしました",
   "phaseCancelling": "キャンセル中…",

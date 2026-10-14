@@ -53,7 +53,7 @@ function OpenPanel({ className }: { className?: string }) {
       onDoubleClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
-        'pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border border-white/10 bg-[rgb(10_14_22/0.9)] text-white shadow-2 backdrop-blur-md motion-safe:animate-pop-in',
+        'player-glass player-glass-edge pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-white motion-safe:animate-pop-in',
         className,
       )}
     >
@@ -73,7 +73,7 @@ function OpenPanel({ className }: { className?: string }) {
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 px-3 py-2 text-xs">
           {statsRows(stats, url, t, i18n.language).map(([label, value]) => (
             <div key={label} className="contents">
-              <dt className="text-white/60">{label}</dt>
+              <dt className="player-on-glass-muted">{label}</dt>
               <dd className="truncate text-end font-mono tabular-nums" title={value} dir="auto">
                 {value}
               </dd>
@@ -81,7 +81,7 @@ function OpenPanel({ className }: { className?: string }) {
           ))}
         </dl>
       ) : (
-        <p role="status" className="px-3 py-3 text-xs text-white/70">
+        <p role="status" className="player-on-glass-muted px-3 py-3 text-xs">
           {t('streamInfoWaiting')}
         </p>
       )}

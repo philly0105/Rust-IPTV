@@ -8,6 +8,7 @@ import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
+import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
 import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
@@ -353,11 +354,14 @@ export function SourcesPage() {
       onFailed: (e) => {
         const err = RpcError.from(e);
         void invalidate('sources.');
+        // Removal never contacts a provider: `auth` is the parental guard (an unlock ran out).
+        const locked = err.code === 'auth';
+        if (locked) void invalidate('parental.status');
         toast({
           variant: 'error',
           title: t('removeFailed', { name: target.name }),
-          description: `${t(summaryKey(err))} ${t('removeFailedKept')}`,
-          action: { label: t('tryAgain'), onClick: () => removeSource(target) },
+          description: `${locked ? t('removeLockedText') : t(summaryKey(err))} ${t('removeFailedKept')}`,
+          action: { label: t('tryAgain'), onClick: () => removeChecked(target) },
         });
       },
       onUndone: () => {
@@ -371,6 +375,32 @@ export function SourcesPage() {
       const card = [...cards].find((el) => el.dataset.sourceId === neighbour);
       const next = card?.querySelector<HTMLElement>('[data-testid="source-remove"]:not(:disabled)') ?? card?.querySelector<HTMLElement>('a');
       (next ?? document.querySelector<HTMLElement>('[data-testid="sources-add"], [data-testid="sources-onboarding"] button'))?.focus();
+    });
+  };
+
+  /**
+   * C2: a removed source takes its parental locks with it, so while controls are locked a source
+   * with locks asks for the PIN (which unlocks the session) before the usual removal.
+   */
+  const removeChecked = (target: Source) => {
+    if (!removalMayNeedPin()) return removeSource(target);
+    void unlockToRemoveSources(target.id, {
+      title: t('removeLockedTitle', { name: target.name }),
+      description: t('removeLockedText'),
+      confirmLabel: t('removeLockedConfirm'),
+    }).then((ok) => {
+      if (ok) removeSource(target);
+    });
+  };
+
+  const openRemoveAll = () => {
+    if (!removalMayNeedPin()) return setRemoveAllOpen(true);
+    void unlockToRemoveSources(undefined, {
+      title: t('removeAllLockedTitle'),
+      description: t('removeLockedText'),
+      confirmLabel: t('removeLockedConfirm'),
+    }).then((ok) => {
+      if (ok) setRemoveAllOpen(true);
     });
   };
 
@@ -466,7 +496,7 @@ export function SourcesPage() {
                   label: t('removeAllMenu'),
                   icon: <Trash2 aria-hidden className="size-4" />,
                   danger: true,
-                  onSelect: () => setRemoveAllOpen(true),
+                  onSelect: openRemoveAll,
                 },
               ]}
             />
@@ -520,7 +550,7 @@ export function SourcesPage() {
               onRefresh={() => void refreshOne(s)}
               onEdit={() => openEdit(s)}
               onAccount={() => openEdit(s, 'account')}
-              onRemove={() => removeSource(s)}
+              onRemove={() => removeChecked(s)}
               onCancelImport={() => void cancelOne(s.id)}
               cancelling={cancelling[s.id] === true}
               onMove={(to) => moveTo(s.id, to)}

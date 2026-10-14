@@ -106,7 +106,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
               {nxt && !compact ? (
                 // Only the title truncates, in its own direction: one RTL truncate over clock and a Latin
                 // title put the ellipsis at the title's start ("…ews Today").
-                <span className="flex min-w-0 items-baseline gap-1 text-[11px] text-fg-subtle" data-testid="row-next">
+                <span className="flex min-w-0 items-baseline gap-1 text-[calc(11rem/15)] text-fg-subtle" data-testid="row-next">
                   <span className="shrink-0 tabular-nums">{formatClock(ms(nxt.start), i18n.language)}</span>
                   <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="row-next-title" title={nxt.title}>
                     {nxt.title}

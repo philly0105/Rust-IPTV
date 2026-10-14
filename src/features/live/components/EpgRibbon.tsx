@@ -124,7 +124,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
             {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
             <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
               {programWhen(shown, now) === 'now' ? (
-                <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px text-[10px] font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
+                <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px text-2xs font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
               ) : null}
               <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                 {programWhen(shown, now) !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ?`${formatDay(ms(shown.start), i18n.language)} ` : ''}
@@ -367,7 +367,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
             const midnight = localDayKey(tt) !== localDayKey(i > 0 ? ticks[i - 1]! : from);
             return (
               <div key={tt} className="absolute top-0 bottom-0" style={inlineStart(x, rtl)}>
-                <span className="absolute top-0 start-1 text-[11px] whitespace-nowrap text-fg-subtle tabular-nums">
+                <span className="absolute top-0 start-1 text-[calc(11rem/15)] whitespace-nowrap text-fg-subtle tabular-nums">
                   {midnight ? formatDay(tt, i18n.language) : formatClock(tt, i18n.language)}
                 </span>
                 <span className={`absolute top-4 bottom-0 w-px ${midnight ? 'bg-border' : 'bg-divider'}`} />
@@ -475,7 +475,7 @@ function TimelineBlock({
         <ScheduleMark channelRef={channel.ref} program={p} />
       </span>
       {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
-      <span className={`relative block truncate text-[11px] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
+      <span className={`relative block truncate text-[calc(11rem/15)] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
         {formatClock(ms(p.start), i18n.language)}
       </span>
     </button>
@@ -532,7 +532,7 @@ function ProgramList(props: ViewProps) {
               >
                 <span className="flex w-24 shrink-0 flex-col text-xs tabular-nums text-fg-muted">
                   {day ? (
-                    <span className="truncate text-[11px] font-medium text-fg" data-testid="ribbon-list-day">
+                    <span className="truncate text-[calc(11rem/15)] font-medium text-fg" data-testid="ribbon-list-day">
                       {day}
                     </span>
                   ) : null}
@@ -563,7 +563,7 @@ function ProgramList(props: ViewProps) {
                   </span>
                 ) : null}
                 {when === 'now' ? (
-                  <span className="shrink-0 rounded-sm bg-live px-1.5 py-px text-[10px] font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
+                  <span className="shrink-0 rounded-sm bg-live px-1.5 py-px text-2xs font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
                 ) : when === 'past' && catchup ? (
                   <span className="inline-flex shrink-0 items-center gap-1 text-xs text-accent">
                     <History className="size-3.5" aria-hidden />

@@ -17,6 +17,8 @@ export interface PlayTarget {
   sourceKind: SourceKind;
   title: string;
   posterUrl?: string;
+  /** The title's group, so the parental gate can check group locks (C2). */
+  categoryId?: string;
 }
 
 export interface PlayOptions {
@@ -54,6 +56,7 @@ export function usePlayback(target: PlayTarget | undefined) {
         if (opts.episodeId) args.episodeId = opts.episodeId;
         if (opts.subtitle) args.subtitle = opts.subtitle;
         if (tgt.posterUrl) args.posterUrl = tgt.posterUrl;
+        if (tgt.categoryId) args.categoryId = tgt.categoryId;
         await playItem(args);
       } catch (err) {
         toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' });

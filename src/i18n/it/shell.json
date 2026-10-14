@@ -64,6 +64,8 @@
   "settingsBackup": "Backup e ripristino",
   "settingsShortcuts": "Scorciatoie",
   "settingsAbout": "Info",
+  "settingsParental": "Controllo parentale",
+  "lockParentalNow": "Blocca ora il controllo parentale",
 
   "shortcutsIntro": "Le scorciatoie funzionano ovunque, tranne mentre scrivi in un campo di testo.",
   "filterShortcuts": "Filtra scorciatoie",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Abbassa il volume",
   "scMute": "Disattiva o riattiva l'audio",
   "scCaptions": "Attiva o disattiva i sottotitoli",
+  "scSleepTimer": "Timer di spegnimento (disattivato, 15, 30, 45, 60, 90 min)",
   "scChannelUp": "Canale precedente",
   "scChannelDown": "Canale successivo",
   "scTheme": "Passa dal tema chiaro al tema scuro",
@@ -141,6 +144,17 @@
   "emptySource": "Ancora nulla di importato",
 
   "heroEyebrow": "Riprendi da dove avevi lasciato",
+  "heroNewIn": "Novità in {{source}}",
+  "heroNew": "Appena aggiunto",
+  "heroLabel": "In evidenza",
+  "heroCarousel": "carosello",
+  "heroSlide": "diapositiva",
+  "heroSlideOf": "{{index}} di {{total}}",
+  "heroControls": "Diapositive",
+  "heroPrevious": "Diapositiva precedente",
+  "heroNext": "Diapositiva successiva",
+  "heroPause": "Metti in pausa la presentazione",
+  "heroPlayRotation": "Avvia la presentazione",
   "play": "Riproduci",
   "resume": "Riprendi",
   "details": "Dettagli",
@@ -191,5 +205,7 @@
   "accountAlertExpiringBody": "Rinnova con il tuo provider per continuare a guardare senza interruzioni.",
   "accountAlertOpen": "Vedi abbonamento",
   "accountAlertDismiss": "Ignora l'avviso per {{name}}",
-  "navScheduled": "Programmati"
+  "navScheduled": "Programmati",
+  "navMultiview": "Multivisione",
+  "navMyList": "La mia lista"
 }

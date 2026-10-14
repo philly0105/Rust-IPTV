@@ -88,6 +88,8 @@ export const DEFAULT_EVENT_INVALIDATION: Readonly<Record<string, readonly string
   'epg.changed': ['epg.'],
   'downloads.update': ['downloads.', 'myvideos.'],
   'settings.changed': ['settings.'],
+  // C7: My List writes (this window or another).
+  'watchlist.changed': ['watchlist.'],
 };
 
 /** Events after which no cached query can be trusted. */

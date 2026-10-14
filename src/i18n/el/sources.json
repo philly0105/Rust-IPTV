@@ -289,6 +289,10 @@
   "removedAllTitle_one": "Αφαιρέθηκε {{count}} λίστα αναπαραγωγής",
   "removedAllTitle_other": "Αφαιρέθηκαν {{count}} λίστες αναπαραγωγής",
   "removeAllFailed": "Δεν ήταν δυνατή η αφαίρεση των λιστών αναπαραγωγής",
+  "removeLockedTitle": "Εισαγάγετε το PIN για να αφαιρέσετε: {{name}}",
+  "removeAllLockedTitle": "Εισαγάγετε το PIN για να αφαιρέσετε τις λίστες αναπαραγωγής",
+  "removeLockedText": "Τα κλειδώματα γονικού ελέγχου αφαιρούνται μαζί με τη λίστα αναπαραγωγής, οπότε το PIN ξεκλειδώνει πρώτα τον γονικό έλεγχο.",
+  "removeLockedConfirm": "Ξεκλείδωμα",
 
   "phaseCancelled": "Η εισαγωγή ακυρώθηκε",
   "phaseCancelling": "Ακύρωση…",

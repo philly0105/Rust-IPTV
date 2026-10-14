@@ -64,6 +64,8 @@
   "settingsBackup": "Biztonsági mentés és visszaállítás",
   "settingsShortcuts": "Billentyűparancsok",
   "settingsAbout": "Névjegy",
+  "settingsParental": "Szülői felügyelet",
+  "lockParentalNow": "Szülői felügyelet zárolása most",
 
   "shortcutsIntro": "A billentyűparancsok mindenhol működnek, kivéve szövegmezőbe való gépelés közben.",
   "filterShortcuts": "Billentyűparancsok szűrése",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Hangerő le",
   "scMute": "Némítás be/ki",
   "scCaptions": "Feliratok be- vagy kikapcsolása",
+  "scSleepTimer": "Elalvási időzítő (ki, 15, 30, 45, 60, 90 perc)",
   "scChannelUp": "Előző csatorna",
   "scChannelDown": "Következő csatorna",
   "scTheme": "Váltás világos és sötét téma között",
@@ -137,6 +140,17 @@
   "emptySource": "Még nincs importált tartalom",
 
   "heroEyebrow": "Folytassa ott, ahol abbahagyta",
+  "heroNewIn": "Új itt: {{source}}",
+  "heroNew": "Most hozzáadva",
+  "heroLabel": "Kiemelt",
+  "heroCarousel": "karusszel",
+  "heroSlide": "dia",
+  "heroSlideOf": "{{index}} / {{total}}",
+  "heroControls": "Diák",
+  "heroPrevious": "Előző dia",
+  "heroNext": "Következő dia",
+  "heroPause": "Diavetítés szüneteltetése",
+  "heroPlayRotation": "Diavetítés indítása",
   "play": "Lejátszás",
   "resume": "Folytatás",
   "details": "Részletek",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "Újítsa meg a szolgáltatónál, hogy megszakítás nélkül nézhessen tovább.",
   "accountAlertOpen": "Előfizetés megtekintése",
   "accountAlertDismiss": "Figyelmeztetés elvetése: {{name}}",
-  "navScheduled": "Ütemezett"
+  "navScheduled": "Ütemezett",
+  "navMultiview": "Többképes nézet",
+  "navMyList": "Saját lista"
 }

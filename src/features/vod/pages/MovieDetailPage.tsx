@@ -1,4 +1,4 @@
-import { Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
+import { Layers, Lock, Play, RotateCcw, MonitorPlay } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
@@ -7,10 +7,13 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef, VodItem } from '@/api/types';
+import { MyListButton } from '@/features/mylist/components/MyListButton';
+import { useLockMenuItems } from '@/features/parental/lockMenu';
 
 import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
 import { OtherSourcesDialog } from '../components/detail/OtherSourcesDialog';
+import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { WatchStage } from '../components/detail/WatchStage';
 import { SimilarSection } from '../components/SimilarSection';
@@ -42,6 +45,8 @@ export function MovieDetailPage() {
   const { sourceId = '', itemId = '' } = useParams();
   const detailScrollRef = useRef<HTMLDivElement>(null);
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'movie', itemId }), [sourceId, itemId]);
+  // C2: in Ask mode a locked movie shows nothing until the PIN is entered.
+  const gate = useOpenGate(ref);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
   const source = useSource(sourceId);
@@ -78,7 +83,10 @@ export function MovieDetailPage() {
   const [othersOpen, setOthersOpen] = useState(false);
 
   const ownTarget = useMemo<PlayTarget | undefined>(
-    () => (item && source.data ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl } : undefined),
+    () =>
+      item && source.data
+        ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
+        : undefined,
     [item, source.data, ref, model?.title, model?.posterUrl],
   );
   const targetFor = (copy: VodItem): PlayTarget | undefined => {
@@ -98,8 +106,9 @@ export function MovieDetailPage() {
   const { pathname } = useLocation();
   useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
 
-  // Until the title is known, the page (sr-only h1) and the shell header both read the section name.
-  const pageTitle = model?.title ?? t('movies');
+  // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
+  const pageTitle = (gate.state === 'open' ? model?.title : undefined) ?? t('movies');
+  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'movie', kind: 'item', targetId: itemId, name: model.title } : null);
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
 
   const resumable = isResumable(position.data);
@@ -118,6 +127,24 @@ export function MovieDetailPage() {
   }
   if (twin.data) {
     return <Navigate replace to={detailHref(twin.data) ?? '/'} />;
+  }
+  if (gate.state !== 'open') {
+    return (
+      <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
+        <h1 className="sr-only">{pageTitle}</h1>
+        {gate.state === 'checking' ? (
+          <DetailHeroSkeleton />
+        ) : (
+          <ParentalLocked
+            itemRef={ref}
+            title={model?.title}
+            failed={gate.state === 'failed'}
+            onRetry={gate.retry}
+            fallbackHref={`/s/${encodeURIComponent(sourceId)}/movies`}
+          />
+        )}
+      </div>
+    );
   }
   if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
@@ -146,9 +173,13 @@ export function MovieDetailPage() {
   const download = downloads.get('');
   const sourceName = source.data?.name ?? sourceId;
 
+  const snapshot = { title: model.title, posterUrl: model.posterUrl, contentType: 'movie' as const };
+  // My List saves what a poster card saves (myListTarget): the base title, with the year as the subtitle.
+  const listSnapshot = { ...snapshot, title: model.titleBase ?? model.title, ...(model.year ? { subtitle: String(model.year) } : {}) };
   const secondary = (
     <>
-      <FavoriteButton itemRef={ref} snapshot={{ title: model.title, posterUrl: model.posterUrl, contentType: 'movie' }} isFavorite={isFavorite} compact={watching} />
+      <MyListButton itemRef={ref} snapshot={listSnapshot} size={watching ? 'sm' : 'lg'} />
+      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact={watching} />
       <WatchedButton itemRef={ref} watched={watched} compact={watching} />
       {playback.canDownload && (
         <DownloadButton
@@ -163,6 +194,12 @@ export function MovieDetailPage() {
           {t('otherSourcesCount', { count: others.length })}
         </Button>
       )}
+      {/* C2: lock or remove the lock (only while parental controls are on). */}
+      {lockItems.map((a) => (
+        <Button key={a.id} size={watching ? 'sm' : 'lg'} variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
+          {a.label}
+        </Button>
+      ))}
     </>
   );
 
@@ -173,7 +210,7 @@ export function MovieDetailPage() {
           <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
           <section className="mx-auto mt-6 flex w-full max-w-[1800px] flex-col gap-3 px-4 md:px-8" aria-label={t('about')}>
             <div className="flex flex-wrap items-center gap-2">{secondary}</div>
-            {model.plot && <p dir="auto" className="max-w-[72ch] text-[15px] leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
+            {model.plot && <p dir="auto" className="max-w-[72ch] text-[calc(15rem/15)] leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
           </section>
         </>
       ) : (

@@ -19,6 +19,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ContentType, FavoriteEntry, ItemRef, ItemSnapshot, PlaybackPosition, RecentEntry,
 };
+use crate::parental::Hide;
 use crate::state::AppState;
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 use serde_json::Value;
@@ -180,11 +181,24 @@ pub fn favorites_list(
     conn: &Connection,
     source_id: Option<&str>,
 ) -> CoreResult<Vec<FavoriteEntry>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT source_id, content_type, item_id, added_at, position, snapshot_json
-         FROM favorites WHERE (?1 IS NULL OR source_id = ?1)
-         ORDER BY position ASC, added_at ASC, rowid ASC",
-    )?;
+    favorites_list_filtered(conn, source_id, None)
+}
+
+/// [`favorites_list`] without the entries parental hide mode drops (`hide`).
+pub fn favorites_list_filtered(
+    conn: &Connection,
+    source_id: Option<&str>,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<FavoriteEntry>> {
+    let locked = match hide {
+        Some(h) => crate::parental::filter::by_ref(conn, "f", h)?,
+        None => String::new(),
+    };
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT f.source_id, f.content_type, f.item_id, f.added_at, f.position, f.snapshot_json
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}
+         ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC"
+    ))?;
     let rows = stmt.query_map(params![source_id], |row| {
         let r = parse_ref(row, 0)?;
         let added_at: String = row.get(3)?;
@@ -379,14 +393,28 @@ pub fn recent_list(
     source_id: Option<&str>,
     limit: Option<i64>,
 ) -> CoreResult<Vec<RecentEntry>> {
+    recent_list_filtered(conn, source_id, limit, None)
+}
+
+/// [`recent_list`] without the entries parental hide mode drops (`hide`).
+pub fn recent_list_filtered(
+    conn: &Connection,
+    source_id: Option<&str>,
+    limit: Option<i64>,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<RecentEntry>> {
     let limit = limit
         .unwrap_or(RECENT_DEFAULT_LIMIT)
         .clamp(1, RECENT_MAX_LIMIT);
-    let mut stmt = conn.prepare_cached(
-        "SELECT source_id, content_type, item_id, viewed_at, snapshot_json
-         FROM recent WHERE (?1 IS NULL OR source_id = ?1)
-         ORDER BY viewed_at DESC, rowid DESC LIMIT ?2",
-    )?;
+    let locked = match hide {
+        Some(h) => crate::parental::filter::by_ref(conn, "r", h)?,
+        None => String::new(),
+    };
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT r.source_id, r.content_type, r.item_id, r.viewed_at, r.snapshot_json
+         FROM recent r WHERE (?1 IS NULL OR r.source_id = ?1){locked}
+         ORDER BY r.viewed_at DESC, r.rowid DESC LIMIT ?2"
+    ))?;
     let rows = stmt.query_map(params![source_id, limit], |row| {
         Ok((
             parse_ref(row, 0)?,
@@ -771,10 +799,23 @@ pub fn continue_watching(
     conn: &Connection,
     limit: Option<i64>,
 ) -> CoreResult<Vec<PlaybackPosition>> {
+    continue_watching_filtered(conn, limit, None)
+}
+
+/// [`continue_watching`] without the items parental hide mode drops (`hide`).
+pub fn continue_watching_filtered(
+    conn: &Connection,
+    limit: Option<i64>,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<PlaybackPosition>> {
     let limit = limit
         .unwrap_or(CONTINUE_DEFAULT_LIMIT)
         .clamp(1, CONTINUE_MAX_LIMIT);
-    let mut stmt = conn.prepare_cached(
+    let locked = match hide {
+        Some(h) => crate::parental::filter::by_ref(conn, "k", h)?,
+        None => String::new(),
+    };
+    let mut stmt = conn.prepare_cached(&format!(
         "WITH ranked AS (
            SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
              PARTITION BY p.source_id, p.content_type, p.item_id
@@ -786,10 +827,10 @@ pub fn continue_watching(
                 i.title, COALESCE(i.poster_url, i.logo_url)
          FROM ranked k
          LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
-         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2
+         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
          ORDER BY k.updated_at DESC, k.rid DESC
-         LIMIT ?1",
-    )?;
+         LIMIT ?1"
+    ))?;
     let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], |row| {
         let mut p = position_from_row(row)?;
         if p.snapshot.is_none() {

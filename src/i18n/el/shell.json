@@ -64,6 +64,8 @@
   "settingsBackup": "Αντίγραφα ασφαλείας και επαναφορά",
   "settingsShortcuts": "Συντομεύσεις",
   "settingsAbout": "Σχετικά",
+  "settingsParental": "Γονικός έλεγχος",
+  "lockParentalNow": "Κλείδωμα γονικού ελέγχου τώρα",
 
   "shortcutsIntro": "Οι συντομεύσεις λειτουργούν παντού, εκτός όταν πληκτρολογείτε σε πεδίο κειμένου.",
   "filterShortcuts": "Φιλτράρισμα συντομεύσεων",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Μείωση έντασης",
   "scMute": "Σίγαση ή κατάργηση σίγασης",
   "scCaptions": "Ενεργοποίηση ή απενεργοποίηση υποτίτλων",
+  "scSleepTimer": "Χρονοδιακόπτης ύπνου (ανενεργός, 15, 30, 45, 60, 90 λεπ.)",
   "scChannelUp": "Προηγούμενο κανάλι",
   "scChannelDown": "Επόμενο κανάλι",
   "scTheme": "Εναλλαγή φωτεινού και σκοτεινού θέματος",
@@ -137,6 +140,17 @@
   "emptySource": "Δεν έχει εισαχθεί τίποτα ακόμα",
 
   "heroEyebrow": "Συνεχίστε από εκεί που σταματήσατε",
+  "heroNewIn": "Νέο στο {{source}}",
+  "heroNew": "Μόλις προστέθηκε",
+  "heroLabel": "Προτεινόμενα",
+  "heroCarousel": "καρουζέλ",
+  "heroSlide": "διαφάνεια",
+  "heroSlideOf": "{{index}} από {{total}}",
+  "heroControls": "Διαφάνειες",
+  "heroPrevious": "Προηγούμενη διαφάνεια",
+  "heroNext": "Επόμενη διαφάνεια",
+  "heroPause": "Παύση προβολής",
+  "heroPlayRotation": "Έναρξη προβολής",
   "play": "Αναπαραγωγή",
   "resume": "Συνέχιση",
   "details": "Λεπτομέρειες",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "Ανανεώστε στον πάροχό σας για να συνεχίσετε να βλέπετε χωρίς διακοπή.",
   "accountAlertOpen": "Προβολή συνδρομής",
   "accountAlertDismiss": "Απόρριψη ειδοποίησης για {{name}}",
-  "navScheduled": "Προγραμματισμένα"
+  "navScheduled": "Προγραμματισμένα",
+  "navMultiview": "Πολλαπλή προβολή",
+  "navMyList": "Η λίστα μου"
 }

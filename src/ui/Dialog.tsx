@@ -217,7 +217,7 @@ export function Dialog({
               onClick={() => onCloseRef.current()}
               className={cn(
                 drawer ? 'ms-auto' : '-me-2',
-                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3',
+                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
               )}
             >
               <X aria-hidden size={18} />

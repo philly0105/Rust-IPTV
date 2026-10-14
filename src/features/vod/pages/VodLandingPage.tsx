@@ -8,7 +8,7 @@ import type { SeriesItem, VodItem } from '@/api/types';
 
 import { CategoryIndex, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
-import { PosterCard } from '../components/PosterCard';
+import { myListTarget, PosterCard } from '../components/PosterCard';
 import { itemLanguage } from '../lib/language';
 import { PosterRail } from '../components/PosterRail';
 import { resumeKey, useRecentlyAdded, useResumeMap, useSource } from '../hooks/queries';
@@ -139,6 +139,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   rating={item.rating}
                   progress={resume.get(resumeKey(item.ref))}
                   language={itemLanguage(item.title, item.categoryName)}
+                  myList={myListTarget(item)}
                 />
               )}
             />

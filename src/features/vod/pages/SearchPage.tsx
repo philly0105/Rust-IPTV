@@ -11,7 +11,7 @@ import { RpcError, rpcRaw } from '@/api/transport';
 import type { Channel, Page, SeriesItem, Source, VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
 
-import { PosterCard } from '../components/PosterCard';
+import { myListTarget, PosterCard } from '../components/PosterCard';
 import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
 import { useScrollMemory } from '../hooks/useScrollMemory';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -220,6 +220,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     if (!hit.sourceKind) return;
     const args: Parameters<typeof playItem>[0] = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
     if (c.logoUrl) args.posterUrl = c.logoUrl;
+    if (c.categoryId) args.categoryId = c.categoryId;
     playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' }));
   };
 
@@ -568,6 +569,7 @@ function PosterGrid({
             language={itemLanguage(item.title, item.categoryName)}
             badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
             badgeLabel={showBadges ? h.sourceName : undefined}
+            myList={myListTarget(item)}
           />
         );
       }}

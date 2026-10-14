@@ -289,6 +289,10 @@
   "removedAllTitle_one": "已移除 {{count}} 个播放列表",
   "removedAllTitle_other": "已移除 {{count}} 个播放列表",
   "removeAllFailed": "无法移除播放列表",
+  "removeLockedTitle": "输入 PIN 码以移除 {{name}}",
+  "removeAllLockedTitle": "输入 PIN 码以移除播放列表",
+  "removeLockedText": "家长控制锁定会随播放列表一起移除，因此需先用 PIN 码解锁家长控制。",
+  "removeLockedConfirm": "解锁",
 
   "phaseCancelled": "导入已取消",
   "phaseCancelling": "正在取消…",

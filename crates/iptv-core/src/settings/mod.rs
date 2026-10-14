@@ -54,6 +54,13 @@ pub const VOD_RATING_RANGE: std::ops::RangeInclusive<f64> = 0.0..=10.0;
 pub const MAX_REFRESH_INTERVAL_HOURS: u32 = 168;
 /// Largest accepted `accountExpiryWarnDays`.
 pub const MAX_EXPIRY_WARN_DAYS: u32 = 60;
+// appearance:
+/// Accepted `uiScale` range (90 % to 125 % of the base font size).
+pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f64> = 0.9..=1.25;
+/// `uiScale` is rounded to this many decimal places before validation, so
+/// floating-point noise from slider arithmetic (`0.8999999999999999`,
+/// `1.2500000000000002`) neither fails the range check nor gets stored.
+const UI_SCALE_DECIMALS: i32 = 4;
 
 /// Fields only the desktop app may change: they name executables, their
 /// arguments, and folders on the machine running the core. In server (PWA)
@@ -298,8 +305,22 @@ fn trim_opt(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Trims strings, maps empty optional strings to `None`, and de-duplicates EPG URLs.
+/// Rounds `v` to [`UI_SCALE_DECIMALS`] places. NaN and infinities pass through
+/// unchanged, so [`validate`] still rejects them.
+fn round_ui_scale(v: f64) -> f64 {
+    let factor = 10f64.powi(UI_SCALE_DECIMALS);
+    let rounded = (v * factor).round() / factor;
+    if rounded.is_finite() {
+        rounded
+    } else {
+        v
+    }
+}
+
+/// Trims strings, maps empty optional strings to `None`, de-duplicates EPG
+/// URLs, and strips floating-point noise from `uiScale`.
 pub fn normalize(mut s: Settings) -> Settings {
+    s.ui_scale = round_ui_scale(s.ui_scale);
     s.language = s.language.trim().to_ascii_lowercase();
     s.last_route = trim_opt(s.last_route);
     s.mpv_path = trim_opt(s.mpv_path);
@@ -381,6 +402,14 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
                 "{field} must be between 0 and {max}"
             )));
         }
+    }
+    // appearance:
+    if !next.ui_scale.is_finite() || !UI_SCALE_RANGE.contains(&next.ui_scale) {
+        return Err(CoreError::invalid(format!(
+            "uiScale must be between {} and {}",
+            UI_SCALE_RANGE.start(),
+            UI_SCALE_RANGE.end()
+        )));
     }
     let changed = |a: &Option<String>, b: &Option<String>| a != b;
     if changed(&current.mpv_path, &next.mpv_path) {
@@ -551,6 +580,81 @@ mod tests {
         let n = apply_patch(&cur, &json!({"mpvPath": "  ", "theme": "dark"})).unwrap();
         assert!(n.mpv_path.is_none());
         assert_eq!(n.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn appearance_fields_validate() {
+        use crate::model::{Accent, Density};
+        let cur = Settings::default();
+        let n = apply_patch(
+            &cur,
+            &json!({"accent": "violet", "oledBlack": true, "density": "compact", "zapBanner": false}),
+        )
+        .unwrap();
+        assert_eq!(n.accent, Accent::Violet);
+        assert!(n.oled_black);
+        assert_eq!(n.density, Density::Compact);
+        assert!(!n.zap_banner);
+        for accent in Accent::ALL {
+            let n = apply_patch(&cur, &json!({ "accent": accent.as_str() })).unwrap();
+            assert_eq!(n.accent, *accent);
+        }
+        assert!(apply_patch(&cur, &json!({"accent": "neon"})).is_err());
+        assert!(apply_patch(&cur, &json!({"accent": "Amber"})).is_err());
+        assert!(apply_patch(&cur, &json!({"density": "cozy"})).is_err());
+        assert!(apply_patch(&cur, &json!({"oledBlack": "yes"})).is_err());
+        assert!(apply_patch(&cur, &json!({"zapBanner": 1})).is_err());
+        // Removing a key falls back to its default.
+        let back = apply_patch(&n, &json!({"accent": null, "density": null})).unwrap();
+        assert_eq!(back.accent, Accent::Amber);
+        assert_eq!(back.density, Density::Comfortable);
+        let rails = apply_patch(&cur, &json!({"dashboardRails": {"myList": false}})).unwrap();
+        assert!(!rails.dashboard_rails.my_list);
+        assert!(rails.dashboard_rails.hero, "siblings keep their values");
+    }
+
+    #[test]
+    fn ui_scale_range_and_rounding() {
+        let cur = Settings::default();
+        let scale = |v: Value| apply_patch(&cur, &json!({ "uiScale": v })).map(|s| s.ui_scale);
+        assert_eq!(scale(json!(0.9)).unwrap(), 0.9);
+        assert_eq!(scale(json!(1.25)).unwrap(), 1.25);
+        assert_eq!(scale(json!(1)).unwrap(), 1.0, "integers are accepted");
+        assert_eq!(scale(json!(1.1)).unwrap(), 1.1);
+        // Slider arithmetic noise at both ends is accepted and cleaned.
+        assert_eq!(scale(json!(0.8999999999999999)).unwrap(), 0.9);
+        assert_eq!(scale(json!(1.2500000000000002)).unwrap(), 1.25);
+        assert_eq!(scale(json!(1.1500000000000001)).unwrap(), 1.15);
+        for bad in [
+            json!(0.85),
+            json!(0.895),
+            json!(1.26),
+            json!(1.3),
+            json!(0),
+            json!(-1),
+        ] {
+            let err = scale(bad.clone()).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("uiScale must be between 0.9 and 1.25"),
+                "{bad}: {err}"
+            );
+        }
+        assert!(scale(json!("1.1")).is_err(), "strings are rejected");
+        // NaN and infinities cannot travel in JSON; Rust callers of `save` are
+        // caught by `validate`.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let next = normalize(Settings {
+                ui_scale: bad,
+                ..Settings::default()
+            });
+            assert!(validate(&cur, next).is_err(), "{bad}");
+        }
+        assert_eq!(
+            round_ui_scale(f64::MAX),
+            f64::MAX,
+            "overflow keeps the value"
+        );
     }
 
     #[test]

@@ -76,6 +76,8 @@ function resetHandlers() {
   h['sources.get'] = () => src;
   h['sources.list'] = () => [src];
   h['settings.get'] = () => settings();
+  // Parental controls off: detail pages open without a lock check (C2).
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['favorites.contains'] = () => [];
   h['downloads.list'] = () => [];
   h['positions.remove'] = () => null;

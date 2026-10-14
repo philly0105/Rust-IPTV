@@ -607,7 +607,7 @@ export function EpgGridPage() {
                         title={t('playChannel', { name: chName })}
                         className="flex h-full w-full items-center gap-2 px-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
                       >
-                        <span className="w-7 shrink-0 text-end text-[11px] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
+                        <span className="w-7 shrink-0 text-end text-[calc(11rem/15)] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
                         <ChannelLogo src={ch.logoUrl} name={chName} size={30} />
                         <span className="min-w-0 flex-1 truncate text-sm text-fg">{chName}</span>
                         {hasUsableArchive(ch, kind) ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
@@ -661,7 +661,7 @@ export function EpgGridPage() {
                                 {/* recording: */}
                                 <ScheduleMark channelRef={ch?.ref} program={b.program} />
                               </span>
-                              <span className={`block truncate text-[11px] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{formatRange(b.program, i18n.language)}</span>
+                              <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{formatRange(b.program, i18n.language)}</span>
                             </span>
                           </button>
                         );

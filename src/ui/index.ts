@@ -33,3 +33,5 @@ export type { MenuAction, MenuItem, MenuProps, MenuSeparator } from './Menu';
 export { Tooltip } from './Tooltip';
 export type { TooltipProps } from './Tooltip';
 export { focusableIn, isTypingTarget } from './focus';
+export { DENSITY_FACTOR, scalePx, setUiScaleState, useDensity, useScaledPx, useUiScale } from './scale';
+export { CARD_ART, CARD_ART_CURSOR, CARD_ROOT } from './card';

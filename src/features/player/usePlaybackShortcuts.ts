@@ -6,6 +6,8 @@ import { LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, positionReadout, SEEK_STEP, SEEK_
 import { playPreviousChannel, setHistoryOpen, useHistoryStore } from './history';
 import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
+import { announceSleep } from './sleepReadout';
+import { cycleSleepTimer } from './sleepTimer';
 import { nextInQueue, prevInQueue, usePlayerStore, zap } from './store';
 import { toggleStreamInfo } from './streamInfo';
 import { adjustDelay, formatDelay, type DelayKind } from './sync';
@@ -48,8 +50,8 @@ export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'play
 
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down; and the player
- * slice's j/l, g/h, i, b, shift+b, shift+p). Registered once by the dock; active while
- * something plays in-app.
+ * slice's j/l, g/h, i, b, shift+b, shift+p, and z for the sleep timer). Registered once by
+ * the dock; active while something plays in-app.
  */
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
   const { t, i18n } = useTranslation('player');
@@ -194,6 +196,15 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   useShortcut('h', guard('letter', () => stepSyncDelay('sub', 1, t, locale)), { ...base, description: t('shortcutSubDelayUp') });
   useShortcut('shift+g', guard('letter', () => stepSyncDelay('audio', -1, t, locale)), { ...base, description: t('shortcutAudioDelayDown') });
   useShortcut('shift+h', guard('letter', () => stepSyncDelay('audio', 1, t, locale)), { ...base, description: t('shortcutAudioDelayUp') });
+  // Sleep timer (C5): Z steps off, 15, 30, 45, 60, 90 minutes, then off again.
+  useShortcut(
+    'z',
+    guard('letter', () => {
+      cycleSleepTimer();
+      announceSleep(t, locale);
+    }),
+    { ...base, description: t('shortcutSleepTimer') },
+  );
   useShortcut('i', guard('letter', () => void toggleStreamInfo()), { ...base, enabled: active && video, description: t('shortcutStreamInfo') });
   useShortcut(
     'b',

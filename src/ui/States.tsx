@@ -143,7 +143,7 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
         </p>
         {/* The code is what support asks for; it stays folded away so the message leads. */}
         <details className="text-xs text-fg-subtle">
-          <summary className="cursor-pointer rounded-sm hover:text-fg-muted">{t('errorTechnicalDetails')}</summary>
+          <summary className="cursor-pointer rounded-sm hover:text-fg-muted active:text-fg">{t('errorTechnicalDetails')}</summary>
           <p className="mt-1" data-error-code={err.code}>
             {t('errorCode', { code: err.code })}
           </p>

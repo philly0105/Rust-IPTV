@@ -14,7 +14,7 @@ import { settle } from './helpers/layout';
 
 const NAME = 'Axe Xtream';
 
-const SETTINGS_SECTIONS = ['general', 'playback', 'players', 'epg', 'metadata', 'appearance', 'remote', 'backup', 'shortcuts', 'about'];
+const SETTINGS_SECTIONS = ['general', 'playback', 'players', 'epg', 'recording', 'metadata', 'appearance', 'parental', 'remote', 'backup', 'shortcuts', 'about'];
 
 function routes(id: string): string[] {
   return [
@@ -27,6 +27,8 @@ function routes(id: string): string[] {
     '/my-videos',
     '/search',
     '/epg',
+    '/my-list',
+    '/multiview',
     `/s/${id}/live`,
     `/s/${id}/radio`,
     `/s/${id}/favorites`,

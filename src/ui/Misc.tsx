@@ -88,7 +88,7 @@ export function Badge({ variant = 'neutral', className, children, ...rest }: Bad
   return (
     <span
       className={cn(
-        'inline-flex h-5 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] font-semibold tabular',
+        'inline-flex h-5 shrink-0 items-center gap-1 rounded-sm px-1.5 text-xs leading-none font-semibold tabular',
         badgeVariants[variant],
         className,
       )}
@@ -118,7 +118,8 @@ export interface ProgressBarProps {
   className?: string;
   /** Unknown progress: animated stripe. */
   indeterminate?: boolean;
-  tone?: 'accent' | 'success' | 'danger' | 'fg';
+  /** `glass`: for bars drawn on glass over artwork or video (C8): a light track and the bright glass accent. */
+  tone?: 'accent' | 'success' | 'danger' | 'fg' | 'glass';
   size?: 'xs' | 'sm' | 'md';
 }
 
@@ -132,7 +133,7 @@ export function ProgressBar({
   size = 'sm',
 }: ProgressBarProps) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  const toneClass = { accent: 'bg-accent', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg' }[tone];
+  const toneClass = { accent: 'bg-accent', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg', glass: 'bg-glass-accent' }[tone];
   return (
     <div
       role="progressbar"
@@ -141,7 +142,8 @@ export function ProgressBar({
       aria-valuemax={indeterminate ? undefined : max}
       aria-valuenow={indeterminate ? undefined : Math.round(Math.min(value, max))}
       className={cn(
-        'relative w-full overflow-hidden rounded-full bg-surface-3',
+        'relative w-full overflow-hidden rounded-full',
+        tone === 'glass' ? 'bg-on-glass/20' : 'bg-surface-3',
         { xs: 'h-0.75', sm: 'h-1.5', md: 'h-2.5' }[size],
         className,
       )}

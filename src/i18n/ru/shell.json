@@ -64,6 +64,8 @@
   "settingsBackup": "Резервное копирование и восстановление",
   "settingsShortcuts": "Горячие клавиши",
   "settingsAbout": "О приложении",
+  "settingsParental": "Родительский контроль",
+  "lockParentalNow": "Заблокировать родительский контроль сейчас",
 
   "shortcutsIntro": "Горячие клавиши работают везде, кроме ввода в текстовых полях.",
   "filterShortcuts": "Фильтр горячих клавиш",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Тише",
   "scMute": "Выключить или включить звук",
   "scCaptions": "Включить или выключить субтитры",
+  "scSleepTimer": "Таймер сна (выкл., 15, 30, 45, 60, 90 мин)",
   "scChannelUp": "Предыдущий канал",
   "scChannelDown": "Следующий канал",
   "scTheme": "Переключить светлую или тёмную тему",
@@ -145,6 +148,17 @@
   "emptySource": "Пока ничего не импортировано",
 
   "heroEyebrow": "Продолжите с того же места",
+  "heroNewIn": "Новое в {{source}}",
+  "heroNew": "Только что добавлено",
+  "heroLabel": "Рекомендуемое",
+  "heroCarousel": "карусель",
+  "heroSlide": "слайд",
+  "heroSlideOf": "{{index}} из {{total}}",
+  "heroControls": "Слайды",
+  "heroPrevious": "Предыдущий слайд",
+  "heroNext": "Следующий слайд",
+  "heroPause": "Приостановить слайд-шоу",
+  "heroPlayRotation": "Запустить слайд-шоу",
   "play": "Воспроизвести",
   "resume": "Продолжить",
   "details": "Подробнее",
@@ -196,5 +210,7 @@
   "accountAlertExpiringBody": "Продлите подписку у провайдера, чтобы смотреть без перерыва.",
   "accountAlertOpen": "Открыть подписку",
   "accountAlertDismiss": "Скрыть уведомление для {{name}}",
-  "navScheduled": "Запланированное"
+  "navScheduled": "Запланированное",
+  "navMultiview": "Мультиэкран",
+  "navMyList": "Мой список"
 }

@@ -71,6 +71,8 @@ function baseHandlers() {
   const src = makeSource('src1', 'xtream', 'Alpha IPTV');
   h['sources.get'] = () => src;
   h['settings.get'] = () => settings();
+  // Parental controls off: detail pages open without a lock check (C2).
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['catalog.categories'] = () => cats;
   h['catalog.recentlyAdded'] = () => [movie(1)];
   h['catalog.movies'] = pages(5000);

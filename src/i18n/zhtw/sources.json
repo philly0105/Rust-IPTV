@@ -289,6 +289,10 @@
   "removedAllTitle_one": "已移除 {{count}} 個播放清單",
   "removedAllTitle_other": "已移除 {{count}} 個播放清單",
   "removeAllFailed": "無法移除播放清單",
+  "removeLockedTitle": "輸入 PIN 碼以移除 {{name}}",
+  "removeAllLockedTitle": "輸入 PIN 碼以移除播放清單",
+  "removeLockedText": "家長監護鎖定會隨播放清單一併移除，因此需先用 PIN 碼解除家長監護鎖定。",
+  "removeLockedConfirm": "解除鎖定",
 
   "phaseCancelled": "已取消匯入",
   "phaseCancelling": "正在取消…",

@@ -308,6 +308,10 @@
   "removedAllTitle_many": "Se quitaron {{count}} listas",
   "removedAllTitle_other": "Se quitaron {{count}} listas",
   "removeAllFailed": "No se pudieron quitar las listas",
+  "removeLockedTitle": "Introduce el PIN para quitar {{name}}",
+  "removeAllLockedTitle": "Introduce el PIN para quitar las listas",
+  "removeLockedText": "Los bloqueos parentales se quitan con la lista, así que el PIN desbloquea primero el control parental.",
+  "removeLockedConfirm": "Desbloquear",
 
   "phaseCancelled": "Importación cancelada",
   "phaseCancelling": "Cancelando…",

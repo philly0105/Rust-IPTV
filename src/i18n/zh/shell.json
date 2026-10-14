@@ -64,6 +64,8 @@
   "settingsBackup": "备份与恢复",
   "settingsShortcuts": "快捷键",
   "settingsAbout": "关于",
+  "settingsParental": "家长控制",
+  "lockParentalNow": "立即锁定家长控制",
 
   "shortcutsIntro": "除在文本框中输入时外，快捷键在任何位置均可使用。",
   "filterShortcuts": "筛选快捷键",
@@ -94,6 +96,7 @@
   "scVolumeDown": "减小音量",
   "scMute": "静音或取消静音",
   "scCaptions": "开启或关闭字幕",
+  "scSleepTimer": "睡眠定时器（关闭、15、30、45、60、90 分钟）",
   "scChannelUp": "上一个频道",
   "scChannelDown": "下一个频道",
   "scTheme": "在浅色和深色主题之间切换",
@@ -137,6 +140,17 @@
   "emptySource": "尚未导入任何内容",
 
   "heroEyebrow": "从上次离开的地方继续",
+  "heroNewIn": "{{source}} 新增",
+  "heroNew": "新加入",
+  "heroLabel": "精选",
+  "heroCarousel": "轮播",
+  "heroSlide": "幻灯片",
+  "heroSlideOf": "第 {{index}} 张，共 {{total}} 张",
+  "heroControls": "幻灯片",
+  "heroPrevious": "上一张",
+  "heroNext": "下一张",
+  "heroPause": "暂停轮播",
+  "heroPlayRotation": "播放轮播",
   "play": "播放",
   "resume": "继续观看",
   "details": "详情",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "请向提供商续订，以便不间断地继续观看。",
   "accountAlertOpen": "查看订阅",
   "accountAlertDismiss": "关闭 {{name}} 的提醒",
-  "navScheduled": "预约"
+  "navScheduled": "预约",
+  "navMultiview": "多画面",
+  "navMyList": "我的片单"
 }

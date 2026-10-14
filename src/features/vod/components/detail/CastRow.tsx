@@ -32,7 +32,7 @@ export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }
             <>
               <Avatar person={p} />
               <span className="flex min-w-0 flex-col leading-tight">
-                <span dir="auto" className="truncate text-[13px] font-medium text-fg text-match-parent">{p.name}</span>
+                <span dir="auto" className="truncate text-[calc(13rem/15)] font-medium text-fg text-match-parent">{p.name}</span>
                 {p.role && <span className="truncate text-xs text-fg-subtle">{p.role}</span>}
               </span>
             </>
@@ -71,7 +71,7 @@ function Avatar({ person }: { person: Person }) {
   return person.profileUrl ? (
     <img src={person.profileUrl} alt="" loading="lazy" className="h-8 w-8 shrink-0 rounded-full object-cover" />
   ) : (
-    <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-semibold text-fg-muted">
+    <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[calc(11rem/15)] font-semibold text-fg-muted">
       {initials}
     </span>
   );

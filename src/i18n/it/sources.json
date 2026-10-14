@@ -308,6 +308,10 @@
   "removedAllTitle_many": "{{count}} playlist rimosse",
   "removedAllTitle_other": "{{count}} playlist rimosse",
   "removeAllFailed": "Impossibile rimuovere le playlist",
+  "removeLockedTitle": "Inserisci il PIN per rimuovere {{name}}",
+  "removeAllLockedTitle": "Inserisci il PIN per rimuovere le playlist",
+  "removeLockedText": "I blocchi parentali vengono rimossi con la playlist, quindi il PIN sblocca prima il controllo parentale.",
+  "removeLockedConfirm": "Sblocca",
 
   "phaseCancelled": "Importazione annullata",
   "phaseCancelling": "Annullamento…",

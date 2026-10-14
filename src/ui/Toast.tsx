@@ -233,7 +233,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="text-sm font-semibold text-fg">{t.title}</p>
-        {t.description && <p className="text-[13px] break-words text-fg-muted">{t.description}</p>}
+        {t.description && <p className="text-sm break-words text-fg-muted">{t.description}</p>}
         {t.progress && (
           <ProgressBar
             className="mt-1"
@@ -250,7 +250,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
               t.action?.onClick();
               close();
             }}
-            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline active:bg-pressed"
+            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline hover:bg-surface-3 active:bg-pressed motion-safe:transition-colors"
           >
             {t.action.label}
           </button>
@@ -261,7 +261,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
         aria-label={tr('dismiss')}
         onClick={close}
         data-toast-dismiss=""
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg active:bg-pressed"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg active:bg-pressed motion-safe:transition-colors"
       >
         <X aria-hidden size={14} />
       </button>

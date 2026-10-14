@@ -327,6 +327,10 @@
   "removedAllTitle_many": "Удалено {{count}} плейлистов",
   "removedAllTitle_other": "Удалено {{count}} плейлиста",
   "removeAllFailed": "Не удалось удалить плейлисты",
+  "removeLockedTitle": "Введите PIN-код, чтобы удалить {{name}}",
+  "removeAllLockedTitle": "Введите PIN-код, чтобы удалить плейлисты",
+  "removeLockedText": "Блокировки родительского контроля удаляются вместе с плейлистом, поэтому сначала PIN-код разблокирует родительский контроль.",
+  "removeLockedConfirm": "Разблокировать",
 
   "phaseCancelled": "Импорт отменён",
   "phaseCancelling": "Отмена…",

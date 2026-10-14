@@ -64,6 +64,8 @@
   "settingsBackup": "Kopia zapasowa i przywracanie",
   "settingsShortcuts": "Skróty",
   "settingsAbout": "O aplikacji",
+  "settingsParental": "Kontrola rodzicielska",
+  "lockParentalNow": "Zablokuj teraz kontrolę rodzicielską",
 
   "shortcutsIntro": "Skróty działają wszędzie, z wyjątkiem pisania w polu tekstowym.",
   "filterShortcuts": "Filtruj skróty",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Ciszej",
   "scMute": "Wycisz lub przywróć dźwięk",
   "scCaptions": "Włącz lub wyłącz napisy",
+  "scSleepTimer": "Wyłącznik czasowy (wył., 15, 30, 45, 60, 90 min)",
   "scChannelUp": "Poprzedni kanał",
   "scChannelDown": "Następny kanał",
   "scTheme": "Przełącz między jasnym a ciemnym motywem",
@@ -145,6 +148,17 @@
   "emptySource": "Jeszcze nic nie zaimportowano",
 
   "heroEyebrow": "Kontynuuj od miejsca, w którym przerwano",
+  "heroNewIn": "Nowości w {{source}}",
+  "heroNew": "Nowo dodane",
+  "heroLabel": "Polecane",
+  "heroCarousel": "karuzela",
+  "heroSlide": "slajd",
+  "heroSlideOf": "{{index}} z {{total}}",
+  "heroControls": "Slajdy",
+  "heroPrevious": "Poprzedni slajd",
+  "heroNext": "Następny slajd",
+  "heroPause": "Wstrzymaj pokaz slajdów",
+  "heroPlayRotation": "Odtwórz pokaz slajdów",
   "play": "Odtwórz",
   "resume": "Wznów",
   "details": "Szczegóły",
@@ -196,5 +210,7 @@
   "accountAlertExpiringBody": "Odnów subskrypcję u dostawcy, aby oglądać bez przerwy.",
   "accountAlertOpen": "Pokaż subskrypcję",
   "accountAlertDismiss": "Odrzuć alert dla {{name}}",
-  "navScheduled": "Zaplanowane"
+  "navScheduled": "Zaplanowane",
+  "navMultiview": "Multiwidok",
+  "navMyList": "Moja lista"
 }

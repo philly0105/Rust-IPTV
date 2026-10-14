@@ -64,6 +64,8 @@
   "settingsBackup": "備份與還原",
   "settingsShortcuts": "快速鍵",
   "settingsAbout": "關於",
+  "settingsParental": "家長監護",
+  "lockParentalNow": "立即鎖定家長監護",
 
   "shortcutsIntro": "除了在文字欄位中輸入時，快速鍵在任何地方都能使用。",
   "filterShortcuts": "篩選快速鍵",
@@ -94,6 +96,7 @@
   "scVolumeDown": "調低音量",
   "scMute": "靜音或取消靜音",
   "scCaptions": "開啟或關閉字幕",
+  "scSleepTimer": "睡眠定時器（關閉、15、30、45、60、90 分鐘）",
   "scChannelUp": "上一個頻道",
   "scChannelDown": "下一個頻道",
   "scTheme": "切換淺色與深色主題",
@@ -137,6 +140,17 @@
   "emptySource": "尚未匯入任何內容",
 
   "heroEyebrow": "從上次中斷的地方繼續",
+  "heroNewIn": "{{source}} 新增內容",
+  "heroNew": "最新加入",
+  "heroLabel": "精選",
+  "heroCarousel": "輪播",
+  "heroSlide": "投影片",
+  "heroSlideOf": "第 {{index}} 張，共 {{total}} 張",
+  "heroControls": "投影片",
+  "heroPrevious": "上一張",
+  "heroNext": "下一張",
+  "heroPause": "暫停輪播",
+  "heroPlayRotation": "播放輪播",
   "play": "播放",
   "resume": "繼續",
   "details": "詳細資訊",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "請向供應商續訂，以便不間斷地繼續觀看。",
   "accountAlertOpen": "查看訂閱",
   "accountAlertDismiss": "關閉 {{name}} 的提醒",
-  "navScheduled": "預約"
+  "navScheduled": "預約",
+  "navMultiview": "多畫面",
+  "navMyList": "我的片單"
 }

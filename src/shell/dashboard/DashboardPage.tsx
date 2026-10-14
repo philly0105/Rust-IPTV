@@ -1,4 +1,4 @@
-import { Info, ListPlus, Play, Tv } from 'lucide-react';
+import { ListPlus, Play, Tv } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
@@ -15,9 +15,10 @@ import {
   type TmdbBrief,
   type VodItem,
 } from '@/api/types';
+import { MyListRail } from '@/features/mylist/components/MyListRail';
 import { playItem } from '@/features/player';
 import { RpcError } from '@/api/transport';
-import { Badge, Button, EmptyState, ErrorState, Poster, ProgressBar, buttonClass, useToast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast } from '@/ui';
 
 import { useShell } from '../store';
 import { useVisibleSources } from '../useVisibleSources';
@@ -26,21 +27,14 @@ import { useSettings } from '../useSettings';
 import { AccountAlerts } from './AccountAlerts';
 import { ChannelCard, PosterCard, SourceCard, itemPath, joinList } from './cards';
 import { DashboardRail } from './DashboardRail';
+import { HeroCarousel } from './HeroCarousel';
 import { HeroSkeleton } from './HeroSkeleton';
+import { buildHeroSlides, type HeroSlide } from './heroSlides';
+import { minutesLeft, watchedFraction } from './progress';
 
 const RAIL_LIMIT = 24;
 
-/** Fraction watched, or undefined when duration is unknown. */
-export function watchedFraction(p: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'>): number | undefined {
-  if (!p.durationSeconds || p.durationSeconds <= 0) return undefined;
-  return Math.max(0, Math.min(1, p.positionSeconds / p.durationSeconds));
-}
-
-/** Whole minutes left (at least 1), or undefined. */
-export function minutesLeft(p: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'>): number | undefined {
-  if (!p.durationSeconds || p.durationSeconds <= 0) return undefined;
-  return Math.max(1, Math.round((p.durationSeconds - p.positionSeconds) / 60));
-}
+export { minutesLeft, watchedFraction } from './progress';
 
 /** Sources ordered by latest activity in `recent`, then refresh/creation time. */
 export function rankSources(sources: readonly Source[], recent: readonly RecentEntry[]): Source[] {
@@ -98,66 +92,6 @@ function programmeProgress(start?: string, end?: string, offsetMinutes = 0): num
   return Math.max(0, Math.min(1, (Date.now() - offsetMinutes * 60_000 - s) / (e - s)));
 }
 
-function Hero({
-  position,
-  sourceKind,
-  onPlay,
-}: {
-  position: PlaybackPosition;
-  sourceKind: Source['kind'] | undefined;
-  onPlay: () => void;
-}) {
-  const { t } = useTranslation('shell');
-  const snap = position.snapshot;
-  const title = snap?.title ?? t('untitled');
-  const fraction = watchedFraction(position);
-  const left = minutesLeft(position);
-  const isVod = position.ref.contentType === 'movie' || position.ref.contentType === 'series';
-  return (
-    <section
-      aria-labelledby="dash-hero-title"
-      data-testid="dashboard-hero"
-      className="relative mx-8 overflow-hidden rounded-lg border border-divider bg-surface"
-    >
-      {snap?.posterUrl && (
-        <div aria-hidden className="absolute inset-0">
-          <img src={snap.posterUrl} alt="" className="h-full w-full scale-110 object-cover opacity-40 blur-2xl" referrerPolicy="no-referrer" />
-        </div>
-      )}
-      <div aria-hidden className="absolute inset-0 bg-gradient-to-r rtl:bg-gradient-to-l from-surface via-surface/85 to-surface/30" />
-      <div className="relative flex items-end gap-8 p-8">
-        <div className="hidden w-[150px] shrink-0 md:block">
-          <Poster src={snap?.posterUrl} alt={title} aspect="poster" eager className="shadow-2" />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <p className="text-sm font-semibold text-accent">{t('heroEyebrow')}</p>
-          <h2 id="dash-hero-title" className="max-w-[22ch] text-[clamp(28px,3.4vw,48px)] leading-[1.05] font-semibold">
-            {title}
-          </h2>
-          {snap?.subtitle && <p className="max-w-[60ch] text-base text-fg-muted">{snap.subtitle}</p>}
-          {fraction !== undefined && (
-            <div className="flex max-w-md items-center gap-3">
-              <ProgressBar value={fraction * 100} label={t('watchedPercent', { percent: Math.round(fraction * 100) })} />
-              {left !== undefined && <span className="shrink-0 text-sm text-fg-muted tabular">{t('minutesLeft', { count: left })}</span>}
-            </div>
-          )}
-          <div className="mt-2 flex flex-wrap gap-3">
-            <Button variant="primary" size="lg" icon={<Play size={18} fill="currentColor" aria-hidden />} onClick={onPlay} disabled={!sourceKind}>
-              {fraction ? t('resume') : t('play')}
-            </Button>
-            {isVod && (
-              <Link to={itemPath(position.ref)} className={buttonClass('secondary', 'lg')}>
-                <Info size={18} aria-hidden />
-                {t('details')}
-              </Link>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 /** The page's single <h1> (sr-only; the header shows the visible title) in every state. */
 export function DashboardPage() {
   const { t } = useTranslation('shell');
@@ -192,16 +126,10 @@ function DashboardBody() {
   const continueWatching = useRpcQuery('positions.continueWatching', { limit: RAIL_LIMIT }, { enabled: hasSources });
   const favorites = useRpcQuery('favorites.list', {}, { enabled: hasSources });
   const recent = useRpcQuery('recent.list', { limit: 60 }, { enabled: hasSources });
-  const addedMovies = useRpcQuery(
-    'catalog.recentlyAdded',
-    { contentType: 'movie', limit: RAIL_LIMIT },
-    { enabled: hasSources && show('recentlyAdded') },
-  );
-  const addedSeries = useRpcQuery(
-    'catalog.recentlyAdded',
-    { contentType: 'series', limit: RAIL_LIMIT },
-    { enabled: hasSources && show('recentlyAdded') },
-  );
+  // The hero rotates new arrivals too, so it loads them even when their rail is off.
+  const wantAdded = hasSources && (show('hero') || show('recentlyAdded'));
+  const addedMovies = useRpcQuery('catalog.recentlyAdded', { contentType: 'movie', limit: RAIL_LIMIT }, { enabled: wantAdded });
+  const addedSeries = useRpcQuery('catalog.recentlyAdded', { contentType: 'series', limit: RAIL_LIMIT }, { enabled: wantAdded });
   const trending = useRpcQuery('tmdb.trending', undefined, {
     enabled: hasSources && tmdbEnabled && show('tmdbTrending'),
     staleTime: 60 * 60_000,
@@ -233,6 +161,8 @@ function DashboardBody() {
     () => mergeRecentlyAdded((addedMovies.data ?? []) as VodItem[], (addedSeries.data ?? []) as SeriesItem[], RAIL_LIMIT),
     [addedMovies.data, addedSeries.data],
   );
+
+  const heroSlides = useMemo(() => buildHeroSlides(continueWatching.data ?? [], recentlyAdded), [continueWatching.data, recentlyAdded]);
 
   const nowRefs = useMemo(() => liveFavorites.map((f) => f.ref), [liveFavorites]);
   const epgOffset = settings.data?.epgOffsetMinutes ?? 0;
@@ -301,28 +231,38 @@ function DashboardBody() {
     return <ErrorState error={sources.error} onRetry={() => void sources.refetch()} />;
   }
 
-  const hero: PlaybackPosition | undefined = continueWatching.data?.[0];
-  const heroLoading = sources.isPending || continueWatching.isPending;
+  // Continue watching leads the rotation and gates the layout below the hero. New arrivals
+  // are only awaited when there is nothing to resume: the hero keeps its skeleton for them,
+  // but a slow catalog query must not hold back the rails underneath.
+  const heroLayoutPending = sources.isPending || continueWatching.isPending;
+  const heroLoading =
+    heroLayoutPending || ((continueWatching.data?.length ?? 0) === 0 && (addedMovies.isPending || addedSeries.isPending));
+  const playSlide = (s: HeroSlide) =>
+    play({ ref: s.ref, episodeId: s.episodeId, title: s.title ?? '', subtitle: s.subtitle, posterUrl: s.posterUrl });
 
   const seriesBadge = (p: PlaybackPosition) => (p.ref.contentType === 'series' && p.snapshot?.subtitle ? <Badge variant="neutral">{p.snapshot.subtitle}</Badge> : undefined);
 
   // Only rails the user has switched on count: hidden rails with data must not suppress the quiet state.
   const anyRailVisible =
-    ((show('hero') || show('continueWatching')) && (continueWatching.data?.length ?? 0) > 0) ||
+    (show('hero') && heroSlides.length > 0) ||
+    (show('continueWatching') && (continueWatching.data?.length ?? 0) > 0) ||
     (show('liveFavorites') && liveFavorites.length > 0) ||
     (show('recentlyWatchedLive') && recentLive.length > 0) ||
     (show('favoriteMoviesAndSeries') && vodFavorites.length > 0) ||
     (show('recentlyAdded') && recentlyAdded.length > 0) ||
     (show('tmdbTrending') && tmdbEnabled && (trending.data?.length ?? 0) > 0);
-  // Wait for every rail on screen, so "Nothing to show yet" never flashes above rails still loading.
-  const anyRailPending = railQueries.some((q) => q.isPending);
+  // Wait for every rail on screen (and a hero still waiting for new arrivals), so
+  // "Nothing to show yet" never flashes above content still loading.
+  const anyRailPending = railQueries.some((q) => q.isPending) || (show('hero') && heroLoading);
 
   // Layout stability: nothing renders below the first section still loading. A skeleton
   // that collapses (empty rail, shared error) or a flagged rail that appears then moves
   // nothing, because everything after it is inserted only once it has settled.
   const sections: [Section, boolean][] = [
-    ['hero', heroLoading],
+    ['hero', heroLayoutPending],
     ['continueWatching', continueWatching.isPending],
+    // My List loads inside its own rail (skeleton first), so it never holds back the rest.
+    ['myList', false],
     ['liveFavorites', favorites.isPending],
     ['recentlyWatchedLive', recent.isPending],
     ['favoriteMoviesAndSeries', favorites.isPending],
@@ -335,6 +275,7 @@ function DashboardBody() {
   const visible = (k: Section) => show(k) && (firstPending < 0 || sections.findIndex(([x]) => x === k) <= firstPending);
 
   return (
+    // gap-10 pt-8 match the startup frame (StartupRedirect), and both follow density through --spacing.
     <div className="flex flex-col gap-10 pt-8 pb-16" data-testid="dashboard">
       {/* account: subscription expiry alerts, above everything else. */}
       {hasSources && <AccountAlerts sources={sources.data ?? []} />}
@@ -350,7 +291,7 @@ function DashboardBody() {
               <HeroSkeleton />
             </div>
           )}
-          <div className="col-start-1 row-start-1 mx-8 flex rounded-lg border border-divider bg-surface" data-testid="dashboard-error">
+          <div className="col-start-1 row-start-1 mx-4 flex rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-error">
             <ErrorState
               error={sharedError}
               size="inline"
@@ -362,21 +303,17 @@ function DashboardBody() {
           </div>
         </div>
       )}
-      {show('hero') && (heroLoading ? <HeroSkeleton /> : hero ? (
-        <Hero
-          position={hero}
-          sourceKind={sourceById.get(hero.ref.sourceId)?.kind}
-          onPlay={() =>
-            play({
-              ref: hero.ref,
-              episodeId: hero.episodeId,
-              title: hero.snapshot?.title ?? '',
-              subtitle: hero.snapshot?.subtitle,
-              posterUrl: hero.snapshot?.posterUrl,
-            })
-          }
-        />
-      ) : null)}
+      {show('hero') &&
+        (heroLoading ? (
+          <HeroSkeleton />
+        ) : heroSlides.length > 0 ? (
+          <HeroCarousel
+            slides={heroSlides}
+            sourceName={(id) => sourceById.get(id)?.name}
+            canPlay={(ref) => sourceById.has(ref.sourceId)}
+            onPlay={playSlide}
+          />
+        ) : null)}
 
       {visible('continueWatching') && (
         <DashboardRail<PlaybackPosition>
@@ -411,6 +348,9 @@ function DashboardBody() {
           }}
         />
       )}
+
+      {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
+      {visible('myList') && <MyListRail hideError={showSharedError} />}
 
       {visible('liveFavorites') && (
         <DashboardRail<FavoriteEntry>

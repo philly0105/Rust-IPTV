@@ -64,6 +64,8 @@
   "settingsBackup": "백업 및 복원",
   "settingsShortcuts": "단축키",
   "settingsAbout": "정보",
+  "settingsParental": "자녀 보호",
+  "lockParentalNow": "지금 자녀 보호 잠그기",
 
   "shortcutsIntro": "단축키는 텍스트 입력란에 입력하는 중이 아니라면 어디서나 작동합니다.",
   "filterShortcuts": "단축키 필터",
@@ -94,6 +96,7 @@
   "scVolumeDown": "볼륨 낮추기",
   "scMute": "음소거/음소거 해제",
   "scCaptions": "자막 켜기/끄기",
+  "scSleepTimer": "취침 타이머 (끔, 15, 30, 45, 60, 90분)",
   "scChannelUp": "이전 채널",
   "scChannelDown": "다음 채널",
   "scTheme": "라이트 테마와 다크 테마 전환",
@@ -137,6 +140,17 @@
   "emptySource": "아직 가져온 항목이 없습니다",
 
   "heroEyebrow": "보던 곳에서 이어 보기",
+  "heroNewIn": "{{source}}의 새 항목",
+  "heroNew": "새로 추가됨",
+  "heroLabel": "추천",
+  "heroCarousel": "캐러셀",
+  "heroSlide": "슬라이드",
+  "heroSlideOf": "{{total}}개 중 {{index}}번째",
+  "heroControls": "슬라이드",
+  "heroPrevious": "이전 슬라이드",
+  "heroNext": "다음 슬라이드",
+  "heroPause": "슬라이드쇼 일시 정지",
+  "heroPlayRotation": "슬라이드쇼 재생",
   "play": "재생",
   "resume": "이어 보기",
   "details": "세부 정보",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "끊김 없이 계속 시청하려면 제공업체에서 갱신하세요.",
   "accountAlertOpen": "구독 보기",
   "accountAlertDismiss": "{{name}} 알림 닫기",
-  "navScheduled": "예약"
+  "navScheduled": "예약",
+  "navMultiview": "멀티뷰",
+  "navMyList": "내 목록"
 }

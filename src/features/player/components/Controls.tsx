@@ -35,8 +35,9 @@ import { useMediaStore } from '../media';
 import { usePipStore } from '../pip';
 import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
+import { InlineSpinner } from './InlineSpinner';
 // failover: AlternatesMenu, AlternatesRow
-import { AlternatesMenu, AlternatesRow, ChannelHistory } from './lazyParts';
+import { AlternatesMenu, AlternatesRow, ChannelHistory, SleepChip, SleepMenu, SleepRowValue } from './lazyParts';
 import { SeekBar } from './SeekBar';
 import { SyncRows, useSyncSummary } from './SyncMenu';
 
@@ -263,10 +264,10 @@ export function BarReadout({
   );
 }
 
-type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'speed' | 'sync' | 'sources'; // failover: + 'sources'
+type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'speed' | 'sync' | 'sources' | 'sleep'; // failover: + 'sources'
 
 /** A row that opens a submenu (shared with the video's context menu). */
-export function MenuRow({ label, value, onClick }: { label: string; value?: string; onClick(): void }) {
+export function MenuRow({ label, value, onClick }: { label: string; value?: ReactNode; onClick(): void }) {
   return (
     <button
       type="button"
@@ -275,7 +276,7 @@ export function MenuRow({ label, value, onClick }: { label: string; value?: stri
       className="flex w-full items-center justify-between gap-6 rounded-sm px-3 py-2 text-start text-sm text-white hover:bg-white/10"
     >
       <span>{label}</span>
-      <span className="flex items-center gap-1 text-white/70">
+      <span className="player-on-glass-muted flex items-center gap-1">
         {value}
         <ChevronRight className="size-4 rtl:rotate-180" aria-hidden />
       </span>
@@ -374,7 +375,9 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
                   ? t('sync')
                   : view === 'sources'
                     ? t('alternateSources')
-                    : t('speed')}
+                    : view === 'sleep'
+                      ? t('sleepTimer')
+                      : t('speed')}
         </button>
       )}
       <button
@@ -382,7 +385,7 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
         aria-label={tc('close')}
         title={tc('close')}
         onClick={() => setView(null)}
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
+        className="player-on-glass-muted inline-flex size-8 shrink-0 items-center justify-center rounded-sm hover:bg-white/10 hover:text-white"
       >
         <X className="size-4" aria-hidden />
       </button>
@@ -408,7 +411,7 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
           next?.focus();
         }
       }}
-      className="max-h-[min(60vh,360px)] w-64 overflow-y-auto rounded-lg border border-white/10 bg-[rgb(10_14_22/0.94)] p-1.5 shadow-2 backdrop-blur-md motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge max-h-[min(60vh,360px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -424,6 +427,8 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
             />
           )}
           <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          {/* Sleep timer (C5): the countdown as its value while on. */}
+          <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
           {/* failover: other copies of the live channel. */}
           <AlternatesRow onOpen={() => setView('sources')} />
@@ -439,6 +444,12 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
         <>
           {header}
           <AlternatesMenu onDone={() => setView(null)} />
+        </>
+      )}
+      {view === 'sleep' && (
+        <>
+          {header}
+          <SleepMenu onDone={() => setView(null)} />
         </>
       )}
       {view === 'quality' && (
@@ -495,15 +506,7 @@ export interface ControlsProps {
   readoutIdle?: ReactNode;
 }
 
-/** Small sweeping dial for inline status text (the loading spinner's style, bar sized). */
-export function InlineSpinner() {
-  return (
-    <svg viewBox="0 0 48 48" className="inline size-3.5 shrink-0 text-accent motion-safe:animate-spin" style={{ animationDuration: '1.4s' }} aria-hidden>
-      <circle cx="24" cy="24" r="20" fill="none" stroke="rgb(255 255 255 / 0.15)" strokeWidth="5" />
-      <path d="M24 4 a20 20 0 0 1 20 20" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
-    </svg>
-  );
-}
+export { InlineSpinner };
 
 export function Controls({ variant, visible, compact, onMenuOpenChange, readoutIdle }: ControlsProps) {
   const { t } = useTranslation('player');
@@ -576,6 +579,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
 
   const store = usePlayerStore.getState();
+  // Overlay: a glass pane floating over a light scrim (the mini player's is full width, it has no
+  // room to spare). Dock: a strong glass strip under the native video.
+  const floating = variant === 'overlay' && !compact;
 
   return (
     <div
@@ -583,8 +589,10 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       className={cn(
         'pointer-events-auto relative text-white',
         variant === 'overlay'
-          ? 'bg-gradient-to-t from-black/85 via-black/45 to-transparent px-3 pt-10 pb-2 sm:px-4'
-          : 'border-t border-white/10 bg-[#070b12] px-3 py-1.5',
+          ? compact
+            ? 'player-scrim-bottom pt-8'
+            : 'player-scrim-bottom px-2 pt-12 pb-2 sm:px-3 sm:pb-3'
+          : 'player-glass-strong border-t px-3 py-1.5',
         variant === 'overlay' && 'motion-safe:transition-opacity motion-safe:duration-200',
         variant === 'overlay' && !visible && 'pointer-events-none opacity-0',
       )}
@@ -593,13 +601,14 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       onDoubleClick={(e) => e.stopPropagation()}
     >
       {menu && variant === 'overlay' && (
-        <div className="absolute end-3 bottom-full z-10 mb-1 sm:end-4">
+        // Floating: just above the glass pane, inside the scrim. Compact: over the picture.
+        <div className={cn('absolute z-10', floating ? 'end-2 bottom-[calc(100%-2.5rem)] sm:end-3' : 'end-1.5 bottom-full mb-1')}>
           <OptionsMenu view={menu} setView={setMenu} isVod={isVod} />
         </div>
       )}
 
       {showHistory && variant === 'overlay' && (
-        <div className="absolute start-3 bottom-full z-10 mb-1 sm:start-4">
+        <div className={cn('absolute z-10', floating ? 'start-2 bottom-[calc(100%-2.5rem)] sm:start-3' : 'start-1.5 bottom-full mb-1')}>
           <ChannelHistory />
         </div>
       )}
@@ -619,145 +628,156 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
         </div>
       )}
 
-      {showSeek && (
-        <SeekBar
-          min={liveWindow ? liveWindow.start : 0}
-          max={liveWindow ? liveWindow.end : (duration ?? 0)}
-          value={position}
-          buffered={buffered}
-          live={!!liveWindow}
-          edgeSlack={edgeSlack}
-          onSeek={(s) => store.seekTo(s)}
-          className="mb-0.5"
-        />
-      )}
-      <div className="flex min-w-0 items-center gap-0.5">
-        {prev && !compact && (
-          <CtlButton id="prev" shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
-            <SkipBack />
-          </CtlButton>
+      <div
+        data-testid="controls-pane"
+        className={cn(
+          variant === 'overlay' && 'player-glass',
+          floating && 'player-glass-edge rounded-xl border px-1.5 pt-1 sm:px-2.5',
+          variant === 'overlay' && compact && 'border-t px-1',
         )}
-        {ended ? (
-          <CtlButton id="play" label={t('replay')} onClick={replay}>
-            <RotateCcw />
-          </CtlButton>
-        ) : (
-          <CtlButton id="play" shortcut="playPause" label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
-            {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
-          </CtlButton>
+      >
+        {showSeek && (
+          <SeekBar
+            min={liveWindow ? liveWindow.start : 0}
+            max={liveWindow ? liveWindow.end : (duration ?? 0)}
+            value={position}
+            buffered={buffered}
+            live={!!liveWindow}
+            edgeSlack={edgeSlack}
+            onSeek={(s) => store.seekTo(s)}
+            className="mb-0.5"
+          />
         )}
-        {next && !compact && (
-          <CtlButton id="next" shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
-            <SkipForward />
-          </CtlButton>
-        )}
-        {!compact && (
-          <CtlButton id="stop" label={t('stop')} onClick={() => store.stop()}>
-            <Square className="size-4! fill-current" />
-          </CtlButton>
-        )}
-        <VolumeControl compact={compact} />
-
-        {isLive ? (
-          atLiveEdge ? (
-            // At the edge there is nothing to jump to: a status badge, not a dead button.
-            <span
-              data-testid="live-badge"
-              className="ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-display text-xs font-semibold tracking-wide text-white"
-            >
-              <span className="size-2 rounded-full bg-live motion-safe:animate-live-pulse" aria-hidden />
-              {t('live')}
-            </span>
+        <div className="flex min-w-0 items-center gap-0.5">
+          {prev && !compact && (
+            <CtlButton id="prev" shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
+              <SkipBack />
+            </CtlButton>
+          )}
+          {ended ? (
+            <CtlButton id="play" label={t('replay')} onClick={replay}>
+              <RotateCcw />
+            </CtlButton>
           ) : (
-            <>
-              <button
-                type="button"
-                data-ctl="golive"
-                onClick={(e) => {
-                  if (!liveWindow) return;
-                  // At the edge this button gives way to the LIVE badge: hand focus to play/pause
-                  // first, or it would fall to the page and the player's keys would stop working.
-                  const bar = e.currentTarget.closest('[data-player-controls]');
-                  bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
-                  store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end);
-                }}
-                aria-label={t('goLive')}
-                title={t('goLive')}
-                className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
-              >
-                <span className="size-2 rounded-full bg-white/50" aria-hidden />
-                {compact ? t('live') : t('goLive')}
-              </button>
+            <CtlButton id="play" shortcut="playPause" label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
+              {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
+            </CtlButton>
+          )}
+          {next && !compact && (
+            <CtlButton id="next" shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
+              <SkipForward />
+            </CtlButton>
+          )}
+          {!compact && (
+            <CtlButton id="stop" label={t('stop')} onClick={() => store.stop()}>
+              <Square className="size-4! fill-current" />
+            </CtlButton>
+          )}
+          <VolumeControl compact={compact} />
+
+          {isLive ? (
+            atLiveEdge ? (
+              // At the edge there is nothing to jump to: a status badge, not a dead button.
               <span
-                className="ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums"
-                data-testid="behind-live"
+                data-testid="live-badge"
+                className="ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-display text-xs font-semibold tracking-wide text-white"
               >
-                {compact ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
+                <span className="size-2 rounded-full bg-live motion-safe:animate-live-pulse" aria-hidden />
+                {t('live')}
               </span>
-            </>
-          )
-        ) : source.isRadio ? (
-          <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
-            <Radio className="size-4" aria-hidden />
-            {t('radio')}
-          </span>
-        ) : showTime ? (
-          <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
-            {formatTime(position)}
-            <span className="text-white/70"> / {formatTime(duration)}</span>
-          </span>
-        ) : null}
-        {canRecord && <RecordControl compact={compact} />}
-        {isLive && !compact && (
-          <CtlButton id="history" shortcut="history" label={t('channelHistory')} pressed={showHistory} onClick={() => setHistoryOpen(!historyOpen)}>
-            <History />
-          </CtlButton>
-        )}
+            ) : (
+              <>
+                <button
+                  type="button"
+                  data-ctl="golive"
+                  onClick={(e) => {
+                    if (!liveWindow) return;
+                    // At the edge this button gives way to the LIVE badge: hand focus to play/pause
+                    // first, or it would fall to the page and the player's keys would stop working.
+                    const bar = e.currentTarget.closest('[data-player-controls]');
+                    bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
+                    store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end);
+                  }}
+                  aria-label={t('goLive')}
+                  title={t('goLive')}
+                  className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
+                >
+                  <span className="size-2 rounded-full bg-white/50" aria-hidden />
+                  {compact ? t('live') : t('goLive')}
+                </button>
+                <span
+                  className="ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums"
+                  data-testid="behind-live"
+                >
+                  {compact ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
+                </span>
+              </>
+            )
+          ) : source.isRadio ? (
+            <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
+              <Radio className="size-4" aria-hidden />
+              {t('radio')}
+            </span>
+          ) : showTime ? (
+            <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
+              {formatTime(position)}
+              <span className="text-white/70"> / {formatTime(duration)}</span>
+            </span>
+          ) : null}
+          {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
+          <SleepChip compact={compact} onOpen={() => setMenu(menu === 'sleep' ? null : 'sleep')} />
+          {canRecord && <RecordControl compact={compact} />}
+          {isLive && !compact && (
+            <CtlButton id="history" shortcut="history" label={t('channelHistory')} pressed={showHistory} onClick={() => setHistoryOpen(!historyOpen)}>
+              <History />
+            </CtlButton>
+          )}
 
-        <div className="flex-1" />
-        {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
+          <div className="flex-1" />
+          {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
 
-        {tracks.text.length > 0 && !compact && (
-          <CtlButton
-            id="captions"
-            // In live fullscreen, C opens the channel list instead.
-            shortcut={isLive && isFullscreen ? undefined : 'captions'}
-            label={captionsOn ? t('captionsOff') : t('captionsOn')}
-            pressed={captionsOn}
-            onClick={() => {
-              const first = tracks.text[0];
-              commands?.setText(captionsOn || !first ? null : first.id);
-            }}
-          >
-            {captionsOn ? <Captions /> : <CaptionsOff />}
-          </CtlButton>
-        )}
-        {hasOptions && !compact && (
-          <CtlButton id="options" label={t('settingsMenu')} pressed={menu !== null} onClick={() => setMenu(menu ? null : 'root')}>
-            <Settings2 />
-          </CtlButton>
-        )}
-        {canPip && (variant === 'overlay' || !compact) && (
-          <CtlButton
-            id="pip"
-            shortcut={windowPip ? 'exitPip' : undefined}
-            label={inPip ? t('exitPip') : t('pip')}
-            pressed={inPip}
-            onClick={() => commands?.togglePip()}
-          >
-            <PictureInPicture2 />
-          </CtlButton>
-        )}
-        {!windowPip && (
-          <CtlButton
-            id="fullscreen"
-            shortcut="fullscreen"
-            label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
-            onClick={() => store.toggleFullscreen()}
-          >
-            {isFullscreen ? <Minimize /> : <Maximize />}
-          </CtlButton>
-        )}
+          {tracks.text.length > 0 && !compact && (
+            <CtlButton
+              id="captions"
+              // In live fullscreen, C opens the channel list instead.
+              shortcut={isLive && isFullscreen ? undefined : 'captions'}
+              label={captionsOn ? t('captionsOff') : t('captionsOn')}
+              pressed={captionsOn}
+              onClick={() => {
+                const first = tracks.text[0];
+                commands?.setText(captionsOn || !first ? null : first.id);
+              }}
+            >
+              {captionsOn ? <Captions /> : <CaptionsOff />}
+            </CtlButton>
+          )}
+          {hasOptions && !compact && (
+            <CtlButton id="options" label={t('settingsMenu')} pressed={menu !== null} onClick={() => setMenu(menu ? null : 'root')}>
+              <Settings2 />
+            </CtlButton>
+          )}
+          {canPip && (variant === 'overlay' || !compact) && (
+            <CtlButton
+              id="pip"
+              shortcut={windowPip ? 'exitPip' : undefined}
+              label={inPip ? t('exitPip') : t('pip')}
+              pressed={inPip}
+              onClick={() => commands?.togglePip()}
+            >
+              <PictureInPicture2 />
+            </CtlButton>
+          )}
+          {!windowPip && (
+            <CtlButton
+              id="fullscreen"
+              shortcut="fullscreen"
+              label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
+              onClick={() => store.toggleFullscreen()}
+            >
+              {isFullscreen ? <Minimize /> : <Maximize />}
+            </CtlButton>
+          )}
+        </div>
       </div>
     </div>
   );

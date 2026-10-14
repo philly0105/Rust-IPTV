@@ -158,6 +158,10 @@ pub fn build_router() -> RpcRouter {
     crate::catchup::rpc::register(&mut r);
     // recording:
     crate::recording::rpc::register(&mut r);
+    // parental:
+    crate::parental::rpc::register(&mut r);
+    // watchlist:
+    crate::watchlist::rpc::register(&mut r);
     r
 }
 
@@ -182,6 +186,10 @@ pub async fn init_all(state: Arc<AppState>) -> CoreResult<()> {
     run_init("remote", crate::remote::init(state.clone())).await;
     // recording:
     run_init("recording", crate::recording::init(state.clone())).await;
+    // parental:
+    run_init("parental", crate::parental::init(state.clone())).await;
+    // watchlist:
+    run_init("watchlist", crate::watchlist::init(state.clone())).await;
     run_init("player", crate::player::init(state)).await;
     tracing::info!("module init complete");
     Ok(())
@@ -299,13 +307,17 @@ mod tests {
             .collect();
 
         // Every module's own command list is registered.
-        let module_lists: [&[&str]; 6] = [
+        let module_lists: [&[&str]; 8] = [
             crate::downloads::rpc::COMMANDS,
             crate::player::rpc::COMMANDS,
             &crate::remote::rpc::COMMANDS,
             &crate::stalker::rpc::COMMANDS,
             &crate::tmdb::rpc::COMMANDS,
             crate::xtream::rpc::COMMANDS,
+            // parental:
+            crate::parental::rpc::COMMANDS,
+            // watchlist:
+            crate::watchlist::rpc::COMMANDS,
         ];
         for list in module_lists {
             for c in list {

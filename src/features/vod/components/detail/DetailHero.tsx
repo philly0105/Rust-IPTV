@@ -77,7 +77,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
               )}
               {language && (
                 <span data-testid="vod-detail-language" className="inline-flex items-center gap-1.5 text-fg">
-                  <span aria-hidden className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[11px] font-semibold tracking-wide">
+                  <span aria-hidden className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[calc(11rem/15)] font-semibold tracking-wide">
                     {model.language?.code}
                   </span>
                   {language}
@@ -97,7 +97,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
           {note && <div className="text-xs text-fg-subtle">{note}</div>}
           {model.plot && (
             <div className="max-w-[72ch]">
-              <p dir="auto" className={cn('text-[15px] leading-relaxed text-fg-muted text-match-parent', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
+              <p dir="auto" className={cn('text-[calc(15rem/15)] leading-relaxed text-fg-muted text-match-parent', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
               {plotLong && (
                 <button type="button" className="mt-1 text-sm font-medium text-accent hover:underline" onClick={() => setExpanded((v) => !v)}>
                   {expanded ? t('showLess') : t('showMore')}

@@ -6,7 +6,8 @@
 //! uses it to write live, radio and movies in one streaming pass).
 //! Readers: [`categories`], [`query`], [`get`], [`search`] plus the helpers
 //! behind the rpc commands (neighbors, channel by number, recently added,
-//! same title). See `docs/architecture/catalog.md`.
+//! same title). The rpc readers take an optional parental [`Hide`] filter
+//! (`docs/architecture/parental.md`). See `docs/architecture/catalog.md`.
 
 pub mod language;
 pub mod rpc;
@@ -19,6 +20,7 @@ use crate::model::{
     ArchiveInfo, CatchupInfo, Category, Channel, ContentType, ItemRef, Page, PageQuery,
     RequestHeaders, SeriesItem, SortDir, SortKey, SourceKind, VodItem,
 };
+use crate::parental::{self, Hide};
 use crate::state::AppState;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
@@ -806,6 +808,44 @@ pub fn english_categories(
         .collect())
 }
 
+/// The `catalog.categories` list: [`english_categories`] in English-only
+/// mode, else [`categories`]. In parental hide mode (`hide` set) locked
+/// categories and, with `autoAdult`, adult ones are dropped; locked items
+/// leave their category's `item_count`, and a category they empty is dropped.
+pub fn visible_categories(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    include_hidden: bool,
+    english_only: bool,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<Category>> {
+    let mut all = if english_only {
+        english_categories(conn, source_id, content_type, include_hidden)?
+    } else {
+        categories(conn, source_id, content_type, include_hidden)?
+    };
+    let Some(hide) = hide else {
+        return Ok(all);
+    };
+    let locked = parental::filter::locked_categories(conn, source_id, content_type)?;
+    let removed =
+        parental::filter::locked_item_counts(conn, source_id, content_type, english_only)?;
+    all.retain_mut(|c| {
+        if locked.contains(&c.id) || (hide.auto_adult && parental::is_adult_category(&c.name)) {
+            return false;
+        }
+        match removed.get(&c.id) {
+            Some(n) if c.item_count > 0 => {
+                c.item_count = (c.item_count - n).max(0);
+                c.item_count > 0
+            }
+            _ => true,
+        }
+    });
+    Ok(all)
+}
+
 /// Sets `hidden` on one category. NotFound when it does not exist.
 pub fn set_category_hidden(
     conn: &Connection,
@@ -966,11 +1006,16 @@ fn clamp_page(page: &PageQuery) -> (i64, i64) {
 /// match finds nothing), optional minimum rating, and sort. Without a
 /// category, items in hidden categories are excluded unless `include_hidden`.
 pub fn query(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<ItemRow>> {
-    Ok(query_named(conn, q)?.map(|n| n.row))
+    Ok(query_named(conn, q, None)?.map(|n| n.row))
 }
 
-/// [`query`] with category names joined.
-pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<NamedRow>> {
+/// [`query`] with category names joined; `hide` drops parentally locked
+/// items from the page and the total.
+pub fn query_named(
+    conn: &Connection,
+    q: &CatalogQuery,
+    hide: Option<Hide>,
+) -> CoreResult<Page<NamedRow>> {
     let (offset, limit) = clamp_page(&q.page);
     let search = q
         .page
@@ -993,6 +1038,10 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
             .query_row(params![q.source_id, q.content_type.as_str()], |r| {
                 r.get::<_, bool>(0)
             })?;
+    let locked = match hide {
+        Some(h) => parental::filter::scoped(conn, &q.source_id, q.content_type, h, "?1", "?2")?,
+        None => String::new(),
+    };
     for (i, m) in attempts.iter().enumerate() {
         let mut where_sql = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
@@ -1029,6 +1078,9 @@ pub fn query_named(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<Named
                 }
             }
         }
+        // After the search: SQLite tests index-covered terms in this order,
+        // so the few FTS matches are found before the hidden-rowid probe.
+        where_sql.push_str(&locked);
         // The join only adds the category name; it cannot change the count
         // (categories' key is unique). Only the English-only filter reads it.
         let count_sql = if q.english_only {
@@ -1078,6 +1130,20 @@ pub fn get_named(conn: &Connection, r: &ItemRef) -> CoreResult<Option<NamedRow>>
         .optional()?)
 }
 
+/// False when parental hide mode (`hide`) drops the catalog item `r`: an item
+/// lock, a lock on its category, or (with `autoAdult`) an adult category
+/// name. Also false when the item does not exist.
+pub fn is_visible(conn: &Connection, r: &ItemRef, hide: Hide) -> CoreResult<bool> {
+    let locked = parental::filter::item_row(conn, hide)?;
+    let sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.item_id = ?3{locked})"
+    );
+    Ok(conn.prepare_cached(&sql)?.query_row(
+        params![r.source_id, r.content_type.as_str(), r.item_id],
+        |row| row.get(0),
+    )?)
+}
+
 /// Global search: FTS word-prefix match (LIKE substring fallback when the
 /// prefix match finds nothing), items in hidden categories excluded, best
 /// matches first. `types` empty means every type. `limit` applies per call.
@@ -1088,14 +1154,16 @@ pub fn search(
     types: &[ContentType],
     limit: usize,
 ) -> CoreResult<Vec<ItemRow>> {
-    Ok(search_named(conn, query, source_id, types, limit, false)?
-        .into_iter()
-        .map(|n| n.row)
-        .collect())
+    Ok(
+        search_named(conn, query, source_id, types, limit, false, None)?
+            .into_iter()
+            .map(|n| n.row)
+            .collect(),
+    )
 }
 
 /// [`search`] with category names joined; `english_only` drops items that are
-/// clearly in another language.
+/// clearly in another language, `hide` parentally locked ones.
 pub fn search_named(
     conn: &Connection,
     query: &str,
@@ -1103,6 +1171,7 @@ pub fn search_named(
     types: &[ContentType],
     limit: usize,
     english_only: bool,
+    hide: Option<Hide>,
 ) -> CoreResult<Vec<NamedRow>> {
     let text = query.trim();
     if text.is_empty() || limit == 0 {
@@ -1119,6 +1188,9 @@ pub fn search_named(
 
     let mut filter = String::from(" AND COALESCE(c.hidden, 0) = 0");
     filter.push_str(english_clause(english_only));
+    if let Some(h) = hide {
+        filter.push_str(&parental::filter::item_set(conn, h)?);
+    }
     let mut base_args: Vec<SqlValue> = Vec::new();
     let placeholders: Vec<String> = types
         .iter()
@@ -1163,13 +1235,14 @@ pub fn search_named(
 }
 
 /// First channel with `number` in playlist order, skipping hidden
-/// categories. `content_type` restricts the lookup to live or radio; `None`
-/// searches both, live first.
+/// categories (and with `hide`, parentally locked channels). `content_type`
+/// restricts the lookup to live or radio; `None` searches both, live first.
 pub fn channel_by_number(
     conn: &Connection,
     source_id: &str,
     number: i64,
     content_type: Option<ContentType>,
+    hide: Option<Hide>,
 ) -> CoreResult<Option<NamedRow>> {
     let types = match content_type {
         None => "'live', 'radio'",
@@ -1181,8 +1254,12 @@ pub fn channel_by_number(
             )))
         }
     };
+    let locked = match hide {
+        Some(h) => parental::filter::item_row(conn, h)?,
+        None => String::new(),
+    };
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0 ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0{locked} ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     Ok(stmt
@@ -1192,12 +1269,14 @@ pub fn channel_by_number(
 
 /// Previous and next channel around `r` in playlist order, inside `category_id`
 /// when given (else across visible categories). Wraps around at both ends.
-/// `english_only` skips channels that are clearly in another language.
+/// `english_only` skips channels that are clearly in another language, `hide`
+/// parentally locked ones.
 pub fn neighbors(
     conn: &Connection,
     r: &ItemRef,
     category_id: Option<&str>,
     english_only: bool,
+    hide: Option<Hide>,
 ) -> CoreResult<(Option<NamedRow>, Option<NamedRow>)> {
     let Some(current) = get(conn, r)? else {
         return Err(CoreError::NotFound(format!("item {} not found", r.item_id)));
@@ -1215,6 +1294,16 @@ pub fn neighbors(
         None => scope.push_str(" AND COALESCE(c.hidden, 0) = 0"),
     }
     scope.push_str(english_clause(english_only));
+    if let Some(h) = hide {
+        scope.push_str(&parental::filter::scoped(
+            conn,
+            &r.source_id,
+            r.content_type,
+            h,
+            "?1",
+            "?2",
+        )?);
+    }
     let pos_idx = args.len() + 1;
     let id_idx = args.len() + 2;
     let pick = |cmp: &str, order: &str, wrap: bool| -> CoreResult<Option<NamedRow>> {
@@ -1249,14 +1338,15 @@ pub fn neighbors(
 }
 
 /// Most recently added movies or series (rows with an `added` date), hidden
-/// categories excluded, and with `english_only` titles clearly in another
-/// language too.
+/// categories excluded, with `english_only` titles clearly in another
+/// language too, and with `hide` parentally locked items.
 pub fn recently_added(
     conn: &Connection,
     source_id: Option<&str>,
     content_type: ContentType,
     limit: usize,
     english_only: bool,
+    hide: Option<Hide>,
 ) -> CoreResult<Vec<NamedRow>> {
     let limit = limit.clamp(1, MAX_PAGE_LIMIT as usize);
     let mut args: Vec<SqlValue> = vec![content_type.as_str().to_string().into()];
@@ -1264,6 +1354,9 @@ pub fn recently_added(
         "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.added IS NOT NULL AND COALESCE(c.hidden, 0) = 0{}",
         english_clause(english_only)
     );
+    if let Some(h) = hide {
+        sql.push_str(&parental::filter::item_row(conn, h)?);
+    }
     if let Some(sid) = source_id {
         args.push(sid.to_string().into());
         sql.push_str(" AND i.source_id = ?2");
@@ -1277,8 +1370,9 @@ pub fn recently_added(
 }
 
 /// Movies in other sources with the same base title (case-insensitive) and a
-/// compatible year (equal, or unknown on either side).
-pub fn same_title(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<NamedRow>> {
+/// compatible year (equal, or unknown on either side); `hide` drops
+/// parentally locked ones.
+pub fn same_title(conn: &Connection, r: &ItemRef, hide: Option<Hide>) -> CoreResult<Vec<NamedRow>> {
     let Some(item) = get(conn, r)? else {
         return Err(CoreError::NotFound(format!("item {} not found", r.item_id)));
     };
@@ -1288,8 +1382,12 @@ pub fn same_title(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<NamedRow>> {
     if base.trim().is_empty() {
         return Ok(Vec::new());
     }
+    let locked = match hide {
+        Some(h) => parental::filter::item_row(conn, h)?,
+        None => String::new(),
+    };
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.title_base = ?2 COLLATE NOCASE AND i.source_id <> ?3 AND (?4 IS NULL OR i.year IS NULL OR i.year = ?4) ORDER BY i.source_id, i.position LIMIT 50"
+        "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.title_base = ?2 COLLATE NOCASE AND i.source_id <> ?3 AND (?4 IS NULL OR i.year IS NULL OR i.year = ?4){locked} ORDER BY i.source_id, i.position LIMIT 50"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt
@@ -1302,14 +1400,20 @@ pub fn same_title(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<NamedRow>> {
 }
 
 /// Every visible live channel of a source in playlist order (capped at 20 000).
-/// `english_only` drops channels that are clearly in another language.
+/// `english_only` drops channels that are clearly in another language, `hide`
+/// parentally locked ones.
 pub fn all_live_channels(
     conn: &Connection,
     source_id: &str,
     english_only: bool,
+    hide: Option<Hide>,
 ) -> CoreResult<Vec<NamedRow>> {
+    let locked = match hide {
+        Some(h) => parental::filter::scoped(conn, source_id, ContentType::Live, h, "?1", "'live'")?,
+        None => String::new(),
+    };
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{}{locked} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
         english_clause(english_only)
     );
     let mut stmt = conn.prepare_cached(&sql)?;

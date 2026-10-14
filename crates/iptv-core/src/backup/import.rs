@@ -129,6 +129,8 @@ struct Manifest {
     epg_urls: Option<Vec<String>>,
     /// [`APP_SETTING_KEYS`] present in `settings` (Tsrust extension).
     app_settings: Map<String, Value>,
+    /// parental: `settings.tsrustParental` (Tsrust extension).
+    parental: Option<Value>,
     playlists: Vec<Value>,
 }
 
@@ -175,9 +177,15 @@ fn parse_manifest(json: &str) -> CoreResult<Manifest> {
                 .collect()
         })
         .unwrap_or_default();
+    let parental = v
+        .get("settings")
+        .and_then(|s| s.get(super::EXT_PARENTAL_SETTINGS))
+        .filter(|p| !p.is_null())
+        .cloned();
     Ok(Manifest {
         epg_urls,
         app_settings,
+        parental,
         playlists: playlists.clone(),
     })
 }
@@ -491,6 +499,11 @@ pub async fn import(
     mode: ImportMode,
 ) -> CoreResult<ImportReport> {
     let manifest = parse_manifest(json)?;
+    // parental: Replace removes every source and their parental locks with
+    // them, so it needs the PIN (an active unlock) while controls are on.
+    if mode == ImportMode::Replace {
+        crate::parental::require_unlocked(state, "replace your sources from a backup").await?;
+    }
     // One import at a time. The shared write lock (`import_lock`) is taken
     // only around database writes so a portal that hangs during its catalog
     // sync never blocks refreshes or `sources.add` (they take it to apply
@@ -573,6 +586,10 @@ pub async fn import(
 
     let mut created = Vec::new();
     let mut any_catalog = false;
+    // parental / watchlist: My List rows of every imported entry (applied in
+    // one call at the end) and whether locks were added.
+    let mut watch: Vec<crate::watchlist::WatchlistBackupEntry> = Vec::new();
+    let mut locks_added = false;
     // Plain reasons a catalog did not load, for the Replace rollback message.
     let mut failures: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
@@ -624,6 +641,9 @@ pub async fn import(
             Ok(failure) => {
                 report.imported += 1;
                 failures.extend(failure);
+                locks_added |=
+                    restore_locks(state, &lock, &entry, &target_id, &mut report.warnings).await?;
+                collect_watchlist(&entry, &target_id, &mut watch, &mut report.warnings);
                 if !any_catalog {
                     any_catalog = has_catalog(state, &target_id).await?;
                 }
@@ -694,8 +714,14 @@ pub async fn import(
         drop(_guard);
         tracing::info!("backup import (replace): previous sources removed");
         restore_settings(state, &manifest, mode, &mut report).await;
+        // Their parental locks went with them.
+        locks_added = true;
     }
 
+    restore_watchlist(state, &lock, watch, mode, &mut report.warnings).await?;
+    if locks_added {
+        crate::parental::announce(state).await?;
+    }
     state.emit("sources.changed", json!({}));
     tracing::info!(
         imported = report.imported,
@@ -768,6 +794,101 @@ async fn restore_settings(
                 .push(format!("App settings could not be restored: {err}"));
         }
     }
+    // parental: options (Tsrust extension). Refused with a warning while
+    // parental controls are on and locked.
+    if let Some(p) = &manifest.parental {
+        if let Err(err) = crate::parental::restore_options(state, p, &mut report.warnings).await {
+            report
+                .warnings
+                .push(format!("Parental settings could not be restored: {err}"));
+        }
+    }
+}
+
+/// parental: adds the entry's `tsrustParentalLocks` to source `id` (no PIN
+/// needed, as with `parental.setLocked`). Locks do not depend on the catalog,
+/// so they are applied even when the catalog did not load. Returns true when
+/// a lock was added.
+async fn restore_locks(
+    state: &Arc<AppState>,
+    lock: &tokio::sync::Mutex<()>,
+    entry: &Entry,
+    id: &str,
+    warnings: &mut Vec<String>,
+) -> CoreResult<bool> {
+    let rows = arr(&entry.user_state, super::EXT_PARENTAL_LOCKS).to_vec();
+    if rows.is_empty() {
+        return Ok(false);
+    }
+    let id = id.to_string();
+    let _guard = lock.lock().await;
+    let (added, skipped) = state
+        .db_call(move |c| crate::parental::restore_locks(c, &id, &rows))
+        .await?;
+    if skipped > 0 {
+        warnings.push(format!(
+            "{}: {skipped} parental lock(s) in the backup were not readable and were skipped",
+            entry.label
+        ));
+    }
+    Ok(added > 0)
+}
+
+/// watchlist: queues the entry's `tsrustWatchlist` rows under source `id`.
+fn collect_watchlist(
+    entry: &Entry,
+    id: &str,
+    out: &mut Vec<crate::watchlist::WatchlistBackupEntry>,
+    warnings: &mut Vec<String>,
+) {
+    let mut bad = 0usize;
+    for v in arr(&entry.user_state, super::EXT_WATCHLIST) {
+        match serde_json::from_value::<crate::watchlist::WatchlistBackupEntry>(v.clone()) {
+            Ok(mut e) => {
+                e.source_id = id.to_string();
+                out.push(e);
+            }
+            Err(_) => bad += 1,
+        }
+    }
+    if bad > 0 {
+        warnings.push(format!(
+            "{}: {bad} My List entr{} in the backup were not readable and were skipped",
+            entry.label,
+            if bad == 1 { "y" } else { "ies" }
+        ));
+    }
+}
+
+/// watchlist: stores the queued My List rows in one call (C3). Replace clears
+/// My List first, even when the backup has none; Merge adds to it.
+async fn restore_watchlist(
+    state: &Arc<AppState>,
+    lock: &tokio::sync::Mutex<()>,
+    entries: Vec<crate::watchlist::WatchlistBackupEntry>,
+    mode: ImportMode,
+    warnings: &mut Vec<String>,
+) -> CoreResult<()> {
+    let replace = mode == ImportMode::Replace;
+    if entries.is_empty() && !replace {
+        return Ok(());
+    }
+    let total = entries.len();
+    let _guard = lock.lock().await;
+    let applied = state
+        .db_call(move |c| crate::watchlist::import_entries(c, &entries, replace))
+        .await?;
+    drop(_guard);
+    if applied < total {
+        warnings.push(format!(
+            "{} of {total} My List entries were not restored (unknown source, live channel, or the list is full)",
+            total - applied
+        ));
+    }
+    if applied > 0 || replace {
+        state.emit(crate::watchlist::CHANGED_EVENT, json!({}));
+    }
+    Ok(())
 }
 
 async fn import_entry(

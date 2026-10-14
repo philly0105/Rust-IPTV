@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
+import { useScaledPx } from './scale';
 
 export interface SkeletonProps {
   className?: string;
@@ -48,12 +49,14 @@ export interface SkeletonGridProps {
 /** Poster-grid placeholders. */
 export function SkeletonGrid({ count = 12, className, aspect = 2 / 3, minColumnWidth = 150 }: SkeletonGridProps) {
   const { t } = useTranslation('common');
+  // Same scale and density as the VirtualGrid it stands in for.
+  const column = useScaledPx(minColumnWidth, true);
   return (
     <div
       role="status"
       aria-busy="true"
       className={cn('grid gap-4', className)}
-      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${minColumnWidth}px, 1fr))` }}
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${column}px, 100%), 1fr))` }}
     >
       <span className="sr-only">{t('loading')}</span>
       {Array.from({ length: count }, (_, i) => (

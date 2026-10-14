@@ -30,7 +30,31 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 's', descKey: 'scChannelFavorite', area: 'Live' },
   { combo: 'shift+f10', descKey: 'scItemMenu', area: 'Live' },
   { combo: 'contextmenu', descKey: 'scItemMenu', area: 'Live' },
+  // Multi-view page (MultiviewPage.tsx); the focused-slot keys are bound by the wall (useWallKeyboard.ts).
+  { combo: 'digit', descKey: 'multiview:shortcutSound', area: 'Multi-view' },
+  { combo: 'f', descKey: 'multiview:shortcutFullscreen', area: 'Multi-view' },
+  { combo: 'm', descKey: 'multiview:shortcutMute', area: 'Multi-view' },
+  { combo: 'l', descKey: 'multiview:shortcutLayout', area: 'Multi-view' },
+  { combo: 'a', descKey: 'multiview:shortcutAdd', area: 'Multi-view' },
+  { combo: 'escape', descKey: 'multiview:shortcutSwapCancel', area: 'Multi-view' },
+  { combo: 'arrowleft', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'arrowright', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'arrowup', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'arrowdown', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'home', descKey: 'multiview:shortcutFocusEnds', area: 'Multi-view' },
+  { combo: 'end', descKey: 'multiview:shortcutFocusEnds', area: 'Multi-view' },
+  { combo: 'enter', descKey: 'multiview:shortcutGiveSound', area: 'Multi-view' },
+  { combo: 'space', descKey: 'multiview:shortcutGiveSound', area: 'Multi-view' },
+  { combo: 'delete', descKey: 'multiview:shortcutCloseTile', area: 'Multi-view' },
+  { combo: 'backspace', descKey: 'multiview:shortcutCloseTile', area: 'Multi-view' },
+  { combo: 'r', descKey: 'multiview:shortcutReplaceTile', area: 'Multi-view' },
+  { combo: 's', descKey: 'multiview:shortcutSwapTile', area: 'Multi-view' },
   { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
+  // My List page (MyListPage.tsx), acting on the focused row.
+  { combo: 'alt+arrowup', descKey: 'mylist:shortcutMoveUp', area: 'My List' },
+  { combo: 'alt+arrowdown', descKey: 'mylist:shortcutMoveDown', area: 'My List' },
+  { combo: 'delete', descKey: 'mylist:shortcutRemove', area: 'My List' },
+  { combo: 'w', descKey: 'mylist:shortcutWatched', area: 'My List' },
   { combo: 'shift+n', descKey: 'sources:shortcutAddSource', area: 'Sources' },
   { combo: 'alt+arrowup', descKey: 'library:shortcutMoveUp', area: 'Favorites' },
   { combo: 'alt+arrowdown', descKey: 'library:shortcutMoveDown', area: 'Favorites' },
@@ -65,6 +89,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'shift+g', descKey: 'player:shortcutAudioDelayDown', area: 'Playback' },
   { combo: 'shift+h', descKey: 'player:shortcutAudioDelayUp', area: 'Playback' },
   { combo: 'i', descKey: 'player:shortcutStreamInfo', area: 'Playback' },
+  { combo: 'z', descKey: 'scSleepTimer', area: 'Playback' },
   // Bound by pip.ts only while picture-in-picture is on.
   { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
   // Bound by the focused seek bar (SeekBar.tsx onKeyDown). Its own area: PgUp/PgDn mean channel up/down in Playback.
@@ -86,7 +111,21 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'delete', descKey: 'scListRemove', area: 'Dialogs and lists' },
 ];
 
-const AREA_ORDER = ['Global', 'Navigation', 'Live', 'Vod', 'Sources', 'Favorites', 'Downloads', 'My videos', 'Playback', 'Seek bar', 'Dialogs and lists'];
+const AREA_ORDER = [
+  'Global',
+  'Navigation',
+  'Live',
+  'Multi-view',
+  'Vod',
+  'My List',
+  'Sources',
+  'Favorites',
+  'Downloads',
+  'My videos',
+  'Playback',
+  'Seek bar',
+  'Dialogs and lists',
+];
 /**
  * Area id -> fully namespaced i18n key of its display label. Feature areas
  * reuse the label the feature registers under, so documented and registered
@@ -96,7 +135,9 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Global: 'shell:areaGlobal',
   Navigation: 'shell:areaNavigation',
   Live: 'shell:areaLive',
+  'Multi-view': 'multiview:shortcutArea',
   Vod: 'shell:areaVod',
+  'My List': 'mylist:title',
   Sources: 'sources:title',
   Favorites: 'library:favoritesTitle',
   Downloads: 'library:title',

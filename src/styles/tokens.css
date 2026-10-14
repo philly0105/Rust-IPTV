@@ -10,6 +10,26 @@
  * apart by spacing or a heading (rail edge, header rule, list separators); it is
  * decorative and stays low-contrast on purpose. src/ui/test/contrast.test.ts
  * computes every pair from this file.
+ *
+ * Appearance (C1, docs/architecture/appearance.md): theme.tsx sets these
+ * attributes on <html>, and the blocks below key off them.
+ *   data-theme   dark | light (the two base blocks, amber accent)
+ *   data-accent  amber | teal | violet | rose | lime | sky | coral; each non-amber
+ *                accent swaps only the accent family (accent, hover, pressed,
+ *                accent-fg, focus, glow), once for dark and once for light
+ *   data-oled    present when OLED black is on and the dark theme is in effect;
+ *                swaps the surfaces to true black and keeps the accent
+ *   data-density comfortable | compact (spacing scale and chrome sizes)
+ *   --ui-scale   inline custom property, 0.9 to 1.25; html font-size follows it
+ * The contrast test checks all 7 accents in dark, light and OLED, plus the
+ * glass tokens (C8) composited over black and over white.
+ *
+ * Glass (C8) is for chrome drawn over video or artwork: player controls, the
+ * zap banner, the dashboard hero, multi-view tile chrome. It stays dark in
+ * every theme, so text on it uses --color-on-glass / --color-on-glass-muted
+ * and accents on it use --color-glass-accent (the bright dial tone, also in
+ * the light theme) with --color-glass-accent-fg for text on that fill.
+ * Consumers outside src/ui read them as var(--color-glass, <fallback>).
  */
 
 :root,
@@ -38,6 +58,20 @@
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
   --color-glow: rgb(245 181 68 / 0.28);
+
+  /* Glass (C8): overlays drawn over video or artwork. */
+  --color-glass: rgb(12 19 32 / 0.72);
+  --color-glass-strong: rgb(12 19 32 / 0.88);
+  --color-glass-border: rgb(255 255 255 / 0.14);
+  --color-on-glass: #f4f6fa;
+  --color-on-glass-muted: #c8cfdc;
+  /*
+   * The accent as drawn on glass: always the bright dial tone with ink text,
+   * because glass is dark in every theme. Set here and in the dark accent
+   * blocks only, so the light theme inherits the bright tone.
+   */
+  --color-glass-accent: #f5b544;
+  --color-glass-accent-fg: #1b1204;
 
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
   --shadow-2: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
@@ -68,8 +102,156 @@
   --color-focus: #8f4f00;
   --color-glow: rgb(143 79 0 / 0.18);
 
+  /* Glass stays dark in the light theme: it sits on video and artwork, not on the page. */
+  --color-glass: rgb(18 26 42 / 0.74);
+  --color-glass-strong: rgb(18 26 42 / 0.88);
+  --color-glass-border: rgb(255 255 255 / 0.16);
+  --color-on-glass: #f4f6fa;
+  --color-on-glass-muted: #c8cfdc;
+
   --shadow-1: 0 1px 2px rgb(18 26 42 / 0.08), 0 2px 8px rgb(18 26 42 / 0.06);
   --shadow-2: 0 12px 32px rgb(18 26 42 / 0.16), 0 2px 6px rgb(18 26 42 / 0.08);
+}
+
+/*
+ * OLED black: true-black page and panels for OLED screens, raised controls kept
+ * a step lighter so they still read as controls. Only the dark theme has it.
+ */
+:root[data-oled]:not([data-theme='light']) {
+  --color-bg: #000000;
+  --color-surface: #000000;
+  --color-surface-2: #0c0f15;
+  --color-surface-3: #161b25;
+  --color-pressed: #222a38;
+  --color-divider: #232a38;
+
+  --color-scrim: rgb(0 0 0 / 0.78);
+  --color-glass: rgb(0 0 0 / 0.72);
+  --color-glass-strong: rgb(0 0 0 / 0.88);
+  --color-glass-border: rgb(255 255 255 / 0.14);
+
+  --shadow-1: 0 0 0 1px rgb(255 255 255 / 0.04), 0 2px 8px rgb(0 0 0 / 0.6);
+  --shadow-2: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 32px rgb(0 0 0 / 0.8);
+}
+
+/*
+ * Accents. Amber is the base blocks above. Each other accent is one hue tuned
+ * twice: a bright dial colour with ink text for dark (and OLED), and a deep
+ * shade with white text for light. Focus is the hover tone in dark and the
+ * accent itself in light, as with amber.
+ */
+:root[data-accent='teal'] {
+  --color-accent: #3ccfbd;
+  --color-accent-hover: #62e0d0;
+  --color-accent-pressed: #22b5a4;
+  --color-accent-fg: #03201c;
+  --color-focus: #62e0d0;
+  --color-glow: rgb(60 207 189 / 0.28);
+  --color-glass-accent: #3ccfbd;
+  --color-glass-accent-fg: #03201c;
+}
+:root[data-theme='light'][data-accent='teal'] {
+  --color-accent: #00685d;
+  --color-accent-hover: #00544b;
+  --color-accent-pressed: #00423b;
+  --color-accent-fg: #ffffff;
+  --color-focus: #00685d;
+  --color-glow: rgb(0 104 93 / 0.18);
+}
+
+:root[data-accent='violet'] {
+  --color-accent: #b7a0ff;
+  --color-accent-hover: #c9b8ff;
+  --color-accent-pressed: #9f85f5;
+  --color-accent-fg: #170c33;
+  --color-focus: #c9b8ff;
+  --color-glow: rgb(183 160 255 / 0.28);
+  --color-glass-accent: #b7a0ff;
+  --color-glass-accent-fg: #170c33;
+}
+:root[data-theme='light'][data-accent='violet'] {
+  --color-accent: #6a42cf;
+  --color-accent-hover: #5833b6;
+  --color-accent-pressed: #47279a;
+  --color-accent-fg: #ffffff;
+  --color-focus: #6a42cf;
+  --color-glow: rgb(106 66 207 / 0.18);
+}
+
+:root[data-accent='rose'] {
+  --color-accent: #ff8fb3;
+  --color-accent-hover: #ffaac6;
+  --color-accent-pressed: #f2709b;
+  --color-accent-fg: #2e0614;
+  --color-focus: #ffaac6;
+  --color-glow: rgb(255 143 179 / 0.28);
+  --color-glass-accent: #ff8fb3;
+  --color-glass-accent-fg: #2e0614;
+}
+:root[data-theme='light'][data-accent='rose'] {
+  --color-accent: #b3215a;
+  --color-accent-hover: #971a4b;
+  --color-accent-pressed: #7b143d;
+  --color-accent-fg: #ffffff;
+  --color-focus: #b3215a;
+  --color-glow: rgb(179 33 90 / 0.18);
+}
+
+:root[data-accent='lime'] {
+  --color-accent: #b4e05a;
+  --color-accent-hover: #c7ee78;
+  --color-accent-pressed: #9ccb3d;
+  --color-accent-fg: #141f02;
+  --color-focus: #c7ee78;
+  --color-glow: rgb(180 224 90 / 0.28);
+  --color-glass-accent: #b4e05a;
+  --color-glass-accent-fg: #141f02;
+}
+:root[data-theme='light'][data-accent='lime'] {
+  --color-accent: #476800;
+  --color-accent-hover: #3a5500;
+  --color-accent-pressed: #2e4400;
+  --color-accent-fg: #ffffff;
+  --color-focus: #476800;
+  --color-glow: rgb(71 104 0 / 0.18);
+}
+
+:root[data-accent='sky'] {
+  --color-accent: #6cc2ff;
+  --color-accent-hover: #8fd2ff;
+  --color-accent-pressed: #4aa9ee;
+  --color-accent-fg: #03182b;
+  --color-focus: #8fd2ff;
+  --color-glow: rgb(108 194 255 / 0.28);
+  --color-glass-accent: #6cc2ff;
+  --color-glass-accent-fg: #03182b;
+}
+:root[data-theme='light'][data-accent='sky'] {
+  --color-accent: #0a5ca6;
+  --color-accent-hover: #084c8a;
+  --color-accent-pressed: #063d70;
+  --color-accent-fg: #ffffff;
+  --color-focus: #0a5ca6;
+  --color-glow: rgb(10 92 166 / 0.18);
+}
+
+:root[data-accent='coral'] {
+  --color-accent: #ff9474;
+  --color-accent-hover: #ffac92;
+  --color-accent-pressed: #f2795a;
+  --color-accent-fg: #2b0d04;
+  --color-focus: #ffac92;
+  --color-glow: rgb(255 148 116 / 0.28);
+  --color-glass-accent: #ff9474;
+  --color-glass-accent-fg: #2b0d04;
+}
+:root[data-theme='light'][data-accent='coral'] {
+  --color-accent: #ad3b16;
+  --color-accent-hover: #923012;
+  --color-accent-pressed: #78270e;
+  --color-accent-fg: #ffffff;
+  --color-focus: #ad3b16;
+  --color-glow: rgb(173 59 22 / 0.18);
 }
 
 :root {
@@ -81,8 +263,27 @@
   --font-display: Bahnschrift, 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, 'SF Mono', monospace;
 
-  --rail-width: 248px;
-  --rail-width-collapsed: 72px;
-  --header-height: 60px;
-  --panel-width: 340px;
+  /* UI scale (C1). theme.tsx sets --ui-scale inline on <html>; px chrome sizes follow it. */
+  --ui-scale: 1;
+  --blur-glass: 14px;
+
+  --rail-width: calc(248px * var(--ui-scale));
+  --rail-width-collapsed: calc(72px * var(--ui-scale));
+  --header-height: calc(60px * var(--ui-scale));
+  --panel-width: calc(340px * var(--ui-scale));
+  /* Height of a rail link (Rail.tsx and the Appearance preview). */
+  --rail-item-height: 2.5rem;
+}
+
+/*
+ * Compact density: every Tailwind spacing step (padding, gaps, control heights)
+ * shrinks by an eighth, and the chrome tightens with it. Type sizes stay put, so
+ * text never gets smaller than the user's UI scale asks for.
+ */
+:root[data-density='compact'] {
+  --spacing: 0.21875rem;
+  --rail-width: calc(224px * var(--ui-scale));
+  --header-height: calc(52px * var(--ui-scale));
+  --panel-width: calc(316px * var(--ui-scale));
+  --rail-item-height: 2.125rem;
 }

@@ -327,6 +327,10 @@
   "removedAllTitle_many": "Выдалена {{count}} плэйлістаў",
   "removedAllTitle_other": "Выдалена плэйлістаў: {{count}}",
   "removeAllFailed": "Не ўдалося выдаліць плэйлісты",
+  "removeLockedTitle": "Увядзіце PIN-код, каб выдаліць {{name}}",
+  "removeAllLockedTitle": "Увядзіце PIN-код, каб выдаліць плэйлісты",
+  "removeLockedText": "Блакіроўкі бацькоўскага кантролю выдаляюцца разам з плэйлістам, таму спачатку PIN-код разблакуе бацькоўскі кантроль.",
+  "removeLockedConfirm": "Разблакаваць",
 
   "phaseCancelled": "Імпарт скасаваны",
   "phaseCancelling": "Скасаванне…",

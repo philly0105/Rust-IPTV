@@ -51,7 +51,7 @@ export function ContinueRail({
   const { t } = useTranslation('library');
   return (
     <section aria-labelledby="continue-heading" className="flex flex-col gap-3 pb-4" style={{ height: CONTINUE_RAIL_HEIGHT }}>
-      <h2 id="continue-heading" className="font-display text-[15px] font-semibold text-fg">
+      <h2 id="continue-heading" className="font-display text-[calc(15rem/15)] font-semibold text-fg">
         {t('continueWatching')}
       </h2>
       <ul className="-mx-1 flex min-h-0 flex-1 snap-x gap-4 overflow-x-auto px-1 pb-2" data-testid="continue-rail">
@@ -84,7 +84,7 @@ export function ContinueRail({
                 </div>
                 {fraction !== undefined && <ProgressBar value={fraction * 100} max={100} size="xs" label={t('watchedPercent', { percent: Math.round(fraction * 100) })} />}
                 <span className="flex flex-col">
-                  <span className="truncate text-[13px] font-medium text-fg">{title}</span>
+                  <span className="truncate text-[calc(13rem/15)] font-medium text-fg">{title}</span>
                   <span className="truncate text-xs text-fg-muted">
                     {p.snapshot?.subtitle ?? (left !== undefined ? t('minutesLeft', { count: Math.max(1, Math.round(left / 60)) }) : formatClock(p.positionSeconds))}
                   </span>

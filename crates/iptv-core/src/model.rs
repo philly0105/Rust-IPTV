@@ -886,6 +886,39 @@ pub enum ReminderAction {
 }
 string_enum!(ReminderAction { Notify => "notify", Switch => "switch" });
 
+// appearance:
+/// Accent color family (`Settings.accent`). The UI maps each value to its
+/// `--color-accent*` tokens through `html[data-accent]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Accent {
+    Amber,
+    Teal,
+    Violet,
+    Rose,
+    Lime,
+    Sky,
+    Coral,
+}
+string_enum!(Accent {
+    Amber => "amber",
+    Teal => "teal",
+    Violet => "violet",
+    Rose => "rose",
+    Lime => "lime",
+    Sky => "sky",
+    Coral => "coral",
+});
+
+/// Spacing density of lists, rails and rows (`Settings.density`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Density {
+    Comfortable,
+    Compact,
+}
+string_enum!(Density { Comfortable => "comfortable", Compact => "compact" });
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -902,6 +935,9 @@ pub struct DashboardRails {
     pub recent_sources: bool,
     pub recently_added: bool,
     pub tmdb_trending: bool,
+    // watchlist:
+    /// The My List rail (movies and series saved with `watchlist.toggle`).
+    pub my_list: bool,
 }
 
 impl Default for DashboardRails {
@@ -915,6 +951,8 @@ impl Default for DashboardRails {
             recent_sources: true,
             recently_added: true,
             tmdb_trending: true,
+            // watchlist:
+            my_list: true,
         }
     }
 }
@@ -1045,6 +1083,20 @@ pub struct Settings {
     pub reminder_lead_minutes: u32,
     /// Notify, or switch to the channel.
     pub reminder_action: ReminderAction,
+    // appearance:
+    /// Accent color family used for focus rings, selection and primary actions.
+    pub accent: Accent,
+    /// Pure-black surfaces whenever the dark theme is in effect (`dark`, or
+    /// `system` resolving to dark). Ignored while the light theme shows.
+    pub oled_black: bool,
+    /// Spacing density of lists, rails and rows.
+    pub density: Density,
+    /// Root font scale: the UI sets `html { font-size: calc(15px * uiScale) }`.
+    /// A finite number in [`crate::settings::UI_SCALE_RANGE`] (0.9..=1.25),
+    /// rounded to whole percent on save.
+    pub ui_scale: f64,
+    /// Now/next banner inside the player on every live channel change.
+    pub zap_banner: bool,
 }
 
 impl Default for Settings {
@@ -1098,6 +1150,12 @@ impl Default for Settings {
             reminders_enabled: true,
             reminder_lead_minutes: 2,
             reminder_action: ReminderAction::Notify,
+            // appearance:
+            accent: Accent::Amber,
+            oled_black: false,
+            density: Density::Comfortable,
+            ui_scale: 1.0,
+            zap_banner: true,
         }
     }
 }
@@ -1402,6 +1460,118 @@ pub struct TmdbPerson {
     pub known_for: Vec<TmdbBrief>,
 }
 
+// ---------------------------------------------------------------------------
+// parental: parental controls (contract C2; `crate::parental` implements)
+// ---------------------------------------------------------------------------
+
+/// Default `ParentalStatus.unlockMinutes` (C2).
+pub const DEFAULT_PARENTAL_UNLOCK_MINUTES: u32 = 15;
+
+/// How locked content is treated while parental controls are on and locked.
+/// `hide` drops it from every catalog and user-state reader; `ask` shows it
+/// and the UI asks for the PIN before it opens. Stored as text in
+/// `parental_config.mode`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ParentalMode {
+    #[default]
+    Hide,
+    Ask,
+}
+string_enum!(ParentalMode { Hide => "hide", Ask => "ask" });
+
+/// What a parental lock targets. Stored as text in `parental_locks.kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ParentalLockKind {
+    Category,
+    Item,
+}
+string_enum!(ParentalLockKind { Category => "category", Item => "item" });
+
+/// `parental.status` and the `parental.changed` event payload. Never carries
+/// the PIN or its hash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentalStatus {
+    /// A PIN is set.
+    pub enabled: bool,
+    pub mode: ParentalMode,
+    /// Categories whose name marks adult content count as locked.
+    pub auto_adult: bool,
+    /// Length of a session unlock: 0 = until the app restarts, else 1..=720.
+    pub unlock_minutes: u32,
+    /// A session unlock is active now.
+    pub unlocked: bool,
+    /// RFC 3339 end of the session unlock; absent when locked or unlocked
+    /// until restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unlocked_until: Option<String>,
+    /// Consecutive wrong PINs.
+    pub failed_attempts: u32,
+    /// Present while the wrong-PIN lockout is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
+}
+
+impl Default for ParentalStatus {
+    /// No PIN set, with the C2 defaults for the configurable fields.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: ParentalMode::Hide,
+            auto_adult: true,
+            unlock_minutes: DEFAULT_PARENTAL_UNLOCK_MINUTES,
+            unlocked: false,
+            unlocked_until: None,
+            failed_attempts: 0,
+            retry_after_seconds: None,
+        }
+    }
+}
+
+/// One stored lock (`parental.locks`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentalLock {
+    pub source_id: String,
+    pub content_type: ContentType,
+    pub kind: ParentalLockKind,
+    /// Category id or item id, depending on `kind`.
+    pub target_id: String,
+    /// Display name snapshot taken when the lock was added.
+    pub name: String,
+    pub created_at: String,
+}
+
+/// A lock without its timestamp (`parental.setLocked` argument; TS
+/// `Omit<ParentalLock, 'createdAt'>`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentalLockTarget {
+    pub source_id: String,
+    pub content_type: ContentType,
+    pub kind: ParentalLockKind,
+    pub target_id: String,
+    pub name: String,
+}
+
+// ---------------------------------------------------------------------------
+// watchlist: My List (contract C3; `crate::watchlist` implements)
+// ---------------------------------------------------------------------------
+
+/// One My List entry (`watchlist.list`). Only movies and series are listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchlistEntry {
+    #[serde(rename = "ref")]
+    pub item_ref: ItemRef,
+    pub snapshot: ItemSnapshot,
+    pub added_at: String,
+    /// The item counts as watched.
+    pub watched: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1429,6 +1599,24 @@ mod tests {
             VideoPlayer::EmbeddedMpv
         );
         assert!("nope".parse::<ContentType>().is_err());
+        // appearance, parental: serde and `string_enum!` spell values alike.
+        for a in Accent::ALL {
+            assert_eq!(serde_json::to_value(a).unwrap(), a.as_str());
+            assert_eq!(a.as_str().parse::<Accent>().unwrap(), *a);
+        }
+        for d in Density::ALL {
+            assert_eq!(serde_json::to_value(d).unwrap(), d.as_str());
+            assert_eq!(d.as_str().parse::<Density>().unwrap(), *d);
+        }
+        for m in ParentalMode::ALL {
+            assert_eq!(serde_json::to_value(m).unwrap(), m.as_str());
+        }
+        for k in ParentalLockKind::ALL {
+            assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
+        }
+        assert_eq!(Accent::ALL.len(), 7);
+        assert!("Amber".parse::<Accent>().is_err());
+        assert!("cozy".parse::<Density>().is_err());
     }
 
     /// Matches the frontend DEFAULT_SETTINGS (`src/api/types.ts`).
@@ -1462,6 +1650,367 @@ mod tests {
         let round: Settings =
             serde_json::from_value(serde_json::to_value(Settings::default()).unwrap()).unwrap();
         assert_eq!(round, Settings::default());
+    }
+
+    /// C1: the appearance fields and the My List rail read their defaults
+    /// from JSON stored by older builds, and keep saved values.
+    #[test]
+    fn appearance_defaults_and_round_trip() {
+        let old: Settings = serde_json::from_str(
+            r#"{"theme":"dark","dashboardRails":{"hero":false,"tmdbTrending":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(old.accent, Accent::Amber);
+        assert!(!old.oled_black);
+        assert_eq!(old.density, Density::Comfortable);
+        assert_eq!(old.ui_scale, 1.0);
+        assert!(old.zap_banner);
+        assert!(old.dashboard_rails.my_list, "a missing rail defaults to on");
+        assert!(!old.dashboard_rails.hero, "saved rails are kept");
+
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["accent"], "amber");
+        assert_eq!(v["oledBlack"], false);
+        assert_eq!(v["density"], "comfortable");
+        assert_eq!(v["uiScale"], 1.0);
+        assert_eq!(v["zapBanner"], true);
+        assert_eq!(v["dashboardRails"]["myList"], true);
+
+        let saved: Settings = serde_json::from_str(
+            r#"{"accent":"coral","oledBlack":true,"density":"compact","uiScale":1.15,"zapBanner":false,"dashboardRails":{"myList":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(saved.accent, Accent::Coral);
+        assert!(saved.oled_black);
+        assert_eq!(saved.density, Density::Compact);
+        assert_eq!(saved.ui_scale, 1.15);
+        assert!(!saved.zap_banner);
+        assert!(!saved.dashboard_rails.my_list);
+        let round: Settings =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(round, saved);
+        assert!(serde_json::from_str::<Settings>(r#"{"accent":"neon"}"#).is_err());
+    }
+
+    /// Every key `backup.export` / `backup.import` carry is a real top-level
+    /// settings field (a typo would silently drop the value), listed once.
+    #[test]
+    fn backup_app_setting_keys_name_settings_fields() {
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        let keys = crate::backup::APP_SETTING_KEYS;
+        for k in keys {
+            assert!(v.get(k).is_some(), "APP_SETTING_KEYS has unknown field {k}");
+        }
+        let unique: std::collections::BTreeSet<_> = keys.iter().collect();
+        assert_eq!(unique.len(), keys.len(), "APP_SETTING_KEYS has duplicates");
+        for k in ["accent", "oledBlack", "density", "uiScale", "zapBanner"] {
+            assert!(keys.contains(&k), "{k} round-trips through backups (C1)");
+        }
+    }
+
+    #[test]
+    fn parental_and_watchlist_wire_shapes() {
+        assert_eq!(
+            serde_json::to_value(ParentalStatus::default()).unwrap(),
+            serde_json::json!({
+                "enabled": false, "mode": "hide", "autoAdult": true, "unlockMinutes": 15,
+                "unlocked": false, "failedAttempts": 0
+            }),
+            "optional fields are omitted, defaults follow C2"
+        );
+        let locked_out = ParentalStatus {
+            enabled: true,
+            unlocked_until: Some("2026-10-13T10:00:00Z".into()),
+            failed_attempts: 5,
+            retry_after_seconds: Some(30),
+            ..ParentalStatus::default()
+        };
+        let v = serde_json::to_value(&locked_out).unwrap();
+        assert_eq!(v["unlockedUntil"], "2026-10-13T10:00:00Z");
+        assert_eq!(v["retryAfterSeconds"], 30);
+        assert_eq!(
+            serde_json::from_value::<ParentalStatus>(v).unwrap(),
+            locked_out
+        );
+
+        let lock = ParentalLock {
+            source_id: "s1".into(),
+            content_type: ContentType::Live,
+            kind: ParentalLockKind::Category,
+            target_id: "c9".into(),
+            name: "Night".into(),
+            created_at: "2026-10-13T08:00:00Z".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&lock).unwrap(),
+            serde_json::json!({
+                "sourceId": "s1", "contentType": "live", "kind": "category",
+                "targetId": "c9", "name": "Night", "createdAt": "2026-10-13T08:00:00Z"
+            })
+        );
+        let target: ParentalLockTarget = serde_json::from_value(serde_json::json!({
+            "sourceId": "s1", "contentType": "movie", "kind": "item", "targetId": "7", "name": "Heat"
+        }))
+        .unwrap();
+        assert_eq!(target.kind, ParentalLockKind::Item);
+
+        let entry = WatchlistEntry {
+            item_ref: ItemRef::new("s1", ContentType::Series, "42"),
+            snapshot: ItemSnapshot {
+                title: "Dark".into(),
+                subtitle: None,
+                poster_url: None,
+                content_type: ContentType::Series,
+            },
+            added_at: "2026-10-13T08:00:00Z".into(),
+            watched: false,
+        };
+        let v = serde_json::to_value(&entry).unwrap();
+        assert_eq!(v["ref"]["itemId"], "42");
+        assert_eq!(v["snapshot"]["contentType"], "series");
+        assert_eq!(v["addedAt"], "2026-10-13T08:00:00Z");
+        assert_eq!(v["watched"], false);
+        assert_eq!(serde_json::from_value::<WatchlistEntry>(v).unwrap(), entry);
+    }
+
+    // -----------------------------------------------------------------------
+    // Parity with `src/api/types.ts`
+    // -----------------------------------------------------------------------
+
+    fn types_ts() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/api/types.ts");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+    }
+
+    /// The text after `marker` up to the bracket that closes the first `open`.
+    fn ts_block<'a>(text: &'a str, marker: &str, open: char, close: char) -> &'a str {
+        let start = text
+            .find(marker)
+            .unwrap_or_else(|| panic!("{marker} not found in types.ts"));
+        let body = &text[start..];
+        let first = body.find(open).expect("opening bracket");
+        let mut depth = 0;
+        for (i, c) in body[first..].char_indices() {
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                depth -= 1;
+                if depth == 0 {
+                    return &body[first..=first + i];
+                }
+            }
+        }
+        panic!("{marker}: unbalanced brackets");
+    }
+
+    /// Converts a TypeScript object or array literal (comments, single-quoted
+    /// strings, bare keys, trailing commas) to JSON.
+    fn ts_literal_to_json(src: &str) -> serde_json::Value {
+        enum Tok {
+            Punct(char),
+            Str(String),
+            Word(String),
+        }
+        let chars: Vec<char> = src.chars().collect();
+        let mut toks = Vec::new();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            match c {
+                '/' if chars.get(i + 1) == Some(&'/') => {
+                    while i < chars.len() && chars[i] != '\n' {
+                        i += 1;
+                    }
+                }
+                '/' if chars.get(i + 1) == Some(&'*') => {
+                    i += 2;
+                    while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+                        i += 1;
+                    }
+                    i += 2;
+                }
+                '\'' | '"' => {
+                    let mut s = String::new();
+                    i += 1;
+                    while chars[i] != c {
+                        if chars[i] == '\\' {
+                            i += 1;
+                        }
+                        s.push(chars[i]);
+                        i += 1;
+                    }
+                    i += 1;
+                    toks.push(Tok::Str(s));
+                }
+                '{' | '}' | '[' | ']' | ':' | ',' => {
+                    toks.push(Tok::Punct(c));
+                    i += 1;
+                }
+                c if c.is_whitespace() => i += 1,
+                _ => {
+                    let mut w = String::new();
+                    while i < chars.len()
+                        && (chars[i].is_alphanumeric() || "_$.+-".contains(chars[i]))
+                    {
+                        w.push(chars[i]);
+                        i += 1;
+                    }
+                    assert!(
+                        !w.is_empty(),
+                        "unexpected character {:?} in TS literal",
+                        chars[i]
+                    );
+                    toks.push(Tok::Word(w));
+                }
+            }
+        }
+        let mut out = String::new();
+        for (n, t) in toks.iter().enumerate() {
+            let is_key = matches!(toks.get(n + 1), Some(Tok::Punct(':')));
+            match t {
+                Tok::Punct(c @ ('}' | ']')) => {
+                    if out.ends_with(',') {
+                        out.pop();
+                    }
+                    out.push(*c);
+                }
+                Tok::Punct(c) => out.push(*c),
+                Tok::Str(s) => out.push_str(&serde_json::to_string(s).unwrap()),
+                Tok::Word(w) if is_key => out.push_str(&serde_json::to_string(w).unwrap()),
+                Tok::Word(w) => out.push_str(w),
+            }
+        }
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"))
+    }
+
+    /// Integers and floats compare by value (`0` in TS, `0.0` in Rust).
+    fn numbers_as_f64(v: serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match v {
+            Value::Number(n) => serde_json::Number::from_f64(n.as_f64().unwrap())
+                .map(Value::Number)
+                .unwrap(),
+            Value::Array(a) => Value::Array(a.into_iter().map(numbers_as_f64).collect()),
+            Value::Object(o) => {
+                Value::Object(o.into_iter().map(|(k, v)| (k, numbers_as_f64(v))).collect())
+            }
+            other => other,
+        }
+    }
+
+    /// Property names of a TS interface (one property per line).
+    fn ts_interface_keys(text: &str, name: &str) -> std::collections::BTreeSet<String> {
+        let block = ts_block(text, &format!("export interface {name} {{"), '{', '}');
+        block
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//") && !l.starts_with('*') && !l.starts_with("/*"))
+            .filter_map(|l| {
+                let key = l.split([':', '?']).next()?.trim();
+                (!key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                    .then(|| key.to_string())
+            })
+            .collect()
+    }
+
+    fn json_keys(v: &serde_json::Value) -> std::collections::BTreeSet<String> {
+        v.as_object().unwrap().keys().cloned().collect()
+    }
+
+    /// `DEFAULT_SETTINGS` in types.ts says it equals `Settings::default()`;
+    /// this keeps that true.
+    #[test]
+    fn ts_default_settings_equal_rust_defaults() {
+        let text = types_ts();
+        let ts = ts_literal_to_json(ts_block(
+            &text,
+            "export const DEFAULT_SETTINGS: Settings = {",
+            '{',
+            '}',
+        ));
+        let rust = serde_json::to_value(Settings::default()).unwrap();
+        let (ts, rust) = (numbers_as_f64(ts), numbers_as_f64(rust));
+        if ts != rust {
+            let (tk, rk) = (json_keys(&ts), json_keys(&rust));
+            let differing: Vec<&String> = tk
+                .intersection(&rk)
+                .filter(|k| ts[k.as_str()] != rust[k.as_str()])
+                .collect();
+            panic!(
+                "DEFAULT_SETTINGS differs from Settings::default(): only in TS {:?}; only in Rust {:?}; different values {differing:?}",
+                tk.difference(&rk).collect::<Vec<_>>(),
+                rk.difference(&tk).collect::<Vec<_>>(),
+            );
+        }
+    }
+
+    /// The TS `Settings` and `DashboardRails` interfaces name exactly the
+    /// fields Rust serializes (optional ones included).
+    #[test]
+    fn ts_settings_interfaces_match_rust_fields() {
+        let text = types_ts();
+        let full = Settings {
+            last_route: Some("/".into()),
+            mpv_path: Some("mpv".into()),
+            vlc_path: Some("vlc".into()),
+            downloads_dir: Some("d".into()),
+            recordings_dir: Some("r".into()),
+            ..Settings::default()
+        };
+        let v = serde_json::to_value(&full).unwrap();
+        assert_eq!(ts_interface_keys(&text, "Settings"), json_keys(&v));
+        assert_eq!(
+            ts_interface_keys(&text, "DashboardRails"),
+            json_keys(&v["dashboardRails"])
+        );
+    }
+
+    /// `Accent`, `Density`, `ACCENTS`, `DENSITIES` and the uiScale bounds in
+    /// types.ts match the Rust enums and `settings::UI_SCALE_RANGE`.
+    #[test]
+    fn ts_appearance_values_match_rust() {
+        let text = types_ts();
+        let union = |name: &str| -> Vec<String> {
+            let start = text
+                .find(&format!("export type {name} = "))
+                .unwrap_or_else(|| panic!("type {name} not found"));
+            let line = text[start..].lines().next().unwrap();
+            line.split('\'')
+                .skip(1)
+                .step_by(2)
+                .map(String::from)
+                .collect()
+        };
+        let list = |marker: &str| -> Vec<String> {
+            let v = ts_literal_to_json(ts_block(&text, marker, '[', ']'));
+            serde_json::from_value(v).unwrap()
+        };
+        let accents: Vec<String> = Accent::ALL.iter().map(|a| a.as_str().into()).collect();
+        let densities: Vec<String> = Density::ALL.iter().map(|d| d.as_str().into()).collect();
+        assert_eq!(union("Accent"), accents);
+        assert_eq!(union("Density"), densities);
+        assert_eq!(list("export const ACCENTS = ["), accents);
+        assert_eq!(list("export const DENSITIES = ["), densities);
+        let constant = |name: &str| -> f64 {
+            let start = text
+                .find(&format!("export const {name} = "))
+                .unwrap_or_else(|| panic!("{name} not found"));
+            let line = text[start..].lines().next().unwrap();
+            line.split('=')
+                .nth(1)
+                .unwrap()
+                .trim()
+                .trim_end_matches(';')
+                .parse()
+                .unwrap()
+        };
+        let range = crate::settings::UI_SCALE_RANGE;
+        assert_eq!(constant("UI_SCALE_MIN"), *range.start());
+        assert_eq!(constant("UI_SCALE_MAX"), *range.end());
+        assert_eq!(union("ParentalMode"), ["hide", "ask"]);
+        assert_eq!(union("ParentalLockKind"), ["category", "item"]);
     }
 
     #[test]

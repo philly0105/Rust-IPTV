@@ -46,6 +46,13 @@ pub async fn update(state: Arc<AppState>, a: UpdateArgs) -> Result<Source, RpcEr
 }
 
 pub async fn remove(state: Arc<AppState>, a: IdArgs) -> Result<(), RpcError> {
+    // C2: removing a source drops its parental locks, so a locked session needs the PIN first.
+    crate::parental::require_unlocked_to_drop_locks(
+        &state,
+        Some(a.id.clone()),
+        "remove a source with locked content",
+    )
+    .await?;
     Ok(super::remove(&state, &a.id).await?)
 }
 
@@ -69,6 +76,12 @@ pub async fn refresh_all(state: Arc<AppState>, _a: NoArgs) -> Result<RefreshAllR
 }
 
 pub async fn remove_all(state: Arc<AppState>, _a: NoArgs) -> Result<(), RpcError> {
+    crate::parental::require_unlocked_to_drop_locks(
+        &state,
+        None,
+        "remove sources with locked content",
+    )
+    .await?;
     Ok(super::remove_all(&state).await?)
 }
 

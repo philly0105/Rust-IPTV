@@ -127,8 +127,9 @@ fn secs(v: f64) -> Result<i64, RpcError> {
 pub fn register(r: &mut RpcRouter) {
     // favorites
     r.add("favorites.list", |state, a: SourceFilter| async move {
+        let hide = crate::parental::hide_filter(&state).await?;
         let v = state
-            .db_call(move |c| super::favorites_list(c, a.source_id.as_deref()))
+            .db_call(move |c| super::favorites_list_filtered(c, a.source_id.as_deref(), hide))
             .await?;
         Ok::<Vec<FavoriteEntry>, RpcError>(v)
     });
@@ -159,8 +160,9 @@ pub fn register(r: &mut RpcRouter) {
 
     // recent
     r.add("recent.list", |state, a: RecentListArgs| async move {
+        let hide = crate::parental::hide_filter(&state).await?;
         let v = state
-            .db_call(move |c| super::recent_list(c, a.source_id.as_deref(), a.limit))
+            .db_call(move |c| super::recent_list_filtered(c, a.source_id.as_deref(), a.limit, hide))
             .await?;
         Ok::<Vec<RecentEntry>, RpcError>(v)
     });
@@ -221,8 +223,9 @@ pub fn register(r: &mut RpcRouter) {
     r.add(
         "positions.continueWatching",
         |state, a: LimitArgs| async move {
+            let hide = crate::parental::hide_filter(&state).await?;
             let v = state
-                .db_call(move |c| super::continue_watching(c, a.limit))
+                .db_call(move |c| super::continue_watching_filtered(c, a.limit, hide))
                 .await?;
             Ok::<Vec<PlaybackPosition>, RpcError>(v)
         },

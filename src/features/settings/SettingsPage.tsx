@@ -11,6 +11,7 @@ import {
   MonitorPlay,
   Palette,
   Play,
+  ShieldCheck,
   SlidersHorizontal,
   Smartphone,
   type LucideIcon,
@@ -19,6 +20,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentType } from 're
 import { useTranslation } from 'react-i18next';
 import { Navigate, NavLink, useParams } from 'react-router';
 
+import { ParentalSection } from '@/features/parental/ParentalSection';
 import { useShell } from '@/shell';
 import { SectionError, SectionSkeleton } from './components';
 import type { SettingsPatch } from './lib/patch';
@@ -46,6 +48,7 @@ const SECTIONS: Record<SectionId, { icon: LucideIcon; label: string; component: 
   recording: { icon: CircleDot, label: 'sectionRecording', component: RecordingSection },
   metadata: { icon: Clapperboard, label: 'sectionMetadata', component: MetadataSection },
   appearance: { icon: Palette, label: 'sectionAppearance', component: AppearanceSection },
+  parental: { icon: ShieldCheck, label: 'sectionParental', component: ParentalSection },
   remote: { icon: Smartphone, label: 'sectionRemote', component: RemoteSection },
   backup: { icon: DatabaseBackup, label: 'sectionBackup', component: BackupSection },
   shortcuts: { icon: Keyboard, label: 'sectionShortcuts', component: ShortcutsSection },

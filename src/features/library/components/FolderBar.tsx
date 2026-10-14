@@ -62,11 +62,11 @@ export function FolderBar({ summary, pageError = false }: { summary?: string; pa
           <Skeleton className="mt-1 h-3.5 w-64" />
         ) : dir.isError && pageError ? (
           // The page already shows the error and its retry; one alert is enough.
-          <span className="text-[13px] text-fg-muted" data-testid="downloads-dir-unavailable">
+          <span className="text-[calc(13rem/15)] text-fg-muted" data-testid="downloads-dir-unavailable">
             {t('folderUnavailable')}
           </span>
         ) : dir.isError ? (
-          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-danger" role="alert" data-testid="downloads-dir-error">
+          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[calc(13rem/15)] text-danger" role="alert" data-testid="downloads-dir-error">
             <span>{t('folderLoadFailed')}</span>
             <Button
               size="sm"
@@ -79,12 +79,12 @@ export function FolderBar({ summary, pageError = false }: { summary?: string; pa
             </Button>
           </span>
         ) : (
-          <span className="truncate font-mono text-[13px] text-fg" title={path} data-testid="downloads-dir">
+          <span className="truncate font-mono text-[calc(13rem/15)] text-fg" title={path} data-testid="downloads-dir">
             {path ?? t('folderUnknown')}
           </span>
         )}
       </div>
-      {summary && <span className="hidden text-[13px] text-fg-muted lg:inline">{summary}</span>}
+      {summary && <span className="hidden text-[calc(13rem/15)] text-fg-muted lg:inline">{summary}</span>}
       {isDesktop && (
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" icon={<FolderOpen size={16} aria-hidden />} onClick={() => void openFolder()} disabled={!path}>

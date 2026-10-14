@@ -289,6 +289,10 @@
   "removedAllTitle_one": "Removed {{count}} playlist",
   "removedAllTitle_other": "Removed {{count}} playlists",
   "removeAllFailed": "Could not remove the playlists",
+  "removeLockedTitle": "Enter the PIN to remove {{name}}",
+  "removeAllLockedTitle": "Enter the PIN to remove the playlists",
+  "removeLockedText": "Parental locks are removed with the playlist, so the PIN unlocks parental controls first.",
+  "removeLockedConfirm": "Unlock",
 
   "phaseCancelled": "Import cancelled",
   "phaseCancelling": "Cancelling…",

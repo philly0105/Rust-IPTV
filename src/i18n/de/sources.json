@@ -289,6 +289,10 @@
   "removedAllTitle_one": "{{count}} Playlist entfernt",
   "removedAllTitle_other": "{{count}} Playlists entfernt",
   "removeAllFailed": "Die Playlists konnten nicht entfernt werden",
+  "removeLockedTitle": "PIN eingeben, um {{name}} zu entfernen",
+  "removeAllLockedTitle": "PIN eingeben, um die Playlists zu entfernen",
+  "removeLockedText": "Jugendschutz-Sperren werden mit der Playlist entfernt, daher entsperrt die PIN zuerst den Jugendschutz.",
+  "removeLockedConfirm": "Entsperren",
 
   "phaseCancelled": "Import abgebrochen",
   "phaseCancelling": "Wird abgebrochen…",

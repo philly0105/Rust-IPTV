@@ -64,6 +64,8 @@
   "settingsBackup": "النسخ الاحتياطي والاستعادة",
   "settingsShortcuts": "الاختصارات",
   "settingsAbout": "حول",
+  "settingsParental": "الرقابة الأبوية",
+  "lockParentalNow": "قفل الرقابة الأبوية الآن",
 
   "shortcutsIntro": "تعمل الاختصارات في أي مكان إلا أثناء الكتابة في حقل نصي.",
   "filterShortcuts": "تصفية الاختصارات",
@@ -94,6 +96,7 @@
   "scVolumeDown": "خفض الصوت",
   "scMute": "كتم الصوت أو إلغاء الكتم",
   "scCaptions": "تشغيل الترجمة أو إيقافها",
+  "scSleepTimer": "مؤقت النوم (متوقف، 15، 30، 45، 60، 90 د)",
   "scChannelUp": "القناة السابقة",
   "scChannelDown": "القناة التالية",
   "scTheme": "التبديل بين السمة الفاتحة والداكنة",
@@ -153,6 +156,17 @@
   "emptySource": "لم يُستورد شيء بعد",
 
   "heroEyebrow": "تابع من حيث توقفت",
+  "heroNewIn": "جديد في {{source}}",
+  "heroNew": "أُضيف حديثًا",
+  "heroLabel": "المميز",
+  "heroCarousel": "عرض دوّار",
+  "heroSlide": "شريحة",
+  "heroSlideOf": "{{index}} من {{total}}",
+  "heroControls": "الشرائح",
+  "heroPrevious": "الشريحة السابقة",
+  "heroNext": "الشريحة التالية",
+  "heroPause": "إيقاف العرض مؤقتًا",
+  "heroPlayRotation": "تشغيل العرض",
   "play": "تشغيل",
   "resume": "استئناف",
   "details": "التفاصيل",
@@ -206,5 +220,7 @@
   "accountAlertExpiringBody": "جدّد الاشتراك لدى مزوّدك لتواصل المشاهدة دون انقطاع.",
   "accountAlertOpen": "عرض الاشتراك",
   "accountAlertDismiss": "تجاهل تنبيه {{name}}",
-  "navScheduled": "المجدول"
+  "navScheduled": "المجدول",
+  "navMultiview": "العرض المتعدد",
+  "navMyList": "قائمتي"
 }

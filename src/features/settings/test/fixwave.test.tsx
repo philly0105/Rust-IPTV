@@ -49,7 +49,7 @@ describe('Section nav below the shell panel breakpoint', () => {
     expect(wrap.className).toContain('min-[1440px]:hidden');
     expect(wrap.className).not.toMatch(/(^|\s)lg:hidden/);
     const nav = within(wrap).getByTestId('settings-nav-inline');
-    expect(within(nav).getAllByRole('link')).toHaveLength(11);
+    expect(within(nav).getAllByRole('link')).toHaveLength(12);
     expect(within(nav).getByRole('link', { name: 'General' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(within(nav).getByRole('link', { name: 'About' }));
     await screen.findByTestId('settings-about');

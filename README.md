@@ -1,6 +1,6 @@
 # Tsrust IPTV
 
-An IPTV player for Windows, rebuilt from the IPTVnator fork on Tauri 2 with a Rust core. It plays M3U/M3U8 playlists, Xtream Codes accounts, and Stalker/Ministra portals. It has live TV with an EPG, movies and series, catch-up, downloads with an offline library, optional TMDB metadata, and a remote control for a browser on this computer or, after QR pairing, phones on the local network. The same core also runs as a small web server, so the UI works in a browser (self-hosted PWA mode).
+An IPTV player for Windows, rebuilt from the IPTVnator fork on Tauri 2 with a Rust core. It plays M3U/M3U8 playlists, Xtream Codes accounts, and Stalker/Ministra portals. It has live TV with an EPG, a multi-view wall for up to four channels, movies and series with a My List, catch-up, parental controls with a PIN, a sleep timer, downloads with an offline library, optional TMDB metadata, and a remote control for a browser on this computer or, after QR pairing, phones on the local network. The same core also runs as a small web server, so the UI works in a browser (self-hosted PWA mode).
 
 The Rust core (`crates/iptv-core`) owns parsing, storage, portals, EPG, downloads, TMDB, remote control, and players. The React UI never holds a whole catalog: it pages rows out of SQLite over one `rpc(cmd, args)` call.
 
@@ -64,6 +64,12 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 - Sync (settings menu or right-click menu) shifts subtitles and audio in 100 ms steps. Audio delay needs the MPV player; subtitle delay works in every player. Both go back to zero when the stream changes.
 - Stream info (I, or the settings and right-click menus) shows the engine, codecs, resolution, frame rate, bitrates, channels, hardware decoding, dropped frames, buffer, container and server host. It never shows the full URL or credentials.
 - B returns to the last live channel. Shift+B, or the history button in the live controls, lists the last 10 channels with what is on now. The series page and Shift+P go back one episode.
+- Changing live channel shows a banner for a few seconds with the channel's logo, number, and what is on now and next. Settings > Playback > "Show channel info when switching channels" turns it off.
+- Sleep timer (player settings menu, or Z to cycle off, 15, 30, 45, 60 and 90 minutes): stop after a number of minutes, at the end of the programme (live TV, from the guide), or at the end of the episode or movie. A minute before the end a notice offers "Keep watching" or "Cancel timer"; then the sound fades out over the last 30 seconds and live TV stops or a video pauses.
+- My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. Reorder it by dragging, with the arrow buttons, or with Alt+Up/Down, and mark movies watched with W.
+- Multi-view plays two to four live channels at once: right-click a channel and choose "Add to multi-view". Pick side by side, a grid of four, or one large and three small. Only the tile you click has sound. Arrow keys move between tiles, Enter gives a tile the sound, R replaces its channel, S swaps two tiles, and Delete closes one.
+- Parental controls (Settings > Parental): set a 4 to 8 digit PIN, then lock whole groups there or from a group's right-click menu, a channel from its right-click menu, and a movie or series from its page. Adult groups can be locked automatically. Locked content is either hidden everywhere until the PIN is entered, or stays visible and asks for the PIN before it opens. An unlock lasts 15 minutes by default; "Lock now" (Settings > Parental, or the command palette) ends it.
+- Settings > Appearance: light, dark or system theme, OLED black for the dark theme, seven accent colours, a compact density, and an interface size from 90 to 125 %.
 
 ## Data
 
@@ -115,6 +121,7 @@ Press `?` in the app for the full list. The main ones:
 | Up / Down | Volume 5 % |
 | M | Mute |
 | C | Captions on / off (in fullscreen live TV: the channel panel) |
+| Z | Sleep timer: off, 15, 30, 45, 60, 90 minutes |
 | Shift+N | Add a source (Sources page) |
 | Alt+Up / Alt+Down | Move the focused favorite up / down (Favorites) |
 | P / R / X / Delete | Pause or resume / retry / cancel / remove the focused download (Downloads) |
@@ -133,7 +140,7 @@ To use a phone, turn on "Allow phones on this network" under Settings > Remote (
 
 ## Backups and migrating from IPTVnator
 
-Settings > Backup exports and imports the IPTVnator playlist backup format (`iptvnator-playlist-backup`, version 1). A backup exported from IPTVnator imports here with its playlists, favorites, recently viewed items, hidden groups, playback positions, and EPG URLs, and a backup exported here opens in IPTVnator. Export leaves passwords out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See `docs/architecture/backup.md`.
+Settings > Backup exports and imports the IPTVnator playlist backup format (`iptvnator-playlist-backup`, version 1). A backup exported from IPTVnator imports here with its playlists, favorites, recently viewed items, hidden groups, playback positions, and EPG URLs, and a backup exported here opens in IPTVnator. A backup made here also keeps My List, parental locks and the parental options, never the PIN; while parental controls are locked, a "Replace" import is refused until you unlock them with the PIN. Export leaves passwords out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See `docs/architecture/backup.md`.
 
 ## Troubleshooting
 

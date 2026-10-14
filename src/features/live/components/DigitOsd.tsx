@@ -19,7 +19,7 @@ export function DigitOsd({ state }: { state: ZapFeedback | null }) {
             {state.digits}
             <span className="motion-safe:animate-pulse">_</span>
           </span>
-          <span className="mt-1 text-[11px] text-white/70">{t('channelNumber')}</span>
+          <span className="mt-1 text-[calc(11rem/15)] text-white/70">{t('channelNumber')}</span>
         </>
       ) : state.kind === 'found' ? (
         <>

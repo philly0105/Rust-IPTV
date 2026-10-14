@@ -8,6 +8,8 @@ vi.mock('@/api/transport', () => ({
   isDesktop: false,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+// The parental gate has its own tests (parentalHook.test.ts); here everything may play.
+vi.mock('../parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 // The DOM engine itself is not under test here: only the chrome around it.
 vi.mock('./InlinePlayer', () => ({ InlinePlayer: () => null }));

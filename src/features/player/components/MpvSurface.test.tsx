@@ -809,10 +809,24 @@ describe('wheel and context menu over the native video', () => {
     expect(m!.style.left).toBe('200px');
     expect(m!.style.top).toBe('120px');
     const items = Array.from(m!.querySelectorAll('[role="menuitem"]')).map((n) => n.textContent);
-    expect(items).toEqual(['Pause', 'Fullscreen', 'Picture in picture', 'Sync', 'Copy stream link']);
+    expect(items).toEqual(['Pause', 'Fullscreen', 'Picture in picture', 'Sync', 'Sleep timerOff', 'Copy stream link']);
     await tick(30);
     const last = calls('mpv.setBounds').at(-1)?.[1] as { bounds: Bounds; holes: Bounds[] } | undefined;
     expect(last?.holes.length).toBeGreaterThan(0);
+  });
+
+  it('sets the sleep timer from the menu like the options menu does (C5)', async () => {
+    const { useSleepTimer, __resetSleepTimerForTests } = await import('../sleepTimer');
+    onTestFinished(() => __resetSleepTimerForTests());
+    await attached();
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Sleep timer/ }));
+    const choices = Array.from(menu()!.querySelectorAll('[role="menuitemradio"]')).map((n) => n.textContent ?? '');
+    expect(choices[0]).toBe('Off');
+    expect(choices.slice(1, 6).map((c) => c.split(/\d+:\d\d/)[0])).toEqual(['15 min', '30 min', '45 min', '60 min', '90 min']);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^45 min/ }));
+    expect(useSleepTimer.getState().target).toEqual({ kind: 'minutes', minutes: 45 });
+    expect(menu()).toBeNull();
   });
 
   it('a click on the video while the menu is open only closes it', async () => {

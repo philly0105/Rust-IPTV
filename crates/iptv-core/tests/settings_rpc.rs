@@ -137,6 +137,15 @@ async fn update_validates() {
         json!({"vodMinRating": 11}),
         json!({"vodMinRating": -0.5}),
         json!({"stripCountryPrefix": "yes"}),
+        // appearance:
+        json!({"accent": "neon"}),
+        json!({"density": "cozy"}),
+        json!({"uiScale": 0.85}),
+        json!({"uiScale": 1.3}),
+        json!({"uiScale": "1.1"}),
+        json!({"oledBlack": "yes"}),
+        json!({"zapBanner": 0}),
+        json!({"dashboardRails": {"myList": "no"}}),
     ] {
         let err = call(&r, &s, "settings.update", json!({ "patch": patch.clone() }))
             .await
@@ -353,6 +362,86 @@ async fn new_fields_have_documented_defaults_and_round_trip() {
         serde_json::from_value(json!({"language": "de"})).unwrap();
     assert!(old.player_reuse_instance && old.show_external_bar);
     assert_eq!(old.recordings_dir, None);
+}
+
+/// C1 appearance fields: defaults, update over RPC (server mode too: they are
+/// not desktop-only), the `settings.changed` payload, persistence, and reset.
+#[tokio::test]
+async fn appearance_fields_update_persist_and_reset() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = router();
+    {
+        let (s, mut rx) = app(dir.path()).await;
+        let got = call(&r, &s, "settings.get", Value::Null).await.unwrap();
+        assert_eq!(got["accent"], "amber");
+        assert_eq!(got["oledBlack"], false);
+        assert_eq!(got["density"], "comfortable");
+        assert_eq!(got["uiScale"], 1.0);
+        assert_eq!(got["zapBanner"], true);
+        assert_eq!(got["dashboardRails"]["myList"], true);
+
+        let got = call(
+            &r,
+            &s,
+            "settings.update",
+            json!({"patch": {
+                "accent": "teal",
+                "oledBlack": true,
+                "density": "compact",
+                "uiScale": 1.1500000000000001,
+                "zapBanner": false,
+                "dashboardRails": {"myList": false},
+            }}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(got["accent"], "teal");
+        assert_eq!(got["density"], "compact");
+        assert_eq!(got["uiScale"], 1.15, "slider noise is rounded away");
+        assert_eq!(got["dashboardRails"]["myList"], false);
+        assert_eq!(
+            got["dashboardRails"]["hero"], true,
+            "other rails keep their value"
+        );
+        let events = changed_events(&mut rx);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["accent"], "teal");
+        assert_eq!(events[0]["oledBlack"], true);
+
+        // The range ends are accepted.
+        for v in [0.9, 1.25] {
+            let got = call(&r, &s, "settings.update", json!({"patch": {"uiScale": v}}))
+                .await
+                .unwrap();
+            assert_eq!(got["uiScale"], v);
+        }
+        // A rejected value leaves the stored one alone.
+        let err = call(
+            &r,
+            &s,
+            "settings.update",
+            json!({"patch": {"uiScale": 1.26}}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, RpcErrorCode::Invalid);
+        assert!(err.message.contains("uiScale"), "{}", err.message);
+        assert_eq!(s.settings_snapshot().ui_scale, 1.25);
+    }
+    // Persisted across a restart.
+    let (s, _rx) = app(dir.path()).await;
+    let snap = s.settings_snapshot();
+    assert_eq!(snap.accent, iptv_core::model::Accent::Teal);
+    assert!(snap.oled_black);
+    assert_eq!(snap.density, iptv_core::model::Density::Compact);
+    assert_eq!(snap.ui_scale, 1.25);
+    assert!(!snap.zap_banner);
+    assert!(!snap.dashboard_rails.my_list);
+
+    let reset = call(&r, &s, "settings.reset", Value::Null).await.unwrap();
+    assert_eq!(reset["accent"], "amber");
+    assert_eq!(reset["uiScale"], 1.0);
+    assert_eq!(reset["dashboardRails"]["myList"], true);
 }
 
 #[tokio::test]

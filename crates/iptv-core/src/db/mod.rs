@@ -147,6 +147,18 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0010_recordings",
         sql: include_str!("migrations/0010_recordings.sql"),
     },
+    // parental: parental_config and parental_locks (contract C2).
+    Migration {
+        version: 11,
+        name: "0011_parental",
+        sql: include_str!("migrations/0011_parental.sql"),
+    },
+    // watchlist: My List rows (contract C3).
+    Migration {
+        version: 12,
+        name: "0012_watchlist",
+        sql: include_str!("migrations/0012_watchlist.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -472,6 +484,46 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .unwrap();
         assert_eq!(mode.to_lowercase(), "wal");
+    }
+
+    /// Versions run 1, 2, 3... without gaps, and each name starts with its
+    /// zero-padded version (the file name convention `NNNN_name.sql`).
+    #[test]
+    fn migration_list_is_contiguous_and_named_by_version() {
+        for (i, m) in MIGRATIONS.iter().enumerate() {
+            assert_eq!(m.version, i as i64 + 1, "{} is out of sequence", m.name);
+            assert!(
+                m.name.starts_with(&format!("{:04}_", m.version)),
+                "{} does not start with its version",
+                m.name
+            );
+        }
+        assert_eq!(latest_version(), MIGRATIONS.len() as i64);
+    }
+
+    /// A database left at any earlier version (including one that stopped
+    /// before a migration that is only a comment) upgrades to the latest.
+    #[test]
+    fn every_earlier_version_upgrades_to_latest() {
+        for stop in 1..MIGRATIONS.len() {
+            let mut conn = Connection::open_in_memory().unwrap();
+            configure(&mut conn).unwrap();
+            for m in &MIGRATIONS[..stop] {
+                conn.execute_batch(m.sql).unwrap();
+                conn.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                    [m.version],
+                )
+                .unwrap();
+            }
+            assert_eq!(schema_version(&conn).unwrap(), stop as i64);
+            migrate(&mut conn).unwrap_or_else(|e| panic!("upgrade from v{stop}: {e}"));
+            assert_eq!(schema_version(&conn).unwrap(), latest_version());
+            let recorded: i64 = conn
+                .query_row("SELECT COUNT(*) FROM schema_migrations", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(recorded, latest_version(), "every version is recorded once");
+        }
     }
 
     #[test]

@@ -289,6 +289,10 @@
   "removedAllTitle_one": "{{count}} oynatma listesi kaldırıldı",
   "removedAllTitle_other": "{{count}} oynatma listesi kaldırıldı",
   "removeAllFailed": "Oynatma listeleri kaldırılamadı",
+  "removeLockedTitle": "{{name}} öğesini kaldırmak için PIN'i girin",
+  "removeAllLockedTitle": "Oynatma listelerini kaldırmak için PIN'i girin",
+  "removeLockedText": "Ebeveyn kilitleri oynatma listesiyle birlikte kaldırılır, bu yüzden PIN önce ebeveyn denetiminin kilidini açar.",
+  "removeLockedConfirm": "Kilidi aç",
 
   "phaseCancelled": "İçe aktarma iptal edildi",
   "phaseCancelling": "İptal ediliyor…",

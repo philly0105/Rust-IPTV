@@ -1,15 +1,18 @@
-import { ListVideo, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
+import { ListVideo, Lock, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { sameRef, type Episode, type ItemRef } from '@/api/types';
+import { MyListButton } from '@/features/mylist/components/MyListButton';
+import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { usePlayerStore } from '@/features/player';
 
 import { FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
 import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
+import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
 import { WatchStage } from '../components/detail/WatchStage';
@@ -41,6 +44,8 @@ export function SeriesDetailPage() {
   const { t } = useTranslation('vod');
   const { sourceId = '', itemId = '' } = useParams();
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'series', itemId }), [sourceId, itemId]);
+  // C2: in Ask mode a locked series shows nothing until the PIN is entered.
+  const gate = useOpenGate(ref);
   const scrollRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
@@ -128,7 +133,10 @@ export function SeriesDetailPage() {
   const isFavorite = useIsFavorite(ref);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const target = useMemo<PlayTarget | undefined>(
-    () => (item && source.data ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl } : undefined),
+    () =>
+      item && source.data
+        ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
+        : undefined,
     [item, source.data, ref, model?.title, model?.posterUrl],
   );
   const playback = usePlayback(target);
@@ -139,8 +147,9 @@ export function SeriesDetailPage() {
   const { pathname } = useLocation();
   useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item });
 
-  // Until the title is known, the page (sr-only h1) and the shell header both read the section name.
-  const pageTitle = model?.title ?? t('series');
+  // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
+  const pageTitle = (gate.state === 'open' ? model?.title : undefined) ?? t('series');
+  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.title } : null);
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
 
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
@@ -166,6 +175,24 @@ export function SeriesDetailPage() {
 
   if (twin.data) {
     return <Navigate replace to={detailHref(twin.data) ?? '/'} />;
+  }
+  if (gate.state !== 'open') {
+    return (
+      <div className="h-full overflow-y-auto" data-testid="vod-series-detail">
+        <h1 className="sr-only">{pageTitle}</h1>
+        {gate.state === 'checking' ? (
+          <DetailHeroSkeleton />
+        ) : (
+          <ParentalLocked
+            itemRef={ref}
+            title={model?.title}
+            failed={gate.state === 'failed'}
+            onRetry={gate.retry}
+            fallbackHref={`/s/${encodeURIComponent(sourceId)}/series`}
+          />
+        )}
+      </div>
+    );
   }
   if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
@@ -193,13 +220,20 @@ export function SeriesDetailPage() {
   const trailer = youtubeKey(model.trailerKey ?? model.trailerUrl);
   const seasonEpisodeIds = episodes.map((e) => e.id);
   const seasonWatched = episodes.length > 0 && episodes.every((e) => isWatched(positions.get(e.id)));
+  const snapshot = { title: model.title, posterUrl: model.posterUrl, contentType: 'series' as const };
+  // My List saves what a poster card saves (myListTarget): the base title, with the year as the subtitle.
+  const listSnapshot = { ...snapshot, title: model.titleBase ?? model.title, ...(model.year ? { subtitle: String(model.year) } : {}) };
   const favorite = (
-    <FavoriteButton
-      itemRef={ref}
-      snapshot={{ title: model.title, posterUrl: model.posterUrl, contentType: 'series' }}
-      isFavorite={isFavorite}
-      compact={watch.active}
-    />
+    <>
+      <MyListButton itemRef={ref} snapshot={listSnapshot} size={watch.active ? 'sm' : 'lg'} />
+      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact={watch.active} />
+      {/* C2: lock or remove the lock (only while parental controls are on). */}
+      {lockItems.map((a) => (
+        <Button key={a.id} size={watch.active ? 'sm' : 'lg'} variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
+          {a.label}
+        </Button>
+      ))}
+    </>
   );
 
   return (

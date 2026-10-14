@@ -19,6 +19,7 @@ import { parity, type SectionProps } from './types';
 const RAILS: (keyof DashboardRails)[] = [
   'hero',
   'continueWatching',
+  'myList',
   'liveFavorites',
   'recentlyWatchedLive',
   'favoriteMoviesAndSeries',
@@ -36,6 +37,7 @@ const RAIL_KEY: Record<keyof DashboardRails, string> = {
   recentSources: 'railRecentSources',
   recentlyAdded: 'railRecentlyAdded',
   tmdbTrending: 'railTmdbTrending',
+  myList: 'railMyList',
 };
 
 const LANGUAGE_OPTIONS = LANGUAGES.map((l) => ({ value: l.code, label: l.name }));

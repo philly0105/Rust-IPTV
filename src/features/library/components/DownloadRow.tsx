@@ -128,7 +128,7 @@ function DownloadRowImpl({ download: d, progress, source, actions, busy, onActio
           <span className="truncate text-sm font-medium text-fg" title={d.title}>
             {d.title}
           </span>
-          {d.subtitle && <span className="hidden truncate text-[13px] text-fg-muted md:inline">{d.subtitle}</span>}
+          {d.subtitle && <span className="hidden truncate text-[calc(13rem/15)] text-fg-muted md:inline">{d.subtitle}</span>}
           <StatusBadge status={d.status} className="ms-auto shrink-0" />
         </div>
         <DialProgress percent={pct} tone={tone} label={t('progressFor', { title: d.title })} />

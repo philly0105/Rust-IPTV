@@ -1,6 +1,7 @@
 import { Command as Cmdk, defaultFilter } from 'cmdk';
 import {
   AlarmClock,
+  Bookmark,
   CalendarRange,
   CornerDownLeft,
   Download,
@@ -9,7 +10,9 @@ import {
   History,
   Keyboard,
   LayoutDashboard,
+  LayoutGrid,
   ListVideo,
+  Lock,
   Monitor,
   Moon,
   Plus,
@@ -23,7 +26,9 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { Dialog, Kbd } from '@/ui';
+import { RpcError } from '@/api/transport';
+import { lockNow, useParentalStatus } from '@/features/parental/status';
+import { Dialog, Kbd, toast } from '@/ui';
 
 import { useCommandList } from './commands';
 import { railLinks } from './railLinks';
@@ -43,6 +48,7 @@ export const SETTINGS_SECTIONS = [
   'recording',
   'metadata',
   'appearance',
+  'parental',
   'remote',
   'backup',
   'shortcuts',
@@ -78,11 +84,14 @@ interface PaletteItem {
 
 /** Built-in navigation, source, and settings commands. Exported for tests. */
 export function usePaletteItems(): PaletteItem[] {
-  const { t } = useTranslation('shell');
+  const { t } = useTranslation(['shell', 'parental']);
   const navigate = useNavigate();
   const sources = useVisibleSources();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useCommandList();
+  const parental = useParentalStatus();
+  // Only while a PIN is set and the session is unlocked: there is nothing to lock otherwise.
+  const canLockParental = !!parental.data?.enabled && !!parental.data.unlocked;
 
   return useMemo(() => {
     const go = (to: string) => () => navigate(to);
@@ -91,7 +100,9 @@ export function usePaletteItems(): PaletteItem[] {
       { id: 'nav.dashboard', title: t('navDashboard'), group: nav, icon: LayoutDashboard, run: go('/dashboard'), keywords: ['home'] },
       { id: 'nav.search', title: t('navSearch'), group: nav, icon: Search, shortcut: 'mod+f', run: go('/search') },
       { id: 'nav.guide', title: t('navGuide'), group: nav, icon: CalendarRange, run: go('/epg'), keywords: ['epg', 'tv guide', 'schedule'] },
+      { id: 'nav.multiview', title: t('navMultiview'), group: nav, icon: LayoutGrid, run: go('/multiview'), keywords: ['multiview', 'wall', 'split screen', 'mosaic'] },
       { id: 'nav.favorites', title: t('navFavorites'), group: nav, icon: Heart, run: go('/favorites') },
+      { id: 'nav.myList', title: t('navMyList'), group: nav, icon: Bookmark, run: go('/my-list'), keywords: ['watchlist', 'watch later'] },
       { id: 'nav.recent', title: t('navRecent'), group: nav, icon: History, shortcut: 'mod+r', run: go('/recent'), keywords: ['history'] },
       { id: 'nav.downloads', title: t('navDownloads'), group: nav, icon: Download, run: go('/downloads') },
       { id: 'nav.myVideos', title: t('navMyVideos'), group: nav, icon: HardDrive, run: go('/my-videos'), keywords: ['offline'] },
@@ -122,6 +133,20 @@ export function usePaletteItems(): PaletteItem[] {
       { id: 'theme.system', title: t('themeSystem'), group: set, icon: Monitor, run: () => void persistTheme('system'), keywords: ['theme', 'auto'] },
       { id: 'help.shortcuts', title: t('keyboardShortcuts'), group: set, icon: Keyboard, shortcut: '?', run: () => setHelpOpen(true), keywords: ['keys', 'help'] },
     );
+    if (canLockParental) {
+      items.push({
+        id: 'parental.lockNow',
+        title: t('lockParentalNow'),
+        group: set,
+        icon: Lock,
+        keywords: ['parental', 'pin', 'lock', 'kids'],
+        run: () =>
+          void lockNow().then(
+            () => toast({ variant: 'success', title: t('parental:lockedNowToast') }),
+            (err: unknown) => toast({ variant: 'error', title: t('parental:saveFailed'), description: RpcError.from(err).message }),
+          ),
+      });
+    }
     for (const section of SETTINGS_SECTIONS) {
       const key = `settings${section[0]!.toUpperCase()}${section.slice(1)}`;
       items.push({
@@ -138,7 +163,7 @@ export function usePaletteItems(): PaletteItem[] {
       items.push({ id: `cmd.${c.id}`, title: c.title, group: c.group, icon: Terminal, shortcut: c.shortcut, keywords: c.keywords, run: () => c.run() });
     }
     return items;
-  }, [t, navigate, sources.data, setHelpOpen, registered]);
+  }, [t, navigate, sources.data, setHelpOpen, registered, canLockParental]);
 }
 
 export function CommandPalette() {

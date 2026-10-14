@@ -64,6 +64,8 @@
   "settingsBackup": "Backup und Wiederherstellung",
   "settingsShortcuts": "Tastenkürzel",
   "settingsAbout": "Info",
+  "settingsParental": "Jugendschutz",
+  "lockParentalNow": "Jugendschutz jetzt sperren",
 
   "shortcutsIntro": "Tastenkürzel funktionieren überall, außer während Sie in ein Textfeld tippen.",
   "filterShortcuts": "Tastenkürzel filtern",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Leiser",
   "scMute": "Stummschalten oder Ton einschalten",
   "scCaptions": "Untertitel ein- oder ausschalten",
+  "scSleepTimer": "Sleep-Timer (aus, 15, 30, 45, 60, 90 Min.)",
   "scChannelUp": "Vorheriger Sender",
   "scChannelDown": "Nächster Sender",
   "scTheme": "Zwischen hellem und dunklem Design wechseln",
@@ -137,6 +140,17 @@
   "emptySource": "Noch nichts importiert",
 
   "heroEyebrow": "Dort weiterschauen, wo Sie aufgehört haben",
+  "heroNewIn": "Neu in {{source}}",
+  "heroNew": "Neu hinzugefügt",
+  "heroLabel": "Highlight",
+  "heroCarousel": "Karussell",
+  "heroSlide": "Folie",
+  "heroSlideOf": "{{index}} von {{total}}",
+  "heroControls": "Folien",
+  "heroPrevious": "Vorherige Folie",
+  "heroNext": "Nächste Folie",
+  "heroPause": "Diashow anhalten",
+  "heroPlayRotation": "Diashow abspielen",
   "play": "Abspielen",
   "resume": "Fortsetzen",
   "details": "Details",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "Verlängern Sie beim Anbieter, um ohne Unterbrechung weiterzuschauen.",
   "accountAlertOpen": "Abo anzeigen",
   "accountAlertDismiss": "Hinweis für {{name}} ausblenden",
-  "navScheduled": "Geplant"
+  "navScheduled": "Geplant",
+  "navMultiview": "Multi-View",
+  "navMyList": "Meine Liste"
 }

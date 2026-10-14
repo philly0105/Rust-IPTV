@@ -280,7 +280,7 @@ export function MyVideoDetailPage() {
   );
 
   const facts = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-fg-muted">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[calc(13rem/15)] text-fg-muted">
       <SourceBadge source={source} />
       {entry.kind === 'series' && <span>{t('episodeCount', { count: entry.episodes.length })}</span>}
       {totalSize > 0 && <span className="font-display tabular-nums">{formatBytes(totalSize, i18n.language)}</span>}
@@ -401,7 +401,7 @@ export function MyVideoDetailPage() {
         </div>
         <div className="relative flex min-w-0 flex-1 flex-col justify-end gap-4 pb-1">
           <div className="flex min-w-0 flex-col gap-2">
-            <h1 className="text-2xl text-fg lg:text-[34px] lg:leading-tight">{pageTitle}</h1>
+            <h1 className="text-2xl text-fg lg:text-[calc(34rem/15)] lg:leading-tight">{pageTitle}</h1>
             {facts}
           </div>
           {missingPanel}

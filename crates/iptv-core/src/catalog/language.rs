@@ -286,7 +286,8 @@ pub const SQL_FUNCTION: &str = "non_english";
 /// `AND` clause for readers whose query joins categories as `c`.
 pub const ENGLISH_ONLY_SQL: &str = " AND non_english(i.title, c.name) = 0";
 
-/// Registers [`SQL_FUNCTION`] on `conn`.
+/// Registers [`SQL_FUNCTION`] on `conn`, and `adult_category` from
+/// [`crate::parental::register_sql`].
 pub fn register(conn: &Connection) -> rusqlite::Result<()> {
     conn.create_scalar_function(
         SQL_FUNCTION,
@@ -303,7 +304,9 @@ pub fn register(conn: &Connection) -> rusqlite::Result<()> {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
             Ok(is_non_english(title.unwrap_or_default(), category))
         },
-    )
+    )?;
+    // parental: the hide-mode filters match adult category names in SQL.
+    crate::parental::register_sql(conn)
 }
 
 #[cfg(test)]

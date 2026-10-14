@@ -124,7 +124,7 @@ export function NextEpisodeCard({
         <div className="text-sm text-fg-muted">
           {autoplay ? t('nextEpisodeIn', { seconds: left }) : t('nextEpisode')}
         </div>
-        <div className="truncate text-[15px] text-fg">
+        <div className="truncate text-[calc(15rem/15)] text-fg">
           <span className="font-display tabular me-2 text-fg-subtle">{episodeCode(next.season, next.episode)}</span>
           {next.title}
         </div>

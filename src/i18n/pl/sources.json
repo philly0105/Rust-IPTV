@@ -327,6 +327,10 @@
   "removedAllTitle_many": "Usunięto {{count}} list odtwarzania",
   "removedAllTitle_other": "Usunięto {{count}} listy odtwarzania",
   "removeAllFailed": "Nie udało się usunąć list odtwarzania",
+  "removeLockedTitle": "Wpisz PIN, aby usunąć {{name}}",
+  "removeAllLockedTitle": "Wpisz PIN, aby usunąć listy odtwarzania",
+  "removeLockedText": "Blokady rodzicielskie są usuwane razem z listą odtwarzania, dlatego PIN najpierw odblokowuje kontrolę rodzicielską.",
+  "removeLockedConfirm": "Odblokuj",
 
   "phaseCancelled": "Import anulowany",
   "phaseCancelling": "Anulowanie…",

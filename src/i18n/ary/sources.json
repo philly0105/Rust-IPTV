@@ -289,6 +289,10 @@
   "removedAllTitle_one": "تحيّدات {{count}} قائمة تشغيل",
   "removedAllTitle_other": "قوائم التشغيل اللي تحيّدو: {{count}}",
   "removeAllFailed": "ما قدرناش نحيدو قوائم التشغيل",
+  "removeLockedTitle": "دخّل الكود باش تحيّد {{name}}",
+  "removeAllLockedTitle": "دخّل الكود باش تحيّد قوائم التشغيل",
+  "removeLockedText": "أقفال الرقابة الأبوية كيتحيدو مع قائمة التشغيل، داكشي علاش الكود كيحلّ الرقابة الأبوية قبل.",
+  "removeLockedConfirm": "حلّ",
 
   "phaseCancelled": "تلغى الاستيراد",
   "phaseCancelling": "كيتلغى…",

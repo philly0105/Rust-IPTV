@@ -2,16 +2,16 @@ import { lazy, Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate } from 'react-router';
 
+import { registerGateHost } from '@/features/parental/gate';
+import { useParentalEvents } from '@/features/parental/status';
 import { ExternalPlaybackFooter, PlayerDock, restorePlayback } from '@/features/player';
 import '@/i18n';
 import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
 
-import { CommandPalette } from './CommandPalette';
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { Header } from './Header';
 import { Rail } from './Rail';
-import { ShortcutOverlay } from './ShortcutOverlay';
 import { useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
@@ -20,6 +20,11 @@ import { useSettings } from './useSettings';
 
 // recording: renders nothing; split out so the recording hooks and schedule logic stay out of the main chunk.
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
+// parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
+const ParentalGateHost = lazy(() => import('@/features/parental/GateHost').then((m) => ({ default: m.ParentalGateHost })));
+// The palette and the `?` overlay only show on demand; they load right after the shell, outside the main chunk.
+const CommandPalette = lazy(() => import('./CommandPalette').then((m) => ({ default: m.CommandPalette })));
+const ShortcutOverlay = lazy(() => import('./ShortcutOverlay').then((m) => ({ default: m.ShortcutOverlay })));
 
 /** Opens the command palette from anywhere. */
 export function openPalette(): void {
@@ -121,19 +126,19 @@ function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
         ))}
       </div>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-divider px-5">
+        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider px-4 sm:gap-4 sm:px-5">
           <Skeleton className="h-6 w-40" />
           <div className="flex-1" />
-          <Skeleton className="h-8 w-[clamp(160px,22vw,300px)] rounded-md" />
+          <Skeleton className="hidden h-8 w-[clamp(10rem,22vw,20rem)] rounded-md lg:block" />
           <Skeleton className="h-8 w-8 rounded-md" />
           <Skeleton className="h-8 w-8 rounded-md" />
         </div>
-        <div aria-hidden className="flex flex-col gap-6 p-8">
+        <div aria-hidden className="flex flex-col gap-6 p-4 sm:p-8">
           <Skeleton className="h-48 w-full rounded-lg" />
           <Skeleton className="h-5 w-48" />
           <div className="flex gap-4 overflow-hidden">
             {Array.from({ length: 6 }, (_, i) => (
-              <Skeleton key={i} className="aspect-[2/3] w-[168px] shrink-0 rounded-md" />
+              <Skeleton key={i} className="aspect-[2/3] w-[11.2rem] shrink-0 rounded-md" />
             ))}
           </div>
         </div>
@@ -155,6 +160,11 @@ export function ShellLayout() {
   const collapsed = railPref || narrow;
 
   useShellEvents();
+  useParentalEvents();
+  // The layout counts as the parental gate's host from its first render, so a PIN request made
+  // before the dialogs can show (restoring a locked channel under the language skeleton, or
+  // while their chunk loads) waits in the queue instead of being refused.
+  useEffect(() => registerGateHost(), []);
   const languageSettled = useLanguageSync(settings.data?.language, settings.isError);
   useLastRoutePersistence(settings.isSuccess, settings.data?.lastRoute);
   useWindowStatePersistence();
@@ -170,7 +180,7 @@ export function ShellLayout() {
   if (!languageSettled) {
     return (
       <>
-        <ThemeSync settingsTheme={settings.data?.theme} />
+        <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />
         <ShellSkeleton collapsed={collapsed} />
       </>
     );
@@ -184,7 +194,7 @@ export function ShellLayout() {
       >
         {t('skipToContent')}
       </a>
-      <ThemeSync settingsTheme={settings.data?.theme} />
+      <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />
       <GlobalShortcuts />
       <Rail collapsed={collapsed} autoCollapsed={narrow} />
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -210,9 +220,14 @@ export function ShellLayout() {
         <ExternalPlaybackFooter />
       </div>
       <PlayerDock />
-      <CommandPalette />
-      <ShortcutOverlay />
+      <Suspense fallback={null}>
+        <CommandPalette />
+        <ShortcutOverlay />
+      </Suspense>
       <ToastViewport />
+      <Suspense fallback={null}>
+        <ParentalGateHost />
+      </Suspense>
       {/* recording: */}
       <Suspense fallback={null}>
         <RecordingWatcher />

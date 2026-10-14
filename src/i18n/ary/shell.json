@@ -64,6 +64,8 @@
   "settingsBackup": "النسخ الاحتياطي والاسترجاع",
   "settingsShortcuts": "الاختصارات",
   "settingsAbout": "حول",
+  "settingsParental": "الرقابة الأبوية",
+  "lockParentalNow": "سدّ الرقابة الأبوية دابا",
 
   "shortcutsIntro": "الاختصارات خدامة فكل بلاصة، من غير ملي كتكتب فخانة ديال النص.",
   "filterShortcuts": "فلتر الاختصارات",
@@ -94,6 +96,7 @@
   "scVolumeDown": "نقّص الصوت",
   "scMute": "كتم الصوت ولا رجّعو",
   "scCaptions": "شعل ولا طفي الترجمة",
+  "scSleepTimer": "مؤقت النعاس (مطفي، 15، 30، 45، 60، 90 د)",
   "scChannelUp": "القناة اللي قبل",
   "scChannelDown": "القناة اللي من بعد",
   "scTheme": "دوز بين المظهر الفاتح والداكن",
@@ -137,6 +140,17 @@
   "emptySource": "مازال ما تستورد والو",
 
   "heroEyebrow": "كمّل من فين وقفتي",
+  "heroNewIn": "جديد ف {{source}}",
+  "heroNew": "تزاد دابا",
+  "heroLabel": "المميز",
+  "heroCarousel": "عرض دوّار",
+  "heroSlide": "شريحة",
+  "heroSlideOf": "{{index}} من {{total}}",
+  "heroControls": "الشرائح",
+  "heroPrevious": "الشريحة اللي قبل",
+  "heroNext": "الشريحة اللي من بعد",
+  "heroPause": "وقف العرض",
+  "heroPlayRotation": "شغل العرض",
   "play": "شغل",
   "resume": "كمّل",
   "details": "التفاصيل",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "جدد مع المزود ديالك باش تبقى تتفرج بلا ما يتقطع.",
   "accountAlertOpen": "شوف الاشتراك",
   "accountAlertDismiss": "سدّ التنبيه ديال {{name}}",
-  "navScheduled": "المبرمج"
+  "navScheduled": "المبرمج",
+  "navMultiview": "العرض المتعدد",
+  "navMyList": "الليستة ديالي"
 }

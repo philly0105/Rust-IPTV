@@ -19,6 +19,8 @@ vi.mock('@/api/transport', () => ({
   isDesktop: false,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+// The parental gate has its own tests (parentalHook.test.ts); here everything may play.
+vi.mock('@/features/player/parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/features/player', () => import('@/features/player/store'));
 
 const store = await import('@/features/player/store');

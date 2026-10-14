@@ -83,10 +83,13 @@ pub fn register(r: &mut RpcRouter) {
         "xtream.sync",
         |s, a: SyncArgs| async move { sync(s, a).await },
     );
+    // parental (C2): hide mode refuses a hidden title here too, as catalog.item does.
     r.add("xtream.vodDetail", |s, a: RefArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<VodDetail, RpcError>(service::vod_detail(&s, &a.item_ref).await?)
     });
     r.add("xtream.seriesDetail", |s, a: RefArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<SeriesDetail, RpcError>(service::series_detail(&s, &a.item_ref).await?)
     });
     r.add("xtream.streamUrl", |s, a: StreamUrlArgs| async move {

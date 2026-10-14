@@ -2,6 +2,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { useUiScale } from './scale';
 
 export interface VirtualItemState {
   /** Keyboard cursor is on this row. */
@@ -12,7 +13,7 @@ export interface VirtualItemState {
 
 export interface VirtualListProps<T> {
   items: readonly T[];
-  /** Fixed row height in px. */
+  /** Fixed row height in px at 100 % UI scale; the list multiplies it by the active scale (C1). */
   itemHeight: number;
   render: (item: T, index: number, state: VirtualItemState) => ReactNode;
   /** Called once per `items.length` when the last rows come into view. */
@@ -31,6 +32,7 @@ export interface VirtualListProps<T> {
   label?: string;
   /** Extra rows rendered after the items (e.g. a loading skeleton for the next page). */
   footer?: ReactNode;
+  /** Footer height in px at 100 % UI scale. */
   footerHeight?: number;
   /** Initial viewport size used before layout (tests, SSR). */
   initialRect?: { width: number; height: number };
@@ -44,7 +46,7 @@ export interface VirtualListProps<T> {
  */
 export function VirtualList<T>({
   items,
-  itemHeight,
+  itemHeight: baseItemHeight,
   render,
   onEndReached,
   endThreshold = 10,
@@ -56,10 +58,14 @@ export function VirtualList<T>({
   getKey,
   label,
   footer,
-  footerHeight = 0,
+  footerHeight: baseFooterHeight = 0,
   initialRect = { width: 0, height: 600 },
   testId,
 }: VirtualListProps<T>) {
+  // Row content is rem-based, so the slots grow and shrink with the UI scale too.
+  const uiScale = useUiScale();
+  const itemHeight = Math.round(baseItemHeight * uiScale);
+  const footerHeight = Math.round(baseFooterHeight * uiScale);
   const parentRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const [active, setActive] = useState(() => (selectedIndex !== undefined && selectedIndex >= 0 ? selectedIndex : -1));
@@ -72,6 +78,11 @@ export function VirtualList<T>({
     initialRect,
     getItemKey: getKey ? (i) => getKey(items[i]!, i) : undefined,
   });
+
+  useEffect(() => {
+    virtualizer.measure();
+    // remeasure when the UI scale changes the row height
+  }, [itemHeight]);
 
   // Follow external selection (e.g. channel zap) and keep it in view.
   useEffect(() => {

@@ -36,11 +36,11 @@ function FieldFrame({
       )}
       {children}
       {error ? (
-        <p id={`${id}-error`} className="text-[13px] text-danger" role="alert">
+        <p id={`${id}-error`} className="text-sm text-danger" role="alert">
           {error}
         </p>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-[13px] text-fg-muted">
+        <p id={`${id}-hint`} className="text-sm text-fg-muted">
           {hint}
         </p>
       ) : null}
@@ -208,7 +208,7 @@ export function Toggle({ checked, onChange, label, description, disabled, id: id
           {label}
         </label>
         {description && (
-          <p id={`${id}-desc`} className="mt-0.5 text-[13px] text-fg-muted">
+          <p id={`${id}-desc`} className="mt-0.5 text-sm text-fg-muted">
             {description}
           </p>
         )}
@@ -292,7 +292,7 @@ export function SearchInput({
           type="button"
           aria-label={t('clearSearch')}
           onClick={() => onChange('')}
-          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3"
+          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
         >
           <X aria-hidden size={14} />
         </button>

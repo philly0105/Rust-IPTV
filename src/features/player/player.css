@@ -113,3 +113,63 @@ html[data-reduced-motion='true'] .player-osd {
     animation: player-radio-bar 1.1s ease-in-out infinite;
   }
 }
+
+/*
+ * Glass (C8) for chrome over the picture: control bar, menus, zap banner, notices. Tokens come
+ * from tokens.css; the fallbacks keep it readable if they are ever missing. Inside a glass
+ * surface `--color-white` follows `--color-on-glass`, so the white utilities the controls use
+ * (text-white, bg-white/10, ring-white/30) take the glass text colour.
+ */
+.player-glass,
+.player-glass-strong {
+  --color-white: var(--color-on-glass, #f4f6fa);
+  color: var(--color-on-glass, #f4f6fa);
+  border-color: var(--color-glass-border, rgb(255 255 255 / 0.14));
+  background-color: var(--color-glass-strong, rgb(12 19 32 / 0.88));
+}
+@supports (backdrop-filter: blur(1px)) {
+  .player-glass {
+    background-color: var(--color-glass, rgb(12 19 32 / 0.72));
+    backdrop-filter: blur(var(--blur-glass, 14px)) saturate(1.2);
+  }
+  .player-glass-strong {
+    backdrop-filter: blur(var(--blur-glass, 14px)) saturate(1.2);
+  }
+}
+/* Secondary text on glass (passes 4.5:1 on the glass surface over black or white). */
+.player-on-glass-muted {
+  color: var(--color-on-glass-muted, #c8cfdc);
+}
+/* A lit top edge and the raised shadow, so a floating pane reads as glass over bright frames. */
+.player-glass-edge {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-glass, #f4f6fa) 8%, transparent),
+    var(--shadow-2, 0 12px 32px rgb(0 0 0 / 0.5));
+}
+
+/*
+ * Scrims behind the floating chrome: just enough to lift it off a bright picture. Video is
+ * dark in every theme, so these stay black (like the captions) instead of following --color-scrim.
+ */
+.player-scrim-bottom {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.18) 55%, transparent);
+}
+.player-scrim-top {
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.6), transparent);
+}
+
+/* Sleep timer chip: a slow breath while the volume fades (motion only; the fade itself is audio). */
+@keyframes player-sleep-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion='true']) .player-sleep-fading {
+    animation: player-sleep-breathe 2.4s ease-in-out infinite;
+  }
+}

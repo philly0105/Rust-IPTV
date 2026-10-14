@@ -32,6 +32,8 @@ beforeEach(() => {
   rpcMock.handlers['settings.get'] = () => settings();
   rpcMock.handlers['player.capabilities'] = () => ({ embeddedMpv: false, reason: 'not built' });
   rpcMock.handlers['downloads.dir'] = () => ({ path: 'C:/Users/me/AppData/Roaming/tsrust-iptv/downloads' });
+  rpcMock.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+  rpcMock.handlers['parental.locks'] = () => [];
 });
 afterEach(cleanup);
 

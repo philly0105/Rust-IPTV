@@ -88,7 +88,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label }: CategoryIn
                 >
                   <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{entry.name}</span>
                   {entry.count !== undefined && entry.count > 0 && (
-                    <span className="tabular font-display text-[13px] text-fg-subtle group-hover:text-accent group-focus-visible:text-accent">
+                    <span className="tabular font-display text-[calc(13rem/15)] text-fg-subtle group-hover:text-accent group-focus-visible:text-accent">
                       {fmt.format(entry.count)}
                     </span>
                   )}

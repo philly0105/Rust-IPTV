@@ -21,6 +21,7 @@ const TOGGLES: { key: BoolKey; label: string; hint: string }[] = [
   { key: 'liveFailover', label: 'liveFailover', hint: 'liveFailoverHint' },
   { key: 'playerAmbientMode', label: 'ambientMode', hint: 'ambientModeHint' },
   { key: 'fullscreenChannelPanel', label: 'fullscreenChannelPanel', hint: 'fullscreenChannelPanelHint' },
+  { key: 'zapBanner', label: 'zapBanner', hint: 'zapBannerHint' },
   { key: 'showCaptions', label: 'showCaptions', hint: 'showCaptionsHint' },
   { key: 'openStreamOnDoubleClick', label: 'doubleClick', hint: 'doubleClickHint' },
 ];

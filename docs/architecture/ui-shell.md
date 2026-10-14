@@ -7,8 +7,8 @@ Owner: U1. Covers `src/styles`, `src/ui`, `src/shell`, `src/i18n/index.ts`, and 
 The app is a TV and radio tuner, so the design borrows from a backlit radio dial at night.
 
 - Surfaces are ink navy in dark mode and cool paper in light mode.
-- The only accent is amber: dark `#f5b544`, light `#8f4f00`. It is used for active navigation, primary actions, progress, and focus. Nothing else is amber, so it always means "here" or "go".
-- The signature detail is the tuning tick, a short amber bar on the leading edge of the active rail item (the `tuning-tick` utility). Focus rings use the same amber with a soft glow.
+- One accent at a time, amber by default (dark `#f5b544`, light `#8f4f00`); the user can pick one of seven in Settings > Appearance. The accents, OLED black, density and UI scale are in [appearance.md](appearance.md). The accent is used for active navigation, primary actions, progress, and focus. Nothing else wears it, so it always means "here" or "go".
+- The signature detail is the tuning tick, a short accent bar on the leading edge of the active rail item (the `tuning-tick` utility). Focus rings use the same accent with a soft glow.
 - Type: Bahnschrift (`font-display`) for headings, titles, and numbers; Segoe UI Variable Text for body; Cascadia Mono for key caps.
 - Artwork fallbacks are initials on a per-title hue gradient (`hueOf`, `initialsOf` in `Poster`), so missing posters still look intentional.
 - Motion only answers user actions (dialogs, toasts, card lift). Everything runs under `motion-safe:`. `html[data-reduced-motion='true']` and the OS media query both turn animation off. The player OSD is the exception: it hides through its keyframe, so under reduced motion it keeps a 2.4 s duration with a no-fade `player-osd-still` animation (shown, then gone).

@@ -7,6 +7,7 @@ import { Link } from 'react-router';
 import type { Category } from '@/api/types';
 
 import { Button, ErrorState, IconButton, Skeleton } from '@/ui';
+import { documentIsRtl } from '../lib/rtl';
 
 const ROW = 36;
 /** Index of the "All channels" link in the keyboard order (the groups follow from 0). */
@@ -24,6 +25,8 @@ export interface CategorySidebarProps {
   onManage(): void;
   onNavigate?(): void;
   totalLabel: string;
+  /** Opens a group's context menu (right click, the context-menu key, Shift+F10). */
+  onGroupMenu?(pos: { x: number; y: number }, category: Category): void;
 }
 
 function linkClass(active: boolean): string {
@@ -114,10 +117,22 @@ export function CategorySidebar(props: CategorySidebarProps) {
     if (raw === undefined) return null;
     return raw === 'all' ? ALL : Number(raw);
   };
+  /** The group menu for the focused link, anchored near its inline start (its right edge in RTL). */
+  const openGroupMenu = (target: EventTarget, at: number): boolean => {
+    const c = at === ALL ? undefined : visible[at];
+    if (!c || !props.onGroupMenu || !(target instanceof HTMLElement)) return false;
+    const r = target.getBoundingClientRect();
+    props.onGroupMenu({ x: documentIsRtl() ? r.right - 32 : r.left + 32, y: r.bottom - 4 }, c);
+    return true;
+  };
   const onListKey = (e: KeyboardEvent<HTMLElement>) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const at = indexOf(e.target);
     if (at === null) return;
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      if (openGroupMenu(e.target, at)) e.preventDefault();
+      return;
+    }
     const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 480) / ROW) - 1);
     switch (e.key) {
       case 'ArrowDown':
@@ -236,6 +251,16 @@ export function CategorySidebar(props: CategorySidebarProps) {
                     data-cat-index={v.index}
                     tabIndex={v.index === tabStop ? 0 : -1}
                     aria-current={active ? 'page' : undefined}
+                    aria-haspopup={props.onGroupMenu ? 'menu' : undefined}
+                    onContextMenu={
+                      props.onGroupMenu
+                        ? (e) => {
+                            e.preventDefault();
+                            setCursor(v.index);
+                            props.onGroupMenu?.({ x: e.clientX, y: e.clientY }, c);
+                          }
+                        : undefined
+                    }
                     className={linkClass(active)}
                     title={c.name}
                   >

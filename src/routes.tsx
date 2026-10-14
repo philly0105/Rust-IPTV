@@ -5,6 +5,8 @@ import { createBrowserRouter, isRouteErrorResponse, Link, Navigate, useRouteErro
 import { RpcError } from '@/api/transport';
 import { libraryRoutes } from '@/features/library/routes';
 import { liveRoutes } from '@/features/live/routes';
+import { multiviewRoutes } from '@/features/multiview/routes';
+import { myListRoutes } from '@/features/mylist/routes';
 import { settingsRoutes } from '@/features/settings/routes';
 import { sourcesRoutes } from '@/features/sources/routes';
 import { vodRoutes } from '@/features/vod/routes';
@@ -157,6 +159,8 @@ export const routes: RouteObject[] = [
           ...liveRoutes,
           ...vodRoutes,
           ...libraryRoutes,
+          ...multiviewRoutes,
+          ...myListRoutes,
           ...sourceRootRoutes,
           { path: '*', element: <NotFoundPage /> },
         ],

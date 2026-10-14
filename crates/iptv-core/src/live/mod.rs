@@ -218,18 +218,38 @@ fn epg_candidates(conn: &Connection, ct: &str, epg: &str) -> CoreResult<Vec<Name
         "{SELECT_NAMED} LEFT JOIN epg_channel_map m ON m.source_id = i.source_id AND m.content_type = i.content_type AND m.item_id = i.item_id \
          WHERE i.epg_channel_id = ?1 AND i.content_type = ?2 AND m.item_id IS NULL AND COALESCE(c.hidden, 0) = 0 LIMIT {cap}"
     );
-    let mapped = format!(
-        "{SELECT_NAMED} JOIN epg_channel_map m ON m.source_id = i.source_id AND m.content_type = i.content_type AND m.item_id = i.item_id \
-         WHERE m.epg_channel_id = ?1 AND m.content_type = ?2 AND COALESCE(c.hidden, 0) = 0 LIMIT {cap}"
-    );
     let mut out = Vec::new();
-    for sql in [own, mapped] {
-        let mut stmt = conn.prepare_cached(&sql)?;
-        for row in stmt.query_map(params![epg, ct], read_named)? {
-            out.push(row?);
-        }
-        if out.len() > EPG_CANDIDATE_CAP {
-            break;
+    let mut stmt = conn.prepare_cached(&own)?;
+    for row in stmt.query_map(params![epg, ct], read_named)? {
+        out.push(row?);
+    }
+    if out.len() > EPG_CANDIDATE_CAP {
+        return Ok(out);
+    }
+
+    // Manual mappings to `epg`: the map first, then each channel by its key. Joined
+    // the other way round, SQLite walks every channel of the type and probes the map
+    // for each (the map has no index on the guide id): about 100 ms over 150k
+    // channels in a debug build, on every lookup.
+    let keys: Vec<(String, String)> = conn
+        .prepare_cached(
+            "SELECT source_id, item_id FROM epg_channel_map WHERE epg_channel_id = ?1 AND content_type = ?2",
+        )?
+        .query_map(params![epg, ct], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let one = format!(
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.item_id = ?3 AND COALESCE(c.hidden, 0) = 0"
+    );
+    let mut stmt = conn.prepare_cached(&one)?;
+    for (source_id, item_id) in keys {
+        if let Some(row) = stmt
+            .query_row(params![source_id, ct, item_id], read_named)
+            .optional()?
+        {
+            out.push(row);
+            if out.len() > EPG_CANDIDATE_CAP {
+                break;
+            }
         }
     }
     Ok(out)

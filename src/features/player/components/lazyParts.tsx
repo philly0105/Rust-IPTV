@@ -61,3 +61,11 @@ export const StreamInfoPanel = lazyPart(() => import('./StreamInfoPanel').then((
 export const VideoContextMenu = lazyPart(() => import('./VideoContextMenu').then((m) => m.VideoContextMenu));
 /** Fullscreen-only; its guide lines pull in the live feature's EPG helpers. */
 export const FullscreenChannelPanel = lazyPart(() => import('./FullscreenChannelPanel').then((m) => m.FullscreenChannelPanel));
+/** The tuner's info banner (C5); mounted with every surface, so it loads right after the player. */
+export const ZapBanner = lazyPart(() => import('./ZapBanner').then((m) => m.ZapBanner));
+/** The sleep timer's chip, menu, warning toast and in-player prompt (C5). */
+export const SleepChip = lazyPart(() => import('./SleepTimer').then((m) => m.SleepChip));
+export const SleepMenu = lazyPart(() => import('./SleepTimer').then((m) => m.SleepMenu));
+export const SleepRowValue = lazyPart(() => import('./SleepTimer').then((m) => m.SleepRowValue));
+export const SleepTimerHost = lazyPart(() => import('./SleepTimer').then((m) => m.SleepTimerHost));
+export const SleepPrompt = lazyPart(() => import('./SleepTimer').then((m) => m.SleepPrompt));

@@ -1,9 +1,14 @@
 import { clsx } from 'clsx';
+import { Check, House, Radio } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Theme } from '@/api/types';
+import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
+import type { Accent, Density, Theme } from '@/api/types';
+import { clampUiScale, previewAppearance, useTheme } from '@/shell';
+import { Button, Poster, ProgressBar } from '@/ui';
 
-import { SettingsGroup, SettingsSection } from '../components';
+import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
 
 /**
@@ -15,16 +20,47 @@ import type { SectionProps } from './types';
 export const PREVIEW_PALETTE = {
   dark: { bg: '#0c1320', surface: '#131c2d', line: '#2f3d57', fg: '#e9edf5', accent: '#f5b544' },
   light: { bg: '#edf0f5', surface: '#ffffff', line: '#c6cedc', fg: '#121a2a', accent: '#8f4f00' },
+  oled: { bg: '#000000', surface: '#000000', line: '#232a38', fg: '#e9edf5', accent: '#f5b544' },
 } as const;
 
-/** Miniature of the app chrome so each card previews its own theme. */
-function ThemePreview({ mode }: { mode: 'light' | 'dark' | 'system' }) {
+/**
+ * Every accent's fill and text-on-fill, per theme (OLED uses the dark pair).
+ * Mirrors the data-accent blocks in tokens.css; a test keeps them in step.
+ */
+export const ACCENT_PALETTE: Record<Accent, Record<'dark' | 'light', { accent: string; fg: string }>> = {
+  amber: { dark: { accent: '#f5b544', fg: '#1b1204' }, light: { accent: '#8f4f00', fg: '#ffffff' } },
+  teal: { dark: { accent: '#3ccfbd', fg: '#03201c' }, light: { accent: '#00685d', fg: '#ffffff' } },
+  violet: { dark: { accent: '#b7a0ff', fg: '#170c33' }, light: { accent: '#6a42cf', fg: '#ffffff' } },
+  rose: { dark: { accent: '#ff8fb3', fg: '#2e0614' }, light: { accent: '#b3215a', fg: '#ffffff' } },
+  lime: { dark: { accent: '#b4e05a', fg: '#141f02' }, light: { accent: '#476800', fg: '#ffffff' } },
+  sky: { dark: { accent: '#6cc2ff', fg: '#03182b' }, light: { accent: '#0a5ca6', fg: '#ffffff' } },
+  coral: { dark: { accent: '#ff9474', fg: '#2b0d04' }, light: { accent: '#ad3b16', fg: '#ffffff' } },
+};
+
+const ACCENT_LABEL_KEYS: Record<Accent, string> = {
+  amber: 'accentAmber',
+  teal: 'accentTeal',
+  violet: 'accentViolet',
+  rose: 'accentRose',
+  lime: 'accentLime',
+  sky: 'accentSky',
+  coral: 'accentCoral',
+};
+
+const DENSITY_LABEL_KEYS: Record<Density, string> = {
+  comfortable: 'densityComfortable',
+  compact: 'densityCompact',
+};
+
+/** Miniature of the app chrome so each card previews its own theme, accent and OLED choice. */
+function ThemePreview({ mode, oled, accent }: { mode: 'light' | 'dark' | 'system'; oled: boolean; accent: Accent }) {
   const half = (m: 'light' | 'dark') => {
-    const c = PREVIEW_PALETTE[m];
+    const c = m === 'dark' && oled ? PREVIEW_PALETTE.oled : PREVIEW_PALETTE[m];
+    const tone = ACCENT_PALETTE[accent][m].accent;
     return (
       <div className="flex h-full flex-1" style={{ background: c.bg }}>
         <div className="flex w-1/4 flex-col gap-1 p-1.5" style={{ background: c.surface, borderInlineEnd: `1px solid ${c.line}` }}>
-          <span className="h-1.5 w-3/4 rounded-full" style={{ background: c.accent }} />
+          <span className="h-1.5 w-3/4 rounded-full" style={{ background: tone }} />
           <span className="h-1 w-full rounded-full opacity-50" style={{ background: c.fg }} />
           <span className="h-1 w-2/3 rounded-full opacity-50" style={{ background: c.fg }} />
         </div>
@@ -50,9 +86,259 @@ function ThemePreview({ mode }: { mode: 'light' | 'dark' | 'system' }) {
   );
 }
 
+/**
+ * Seven dial-knob swatches as a radio group: arrows move and choose (flipped
+ * in right-to-left locales), Home/End jump to the ends.
+ */
+function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: Accent) => void; tone: 'dark' | 'light' }) {
+  const { t } = useTranslation('settings');
+  const hintId = useId();
+  const groupRef = useRef<HTMLDivElement>(null);
+
+  const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    const i = ACCENTS.indexOf(value);
+    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
+    let next: number | null = null;
+    if (e.key === (rtl ? 'ArrowLeft' : 'ArrowRight') || e.key === 'ArrowDown') next = (i + 1) % ACCENTS.length;
+    else if (e.key === (rtl ? 'ArrowRight' : 'ArrowLeft') || e.key === 'ArrowUp') next = (i - 1 + ACCENTS.length) % ACCENTS.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = ACCENTS.length - 1;
+    if (next === null) return;
+    e.preventDefault();
+    const accent = ACCENTS[next]!;
+    onChange(accent);
+    groupRef.current?.querySelector<HTMLElement>(`[data-accent-option="${accent}"]`)?.focus();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 px-4 py-4">
+      <div className="flex flex-col gap-0.5">
+        <span className="font-medium text-fg">{t('accent')}</span>
+        <p id={hintId} className="text-sm text-fg-muted">
+          {t('accentHint')}
+        </p>
+      </div>
+      <div
+        ref={groupRef}
+        role="radiogroup"
+        aria-label={t('accent')}
+        aria-describedby={hintId}
+        data-testid="accent-picker"
+        className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-1"
+      >
+        {ACCENTS.map((a) => {
+          const selected = a === value;
+          const swatch = ACCENT_PALETTE[a][tone];
+          return (
+            <button
+              key={a}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
+              data-accent-option={a}
+              data-testid={`accent-${a}`}
+              onClick={() => onChange(a)}
+              onKeyDown={onKeyDown}
+              className={clsx(
+                'group flex min-w-0 flex-col items-center gap-2 rounded-md px-1 py-2.5 motion-safe:transition-colors',
+                selected ? 'bg-surface-2' : 'hover:bg-surface-2 active:bg-surface-3',
+              )}
+            >
+              <span
+                aria-hidden
+                className="flex size-9 items-center justify-center rounded-full motion-safe:transition-[box-shadow,scale] motion-safe:duration-150 motion-safe:group-active:scale-95"
+                style={{
+                  background: swatch.accent,
+                  // Ring in the swatch's own colour, separated by a gap the colour of the card.
+                  boxShadow: selected ? `0 0 0 2px var(--color-surface-2), 0 0 0 4px ${swatch.accent}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
+                }}
+              >
+                {selected ? <Check size={18} strokeWidth={2.75} style={{ color: swatch.fg }} /> : null}
+              </span>
+              <span className={clsx('max-w-full truncate text-xs', selected ? 'font-semibold text-fg' : 'text-fg-muted group-hover:text-fg')}>
+                {t(ACCENT_LABEL_KEYS[a])}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A slice of real chrome drawn with the live tokens, so accent, OLED, density
+ * and size changes show here the moment they apply. Inert: nothing in it acts.
+ */
+function AppearanceSample() {
+  const { t } = useTranslation(['settings', 'shell']);
+  return (
+    <div className="flex flex-col gap-3 px-4 py-4" data-testid="appearance-sample">
+      <span className="text-xs font-medium text-fg-subtle">{t('previewLabel')}</span>
+      <div inert aria-hidden className="flex flex-wrap items-stretch gap-4 rounded-md border border-divider bg-bg p-3">
+        <div className="flex w-40 shrink-0 flex-col gap-1 rounded-md bg-surface p-2">
+          <span className="tuning-tick flex h-(--rail-item-height) items-center gap-2 rounded-md bg-surface-3 ps-3 text-sm font-medium text-fg">
+            <House size={16} className="text-accent" />
+            <span className="truncate">{t('shell:navDashboard')}</span>
+          </span>
+          <span className="flex h-(--rail-item-height) items-center gap-2 rounded-md ps-3 text-sm text-fg-muted">
+            <Radio size={16} />
+            <span className="truncate">{t('shell:railLive')}</span>
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-1 basis-56 items-center gap-3">
+          <div className="w-14 shrink-0">
+            <Poster alt="" label={t('previewTitle')} rounded="sm" />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <span className="truncate font-display text-base font-semibold text-fg">{t('previewTitle')}</span>
+            <span className="truncate text-sm text-fg-muted">{t('previewMeta')}</span>
+            <ProgressBar value={42} size="xs" className="max-w-48" />
+          </div>
+          <Button variant="primary" size="sm" tabIndex={-1}>
+            {t('previewPlay')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SCALE_STEP = 0.05;
+const SCALE_TICKS = Math.round((UI_SCALE_MAX - UI_SCALE_MIN) / SCALE_STEP) + 1;
+
+/**
+ * Interface size slider with a live preview: dragging resizes the whole app
+ * through previewAppearance, and the value is saved on release (pointer up,
+ * key up, blur). Keyboard arrows step by 5 % and save each step.
+ */
+function ScaleControl({
+  value,
+  onCommit,
+  id,
+  describedBy,
+}: {
+  value: number;
+  onCommit: (v: number) => Promise<boolean>;
+  id: string;
+  describedBy?: string;
+}) {
+  const { t, i18n } = useTranslation('settings');
+  const [draft, setDraft] = useState(value);
+  const editing = useRef(false);
+  const seq = useRef(0);
+  useEffect(() => {
+    if (!editing.current) setDraft(value);
+  }, [value]);
+  // Leaving the page mid-drag drops the unsaved preview.
+  useEffect(() => () => previewAppearance(null), []);
+
+  const pct = (v: number) => new Intl.NumberFormat(i18n.language, { style: 'percent', maximumFractionDigits: 0 }).format(v);
+
+  const commit = (v: number) => {
+    editing.current = false;
+    const mine = ++seq.current;
+    if (v === value) {
+      previewAppearance(null);
+      return;
+    }
+    // The preview stays up until the save settles, so the size never flickers back.
+    void onCommit(v).then(() => {
+      if (mine === seq.current && !editing.current) previewAppearance(null);
+    });
+  };
+
+  const onInput = (raw: number) => {
+    const v = clampUiScale(raw / 100);
+    editing.current = true;
+    seq.current++;
+    setDraft(v);
+    previewAppearance({ uiScale: v });
+  };
+
+  // Where the thumb's centre sits for a value: the track minus half a (1rem) thumb at each end.
+  const along = (v: number) => `calc(0.5rem + (100% - 1rem) * ${(v - UI_SCALE_MIN) / (UI_SCALE_MAX - UI_SCALE_MIN)})`;
+
+  return (
+    <div className="flex w-full flex-col gap-2 @2xl:w-80">
+      <div className="flex items-center justify-between gap-3">
+        <output htmlFor={id} aria-live="polite" className="font-display text-2xl font-semibold text-fg tabular" data-testid="ui-scale-value">
+          {pct(draft)}
+        </output>
+        {Math.abs(value - 1) > 1e-9 || Math.abs(draft - 1) > 1e-9 ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="ui-scale-reset"
+            onClick={() => {
+              setDraft(1);
+              commit(1);
+            }}
+          >
+            {t('uiScaleReset')}
+          </Button>
+        ) : null}
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={Math.round(UI_SCALE_MIN * 100)}
+        max={Math.round(UI_SCALE_MAX * 100)}
+        step={Math.round(SCALE_STEP * 100)}
+        value={Math.round(draft * 100)}
+        aria-describedby={describedBy}
+        aria-valuetext={pct(draft)}
+        data-testid="ui-scale"
+        onChange={(e) => onInput(Number(e.currentTarget.value))}
+        onPointerUp={() => commit(draft)}
+        onKeyUp={(e) => {
+          if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key.startsWith('Page')) commit(draft);
+        }}
+        onBlur={() => {
+          if (editing.current) commit(draft);
+        }}
+        className="h-6 w-full cursor-pointer accent-accent"
+      />
+      {/* The tuning scale: a tick per 5 % step, labelled at the ends and at 100 %. */}
+      <div aria-hidden className="relative h-6">
+        {Array.from({ length: SCALE_TICKS }, (_, i) => {
+          const v = UI_SCALE_MIN + i * SCALE_STEP;
+          const major = i === 0 || i === SCALE_TICKS - 1 || Math.abs(v - 1) < 1e-9;
+          const on = Math.abs(v - draft) < 1e-9;
+          return (
+            <span
+              key={i}
+              className={clsx('absolute top-0 w-px -translate-x-1/2 rtl:translate-x-1/2', major ? 'h-2' : 'h-1', on ? 'bg-accent' : 'bg-border')}
+              style={{ insetInlineStart: along(v) }}
+            />
+          );
+        })}
+        {[UI_SCALE_MIN, 1, UI_SCALE_MAX].map((v, i) => (
+          <span
+            key={v}
+            className={clsx(
+              'absolute top-2.5 text-2xs text-fg-subtle tabular',
+              i === 0 ? 'start-0' : i === 2 ? 'end-0' : '-translate-x-1/2 rtl:translate-x-1/2',
+            )}
+            style={i === 1 ? { insetInlineStart: along(v) } : undefined}
+          >
+            {pct(v)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AppearanceSection({ settings, update }: SectionProps) {
   const { t } = useTranslation('settings');
+  const { resolved } = useTheme();
   const current: Theme = settings.theme;
+  const accent: Accent = (ACCENTS as readonly string[]).includes(settings.accent) ? settings.accent : 'amber';
+  const oledBlack = settings.oledBlack === true;
+  const density: Density = settings.density === 'compact' ? 'compact' : 'comfortable';
+  const uiScale = clampUiScale(settings.uiScale);
 
   const choose = (value: Theme) => {
     if (value === current) return;
@@ -76,11 +362,11 @@ export function AppearanceSection({ settings, update }: SectionProps) {
               <label
                 key={o.value}
                 className={clsx(
-                  'flex cursor-pointer flex-col gap-3 rounded-md border p-3 hover:bg-surface-2 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus',
+                  'flex cursor-pointer flex-col gap-3 rounded-md border p-3 hover:bg-surface-2 active:bg-surface-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus',
                   selected ? 'border-accent bg-surface-2' : 'border-border',
                 )}
               >
-                <ThemePreview mode={o.value} />
+                <ThemePreview mode={o.value} oled={oledBlack} accent={accent} />
                 <span className="flex items-start gap-2">
                   <input
                     type="radio"
@@ -109,6 +395,37 @@ export function AppearanceSection({ settings, update }: SectionProps) {
             );
           })}
         </div>
+        <SwitchRow
+          label={t('oledBlack')}
+          description={resolved === 'light' ? t('oledBlackLightHint') : t('oledBlackHint')}
+          checked={oledBlack}
+          onChange={(v) => void update({ oledBlack: v })}
+          testId="oled-black"
+        />
+      </SettingsGroup>
+
+      <SettingsGroup>
+        <AccentPicker value={accent} tone={resolved} onChange={(a) => a !== accent && void update({ accent: a })} />
+        <AppearanceSample />
+      </SettingsGroup>
+
+      <SettingsGroup title={t('sizeGroup')}>
+        <SettingsRow label={t('density')} description={t('densityHint')}>
+          {({ id }) => (
+            <Segmented<Density>
+              id={id}
+              label={t('density')}
+              value={density}
+              options={DENSITIES.map((d) => ({ value: d, label: t(DENSITY_LABEL_KEYS[d]) }))}
+              onChange={(d) => void update({ density: d })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label={t('uiScale')} description={t('uiScaleHint')}>
+          {({ id, describedBy }) => (
+            <ScaleControl id={id} describedBy={describedBy} value={uiScale} onCommit={(v) => update({ uiScale: v })} />
+          )}
+        </SettingsRow>
       </SettingsGroup>
     </SettingsSection>
   );

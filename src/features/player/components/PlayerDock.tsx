@@ -17,6 +17,8 @@ import { flushProgress, reportFullscreen, usePlayerStore } from '../store';
 import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
 import { PlayerSurface } from './PlayerSurface';
+import { SleepTimerHost } from './lazyParts';
+import { useZapHover } from './zapHooks';
 
 const POS_KEY = 'player.mini.pos';
 const MARGIN = 16;
@@ -115,6 +117,8 @@ export function PlayerDock() {
   const pipSlotRef = useRef<HTMLDivElement>(null);
   const miniRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MiniPos>(readPos);
+  // Hovering the mini player's channel title brings up the zap banner over its video.
+  const titleHover = useZapHover();
 
   const visible = !!source && mode !== 'external';
   const inStage = visible && dock === 'stage' && !!stageTarget;
@@ -243,6 +247,8 @@ export function PlayerDock() {
     <>
       {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
       {createPortal(<PlayerSurface compact={inMini && !isFullscreen && !inPip} channelPanelAvailable={channelPanelAvailable} />, host)}
+      {/* Sleep timer (C5): the one-minute warning toast. */}
+      <SleepTimerHost />
       <div
         ref={miniRef}
         role="region"
@@ -285,7 +291,12 @@ export function PlayerDock() {
             <GripHorizontal className="size-4" />
           </button>
           {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg" title={source?.title}>
+          <span
+            className="min-w-0 flex-1 truncate text-sm font-medium text-fg"
+            title={source?.title}
+            onPointerEnter={titleHover.onPointerEnter}
+            onPointerLeave={titleHover.onPointerLeave}
+          >
             {source?.title}
           </span>
           <ExpandButton label={t('expand')} />

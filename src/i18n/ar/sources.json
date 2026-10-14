@@ -365,6 +365,10 @@
   "removedAllTitle_many": "تمت إزالة {{count}} قائمة تشغيل",
   "removedAllTitle_other": "تمت إزالة {{count}} قائمة تشغيل",
   "removeAllFailed": "تعذّرت إزالة قوائم التشغيل",
+  "removeLockedTitle": "أدخل رمز PIN لإزالة {{name}}",
+  "removeAllLockedTitle": "أدخل رمز PIN لإزالة قوائم التشغيل",
+  "removeLockedText": "تُزال أقفال الرقابة الأبوية مع قائمة التشغيل، لذا يفتح رمز PIN قفل الرقابة الأبوية أولًا.",
+  "removeLockedConfirm": "إلغاء القفل",
 
   "phaseCancelled": "أُلغي الاستيراد",
   "phaseCancelling": "جارٍ الإلغاء…",

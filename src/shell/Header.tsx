@@ -28,7 +28,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
   return (
     <header
       data-testid="shell-header"
-      className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-divider bg-bg/90 px-5 backdrop-blur"
+      className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
     >
       <div className="flex min-w-0 flex-1 items-baseline gap-3">
         {header?.title ? (
@@ -49,7 +49,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
 
       {header?.search ? (
         <SearchInput
-          className="w-[clamp(180px,28vw,380px)]"
+          className="w-[clamp(12rem,28vw,25rem)]"
           size="sm"
           value={header.search.value}
           onChange={header.search.onChange}
@@ -62,8 +62,8 @@ export function Header({ panelInline }: { panelInline: boolean }) {
           type="button"
           onClick={() => navigate('/search')}
           className={cn(
-            'hidden h-8 w-[clamp(160px,22vw,300px)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
-            'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-2',
+            'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
+            'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-2 motion-safe:transition-colors',
           )}
         >
           <Search aria-hidden size={15} />

@@ -23,7 +23,7 @@ export function ChannelLogo({ src, name, size = 36 }: { src?: string; name: stri
       <span
         aria-hidden
         style={style}
-        className="inline-flex shrink-0 items-center justify-center rounded-md bg-surface-3 text-[11px] font-semibold text-fg-muted"
+        className="inline-flex shrink-0 items-center justify-center rounded-md bg-surface-3 text-[calc(11rem/15)] font-semibold text-fg-muted"
       >
         {initials(name)}
       </span>

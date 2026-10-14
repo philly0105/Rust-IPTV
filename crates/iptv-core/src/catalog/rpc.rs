@@ -163,6 +163,12 @@ fn english_only(state: &AppState) -> bool {
     state.settings_snapshot().english_only
 }
 
+/// The parental hide-mode filter for this call (`None` unless a PIN is set,
+/// the mode is hide and no unlock is active).
+async fn hide(state: &AppState) -> Result<Option<crate::parental::Hide>, RpcError> {
+    Ok(crate::parental::hide_filter(state).await?)
+}
+
 fn to_any(n: NamedRow) -> AnyItem {
     match n.row.content_type {
         ContentType::Live | ContentType::Radio => AnyItem::Channel(n.into_channel()),
@@ -176,13 +182,17 @@ pub async fn categories(
     a: CategoriesArgs,
 ) -> Result<Vec<Category>, RpcError> {
     let english = english_only(&state);
+    let hide = hide(&state).await?;
     Ok(state
         .db_call(move |c| {
-            if english {
-                super::english_categories(c, &a.source_id, a.content_type, a.include_hidden)
-            } else {
-                super::categories(c, &a.source_id, a.content_type, a.include_hidden)
-            }
+            super::visible_categories(
+                c,
+                &a.source_id,
+                a.content_type,
+                a.include_hidden,
+                english,
+                hide,
+            )
         })
         .await?)
 }
@@ -212,6 +222,7 @@ pub async fn set_categories_hidden(
 }
 
 pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Channel>, RpcError> {
+    let hide = hide(&state).await?;
     let q = CatalogQuery {
         source_id: a.source_id,
         content_type: if a.radio {
@@ -228,7 +239,7 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
     // guide: M3U catch-up overrides are applied on read.
     let page = state
         .db_call(move |c| {
-            let mut page = super::query_named(c, &q)?.map(NamedRow::into_channel);
+            let mut page = super::query_named(c, &q, hide)?.map(NamedRow::into_channel);
             crate::catchup::m3u::apply_overrides(c, &mut page.items)?;
             Ok(page)
         })
@@ -237,6 +248,7 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
 }
 
 pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem>, RpcError> {
+    let hide = hide(&state).await?;
     let q = CatalogQuery {
         source_id: a.source_id,
         content_type: ContentType::Movie,
@@ -246,11 +258,14 @@ pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem
         min_rating: a.min_rating,
         english_only: english_only(&state),
     };
-    let page = state.db_call(move |c| super::query_named(c, &q)).await?;
+    let page = state
+        .db_call(move |c| super::query_named(c, &q, hide))
+        .await?;
     Ok(page.map(NamedRow::into_vod))
 }
 
 pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesItem>, RpcError> {
+    let hide = hide(&state).await?;
     let q = CatalogQuery {
         source_id: a.source_id,
         content_type: ContentType::Series,
@@ -260,23 +275,41 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
         min_rating: a.min_rating,
         english_only: english_only(&state),
     };
-    let page = state.db_call(move |c| super::query_named(c, &q)).await?;
+    let page = state
+        .db_call(move |c| super::query_named(c, &q, hide))
+        .await?;
     Ok(page.map(NamedRow::into_series))
 }
 
 pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError> {
     let r = a.item_ref;
     let id = r.item_id.clone();
-    let row = state
+    let hide = hide(&state).await?;
+    // (item, hidden by parental hide mode)
+    let (row, hidden) = state
         .db_call(move |c| {
-            let mut item = super::get_named(c, &r)?.map(to_any);
+            let Some(named) = super::get_named(c, &r)? else {
+                return Ok((None, false));
+            };
+            // parental: hide mode keeps a locked item in the database.
+            if let Some(h) = hide {
+                if !super::is_visible(c, &r, h)? {
+                    return Ok((None, true));
+                }
+            }
+            let mut item = to_any(named);
             // guide: M3U catch-up overrides are applied on read.
-            if let Some(AnyItem::Channel(ch)) = &mut item {
+            if let AnyItem::Channel(ch) = &mut item {
                 crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
             }
-            Ok(item)
+            Ok((Some(item), false))
         })
         .await?;
+    if hidden {
+        return Err(RpcError::not_found(format!(
+            "catalog item {id} is locked by parental controls; unlock them to open it"
+        )));
+    }
     row.ok_or_else(|| {
         RpcError::not_found(format!("catalog item {id} not found; refresh the source"))
     })
@@ -286,9 +319,10 @@ pub async fn channel_by_number(
     state: Arc<AppState>,
     a: ChannelByNumberArgs,
 ) -> Result<Option<Channel>, RpcError> {
+    let hide = hide(&state).await?;
     let row = state
         .db_call(move |c| {
-            let mut ch = super::channel_by_number(c, &a.source_id, a.number, a.content_type)?
+            let mut ch = super::channel_by_number(c, &a.source_id, a.number, a.content_type, hide)?
                 .map(NamedRow::into_channel);
             // guide: M3U catch-up overrides are applied on read.
             crate::catchup::m3u::apply_overrides(c, ch.as_mut_slice())?;
@@ -303,6 +337,7 @@ pub async fn neighbors(
     a: NeighborsArgs,
 ) -> Result<NeighborsResult, RpcError> {
     let english = english_only(&state);
+    let hide = hide(&state).await?;
     let (prev, next) = state
         .db_call(move |c| {
             let (prev, next) = super::neighbors(
@@ -310,6 +345,7 @@ pub async fn neighbors(
                 &a.item_ref,
                 a.category_id.as_deref().filter(|s| !s.is_empty()),
                 english,
+                hide,
             )?;
             let mut prev = prev.map(NamedRow::into_channel);
             let mut next = next.map(NamedRow::into_channel);
@@ -329,6 +365,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
         .clamp(1, MAX_SEARCH_LIMIT);
     let wanted = a.content_types.unwrap_or_else(|| ContentType::ALL.to_vec());
     let english = english_only(&state);
+    let hide = hide(&state).await?;
     state
         .db_call(move |c| {
             let mut out = SearchResult::default();
@@ -345,6 +382,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                     &live_types,
                     limit,
                     english,
+                    hide,
                 )?
                 .into_iter()
                 .map(NamedRow::into_channel)
@@ -360,6 +398,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                     &[ContentType::Movie],
                     limit,
                     english,
+                    hide,
                 )?
                 .into_iter()
                 .map(NamedRow::into_vod)
@@ -373,6 +412,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                     &[ContentType::Series],
                     limit,
                     english,
+                    hide,
                 )?
                 .into_iter()
                 .map(NamedRow::into_series)
@@ -395,8 +435,11 @@ pub async fn recently_added(
         ));
     }
     let english = english_only(&state);
+    let hide = hide(&state).await?;
     let rows = state
-        .db_call(move |c| super::recently_added(c, a.source_id.as_deref(), ct, a.limit, english))
+        .db_call(move |c| {
+            super::recently_added(c, a.source_id.as_deref(), ct, a.limit, english, hide)
+        })
         .await?;
     Ok(match ct {
         ContentType::Series => {
@@ -407,8 +450,9 @@ pub async fn recently_added(
 }
 
 pub async fn same_title(state: Arc<AppState>, a: RefArgs) -> Result<Vec<VodItem>, RpcError> {
+    let hide = hide(&state).await?;
     let rows = state
-        .db_call(move |c| super::same_title(c, &a.item_ref))
+        .db_call(move |c| super::same_title(c, &a.item_ref, hide))
         .await?;
     Ok(rows.into_iter().map(NamedRow::into_vod).collect())
 }
@@ -418,9 +462,10 @@ pub async fn all_live_channels(
     a: SourceArgs,
 ) -> Result<Vec<Channel>, RpcError> {
     let english = english_only(&state);
+    let hide = hide(&state).await?;
     let rows = state
         .db_call(move |c| {
-            let mut v: Vec<Channel> = super::all_live_channels(c, &a.source_id, english)?
+            let mut v: Vec<Channel> = super::all_live_channels(c, &a.source_id, english, hide)?
                 .into_iter()
                 .map(NamedRow::into_channel)
                 .collect();

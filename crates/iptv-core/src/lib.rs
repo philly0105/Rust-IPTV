@@ -27,6 +27,8 @@ pub mod catchup;
 pub mod downloads;
 pub mod epg;
 pub mod m3u;
+// parental: parental controls (contract C2).
+pub mod parental;
 pub mod player;
 // recording:
 pub mod recording;
@@ -36,6 +38,8 @@ pub mod sources;
 pub mod stalker;
 pub mod tmdb;
 pub mod userstate;
+// watchlist: My List (contract C3).
+pub mod watchlist;
 pub mod xtream;
 
 // failover: live channel alternates (`live.alternates`).

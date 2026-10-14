@@ -89,7 +89,7 @@ export function ActorPage() {
             )}
             {p.biography ? (
               <div className="max-w-[72ch]">
-                <p className={cn('whitespace-pre-line text-[15px] leading-relaxed text-fg-muted', !expanded && long && 'line-clamp-6')}>{p.biography}</p>
+                <p className={cn('whitespace-pre-line text-[calc(15rem/15)] leading-relaxed text-fg-muted', !expanded && long && 'line-clamp-6')}>{p.biography}</p>
                 {long && (
                   <button type="button" className="mt-1 text-sm font-medium text-accent hover:underline" onClick={() => setExpanded((v) => !v)}>
                     {expanded ? t('showLess') : t('showMore')}

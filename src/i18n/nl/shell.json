@@ -64,6 +64,8 @@
   "settingsBackup": "Backup en herstel",
   "settingsShortcuts": "Sneltoetsen",
   "settingsAbout": "Over",
+  "settingsParental": "Ouderlijk toezicht",
+  "lockParentalNow": "Ouderlijk toezicht nu vergrendelen",
 
   "shortcutsIntro": "Sneltoetsen werken overal, behalve terwijl je in een tekstveld typt.",
   "filterShortcuts": "Sneltoetsen filteren",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Volume omlaag",
   "scMute": "Dempen of dempen opheffen",
   "scCaptions": "Ondertiteling aan of uit",
+  "scSleepTimer": "Slaaptimer (uit, 15, 30, 45, 60, 90 min)",
   "scChannelUp": "Vorige zender",
   "scChannelDown": "Volgende zender",
   "scTheme": "Wisselen tussen licht en donker thema",
@@ -137,6 +140,17 @@
   "emptySource": "Nog niets geïmporteerd",
 
   "heroEyebrow": "Ga verder waar je gebleven was",
+  "heroNewIn": "Nieuw in {{source}}",
+  "heroNew": "Net toegevoegd",
+  "heroLabel": "Uitgelicht",
+  "heroCarousel": "carrousel",
+  "heroSlide": "dia",
+  "heroSlideOf": "{{index}} van {{total}}",
+  "heroControls": "Dia's",
+  "heroPrevious": "Vorige dia",
+  "heroNext": "Volgende dia",
+  "heroPause": "Diavoorstelling pauzeren",
+  "heroPlayRotation": "Diavoorstelling afspelen",
   "play": "Afspelen",
   "resume": "Hervatten",
   "details": "Details",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "Verleng bij je provider om zonder onderbreking te blijven kijken.",
   "accountAlertOpen": "Abonnement bekijken",
   "accountAlertDismiss": "Melding voor {{name}} sluiten",
-  "navScheduled": "Gepland"
+  "navScheduled": "Gepland",
+  "navMultiview": "Multiview",
+  "navMyList": "Mijn lijst"
 }

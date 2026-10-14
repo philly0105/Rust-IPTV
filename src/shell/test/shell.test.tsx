@@ -81,6 +81,9 @@ function baseHandlers(opts: { sources?: number } = {}) {
   h['settings.get'] = () => settings();
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   h['sources.list'] = () => sources;
+  // An empty My List: its rail stays out of the way (mylist tests cover it).
+  h['watchlist.list'] = () => [];
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['positions.continueWatching'] = (): PlaybackPosition[] => [
     { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('The Long Signal') },
   ];

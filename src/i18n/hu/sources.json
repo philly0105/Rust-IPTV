@@ -289,6 +289,10 @@
   "removedAllTitle_one": "{{count}} lejátszási lista eltávolítva",
   "removedAllTitle_other": "{{count}} lejátszási lista eltávolítva",
   "removeAllFailed": "Nem sikerült eltávolítani a lejátszási listákat",
+  "removeLockedTitle": "{{name}} eltávolításához adja meg a PIN-kódot",
+  "removeAllLockedTitle": "A lejátszási listák eltávolításához adja meg a PIN-kódot",
+  "removeLockedText": "A szülői zárolások a lejátszási listával együtt törlődnek, ezért a PIN-kód előbb feloldja a szülői felügyeletet.",
+  "removeLockedConfirm": "Feloldás",
 
   "phaseCancelled": "Importálás megszakítva",
   "phaseCancelling": "Megszakítás…",

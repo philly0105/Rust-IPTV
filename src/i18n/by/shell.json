@@ -64,6 +64,8 @@
   "settingsBackup": "Рэзервовае капіраванне і аднаўленне",
   "settingsShortcuts": "Спалучэнні клавіш",
   "settingsAbout": "Аб праграме",
+  "settingsParental": "Бацькоўскі кантроль",
+  "lockParentalNow": "Заблакаваць бацькоўскі кантроль зараз",
 
   "shortcutsIntro": "Спалучэнні клавіш працуюць усюды, акрамя ўводу тэксту ў поле.",
   "filterShortcuts": "Фільтр спалучэнняў",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Цішэй",
   "scMute": "Выключыць або ўключыць гук",
   "scCaptions": "Уключыць або выключыць субтытры",
+  "scSleepTimer": "Таймер сну (выкл., 15, 30, 45, 60, 90 хв)",
   "scChannelUp": "Папярэдні канал",
   "scChannelDown": "Наступны канал",
   "scTheme": "Пераключыць светлую або цёмную тэму",
@@ -145,6 +148,17 @@
   "emptySource": "Пакуль нічога не імпартавана",
 
   "heroEyebrow": "Працягніце з таго ж месца",
+  "heroNewIn": "Новае ў {{source}}",
+  "heroNew": "Толькі што дададзена",
+  "heroLabel": "Рэкамендаванае",
+  "heroCarousel": "карусель",
+  "heroSlide": "слайд",
+  "heroSlideOf": "{{index}} з {{total}}",
+  "heroControls": "Слайды",
+  "heroPrevious": "Папярэдні слайд",
+  "heroNext": "Наступны слайд",
+  "heroPause": "Прыпыніць слайд-шоу",
+  "heroPlayRotation": "Запусціць слайд-шоу",
   "play": "Прайграць",
   "resume": "Працягнуць",
   "details": "Падрабязнасці",
@@ -196,5 +210,7 @@
   "accountAlertExpiringBody": "Падоўжыце падпіску ў правайдара, каб глядзець без перапынку.",
   "accountAlertOpen": "Паказаць падпіску",
   "accountAlertDismiss": "Закрыць апавяшчэнне для {{name}}",
-  "navScheduled": "Запланаванае"
+  "navScheduled": "Запланаванае",
+  "navMultiview": "Мультыэкран",
+  "navMyList": "Мой спіс"
 }

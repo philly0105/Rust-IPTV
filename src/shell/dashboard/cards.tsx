@@ -4,12 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { ContentType, ItemRef, Source, SourceKind } from '@/api/types';
-import { LiveBadge, Poster, ProgressBar, hueOf, initialsOf } from '@/ui';
+import { CARD_ART, CARD_ROOT, LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 
-const cardFocus =
-  'group/card block w-full rounded-md text-start outline-offset-4 focus-visible:outline-2';
+/** The focusable card; its focus ring, hover lift and press are drawn on the artwork (CARD_ART). */
+const cardRoot = cn(CARD_ROOT, 'block w-full rounded-md text-start');
 
 /**
  * The separator between short facts in a list. Intl.ListFormat's `unit` lists
@@ -56,21 +56,13 @@ export function itemPath(ref: ItemRef): string {
   }
 }
 
-function Lift({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative motion-safe:transition-transform motion-safe:duration-200 group-hover/card:-translate-y-0.5 group-focus-visible/card:-translate-y-0.5">
-      {children}
-    </div>
-  );
-}
-
 function PlayGlyph() {
   return (
     <span
       aria-hidden
       className="absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover/card:bg-scrim/40 group-hover/card:opacity-100 group-focus-visible/card:opacity-100 motion-safe:transition-opacity"
     >
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent text-accent-fg shadow-2">
+      <span className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90">
         <Play size={20} fill="currentColor" className="translate-x-px" />
       </span>
     </span>
@@ -96,9 +88,9 @@ export interface PosterCardProps {
 export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, onPlay, to, ariaLabel }: PosterCardProps) {
   const body = (
     <>
-      <Lift>
+      <div className={CARD_ART}>
         {/* The caption below names the card; alt text would read the title twice. */}
-        <Poster src={posterUrl} alt="" label={title} aspect="poster" className="shadow-1">
+        <Poster src={posterUrl} alt="" label={title} aspect="poster" className="after:hidden">
           {onPlay && <PlayGlyph />}
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
@@ -107,21 +99,21 @@ export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, 
             </span>
           )}
         </Poster>
-      </Lift>
+      </div>
       {/* dir="auto": a Latin title in an RTL UI truncates at its own end, not its start. */}
       <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{title}</span>
-      {subtitle && <span dir="auto" className="block truncate text-match-parent text-[13px] text-fg-muted">{subtitle}</span>}
+      {subtitle && <span dir="auto" className="block truncate text-match-parent text-sm text-fg-muted">{subtitle}</span>}
     </>
   );
   if (onPlay) {
     return (
-      <button type="button" {...rail} onClick={onPlay} aria-label={ariaLabel} className={cardFocus}>
+      <button type="button" {...rail} onClick={onPlay} aria-label={ariaLabel} className={cardRoot}>
         {body}
       </button>
     );
   }
   return (
-    <Link to={to ?? '#'} {...rail} aria-label={ariaLabel} className={cardFocus}>
+    <Link to={to ?? '#'} {...rail} aria-label={ariaLabel} className={cardRoot}>
       {body}
     </Link>
   );
@@ -146,26 +138,24 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
   const { t } = useTranslation('shell');
   const hue = hueOf(name);
   return (
-    <button type="button" {...rail} onClick={onPlay} aria-label={ariaLabel} className={cardFocus}>
-      <Lift>
-        <div
-          className="relative aspect-video w-full overflow-hidden rounded-md border border-border shadow-1"
-          style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
-        >
-          <Poster src={logoUrl} alt="" label={name} aspect="wide" fit="contain" kind={isRadio ? 'radio' : 'live'} className="bg-transparent" rounded="sm" />
-          <PlayGlyph />
-          <span className="absolute top-2 start-2">
-            <LiveBadge />
+    <button type="button" {...rail} onClick={onPlay} aria-label={ariaLabel} className={cardRoot}>
+      <div
+        className={cn(CARD_ART, 'aspect-video w-full')}
+        style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
+      >
+        <Poster src={logoUrl} alt="" label={name} aspect="wide" fit="contain" kind={isRadio ? 'radio' : 'live'} className="bg-transparent after:hidden" rounded="sm" />
+        <PlayGlyph />
+        <span className="absolute top-2 start-2">
+          <LiveBadge />
+        </span>
+        {nowProgress !== undefined && (
+          <span className="absolute inset-x-0 bottom-0">
+            <ProgressBar value={nowProgress * 100} size="xs" className="rounded-none bg-black/40" />
           </span>
-          {nowProgress !== undefined && (
-            <span className="absolute inset-x-0 bottom-0">
-              <ProgressBar value={nowProgress * 100} size="xs" className="rounded-none bg-black/40" />
-            </span>
-          )}
-        </div>
-      </Lift>
+        )}
+      </div>
       <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{name}</span>
-      <span dir="auto" className="block truncate text-match-parent text-[13px] text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
+      <span dir="auto" className="block truncate text-match-parent text-sm text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
     </button>
   );
 }
@@ -182,27 +172,25 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
     source.seriesCount > 0 && t('countSeries', { count: source.seriesCount }),
   ];
   return (
-    <Link to={`/s/${encodeURIComponent(source.id)}/live`} {...rail} className={cardFocus}>
-      <Lift>
-        <div
-          className="relative flex aspect-video w-full flex-col justify-between overflow-hidden rounded-md border border-border p-4 shadow-1"
-          style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 30%), hsl(${(hue + 36) % 360} 46% 16%))` }}
-        >
-          {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
-          <span aria-hidden className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
-          <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-[11px] font-semibold text-white">{KIND_NAMES[source.kind]}</span>
-          {source.lastError && (
-            <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
-          )}
-        </div>
-      </Lift>
+    <Link to={`/s/${encodeURIComponent(source.id)}/live`} {...rail} className={cardRoot}>
+      <div
+        className={cn(CARD_ART, 'flex aspect-video w-full flex-col justify-between p-4')}
+        style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 30%), hsl(${(hue + 36) % 360} 46% 16%))` }}
+      >
+        {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
+        <span aria-hidden className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
+        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white">{KIND_NAMES[source.kind]}</span>
+        {source.lastError && (
+          <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
+        )}
+      </div>
       <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
         {source.name}
       </span>
       {/* A title alone is never read on a link; these join the card's name after the source name. */}
       <span className="sr-only" data-testid="source-card-kind">{`, ${KIND_NAMES[source.kind]}`}</span>
       {source.lastError && <span className="sr-only">{`, ${t('sourceHasError')}`}</span>}
-      <span className="block truncate text-[13px] text-fg-muted">{joinList(counts, i18n.language) || t('emptySource')}</span>
+      <span className="block truncate text-sm text-fg-muted">{joinList(counts, i18n.language) || t('emptySource')}</span>
     </Link>
   );
 }

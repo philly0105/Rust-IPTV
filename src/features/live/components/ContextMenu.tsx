@@ -4,7 +4,7 @@ import { documentIsRtl } from '../lib/rtl';
 
 export interface MenuItem {
   id: string;
-  label: string;
+  label: ReactNode;
   icon?: ReactNode;
   disabled?: boolean;
   onSelect(): void;

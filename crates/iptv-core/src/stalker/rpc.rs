@@ -104,12 +104,15 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
     r.add("stalker.series", |s, a: ListArgs| async move {
         Ok::<Page<SeriesItem>, RpcError>(series(&s, a).await?)
     });
+    // parental (C2): hide mode refuses a hidden title here too, as catalog.item does.
     r.add("stalker.vodDetail", |s, a: RefArgs| async move {
         expect_type(&a.item_ref, &[ContentType::Movie])?;
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<VodDetail, RpcError>(vod::vod_detail(&s, &a.item_ref).await?)
     });
     r.add("stalker.seriesDetail", |s, a: RefArgs| async move {
         expect_type(&a.item_ref, &[ContentType::Series])?;
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<SeriesDetail, RpcError>(vod::series_detail(&s, &a.item_ref).await?)
     });
     r.add("stalker.streamUrl", |s, a: StreamArgs| async move {
@@ -177,7 +180,7 @@ async fn movies(state: &Arc<AppState>, a: ListArgs) -> Result<Page<VodItem>, Cor
     let names = vod::category_names(state, &a.source_id, ContentType::Movie).await;
     vod::remember_rows(state, &a.source_id, Kind::Vod, &page.items, &names).await;
     let sid = a.source_id.clone();
-    Ok(page
+    let page = page
         .map(|l| {
             super::mapping::vod_item(
                 &sid,
@@ -187,7 +190,11 @@ async fn movies(state: &Arc<AppState>, a: ListArgs) -> Result<Page<VodItem>, Cor
                 names.get(&l.category_id).cloned(),
             )
         })
-        .filter_some())
+        .filter_some();
+    drop_hidden(state, page, |v| {
+        (v.item_ref.clone(), Some(v.category_id.clone()))
+    })
+    .await
 }
 
 async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, CoreError> {
@@ -205,7 +212,7 @@ async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, 
     let names = vod::category_names(state, &a.source_id, ContentType::Series).await;
     vod::remember_rows(state, &a.source_id, Kind::Series, &page.items, &names).await;
     let sid = a.source_id.clone();
-    Ok(page
+    let page = page
         .map(|l| {
             super::mapping::series_item(
                 &sid,
@@ -215,7 +222,28 @@ async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, 
                 names.get(&l.category_id).cloned(),
             )
         })
-        .filter_some())
+        .filter_some();
+    drop_hidden(state, page, |v| {
+        (v.item_ref.clone(), Some(v.category_id.clone()))
+    })
+    .await
+}
+
+/// Hide mode (C2): drops the titles parental controls hide right now. Portal
+/// pages are not in the catalog, so their refs go through
+/// [`crate::parental::hidden`] instead of the catalog's SQL filter. `total`
+/// stays the portal's count, as for rows the mapping drops: the portal cannot
+/// say how many hidden titles later pages hold.
+async fn drop_hidden<T>(
+    state: &AppState,
+    mut page: Page<T>,
+    key: impl Fn(&T) -> (ItemRef, Option<String>),
+) -> Result<Page<T>, CoreError> {
+    let hidden = crate::parental::hidden(state, page.items.iter().map(&key).collect()).await?;
+    if !hidden.is_empty() {
+        page.items.retain(|it| !hidden.contains(&key(it).0));
+    }
+    Ok(page)
 }
 
 async fn search(state: &Arc<AppState>, a: SearchArgs) -> Result<Page<Value>, CoreError> {

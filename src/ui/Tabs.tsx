@@ -109,11 +109,11 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
               variant === 'underline'
                 ? cn(
                     '-mb-px h-10 border-b-2 px-3',
-                    selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg active:border-divider',
+                    selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg hover:border-divider active:border-border motion-safe:transition-colors',
                   )
                 : cn(
                     'h-8 rounded-sm px-3',
-                    selected ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:text-fg active:bg-surface-3',
+                    selected ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
                   ),
             )}
           >

@@ -64,6 +64,8 @@
   "settingsBackup": "バックアップと復元",
   "settingsShortcuts": "ショートカット",
   "settingsAbout": "アプリについて",
+  "settingsParental": "ペアレンタルコントロール",
+  "lockParentalNow": "ペアレンタルコントロールを今すぐロック",
 
   "shortcutsIntro": "ショートカットはテキスト入力中を除き、どこでも使えます。",
   "filterShortcuts": "ショートカットを絞り込む",
@@ -94,6 +96,7 @@
   "scVolumeDown": "音量を下げる",
   "scMute": "ミュート／ミュート解除",
   "scCaptions": "字幕のオン/オフ",
+  "scSleepTimer": "スリープタイマー（オフ、15、30、45、60、90分）",
   "scChannelUp": "前のチャンネル",
   "scChannelDown": "次のチャンネル",
   "scTheme": "ライトテーマとダークテーマを切り替え",
@@ -137,6 +140,17 @@
   "emptySource": "まだ何も読み込まれていません",
 
   "heroEyebrow": "前回の続きから",
+  "heroNewIn": "{{source}} の新着",
+  "heroNew": "新着",
+  "heroLabel": "注目",
+  "heroCarousel": "カルーセル",
+  "heroSlide": "スライド",
+  "heroSlideOf": "{{total}} 件中 {{index}} 件目",
+  "heroControls": "スライド",
+  "heroPrevious": "前のスライド",
+  "heroNext": "次のスライド",
+  "heroPause": "スライドショーを一時停止",
+  "heroPlayRotation": "スライドショーを再生",
   "play": "再生",
   "resume": "続きから再生",
   "details": "詳細",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "途切れずに視聴を続けるには、プロバイダーで更新してください。",
   "accountAlertOpen": "サブスクリプションを表示",
   "accountAlertDismiss": "{{name}} の通知を閉じる",
-  "navScheduled": "予定"
+  "navScheduled": "予定",
+  "navMultiview": "マルチビュー",
+  "navMyList": "マイリスト"
 }

@@ -6,6 +6,7 @@ use crate::model::{ContentType, M3uOrigin, Source, SourceKind};
 use crate::state::AppState;
 use rusqlite::{params, Connection};
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -134,13 +135,22 @@ pub fn build_manifest(
     epg_urls: &[String],
     include_secrets: bool,
 ) -> CoreResult<Value> {
+    // parental / watchlist: per-source rows for the `userState` extensions.
+    let mut locks = crate::parental::backup_locks(conn)?;
+    let mut watch: HashMap<String, Vec<Value>> = HashMap::new();
+    for e in crate::watchlist::export_entries(conn)? {
+        let sid = e.source_id.clone();
+        watch.entry(sid).or_default().push(serde_json::to_value(e)?);
+    }
     let mut playlists = Vec::new();
     for s in load_sources(conn)? {
-        let entry = match s.kind {
+        let mut entry = match s.kind {
             SourceKind::M3u => m3u_entry(conn, data_dir, &s)?,
             SourceKind::Xtream => xtream_entry(conn, &s, include_secrets)?,
             SourceKind::Stalker => stalker_entry(conn, &s, include_secrets)?,
         };
+        add_user_state_ext(&mut entry, super::EXT_PARENTAL_LOCKS, locks.remove(&s.id));
+        add_user_state_ext(&mut entry, super::EXT_WATCHLIST, watch.remove(&s.id));
         playlists.push(entry);
     }
     let mut m = Map::new();
@@ -149,11 +159,23 @@ pub fn build_manifest(
     m.insert("exportedAt".into(), json!(crate::userstate::now_ts()));
     m.insert("includeSecrets".into(), json!(include_secrets));
     let urls: Vec<&String> = epg_urls.iter().filter(|u| !u.trim().is_empty()).collect();
-    if !urls.is_empty() {
-        m.insert("settings".into(), json!({ "epgUrls": urls }));
-    }
+    // parental: the options always go in `settings` (with the empty
+    // `epgUrls` IPTVnator requires); the PIN, its hash and salt never do.
+    let mut settings = json!({ "epgUrls": urls });
+    settings[super::EXT_PARENTAL_SETTINGS] = crate::parental::backup_options(conn)?;
+    m.insert("settings".into(), settings);
     m.insert("playlists".into(), Value::Array(playlists));
     Ok(Value::Object(m))
+}
+
+/// Adds a Tsrust extension array to an entry's `userState` when it has rows.
+fn add_user_state_ext(entry: &mut Value, key: &str, rows: Option<Vec<Value>>) {
+    let Some(rows) = rows.filter(|r| !r.is_empty()) else {
+        return;
+    };
+    if let Some(us) = entry.get_mut("userState").and_then(Value::as_object_mut) {
+        us.insert(key.into(), Value::Array(rows));
+    }
 }
 
 /// Adds [`super::APP_SETTING_KEYS`] to the manifest's `settings` object

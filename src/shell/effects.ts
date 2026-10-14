@@ -22,7 +22,8 @@ import { bindRailEmptySync } from './dashboard/railEmpty';
 
 /** Query prefixes invalidated per event type. */
 export const EVENT_INVALIDATION: Record<string, string[]> = {
-  'sources.changed': ['sources.', 'catalog.', 'favorites.', 'recent.', 'positions.', 'xtream.', 'stalker.'],
+  // watchlist.: removing a source drops its My List rows.
+  'sources.changed': ['sources.', 'catalog.', 'favorites.', 'recent.', 'positions.', 'xtream.', 'stalker.', 'watchlist.'],
   'epg.changed': ['epg.'],
   'downloads.update': ['downloads.', 'myvideos.'],
   // account: a new subscription check; the refresh interval moves every next-refresh time.

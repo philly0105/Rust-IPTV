@@ -32,6 +32,21 @@
   --color-live: #ff6a70;
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
+  --color-glow: rgb(245 181 68 / 0.28);
+
+  /* Glass (C8): bg-glass, bg-glass-strong, border-glass-border, text-on-glass, backdrop-blur-glass. */
+  --color-glass: rgb(12 19 32 / 0.72);
+  --color-glass-strong: rgb(12 19 32 / 0.88);
+  --color-glass-border: rgb(255 255 255 / 0.14);
+  --color-on-glass: #f4f6fa;
+  --color-on-glass-muted: #c8cfdc;
+  --color-glass-accent: #f5b544;
+  --color-glass-accent-fg: #1b1204;
+  --blur-glass: 14px;
+
+  /* 10px at 100 % UI scale; rem so it follows the scale like the stock sizes. */
+  --text-2xs: calc(10rem / 15);
+  --text-2xs--line-height: 1.4;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -50,6 +65,40 @@
   --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-live-pulse: live-pulse 2s ease-in-out infinite;
   --animate-indeterminate: indeterminate 1.2s ease-in-out infinite;
+  --animate-hero-in: hero-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-hero-copy: hero-copy 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-dial-fill: dial-fill linear forwards;
+
+  /* Hero backdrop: fades up while settling from a slight zoom. */
+  @keyframes hero-in {
+    from {
+      opacity: 0;
+      transform: scale(1.04);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes hero-copy {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* The active dial tick fills over the slide's dwell time (duration set inline). */
+  @keyframes dial-fill {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
 
   @keyframes indeterminate {
     from {
@@ -112,7 +161,8 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
-    font-size: 15px;
+    /* UI scale (C1): rem-based sizes and the Tailwind spacing scale follow --ui-scale. */
+    font-size: calc(15px * var(--ui-scale, 1));
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -267,6 +317,39 @@ html[data-theme-switching='true'] *::after {
   background-size: 200% 100%;
 }
 
+/*
+ * Glass panel (C8) for chrome laid over video or artwork. The solid fallback
+ * keeps text readable where backdrop-filter is unsupported or turned off.
+ */
+@utility glass {
+  background-color: var(--color-glass-strong);
+  color: var(--color-on-glass);
+  border-color: var(--color-glass-border);
+  @supports (backdrop-filter: blur(1px)) {
+    background-color: var(--color-glass);
+    backdrop-filter: blur(var(--blur-glass)) saturate(1.2);
+  }
+}
+
+/*
+ * The dashboard hero's frost: glass that is solid behind the text column and
+ * clears toward the inline end, so the artwork shows beside the copy. On
+ * narrow screens the copy runs edge to edge, so the whole frame is frosted.
+ * --hero-solid covers padding, poster (lg+) and the 28rem text column.
+ */
+@utility hero-frost {
+  --hero-solid: 32rem;
+  @media (width >= 40rem) {
+    mask-image: linear-gradient(to right, #000 0, #000 var(--hero-solid), transparent calc(var(--hero-solid) + 16rem));
+    &:where(:dir(rtl)) {
+      mask-image: linear-gradient(to left, #000 0, #000 var(--hero-solid), transparent calc(var(--hero-solid) + 16rem));
+    }
+  }
+  @media (width >= 64rem) {
+    --hero-solid: 44rem;
+  }
+}
+
 /* The tuning tick: a short amber bar marking the active rail item or selected row. */
 @utility tuning-tick {
   position: relative;
@@ -297,8 +380,9 @@ html[data-theme-switching='true'] *::after {
   opacity: 0.5;
 }
 [cmdk-group-heading] {
-  padding: 10px 14px 4px;
-  font-size: 12px;
+  /* 10px 14px 4px and 12px at 100 % UI scale; rem so the palette follows the scale. */
+  padding: calc(10rem / 15) calc(14rem / 15) calc(4rem / 15);
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--color-fg-subtle);
 }

@@ -3,10 +3,13 @@ import type { MouseEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
+import type { ItemRef, ItemSnapshot, SeriesItem, VodItem } from '@/api/types';
+import { MyListButton } from '@/features/mylist/components/MyListButton';
+
 import { formatRating } from '../lib/format';
 import { languageName, type ItemLanguage } from '../lib/language';
 import { joinList } from '@/shell/dashboard/cards';
-import { Poster, ProgressBar, Skeleton, cn } from '@/ui';
+import { CARD_ART, CARD_ART_CURSOR, CARD_ROOT, Poster, ProgressBar, Skeleton, cn } from '@/ui';
 
 export interface PosterCardProps {
   /** Caption; pass `titleBase` so a year already in `year`/`meta` is not shown twice. */
@@ -41,6 +44,19 @@ export interface PosterCardProps {
    * the card text becomes the option's accessible name.
    */
   interactive?: boolean;
+  /**
+   * The title to save with the My List toggle (C3) on the poster's corner. Only on a linked card:
+   * inside a listbox option a button would be a nested interactive control.
+   */
+  myList?: { itemRef: ItemRef; snapshot: ItemSnapshot } | undefined;
+}
+
+/** The My List target for a catalog movie or series. */
+export function myListTarget(item: VodItem | SeriesItem): { itemRef: ItemRef; snapshot: ItemSnapshot } {
+  const snapshot: ItemSnapshot = { title: item.titleBase || item.title, contentType: item.ref.contentType };
+  if (item.posterUrl) snapshot.posterUrl = item.posterUrl;
+  if (item.year) snapshot.subtitle = String(item.year);
+  return { itemRef: item.ref, snapshot };
 }
 
 /**
@@ -73,7 +89,8 @@ export function posterCardLabel(parts: {
 
 /**
  * Poster tile used by grids and rails. The poster carries the identity; the
- * caption is quiet. Focus draws the amber ring around the artwork only.
+ * caption is quiet. Hover, focus, press and the grid's keyboard cursor are the
+ * shared card states (src/ui/card.ts), drawn on the artwork only.
  */
 export function PosterCard({
   title,
@@ -93,6 +110,7 @@ export function PosterCard({
   tabIndex,
   active,
   interactive = true,
+  myList,
 }: PosterCardProps) {
   const { t, i18n } = useTranslation('vod');
   const r = formatRating(rating, i18n.language);
@@ -112,23 +130,18 @@ export function PosterCard({
   const secondary = meta ?? year;
   const content = (
     <>
-      <div
-        className={cn(
-          'relative overflow-hidden rounded-md shadow-1 ring-1 ring-border/60',
-          'group-hover:ring-fg-subtle group-focus-visible:ring-2 group-focus-visible:ring-focus',
-          active && 'ring-2 ring-focus',
-          'motion-safe:transition-[box-shadow,transform] motion-safe:duration-150 motion-safe:group-hover:-translate-y-0.5',
-        )}
-      >
-        <Poster src={posterUrl} alt="" label={title} aspect="poster" />
+      <div className={cn(CARD_ART, active && CARD_ART_CURSOR)}>
+        {/* The frame's ring is the edge; the poster's own hairline would double it. */}
+        <Poster src={posterUrl} alt="" label={title} aspect="poster" className="after:hidden" />
         {badge && (
           <div aria-hidden className="pointer-events-none absolute start-1.5 top-1.5 flex gap-1">
             {badge}
           </div>
         )}
         {r && (
-          <div aria-hidden className="tabular pointer-events-none absolute end-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold text-white">
-            <Star aria-hidden size={11} className="fill-current text-accent" />
+          <div aria-hidden className="tabular pointer-events-none absolute end-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-glass-strong px-1.5 py-1 text-xs leading-none font-semibold text-on-glass">
+            {/* Glass chips stay dark in every theme, so the star takes the bright glass accent, not the light theme's deep one. */}
+            <Star aria-hidden size={11} className="fill-current text-glass-accent" />
             {r}
           </div>
         )}
@@ -136,7 +149,7 @@ export function PosterCard({
           <div
             aria-hidden
             className={cn(
-              'pointer-events-none absolute start-1.5 rounded-sm bg-scrim px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-white',
+              'pointer-events-none absolute start-1.5 rounded-sm bg-glass-strong px-1.5 py-1 text-xs leading-none font-semibold tracking-wide text-on-glass',
               hasProgress ? 'bottom-5' : 'bottom-1.5',
             )}
           >
@@ -150,7 +163,7 @@ export function PosterCard({
         )}
       </div>
       <div className="min-w-0 px-0.5">
-        <div dir="auto" className="line-clamp-2 text-match-parent text-[13px] leading-snug font-medium text-fg group-hover:text-fg">
+        <div dir="auto" className="line-clamp-2 text-match-parent text-sm leading-snug font-medium text-fg">
           {title}
         </div>
         <div className="tabular truncate text-xs text-fg-subtle">
@@ -165,7 +178,7 @@ export function PosterCard({
       </div>
     </>
   );
-  const classes = cn('group flex min-w-0 flex-col gap-2 rounded-md outline-none', className);
+  const classes = cn(CARD_ROOT, 'flex min-w-0 flex-col gap-2 rounded-md', className);
   if (!interactive) {
     return (
       // A named, non-interactive group: its label becomes the option's accessible name.
@@ -174,7 +187,7 @@ export function PosterCard({
       </div>
     );
   }
-  return (
+  const link = (
     <Link
       to={href}
       onClick={onClick}
@@ -187,6 +200,29 @@ export function PosterCard({
     >
       {content}
     </Link>
+  );
+  if (!myList) return link;
+  return (
+    <div className="group/poster relative min-w-0">
+      {link}
+      {/*
+        A layer with the artwork's box (2:3 at the card's width), so the toggle sits on the poster's
+        corner while staying beside the link, not inside it. It shows on hover, on keyboard focus, on
+        touch screens, and always once the title is saved.
+      */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]">
+        <MyListButton
+          variant="icon"
+          itemRef={myList.itemRef}
+          snapshot={myList.snapshot}
+          className={cn(
+            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
+            'motion-safe:transition-[opacity,background-color,color,transform]',
+            hasProgress ? 'bottom-5' : 'bottom-1.5',
+          )}
+        />
+      </div>
+    </div>
   );
 }
 

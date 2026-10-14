@@ -64,6 +64,8 @@
   "settingsBackup": "Backup e restauração",
   "settingsShortcuts": "Atalhos",
   "settingsAbout": "Sobre",
+  "settingsParental": "Controle parental",
+  "lockParentalNow": "Bloquear o controle parental agora",
 
   "shortcutsIntro": "Os atalhos funcionam em qualquer lugar, exceto enquanto você digita em um campo de texto.",
   "filterShortcuts": "Filtrar atalhos",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Diminuir volume",
   "scMute": "Ativar ou desativar o som",
   "scCaptions": "Ativar ou desativar legendas",
+  "scSleepTimer": "Timer de desligamento (desativado, 15, 30, 45, 60, 90 min)",
   "scChannelUp": "Canal anterior",
   "scChannelDown": "Próximo canal",
   "scTheme": "Alternar entre tema claro e escuro",
@@ -141,6 +144,17 @@
   "emptySource": "Nada importado ainda",
 
   "heroEyebrow": "Continue de onde parou",
+  "heroNewIn": "Novo em {{source}}",
+  "heroNew": "Adicionado agora",
+  "heroLabel": "Destaque",
+  "heroCarousel": "carrossel",
+  "heroSlide": "slide",
+  "heroSlideOf": "{{index}} de {{total}}",
+  "heroControls": "Slides",
+  "heroPrevious": "Slide anterior",
+  "heroNext": "Próximo slide",
+  "heroPause": "Pausar apresentação",
+  "heroPlayRotation": "Reproduzir apresentação",
   "play": "Reproduzir",
   "resume": "Retomar",
   "details": "Detalhes",
@@ -191,5 +205,7 @@
   "accountAlertExpiringBody": "Renove com seu provedor para continuar assistindo sem interrupção.",
   "accountAlertOpen": "Ver assinatura",
   "accountAlertDismiss": "Dispensar o alerta de {{name}}",
-  "navScheduled": "Agendados"
+  "navScheduled": "Agendados",
+  "navMultiview": "Multitela",
+  "navMyList": "Minha lista"
 }

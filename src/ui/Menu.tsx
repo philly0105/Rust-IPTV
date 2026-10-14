@@ -230,7 +230,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
         }}
         className={cn(
           !trigger &&
-            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3',
+            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
           triggerClassName,
         )}
       >

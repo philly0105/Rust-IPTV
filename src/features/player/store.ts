@@ -27,6 +27,7 @@ import { displayChannelName } from '@/features/live/lib/channelName';
 
 import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
+import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
@@ -97,6 +98,13 @@ const sourceKindCache = new Map<string, SourceKind>();
  * Retry runs it again, since there is no media URL for the surface to reload.
  */
 let failedResolve: (() => Promise<void>) | null = null;
+/**
+ * The item the parental gate last let through (`itemKey` of its ref). Entry points ask the
+ * gate before anything shows; `play` and queue advances only ask again when they switch to a
+ * different item, so a replay, a failover to the same item or the next episode of an allowed
+ * series never prompts twice.
+ */
+let allowedRefKey: string | null = null;
 /** Saved positions this close to the start are not worth a resume (and no "Resumed at 0:03"). */
 export const MIN_RESUME_SECONDS = 5;
 /**
@@ -119,6 +127,24 @@ function readStoredVolume(): { volume: number; muted: boolean } {
     // corrupt value: defaults
   }
   return { volume: 1, muted: false };
+}
+
+/**
+ * Told when the volume or mute changes through the store's actions (`setVolume`,
+ * `adjustVolume`, `toggleMute`), never for a surface echo (`reportVolume`): the sleep timer's
+ * fade tells a person's change apart from mpv reporting back the levels the fade set.
+ */
+const volumeIntentListeners = new Set<() => void>();
+
+export function subscribeVolumeIntent(fn: () => void): () => void {
+  volumeIntentListeners.add(fn);
+  return () => {
+    volumeIntentListeners.delete(fn);
+  };
+}
+
+function volumeIntent(): void {
+  for (const fn of volumeIntentListeners) fn();
 }
 
 function storeVolume(volume: number, muted: boolean): void {
@@ -400,6 +426,12 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     failedResolve = null;
     // A pending Up next must not fire while this request resolves and replace it.
     cancelUpNext();
+    // Direct callers (failover, a queue advance) that switch items pass the parental gate here;
+    // a refusal leaves whatever was playing as it was.
+    if (source.ref && !gatePassed(source.ref)) {
+      const allowed = await passGate({ ref: source.ref, title: source.title });
+      if (!allowed || token !== playToken) return;
+    }
     bindUnload();
     // Persist the outgoing item before switching.
     if (get().source) flushProgress();
@@ -517,6 +549,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     if (!muted) controller?.setMuted(false);
     set({ volume, muted });
     storeVolume(volume, muted);
+    volumeIntent();
   },
 
   adjustVolume(delta) {
@@ -528,6 +561,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     controller?.setMuted(muted);
     set({ muted });
     storeVolume(get().volume, muted);
+    volumeIntent();
   },
 
   toggleFullscreen() {
@@ -729,6 +763,11 @@ export function cancelUpNext(): void {
  */
 async function playQueued(entry: PlayerSource): Promise<void> {
   const { queue, mode } = usePlayerStore.getState();
+  // A queue of different items (not episodes of one series) asks the gate before the entry shows.
+  if (entry.ref && !gatePassed(entry.ref)) {
+    const seq = requestSeq;
+    if (!(await passGate({ ref: entry.ref, title: entry.title })) || seq !== requestSeq) return;
+  }
   const run = async (): Promise<void> => {
     const seq = ++requestSeq;
     let resolved = entry;
@@ -862,6 +901,28 @@ export interface PlayItemArgs {
   isLive: boolean;
   isRadio?: boolean;
   sourceKind: SourceKind;
+  /** The item's category when the caller knows it; the parental gate looks it up otherwise. */
+  categoryId?: string;
+}
+
+/** True when `ref` is the item playing now or the one the parental gate last let through. */
+function gatePassed(ref: ItemRef): boolean {
+  const key = itemKey(ref);
+  const current = usePlayerStore.getState().source?.ref;
+  return key === allowedRefKey || (!!current && itemKey(current) === key);
+}
+
+/** Ask the parental gate (`parentalHook`); a pass is remembered for the item. */
+async function passGate(item: PlaybackGateItem): Promise<boolean> {
+  let allowed: boolean;
+  try {
+    allowed = await ensurePlaybackAllowed(item);
+  } catch {
+    // The gate could not decide (its lookup failed): stay closed, like a cancelled prompt.
+    allowed = false;
+  }
+  if (allowed) allowedRefKey = itemKey(item.ref);
+  return allowed;
 }
 
 /** Resolve a catalog item to a PlayerSource by source kind. Exported for tests. */
@@ -975,6 +1036,9 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
   const seq = ++requestSeq;
   // The user picked something: a countdown firing during the lookup must not override it.
   cancelUpNext();
+  // Parental gate first, so a locked item's title never shows behind the PIN prompt.
+  if (!(await passGate(args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title }))) return;
+  if (seq !== requestSeq) return;
   usePlayerStore.setState({
     status: 'loading',
     error: undefined,
@@ -1008,6 +1072,8 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
 export async function playSource(source: PlayerSource): Promise<void> {
   const seq = ++requestSeq;
   cancelUpNext();
+  if (source.ref && !(await passGate({ ref: source.ref, title: source.title }))) return;
+  if (seq !== requestSeq) return;
   const withPos = await withResume(source);
   if (seq !== requestSeq) return;
   await usePlayerStore.getState().play(withPos);
@@ -1017,6 +1083,8 @@ export async function playSource(source: PlayerSource): Promise<void> {
 export async function restorePlayback(): Promise<boolean> {
   const rec = readResume();
   if (!rec || rec.mode === 'external') return false;
+  // A locked item from the last session asks again (its unlock did not survive the restart).
+  if (rec.source.ref && !(await passGate({ ref: rec.source.ref, title: rec.source.title }))) return false;
   const source: PlayerSource = { ...rec.source };
   if (!source.isLive && rec.positionSeconds > 0) source.resumeSeconds = rec.positionSeconds;
   else delete source.resumeSeconds;
@@ -1059,6 +1127,7 @@ export async function playChannel(channel: Channel, sourceKind?: SourceKind): Pr
     isRadio: channel.isRadio,
     sourceKind: kind,
   };
+  if (channel.categoryId) args.categoryId = channel.categoryId;
   if (channel.logoUrl) args.posterUrl = channel.logoUrl;
   if (subtitle) args.subtitle = subtitle;
   await playItem(args);
@@ -1101,6 +1170,7 @@ export function __resetPlayerForTests(): void {
   settingsPromise = null;
   lastSavedPosition = -1;
   failedResolve = null;
+  allowedRefKey = null;
   sourceKindCache.clear();
   stopSaver();
   if (upNextTimer) clearTimeout(upNextTimer);

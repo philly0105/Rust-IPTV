@@ -20,6 +20,8 @@ vi.mock('@/api/transport', () => ({
   isDesktop: false,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+// The parental gate has its own tests (parentalHook.test.ts); here everything may play.
+vi.mock('./parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 // The queue manager only needs the store; skip the feature's component exports.
 vi.mock('@/features/player', () => import('./store'));
 

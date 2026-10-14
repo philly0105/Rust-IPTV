@@ -9,12 +9,13 @@ import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { MenuChoice, MenuRow, MenuToggle } from './Controls';
+import { SleepMenu, SleepRowValue } from './SleepTimer';
 import { SyncRows, useSyncSummary } from './SyncMenu';
 
 /** Gap kept between the menu and the window edges, in CSS px. */
 const EDGE = 8;
 
-type View = 'root' | 'audio' | 'text' | 'sync';
+type View = 'root' | 'audio' | 'text' | 'sync' | 'sleep';
 
 function MenuAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick(): void }) {
   return (
@@ -119,7 +120,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
       className="mb-1 flex w-full items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
     >
       <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
-      {view === 'audio' ? t('audioTrack') : view === 'sync' ? t('sync') : t('subtitles')}
+      {view === 'audio' ? t('audioTrack') : view === 'sync' ? t('sync') : view === 'sleep' ? t('sleepTimer') : t('subtitles')}
     </button>
   );
   const icon = 'size-4 shrink-0';
@@ -148,7 +149,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="fixed z-50 max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border border-white/10 bg-[rgb(10_14_22/0.94)] p-1.5 shadow-2 backdrop-blur-md motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge fixed z-50 max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -182,6 +183,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
             <MenuRow label={t('subtitles')} value={tracks.text.find((a) => a.selected)?.label ?? t('off')} onClick={() => setView('text')} />
           )}
           <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          {/* Sleep timer (C5), as in the options menu. */}
+          <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
           {canShareSource(source, knownSourceKind) && (
             <MenuAction icon={<Copy className={icon} aria-hidden />} label={t('copyStreamLink')} onClick={() => void copyLink()} />
@@ -200,6 +203,12 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
         <>
           {back}
           <SyncRows />
+        </>
+      )}
+      {view === 'sleep' && (
+        <>
+          {back}
+          <SleepMenu onDone={onClose} />
         </>
       )}
       {view === 'text' && (

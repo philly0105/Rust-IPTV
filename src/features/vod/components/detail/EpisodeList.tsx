@@ -149,7 +149,7 @@ export function EpisodeList({
                     )}
                     {runtime && <span className="tabular ms-auto text-xs text-fg-subtle">{runtime}</span>}
                   </div>
-                  <div dir="auto" className="truncate text-[15px] font-medium text-fg text-match-parent">{ep.title}</div>
+                  <div dir="auto" className="truncate text-[calc(15rem/15)] font-medium text-fg text-match-parent">{ep.title}</div>
                   {ep.plot && <p dir="auto" className="line-clamp-2 text-sm text-fg-muted text-match-parent">{ep.plot}</p>}
                 </div>
               </button>

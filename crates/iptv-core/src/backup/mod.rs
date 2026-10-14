@@ -55,10 +55,19 @@ pub const EXT_POSITIONS: &str = "tsrustPlaybackPositions";
 /// Tsrust extension in a Stalker entry's `userState`: hidden categories
 /// (`[{contentType, categoryId}]`).
 pub const EXT_HIDDEN_CATEGORIES: &str = "tsrustHiddenCategories";
+/// Tsrust extension in an entry's `userState`: parental locks of the source
+/// (`[{contentType, kind, targetId, name, createdAt}]`). Never PIN material.
+pub const EXT_PARENTAL_LOCKS: &str = "tsrustParentalLocks";
+/// Tsrust extension in an entry's `userState`: the source's My List rows
+/// (`[WatchlistBackupEntry]`, contract C3).
+pub const EXT_WATCHLIST: &str = "tsrustWatchlist";
+/// Tsrust extension in the manifest's `settings`: parental options
+/// (`{mode, autoAdult, unlockMinutes}`). Never the PIN, its hash or salt.
+pub const EXT_PARENTAL_SETTINGS: &str = "tsrustParental";
 /// App-level settings carried in the manifest's `settings` object next to
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
 /// specific values (player paths, folders) are deliberately not exported.
-pub const APP_SETTING_KEYS: [&str; 14] = [
+pub const APP_SETTING_KEYS: [&str; 19] = [
     "stripCountryPrefix",
     "epgOffsetMinutes",
     "playerReuseInstance",
@@ -76,6 +85,12 @@ pub const APP_SETTING_KEYS: [&str; 14] = [
     "remindersEnabled",
     "reminderLeadMinutes",
     "reminderAction",
+    // appearance:
+    "accent",
+    "oledBlack",
+    "density",
+    "uiScale",
+    "zapBanner",
 ];
 
 /// `backup.import` mode.

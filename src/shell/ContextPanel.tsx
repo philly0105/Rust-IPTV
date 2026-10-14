@@ -23,7 +23,8 @@ export function ContextPanel({ inline }: { inline: boolean }) {
       <aside
         aria-label={t('contextPanel')}
         data-testid="context-panel"
-        className="w-(--panel-width) shrink-0 overflow-y-auto border-s border-divider bg-surface"
+        // overscroll-contain: scrolling the panel to its end does not start scrolling the page behind it.
+        className="w-(--panel-width) shrink-0 overflow-y-auto overscroll-contain border-s border-divider bg-surface"
       >
         {node}
       </aside>

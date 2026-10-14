@@ -64,6 +64,10 @@ import type {
   ScheduleRecordingArgs,
   ScheduleRecordingResult,
 } from './types';
+// parental:
+import type { ParentalLock, ParentalLockTarget, ParentalMode, ParentalStatus } from './types';
+// watchlist:
+import type { WatchlistEntry } from './types';
 
 /** One command: payload and resolved value. */
 interface Cmd<A, R> {
@@ -542,6 +546,36 @@ export interface RpcMap {
   'recordings.reveal': Cmd<{ id: string }, void>;
   /** Moves the file to the Recycle Bin (deletes it on a server that is not Windows). */
   'recordings.delete': Cmd<{ id: string }, void>;
+
+  // parental: parental controls (contract C2). Every change emits `parental.changed`.
+  'parental.status': Cmd<void, ParentalStatus>;
+  /** First PIN: currentPin omitted. Changing: currentPin required (wrong -> auth). newPin 4-8 digits else invalid. */
+  'parental.setPin': Cmd<{ currentPin?: string; newPin: string }, ParentalStatus>;
+  /** Removes the PIN (controls off). Locks are kept for when a PIN is set again. Wrong pin -> auth. */
+  'parental.disable': Cmd<{ pin: string }, ParentalStatus>;
+  /** Needs pin, or an active unlock. unlockMinutes outside 0..=720 -> invalid. */
+  'parental.configure': Cmd<{ pin?: string; mode?: ParentalMode; autoAdult?: boolean; unlockMinutes?: number }, ParentalStatus>;
+  /** Wrong pin -> auth (failedAttempts+1). After 5 consecutive wrong PINs: conflict, retryable, details.retryAfterSeconds (30 s, doubling to max 300 s). */
+  'parental.unlock': Cmd<{ pin: string }, ParentalStatus>;
+  'parental.lockNow': Cmd<void, ParentalStatus>;
+  'parental.locks': Cmd<{ sourceId?: string }, ParentalLock[]>;
+  /** Adding a lock needs no PIN. Removing one needs pin or an active unlock (else auth). */
+  'parental.setLocked': Cmd<{ target: ParentalLockTarget; locked: boolean; pin?: string }, void>;
+  /** Refs locked right now (empty when disabled or unlocked). categoryId optional: core looks it up from items when absent. Covers item locks, category locks and autoAdult categories. Max 500 items else invalid. */
+  'parental.check': Cmd<{ items: { ref: ItemRef; categoryId?: string }[] }, ItemRef[]>;
+  /** Category ids of a source/type that autoAdult treats as adult (whether or not enabled), for badges in lock management. */
+  'parental.adultCategories': Cmd<{ sourceId: string; contentType: ContentType }, string[]>;
+
+  // watchlist: My List (contract C3). Every write emits `watchlist.changed`.
+  /** Ordered by position, then addedAt desc. */
+  'watchlist.list': Cmd<{ sourceId?: string; contentType?: 'movie' | 'series' }, WatchlistEntry[]>;
+  /** Adds or removes one movie or series; live/radio refs -> invalid. */
+  'watchlist.toggle': Cmd<{ ref: ItemRef; snapshot: ItemSnapshot }, { inList: boolean }>;
+  /** The subset of `refs` that is in My List. */
+  'watchlist.contains': Cmd<{ refs: ItemRef[] }, ItemRef[]>;
+  'watchlist.remove': Cmd<{ ref: ItemRef }, void>;
+  /** New order of My List. */
+  'watchlist.reorder': Cmd<{ refs: ItemRef[] }, void>;
 }
 
 /** Every command name, for runtime checks and tests. Kept in sync with `RpcMap` by the type below. */
@@ -694,6 +728,21 @@ export const RPC_COMMANDS = [
   'recordings.playSource',
   'recordings.reveal',
   'recordings.delete',
+  'parental.status',
+  'parental.setPin',
+  'parental.disable',
+  'parental.configure',
+  'parental.unlock',
+  'parental.lockNow',
+  'parental.locks',
+  'parental.setLocked',
+  'parental.check',
+  'parental.adultCategories',
+  'watchlist.list',
+  'watchlist.toggle',
+  'watchlist.contains',
+  'watchlist.remove',
+  'watchlist.reorder',
 ] as const satisfies readonly (keyof RpcMap)[];
 
 // Compile-time check that RPC_COMMANDS lists every RpcMap key.

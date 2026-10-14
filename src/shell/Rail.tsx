@@ -1,6 +1,7 @@
 import {
   // recording:
   AlarmClock,
+  Bookmark,
   CalendarRange,
   ChevronDown,
   Download,
@@ -9,6 +10,7 @@ import {
   History,
   Keyboard,
   LayoutDashboard,
+  LayoutGrid,
   ListVideo,
   PanelLeftClose,
   PanelLeftOpen,
@@ -41,7 +43,9 @@ const PRIMARY: PrimaryLink[] = [
   { to: '/dashboard', labelKey: 'navDashboard', icon: LayoutDashboard },
   { to: '/search', labelKey: 'navSearch', icon: Search },
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
+  { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
+  { to: '/my-list', labelKey: 'navMyList', icon: Bookmark },
   { to: '/recent', labelKey: 'navRecent', icon: History },
   { to: '/downloads', labelKey: 'navDownloads', icon: Download },
   { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive },
@@ -51,9 +55,14 @@ const PRIMARY: PrimaryLink[] = [
 
 const KIND_LABEL: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'XC', stalker: 'STB' };
 
+/**
+ * One look for every rail row: rest (muted), hover (soft fill, full text),
+ * pressed (deeper fill), current (tuning tick, accent icon). The height is
+ * --rail-item-height, so compact density tightens the rail with everything else.
+ */
 const itemClass = (active: boolean, collapsed: boolean) =>
   cn(
-    'group flex h-10 items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
+    'group flex h-(--rail-item-height) items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
     'motion-safe:transition-colors motion-safe:duration-150',
     collapsed ? 'justify-center px-0' : 'px-3',
     active ? 'tuning-tick bg-surface-2 text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
@@ -87,7 +96,7 @@ function SourceMark({ source, size = 'sm', errorDot }: { source: Source; size?: 
       aria-hidden
       className={cn(
         'relative inline-flex shrink-0 items-center justify-center rounded-sm font-display font-semibold text-white',
-        size === 'sm' ? 'h-6 w-6 text-[11px]' : 'h-9 w-9 text-sm',
+        size === 'sm' ? 'h-6 w-6 text-xs' : 'h-9 w-9 text-sm',
       )}
       style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
     >
@@ -137,8 +146,8 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
         aria-controls={listId}
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          'flex h-10 w-full items-center gap-3 rounded-md px-3 text-start text-sm',
-          active ? 'text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
+          'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
+          active ? 'text-fg hover:bg-surface-2/60 active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
         )}
       >
         <SourceMark source={source} />
@@ -149,7 +158,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
             <span className="sr-only">{t('sourceHasError')}</span>
           </span>
         ) : (
-          <span className="shrink-0 text-[10px] font-semibold text-fg-subtle">{KIND_LABEL[source.kind]}</span>
+          <span className="shrink-0 text-2xs font-semibold text-fg-subtle">{KIND_LABEL[source.kind]}</span>
         )}
         <ChevronDown
           aria-hidden
@@ -157,15 +166,16 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
           className={cn('shrink-0 text-fg-subtle motion-safe:transition-transform', expanded ? 'rotate-0' : '-rotate-90 rtl:rotate-90')}
         />
       </button>
+      {/* The sublinks hang off a line through the middle of the source mark: px-3 plus half its w-6. */}
       {expanded && (
-        <ul id={listId} className="mt-0.5 mb-1 ms-[22px] flex flex-col gap-0.5 border-s border-divider ps-2">
+        <ul id={listId} className="mt-0.5 mb-1 ms-6 flex flex-col gap-0.5 border-s border-divider ps-2">
           {links.map((l) => (
             <li key={l.id}>
               <NavLink
                 to={l.to}
                 className={({ isActive }) =>
                   cn(
-                    'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-[13px]',
+                    'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
                     isActive ? 'tuning-tick bg-surface-2 font-medium text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
                   )
                 }
@@ -231,7 +241,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
               to="/sources?add=1"
               title={t('addSource')}
               aria-label={t('addSource')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
             >
               <Plus aria-hidden size={16} />
             </Link>
@@ -246,7 +256,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
               data-testid="rail-sources-error"
               className={cn('flex items-center gap-2', collapsed ? 'justify-center' : 'justify-between ps-3 pe-1')}
             >
-              <p role="alert" className={cn('min-w-0 text-[13px] text-danger', collapsed && 'sr-only')}>
+              <p role="alert" className={cn('min-w-0 text-sm text-danger', collapsed && 'sr-only')}>
                 {t('sourcesLoadFailed')}
               </p>
               <button
@@ -255,7 +265,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
                 disabled={sources.isFetching}
                 title={t('retry', { ns: 'common' })}
                 aria-label={t('retry', { ns: 'common' })}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 disabled:opacity-50"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors disabled:opacity-50"
               >
                 <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
               </button>
@@ -268,9 +278,9 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
             </ul>
           ) : (
             !collapsed && (
-              <p className="px-3 text-[13px] text-fg-muted">
+              <p className="px-3 text-sm text-fg-muted">
                 {t('noSourcesYet')}{' '}
-                <Link to="/sources?add=1" className="font-medium text-accent hover:underline">
+                <Link to="/sources?add=1" className="rounded-sm font-medium text-accent hover:underline active:text-accent-pressed">
                   {t('addFirstSource')}
                 </Link>
               </p>

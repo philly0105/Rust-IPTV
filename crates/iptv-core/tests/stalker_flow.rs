@@ -414,6 +414,40 @@ async fn movies_map_offset_and_limit_onto_portal_pages() {
 }
 
 #[tokio::test]
+async fn hide_mode_drops_locked_portal_titles_from_pages_and_search() {
+    let mut e = env().await;
+    iptv_core::parental::rpc::register(&mut e.router);
+    let ids = |page: &Value| -> Vec<String> {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["ref"]["itemId"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let window = json!({"sourceId": SID, "query": {"offset": 0, "limit": 10}});
+    let before = e.ok("stalker.movies", window.clone()).await;
+    assert!(ids(&before).contains(&"5001".to_string()));
+    let title = before["items"][0]["title"].as_str().unwrap().to_string();
+    let search = json!({"sourceId": SID, "query": title, "contentType": "movie"});
+    assert!(ids(&e.ok("stalker.search", search.clone()).await).contains(&"5001".to_string()));
+
+    // A PIN turns parental controls on in Hide mode (the default); lock one portal title.
+    e.ok("parental.setPin", json!({"newPin": "2468"})).await;
+    e.ok(
+        "parental.setLocked",
+        json!({"target": {"sourceId": SID, "contentType": "movie", "kind": "item", "targetId": "5001", "name": "Locked"}, "locked": true}),
+    )
+    .await;
+    let after = e.ok("stalker.movies", window).await;
+    assert!(!ids(&after).contains(&"5001".to_string()));
+    assert_eq!(ids(&after).len(), ids(&before).len() - 1);
+    // The portal's count stays: it cannot say what later pages hide.
+    assert_eq!(after["total"], before["total"]);
+    assert!(!ids(&e.ok("stalker.search", search).await).contains(&"5001".to_string()));
+}
+
+#[tokio::test]
 async fn vod_detail_and_stream_url() {
     let e = env().await;
     e.ok(

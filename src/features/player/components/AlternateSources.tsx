@@ -27,7 +27,7 @@ export function AlternatesRow({ onOpen }: { onOpen(): void }) {
 
 function QualityTag({ quality }: { quality: ChannelQuality }) {
   return (
-    <span className="shrink-0 rounded-sm border border-white/30 px-1 text-[10px] leading-4 font-semibold text-white/80">
+    <span className="shrink-0 rounded-sm border border-white/30 px-1 text-2xs leading-4 font-semibold text-white/80">
       {QUALITY_LABEL[quality]}
     </span>
   );

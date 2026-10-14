@@ -91,6 +91,8 @@ beforeEach(() => {
   rpcMock.calls.length = 0;
   useKind('xtream');
   h['settings.get'] = () => settings({ tmdb: { enabled: true, apiKey: 'k' } });
+  // Parental controls off: detail pages open without a lock check (C2).
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['favorites.contains'] = () => [];
   h['downloads.list'] = () => [];
   h['catalog.sameTitle'] = () => [];

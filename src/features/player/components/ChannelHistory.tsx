@@ -105,7 +105,7 @@ export function ChannelHistory() {
           items[to]?.focus();
         }
       }}
-      className="max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-white/10 bg-[rgb(10_14_22/0.94)] p-1.5 text-white shadow-2 backdrop-blur-md motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border p-1.5 text-white motion-safe:animate-pop-in"
     >
       <div className="mb-1 flex items-center gap-1 border-b border-white/10">
         <span className="flex-1 px-2 py-2 text-sm font-medium">{t('channelHistory')}</span>

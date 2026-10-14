@@ -14,6 +14,8 @@ vi.mock('@/api/transport', () => ({
   isDesktop: false,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+// The parental gate has its own tests (parentalHook.test.ts); here everything may play.
+vi.mock('./parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 
 const store = await import('./store');
 const media = await import('./media');
@@ -465,10 +467,24 @@ describe('playItem resolution by kind', () => {
       return id === 'slow' ? new Promise((r) => (release = () => r(src))) : src;
     };
     const slow = playItem({ ...base, ref: { ...liveRef, itemId: 'slow' }, sourceKind: 'xtream' });
+    // Past the parental gate and waiting on its stream URL when the newer pick arrives.
+    await flush();
     await playItem({ ...base, ref: { ...liveRef, itemId: 'fast' }, sourceKind: 'xtream' });
     release();
     await slow;
     expect(usePlayerStore.getState().source?.url).toBe('http://x/fast.m3u8');
+  });
+
+  it('a request overtaken while at the parental gate never resolves its stream', async () => {
+    handlers['xtream.streamUrl'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      return { url: `http://x/${id}.m3u8`, kind: 'hls', title: id, isLive: true, isRadio: false };
+    };
+    const first = playItem({ ...base, ref: { ...liveRef, itemId: 'first' }, sourceKind: 'xtream' });
+    await playItem({ ...base, ref: { ...liveRef, itemId: 'second' }, sourceKind: 'xtream' });
+    await first;
+    expect(calls('xtream.streamUrl')).toEqual([{ ref: { ...liveRef, itemId: 'second' } }]);
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/second.m3u8');
   });
 
   it('kindFromUrl', () => {

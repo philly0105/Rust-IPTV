@@ -172,10 +172,10 @@ function Section({ title, count, testId, children }: { title: string; count: num
   return (
     <section aria-labelledby={id} data-testid={testId} className="flex flex-col gap-2">
       <div className="flex items-baseline gap-3 px-1">
-        <h2 id={id} className="font-display text-[15px] font-semibold text-fg">
+        <h2 id={id} className="font-display text-[calc(15rem/15)] font-semibold text-fg">
           {title}
         </h2>
-        <span className="font-display text-[13px] tabular-nums text-fg-subtle">{count}</span>
+        <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
       </div>
       <div className="flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-border bg-surface">{children}</div>
     </section>
@@ -199,7 +199,7 @@ function RecordingNowRow({ recording: r, now }: { recording: Recording; now: num
             {name}
           </span>
           {r.title ? (
-            <span dir="auto" className="hidden truncate text-[13px] text-fg-muted sm:inline">
+            <span dir="auto" className="hidden truncate text-[calc(13rem/15)] text-fg-muted sm:inline">
               {r.channelName}
             </span>
           ) : null}

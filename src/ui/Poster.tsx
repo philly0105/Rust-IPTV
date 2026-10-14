@@ -79,7 +79,16 @@ export function Poster({
   const radius = { sm: 'rounded-sm', md: 'rounded-md', lg: 'rounded-lg' }[rounded];
 
   return (
-    <div className={cn('relative w-full overflow-hidden bg-surface-2', ASPECTS[aspect], radius, className)}>
+    <div
+      className={cn(
+        'relative w-full overflow-hidden bg-surface-2',
+        // Inner hairline: keeps dark artwork from melting into OLED-black and ink surfaces.
+        'after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:ring-1 after:ring-inset after:ring-fg/8',
+        ASPECTS[aspect],
+        radius,
+        className,
+      )}
+    >
       {state !== 'loaded' && (
         <div
           aria-hidden

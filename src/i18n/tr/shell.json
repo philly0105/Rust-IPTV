@@ -64,6 +64,8 @@
   "settingsBackup": "Yedekleme ve geri yükleme",
   "settingsShortcuts": "Kısayollar",
   "settingsAbout": "Hakkında",
+  "settingsParental": "Ebeveyn denetimi",
+  "lockParentalNow": "Ebeveyn denetimini şimdi kilitle",
 
   "shortcutsIntro": "Kısayollar, bir metin alanına yazarken hariç her yerde çalışır.",
   "filterShortcuts": "Kısayolları filtrele",
@@ -94,6 +96,7 @@
   "scVolumeDown": "Sesi azalt",
   "scMute": "Sesi kapat veya aç",
   "scCaptions": "Altyazıyı aç veya kapat",
+  "scSleepTimer": "Uyku zamanlayıcısı (kapalı, 15, 30, 45, 60, 90 dk)",
   "scChannelUp": "Önceki kanal",
   "scChannelDown": "Sonraki kanal",
   "scTheme": "Açık ve koyu tema arasında geçiş yap",
@@ -137,6 +140,17 @@
   "emptySource": "Henüz bir şey içe aktarılmadı",
 
   "heroEyebrow": "Kaldığınız yerden devam edin",
+  "heroNewIn": "{{source}} kaynağında yeni",
+  "heroNew": "Yeni eklendi",
+  "heroLabel": "Öne çıkan",
+  "heroCarousel": "kayan galeri",
+  "heroSlide": "slayt",
+  "heroSlideOf": "{{index}} / {{total}}",
+  "heroControls": "Slaytlar",
+  "heroPrevious": "Önceki slayt",
+  "heroNext": "Sonraki slayt",
+  "heroPause": "Slayt gösterisini duraklat",
+  "heroPlayRotation": "Slayt gösterisini oynat",
   "play": "Oynat",
   "resume": "Devam et",
   "details": "Ayrıntılar",
@@ -186,5 +200,7 @@
   "accountAlertExpiringBody": "Kesintisiz izlemeye devam etmek için sağlayıcınızla yenileyin.",
   "accountAlertOpen": "Aboneliği görüntüle",
   "accountAlertDismiss": "{{name}} uyarısını kapat",
-  "navScheduled": "Planlananlar"
+  "navScheduled": "Planlananlar",
+  "navMultiview": "Çoklu izleme",
+  "navMyList": "Listem"
 }

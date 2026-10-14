@@ -308,6 +308,10 @@
   "removedAllTitle_many": "{{count}} listes de lecture supprimées",
   "removedAllTitle_other": "{{count}} listes de lecture supprimées",
   "removeAllFailed": "Impossible de supprimer les listes de lecture",
+  "removeLockedTitle": "Saisissez le code PIN pour supprimer {{name}}",
+  "removeAllLockedTitle": "Saisissez le code PIN pour supprimer les listes de lecture",
+  "removeLockedText": "Les verrous parentaux sont supprimés avec la liste de lecture : le code PIN déverrouille d'abord le contrôle parental.",
+  "removeLockedConfirm": "Déverrouiller",
 
   "phaseCancelled": "Importation annulée",
   "phaseCancelling": "Annulation…",

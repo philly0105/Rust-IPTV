@@ -5,7 +5,9 @@
 //!
 //! Event kinds used across slices: `import.progress`, `sources.changed`,
 //! `epg.progress`, `epg.changed`, `downloads.update`, `downloads.progress`,
-//! `remote.command`, `mpv.state`, `settings.changed`, `player.external`.
+//! `remote.command`, `mpv.state`, `settings.changed`, `player.external`,
+//! `parental.changed` (payload `ParentalStatus`), `watchlist.changed`
+//! (payload `{}`).
 
 use serde::{Deserialize, Serialize};
 

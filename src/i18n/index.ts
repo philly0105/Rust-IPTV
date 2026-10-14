@@ -19,7 +19,19 @@
 import i18next, { type Resource } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-export const NAMESPACES = ['common', 'shell', 'sources', 'settings', 'live', 'vod', 'player', 'library'] as const;
+export const NAMESPACES = [
+  'common',
+  'shell',
+  'sources',
+  'settings',
+  'live',
+  'vod',
+  'player',
+  'library',
+  'multiview',
+  'parental',
+  'mylist',
+] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 export interface LanguageInfo {

@@ -18,11 +18,15 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import { itemKey, sameRef, type Channel, type ContentType, type EpgNowNext, type ItemKey, type ItemRef } from '@/api/types';
+import { itemKey, sameRef, type Category, type Channel, type ContentType, type EpgNowNext, type ItemKey, type ItemRef } from '@/api/types';
 
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, useToast } from '@/ui';
 import { PlayerStage, RadioPlayer, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
+import { channelInput } from '@/features/multiview/addChannel';
+import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
+import { useLockMenuItems } from '@/features/parental/lockMenu';
+import { useParentalStatus } from '@/features/parental/status';
 import { registerCommands, useShell, useShortcut } from '@/shell';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -275,6 +279,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const [manageOpen, setManageOpen] = useState(false);
   const [mapping, setMapping] = useState<Channel | null>(null);
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean } | null>(null);
+  const [groupMenu, setGroupMenu] = useState<{ pos: { x: number; y: number }; category: Category } | null>(null);
 
   const shortcutArea = t('shortcutArea');
   useShortcut('mod+b', (e) => {
@@ -397,6 +402,30 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const navigate = useNavigate();
+  const menuChannel = menu?.channel ?? null;
+  // C4: radio has no picture, so a station gets no multi-view entry.
+  const multiviewItem = useMultiviewMenuItem(menuChannel && menuChannel.ref.contentType === 'live' ? channelInput(menuChannel) : null);
+  // C2: lock / remove lock for the channel or station.
+  const lockItems = useLockMenuItems(
+    menuChannel
+      ? {
+          sourceId: menuChannel.ref.sourceId,
+          contentType: menuChannel.ref.contentType,
+          kind: 'item',
+          targetId: menuChannel.ref.itemId,
+          name: displayChannelName(menuChannel.name, prefs.stripCountryPrefix),
+        }
+      : null,
+  );
+  const groupLockItems = useLockMenuItems(
+    groupMenu
+      ? { sourceId, contentType, kind: 'category', targetId: groupMenu.category.id, name: groupMenu.category.name }
+      : null,
+  );
+  // Groups get a menu (right click, context-menu key) only while there is something in it.
+  const parentalOn = useParentalStatus().data?.enabled === true;
+  const closeGroupMenu = useCallback(() => setGroupMenu(null), []);
+  const openGroupMenu = useCallback((pos: { x: number; y: number }, category: Category) => setGroupMenu({ pos, category }), []);
   const menuItems: MenuItem[] = useMemo(() => {
     if (!menu || !source.data) return [];
     const ch = menu.channel;
@@ -447,9 +476,11 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             },
           ]
         : []),
+      ...(ch.ref.contentType === 'live' ? [multiviewItem] : []),
       { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => setMapping(ch) },
+      ...lockItems,
     ];
-  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate]);
+  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate, multiviewItem, lockItems]);
 
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
@@ -478,6 +509,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       onManage={() => setManageOpen(true)}
       onNavigate={() => setDrawerOpen(false)}
       totalLabel={isRadio ? t('allStations') : t('allChannels')}
+      onGroupMenu={parentalOn ? openGroupMenu : undefined}
     />
   );
 
@@ -570,7 +602,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const sidebarVisible = wide && !collapsed;
 
   return (
-    <div className="relative flex h-full min-h-0 w-full min-w-0 overflow-hidden bg-bg" data-testid={isRadio ? 'radio-page' : 'live-page'}>
+    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
       {heading}
       {/* groups: column on wide screens, drawer below 1024 px */}
       {sidebarVisible ? (
@@ -593,10 +625,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </>
       ) : null}
 
-      {/* channel list */}
+      {/* channel list: beside the stage from 768 px, under it on a phone */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        className="flex w-[clamp(272px,34vw,400px)] shrink-0 flex-col border-e border-divider bg-surface"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
           <IconButton
@@ -660,13 +692,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         {listBody}
       </section>
 
-      {/* stage */}
-      <section aria-label={t('stage')} className="flex min-w-0 flex-1 flex-col">
+      {/* stage: on top on a phone, as wide as the screen */}
+      <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:flex-1">
         {isRadio ? (
           <RadioStage channel={playingChannel} stripPrefix={prefs.stripCountryPrefix} />
         ) : (
           <>
-            <div className="relative min-h-0 flex-1 bg-black">
+            <div className="relative aspect-video min-h-0 bg-black md:aspect-auto md:flex-1">
               <PlayerStage className="h-full w-full">
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70">
                   <Tv className="size-8" aria-hidden />
@@ -691,6 +723,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       </section>
 
       <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
+      {/* C2: a group's menu only has entries while parental controls are on. */}
+      <ContextMenu
+        pos={groupMenu && groupLockItems.length > 0 ? groupMenu.pos : null}
+        items={groupLockItems}
+        label={groupMenu?.category.name ?? ''}
+        onClose={closeGroupMenu}
+      />
       <ManageCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
       <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
     </div>
@@ -702,7 +741,7 @@ function RadioStage({ channel, stripPrefix }: { channel?: Channel; stripPrefix: 
   const source = usePlayerStore((st) => st.source);
   const playingRadio = !!source?.isRadio;
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-black" data-testid="radio-stage">
+    <div className="relative flex min-h-56 flex-1 flex-col bg-black md:min-h-0" data-testid="radio-stage">
       {playingRadio ? (
         <RadioPlayer variant="stage" className="h-full" />
       ) : (

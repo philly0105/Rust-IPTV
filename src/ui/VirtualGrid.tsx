@@ -2,6 +2,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { scalePx, useDensity, useUiScale } from './scale';
 import type { VirtualItemState } from './VirtualList';
 
 export type GridAspect = number | 'poster' | 'wide' | 'square';
@@ -20,7 +21,11 @@ export function gridLayout(width: number, minColumnWidth: number, gap: number): 
 
 export interface VirtualGridProps<T> {
   items: readonly T[];
-  /** Minimum cell width in px; columns are derived from the container width. */
+  /**
+   * Minimum cell width in px; columns are derived from the container width.
+   * Like `gap` and `captionHeight`, given at 100 % UI scale and comfortable
+   * density: the grid applies the active scale (and density, for width and gap).
+   */
   minColumnWidth: number;
   /** Artwork aspect (width / height) or a named aspect. */
   aspect: GridAspect;
@@ -54,13 +59,13 @@ export interface VirtualGridProps<T> {
  */
 export function VirtualGrid<T>({
   items,
-  minColumnWidth,
+  minColumnWidth: baseMinColumnWidth,
   aspect,
   render,
   onEndReached,
   endThresholdRows = 2,
-  captionHeight = 52,
-  gap = 16,
+  captionHeight: baseCaptionHeight = 52,
+  gap: baseGap = 16,
   overscan = 3,
   className,
   onSelect,
@@ -72,6 +77,12 @@ export function VirtualGrid<T>({
   testId,
   initialActiveIndex,
 }: VirtualGridProps<T>) {
+  const uiScale = useUiScale();
+  const density = useDensity();
+  const minColumnWidth = scalePx(baseMinColumnWidth, uiScale, density, true);
+  const gap = scalePx(baseGap, uiScale, density, true);
+  // The caption holds text, which density does not shrink.
+  const captionHeight = scalePx(baseCaptionHeight, uiScale, density);
   const parentRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const [width, setWidth] = useState(initialRect.width);

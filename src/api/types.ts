@@ -395,6 +395,25 @@ export type Theme = 'light' | 'dark' | 'system';
 export type StartupBehavior = 'first-view' | 'restore-last-view';
 export type EpgViewMode = 'timeline' | 'list';
 export type CoverSize = 'small' | 'medium' | 'large';
+// appearance:
+/** Accent color family (`settings.accent`); applied as `html[data-accent]`. */
+export type Accent = 'amber' | 'teal' | 'violet' | 'rose' | 'lime' | 'sky' | 'coral';
+/** Spacing density of lists, rails and rows (`settings.density`); applied as `html[data-density]`. */
+export type Density = 'comfortable' | 'compact';
+
+/** Every accent, in the order pickers show them (same order as `Accent::ALL` in model.rs). */
+export const ACCENTS = ['amber', 'teal', 'violet', 'rose', 'lime', 'sky', 'coral'] as const satisfies readonly Accent[];
+/** Every density (same order as `Density::ALL` in model.rs). */
+export const DENSITIES = ['comfortable', 'compact'] as const satisfies readonly Density[];
+// Compile-time checks that ACCENTS and DENSITIES list every value.
+const _allAccentsListed: [Exclude<Accent, (typeof ACCENTS)[number]>] extends [never] ? true : never = true;
+const _allDensitiesListed: [Exclude<Density, (typeof DENSITIES)[number]>] extends [never] ? true : never = true;
+void _allAccentsListed;
+void _allDensitiesListed;
+/** Smallest accepted `settings.uiScale` (`settings::UI_SCALE_RANGE` in the core). */
+export const UI_SCALE_MIN = 0.9;
+/** Largest accepted `settings.uiScale` (`settings::UI_SCALE_RANGE` in the core). */
+export const UI_SCALE_MAX = 1.25;
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -409,6 +428,9 @@ export interface DashboardRails {
   recentSources: boolean;
   recentlyAdded: boolean;
   tmdbTrending: boolean;
+  // watchlist:
+  /** The My List rail (movies and series saved with `watchlist.toggle`). */
+  myList: boolean;
 }
 
 export interface TmdbSettings {
@@ -493,6 +515,20 @@ export interface Settings {
   /** Minutes before the start a reminder fires (0..60). */
   reminderLeadMinutes: number;
   reminderAction: ReminderAction;
+  // appearance:
+  /** Accent color family for focus rings, selection and primary actions. */
+  accent: Accent;
+  /** Pure-black surfaces whenever the dark theme is in effect (dark, or system resolving to dark). */
+  oledBlack: boolean;
+  /** Spacing density of lists, rails and rows. */
+  density: Density;
+  /**
+   * Root font scale, `html { font-size: calc(15px * uiScale) }`. The core
+   * accepts `UI_SCALE_MIN..=UI_SCALE_MAX` (0.9..1.25) and rounds to 4 decimals.
+   */
+  uiScale: number;
+  /** Now/next banner inside the player on every live channel change. */
+  zapBanner: boolean;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -518,6 +554,8 @@ export const DEFAULT_SETTINGS: Settings = {
     recentSources: true,
     recentlyAdded: true,
     tmdbTrending: true,
+    // watchlist:
+    myList: true,
   },
   remoteControl: { enabled: false, port: 7310 },
   playerAmbientMode: false,
@@ -550,6 +588,12 @@ export const DEFAULT_SETTINGS: Settings = {
   remindersEnabled: true,
   reminderLeadMinutes: 2,
   reminderAction: 'notify',
+  // appearance:
+  accent: 'amber',
+  oledBlack: false,
+  density: 'comfortable',
+  uiScale: 1,
+  zapBanner: true,
 };
 
 export interface WindowState {
@@ -870,6 +914,12 @@ export interface AppEventMap {
   'reminders.fire': ReminderFiredEvent;
   'recordings.update': EmptyEvent;
   'recordings.progress': RecordingProgressEvent;
+  // parental:
+  /** Every parental state change: PIN set or removed, configure, unlock, lock, lock-list change, unlock expiry. */
+  'parental.changed': ParentalStatus;
+  // watchlist:
+  /** After every My List write. */
+  'watchlist.changed': EmptyEvent;
 }
 
 export type AppEventType = keyof AppEventMap;
@@ -1005,4 +1055,53 @@ export interface RecordingProgressEvent {
   id: string;
   bytes: number;
   elapsedSeconds: number;
+}
+
+// parental: parental controls (contract C2; crates/iptv-core/src/parental).
+/** `hide` drops locked content from every list; `ask` shows it and asks for the PIN before it opens. */
+export type ParentalMode = 'hide' | 'ask';
+
+/** `parental.status` and the `parental.changed` payload. Never carries the PIN or its hash. */
+export interface ParentalStatus {
+  /** A PIN is set. */
+  enabled: boolean;
+  /** Default 'hide'. */
+  mode: ParentalMode;
+  /** Default true; categories whose name marks adult content count as locked. */
+  autoAdult: boolean;
+  /** 0 = until the app restarts; else 1..=720; default 15. */
+  unlockMinutes: number;
+  /** A session unlock is active now. */
+  unlocked: boolean;
+  /** RFC 3339; absent when locked or unlocked until restart. */
+  unlockedUntil?: string;
+  /** Consecutive wrong PINs. */
+  failedAttempts: number;
+  /** Present while the wrong-PIN lockout is active. */
+  retryAfterSeconds?: number;
+}
+
+export type ParentalLockKind = 'category' | 'item';
+
+export interface ParentalLock {
+  sourceId: string;
+  contentType: ContentType;
+  kind: ParentalLockKind;
+  /** Category id or item id. */
+  targetId: string;
+  /** Display name snapshot. */
+  name: string;
+  createdAt: string;
+}
+
+/** A lock to add or remove (`parental.setLocked`). */
+export type ParentalLockTarget = Omit<ParentalLock, 'createdAt'>;
+
+// watchlist: My List (contract C3; crates/iptv-core/src/watchlist).
+/** One My List entry (movies and series only). */
+export interface WatchlistEntry {
+  ref: ItemRef;
+  snapshot: ItemSnapshot;
+  addedAt: string;
+  watched: boolean;
 }

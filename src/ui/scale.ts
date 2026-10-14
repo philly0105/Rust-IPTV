@@ -58,3 +58,22 @@ export function useScaledPx(px: number, spacing = false): number {
   const density = useDensity();
   return scalePx(px, uiScale, density, spacing);
 }
+
+/**
+ * A list row's slot height as the stylesheet renders it now. `px` is the
+ * whole row at 100 %; `spacingPx` is the part of it made of Tailwind spacing
+ * (vertical padding, gaps between stacked lines), which compact density
+ * tightens. The rest (text lines, logos, icons) follows the UI scale only,
+ * so a compact row gets shorter without clipping its text.
+ */
+export function scaleRowPx(px: number, spacingPx: number, uiScale: number, density: Density): number {
+  const spacing = Math.min(Math.max(spacingPx, 0), px);
+  return Math.round((px - spacing + spacing * DENSITY_FACTOR[density]) * uiScale);
+}
+
+/** Hook form of {@link scaleRowPx}, for lists that virtualise their own rows. */
+export function useRowHeight(px: number, spacingPx = 0): number {
+  const uiScale = useUiScale();
+  const density = useDensity();
+  return scaleRowPx(px, spacingPx, uiScale, density);
+}

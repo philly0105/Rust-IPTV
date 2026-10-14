@@ -223,5 +223,8 @@
   "zapNoGuide": "无节目信息",
   "zapMinutesLeft": "剩余 {{minutes}} 分钟",
   "zapNow": "正在播出",
-  "zapNext": "接下来"
+  "zapNext": "接下来",
+  "parentalHiddenTitle": "已被家长控制锁定",
+  "parentalHidden": "家长控制隐藏了此内容。请在设置中解锁后观看。",
+  "parentalStopped": "播放已停止。请重新播放并输入 PIN 以继续观看。"
 }

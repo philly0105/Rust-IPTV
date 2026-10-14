@@ -10,7 +10,9 @@ import type { Category, Channel, Page, PageQuery } from '@/api/types';
 
 import { CategorySidebar } from '../components/CategorySidebar';
 import { resetChannelListMemory } from '../components/ChannelList';
-import { CHANNEL_ROW_HEIGHT } from '../components/ChannelRow';
+import { scaleRowPx, setUiScaleState } from '@/ui/scale';
+
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING } from '../components/ChannelRow';
 import { EpgGridPage } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage } from '../components/LivePage';
@@ -498,5 +500,38 @@ describe('Empty groups and group filter', () => {
     fireEvent.keyDown(box, { key: 'Escape' });
     expect(box.value).toBe('');
     expect(screen.getByText('News')).toBeTruthy();
+  });
+});
+
+describe('Live list: density and UI scale', () => {
+  afterEach(() => setUiScaleState(1, 'comfortable'));
+  const rowSlot = (i: number) => rowButton(i)?.closest<HTMLElement>('[style*="translateY"]');
+  const groupSlot = (i: number) => document.querySelector<HTMLElement>(`[data-cat-index="${i}"]`)?.parentElement;
+
+  it('compact density tightens the loading skeleton rows', async () => {
+    setUiScaleState(1, 'compact');
+    rpcMock.handlers['catalog.channels'] = () => new Promise(() => undefined);
+    renderAt('/s/src1/live', ROUTE);
+    const loading = await screen.findByTestId('channel-list-loading');
+    const compact = scaleRowPx(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, 1, 'compact');
+    expect(compact).toBeLessThan(CHANNEL_ROW_HEIGHT);
+    for (const r of [...loading.children] as HTMLElement[]) expect(r.style.height).toBe(`${compact}px`);
+  });
+
+  it('channel and group rows follow a density or scale change without a remount', async () => {
+    renderAt('/s/src1/live', ROUTE);
+    await screen.findByText('Channel 0');
+    expect(rowSlot(0)?.style.height).toBe(`${CHANNEL_ROW_HEIGHT}px`);
+    await waitFor(() => expect(groupSlot(0)?.style.height).toBe('36px'));
+
+    act(() => setUiScaleState(1, 'compact'));
+    await waitFor(() => expect(rowSlot(0)?.style.height).toBe(`${scaleRowPx(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, 1, 'compact')}px`));
+    expect(Number.parseFloat(groupSlot(0)!.style.height)).toBeLessThan(36);
+    // The next row starts where the tightened one ends.
+    expect(rowSlot(1)?.style.transform).toBe(`translateY(${scaleRowPx(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, 1, 'compact')}px)`);
+
+    act(() => setUiScaleState(1.25, 'comfortable'));
+    await waitFor(() => expect(rowSlot(0)?.style.height).toBe(`${scaleRowPx(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, 1.25, 'comfortable')}px`));
+    expect(groupSlot(0)?.style.height).toBe('45px');
   });
 });

@@ -998,6 +998,56 @@ async fn watched_positions_and_app_settings_round_trip() {
     assert_eq!(watched, 1);
 }
 
+/// One app setting this build refuses (a scale out of range, an accent from a
+/// later version) skips only that key, each with its own warning; the rest of
+/// the backup's settings are restored.
+#[tokio::test]
+async fn a_refused_app_setting_skips_only_that_key() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "settings": { "englishOnly": true, "uiScale": 1.3, "accent": "plum", "density": "compact" },
+        "playlists": [{
+            "portalType": "xtream",
+            "exportedId": "xt-s",
+            "title": "Settings Xtream",
+            "connection": { "serverUrl": "http://127.0.0.1:9/xtream", "username": "s", "password": "p" },
+            "userState": { "favorites": [], "recentlyViewed": [], "hiddenCategories": [] }
+        }]
+    })
+    .to_string();
+    let report = import(&r, &st, &manifest, "merge").await;
+    let warnings: Vec<&str> = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|w| w.contains("App setting"))
+        .collect();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("App setting uiScale"))
+            && warnings.iter().any(|w| w.starts_with("App setting accent")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().all(|w| !w.contains("invalid:")),
+        "{warnings:?}"
+    );
+    let s = st.settings_snapshot();
+    assert!(s.english_only, "the other keys are restored");
+    assert_eq!(s.ui_scale, 1.0, "the refused key keeps its value");
+    assert_eq!(
+        serde_json::to_value(&s).unwrap()["density"],
+        "compact",
+        "{s:?}"
+    );
+}
+
 /// A restored playlist over `RAW_INLINE_MAX` is stored like an imported large
 /// file: `m3u_raw.raw = ''` plus `playlists/<id>.m3u`, and it still parses,
 /// refreshes, exports, and re-imports unchanged.
@@ -1141,6 +1191,7 @@ async fn stalker_restore_records_totals_and_plain_errors() {
         iptv_core::stalker::CachedItem {
             raw: json!({"id": "5005", "cmd": "http://old-portal.invalid/5005.mp4"}),
             category_name: None,
+            category_id: None,
         },
     );
     import(&r, &state, &manifest, "replace").await;

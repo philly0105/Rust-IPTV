@@ -67,5 +67,11 @@
   "showWatched": "İzlenenleri göster",
   "noMatchTitle": "Sonuç yok",
   "noMatchBody": "Listemde “{{query}}” ile eşleşen bir şey yok.",
-  "clearSearch": "Aramayı temizle"
+  "clearSearch": "Aramayı temizle",
+  "checkingHint": "Listem denetleniyor…",
+  "retryHint": "Listem yüklenemedi. Yeniden denemek için basın.",
+  "menuChecking": "Listem denetleniyor…",
+  "menuRetry": "Listemi yeniden yükle",
+  "notReady": "Listem hâlâ yükleniyor. Birazdan yeniden deneyin.",
+  "loadFailed": "Listem yüklenemedi"
 }

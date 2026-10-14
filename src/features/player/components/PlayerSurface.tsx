@@ -358,7 +358,6 @@ function MpvPlayer({ compact }: { compact: boolean }) {
   /** Whether focus was last inside the player, and on which control (`data-ctl`). */
   const focusInside = useRef(false);
   const lastCtl = useRef<string | null>(null);
-  const titleHover = useZapHover();
   const statsOpen = useStreamInfoStore((x) => x.open);
 
   const poke = useCallback((): void => {
@@ -397,6 +396,8 @@ function MpvPlayer({ compact }: { compact: boolean }) {
 
   // A stall keeps the chrome up, like a pause: its readout is the only sign of it over the video.
   const chromeShown = !overlay || !idle || onBar || menuOpen || focusPin.pinned || buffering || status !== 'playing';
+  // The PiP bar's title, while it is drawn (hiding it sends no pointerleave).
+  const titleHover = useZapHover(overlay && pip && chromeShown && !buffering);
 
   // Switching between docked, fullscreen and PiP layouts re-renders the chrome, and hiding it
   // unmounts it: a focused control disappears and focus falls to <body>. Put it back on the
@@ -529,7 +530,6 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   const statsOpen = useStreamInfoStore((s) => s.open);
   const pip = usePipStore((s) => s.active);
   const zapShown = useZapBannerShown();
-  const titleHover = useZapHover();
   const [idle, setIdle] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [onBar, setOnBar] = useState(false);
@@ -542,6 +542,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
   const playing = status === 'playing';
   const chromeVisible = !idle || !playing || menuOpen || focusPin.pinned || onBar || panelOpen;
+  // The title takes the pointer only while the chrome shows it.
+  const titleHover = useZapHover(chromeVisible);
 
   const poke = (): void => {
     setIdle(false);
@@ -659,8 +661,25 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
                 {t('live')}
               </span>
             )}
-            {/* Hovering the channel title brings up the zap banner (live TV). */}
-            <h2 className="pointer-events-auto min-w-0 truncate font-display text-base sm:text-lg" {...titleHover}>
+            {/*
+              Hovering the channel title brings up the zap banner (live TV) and, like the bar,
+              keeps the chrome up. It sits above the click layer, so it passes clicks on to it;
+              hidden chrome lets the pointer through to the video.
+            */}
+            <h2
+              data-testid="player-title"
+              className={cn('min-w-0 truncate font-display text-base sm:text-lg', chromeVisible && 'pointer-events-auto')}
+              onClick={onSurfaceClick}
+              onDoubleClick={onSurfaceDouble}
+              onPointerEnter={() => {
+                setOnBar(true);
+                titleHover.onPointerEnter();
+              }}
+              onPointerLeave={() => {
+                setOnBar(false);
+                titleHover.onPointerLeave();
+              }}
+            >
               {source.title}
             </h2>
           </div>

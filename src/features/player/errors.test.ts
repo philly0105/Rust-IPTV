@@ -70,3 +70,17 @@ describe('helpers', () => {
     }
   });
 });
+
+describe('parental refusal', () => {
+  // The core refuses an item Hide mode hides as not_found (parental::refuse_hidden).
+  const message = 'catalog item 666 is locked by parental controls; unlock them to open it';
+
+  it('reads as locked, not as a stream that no longer exists', () => {
+    expect(classifyStreamError({ message, code: 'not_found' })).toBe('notFound');
+    expect(errorCopyKeys('notFound', { message })).toEqual({ title: 'parentalHiddenTitle', hint: 'parentalHidden' });
+    expect(errorCopyKeys('notFound', { message: 'HTTP 404' })).toEqual({ title: 'errorNotFoundTitle', hint: 'errorNotFound' });
+    const strings = en as Record<string, string>;
+    expect(strings.parentalHiddenTitle).toBeTruthy();
+    expect(strings.parentalHidden).toBeTruthy();
+  });
+});

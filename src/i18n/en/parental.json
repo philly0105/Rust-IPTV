@@ -67,6 +67,7 @@
   "unlockTimeLeft": "Time left unlocked",
   "lockNow": "Lock now",
   "lockedNowToast": "Parental controls locked",
+  "shortcutLockNow": "Lock parental controls now",
   "lockoutActive": "Too many wrong PINs. The PIN can be tried again in {{time}}.",
   "behaviourTitle": "How locks work",
   "behaviourPinNote": "Changes here ask for the PIN.",

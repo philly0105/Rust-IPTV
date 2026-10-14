@@ -8,6 +8,7 @@ import {
   itemKey,
   type FavoriteEntry,
   type ItemRef,
+  type ItemSnapshot,
   type PlaybackPosition,
   type RecentEntry,
   type SeriesItem,
@@ -16,6 +17,8 @@ import {
   type VodItem,
 } from '@/api/types';
 import { MyListRail } from '@/features/mylist/components/MyListRail';
+import { useMyList } from '@/features/mylist/hooks/useMyList';
+import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { playItem } from '@/features/player';
 import { RpcError } from '@/api/transport';
 import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast } from '@/ui';
@@ -60,6 +63,14 @@ export function mergeRecentlyAdded(movies: readonly VodItem[], series: readonly 
   return [...movies, ...series]
     .sort((a, b) => ((a.added ?? '') < (b.added ?? '') ? 1 : (a.added ?? '') > (b.added ?? '') ? -1 : 0))
     .slice(0, limit);
+}
+
+/** The My List target of a new arrival: the title without its year, which the snapshot carries itself. */
+function myListTarget(item: VodItem | SeriesItem): { itemRef: ItemRef; snapshot: ItemSnapshot } {
+  const snapshot: ItemSnapshot = { title: item.titleBase || item.title, contentType: item.ref.contentType };
+  if (item.posterUrl) snapshot.posterUrl = item.posterUrl;
+  if (item.year) snapshot.subtitle = String(item.year);
+  return { itemRef: item.ref, snapshot };
 }
 
 /** Identity of an error for "same failure" checks: its RpcError code and message. */
@@ -130,6 +141,9 @@ function DashboardBody() {
   const wantAdded = hasSources && (show('hero') || show('recentlyAdded'));
   const addedMovies = useRpcQuery('catalog.recentlyAdded', { contentType: 'movie', limit: RAIL_LIMIT }, { enabled: wantAdded });
   const addedSeries = useRpcQuery('catalog.recentlyAdded', { contentType: 'series', limit: RAIL_LIMIT }, { enabled: wantAdded });
+  // The shared My List query its rail reads (C3): one fetch, so the quiet state, the
+  // pending check and the shared retry below see the same list the rail shows.
+  const myList = useMyList({ enabled: hasSources });
   const trending = useRpcQuery('tmdb.trending', undefined, {
     enabled: hasSources && tmdbEnabled && show('tmdbTrending'),
     staleTime: 60 * 60_000,
@@ -156,6 +170,12 @@ function DashboardBody() {
         .slice(0, RAIL_LIMIT),
     [recent.data],
   );
+  // Counted like MyListRail counts it: entries of sources in their delete-undo window are already gone.
+  const removingSources = usePendingRemovals((s) => s.ids);
+  const myListCount = useMemo(
+    () => (myList.data ?? []).filter((e) => !removingSources.has(e.ref.sourceId)).length,
+    [myList.data, removingSources],
+  );
   const rankedSources = useMemo(() => rankSources(sources.data ?? [], recent.data ?? []), [sources.data, recent.data]);
   const recentlyAdded = useMemo(
     () => mergeRecentlyAdded((addedMovies.data ?? []) as VodItem[], (addedSeries.data ?? []) as SeriesItem[], RAIL_LIMIT),
@@ -177,12 +197,17 @@ function DashboardBody() {
     ...(show('tmdbTrending') && tmdbEnabled ? [trending] : []),
   ];
   const sharedError = hasSources ? sharedRailError(railQueries.map((q) => q.error)) : undefined;
-  const anyRailError = railQueries.some((q) => q.isError);
+  // My List stays out of the collapse: an empty list draws no rail, so its answer must not
+  // split one shared error back into five; it still counts as a rail for the quiet state.
+  const myListOn = show('myList');
+  const anyRailError = railQueries.some((q) => q.isError) || (myListOn && myList.isError);
   /** Per-rail error, hidden when the dashboard shows the shared one. */
   const railError = (err: unknown) => (sharedError ? undefined : err);
   const showSharedError = sharedError !== undefined;
   const retryAllRails = () => {
     for (const q of railQueries) if (q.isError) void q.refetch();
+    // Its rail hides its own error behind the shared one, so the shared retry covers it too.
+    if (myListOn && myList.isError) void myList.refetch();
   };
 
   const play = (args: { ref: ItemRef; episodeId?: string; title: string; subtitle?: string; posterUrl?: string }) => {
@@ -246,6 +271,7 @@ function DashboardBody() {
   const anyRailVisible =
     (show('hero') && heroSlides.length > 0) ||
     (show('continueWatching') && (continueWatching.data?.length ?? 0) > 0) ||
+    (myListOn && myListCount > 0) ||
     (show('liveFavorites') && liveFavorites.length > 0) ||
     (show('recentlyWatchedLive') && recentLive.length > 0) ||
     (show('favoriteMoviesAndSeries') && vodFavorites.length > 0) ||
@@ -253,7 +279,7 @@ function DashboardBody() {
     (show('tmdbTrending') && tmdbEnabled && (trending.data?.length ?? 0) > 0);
   // Wait for every rail on screen (and a hero still waiting for new arrivals), so
   // "Nothing to show yet" never flashes above content still loading.
-  const anyRailPending = railQueries.some((q) => q.isPending) || (show('hero') && heroLoading);
+  const anyRailPending = railQueries.some((q) => q.isPending) || (myListOn && myList.isPending) || (show('hero') && heroLoading);
 
   // Layout stability: nothing renders below the first section still loading. A skeleton
   // that collapses (empty rail, shared error) or a flagged rail that appears then moves
@@ -340,6 +366,7 @@ function DashboardBody() {
                 progress={watchedFraction(p)}
                 badge={seriesBadge(p)}
                 ariaLabel={t('resumeTitle', { title })}
+                myList={{ itemRef: p.ref, snapshot: p.snapshot ?? { title, contentType: p.ref.contentType } }}
                 onPlay={() =>
                   play({ ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot?.subtitle, posterUrl: p.snapshot?.posterUrl })
                 }
@@ -438,6 +465,7 @@ function DashboardBody() {
                 posterUrl={f.snapshot.posterUrl}
                 to={itemPath(f.ref)}
                 ariaLabel={joinList([f.snapshot.title, subtitle], i18n.language)}
+                myList={{ itemRef: f.ref, snapshot: f.snapshot }}
               />
             );
           }}
@@ -489,6 +517,7 @@ function DashboardBody() {
                   [v.title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
                   i18n.language,
                 )}
+                myList={myListTarget(v)}
               />
             );
           }}

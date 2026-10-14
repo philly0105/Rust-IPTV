@@ -83,6 +83,7 @@
   "unlockTimeLeft": "الوقت المتبقي قبل القفل",
   "lockNow": "أقفل الآن",
   "lockedNowToast": "تم قفل الرقابة الأبوية",
+  "shortcutLockNow": "قفل الرقابة الأبوية الآن",
   "lockoutActive": "أُدخل رمز PIN خاطئ مرات كثيرة جدًا. يمكن تجربة رمز PIN مرة أخرى بعد {{time}}.",
   "behaviourTitle": "كيف تعمل الأقفال",
   "behaviourPinNote": "التغييرات هنا تتطلب رمز PIN.",

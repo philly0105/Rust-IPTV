@@ -190,5 +190,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Não foi possível carregar estes títulos",
   "searchPartialError": "Não foi possível carregar alguns resultados.",
-  "previousEpisode": "Episódio anterior"
+  "previousEpisode": "Episódio anterior",
+  "posterInMyList": "Na Minha lista",
+  "shortcutMyList": "Guardar o título sob o cursor na Minha lista ou removê-lo",
+  "shortcutPosterMenu": "Abrir o menu do título sob o cursor"
 }

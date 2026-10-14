@@ -20,7 +20,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type Category, type Channel, type ContentType, type EpgNowNext, type ItemKey, type ItemRef } from '@/api/types';
 
-import { Button, buttonClass, EmptyState, ErrorState, IconButton, useToast } from '@/ui';
+import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast } from '@/ui';
 import { PlayerStage, RadioPlayer, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 import { channelInput } from '@/features/multiview/addChannel';
@@ -39,14 +39,14 @@ import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { MINUTE } from '../lib/epgTime';
-import { playChannel, resolveChannelSource } from '../lib/playback';
+import { openChannelSource, playChannel } from '../lib/playback';
 import { needsFallback } from '../lib/shortEpg';
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
-import { CHANNEL_ROW_HEIGHT, RowSkeleton } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelRow';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
@@ -108,6 +108,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     shortEpg: shortEpgOn,
     epgOffsetMinutes: prefs.epgOffsetMinutes,
   });
+  // The loading skeleton matches the list's rows at the current scale and density.
+  const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
   useEffect(() => {
     if (!focusListPending.current || paged.isLoading || paged.refreshing) return;
     focusListPending.current = false;
@@ -432,7 +434,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     const src = source.data;
     const external = (player: 'mpv' | 'vlc') => async () => {
       try {
-        const s = await resolveChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
+        // C2: a locked channel or group asks for the PIN first, as inline playback does.
+        const s = await openChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
+        if (!s) return;
         await rpc('player.openExternal', { player, source: s });
       } catch (err) {
         toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
@@ -462,7 +466,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               icon: <Copy className="size-4" />,
               onSelect: async () => {
                 try {
-                  const s = await resolveChannelSource(ch, src);
+                  // C2: copying a locked channel's link needs the PIN like playing it.
+                  const s = await openChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
+                  if (!s) return;
                   if (!canShareSource(s, () => src.kind)) {
                     toast({ title: t('copyFailed'), variant: 'error' });
                     return;
@@ -521,7 +527,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     listBody = (
       <div className="min-h-0 flex-1 overflow-hidden" role="status" aria-busy="true" aria-label={t('loadingChannels')} data-testid="channel-list-loading">
         {Array.from({ length: 12 }, (_, i) => (
-          <div key={i} className="border-b border-divider" style={{ height: CHANNEL_ROW_HEIGHT }}>
+          <div key={i} className="border-b border-divider" style={{ height: rowHeight }}>
             <RowSkeleton pulse />
           </div>
         ))}

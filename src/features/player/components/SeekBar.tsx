@@ -142,7 +142,7 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
           <div
             aria-hidden
             data-testid="rewind-depth"
-            className="pointer-events-none absolute bottom-6 left-0 rounded-sm bg-black/85 px-1.5 py-0.5 font-display text-xs text-white/80 tabular-nums opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
+            className="player-glass-strong player-on-glass-muted pointer-events-none absolute bottom-6 left-0 rounded-sm border px-1.5 py-0.5 font-display text-xs tabular-nums opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
             style={{ opacity: hover && hover.x < 64 ? 0 : undefined }}
           >
             -{formatTime(span)}
@@ -153,7 +153,7 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
         <div
           aria-hidden
           data-testid="seek-preview"
-          className="pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm bg-black/85 px-1.5 py-0.5 font-display text-xs text-white tabular-nums"
+          className="player-glass-strong pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm border px-1.5 py-0.5 font-display text-xs tabular-nums"
           // Kept inside the bar so the ends never clip at the player's edge.
           style={{ left: clampTip(hover.x, trackRef.current?.getBoundingClientRect().width ?? 0) }}
         >

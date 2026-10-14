@@ -54,6 +54,15 @@ export function nextLayout(layout: MultiviewLayout, count: number): MultiviewLay
   return layout;
 }
 
+/**
+ * Classes every wall grid has, whatever the layout. The host is a flex row, so a grid left to
+ * stretch takes the host's height and splits it into rows that disagree with the 16:9 slots
+ * (shorter rows overlap the slots, taller ones leave bands between them). Stacked, the grid
+ * keeps to its content instead (`self-start`, rows packed at the top) and the host scrolls.
+ * From 42rem WALL_CLASSES give it a size and the auto margins centre it.
+ */
+export const WALL_BASE = 'grid w-full gap-1 self-start content-start @2xl:mx-auto @2xl:my-auto';
+
 /** Grid classes of the wall per layout (see the module comment for the ratios). */
 export const WALL_CLASSES: Record<MultiviewLayout, string> = {
   '1x2':
@@ -64,7 +73,11 @@ export const WALL_CLASSES: Record<MultiviewLayout, string> = {
     'grid-cols-1 @2xl:grid-cols-3 @2xl:grid-rows-[3fr_1fr] @2xl:w-[min(100cqw,calc(100cqh*4/3))] @2xl:h-[min(100cqh,calc(100cqw*3/4))] @5xl:grid-cols-[3fr_1fr] @5xl:grid-rows-3 @5xl:w-[min(100cqw,calc(100cqh*64/27))] @5xl:h-[min(100cqh,calc(100cqw*27/64))]',
 };
 
-/** Classes of one slot: 16:9 when stacked, the grid cell from 42rem; the large 1+3 slot spans. */
+/**
+ * Classes of one slot: 16:9 when stacked, the grid cell from 42rem; the large 1+3 slot spans.
+ * `min-h-0` only from 42rem: stacked, the slot's 16:9 height (or its content, if taller) is
+ * what sizes its row.
+ */
 export function slotClass(layout: MultiviewLayout, index: number): string {
   const base = 'aspect-video min-w-0 @2xl:aspect-auto @2xl:min-h-0';
   if (layout === '1+3' && index === 0) return `${base} @2xl:col-span-3 @5xl:col-span-1 @5xl:row-span-3`;

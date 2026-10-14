@@ -96,13 +96,17 @@ export function source(id: string, kind: Source['kind'] = 'xtream', name = `Sour
   return { id, kind, name, position: 0, channelCount: 10 } as unknown as Source;
 }
 
-/** Shows the current path, for navigation assertions. */
+/** Shows the current path (and the route state as JSON), for navigation assertions. */
 export function LocationProbe() {
   const loc = useLocation();
-  return <div data-testid="location">{loc.pathname}</div>;
+  return (
+    <div data-testid="location" data-state={JSON.stringify(loc.state ?? null)}>
+      {loc.pathname}
+    </div>
+  );
 }
 
-export function renderWithApp(ui: ReactNode, path = '/multiview') {
+export function renderWithApp(ui: ReactNode, path: string | { pathname: string; state: unknown } = '/multiview') {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>

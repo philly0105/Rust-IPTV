@@ -71,5 +71,11 @@
   "showWatched": "Pokaż obejrzane",
   "noMatchTitle": "Brak wyników",
   "noMatchBody": "Nic na Mojej liście nie pasuje do „{{query}}”.",
-  "clearSearch": "Wyczyść wyszukiwanie"
+  "clearSearch": "Wyczyść wyszukiwanie",
+  "checkingHint": "Sprawdzanie Mojej listy…",
+  "retryHint": "Nie udało się wczytać Mojej listy. Naciśnij, aby spróbować ponownie.",
+  "menuChecking": "Sprawdzanie Mojej listy…",
+  "menuRetry": "Wczytaj Moją listę ponownie",
+  "notReady": "Moja lista wciąż się wczytuje. Spróbuj ponownie za chwilę.",
+  "loadFailed": "Nie udało się wczytać Mojej listy"
 }

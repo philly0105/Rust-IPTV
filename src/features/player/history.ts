@@ -10,7 +10,8 @@ import { itemKey, type ItemKey, type ItemRef, type PlayerSource } from '@/api/ty
 
 import { failoverSwitchKey } from './failover';
 import { showOsd } from './media';
-import { getSettings, nowTitle, playItem, sourceKindOf, usePlayerStore, type PlayItemArgs } from './store';
+import { onPlaybackHidden } from './parentalLocks';
+import { getSettings, nowTitle, sourceKindOf, startItem, usePlayerStore, type PlayItemArgs } from './store';
 
 export const HISTORY_LIMIT = 10;
 
@@ -91,15 +92,26 @@ usePlayerStore.subscribe((s) => {
   if (useHistoryStore.getState().open && (!s.source?.isLive || s.mode === 'radio')) setHistoryOpen(false);
 });
 
+/** Drops the entries with these keys (channels parental controls hide now). */
+export function dropHistoryEntries(keys: ReadonlySet<ItemKey>): void {
+  const { entries } = useHistoryStore.getState();
+  const next = entries.filter((e) => !keys.has(e.key));
+  if (next.length !== entries.length) useHistoryStore.setState({ entries: next });
+}
+
+// A channel Hide mode refused to start (B, the history popover) is out of reach: drop it, so
+// B goes to the channel before it instead of knocking on the locked one again.
+onPlaybackHidden((item) => dropHistoryEntries(new Set([itemKey(item.ref)])));
+
 /** Plays a history entry, titled like a zap: the channel name, subtitled with what airs now. */
 export async function playHistoryEntry(entry: HistoryEntry): Promise<void> {
-  showOsd(entry.title);
   const settings = await getSettings();
   const [sourceKind, subtitle] = await Promise.all([sourceKindOf(entry.ref.sourceId), nowTitle(entry.ref, settings?.epgOffsetMinutes)]);
   const args: PlayItemArgs = { ref: entry.ref, title: entry.title, isLive: true, isRadio: entry.isRadio, sourceKind };
   if (entry.posterUrl) args.posterUrl = entry.posterUrl;
   if (subtitle) args.subtitle = subtitle;
-  await playItem(args);
+  // The readout only once the parental gate let it through (no locked name behind a PIN prompt).
+  await startItem(args, { onAllowed: () => showOsd(entry.title) });
 }
 
 /** Switches to the previous channel. Returns it, or undefined when there is none yet. */

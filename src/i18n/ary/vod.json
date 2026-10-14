@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "ما قدرناش نحمّلو هاد العناوين",
   "searchPartialError": "شي نتائج ما تشارجاوش.",
-  "previousEpisode": "الحلقة اللي قبل"
+  "previousEpisode": "الحلقة اللي قبل",
+  "posterInMyList": "فالليستة ديالي",
+  "shortcutMyList": "حفظ العنوان اللي عليه المؤشر فالليستة ديالي ولا حيدو منها",
+  "shortcutPosterMenu": "حل القائمة ديال العنوان اللي عليه المؤشر"
 }

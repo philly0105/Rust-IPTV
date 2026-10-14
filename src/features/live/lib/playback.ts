@@ -2,6 +2,8 @@ import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, PlayerKind, PlayerSource, RequestHeaders, Source, SourceKind } from '@/api/types';
 
 import { playItem, playSource } from '@/features/player';
+// The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
+import { ensureUnlocked } from '@/features/parental/gate';
 import { type CatchupChannel, resolveM3uCatchupUrl } from './catchup';
 import { durationMinutes, ms } from './epgTime';
 
@@ -43,6 +45,24 @@ export async function resolveChannelSource(
   const headers = mergeHeaders(source.m3u?.headers, channelHeaders);
   if (headers) out.headers = headers;
   return out;
+}
+
+/**
+ * The channel's playable source for use outside the built-in player (an external player, a copied
+ * link), behind the parental gate (C2): in Ask mode a channel or group that is locked asks for the
+ * PIN first, exactly like inline playback. Resolves null when the prompt was cancelled or the lock
+ * check failed (the gate fails closed and reports why); nothing is resolved or opened then.
+ */
+export async function openChannelSource(
+  channel: Channel,
+  source: Pick<Source, 'kind' | 'm3u'>,
+  displayName: string = channel.name,
+): Promise<PlayerSource | null> {
+  const allowed = await ensureUnlocked([
+    { ref: channel.ref, title: displayName || channel.name, ...(channel.categoryId ? { categoryId: channel.categoryId } : {}) },
+  ]);
+  if (!allowed) return null;
+  return resolveChannelSource(channel, source, displayName);
 }
 
 /** `displayName`: the name the live views show (`settings.stripCountryPrefix`); it titles the player and history. */

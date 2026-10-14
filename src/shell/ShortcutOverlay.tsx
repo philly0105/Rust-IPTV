@@ -20,6 +20,8 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'escape', descKey: 'scEscape', area: 'Global' },
   { combo: 'mod+shift+l', descKey: 'scTheme', area: 'Global' },
   { combo: 'f8', descKey: 'scNotifications', area: 'Global' },
+  // Bound by useParentalEvents only while a session unlock is active.
+  { combo: 'mod+alt+l', descKey: 'parental:shortcutLockNow', area: 'Parental controls' },
   { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
   { combo: 'digit', descKey: 'scDigits', area: 'Live' },
   { combo: '/', descKey: 'live:shortcutFocusSearch', area: 'Live' },
@@ -50,6 +52,10 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'r', descKey: 'multiview:shortcutReplaceTile', area: 'Multi-view' },
   { combo: 's', descKey: 'multiview:shortcutSwapTile', area: 'Multi-view' },
   { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
+  // Bound by the movie and series grid (CategoryGridPage.tsx) while it shows posters.
+  { combo: 's', descKey: 'vod:shortcutMyList', area: 'Vod' },
+  { combo: 'shift+f10', descKey: 'vod:shortcutPosterMenu', area: 'Vod' },
+  { combo: 'contextmenu', descKey: 'vod:shortcutPosterMenu', area: 'Vod' },
   // My List page (MyListPage.tsx), acting on the focused row.
   { combo: 'alt+arrowup', descKey: 'mylist:shortcutMoveUp', area: 'My List' },
   { combo: 'alt+arrowdown', descKey: 'mylist:shortcutMoveDown', area: 'My List' },
@@ -113,6 +119,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
 
 const AREA_ORDER = [
   'Global',
+  'Parental controls',
   'Navigation',
   'Live',
   'Multi-view',
@@ -129,10 +136,12 @@ const AREA_ORDER = [
 /**
  * Area id -> fully namespaced i18n key of its display label. Feature areas
  * reuse the label the feature registers under, so documented and registered
- * entries merge. Usable with `t()` from any namespace (Settings imports it).
+ * entries merge. Usable with `t()` from any namespace; `shortcutReference`
+ * is the one place that reads it.
  */
 export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Global: 'shell:areaGlobal',
+  'Parental controls': 'shell:settingsParental',
   Navigation: 'shell:areaNavigation',
   Live: 'shell:areaLive',
   'Multi-view': 'multiview:shortcutArea',
@@ -146,7 +155,6 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   'Seek bar': 'shell:areaSeekBar',
   'Dialogs and lists': 'shell:areaDialogs',
 };
-const AREA_KEYS = SHORTCUT_AREA_KEYS;
 
 /**
  * Merges registered and documented shortcuts and groups them by area.
@@ -184,6 +192,23 @@ export function groupShortcuts(
   return [...map.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
 }
 
+/**
+ * The full shortcut reference, as both the ? overlay and Settings > Shortcuts
+ * show it: the registered shortcuts merged with the documented ones, grouped
+ * under translated area names. `t` must resolve namespaced keys
+ * (`multiview:shortcutArea`), which any `useTranslation` t does. Sharing this
+ * keeps the two lists from drifting apart (an area missing from a second
+ * label map used to show its raw English id in Settings).
+ */
+export function shortcutReference(registered: ShortcutInfo[], t: (key: string) => string): [string, ShortcutInfo[]][] {
+  const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
+  const label = (area: string) => {
+    const key = SHORTCUT_AREA_KEYS[area];
+    return key ? t(key) : area;
+  };
+  return groupShortcuts(registered, documented, label);
+}
+
 /** Text the overlay filter matches: the description, the combo, and its printed keys ("Ctrl", "PgUp"). */
 export function shortcutHaystack(s: ShortcutInfo): string {
   return `${s.description} ${s.combo} ${comboKeys(s.combo).join(' ')}`.toLowerCase();
@@ -198,13 +223,8 @@ export function ShortcutOverlay() {
   const idBase = useId();
 
   const groups = useMemo(() => {
-    const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
-    const label = (area: string) => {
-      const key = AREA_KEYS[area];
-      return key ? t(key) : area;
-    };
     const q = filter.trim().toLowerCase();
-    return groupShortcuts(registered, documented, label)
+    return shortcutReference(registered, t)
       .map(([area, list]) => [area, q ? list.filter((s) => shortcutHaystack(s).includes(q)) : list] as const)
       .filter(([, list]) => list.length > 0);
   }, [registered, filter, t]);

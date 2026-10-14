@@ -136,6 +136,21 @@ html[data-reduced-motion='true'] .player-osd {
     backdrop-filter: blur(var(--blur-glass, 14px)) saturate(1.2);
   }
 }
+/*
+ * Glass stays dark in the light theme, where the page accent is a deep tone (2.9:1 on black):
+ * inside glass the accent utilities (bg-accent, the seek fill, focus rings) take the bright
+ * glass accent instead, and danger the bright tone the dark theme uses. Dark themes need none
+ * of this: their accent is the glass accent already.
+ */
+:root[data-theme='light'] :is(.player-glass, .player-glass-strong) {
+  --color-accent: var(--color-glass-accent, #f5b544);
+  --color-accent-hover: color-mix(in srgb, var(--color-glass-accent, #f5b544) 80%, var(--color-on-glass, #f4f6fa));
+  --color-accent-pressed: var(--color-glass-accent, #f5b544);
+  --color-accent-fg: var(--color-glass-accent-fg, #1b1204);
+  --color-focus: var(--color-glass-accent, #f5b544);
+  --color-glow: color-mix(in srgb, var(--color-glass-accent, #f5b544) 28%, transparent);
+  --color-danger: #ff7a7a;
+}
 /* Secondary text on glass (passes 4.5:1 on the glass surface over black or white). */
 .player-on-glass-muted {
   color: var(--color-on-glass-muted, #c8cfdc);

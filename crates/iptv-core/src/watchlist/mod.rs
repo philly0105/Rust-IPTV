@@ -393,11 +393,13 @@ pub fn remove(conn: &Connection, r: &ItemRef) -> CoreResult<bool> {
     Ok(n > 0)
 }
 
-/// Rewrites `position` so the listed refs come first, in the given order,
-/// followed by every unlisted entry in its previous relative order. Refs not
-/// in My List are ignored and a ref listed twice keeps its first place, so a
-/// client may send just the part of the list it reordered. Every ref must be
-/// a valid movie or series ref (`invalid` otherwise), at most [`MAX_REFS`].
+/// Rewrites `position` so the listed refs fill the places they held before,
+/// in the given order, and every unlisted entry keeps its place. Refs not in
+/// My List are ignored and a ref listed twice keeps its first place, so a
+/// client may send just the part of the list it reordered, and entries it
+/// cannot see (hidden by parental controls, or filtered out on screen) stay
+/// where they were. Every ref must be a valid movie or series ref (`invalid`
+/// otherwise), at most [`MAX_REFS`].
 pub fn reorder(conn: &mut Connection, refs: &[ItemRef]) -> CoreResult<()> {
     validate_refs(refs)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -409,12 +411,24 @@ pub fn reorder(conn: &mut Connection, refs: &[ItemRef]) -> CoreResult<()> {
             .iter()
             .filter(|r| present.contains(r) && seen.insert(*r))
             .collect();
-        let rest = current.iter().filter(|r| !seen.contains(r));
+        let mut listed = listed.into_iter();
+        // Walk the current order: a listed entry's place takes the next
+        // listed ref, an unlisted entry stays put.
+        let order: Vec<&ItemRef> = current
+            .iter()
+            .map(|r| {
+                if seen.contains(r) {
+                    listed.next().unwrap_or(r)
+                } else {
+                    r
+                }
+            })
+            .collect();
         let mut set = tx.prepare_cached(
             "UPDATE watchlist SET position = ?4
              WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
         )?;
-        for (i, r) in listed.into_iter().chain(rest).enumerate() {
+        for (i, r) in order.into_iter().enumerate() {
             set.execute(params![
                 r.source_id,
                 r.content_type.as_str(),
@@ -666,17 +680,21 @@ mod tests {
     }
 
     #[test]
-    fn reorder_puts_listed_first_and_keeps_the_rest_in_order() {
+    fn reorder_fills_the_listed_places_and_keeps_the_rest_in_place() {
         let mut c = conn();
         for id in ["1", "2", "3", "4"] {
             toggle(&mut c, &movie(id), &snap(id)).unwrap();
         }
-        // [4, 3, 2, 1] -> move 1 and 3 to the front; 9 is not in the list.
+        // [4, 3, 2, 1] -> 1 and 3 swap the 2nd and 4th places; 9 is not in
+        // the list and the repeated 1 keeps its first place.
         reorder(&mut c, &[movie("1"), movie("9"), movie("3"), movie("1")]).unwrap();
-        assert_eq!(ids(&c), ["1", "3", "4", "2"]);
+        assert_eq!(ids(&c), ["4", "1", "2", "3"]);
+        // The whole list sets the whole order.
+        reorder(&mut c, &[movie("1"), movie("2"), movie("3"), movie("4")]).unwrap();
+        assert_eq!(ids(&c), ["1", "2", "3", "4"]);
         // An add after a reorder still lands on top.
         toggle(&mut c, &movie("5"), &snap("5")).unwrap();
-        assert_eq!(ids(&c), ["5", "1", "3", "4", "2"]);
+        assert_eq!(ids(&c), ["5", "1", "2", "3", "4"]);
     }
 
     #[test]

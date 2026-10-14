@@ -67,5 +67,11 @@
   "showWatched": "Megtekintettek megjelenítése",
   "noMatchTitle": "Nincs találat",
   "noMatchBody": "A Saját listában semmi sem felel meg ennek: „{{query}}”.",
-  "clearSearch": "Keresés törlése"
+  "clearSearch": "Keresés törlése",
+  "checkingHint": "Saját lista ellenőrzése…",
+  "retryHint": "Nem sikerült betölteni a Saját listát. Nyomja meg az újrapróbáláshoz.",
+  "menuChecking": "Saját lista ellenőrzése…",
+  "menuRetry": "Saját lista újratöltése",
+  "notReady": "A Saját lista még töltődik. Próbálja újra egy pillanat múlva.",
+  "loadFailed": "Nem sikerült betölteni a Saját listát"
 }

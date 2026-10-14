@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "無法載入這些影片",
   "searchPartialError": "部分結果無法載入。",
-  "previousEpisode": "上一集"
+  "previousEpisode": "上一集",
+  "posterInMyList": "已在我的片單",
+  "shortcutMyList": "將游標所在的影片加入我的片單或從中移除",
+  "shortcutPosterMenu": "開啟游標所在影片的選單"
 }

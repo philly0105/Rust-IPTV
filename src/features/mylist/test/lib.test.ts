@@ -197,3 +197,34 @@ describe('relativeTime', () => {
     expect(relativeTime('soon', 'en', now)).toBe('');
   });
 });
+
+describe('patchList', () => {
+  // TanStack Query reverts a cancelled fetch (revert: true) synchronously
+  // inside cancelQueries, before the patch lands, and drops the fetch's late
+  // answer; the cancelled fetch must not put the old list back afterwards.
+  it('keeps the optimistic patch when a list fetch in flight lands late', async () => {
+    const { queryClient } = await import('@/api/query');
+    const { LIST_KEY, patchList, readList } = await import('../lib/cache');
+    queryClient.clear();
+    const a = e(r('movie', 'a'), 'A');
+    const b = e(r('movie', 'b'), 'B');
+    queryClient.setQueryData(LIST_KEY, [a]);
+    let land: (list: WatchlistEntry[]) => void = () => {};
+    const inFlight = queryClient.fetchQuery({
+      queryKey: LIST_KEY,
+      queryFn: () => new Promise<WatchlistEntry[]>((resolve) => (land = resolve)),
+      staleTime: 0,
+    });
+
+    const previous = patchList((list) => [b, ...list]);
+    expect(titles(previous ?? [])).toEqual(['A']);
+    expect(titles(readList() ?? [])).toEqual(['B', 'A']);
+
+    land([a]);
+    await inFlight.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(titles(readList() ?? [])).toEqual(['B', 'A']);
+    expect(queryClient.getQueryState(LIST_KEY)?.status).toBe('success');
+    queryClient.clear();
+  });
+});

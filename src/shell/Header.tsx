@@ -28,9 +28,15 @@ export function Header({ panelInline }: { panelInline: boolean }) {
   return (
     <header
       data-testid="shell-header"
-      className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
+      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
     >
-      <div className="flex min-w-0 flex-1 items-baseline gap-3">
+      {/* Below sm the title gives way to the page search while it is in use (focused or holding a query). */}
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 items-baseline gap-3',
+          'max-sm:group-has-[[data-shell-search]:focus]/header:hidden max-sm:group-has-[[data-shell-search]:not(:placeholder-shown)]/header:hidden',
+        )}
+      >
         {header?.title ? (
           <>
             {/*
@@ -49,7 +55,20 @@ export function Header({ panelInline }: { panelInline: boolean }) {
 
       {header?.search ? (
         <SearchInput
-          className="w-[clamp(12rem,28vw,25rem)]"
+          className={cn(
+            'sm:w-[clamp(12rem,28vw,25rem)]',
+            /*
+              Below sm a fixed-width field would squeeze the page title to its first
+              letter, so the search folds into a search-icon button: the same input,
+              only narrow and borderless, so a click, Tab or Ctrl+F still lands in it.
+              Focused or holding a query, it unfolds over the title's space.
+            */
+            'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0',
+            'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
+            'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
+            'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',
+            'max-sm:[&:not(:focus-within)>input:placeholder-shown:hover]:bg-surface-2 max-sm:[&:not(:focus-within)>input::placeholder]:text-transparent',
+          )}
           size="sm"
           value={header.search.value}
           onChange={header.search.onChange}

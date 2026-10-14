@@ -36,7 +36,7 @@ const { shellRoutes } = await import('../routes');
 const { useShell, useShellStore } = await import('../store');
 const { sharedRailError } = await import('../dashboard/DashboardPage');
 const { RpcError } = await import('@/api/transport');
-const { useEffect } = await import('react');
+const { useEffect, useState } = await import('react');
 
 /** A page that fills the context panel with two links. */
 function PanelPage() {
@@ -54,7 +54,7 @@ function PanelPage() {
 const { useThemeStore } = await import('../theme');
 const { useToastStore } = await import('@/ui');
 
-function routes() {
+function routes(searchPage = <Page>search page</Page>) {
   return [
     {
       path: '/',
@@ -64,7 +64,7 @@ function routes() {
         { path: 'favorites', element: <Page>favorites page</Page> },
         { path: 'panel', element: <PanelPage /> },
         { path: 'recent', element: <Page>recent page</Page> },
-        { path: 'search', element: <Page>search page</Page> },
+        { path: 'search', element: searchPage },
         { path: 'sources', element: <Page>sources page</Page> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
       ],
@@ -147,6 +147,23 @@ describe('ShellLayout', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
     expect(screen.queryByTestId('command-palette')).toBeNull();
+  });
+
+  it('mod+f focuses the search field even when the search page mounts late (lazy chunk)', async () => {
+    function LateSearchPage() {
+      const [ready, setReady] = useState(false);
+      useEffect(() => {
+        const id = setTimeout(() => setReady(true), 300);
+        return () => clearTimeout(id);
+      }, []);
+      return ready ? <input data-page-search="" aria-label="late search" /> : <Page>loading search</Page>;
+    }
+    const { router } = renderRoutes(routes(<LateSearchPage />), '/favorites');
+    await screen.findByText('favorites page');
+    key('f', { ctrlKey: true });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    const field = await screen.findByLabelText('late search');
+    await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
   it('mod+k toggles the palette closed from inside its input, and Escape still closes it', async () => {

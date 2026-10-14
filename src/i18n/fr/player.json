@@ -223,5 +223,8 @@
   "zapNoGuide": "Aucune information de guide",
   "zapMinutesLeft": "encore {{minutes}} min",
   "zapNow": "Maintenant",
-  "zapNext": "Ensuite"
+  "zapNext": "Ensuite",
+  "parentalHiddenTitle": "Verrouillé par le contrôle parental",
+  "parentalHidden": "Le contrôle parental masque ce contenu. Déverrouillez-le dans les Paramètres pour le regarder.",
+  "parentalStopped": "Lecture arrêtée. Relancez-la et saisissez le code PIN pour continuer à regarder."
 }

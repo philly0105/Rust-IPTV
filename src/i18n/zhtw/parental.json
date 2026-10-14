@@ -63,6 +63,7 @@
   "unlockTimeLeft": "解除鎖定剩餘時間",
   "lockNow": "立即鎖定",
   "lockedNowToast": "家長監護已鎖定",
+  "shortcutLockNow": "立即鎖定家長監護",
   "lockoutActive": "輸入錯誤 PIN 碼的次數過多。{{time}} 後可再次輸入 PIN 碼。",
   "behaviourTitle": "鎖定方式",
   "behaviourPinNote": "在此變更需要輸入 PIN 碼。",

@@ -65,5 +65,11 @@
   "showWatched": "視聴済みを表示",
   "noMatchTitle": "一致なし",
   "noMatchBody": "マイリストに「{{query}}」に一致するものはありません。",
-  "clearSearch": "検索をクリア"
+  "clearSearch": "検索をクリア",
+  "checkingHint": "マイリストを確認中…",
+  "retryHint": "マイリストを読み込めませんでした。押すと再試行します。",
+  "menuChecking": "マイリストを確認中…",
+  "menuRetry": "マイリストを再読み込み",
+  "notReady": "マイリストはまだ読み込み中です。少ししてからもう一度お試しください。",
+  "loadFailed": "マイリストを読み込めませんでした"
 }

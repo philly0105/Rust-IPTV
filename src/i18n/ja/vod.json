@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "これらのタイトルを読み込めませんでした",
   "searchPartialError": "一部の結果を読み込めませんでした。",
-  "previousEpisode": "前のエピソード"
+  "previousEpisode": "前のエピソード",
+  "posterInMyList": "マイリストに保存済み",
+  "shortcutMyList": "カーソル位置の作品をマイリストに保存、または削除",
+  "shortcutPosterMenu": "カーソル位置の作品のメニューを開く"
 }

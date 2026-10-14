@@ -223,5 +223,8 @@
   "zapNoGuide": "Keine Programminformationen",
   "zapMinutesLeft": "noch {{minutes}} Min.",
   "zapNow": "Jetzt",
-  "zapNext": "Danach"
+  "zapNext": "Danach",
+  "parentalHiddenTitle": "Durch Jugendschutz gesperrt",
+  "parentalHidden": "Der Jugendschutz blendet dies aus. Entsperren Sie ihn in den Einstellungen, um es anzusehen.",
+  "parentalStopped": "Wiedergabe beendet. Starten Sie sie erneut und geben Sie die PIN ein, um weiterzusehen."
 }

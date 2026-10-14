@@ -106,6 +106,8 @@ function baseHandlers(total = 200) {
   h['sources.get'] = () => ({ id: 'src1', kind: 'xtream', name: 'Demo portal', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
   h['sources.list'] = () => [h['sources.get']!({})];
   h['settings.get'] = () => settings();
+  // C2: controls off unless a test turns them on (the external player and copy link ask the gate).
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['settings.update'] = () => settings();
   h['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: total })];
   h['catalog.channels'] = serve(Array.from({ length: total }, (_, i) => makeChannel(i)));
@@ -869,6 +871,27 @@ describe('Live context menu: Copy stream address (round 2)', () => {
     const menu = await openMenu(4);
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Copy stream address' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://cdn.example.com/hls/channel4.m3u8'));
+  });
+
+  it('asks the parental gate first: a locked channel (Ask mode) is neither copied nor opened externally', async () => {
+    asM3u((i) => `https://cdn.example.com/hls/channel${i}.m3u8`);
+    rpcMock.handlers['parental.status'] = () => ({ enabled: true, mode: 'ask', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    rpcMock.handlers['parental.check'] = (a) => (a as { items: { ref: unknown }[] }).items.map((i) => i.ref);
+    rpcMock.handlers['player.openExternal'] = () => ({ pid: 1 });
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    renderIn('/s/src1/live', LIVE);
+    let menu = await openMenu(4);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Copy stream address' }));
+    // No PIN dialog host is mounted here, so the gate refuses (as a cancelled PIN prompt does).
+    await waitFor(() => expect(calls('parental.check')).toHaveLength(1));
+    expect(calls('parental.check')[0]!.args).toEqual({ items: [{ ref: makeChannel(4).ref, categoryId: 'g1' }] });
+    menu = await openMenu(4);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in MPV' }));
+    await waitFor(() => expect(calls('parental.check')).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(writeText).not.toHaveBeenCalled();
+    expect(calls('player.openExternal')).toHaveLength(0);
   });
 });
 

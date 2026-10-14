@@ -223,5 +223,8 @@
   "zapNoGuide": "無節目資訊",
   "zapMinutesLeft": "剩餘 {{minutes}} 分鐘",
   "zapNow": "正在播出",
-  "zapNext": "接下來"
+  "zapNext": "接下來",
+  "parentalHiddenTitle": "已被家長監護鎖定",
+  "parentalHidden": "家長監護隱藏了此內容。請在設定中解除鎖定後觀看。",
+  "parentalStopped": "播放已停止。請重新播放並輸入 PIN 以繼續觀看。"
 }

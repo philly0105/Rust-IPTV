@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Bu başlıklar yüklenemedi",
   "searchPartialError": "Bazı sonuçlar yüklenemedi.",
-  "previousEpisode": "Önceki bölüm"
+  "previousEpisode": "Önceki bölüm",
+  "posterInMyList": "Listemde",
+  "shortcutMyList": "İmlecin üzerindeki yapımı Listeme kaydet veya listeden çıkar",
+  "shortcutPosterMenu": "İmlecin üzerindeki yapımın menüsünü aç"
 }

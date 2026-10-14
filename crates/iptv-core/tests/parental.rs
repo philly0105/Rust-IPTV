@@ -1668,6 +1668,231 @@ async fn hide_mode_keeps_locked_items_out_of_single_item_reads() {
     assert!(!e.message.contains("parental"), "unlocked: {}", e.message);
 }
 
+/// Stream and catch-up URLs take a ref directly too: a channel left in the
+/// zap history or a resume record must not play while hide mode hides it.
+#[tokio::test]
+async fn hide_mode_refuses_stream_and_catchup_urls_of_hidden_items() {
+    let a = hidden_app().await;
+    let start = "2026-10-14T08:00:00Z";
+    let calls = |r: Value| {
+        [
+            ("xtream.streamUrl", json!({ "ref": r })),
+            (
+                "xtream.catchupUrl",
+                json!({"ref": r, "start": start, "durationMinutes": 30.0}),
+            ),
+            ("stalker.streamUrl", json!({ "ref": r })),
+            (
+                "stalker.catchupUrl",
+                json!({"ref": r, "start": start, "durationMinutes": 30}),
+            ),
+        ]
+    };
+    // An item lock, a category lock, an adult category, and a locked title
+    // (episode playback goes through the series ref).
+    for r in [
+        rf("s1", "live", "n2"),
+        rf("s1", "live", "p1"),
+        rf("s1", "live", "x1"),
+        rf("s1", "movie", "m2"),
+        rf("s1", "series", "r3"),
+    ] {
+        for (cmd, args) in calls(r.clone()) {
+            let e = a.err(cmd, args).await;
+            assert_eq!(e.code, RpcErrorCode::NotFound, "{cmd} {r}");
+            assert!(e.message.contains("parental"), "{cmd} {r}: {}", e.message);
+        }
+    }
+    // A visible channel gets past the check (the fixture source is M3U, so
+    // the provider call fails later for another reason).
+    for (cmd, args) in calls(rf("s1", "live", "n1")) {
+        let e = a.err(cmd, args).await;
+        assert!(!e.message.contains("parental"), "{cmd}: {}", e.message);
+    }
+    a.call("parental.unlock", json!({"pin": PIN})).await;
+    for (cmd, args) in calls(rf("s1", "live", "n2")) {
+        let e = a.err(cmd, args).await;
+        assert!(
+            !e.message.contains("parental"),
+            "unlocked {cmd}: {}",
+            e.message
+        );
+    }
+}
+
+/// Stalker movies and series never reach `items` (the portal pages them
+/// live); their category is known only from the remembered portal row. Hide
+/// mode must still apply category and adult-category locks to them in every
+/// user-state reader, `parental.check` and the commands that open or play
+/// them.
+#[tokio::test]
+async fn hide_mode_applies_category_locks_to_stalker_titles() {
+    use iptv_core::model::{ContentType, ItemRef};
+    use iptv_core::stalker::{persist_items, CachedItem};
+    let a = app().await;
+    support::bare_source(&a.state, "stk").await;
+    a.state
+        .db_call(|c| {
+            // What a Stalker sync stores for VOD: categories, no items rows.
+            for (pos, (id, name)) in [("xm", "XXX Movies"), ("km", "Late Movies"), ("ok", "Action")]
+                .iter()
+                .enumerate()
+            {
+                c.execute(
+                    "INSERT INTO categories(source_id, content_type, category_id, name, item_count, position)
+                     VALUES ('stk', 'movie', ?1, ?2, 0, ?3)",
+                    params![id, name, pos as i64],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // Listing the portal's movies remembers each row with its category.
+    let row = |id: &str, cat: &str, name: &str| {
+        (
+            ItemRef::new("stk", ContentType::Movie, id),
+            CachedItem {
+                raw: json!({"id": id, "name": id, "cmd": format!("http://portal.invalid/{id}.mp4")}),
+                category_name: Some(name.to_string()),
+                category_id: Some(cat.to_string()),
+            },
+        )
+    };
+    persist_items(
+        &a.state,
+        vec![
+            row("portal42", "xm", "XXX Movies"),
+            row("portal43", "km", "Late Movies"),
+            row("portal44", "ok", "Action"),
+        ],
+    )
+    .await;
+    for id in ["portal42", "portal43", "portal44"] {
+        let r = rf("stk", "movie", id);
+        let snap = json!({"title": id, "contentType": "movie"});
+        a.call("favorites.toggle", json!({"ref": r, "snapshot": snap}))
+            .await;
+        a.call("recent.add", json!({"ref": r, "snapshot": snap}))
+            .await;
+        a.call(
+            "positions.set",
+            json!({"ref": r, "positionSeconds": 600, "durationSeconds": 6000, "snapshot": snap}),
+        )
+        .await;
+        a.call("watchlist.toggle", json!({"ref": r, "snapshot": snap}))
+            .await;
+    }
+    a.lock("stk", "movie", "category", "km").await;
+    a.set_pin().await;
+
+    let all = set(&["portal42", "portal43", "portal44"]);
+    let visible = set(&["portal44"]);
+    for (cmd, args) in [
+        ("favorites.list", json!({})),
+        ("recent.list", json!({})),
+        ("positions.continueWatching", json!({})),
+        ("watchlist.list", json!({})),
+    ] {
+        assert_eq!(ids(&a.call(cmd, args).await), visible, "{cmd} (hide)");
+    }
+    let refs: Vec<Value> = ["portal42", "portal43", "portal44"]
+        .iter()
+        .map(|id| json!({ "ref": rf("stk", "movie", id) }))
+        .collect();
+    let locked: BTreeSet<String> = a
+        .call("parental.check", json!({ "items": refs }))
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["itemId"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        locked,
+        set(&["portal42", "portal43"]),
+        "check without categoryId"
+    );
+    for id in ["portal42", "portal43"] {
+        for (cmd, args) in [
+            ("stalker.vodDetail", json!({"ref": rf("stk", "movie", id)})),
+            ("stalker.streamUrl", json!({"ref": rf("stk", "movie", id)})),
+        ] {
+            let e = a.err(cmd, args).await;
+            assert_eq!(e.code, RpcErrorCode::NotFound, "{cmd} {id}");
+            assert!(e.message.contains("parental"), "{cmd} {id}: {}", e.message);
+        }
+    }
+    let e = a
+        .err(
+            "stalker.vodDetail",
+            json!({"ref": rf("stk", "movie", "portal44")}),
+        )
+        .await;
+    assert!(!e.message.contains("parental"), "{}", e.message);
+
+    a.call("parental.unlock", json!({"pin": PIN})).await;
+    for cmd in [
+        "favorites.list",
+        "recent.list",
+        "positions.continueWatching",
+        "watchlist.list",
+    ] {
+        assert_eq!(ids(&a.call(cmd, json!({})).await), all, "{cmd} (unlocked)");
+    }
+}
+
+/// A `stalker_items` table an older build created (no `category_id`) is
+/// brought up to date at start-up, the column filled from the remembered
+/// row, so hide mode covers titles listed before the upgrade.
+#[tokio::test]
+async fn an_old_stalker_row_cache_gets_its_categories_at_start_up() {
+    let a = app().await;
+    support::bare_source(&a.state, "stk").await;
+    a.state
+        .db_call(|c| {
+            c.execute_batch(
+                "CREATE TABLE stalker_items (
+                   source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                   content_type TEXT NOT NULL,
+                   item_id TEXT NOT NULL,
+                   raw_json TEXT NOT NULL,
+                   category_name TEXT,
+                   touched_at INTEGER NOT NULL,
+                   PRIMARY KEY (source_id, content_type, item_id)
+                 ) WITHOUT ROWID;
+                 INSERT INTO categories(source_id, content_type, category_id, name, item_count, position)
+                   VALUES ('stk', 'movie', 'xm', 'XXX Movies', 0, 0), ('stk', 'movie', 'km', 'Late Movies', 0, 1);
+                 INSERT INTO stalker_items VALUES
+                   ('stk', 'movie', 'p1', '{\"id\":\"p1\",\"category_id\":12}', NULL, 1),
+                   ('stk', 'movie', 'p2', '{\"id\":\"p2\"}', 'Late Movies', 2),
+                   ('stk', 'movie', 'p3', 'not json', NULL, 3);",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    iptv_core::stalker::init(a.state.clone()).await.unwrap();
+    let cats: Vec<(String, Option<String>)> = a
+        .state
+        .db_call(|c| {
+            let mut s =
+                c.prepare("SELECT item_id, category_id FROM stalker_items ORDER BY item_id")?;
+            let rows = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        cats,
+        vec![
+            ("p1".to_string(), Some("12".to_string())),
+            ("p2".to_string(), Some("km".to_string())),
+            ("p3".to_string(), None),
+        ]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Backup
 // ---------------------------------------------------------------------------

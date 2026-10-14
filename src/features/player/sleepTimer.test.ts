@@ -174,6 +174,68 @@ describe('sleep timer: fade, stop, restore (SC5)', () => {
     expect(volume()).toBe(0.5);
   });
 
+  it('keeps the level an arrow key sets during the fade', async () => {
+    playing(live);
+    useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
+    await advance(15 * MIN - 15_000);
+    usePlayerStore.getState().adjustVolume(0.05);
+    const set = volume();
+    expect(set).toBeCloseTo(0.45, 2);
+    await advance(15_000);
+    expect(usePlayerStore.getState().source).toBeUndefined();
+    expect(volume()).toBe(set);
+    expect(localStorage.getItem(SLEEP_FADE_KEY)).toBeNull();
+  });
+
+  it('a mute during the fade only silences it: the level before comes back at expiry, still muted', async () => {
+    playing(live);
+    useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
+    await advance(15 * MIN - 10_000);
+    expect(Math.abs(volume() - 0.8 / 3)).toBeLessThan(0.01);
+    usePlayerStore.getState().toggleMute();
+    ctl.setVolume.mockClear();
+    await advance(5_000);
+    // The ramp holds while muted (a level write would lift the mute); the restore marker stays.
+    expect(ctl.setVolume).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().muted).toBe(true);
+    expect(JSON.parse(localStorage.getItem(SLEEP_FADE_KEY)!)).toEqual({ volume: 0.8 });
+    await advance(5_000);
+    expect(usePlayerStore.getState().source).toBeUndefined();
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.8, muted: true });
+    expect(JSON.parse(localStorage.getItem('player.volume')!)).toEqual({ volume: 0.8, muted: true });
+    expect(localStorage.getItem(SLEEP_FADE_KEY)).toBeNull();
+  });
+
+  it('an unmute during the fade carries on fading, and the level before still comes back', async () => {
+    playing(live);
+    useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
+    await advance(15 * MIN - 20_000);
+    usePlayerStore.getState().toggleMute();
+    await advance(5_000);
+    usePlayerStore.getState().toggleMute();
+    await advance(5_000);
+    expect(usePlayerStore.getState().muted).toBe(false);
+    expect(Math.abs(volume() - 0.8 / 3)).toBeLessThan(0.01);
+    await advance(10_000);
+    expect(usePlayerStore.getState().source).toBeUndefined();
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.8, muted: false });
+  });
+
+  it('Cancel after a mute during the fade puts the level back and keeps the mute', async () => {
+    playing(live);
+    useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
+    await advance(15 * MIN - 10_000);
+    usePlayerStore.getState().toggleMute();
+    ctl.setMuted.mockClear();
+    useSleepTimer.getState().cancel();
+    // The level comes back on a still-muted surface: no unmute blip on the way.
+    expect(ctl.setMuted).not.toHaveBeenCalledWith(false);
+    expect(ctl.setVolume).toHaveBeenLastCalledWith(0.8);
+    expect(usePlayerStore.getState()).toMatchObject({ source: live, volume: 0.8, muted: true });
+    expect(JSON.parse(localStorage.getItem('player.volume')!)).toEqual({ volume: 0.8, muted: true });
+    expect(localStorage.getItem(SLEEP_FADE_KEY)).toBeNull();
+  });
+
   it('fades nothing while muted, and still stops at expiry', async () => {
     playing(live, { muted: true });
     useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
@@ -277,6 +339,19 @@ describe('Z cycles the presets', () => {
     expect(useSleepTimer.getState().target?.kind).toBe('programmeEnd');
     expect(sleep.cycleSleepTimer()).toBeNull();
   });
+
+  it('turns a countdown Keep watching made off, even when it lands on a preset', async () => {
+    playing(live);
+    useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
+    await advance(14 * MIN + 40_000);
+    useSleepTimer.getState().extend(sleep.SLEEP_EXTEND_MINUTES);
+    expect(useSleepTimer.getState().target).toEqual({ kind: 'minutes', minutes: 15 });
+    expect(sleep.cycleSleepTimer()).toBeNull();
+    expect(useSleepTimer.getState().target).toBeNull();
+    // A preset picked afresh steps up again.
+    useSleepTimer.getState().start({ kind: 'minutes', minutes: 15 });
+    expect(sleep.cycleSleepTimer()).toEqual({ kind: 'minutes', minutes: 30 });
+  });
 });
 
 function guide(start: number, end: number): EpgNowNext {
@@ -317,6 +392,21 @@ describe('until the programme ends', () => {
     await advance(0);
     usePlayerStore.setState({ source: { ...live, title: 'Sport 1', ref: { ...liveRef, itemId: '102' } } });
     expect(useSleepTimer.getState()).toMatchObject({ target: { kind: 'minutes', minutes: 20 }, endsAt: T0 + 20 * MIN });
+    // Made from another timer: Z turns it off.
+    expect(sleep.cycleSleepTimer()).toBeNull();
+  });
+
+  it('a zap while the guide is still asked also ends up as the old end, as a plain countdown', async () => {
+    playing(live);
+    handlers['epg.nowNext'] = () => ({ [itemKey(liveRef)]: guide(T0 - 10 * MIN, T0 + 20 * MIN) });
+    useSleepTimer.getState().start({ kind: 'programmeEnd' });
+    expect(useSleepTimerExtras.getState().resolving).toBe(true);
+    usePlayerStore.setState({ source: { ...live, title: 'Sport 1', ref: { ...liveRef, itemId: '102' } } });
+    expect(useSleepTimer.getState()).toMatchObject({ target: { kind: 'programmeEnd' }, endsAt: null });
+    await advance(0);
+    expect(useSleepTimerExtras.getState().resolving).toBe(false);
+    expect(useSleepTimer.getState()).toMatchObject({ target: { kind: 'minutes', minutes: 20 }, endsAt: T0 + 20 * MIN });
+    expect(sleep.cycleSleepTimer()).toBeNull();
   });
 });
 

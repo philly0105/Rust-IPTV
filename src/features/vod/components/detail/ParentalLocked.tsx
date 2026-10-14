@@ -18,15 +18,30 @@ import { Button, EmptyState } from '@/ui';
 
 export type OpenGateState = 'checking' | 'open' | 'locked' | 'failed';
 
+export interface OpenGateOptions {
+  /**
+   * The title's category, for sources whose titles are not in the local catalog (Stalker pages
+   * its VOD live from the portal): without it the core cannot see a group lock or an adult group.
+   */
+  categoryId?: string | undefined;
+  /** Hold the check (state `checking`) until `categoryId` can be known, e.g. while the details load. */
+  waitForCategory?: boolean;
+}
+
 /**
  * Whether a detail page may show `ref`. `failed` means the lock check itself failed: the page
  * stays closed (the gate fails closed), with a retry.
  */
-export function useOpenGate(ref: ItemRef): { state: OpenGateState; retry(): void } {
+export function useOpenGate(ref: ItemRef, opts: OpenGateOptions = {}): { state: OpenGateState; retry(): void } {
+  const { categoryId, waitForCategory = false } = opts;
   const status = useParentalStatus();
   const s = status.data;
   const asks = !!s && s.enabled && s.mode === 'ask' && !s.unlocked;
-  const check = useRpcQuery('parental.check', { items: [{ ref }] }, { enabled: asks, staleTime: 0 });
+  const check = useRpcQuery(
+    'parental.check',
+    { items: [categoryId ? { ref, categoryId } : { ref }] },
+    { enabled: asks && !waitForCategory, staleTime: 0 },
+  );
   const retry = () => {
     void status.refetch();
     if (asks) void check.refetch();
@@ -36,6 +51,7 @@ export function useOpenGate(ref: ItemRef): { state: OpenGateState; retry(): void
   if (status.error?.code === 'unsupported') return { state: 'open', retry };
   if (!s) return { state: status.isError ? 'failed' : 'checking', retry };
   if (!asks) return { state: 'open', retry };
+  if (waitForCategory) return { state: 'checking', retry };
   if (check.isError) return { state: check.error.code === 'unsupported' ? 'open' : 'failed', retry };
   if (!check.data) return { state: 'checking', retry };
   return { state: check.data.some((r) => sameRef(r, ref)) ? 'locked' : 'open', retry };
@@ -44,12 +60,15 @@ export function useOpenGate(ref: ItemRef): { state: OpenGateState; retry(): void
 /** The closed page: unlock with the PIN, or go back. */
 export function ParentalLocked({
   itemRef,
+  categoryId,
   title,
   failed,
   onRetry,
   fallbackHref,
 }: {
   itemRef: ItemRef;
+  /** The title's category when known (see {@link OpenGateOptions.categoryId}). */
+  categoryId?: string | undefined;
   /** Names the title in the PIN prompt once its details are known. */
   title?: string | undefined;
   failed: boolean;
@@ -70,7 +89,7 @@ export function ParentalLocked({
     setBusy(true);
     try {
       // A good PIN unlocks the session; the status change then opens the page.
-      await ensureUnlocked([title ? { ref: itemRef, title } : { ref: itemRef }]);
+      await ensureUnlocked([{ ref: itemRef, ...(title ? { title } : {}), ...(categoryId ? { categoryId } : {}) }]);
     } finally {
       setBusy(false);
     }

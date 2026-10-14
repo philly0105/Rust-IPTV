@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SEEK_STEP } from '@/features/player/usePlaybackShortcuts';
 
-import { DOCUMENTED_SHORTCUTS, SHORTCUT_AREA_KEYS, groupShortcuts, shortcutHaystack } from '../ShortcutOverlay';
+import { DOCUMENTED_SHORTCUTS, SHORTCUT_AREA_KEYS, groupShortcuts, shortcutHaystack, shortcutReference } from '../ShortcutOverlay';
 import { normalizeCombo } from '../shortcuts';
 
 const ROOT = join(__dirname, '..', '..', '..');
@@ -86,6 +86,13 @@ describe('shortcut overlay accuracy', () => {
       const en = JSON.parse(read(`src/i18n/en/${ns}.json`)) as Record<string, string>;
       expect(en[k!], key).toBeTruthy();
     }
+  });
+
+  it('shows every documented area under its translated label, never the raw id', () => {
+    // An area missing from SHORTCUT_AREA_KEYS would come back as its English id, without the marker.
+    const groups = shortcutReference([], (k) => `<${k}>`);
+    expect(groups.length).toBeGreaterThan(0);
+    for (const [area] of groups) expect(area, area).toMatch(/^</);
   });
 
   it('states the seek bar large step (30 s) in every locale', () => {

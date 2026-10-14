@@ -223,5 +223,8 @@
   "zapNoGuide": "番組情報がありません",
   "zapMinutesLeft": "残り{{minutes}}分",
   "zapNow": "放送中",
-  "zapNext": "次の番組"
+  "zapNext": "次の番組",
+  "parentalHiddenTitle": "ペアレンタルコントロールでロック中",
+  "parentalHidden": "ペアレンタルコントロールにより非表示になっています。視聴するには設定でロックを解除してください。",
+  "parentalStopped": "再生を停止しました。もう一度再生して PIN を入力すると続きを視聴できます。"
 }

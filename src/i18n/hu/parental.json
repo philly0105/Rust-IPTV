@@ -67,6 +67,7 @@
   "unlockTimeLeft": "Hátralévő feloldási idő",
   "lockNow": "Zárolás most",
   "lockedNowToast": "Szülői felügyelet zárolva",
+  "shortcutLockNow": "Szülői felügyelet zárolása most",
   "lockoutActive": "Túl sok hibás PIN-kód. Ennyi idő múlva próbálkozhat újra: {{time}}.",
   "behaviourTitle": "Hogyan működnek a zárolások",
   "behaviourPinNote": "Az itteni módosításokhoz PIN-kód kell.",

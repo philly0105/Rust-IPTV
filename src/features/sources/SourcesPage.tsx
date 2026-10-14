@@ -38,6 +38,7 @@ import {
 import { isRemovalPending, scheduleRemoval, usePendingRemovals } from './lib/pendingRemoval';
 import { beginImport, cancelImport, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
 import { redactText } from './lib/redact';
+import { dropSourcesFromLists } from './lib/userLists';
 import { applyOrder, moveItem } from './lib/reorder';
 import { useNextFrame } from './lib/useNextFrame';
 
@@ -348,8 +349,19 @@ export function SourcesPage() {
       onRemoved: () => {
         const list = queryClient.getQueryData<Source[]>(rpcKey('sources.list'));
         if (list) setCache(list.filter((s) => s.id !== target.id));
+        // Its titles leave My List, Favorites, Recent and Continue watching now, before the
+        // source is un-hidden: the rails must not show them again until the refetch lands.
+        dropSourcesFromLists(queryClient, [target.id]);
         useImportProgressStore.getState().clear(target.id);
-        void Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
+        void Promise.all([
+          invalidate('sources.'),
+          invalidate('catalog.'),
+          invalidate('favorites.'),
+          invalidate('recent.'),
+          invalidate('positions.'),
+          invalidate('watchlist.'),
+          invalidate('epg.'),
+        ]);
       },
       onFailed: (e) => {
         const err = RpcError.from(e);
@@ -410,10 +422,19 @@ export function SourcesPage() {
     try {
       await rpcRaw('sources.removeAll');
       setCache([]);
+      dropSourcesFromLists(queryClient, before.map((s) => s.id));
       for (const s of before) useImportProgressStore.getState().clear(s.id);
       setRemoveAllOpen(false);
       toast({ variant: 'success', title: t('removedAllTitle', { count: before.length }) });
-      await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('favorites.'), invalidate('recent.'), invalidate('epg.')]);
+      await Promise.all([
+        invalidate('sources.'),
+        invalidate('catalog.'),
+        invalidate('favorites.'),
+        invalidate('recent.'),
+        invalidate('positions.'),
+        invalidate('watchlist.'),
+        invalidate('epg.'),
+      ]);
     } catch (e) {
       toast({
         variant: 'error',

@@ -5,6 +5,10 @@
  * back with an error toast the user can act on when the core refuses it.
  * Adding offers "Open My List"; removing offers Undo, which puts the title
  * back in its old place.
+ *
+ * The core's toggle flips whatever it holds, so the UI must know the current
+ * state before it sends one: until the shared list has loaded, nothing is sent
+ * (the button and menu item show that state and stay disabled).
  */
 
 import { useCallback } from 'react';
@@ -15,6 +19,7 @@ import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type ItemRef, type ItemSnapshot } from '@/api/types';
 
 import { useToast } from '../deps';
+import { useMyList } from './useMyList';
 import { errorText, patchList, readList, refreshMyList, restoreEntry, rollbackList } from '../lib/cache';
 import { canSave, draftEntry } from '../lib/list';
 import { MY_LIST_PATH } from '../paths';
@@ -33,23 +38,30 @@ export function isToggling(ref: ItemRef): boolean {
 /**
  * Returns `toggle(ref, snapshot)`, which resolves to the new state (`true` =
  * now in My List), or `undefined` when nothing was sent: a live or radio ref,
- * a toggle of the same title already in flight, or a failure (already shown
- * as a toast).
+ * a toggle of the same title already in flight, a list that has not loaded
+ * (so the current state is unknown), or a failure (already shown as a toast).
  */
 export function useMyListToggle(): (itemRef: ItemRef, snapshot: ItemSnapshot) => Promise<boolean | undefined> {
   const { t } = useTranslation('mylist');
   const { toast } = useToast();
   const navigate = useNavigate();
+  // Subscribes to the shared list, so whoever toggles also keeps it loaded.
+  useMyList();
 
   return useCallback(
     async (itemRef: ItemRef, snapshot: ItemSnapshot) => {
       const key = itemKey(itemRef);
       if (!canSave(itemRef) || inFlight.has(key)) return undefined;
-      inFlight.add(key);
       const title = snapshot.title;
       const list = readList();
-      const index = list?.findIndex((x) => sameRef(x.ref, itemRef)) ?? -1;
-      const removed = index >= 0 ? list![index] : undefined;
+      if (!list) {
+        // Unknown state: a toggle now could remove a saved title. Nothing is sent.
+        toast({ title: t('notReady'), variant: 'info' });
+        return undefined;
+      }
+      inFlight.add(key);
+      const index = list.findIndex((x) => sameRef(x.ref, itemRef));
+      const removed = index >= 0 ? list[index] : undefined;
       const previous = patchList((l) => (removed ? l.filter((x) => !sameRef(x.ref, itemRef)) : [draftEntry(itemRef, snapshot), ...l]));
       try {
         const { inList } = await rpc('watchlist.toggle', { ref: itemRef, snapshot });

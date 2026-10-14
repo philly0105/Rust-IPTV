@@ -63,17 +63,43 @@ afterEach(() => {
 });
 
 describe('MyListPage: list and header', () => {
-  it('lists every title in the user order with ranks, and sets the header with a count and search', async () => {
+  it('lists every title in the user order with ranks, and sets the header with a count (search stays on the page)', async () => {
     await loaded();
     expect(shownTitles()).toEqual(['Arrival', 'Dark', 'Heat', 'Blade Runner']);
     expect(screen.getAllByTestId('mylist-rank').map((r) => r.textContent)).toEqual(['1', '2', '3', '4']);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('My List');
-    expect(header()).toMatchObject({ title: 'My List', subtitle: '4 titles', search: { value: '', placeholder: 'Search My List' } });
+    expect(header()).toMatchObject({ title: 'My List', subtitle: '4 titles' });
+    // The search lives in the page toolbar, so a phone-width header keeps its room for the title.
+    expect(header()?.search).toBeUndefined();
+    const search = within(screen.getByTestId('mylist-toolbar')).getByRole('searchbox', { name: 'Search My List' });
+    expect(search.hasAttribute('data-page-search')).toBe(true);
     expect(within(rowOf('Heat')).getByTestId('mylist-watched').textContent).toBe('Watched');
     expect(screen.getByRole('list', { name: 'My List' })).toBeTruthy();
     // Series carry no watched tick (they are marked episode by episode).
     expect(rowOf('Dark').querySelector('[data-action="watched"]')).toBeNull();
     expect(rowOf('Arrival').querySelector('[data-action="watched"]')).not.toBeNull();
+  });
+
+  it('gives the title the width below sm: rank on the poster, no grip, actions on their own visible line', async () => {
+    // jsdom has no layout, so this pins the responsive classes behind the 390 px fix (R1-craft).
+    await loaded();
+    const row = rowOf('Arrival');
+    const rank = within(row).getByTestId('mylist-rank');
+    expect(rank.className).toMatch(/(^|\s)absolute(\s|$)/);
+    expect(rank.className).toContain('sm:static');
+    // The grip shows only from sm up, on a fine pointer.
+    const grip = within(row).getByTestId('mylist-drag');
+    expect(grip.className).toContain('sm:pointer-fine:flex');
+    expect(grip.className).not.toMatch(/(^|\s)pointer-fine:flex/);
+    // Actions: their own grid line under the title; the move buttons hide on hover only from sm up.
+    expect(within(row).getByTestId('mylist-actions').className).toContain('row-start-2');
+    const moves = within(row).getByTestId('mylist-move').className;
+    expect(moves).toContain('sm:pointer-fine:opacity-0');
+    expect(moves).not.toMatch(/(^|\s)pointer-fine:opacity-0/);
+    // Two lines before the ellipsis, and the full title on hover.
+    const title = within(row).getByTestId('mylist-title');
+    expect(title.className).toContain('line-clamp-2');
+    expect(title.getAttribute('title')).toBe('Arrival');
   });
 
   it('shows the source on each row only when the list spans several', async () => {
@@ -202,12 +228,26 @@ describe('MyListPage: filter, sort, search, Hide watched', () => {
     expect(screen.queryByRole('switch', { name: 'Hide watched' })).toBeNull();
   });
 
-  it('searches from the header, accent-blind, mirrored in the URL', async () => {
+  it('searches from the page toolbar, accent-blind, mirrored in the URL', async () => {
     await loaded([...LIST, h.entry(m('m9'), 'Amélie')]);
-    act(() => header()!.search!.onChange('amelie'));
+    const search = () => screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search My List' });
+    fireEvent.change(search(), { target: { value: 'amelie' } });
     await waitFor(() => expect(shownTitles()).toEqual(['Amélie']));
     expect(h.location.current).toBe('/my-list?q=amelie');
-    expect(header()!.search!.value).toBe('amelie');
+    expect(search().value).toBe('amelie');
+  });
+
+  it('keeps the search box when it matches nothing, and ArrowDown moves on to the list', async () => {
+    h.installCore(rpc, LIST);
+    open('/my-list?q=zzz');
+    await screen.findByText('Nothing in My List matches “zzz”.');
+    const search = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search My List' });
+    expect(search.value).toBe('zzz');
+    fireEvent.change(search, { target: { value: 'dar' } });
+    await waitFor(() => expect(shownTitles()).toEqual(['Dark']));
+    search.focus();
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(itemOf('Dark'));
   });
 
   it('restores filter, sort and Hide watched from the URL', async () => {
@@ -391,17 +431,15 @@ describe('MyListPage: remove and watched', () => {
     await waitFor(() => expect(rowOf('Heat').querySelector('[data-action="watched"]')!.getAttribute('aria-pressed')).toBe('false'));
   });
 
-  it('ignores page keys typed into the header search', async () => {
+  it('ignores page keys typed into the search box', async () => {
     await loaded();
-    const input = document.createElement('input');
-    document.body.appendChild(input);
+    const input = screen.getByRole('searchbox', { name: 'Search My List' });
     input.focus();
     press(input, 'Delete');
     press(input, 'w');
     await act(async () => undefined);
     expect(rpc.callsOf('watchlist.remove')).toHaveLength(0);
     expect(rpc.callsOf('userstate.setWatched')).toHaveLength(0);
-    input.remove();
   });
 
   it('registers its keys for the ? overlay under My List; the move keys only in the user order', async () => {

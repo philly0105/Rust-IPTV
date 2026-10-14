@@ -45,8 +45,6 @@ export function MovieDetailPage() {
   const { sourceId = '', itemId = '' } = useParams();
   const detailScrollRef = useRef<HTMLDivElement>(null);
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'movie', itemId }), [sourceId, itemId]);
-  // C2: in Ask mode a locked movie shows nothing until the PIN is entered.
-  const gate = useOpenGate(ref);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
   const source = useSource(sourceId);
@@ -64,6 +62,13 @@ export function MovieDetailPage() {
   const twin = useTwinProbe(source.data, ref, probeTwin);
   const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
+  // C2: in Ask mode a locked movie shows nothing until the PIN is entered. Stalker titles are not
+  // in the local catalog, so the core learns their group only from the details: wait for them.
+  const stalkerSource = source.data?.kind === 'stalker';
+  const gate = useOpenGate(ref, {
+    categoryId: stalkerSource ? item?.categoryId : undefined,
+    waitForCategory: source.isPending || (stalkerSource && detail.isPending),
+  });
   const tmdb = useTmdbMovie(item, tmdbOn);
   const model = useMemo(() => (detail.data ? mergeMovieDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
   const similarFallback = useTmdbSimilar('movie', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
@@ -137,6 +142,7 @@ export function MovieDetailPage() {
         ) : (
           <ParentalLocked
             itemRef={ref}
+            categoryId={stalkerSource ? item?.categoryId : undefined}
             title={model?.title}
             failed={gate.state === 'failed'}
             onRetry={gate.retry}

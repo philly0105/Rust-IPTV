@@ -8,8 +8,8 @@ import {
   HardDrive,
   Heart,
   History,
+  House,
   Keyboard,
-  LayoutDashboard,
   LayoutGrid,
   ListVideo,
   PanelLeftClose,
@@ -39,8 +39,10 @@ interface PrimaryLink {
   end?: boolean;
 }
 
+// Home is a house, not a layout glyph: collapsed, the rail is icons only, and a
+// tile-shaped Home would echo Multi-view's grid (LayoutGrid, as in its page and menus).
 const PRIMARY: PrimaryLink[] = [
-  { to: '/dashboard', labelKey: 'navDashboard', icon: LayoutDashboard },
+  { to: '/dashboard', labelKey: 'navDashboard', icon: House },
   { to: '/search', labelKey: 'navSearch', icon: Search },
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
   { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },

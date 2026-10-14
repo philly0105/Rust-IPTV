@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Deze titels konden niet worden geladen",
   "searchPartialError": "Sommige resultaten konden niet worden geladen.",
-  "previousEpisode": "Vorige aflevering"
+  "previousEpisode": "Vorige aflevering",
+  "posterInMyList": "In Mijn lijst",
+  "shortcutMyList": "Titel onder de cursor opslaan in Mijn lijst of eruit halen",
+  "shortcutPosterMenu": "Menu openen voor de titel onder de cursor"
 }

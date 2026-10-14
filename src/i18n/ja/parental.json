@@ -63,6 +63,7 @@
   "unlockTimeLeft": "ロック解除の残り時間",
   "lockNow": "今すぐロック",
   "lockedNowToast": "ペアレンタルコントロールをロックしました",
+  "shortcutLockNow": "ペアレンタルコントロールを今すぐロック",
   "lockoutActive": "間違ったPINの入力が多すぎます。{{time}}後にもう一度PINを入力できます。",
   "behaviourTitle": "ロックの動作",
   "behaviourPinNote": "ここでの変更にはPINが必要です。",

@@ -67,5 +67,11 @@
   "showWatched": "Bekeken tonen",
   "noMatchTitle": "Geen resultaten",
   "noMatchBody": "Niets in Mijn lijst komt overeen met ‘{{query}}’.",
-  "clearSearch": "Zoekopdracht wissen"
+  "clearSearch": "Zoekopdracht wissen",
+  "checkingHint": "Mijn lijst controleren…",
+  "retryHint": "Mijn lijst kon niet worden geladen. Druk om het opnieuw te proberen.",
+  "menuChecking": "Mijn lijst controleren…",
+  "menuRetry": "Mijn lijst opnieuw laden",
+  "notReady": "Mijn lijst wordt nog geladen. Probeer het zo opnieuw.",
+  "loadFailed": "Mijn lijst kon niet worden geladen"
 }

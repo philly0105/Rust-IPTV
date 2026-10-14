@@ -146,6 +146,8 @@ describe('useMultiviewMenuItem', () => {
     act(() => result.current.onSelect());
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/multiview'));
     expect(store().tiles.map((t) => t.title)).toEqual(['Channel 1']);
+    // The page is told which tile to focus, so keyboard focus does not fall to the body.
+    expect(JSON.parse(screen.getByTestId('location').dataset['state']!)).toEqual({ focusTile: store().tiles[0]!.key });
   });
 
   it('says so when the channel is already up, with a way to the wall', async () => {

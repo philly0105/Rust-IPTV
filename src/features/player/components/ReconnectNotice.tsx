@@ -28,7 +28,7 @@ export function ReconnectNotice({ compact }: { compact: boolean }) {
         aria-live="polite"
         data-testid="reconnect-notice"
         className={cn(
-          'inline-flex max-w-[90%] items-center rounded-full bg-black/70 px-3 py-1 text-white/90',
+          'player-glass-strong inline-flex max-w-[90%] items-center rounded-full border px-3 py-1',
           compact ? 'text-xs' : 'text-sm',
         )}
       >

@@ -199,5 +199,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Не ўдалося загрузіць гэтыя назвы",
   "searchPartialError": "Некаторыя вынікі не атрымалася загрузіць.",
-  "previousEpisode": "Папярэдні эпізод"
+  "previousEpisode": "Папярэдні эпізод",
+  "posterInMyList": "У маім спісе",
+  "shortcutMyList": "Захаваць назву пад курсорам у мой спіс або прыбраць яе адтуль",
+  "shortcutPosterMenu": "Адкрыць меню назвы пад курсорам"
 }

@@ -8,8 +8,8 @@ import {
   HardDrive,
   Heart,
   History,
+  House,
   Keyboard,
-  LayoutDashboard,
   LayoutGrid,
   ListVideo,
   Lock,
@@ -97,7 +97,7 @@ export function usePaletteItems(): PaletteItem[] {
     const go = (to: string) => () => navigate(to);
     const nav = t('groupNavigation');
     const items: PaletteItem[] = [
-      { id: 'nav.dashboard', title: t('navDashboard'), group: nav, icon: LayoutDashboard, run: go('/dashboard'), keywords: ['home'] },
+      { id: 'nav.dashboard', title: t('navDashboard'), group: nav, icon: House, run: go('/dashboard'), keywords: ['home'] },
       { id: 'nav.search', title: t('navSearch'), group: nav, icon: Search, shortcut: 'mod+f', run: go('/search') },
       { id: 'nav.guide', title: t('navGuide'), group: nav, icon: CalendarRange, run: go('/epg'), keywords: ['epg', 'tv guide', 'schedule'] },
       { id: 'nav.multiview', title: t('navMultiview'), group: nav, icon: LayoutGrid, run: go('/multiview'), keywords: ['multiview', 'wall', 'split screen', 'mosaic'] },
@@ -139,6 +139,7 @@ export function usePaletteItems(): PaletteItem[] {
         title: t('lockParentalNow'),
         group: set,
         icon: Lock,
+        shortcut: 'mod+alt+l',
         keywords: ['parental', 'pin', 'lock', 'kids'],
         run: () =>
           void lockNow().then(

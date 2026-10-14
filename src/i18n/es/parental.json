@@ -71,6 +71,7 @@
   "unlockTimeLeft": "Tiempo de desbloqueo restante",
   "lockNow": "Bloquear ahora",
   "lockedNowToast": "Control parental bloqueado",
+  "shortcutLockNow": "Bloquear el control parental ahora",
   "lockoutActive": "Demasiados PIN incorrectos. Podrás volver a probar el PIN en {{time}}.",
   "behaviourTitle": "Cómo funcionan los bloqueos",
   "behaviourPinNote": "Los cambios aquí piden el PIN.",

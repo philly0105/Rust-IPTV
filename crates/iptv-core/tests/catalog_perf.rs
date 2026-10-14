@@ -264,3 +264,263 @@ async fn queries_on_50k_channels_stay_fast() {
         assert!(took < QUERY_BUDGET, "{label} took {took:?}");
     }
 }
+
+/// Group `g` of the mixed-language playlist: French (hidden by
+/// English-only), British (kept), adult (hidden by parental hide mode) or
+/// untagged.
+fn mixed_group(g: usize) -> String {
+    match g % 5 {
+        _ if g < 10 => format!("XXX | Adult {g}"),
+        0 => format!("FR | Groupe {g}"),
+        1 => format!("UK | Group {g}"),
+        _ => format!("Group {g}"),
+    }
+}
+
+/// Channel `i`'s title: a Cyrillic name (hidden unless its group is
+/// English), a German tag (hidden), an English tag (kept even in a French
+/// group), a "UK:" tag (kept), capitals that are not a tag, or plain words.
+/// Over half the titles go through the full title test rather than the
+/// clause's `GLOB` shortcut, as in a typical provider list.
+fn mixed_title(i: usize) -> String {
+    match i % 50 {
+        3 => format!("Канал {i}"),
+        n if n % 7 == 0 => format!("DE - Channel {i}"),
+        n if n % 7 == 1 => format!("EN - Channel {i}"),
+        n if n % 7 == 2 => format!("UK: Channel {i}"),
+        n if n % 7 == 3 => format!("BBC Channel {i}"),
+        _ => format!("Channel {i}"),
+    }
+}
+
+fn gen_mixed_m3u(n: usize, groups: usize) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(n * 170);
+    s.push_str("#EXTM3U\n");
+    for i in 0..n {
+        let g = i % groups;
+        let _ = write!(
+            s,
+            "#EXTINF:-1 tvg-id=\"ch{i}.example\" tvg-logo=\"http://logo.example/{i}.png\" group-title=\"{}\",{}\nhttp://stream.example/live/{i}.ts\n",
+            mixed_group(g),
+            mixed_title(i)
+        );
+    }
+    s
+}
+
+/// R1 review: `englishOnly` filters by the title and category language. On
+/// 50k channels every whole-list call (categories, first and deep pages,
+/// sort, one-letter search, the zap list, neighbors) stays within the same
+/// budget as without it, alone and together with parental hide mode
+/// (10 adult groups, 2 locked groups, 200 locked channels). Totals are
+/// checked against the Rust rule, so a faster filter cannot drop or keep
+/// the wrong rows.
+///
+/// Each call is timed after a warm-up call, which builds the connection's
+/// cached set of hidden rowids (`catalog::language::hidden_rowids`); the
+/// budget is not scaled for debug builds, as above.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn english_only_queries_on_50k_channels_stay_fast() {
+    use iptv_core::catalog::language::is_non_english;
+    use iptv_core::parental::is_adult_category;
+    use std::collections::HashSet;
+
+    let env = env().await;
+    let r = iptv_core::rpc::build_router();
+    let src = add_text(&env.state, "mixed", &gen_mixed_m3u(CHANNELS, GROUPS)).await;
+    assert_eq!(src.channel_count, CHANNELS as i64);
+    let sid = src.id.clone();
+    let call = |method: &'static str, args: Value| {
+        let r = &r;
+        let state = env.state.clone();
+        async move {
+            r.dispatch(state, method, args)
+                .await
+                .unwrap_or_else(|e| panic!("{method}: {e:?}"))
+        }
+    };
+    // Category ids by name, and the channels to lock (the first channel of
+    // groups 20..220: channel k sits in group k % 250).
+    let cats = call(
+        "catalog.categories",
+        json!({"sourceId": sid, "contentType": "live", "includeHidden": true}),
+    )
+    .await;
+    assert_eq!(cats.as_array().unwrap().len(), GROUPS);
+    call("settings.update", json!({"patch": {"englishOnly": true}})).await;
+    let cat_id = |name: &str| -> String {
+        cats.as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("{name} in {cats}"))["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let s2 = sid.clone();
+    let titles: Vec<String> = (20..220).map(mixed_title).collect();
+    let item_locks: Vec<String> = env
+        .state
+        .db_call(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT item_id FROM items WHERE source_id = ?1 AND content_type = 'live' AND title = ?2",
+            )?;
+            titles
+                .iter()
+                .map(|t| stmt.query_row(rusqlite::params![s2, t], |r| r.get(0)))
+                .collect::<Result<Vec<String>, _>>()
+                .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+    let locked_groups = [12usize, 13];
+
+    // What each mode must show, from the Rust rules.
+    let expect = |hide: bool| -> (usize, usize) {
+        let mut groups_seen = HashSet::new();
+        let mut visible = 0;
+        for i in 0..CHANNELS {
+            let g = i % GROUPS;
+            let name = mixed_group(g);
+            if is_non_english(&mixed_title(i), Some(&name)) {
+                continue;
+            }
+            if hide
+                && (is_adult_category(&name)
+                    || locked_groups.contains(&g)
+                    || (20..220).contains(&i))
+            {
+                continue;
+            }
+            visible += 1;
+            groups_seen.insert(g);
+        }
+        (visible, groups_seen.len())
+    };
+
+    for hide in [false, true] {
+        if hide {
+            for g in locked_groups {
+                let id = cat_id(&mixed_group(g));
+                call(
+                    "parental.setLocked",
+                    json!({"target": {"sourceId": sid, "contentType": "live", "kind": "category", "targetId": id, "name": "g"}, "locked": true}),
+                )
+                .await;
+            }
+            for id in &item_locks {
+                call(
+                    "parental.setLocked",
+                    json!({"target": {"sourceId": sid, "contentType": "live", "kind": "item", "targetId": id, "name": "c"}, "locked": true}),
+                )
+                .await;
+            }
+            call("parental.setPin", json!({"newPin": "2468"})).await;
+        }
+        let mode = if hide {
+            "englishOnly + hide"
+        } else {
+            "englishOnly"
+        };
+        let (visible, group_count) = expect(hide);
+        assert!(visible > CHANNELS / 2 && visible < CHANNELS, "{visible}");
+        let open_group = cat_id(&mixed_group(GROUPS / 2 + 2));
+
+        type Check = Box<dyn Fn(&Value)>;
+        let calls: Vec<(&str, &'static str, Value, Check)> = vec![
+            (
+                "categories",
+                "catalog.categories",
+                json!({"sourceId": sid, "contentType": "live"}),
+                Box::new(move |v: &Value| assert_eq!(v.as_array().unwrap().len(), group_count)),
+            ),
+            (
+                "first page",
+                "catalog.channels",
+                json!({"sourceId": sid}),
+                Box::new(move |v: &Value| assert_eq!(v["total"], visible as i64)),
+            ),
+            (
+                "deep page",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"offset": visible - 100, "limit": 100}}),
+                Box::new(|v: &Value| assert_eq!(v["items"].as_array().unwrap().len(), 100)),
+            ),
+            (
+                "group page",
+                "catalog.channels",
+                json!({"sourceId": sid, "categoryId": open_group}),
+                Box::new(|v: &Value| assert!(v["total"].as_i64().unwrap() > 0, "{v}")),
+            ),
+            (
+                "sorted by name, descending",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"sort": "name", "dir": "desc"}}),
+                Box::new(move |v: &Value| assert_eq!(v["total"], visible as i64)),
+            ),
+            (
+                "in-list search",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"search": "Channel 99"}}),
+                Box::new(|v: &Value| assert!(v["total"].as_i64().unwrap() > 0, "{v}")),
+            ),
+            (
+                "in-list search, one letter",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"search": "c"}}),
+                Box::new(|v: &Value| assert!(v["total"].as_i64().unwrap() > 0, "{v}")),
+            ),
+            (
+                "global search",
+                "catalog.search",
+                json!({"query": "Channel 1234"}),
+                Box::new(|v: &Value| assert!(v["live"].is_array(), "{v}")),
+            ),
+            (
+                "all live channels (zap list)",
+                "catalog.allLiveChannels",
+                json!({"sourceId": sid}),
+                Box::new(move |v: &Value| {
+                    assert_eq!(
+                        v.as_array().unwrap().len(),
+                        visible.min(iptv_core::catalog::ALL_LIVE_CAP)
+                    )
+                }),
+            ),
+        ];
+        for (label, method, args, check) in calls {
+            let first = call(method, args.clone()).await;
+            check(&first);
+            let started = Instant::now();
+            let v = call(method, args).await;
+            let took = started.elapsed();
+            check(&v);
+            eprintln!("catalog_perf: {mode}: {label} in {took:?}");
+            let budget = if method == "catalog.allLiveChannels" {
+                QUERY_BUDGET * 4
+            } else {
+                QUERY_BUDGET
+            };
+            assert!(
+                took < budget,
+                "{mode}: {label} took {took:?} (budget {budget:?})"
+            );
+        }
+
+        let mid = call(
+            "catalog.channels",
+            json!({"sourceId": sid, "query": {"offset": visible / 2, "limit": 1}}),
+        )
+        .await;
+        let reference = mid["items"][0]["ref"].clone();
+        let _ = call("catalog.neighbors", json!({"ref": reference})).await;
+        let started = Instant::now();
+        let n = call("catalog.neighbors", json!({"ref": reference})).await;
+        let took = started.elapsed();
+        eprintln!("catalog_perf: {mode}: neighbors in {took:?}");
+        assert!(n["next"].is_object() && n["prev"].is_object(), "{n}");
+        assert!(took < QUERY_BUDGET, "{mode}: neighbors took {took:?}");
+    }
+}

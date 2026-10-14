@@ -92,12 +92,16 @@ pub fn register(r: &mut RpcRouter) {
         crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<SeriesDetail, RpcError>(service::series_detail(&s, &a.item_ref).await?)
     });
+    // So do the stream and catch-up URLs: a stale history or resume entry
+    // must not play a locked channel or title without the PIN.
     r.add("xtream.streamUrl", |s, a: StreamUrlArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
             service::stream_url(&s, &a.item_ref, a.episode_id.as_deref()).await?,
         )
     });
     r.add("xtream.catchupUrl", |s, a: CatchupArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
             service::catchup_url(&s, &a.item_ref, &a.start, a.duration_minutes).await?,
         )

@@ -9,10 +9,12 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, type NavigateFunction } from 'react-router';
 
+import { sameRef } from '@/api/types';
 import { toast, type MenuAction } from '@/ui';
 
 import { addToWall, wallAccepts } from './addChannel';
-import { MULTIVIEW_PATH } from './paths';
+import { MULTIVIEW_PATH, type MultiviewLocationState } from './paths';
+import { useMultiviewStore } from './store';
 import type { MultiviewChannelInput } from './types';
 
 /** Runs the add and says what happened; exported for tests and for callers without a menu. */
@@ -24,9 +26,13 @@ export async function addFromMenu(
   const r = await addToWall(ch);
   const open = { label: t('openMultiview'), onClick: () => void navigate(MULTIVIEW_PATH) };
   switch (r) {
-    case 'added':
-      void navigate(MULTIVIEW_PATH);
+    case 'added': {
+      // The page focuses the new tile, so a keyboard user lands on what they added.
+      const key = useMultiviewStore.getState().tiles.find((x) => sameRef(x.ref, ch.ref))?.key;
+      const state: MultiviewLocationState = key ? { focusTile: key } : {};
+      void navigate(MULTIVIEW_PATH, { state });
       return;
+    }
     case 'duplicate':
       toast({ id: 'multiview-add', title: t('toastDuplicate', { name: ch.title }), action: open });
       return;

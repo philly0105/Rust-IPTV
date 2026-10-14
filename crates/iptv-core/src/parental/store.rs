@@ -254,16 +254,17 @@ pub fn locks(conn: &Connection, source_id: Option<&str>) -> CoreResult<Vec<Paren
     Ok(out)
 }
 
-/// Trimmed, length-checked copy of a lock target.
+/// Length-checked copy of a lock target (source id and name trimmed; the
+/// target id kept exactly as given).
 pub fn validate_target(t: &ParentalLockTarget) -> CoreResult<ParentalLockTarget> {
     let source_id = t.source_id.trim();
-    let target_id = t.target_id.trim();
-    if source_id.is_empty() || target_id.is_empty() {
+    if source_id.is_empty() || t.target_id.trim().is_empty() {
         return Err(CoreError::invalid(
             "target.sourceId and target.targetId are required",
         ));
     }
-    if source_id.len() > MAX_ID_LEN || target_id.len() > MAX_ID_LEN {
+    // The limit applies to what is stored: padding cannot carry an id past it.
+    if source_id.len() > MAX_ID_LEN || t.target_id.len() > MAX_ID_LEN {
         return Err(CoreError::invalid("target ids are too long"));
     }
     let name: String = t.name.trim().chars().take(MAX_NAME_CHARS).collect();
@@ -340,6 +341,15 @@ pub fn check(
     let mut item_cat = conn.prepare_cached(
         "SELECT category_id FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
     )?;
+    // Stalker movies and series are not in `items`; their listed category
+    // is kept with the remembered portal row.
+    let mut stalker_cat = if crate::stalker::items_have_categories(conn)? {
+        Some(conn.prepare_cached(
+            "SELECT category_id FROM stalker_items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND category_id IS NOT NULL",
+        )?)
+    } else {
+        None
+    };
     let mut cat_name = conn.prepare_cached(
         "SELECT name FROM categories WHERE source_id = ?1 AND content_type = ?2 AND category_id = ?3",
     )?;
@@ -357,9 +367,18 @@ pub fn check(
         }
         let category = match category_id.as_deref().filter(|c| !c.is_empty()) {
             Some(c) => Some(c.to_string()),
-            None => item_cat
+            None => match item_cat
                 .query_row(params![r.source_id, ct, r.item_id], |row| row.get(0))
-                .optional()?,
+                .optional()?
+            {
+                Some(c) => Some(c),
+                None => match stalker_cat.as_mut() {
+                    Some(stmt) => stmt
+                        .query_row(params![r.source_id, ct, r.item_id], |row| row.get(0))
+                        .optional()?,
+                    None => None,
+                },
+            },
         };
         let Some(category) = category else {
             continue;
@@ -422,6 +441,31 @@ mod tests {
         let got: Vec<u64> = (1..=10).map(lockout_secs).collect();
         assert_eq!(got, [0, 0, 0, 0, 30, 60, 120, 240, 300, 300]);
         assert_eq!(lockout_secs(u32::MAX), 300);
+    }
+
+    #[test]
+    fn target_length_limit_applies_to_the_stored_id() {
+        let t = |id: String| ParentalLockTarget {
+            source_id: " s1 ".into(),
+            content_type: ContentType::Live,
+            kind: ParentalLockKind::Item,
+            target_id: id,
+            name: " Name ".into(),
+        };
+        // Padding cannot carry an id past the limit.
+        let padded = format!("{}ca915ddbf6fe48e6{}", " ".repeat(500), " ".repeat(500));
+        assert!(matches!(
+            validate_target(&t(padded)),
+            Err(CoreError::Invalid(_))
+        ));
+        let edge = format!("  {}", "x".repeat(MAX_ID_LEN - 1));
+        assert!(validate_target(&t(edge)).is_err());
+        assert!(validate_target(&t("   ".into())).is_err());
+        // Within the limit the id is stored as given (ids match the catalog
+        // exactly); the source id and name are trimmed.
+        let ok = validate_target(&t("x".repeat(MAX_ID_LEN))).unwrap();
+        assert_eq!(ok.target_id.len(), MAX_ID_LEN);
+        assert_eq!((ok.source_id.as_str(), ok.name.as_str()), ("s1", "Name"));
     }
 
     #[test]

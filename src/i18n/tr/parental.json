@@ -67,6 +67,7 @@
   "unlockTimeLeft": "Kilidin açık kalacağı süre",
   "lockNow": "Şimdi kilitle",
   "lockedNowToast": "Ebeveyn denetimi kilitlendi",
+  "shortcutLockNow": "Ebeveyn denetimini şimdi kilitle",
   "lockoutActive": "Çok fazla yanlış PIN girildi. PIN {{time}} sonra tekrar denenebilir.",
   "behaviourTitle": "Kilitler nasıl çalışır",
   "behaviourPinNote": "Buradaki değişiklikler PIN ister.",

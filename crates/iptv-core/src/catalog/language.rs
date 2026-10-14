@@ -8,13 +8,24 @@
 //!
 //! The filter only hides what is clearly another language: no prefix, an
 //! unknown code, a multi-subtitle group, or a service/quality prefix ("NF",
-//! "4K") all stay visible. The rule runs in SQL as `non_english(title,
-//! category_name)`, registered on every connection by [`register`].
+//! "4K") all stay visible.
+//!
+//! The rule splits into a title half and a category half ([`title_verdict`],
+//! [`category_verdict`], joined by [`combine`]) so that SQL never runs the
+//! category keyword scan once per item. Readers of one source and content
+//! type use [`english_only_scoped`]: one cheap title test per row and two
+//! category-id sets built once per statement. Readers across sources use
+//! [`ENGLISH_ONLY_SQL`] (`non_english(title, category_name)`), whose category
+//! half is memoized per connection. Both are registered on every connection
+//! by [`register`]; `catalog_perf` holds them to the 100 ms budget on 50k
+//! channels.
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::Connection;
+use std::borrow::Cow;
+use std::collections::HashMap;
 
 /// Detected language: a BCP 47 tag, or a group of languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,7 +236,20 @@ fn resolve(code_text: &str, category: Option<&str>) -> Option<Lang> {
 }
 
 fn not_language(token: &str) -> bool {
-    NOT_LANGUAGE.contains(&token.to_ascii_uppercase().as_str())
+    NOT_LANGUAGE.iter().any(|n| n.eq_ignore_ascii_case(token))
+}
+
+/// `text` without bidi marks; borrowed (no copy) when it has none.
+fn without_bidi(text: &str) -> Cow<'_, str> {
+    if text.is_ascii() || !text.chars().any(is_bidi_mark) {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(text.chars().filter(|c| !is_bidi_mark(*c)).collect())
+    }
+}
+
+fn has_foreign_script(text: &str) -> bool {
+    !text.is_ascii() && text.chars().any(is_foreign_script)
 }
 
 fn from_category(category: Option<&str>) -> Option<Lang> {
@@ -235,7 +259,7 @@ fn from_category(category: Option<&str>) -> Option<Lang> {
             return Some(hit);
         }
     }
-    let clean: String = name.chars().filter(|c| !is_bidi_mark(*c)).collect();
+    let clean = without_bidi(name);
     if let Some(tag) = leading_tag(&clean).filter(|t| !not_language(t)) {
         if let Some(hit) = resolve(tag, category) {
             return Some(hit);
@@ -252,59 +276,236 @@ fn from_category(category: Option<&str>) -> Option<Lang> {
     None
 }
 
+/// The language a title's own leading tag names, if it names one.
+fn title_language(title: &str, category: Option<&str>) -> Option<Lang> {
+    let clean = without_bidi(title);
+    let tag = leading_tag(&clean)
+        .filter(|t| !not_language(t) && !t.bytes().any(|b| b.is_ascii_lowercase()))?;
+    resolve(tag, category)
+}
+
 /// Language from the raw provider title and category name, if either says.
 /// A title tag counts only in capitals ("IT - Film", not "It: Chapter Two").
 pub fn item_language(title: &str, category: Option<&str>) -> Option<Lang> {
-    let clean: String = title.chars().filter(|c| !is_bidi_mark(*c)).collect();
-    if let Some(tag) = leading_tag(&clean)
-        .filter(|t| !not_language(t) && !t.bytes().any(|b| b.is_ascii_lowercase()))
-    {
-        if let Some(hit) = resolve(tag, category) {
-            return Some(hit);
-        }
+    title_language(title, category).or_else(|| from_category(category))
+}
+
+/// True for a detected language English-only hides: everything but English,
+/// multi-subtitle and African (often English-language) groups.
+fn hides(lang: Lang) -> bool {
+    match lang {
+        T(tag) => tag != "en" && !tag.starts_with("en-"),
+        G(g) => !matches!(g, Multisub | African),
     }
-    from_category(category)
+}
+
+/// [`title_verdict`]: the title's tag names English or a kept group.
+pub const TITLE_KEEP: i64 = 0;
+/// [`title_verdict`]: the title's tag names another language.
+pub const TITLE_HIDE: i64 = 1;
+/// [`title_verdict`]: no deciding tag; the title has no foreign script.
+pub const TITLE_UNDECIDED: i64 = 2;
+/// [`title_verdict`]: no deciding tag; the title has foreign-script letters.
+pub const TITLE_UNDECIDED_FOREIGN: i64 = 3;
+
+/// [`category_verdict`]: the name says English or a kept group.
+pub const CATEGORY_KEEP: i64 = 0;
+/// [`category_verdict`]: the name says another language, or names none
+/// but is written in a foreign script.
+pub const CATEGORY_HIDE: i64 = 1;
+/// [`category_verdict`]: the name says nothing (also: no category).
+pub const CATEGORY_UNDECIDED: i64 = 2;
+
+/// The title half of [`is_non_english`]. It does not depend on the
+/// category: the one category-dependent code ("MA": Malayalam or Moroccan)
+/// hides either way.
+pub fn title_verdict(title: &str) -> i64 {
+    match title_language(title, None) {
+        Some(lang) if hides(lang) => TITLE_HIDE,
+        Some(_) => TITLE_KEEP,
+        None if has_foreign_script(title) => TITLE_UNDECIDED_FOREIGN,
+        None => TITLE_UNDECIDED,
+    }
+}
+
+/// The category half of [`is_non_english`], from the category name.
+pub fn category_verdict(name: &str) -> i64 {
+    match from_category(Some(name)) {
+        Some(lang) if hides(lang) => CATEGORY_HIDE,
+        Some(_) => CATEGORY_KEEP,
+        None if has_foreign_script(name) => CATEGORY_HIDE,
+        None => CATEGORY_UNDECIDED,
+    }
+}
+
+/// Joins the halves: the title's tag wins; without one the category
+/// decides, and with neither saying, foreign-script letters in either hide.
+pub fn combine(title: i64, category: i64) -> bool {
+    match title {
+        TITLE_KEEP => false,
+        TITLE_HIDE => true,
+        TITLE_UNDECIDED => category == CATEGORY_HIDE,
+        _ => category != CATEGORY_KEEP,
+    }
 }
 
 /// True when the item is clearly in a language other than English. Unknown,
 /// multi-subtitle and African (often English-language) items stay visible.
 pub fn is_non_english(title: &str, category: Option<&str>) -> bool {
-    match item_language(title, category) {
-        Some(T(tag)) => tag != "en" && !tag.starts_with("en-"),
-        Some(G(g)) => !matches!(g, Multisub | African),
-        None => {
-            title.chars().any(is_foreign_script)
-                || category.is_some_and(|c| c.chars().any(is_foreign_script))
-        }
-    }
+    combine(
+        title_verdict(title),
+        category.map_or(CATEGORY_UNDECIDED, category_verdict),
+    )
 }
 
 /// SQL name of [`is_non_english`]: `non_english(title, category_name)` is 1
 /// for clearly non-English items, else 0.
 pub const SQL_FUNCTION: &str = "non_english";
+/// SQL name of [`title_verdict`]: `english_title(title)`.
+pub const TITLE_SQL_FUNCTION: &str = "english_title";
+/// SQL name of [`category_verdict`]: `english_category(name)`.
+pub const CATEGORY_SQL_FUNCTION: &str = "english_category";
 
-/// `AND` clause for readers whose query joins categories as `c`.
+/// `AND` clause for readers whose query joins categories as `c` and spans
+/// sources (search, recently added): few rows reach it.
 pub const ENGLISH_ONLY_SQL: &str = " AND non_english(i.title, c.name) = 0";
 
-/// Registers [`SQL_FUNCTION`] on `conn`, and `adult_category` from
+/// `AND` clause for rows of `items i` from one source and content type
+/// (`src` and `ty` are the statement's placeholders or literals for them,
+/// e.g. `?1`, `?2`). Needs no join: per row it runs only the title test,
+/// and the category half is two non-correlated category-id sets that SQLite
+/// builds once per statement (250 names, not 50k rows). Same rows as
+/// [`ENGLISH_ONLY_SQL`]; an item whose category row is missing counts as an
+/// undecided category, as the `LEFT JOIN` there does.
+pub fn english_only_scoped(src: &str, ty: &str) -> String {
+    format!(" AND {}", keep_predicate(src, ty))
+}
+
+fn keep_predicate(src: &str, ty: &str) -> String {
+    let set = |verdict: i64| {
+        format!(
+            "SELECT category_id FROM categories WHERE source_id = {src} AND content_type = {ty} AND {CATEGORY_SQL_FUNCTION}(name) = {verdict}"
+        )
+    };
+    format!(
+        "(CASE {TITLE_SQL_FUNCTION}(i.title) WHEN {TITLE_KEEP} THEN 1 WHEN {TITLE_HIDE} THEN 0 WHEN {TITLE_UNDECIDED} THEN i.category_id NOT IN ({}) ELSE i.category_id IN ({}) END)",
+        set(CATEGORY_HIDE),
+        set(CATEGORY_KEEP),
+    )
+}
+
+/// The `AND` clause [`hidden_rowids`] returns.
+pub const HIDDEN_ROWIDS_SQL: &str =
+    " AND i.rowid NOT IN (SELECT item_rowid FROM temp.english_hidden)";
+
+/// `AND` clause dropping the rows of `items i` that English-only hides, for
+/// readers of one source and content type (catalog pages and counts,
+/// categories, neighbors, the zap list).
+///
+/// Testing every row on every call costs a count over 50k channels about
+/// 20 ms in release and 50 ms in a debug build, twice per deep page. So the
+/// hidden rowids of the source and type last asked for are kept in a temp
+/// table of this connection, `temp.english_hidden`, built with
+/// [`english_only_scoped`] and probed through its primary key; the readers'
+/// counts stay index-only scans, as without the filter.
+///
+/// The set is rebuilt when anything may have changed it: another source or
+/// type, a commit by another connection (`PRAGMA data_version`) or any
+/// write by this one (`total_changes()`). The build records the change count
+/// its own writes leave behind, so a set stays valid until the next real
+/// write, of any table.
+pub fn hidden_rowids(
+    conn: &Connection,
+    source_id: &str,
+    content_type: &str,
+) -> rusqlite::Result<&'static str> {
+    conn.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS english_hidden (item_rowid INTEGER PRIMARY KEY);
+         CREATE TEMP TABLE IF NOT EXISTS english_hidden_for (
+           id INTEGER PRIMARY KEY CHECK (id = 1), source_id TEXT NOT NULL,
+           content_type TEXT NOT NULL, data_version INTEGER NOT NULL, changes INTEGER NOT NULL);",
+    )?;
+    let version: i64 = conn.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+    let fresh: bool = conn
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM temp.english_hidden_for WHERE source_id = ?1 AND content_type = ?2 AND data_version = ?3 AND changes = total_changes())",
+        )?
+        .query_row(rusqlite::params![source_id, content_type, version], |r| {
+            r.get(0)
+        })?;
+    if fresh {
+        return Ok(HIDDEN_ROWIDS_SQL);
+    }
+    conn.execute("DELETE FROM temp.english_hidden", [])?;
+    conn.execute("DELETE FROM temp.english_hidden_for", [])?;
+    conn.prepare_cached(&format!(
+        "INSERT INTO temp.english_hidden (item_rowid) SELECT i.rowid FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2 AND NOT {}",
+        keep_predicate("?1", "?2")
+    ))?
+    .execute(rusqlite::params![source_id, content_type])?;
+    // `total_changes()` is read before this statement's own row counts:
+    // after it, the total is one more.
+    conn.prepare_cached(
+        "INSERT INTO temp.english_hidden_for (id, source_id, content_type, data_version, changes) VALUES (1, ?1, ?2, ?3, total_changes() + 1)",
+    )?
+    .execute(rusqlite::params![source_id, content_type, version])?;
+    Ok(HIDDEN_ROWIDS_SQL)
+}
+
+/// Category verdicts by name for one connection's SQL functions. A name
+/// repeats on every item of its category, and its keyword scan (some forty
+/// regexes) is the costly half of the rule. The verdict is a pure function
+/// of the name, so the memo never goes stale; it is cleared when it outgrows
+/// [`CategoryMemo::CAP`] names.
+#[derive(Default)]
+struct CategoryMemo(HashMap<String, i64>);
+
+impl CategoryMemo {
+    const CAP: usize = 4096;
+
+    fn verdict(&mut self, name: Option<&str>) -> i64 {
+        let Some(name) = name else {
+            return CATEGORY_UNDECIDED;
+        };
+        if let Some(v) = self.0.get(name) {
+            return *v;
+        }
+        let v = category_verdict(name);
+        if self.0.len() >= Self::CAP {
+            self.0.clear();
+        }
+        self.0.insert(name.to_owned(), v);
+        v
+    }
+}
+
+fn text_arg<'a>(
+    ctx: &'a rusqlite::functions::Context<'_>,
+    i: usize,
+) -> rusqlite::Result<Option<&'a str>> {
+    ctx.get_raw(i)
+        .as_str_or_null()
+        .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+}
+
+/// Registers [`SQL_FUNCTION`], [`TITLE_SQL_FUNCTION`] and
+/// [`CATEGORY_SQL_FUNCTION`] on `conn`, and `adult_category` from
 /// [`crate::parental::register_sql`].
 pub fn register(conn: &Connection) -> rusqlite::Result<()> {
-    conn.create_scalar_function(
-        SQL_FUNCTION,
-        2,
-        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
-        |ctx| {
-            let title = ctx
-                .get_raw(0)
-                .as_str_or_null()
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
-            let category = ctx
-                .get_raw(1)
-                .as_str_or_null()
-                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
-            Ok(is_non_english(title.unwrap_or_default(), category))
-        },
-    )?;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    let mut memo = CategoryMemo::default();
+    conn.create_scalar_function(SQL_FUNCTION, 2, flags, move |ctx| {
+        let title = text_arg(ctx, 0)?.unwrap_or_default();
+        let category = memo.verdict(text_arg(ctx, 1)?);
+        Ok(combine(title_verdict(title), category))
+    })?;
+    conn.create_scalar_function(TITLE_SQL_FUNCTION, 1, flags, |ctx| {
+        Ok(title_verdict(text_arg(ctx, 0)?.unwrap_or_default()))
+    })?;
+    let mut memo = CategoryMemo::default();
+    conn.create_scalar_function(CATEGORY_SQL_FUNCTION, 1, flags, move |ctx| {
+        Ok(memo.verdict(text_arg(ctx, 0)?))
+    })?;
     // parental: the hide-mode filters match adult category names in SQL.
     crate::parental::register_sql(conn)
 }
@@ -413,5 +614,237 @@ mod tests {
             .query_row("SELECT non_english(NULL, NULL)", [], |r| r.get(0))
             .unwrap();
         assert_eq!(null_title, 0);
+    }
+
+    const TITLES: [&str; 32] = [
+        // The scoped clause's GLOB prefilter must send every one of these
+        // shapes to the title test.
+        " DE - Leading space",
+        "  EN | Two spaces",
+        "\tFR - Tab",
+        "[DE] Der Film",
+        "|FR| Le Film",
+        "(IT) Il Film",
+        "[ ES ] Spaced bracket",
+        "\u{3000}FR - Ideographic space",
+        "D+ - Show",
+        "fr - lowercase",
+        "FR - Le Film",
+        "EN - Interstellar",
+        "US: CNN",
+        "ENG - Interstellar",
+        "Interstellar (2014)",
+        "ESPN",
+        "NF - Show",
+        "It: Chapter Two",
+        "Pokémon: Amélie",
+        "",
+        "MA - Film",
+        "STH - Film",
+        "MULTI - Film",
+        "AF - Film",
+        "Первый канал",
+        "\u{202B}AR - Show",
+        "\u{200E}EN - Show",
+        "4K - Hungry",
+        "TOP - Film (1994)",
+        "XX - Unknown code",
+        "مسلسل",
+        "Channel 12",
+    ];
+    const CATEGORIES: [Option<&str>; 16] = [
+        None,
+        Some(""),
+        Some("FRANCE"),
+        Some("UK | ENTERTAINMENT"),
+        Some("VOD - INDIA"),
+        Some("[EXYU]"),
+        Some("SPORTS"),
+        Some("NETFLIX [MULTISUB]"),
+        Some("AF - NOLLYWOOD"),
+        Some("HORROR"),
+        Some("مسلسلات"),
+        Some("Новости"),
+        Some("VOD - ENGLISH 4K"),
+        Some("|DE| ALLGEMEIN"),
+        Some("LATINO"),
+        Some("Group 7"),
+    ];
+
+    /// The rule before it split into halves, kept as the reference.
+    fn reference(title: &str, category: Option<&str>) -> bool {
+        match item_language(title, category) {
+            Some(T(tag)) => tag != "en" && !tag.starts_with("en-"),
+            Some(G(g)) => !matches!(g, Multisub | African),
+            None => {
+                title.chars().any(is_foreign_script)
+                    || category.is_some_and(|c| c.chars().any(is_foreign_script))
+            }
+        }
+    }
+
+    #[test]
+    fn split_rule_matches_the_whole_rule() {
+        for title in TITLES {
+            for category in CATEGORIES {
+                assert_eq!(
+                    is_non_english(title, category),
+                    reference(title, category),
+                    "{title:?} in {category:?}"
+                );
+            }
+        }
+    }
+
+    /// The set-based clause keeps exactly the rows the joined clause keeps,
+    /// including items whose category row is missing.
+    #[test]
+    fn scoped_clause_matches_the_joined_clause() {
+        let conn = Connection::open_in_memory().unwrap();
+        register(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE categories (source_id TEXT, content_type TEXT, category_id TEXT, name TEXT, PRIMARY KEY (source_id, content_type, category_id));
+             CREATE TABLE items (source_id TEXT, content_type TEXT, item_id TEXT, category_id TEXT NOT NULL, title TEXT NOT NULL);",
+        )
+        .unwrap();
+        let mut n = 0;
+        for (ci, category) in CATEGORIES.iter().enumerate() {
+            if let Some(name) = category {
+                conn.execute(
+                    "INSERT INTO categories VALUES ('s', 'live', ?1, ?2)",
+                    rusqlite::params![format!("c{ci}"), name],
+                )
+                .unwrap();
+            }
+            for title in TITLES {
+                n += 1;
+                conn.execute(
+                    "INSERT INTO items VALUES ('s', 'live', ?1, ?2, ?3)",
+                    rusqlite::params![n.to_string(), format!("c{ci}"), title],
+                )
+                .unwrap();
+            }
+        }
+        // Another source with the same category ids and opposite names must
+        // not leak into the sets.
+        conn.execute(
+            "INSERT INTO categories VALUES ('t', 'live', 'c6', 'FRANCE')",
+            [],
+        )
+        .unwrap();
+        let ids = |clause: &str, join: bool| -> Vec<i64> {
+            let from = if join {
+                "items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id"
+            } else {
+                "items i"
+            };
+            let sql = format!(
+                "SELECT CAST(i.item_id AS INTEGER) FROM {from} WHERE i.source_id = ?1 AND i.content_type = ?2{clause} ORDER BY 1"
+            );
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let rows = stmt
+                .query_map(["s", "live"], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<i64>, _>>()
+                .unwrap();
+            rows
+        };
+        let joined = ids(ENGLISH_ONLY_SQL, true);
+        let scoped = ids(&english_only_scoped("?1", "?2"), false);
+        assert_eq!(scoped, joined);
+        assert!(!joined.is_empty() && joined.len() < n, "{}", joined.len());
+        // And both agree with the Rust rule.
+        let mut expected = Vec::new();
+        let mut k = 0;
+        for category in CATEGORIES {
+            for title in TITLES {
+                k += 1;
+                if !is_non_english(title, category) {
+                    expected.push(k);
+                }
+            }
+        }
+        assert_eq!(joined, expected);
+    }
+
+    /// The cached rowid set follows every write: this connection's, another
+    /// connection's, and a switch of source; and it is not rebuilt while
+    /// nothing changed.
+    #[test]
+    fn hidden_rowids_cache_follows_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let open = || {
+            let c = Connection::open(&path).unwrap();
+            register(&c).unwrap();
+            c.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+            c
+        };
+        let a = open();
+        a.execute_batch(
+            "CREATE TABLE categories (source_id TEXT, content_type TEXT, category_id TEXT, name TEXT, PRIMARY KEY (source_id, content_type, category_id));
+             CREATE TABLE items (source_id TEXT, content_type TEXT, item_id TEXT, category_id TEXT NOT NULL, title TEXT NOT NULL);
+             INSERT INTO categories VALUES ('s', 'live', 'fr', 'FRANCE'), ('s', 'live', 'gen', 'GENERAL'), ('t', 'live', 'gen', 'GENERAL');
+             INSERT INTO items VALUES ('s', 'live', '1', 'fr', 'TF1'), ('s', 'live', '2', 'fr', 'EN - BBC'),
+               ('s', 'live', '3', 'gen', 'Channel 3'), ('s', 'live', '4', 'gen', 'DE - ZDF'), ('t', 'live', '5', 'gen', 'PL - TVP');",
+        )
+        .unwrap();
+        let b = open();
+        let visible = |c: &Connection, source: &str| -> Vec<String> {
+            let clause = hidden_rowids(c, source, "live").unwrap();
+            let mut stmt = c
+                .prepare(&format!(
+                    "SELECT i.item_id FROM items i WHERE i.source_id = ?1 AND i.content_type = 'live'{clause} ORDER BY 1"
+                ))
+                .unwrap();
+            let rows = stmt
+                .query_map([source], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<String>, _>>()
+                .unwrap();
+            rows
+        };
+        let total = |c: &Connection| -> i64 {
+            c.query_row("SELECT total_changes()", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(visible(&a, "s"), ["2", "3"]);
+        // Fresh: a second call writes nothing.
+        let before = total(&a);
+        assert_eq!(visible(&a, "s"), ["2", "3"]);
+        assert_eq!(total(&a), before);
+        // A write on this connection.
+        a.execute(
+            "UPDATE items SET title = 'IT - Rai' WHERE item_id = '3'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(visible(&a, "s"), ["2"]);
+        // A commit on another connection.
+        b.execute(
+            "UPDATE categories SET name = 'UK | NEWS' WHERE category_id = 'fr'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(visible(&a, "s"), ["1", "2"]);
+        // Another source; then back.
+        assert_eq!(visible(&a, "t"), Vec::<String>::new());
+        assert_eq!(visible(&a, "s"), ["1", "2"]);
+        // Each connection keeps its own set.
+        assert_eq!(visible(&b, "s"), ["1", "2"]);
+    }
+
+    #[test]
+    fn category_memo_is_bounded_and_answers_like_the_rule() {
+        let mut memo = CategoryMemo::default();
+        for i in 0..(CategoryMemo::CAP + 10) {
+            let name = format!("FRANCE {i}");
+            assert_eq!(memo.verdict(Some(&name)), CATEGORY_HIDE);
+        }
+        assert!(memo.0.len() <= CategoryMemo::CAP);
+        assert_eq!(memo.verdict(Some("SPORTS")), CATEGORY_UNDECIDED);
+        assert_eq!(memo.verdict(Some("UK | NEWS")), CATEGORY_KEEP);
+        assert_eq!(memo.verdict(Some("Новости")), CATEGORY_HIDE);
+        assert_eq!(memo.verdict(None), CATEGORY_UNDECIDED);
     }
 }

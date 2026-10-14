@@ -223,5 +223,8 @@
   "zapNoGuide": "No guide information",
   "zapMinutesLeft": "{{minutes}} min left",
   "zapNow": "Now",
-  "zapNext": "Next"
+  "zapNext": "Next",
+  "parentalHiddenTitle": "Locked by parental controls",
+  "parentalHidden": "Parental controls hide this. Unlock them in Settings to watch it.",
+  "parentalStopped": "Playback stopped. Play it again and enter the PIN to keep watching."
 }

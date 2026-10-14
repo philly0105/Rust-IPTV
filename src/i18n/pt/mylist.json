@@ -69,5 +69,11 @@
   "showWatched": "Mostrar assistidos",
   "noMatchTitle": "Nenhum resultado",
   "noMatchBody": "Nada na Minha lista corresponde a “{{query}}”.",
-  "clearSearch": "Limpar a pesquisa"
+  "clearSearch": "Limpar a pesquisa",
+  "checkingHint": "Verificando Minha lista…",
+  "retryHint": "Não foi possível carregar a Minha lista. Pressione para tentar de novo.",
+  "menuChecking": "Verificando Minha lista…",
+  "menuRetry": "Carregar Minha lista de novo",
+  "notReady": "A Minha lista ainda está carregando. Tente de novo em instantes.",
+  "loadFailed": "Não foi possível carregar a Minha lista"
 }

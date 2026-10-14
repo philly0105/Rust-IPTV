@@ -1,5 +1,5 @@
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, Info, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -8,7 +8,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRpcQuery } from '@/api/query';
 import type { CoverSize, ItemRef, SeriesItem, VodItem } from '@/api/types';
 
-import { PosterCard, PosterCardSkeleton } from '../components/PosterCard';
+import { useMyListMenuItem } from '@/features/mylist/hooks/useMyListMenuItem';
+import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
+import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
+import { useShortcut } from '@/shell';
+
+import { PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -98,6 +103,8 @@ function GridPoster({ item, active, resume }: { item: VodItem | SeriesItem; acti
       rating={item.rating}
       progress={resume.get(resumeKey(item.ref))}
       language={itemLanguage(item.title, item.categoryName)}
+      // C3: the saved marker and pointer toggle on the corner; S toggles it from the keyboard.
+      myList={myListTarget(item)}
     />
   );
 }
@@ -254,6 +261,60 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   };
   const focusGrid = () => getListbox()?.focus();
 
+  // C3: S saves the title under the grid's keyboard cursor to My List (or takes it off). The
+  // posters sit inside listbox options, so they cannot hold a focusable button of their own.
+  const toggleMyList = useMyListToggle();
+  const itemAt = (i: number): VodItem | SeriesItem | undefined =>
+    clientFiltered ? filteredItems[i] : (queryItem(i) as VodItem | SeriesItem | undefined);
+  /** The grid cell (and its index) the keyboard cursor rests on, while the grid has focus. */
+  const activeCell = (): { cell: HTMLElement; index: number } | undefined => {
+    const listbox = getListbox();
+    if (!listbox || document.activeElement !== listbox) return undefined;
+    const activeId = listbox.getAttribute('aria-activedescendant');
+    const cell = activeId ? document.getElementById(activeId) : null;
+    const index = Number(cell?.dataset.index);
+    return cell && Number.isInteger(index) ? { cell, index } : undefined;
+  };
+  useShortcut(
+    's',
+    () => {
+      const at = activeCell();
+      const item = at ? itemAt(at.index) : undefined;
+      if (!item) return;
+      const { itemRef, snapshot } = myListTarget(item);
+      void toggleMyList(itemRef, snapshot);
+    },
+    { description: t('shortcutMyList'), area: 'Vod', enabled: gridShown },
+  );
+
+  // A poster's menu (right click, Shift+F10, the context-menu key): open it, or My List.
+  const [menu, setMenu] = useState<{ pos: { x: number; y: number }; item: VodItem | SeriesItem; index: number } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const myListItem = useMyListMenuItem(menu ? { ref: menu.item.ref, snapshot: myListTarget(menu.item).snapshot } : null);
+  const menuItems: MenuItem[] = menu
+    ? [
+        { id: 'open', label: t('openDetails'), icon: <Info aria-hidden className="size-4" />, onSelect: () => openTitle(menu.item.ref, menu.index) },
+        ...(myListItem ? [myListItem] : []),
+      ]
+    : [];
+  const onGridContextMenu = (e: MouseEvent<HTMLDivElement>) => {
+    const cell = (e.target as HTMLElement).closest<HTMLElement>('[role="option"]');
+    const index = Number(cell?.dataset.index);
+    const item = cell && Number.isInteger(index) ? itemAt(index) : undefined;
+    if (!item) return;
+    e.preventDefault();
+    setMenu({ pos: { x: e.clientX, y: e.clientY }, item, index });
+  };
+  const openCursorMenu = () => {
+    const at = activeCell();
+    const item = at ? itemAt(at.index) : undefined;
+    if (!at || !item) return;
+    const r = at.cell.getBoundingClientRect();
+    setMenu({ pos: { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 120) }, item, index: at.index });
+  };
+  useShortcut('shift+f10', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: gridShown });
+  useShortcut('contextmenu', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: gridShown });
+
   // Escape on the grid returns to the category list.
   useEscapeBack(true, () => navigate(backHref));
 
@@ -321,7 +382,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         </div>
       )}
 
-      <div ref={gridWrapRef} className="min-h-0 flex-1 px-4 pt-4 md:px-8">
+      {/* Right clicks bubble here from the grid's options. */}
+      <div ref={gridWrapRef} className="min-h-0 flex-1 px-4 pt-4 md:px-8" onContextMenu={onGridContextMenu}>
         {source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
           <ErrorState
             error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
@@ -411,6 +473,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           />
         )}
       </div>
+      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />
     </div>
   );
 }

@@ -63,6 +63,7 @@
   "unlockTimeLeft": "잠금 해제 남은 시간",
   "lockNow": "지금 잠그기",
   "lockedNowToast": "자녀 보호가 잠겼습니다",
+  "shortcutLockNow": "지금 자녀 보호 잠그기",
   "lockoutActive": "잘못된 PIN을 너무 많이 입력했습니다. {{time}} 후에 PIN을 다시 입력할 수 있습니다.",
   "behaviourTitle": "잠금 방식",
   "behaviourPinNote": "여기에서 변경하려면 PIN이 필요합니다.",

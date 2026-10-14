@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { itemKey, type ItemKey, type ParentalMode } from '@/api/types';
 
 import { cn } from '../deps';
-import { capacityOf, slotClass, WALL_CLASSES } from '../layout';
+import { capacityOf, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import type { MultiviewLayout, MultiviewTile } from '../types';
 import { useTileLock } from '../useWallData';
 import { Tile, type TileProps } from './Tile';
@@ -57,7 +57,7 @@ function EmptySlot({ slot, className, disabled, onAdd }: { slot: number; classNa
       aria-label={t('slotEmptyLabel', { slot: number })}
       onClick={() => onAdd(slot)}
       className={cn(
-        'group/slot relative flex min-h-0 flex-col items-center justify-center gap-2 rounded-sm border-2 border-dashed border-divider bg-surface/50 p-2 text-fg-muted outline-none',
+        'group/slot relative flex flex-col items-center justify-center gap-2 rounded-sm border-2 border-dashed border-divider bg-surface/50 p-2 text-fg-muted outline-none',
         'hover:border-accent hover:bg-surface hover:text-fg active:bg-surface-2',
         'focus-visible:border-solid focus-visible:border-focus focus-visible:text-fg',
         'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-divider disabled:hover:bg-surface/50',
@@ -110,7 +110,7 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
       data-testid="multiview-wall"
       data-layout={layout}
       onKeyDown={onKeyDown}
-      className={cn('grid w-full gap-1 @2xl:mx-auto @2xl:my-auto', WALL_CLASSES[layout])}
+      className={cn(WALL_BASE, WALL_CLASSES[layout])}
     >
       <p id="multiview-wall-keys" className="sr-only">
         {t('wallKeysHint')}

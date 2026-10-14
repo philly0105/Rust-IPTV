@@ -20,14 +20,14 @@ const bus = vi.hoisted(() => {
     },
   };
 });
-const rpcMock = vi.hoisted(() => ({ running: false, calls: [] as { cmd: string; args: unknown }[] }));
+const rpcMock = vi.hoisted(() => ({ running: false, channels: 2, calls: [] as { cmd: string; args: unknown }[] }));
 
 vi.mock('@/api/events', () => ({ onAppEvent: bus.on, onAnyAppEvent: () => () => undefined }));
 vi.mock('@/api/transport', () => ({
   rpc: async (cmd: string, args?: unknown) => {
     rpcMock.calls.push({ cmd, args });
     if (cmd === 'remote.status') return { running: rpcMock.running, port: 7310 };
-    if (cmd === 'catalog.allLiveChannels') return [makeChannel(0), makeChannel(1)];
+    if (cmd === 'catalog.allLiveChannels') return Array.from({ length: rpcMock.channels }, (_, i) => makeChannel(i));
     return null;
   },
 }));
@@ -48,6 +48,7 @@ function mount() {
 
 beforeEach(() => {
   rpcMock.running = false;
+  rpcMock.channels = 2;
   rpcMock.calls.length = 0;
   bus.listeners.clear();
 });
@@ -80,6 +81,26 @@ describe('useRemoteBridge', () => {
     rpcMock.running = true;
     act(() => bus.emit('remote.command', { command: 'volumeUp' }));
     await waitFor(() => expect(published()).toHaveLength(1));
+  });
+
+  it('republishes the channel list when parental controls change (Hide mode drops locked channels)', async () => {
+    rpcMock.running = true;
+    mount();
+    await waitFor(() => expect(published()).toHaveLength(1));
+    const ids = (n: number) => (published()[n]!.args as { channels: { id: string }[] }).channels.map((c) => c.id);
+    expect(ids(0)).toEqual(['src1|c0', 'src1|c1']);
+
+    // Lock now in Hide mode: the core leaves the locked channel out of allLiveChannels.
+    rpcMock.channels = 1;
+    act(() => bus.emit('parental.changed', { enabled: true, mode: 'hide', unlocked: false }));
+    await waitFor(() => expect(published()).toHaveLength(2));
+    expect(ids(1)).toEqual(['src1|c0']);
+
+    // Unlocking brings it back.
+    rpcMock.channels = 2;
+    act(() => bus.emit('parental.changed', { enabled: true, mode: 'hide', unlocked: true }));
+    await waitFor(() => expect(published()).toHaveLength(3));
+    expect(ids(2)).toEqual(['src1|c0', 'src1|c1']);
   });
 
   it('owns channel commands while mounted', () => {

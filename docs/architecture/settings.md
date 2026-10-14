@@ -49,7 +49,7 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `playerReuseInstance` | `true` | External launch closes the previous external player first. |
 | `showExternalBar` | `true` | External-playback footer visible. |
 | `vodMinRating` | `0` | VOD grids hide items rated below this. |
-| `englishOnly` | `false` | Channel lists, VOD grids, categories, search, neighbours, recently added and `allLiveChannels` drop items whose title or category clearly marks another language (`catalog::language`, SQL function `non_english`). Items without a clear language, multi-subtitle and African groups stay. Categories left empty are dropped and `itemCount` counts what remains. Stalker VOD grids filter loaded pages in the UI. |
+| `englishOnly` | `false` | Channel lists, VOD grids, categories, search, neighbours, recently added and `allLiveChannels` drop items whose title or category clearly marks another language (`catalog::language`). Readers of one source and type (channel, movie and series pages and their counts, categories, neighbours, `allLiveChannels`) filter through a per-connection cached temp table of hidden item rowids, `temp.english_hidden`, built with the SQL functions `english_title` and `english_category` and rebuilt after any database write or when another source or type is asked for (`language::hidden_rowids`). Cross-source search and recently added still test each row with the SQL function `non_english`. Items without a clear language, multi-subtitle and African groups stay. Categories left empty are dropped and `itemCount` counts what remains. Stalker VOD grids filter loaded pages in the UI. |
 | `recordingsDir` | `null` | `null` = `<downloadsDir>/recordings`. Serialized as `null`, not omitted. |
 | `sourceRefreshIntervalHours` | `12` | Hours between scheduled refreshes of `autoRefresh` sources; 0 = only at startup. 0..168, else `Invalid`. See sources.md. |
 | `accountExpiryWarnDays` | `7` | Days before a subscription's expiry date that the dashboard and source cards warn; 0 = off. 0..60, else `Invalid`. |
@@ -69,7 +69,7 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `zapBanner` | `true` | The player shows the channel's logo, number and now/next for 5 s after each live channel change. Settings > Playback. |
 | `dashboardRails.myList` | `true` | The dashboard's My List rail (Settings > General, dashboard rails). |
 
-Parental controls are not part of `Settings`: their options and PIN live in the `parental_config` table and change only through the `parental.*` commands (see parental.md); Settings > Parental is their page.
+Parental controls are not part of `Settings`: their options and PIN live in the `parental_config` table and change only through the `parental.*` commands (see parental.md); Settings > Parental controls is their page.
 
 `englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields, and the five appearance and playback fields above (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`) are in `backup::APP_SETTING_KEYS`, so they round-trip through `backup.export` / `backup.import`. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
 

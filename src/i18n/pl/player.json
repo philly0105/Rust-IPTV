@@ -223,5 +223,8 @@
   "zapNoGuide": "Brak informacji w przewodniku",
   "zapMinutesLeft": "jeszcze {{minutes}} min",
   "zapNow": "Teraz",
-  "zapNext": "Następnie"
+  "zapNext": "Następnie",
+  "parentalHiddenTitle": "Zablokowane przez kontrolę rodzicielską",
+  "parentalHidden": "Kontrola rodzicielska ukrywa tę pozycję. Odblokuj ją w Ustawieniach, aby oglądać.",
+  "parentalStopped": "Odtwarzanie zatrzymane. Uruchom je ponownie i wpisz PIN, aby oglądać dalej."
 }

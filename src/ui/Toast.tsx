@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
 import { cn } from './cn';
+import { useCenteredDialogOpen } from './Dialog';
 import { ProgressBar } from './Misc';
 
 export type ToastVariant = 'info' | 'success' | 'error';
@@ -303,6 +304,7 @@ export function ToastViewport() {
   const seen = useRef(new Map<string, ReactNode>());
   const seq = useRef(0);
   const listRef = useRef<HTMLOListElement>(null);
+  const overDialog = useCenteredDialogOpen();
   // The last toast leaving while hovered never fires mouseleave; reset so the next stack starts unpaused.
   useEffect(() => {
     if (toasts.length === 0) setHovered(false);
@@ -341,7 +343,14 @@ export function ToastViewport() {
       aria-label={t('notifications')}
       aria-keyshortcuts="F8"
       data-toast-viewport=""
-      className="pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]">
+      data-over-dialog={overDialog ? '' : undefined}
+      className={cn(
+        'pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]',
+        // Below sm a centred dialog spans the window and its footer (Save, Cancel) sits at
+        // the bottom, where the toasts are: while one is open they move to the top edge,
+        // into the gap above the dialog (its pt-[8vh]), and stay readable without hiding its actions.
+        'max-sm:data-[over-dialog]:top-4 max-sm:data-[over-dialog]:bottom-auto',
+      )}>
       <div aria-live="polite" aria-atomic="true" className="sr-only" data-toast-live="polite">
         {spoken(polite)}
       </div>

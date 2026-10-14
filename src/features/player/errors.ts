@@ -113,6 +113,12 @@ function fromCode(code: RpcErrorCode): StreamErrorClass | undefined {
  */
 const ENGINE_MISSING = /\bmpv(?:\.exe)?\s+(?:was\s+|is\s+)?(?:not found|could not be found)|could not find mpv|mpv is not installed/i;
 
+/**
+ * The core's refusal of an item parental controls hide (`parental::refuse_hidden`): a
+ * `not_found` whose copy says why instead of "this stream no longer exists".
+ */
+const PARENTAL_LOCKED = /locked by parental controls/i;
+
 const PHRASES: readonly [RegExp, StreamErrorClass][] = [
   [/mpv stopped unexpectedly|lost the connection to mpv|mpv could not be monitored|mpv exited during startup/i, 'crashed'],
   [/timed?[\s_-]?out|timeout/i, 'timeout'],
@@ -191,6 +197,7 @@ export function errorCopyKeys(
     case 'auth':
       return { title: 'errorAuthTitle', hint: 'errorAuth' };
     case 'notFound':
+      if (PARENTAL_LOCKED.test(input?.message ?? '')) return { title: 'parentalHiddenTitle', hint: 'parentalHidden' };
       return { title: 'errorNotFoundTitle', hint: 'errorNotFound' };
     case 'timeout':
       return { title: 'errorTimeoutTitle', hint: 'errorTimeout' };

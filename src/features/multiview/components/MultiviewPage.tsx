@@ -1,16 +1,17 @@
 import { LayoutGrid } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 
 import { gateItem } from '../addChannel';
 import { buttonClass, cn, EmptyState, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
-import { capacityOf, MAX_TILES, nextLayout, slotClass } from '../layout';
+import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewLayout, MultiviewTile } from '../types';
+import { focusTileOf } from '../paths';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
 import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources } from '../useWallData';
 import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
@@ -67,7 +68,7 @@ function WallSkeleton({ layout }: { layout: MultiviewLayout }) {
         <Skeleton className="h-4 w-[28rem] max-w-full" />
       </div>
       <div className="relative flex min-h-0 flex-1 overflow-y-auto p-1 [container-type:size] @2xl:p-2">
-        <div className="grid w-full gap-1 @2xl:mx-auto @2xl:my-auto @2xl:grid-cols-2 @2xl:grid-rows-2 @2xl:h-[min(100cqh,calc(100cqw*9/16))] @2xl:w-[min(100cqw,calc(100cqh*16/9))]">
+        <div className={cn(WALL_BASE, WALL_CLASSES['2x2'])}>
           {Array.from({ length: capacityOf(layout === '1x2' ? '1x2' : '2x2') }, (_, i) => (
             <Skeleton key={i} className={cn('rounded-sm', slotClass('2x2', i))} />
           ))}
@@ -134,6 +135,14 @@ export function MultiviewPage() {
   useEffect(() => {
     if (count === 0 && fsActive) void fsExit();
   }, [count, fsActive, fsExit]);
+  // Arriving from "Add to multi-view": focus lands on the tile just added, not on the page body.
+  const location = useLocation();
+  useEffect(() => {
+    const key = focusTileOf(location.state);
+    if (!key) return;
+    const index = useMultiviewStore.getState().tiles.findIndex((x) => x.key === key);
+    if (index >= 0) focusSlot(wallRef.current, index);
+  }, [location.key, location.state]);
 
   const nameOf = useCallback((key: string) => useMultiviewStore.getState().tiles.find((x) => x.key === key)?.title ?? '', []);
 

@@ -47,6 +47,9 @@ const PERSISTED_ROWS_CAP: i64 = 20_000;
 pub struct CachedItem {
     pub raw: Value,
     pub category_name: Option<String>,
+    /// The portal category the row was listed under. Stalker titles are not
+    /// in `items`, so parental controls find their category here.
+    pub category_id: Option<String>,
 }
 
 /// A small concurrent map with least-recently-used eviction.
@@ -213,15 +216,56 @@ const ITEMS_DDL: &str = "CREATE TABLE IF NOT EXISTS stalker_items (
   raw_json TEXT NOT NULL,
   category_name TEXT,
   touched_at INTEGER NOT NULL,
+  category_id TEXT,
   PRIMARY KEY (source_id, content_type, item_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS stalker_items_touched ON stalker_items(source_id, touched_at);";
 
 fn ensure_items_table(rt: &Runtime, conn: &rusqlite::Connection) -> CoreResult<()> {
     if !rt.table_ready.load(Ordering::Acquire) {
-        conn.execute_batch(ITEMS_DDL)?;
+        create_items_table(conn)?;
         rt.table_ready.store(true, Ordering::Release);
     }
+    Ok(())
+}
+
+/// True when `stalker_items` exists with its `category_id` column, so SQL
+/// that reads a Stalker title's category can run (the table is created on
+/// demand, and builds before parental controls made it without the column).
+pub fn items_have_categories(conn: &rusqlite::Connection) -> CoreResult<bool> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('stalker_items') WHERE name = 'category_id')",
+        )?
+        .query_row([], |r| r.get(0))?)
+}
+
+/// Creates `stalker_items`, or brings one an older build made up to date:
+/// `category_id` is added and filled from the row's own `category_id` field,
+/// else from the catalog category with the remembered name.
+fn create_items_table(conn: &rusqlite::Connection) -> CoreResult<()> {
+    conn.execute_batch(ITEMS_DDL)?;
+    if items_have_categories(conn)? {
+        return Ok(());
+    }
+    if let Err(err) = conn.execute_batch("ALTER TABLE stalker_items ADD COLUMN category_id TEXT;") {
+        // Another connection added it first.
+        if items_have_categories(conn)? {
+            return Ok(());
+        }
+        return Err(err.into());
+    }
+    conn.execute_batch(
+        "UPDATE stalker_items SET category_id = COALESCE(
+           CASE WHEN json_valid(raw_json)
+                THEN NULLIF(CAST(json_extract(raw_json, '$.category_id') AS TEXT), '') END,
+           (SELECT c.category_id FROM categories c
+             WHERE c.source_id = stalker_items.source_id
+               AND c.content_type = stalker_items.content_type
+               AND c.name = stalker_items.category_name
+             ORDER BY c.position LIMIT 1))
+         WHERE category_id IS NULL;",
+    )?;
     Ok(())
 }
 
@@ -240,11 +284,12 @@ pub async fn persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
             let mut sources: Vec<String> = Vec::new();
             {
                 let mut stmt = tx.prepare_cached(
-                    "INSERT INTO stalker_items (source_id, content_type, item_id, raw_json, category_name, touched_at)
-                     SELECT id, ?2, ?3, ?4, ?5, ?6 FROM sources WHERE id = ?1
+                    "INSERT INTO stalker_items (source_id, content_type, item_id, raw_json, category_name, touched_at, category_id)
+                     SELECT id, ?2, ?3, ?4, ?5, ?6, ?7 FROM sources WHERE id = ?1
                      ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET
                        raw_json = excluded.raw_json,
                        category_name = COALESCE(excluded.category_name, stalker_items.category_name),
+                       category_id = COALESCE(excluded.category_id, stalker_items.category_id),
                        touched_at = excluded.touched_at",
                 )?;
                 for (r, item) in &rows {
@@ -254,18 +299,26 @@ pub async fn persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
                         r.item_id,
                         item.raw.to_string(),
                         item.category_name,
-                        now
+                        now,
+                        item.category_id
                     ])?;
                     if !sources.contains(&r.source_id) {
                         sources.push(r.source_id.clone());
                     }
                 }
             }
+            // Rows of titles the user saved (favorites, history, continue
+            // watching, My List) are kept past the cap: parental controls
+            // read their category from here.
             for sid in &sources {
                 tx.execute(
                     "DELETE FROM stalker_items WHERE source_id = ?1 AND touched_at < (
                        SELECT touched_at FROM stalker_items WHERE source_id = ?1
-                       ORDER BY touched_at DESC LIMIT 1 OFFSET ?2)",
+                       ORDER BY touched_at DESC LIMIT 1 OFFSET ?2)
+                     AND NOT EXISTS (SELECT 1 FROM favorites u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
+                     AND NOT EXISTS (SELECT 1 FROM recent u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
+                     AND NOT EXISTS (SELECT 1 FROM playback_positions u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
+                     AND NOT EXISTS (SELECT 1 FROM watchlist u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)",
                     rusqlite::params![sid, PERSISTED_ROWS_CAP],
                 )?;
             }
@@ -286,25 +339,26 @@ pub async fn cached_item(state: &AppState, r: &ItemRef) -> Option<CachedItem> {
     }
     let r2 = r.clone();
     let rt2 = rt.clone();
-    let row: Option<(String, Option<String>)> = state
+    let row: Option<(String, Option<String>, Option<String>)> = state
         .db_call(move |conn| {
             use rusqlite::OptionalExtension;
             ensure_items_table(&rt2, conn)?;
             Ok(conn
                 .query_row(
-                    "SELECT raw_json, category_name FROM stalker_items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+                    "SELECT raw_json, category_name, category_id FROM stalker_items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
                     rusqlite::params![r2.source_id, r2.content_type.as_str(), r2.item_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?)
         })
         .await
         .ok()
         .flatten();
-    let (raw, category_name) = row?;
+    let (raw, category_name, category_id) = row?;
     let item = CachedItem {
         raw: serde_json::from_str(&raw).ok()?,
         category_name,
+        category_id,
     };
     rt.remember(r, item.clone());
     Some(item)
@@ -312,7 +366,11 @@ pub async fn cached_item(state: &AppState, r: &ItemRef) -> Option<CachedItem> {
 
 /// Registers the stalker importer (amendment A1) and creates the runtime.
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
-    let _ = Runtime::get(&state);
+    let rt = Runtime::get(&state);
+    // Up to date before a parental filter reads a Stalker title's category.
+    if let Err(err) = state.db_call(move |c| ensure_items_table(&rt, c)).await {
+        tracing::warn!(error = %err, "could not prepare the Stalker row cache");
+    }
     crate::sources::register_importer(&state, Arc::new(sync::StalkerImporter));
     Ok(())
 }

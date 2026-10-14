@@ -45,7 +45,7 @@ Undo helpers for the toasts:
 
 The arrangement is set with container queries on the stage, not the viewport:
 
-- Below `@2xl` (42rem), every layout stacks as a single 16:9 column.
+- Below `@2xl` (42rem), every layout stacks as a single 16:9 column. The grid then sizes to its content (`WALL_BASE`: `self-start content-start`) and the stage scrolls. Left to stretch, the grid would take the stage's height and split it into rows shorter or taller than the 16:9 slots, so slots would overlap or float apart. Slots drop `min-h-0` below `@2xl` for the same reason: their 16:9 height, or their content if taller, sizes the row.
 - `1+3` puts the large slot across the top with the three small slots in a row beneath it from `@2xl`, and switches to the large slot on the start side with the three small slots stacked beside it from `@5xl` (64rem).
 
 The stage height bounds the grid (`[container-type:size]`), so tiles never push the page into horizontal scroll from 390 to 1920 px.
@@ -80,6 +80,7 @@ Chrome follows the broadcast multiviewer pattern:
 - The tile with sound gets a tally: an accent edge and a lit slot plate.
 - Tool buttons sit at the top end: listen, move, replace and close. They appear on hover and focus, and always on touch screens.
 - The chrome is glass on video: C8 tokens (`--color-glass*`, `--color-on-glass`) with `var()` fallbacks.
+- Panels with actions (error, lock, lock-check failure, source removed) are centred in the band above the label strip, so the strip never covers their buttons. Every slot is 16:9, so the tile's width (`@container/tile`) also gives its height, and the panel grows in steps: below 20rem the icon sits beside the headline and the help line is left out; from 20rem the icon stands above it; from 26rem the help line shows.
 
 ## Page
 
@@ -97,10 +98,12 @@ Behaviour:
 
 - Banners:
   - Connection limit, per source. The page reads `account.status` for every Xtream source on the wall. A source with `maxConnections > 0` and more tiles than that gets a dismissable warning naming the source, its limit and its tile count. The dismissal lasts until the count changes.
-  - Main player. Opening a wall with tiles stops the in-app main player. External mpv or VLC is left alone. During the first 5 s a restored session that starts playing is stopped too. After that, playback the user starts on purpose keeps playing: the wall goes quiet and a banner offers to stop the main player. An empty wall stops nothing.
+  - Main player. Opening `/multiview` stops the in-app main player, whether or not the wall has tiles yet, and so does putting the first tile on an empty wall. External mpv or VLC is left alone. During the first 5 s a restored session that starts playing is stopped too. After that, playback the user starts on purpose keeps playing: on a wall with tiles, the wall goes quiet and a banner offers to stop the main player.
 - Missing source: a tile whose source was removed shows "Source removed" with Replace and Close.
 - Full screen covers the whole stage through the Fullscreen API. On the desktop the shell mirrors the window. In full screen the toolbar and banners float over the wall and hide after 2.5 s without pointer or key activity. Dialogs portal to `body`, so they cannot show inside the full-screen element. The picker and the PIN prompt therefore leave full screen first.
-- Picker: `ChannelPicker` is a dialog. Choose a source and browse its live channels, or search across sources with `catalog.search`. Rows already on the wall show their slot. In add mode it stays open for several picks, and it warns when the wall is full or a source is already at its connection limit. In replace mode it puts the pick on one tile.
+- Picker: `ChannelPicker` is a dialog. Choose a source and browse its live channels, or search across sources with `catalog.search`. Rows already on the wall show their slot. In add mode it stays open for several picks, and it warns when the wall is full or a source is already at its connection limit. Under "All sources" the warning names every source at its limit, and the rows of those sources carry a warning mark ("Connection limit reached", also in the row's accessible name). In replace mode it puts the pick on one tile; picking from the replaced tile's own source adds no connection, so that source is not warned about.
+- Empty intro: below a 42rem intro width the layout buttons show only their glyphs (named for screen readers and in a tooltip), as in the toolbar; wider, the names show on one line each and the group wraps instead of overflowing.
+- Focus after "Add to multi-view": the menu item navigates with the new tile's key in the route state, and the page focuses that tile's main button, so a keyboard user lands on the tile they added.
 - Undo: closing a tile or clearing the wall shows a toast with Undo.
 - Screen readers: layout changes, sound moves, swaps and closes are announced in a polite live region.
 

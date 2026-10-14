@@ -53,7 +53,14 @@ function Spinner({ className }: { className?: string }) {
   return <LoaderCircle aria-hidden className={cn('motion-safe:animate-spin', className)} />;
 }
 
-/** A centred glass panel for a tile that is not playing: icon, headline, one line of help, actions. */
+/**
+ * A centred glass panel for a tile that is not playing: icon, headline, one line of help, actions.
+ *
+ * Every slot is 16:9, so the tile's width also sets its height, and the panel grows with
+ * the width: in a small tile (the 1+3 side slots, a short window) the icon sits beside the
+ * headline and the help is left out; from 20rem the icon stands above the headline; from
+ * 26rem the help shows too. Each step fits above the label strip (see `Tile`).
+ */
 function TilePanel({
   icon,
   title,
@@ -76,12 +83,18 @@ function TilePanel({
       role={role}
       data-testid={testId}
       data-error-class={errorClass}
-      className={cn(GLASS, 'pointer-events-auto flex max-w-[24rem] flex-col items-center gap-1.5 rounded-md px-4 py-3 text-center motion-safe:animate-fade-in')}
+      className={cn(
+        GLASS,
+        'pointer-events-auto flex max-w-[24rem] flex-col items-center gap-1 rounded-md px-3 py-1.5 text-center motion-safe:animate-fade-in',
+        '@[20rem]/tile:gap-1.5 @[20rem]/tile:px-4 @[20rem]/tile:py-2.5 @[26rem]/tile:py-3',
+      )}
     >
-      {icon}
-      <p className="text-sm font-semibold text-balance">{title}</p>
-      <p className={cn('hidden text-xs text-pretty @[18rem]/tile:block', ON_GLASS_MUTED)}>{hint}</p>
-      <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5">{children}</div>
+      <div data-testid="multiview-panel-head" className="flex items-center justify-center gap-1.5 @[20rem]/tile:flex-col">
+        <span className="flex shrink-0">{icon}</span>
+        <p className="line-clamp-2 text-sm font-semibold text-balance">{title}</p>
+      </div>
+      <p className={cn('hidden text-xs text-pretty @[26rem]/tile:block', ON_GLASS_MUTED)}>{hint}</p>
+      <div className="flex flex-wrap items-center justify-center gap-1.5 @[20rem]/tile:mt-1">{children}</div>
     </div>
   );
 }
@@ -183,6 +196,8 @@ export const Tile = memo(function Tile({
 
   // Centre: what the tile is doing when it is not simply playing.
   let centre: ReactNode = null;
+  // A panel with actions sits above the label strip, never under it (see the centre layer).
+  const panel = sourceMissing || lock === 'locked' || lock === 'error' || errorClass !== null;
   if (sourceMissing) {
     centre = (
       <TilePanel
@@ -322,7 +337,20 @@ export const Tile = memo(function Tile({
         )}
       />
 
-      {centre ? <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-3">{centre}</div> : null}
+      {/* A panel is centred in the band above the label strip (bottom-2 plus its 2rem, or about
+          2.7rem once the programme line shows), so the strip, drawn over everything, never covers
+          its buttons; a status pill uses the whole tile. */}
+      {centre ? (
+        <div
+          data-testid="multiview-tile-centre"
+          className={cn(
+            'pointer-events-none absolute z-10 flex items-center justify-center',
+            panel ? cn('inset-x-0 top-0 bottom-11 px-2 pt-2', programme && '@[18rem]/tile:bottom-14') : 'inset-0 p-3',
+          )}
+        >
+          {centre}
+        </div>
+      ) : null}
 
       {/* The browser held back sound until the first click or key on the page. */}
       {soundBlocked && phase === 'playing' && !blocked ? (
@@ -416,7 +444,7 @@ export const Tile = memo(function Tile({
 
       {/* The label strip (UMD): slot plate, logo, name, programme. */}
       <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex min-w-0 justify-start">
-        <div className={cn(GLASS, 'flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 ps-1 pe-2.5')}>
+        <div data-testid="multiview-tile-strip" className={cn(GLASS, 'flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 ps-1 pe-2.5')}>
           <span
             aria-hidden
             data-testid="multiview-slot-plate"

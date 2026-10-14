@@ -11,6 +11,7 @@ import { bindExternalEvents } from '../external';
 import { bindRecovery } from '../reconnect';
 import { useMediaStore } from '../media';
 import { bindRemote } from '../remote';
+import { bindParentalGuard } from '../parentalGuard';
 import { exitPip, usePipStore } from '../pip';
 import { getLastStagePath, setRehome, useStageTarget } from '../stage';
 import { flushProgress, reportFullscreen, usePlayerStore } from '../store';
@@ -117,12 +118,13 @@ export function PlayerDock() {
   const pipSlotRef = useRef<HTMLDivElement>(null);
   const miniRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MiniPos>(readPos);
-  // Hovering the mini player's channel title brings up the zap banner over its video.
-  const titleHover = useZapHover();
 
   const visible = !!source && mode !== 'external';
   const inStage = visible && dock === 'stage' && !!stageTarget;
   const inMini = visible && !inStage && dock !== 'hidden';
+  // Hovering the mini player's channel title brings up the zap banner over its video; leaving the
+  // mini player (no pointerleave comes then) lets go of that hold.
+  const titleHover = useZapHover(inMini);
   const channelPanelAvailable = !!source?.isLive && (settings?.fullscreenChannelPanel ?? true) && !!(zapContext ?? source?.ref);
 
   usePlaybackShortcuts({ channelPanelAvailable });
@@ -136,6 +138,8 @@ export function PlayerDock() {
 
   // failover: smart reconnect and live failover follow the player from here.
   useEffect(() => bindRecovery(), []);
+  // Parental controls locking again re-check what plays (Ask: PIN prompt; Hide: stop).
+  useEffect(() => bindParentalGuard(), []);
 
   useEffect(() => {
     const onHide = (): void => {

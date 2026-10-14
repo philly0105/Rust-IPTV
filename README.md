@@ -66,9 +66,9 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 - B returns to the last live channel. Shift+B, or the history button in the live controls, lists the last 10 channels with what is on now. The series page and Shift+P go back one episode.
 - Changing live channel shows a banner for a few seconds with the channel's logo, number, and what is on now and next. Settings > Playback > "Show channel info when switching channels" turns it off.
 - Sleep timer (player settings menu, or Z to cycle off, 15, 30, 45, 60 and 90 minutes): stop after a number of minutes, at the end of the programme (live TV, from the guide), or at the end of the episode or movie. A minute before the end a notice offers "Keep watching" or "Cancel timer"; then the sound fades out over the last 30 seconds and live TV stops or a video pauses.
-- My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. Reorder it by dragging, with the arrow buttons, or with Alt+Up/Down, and mark movies watched with W.
-- Multi-view plays two to four live channels at once: right-click a channel and choose "Add to multi-view". Pick side by side, a grid of four, or one large and three small. Only the tile you click has sound. Arrow keys move between tiles, Enter gives a tile the sound, R replaces its channel, S swaps two tiles, and Delete closes one.
-- Parental controls (Settings > Parental): set a 4 to 8 digit PIN, then lock whole groups there or from a group's right-click menu, a channel from its right-click menu, and a movie or series from its page. Adult groups can be locked automatically. Locked content is either hidden everywhere until the PIN is entered, or stays visible and asks for the PIN before it opens. An unlock lasts 15 minutes by default; "Lock now" (Settings > Parental, or the command palette) ends it.
+- My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. In a movie or series group, saved posters carry a marker and a corner toggle, S saves or removes the title under the cursor, and Shift+F10 or the context-menu key opens the poster menu (also on right click) with Add to or Remove from My List. Reorder it by dragging, with the arrow buttons, or with Alt+Up/Down, mark movies watched with W, and remove the focused title with Delete. Removing a source also removes its titles from My List.
+- Multi-view plays two to four live channels at once: right-click a channel and choose "Add to multi-view". Pick side by side, a grid of four, or one large and three small. Only the tile you click has sound. When a source would play on more tiles than its account allows connections, the page warns. Keys on the multi-view page: 1 to 4 give that tile the sound, F fills the screen, M mutes the wall, L switches layout, and A adds a channel. On the focused tile, arrow keys move between tiles, Enter gives it the sound, R replaces its channel, S swaps it with another tile, and Delete closes it.
+- Parental controls (Settings > Parental controls): set a 4 to 8 digit PIN, then lock whole groups there or from a group's right-click menu, a channel from its right-click menu, and a movie or series from its page. Adult groups can be locked automatically. Locked content is either hidden everywhere until the PIN is entered, or stays visible and asks for the PIN before it opens. An unlock lasts 15 minutes by default; "Lock now" (Settings > Parental controls, "Lock parental controls now" in the command palette, Ctrl+K, or Ctrl+Alt+L) ends it.
 - Settings > Appearance: light, dark or system theme, OLED black for the dark theme, seven accent colours, a compact density, and an interface size from 90 to 125 %.
 
 ## Data
@@ -100,6 +100,7 @@ Press `?` in the app for the full list. The main ones:
 | Ctrl+F | Global search |
 | Ctrl+R | Recently watched |
 | Ctrl+Shift+L | Switch light / dark theme |
+| Ctrl+Alt+L | Lock parental controls now (while an unlock is running) |
 | F8 | Move focus to notifications |
 | ? | Shortcut help |
 | Ctrl+B | Toggle the live TV group sidebar |
@@ -123,10 +124,30 @@ Press `?` in the app for the full list. The main ones:
 | C | Captions on / off (in fullscreen live TV: the channel panel) |
 | Z | Sleep timer: off, 15, 30, 45, 60, 90 minutes |
 | Shift+N | Add a source (Sources page) |
-| Alt+Up / Alt+Down | Move the focused favorite up / down (Favorites) |
+| Alt+Up / Alt+Down | Move the focused favorite or title up / down (Favorites, My List) |
+| W | Mark the focused movie watched or unwatched (My List) |
+| S | Add or remove the title under the cursor in My List (movie and series groups) |
+| Shift+F10 or the context-menu key | Open the poster menu for the title under the cursor (movie and series groups) |
+| Delete | Remove the focused title (My List), favorite (Favorites), or item (Recently watched, My Videos) |
 | P / R / X / Delete | Pause or resume / retry / cancel / remove the focused download (Downloads) |
 | Backspace | Back to My Videos from a video's page |
 | Esc | Close the open dialog or overlay; leave picture-in-picture; on a movie or series page, go back to where you came from (a grid returns to the title you opened) |
+
+On the multi-view page:
+
+| Keys | Action |
+| --- | --- |
+| 1-4 | Give that tile the sound |
+| F | Full screen for the wall |
+| M | Mute or unmute the wall |
+| L | Next layout that holds the tiles |
+| A | Add a channel |
+| Arrow keys | Move focus between tiles and empty slots |
+| Home / End | Focus the first or last slot |
+| Enter or Space | Give the focused tile the sound |
+| R | Replace the focused tile's channel |
+| S | Move the focused tile: press S, then S or Enter on another tile to swap the two (S again on the same tile, or Esc, cancels) |
+| Delete or Backspace | Close the focused tile (Undo in the toast) |
 
 ## Picture-in-picture
 

@@ -67,6 +67,7 @@
   "unlockTimeLeft": "الوقت اللي باقي محلول",
   "lockNow": "سدّ دابا",
   "lockedNowToast": "الرقابة الأبوية تسدّات",
+  "shortcutLockNow": "سدّ الرقابة الأبوية دابا",
   "lockoutActive": "دخلتي كود غالط بزاف ديال المرات. تقدر تعاود تجرب الكود من بعد {{time}}.",
   "behaviourTitle": "كيفاش كيخدمو الأقفال",
   "behaviourPinNote": "التبديلات هنا كتطلب الكود.",

@@ -67,6 +67,7 @@
   "unlockTimeLeft": "Resterende ontgrendelde tijd",
   "lockNow": "Nu vergrendelen",
   "lockedNowToast": "Ouderlijk toezicht vergrendeld",
+  "shortcutLockNow": "Ouderlijk toezicht nu vergrendelen",
   "lockoutActive": "Te veel onjuiste pincodes. De pincode kan over {{time}} opnieuw worden geprobeerd.",
   "behaviourTitle": "Hoe vergrendelen werkt",
   "behaviourPinNote": "Wijzigingen hier vragen om de pincode.",

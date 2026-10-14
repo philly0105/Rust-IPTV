@@ -42,13 +42,18 @@ export function useRemoteBridge(args: Args): void {
     const sourceId = args.sourceId;
     const timers: ReturnType<typeof setTimeout>[] = [];
     published.current = false;
+    // Bumped whenever the list to publish may have changed (parental locks): an attempt that
+    // started earlier fetched the old list, so it stands down instead of publishing it.
+    let generation = 0;
     const attempt = async () => {
+      const gen = generation;
+      const stale = () => cancelled || gen !== generation || published.current;
       try {
         const status = await rpc('remote.status');
         running.current = status.running;
-        if (!status.running || cancelled || published.current) return;
+        if (!status.running || stale()) return;
         const channels = await rpc('catalog.allLiveChannels', { sourceId });
-        if (cancelled || published.current) return;
+        if (stale()) return;
         await rpc('remote.publishChannels', {
           channels: channels.map((c) => ({
             id: `${c.ref.sourceId}|${c.ref.itemId}`,
@@ -76,9 +81,18 @@ export function useRemoteBridge(args: Args): void {
       if (s.remoteControl?.enabled) retry();
       else running.current = false;
     });
+    // Parental controls (C2): in Hide mode a lock, Lock now or an expired unlock takes channels out
+    // of `catalog.allLiveChannels`, and an unlock brings them back. Republish so the phone's list
+    // never keeps showing the names and logos of channels that are hidden now.
+    const offParental = onAppEvent('parental.changed', () => {
+      generation += 1;
+      published.current = false;
+      void attempt();
+    });
     return () => {
       cancelled = true;
       off();
+      offParental();
       for (const t of timers) clearTimeout(t);
       kick.current = () => undefined;
     };

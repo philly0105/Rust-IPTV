@@ -155,6 +155,34 @@ describe('movie page parental gate (Ask mode)', () => {
     await screen.findByText('A film for grown-ups.');
   });
 
+  it('checks a Stalker title with its category from the details (no catalog row to look it up in)', async () => {
+    // Stalker VOD is paged live from the portal: the core finds a group lock only through categoryId.
+    const h = rpcMock.handlers;
+    h['sources.get'] = () => makeSource('src1', 'stalker', 'Portal');
+    h['sources.list'] = () => [makeSource('src1', 'stalker', 'Portal')];
+    h['stalker.vodDetail'] = (): VodDetail => ({
+      item: { ...item, categoryId: 'adult', plot: 'A film for grown-ups.' } as VodItem,
+      cast: [],
+      providerDetailsUnavailable: false,
+      backdrops: [],
+    });
+    h['parental.check'] = (args) =>
+      (args as { items: { ref: ItemRef; categoryId?: string }[] }).items.filter((i) => i.categoryId === 'adult').map((i) => i.ref);
+    renderMovie();
+    await screen.findByRole('heading', { name: 'Enter the parental PIN' });
+    expect(screen.queryByText('A film for grown-ups.')).toBeNull();
+    const checks = rpcMock.calls.filter((c) => c.cmd === 'parental.check');
+    expect(checks.length).toBeGreaterThan(0);
+    // Never asked without the category (that answer would be "not locked" and open the page).
+    for (const c of checks) expect((c.args as { items: { categoryId?: string }[] }).items[0]!.categoryId).toBe('adult');
+
+    // The unlock prompt carries the category too.
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    await waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
+    const req = useGateStore.getState().queue[0]!;
+    expect(req.kind === 'unlock' && req.items.map((i) => i.categoryId)).toEqual(['adult']);
+  });
+
   it('asks nothing with parental controls off', async () => {
     rpcMock.handlers['parental.status'] = () => status({ enabled: false });
     renderMovie();

@@ -75,6 +75,7 @@
   "unlockTimeLeft": "Pozostały czas odblokowania",
   "lockNow": "Zablokuj teraz",
   "lockedNowToast": "Kontrola rodzicielska zablokowana",
+  "shortcutLockNow": "Zablokuj teraz kontrolę rodzicielską",
   "lockoutActive": "Za dużo błędnych kodów PIN. Kolejna próba będzie możliwa za {{time}}.",
   "behaviourTitle": "Jak działają blokady",
   "behaviourPinNote": "Zmiany tutaj wymagają kodu PIN.",

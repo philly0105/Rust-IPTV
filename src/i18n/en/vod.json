@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Couldn't load these titles",
   "searchPartialError": "Some results could not be loaded.",
-  "previousEpisode": "Previous episode"
+  "previousEpisode": "Previous episode",
+  "posterInMyList": "In My List",
+  "shortcutMyList": "Save the title under the cursor to My List, or take it off",
+  "shortcutPosterMenu": "Open the menu for the title under the cursor"
 }

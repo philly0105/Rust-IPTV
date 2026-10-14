@@ -28,6 +28,7 @@ import { displayChannelName } from '@/features/live/lib/channelName';
 import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
 import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
+import { lockedNow, onPlaybackHidden } from './parentalLocks';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
@@ -145,6 +146,18 @@ export function subscribeVolumeIntent(fn: () => void): () => void {
 
 function volumeIntent(): void {
   for (const fn of volumeIntentListeners) fn();
+}
+
+/**
+ * Puts the volume level back and leaves mute as it is (the sleep timer restoring the level its
+ * fade lowered, after the person muted meanwhile). A restore, not a person's change: no intent.
+ */
+export function restoreVolumeLevel(v: number): void {
+  const volume = clamp01(v);
+  const { muted } = usePlayerStore.getState();
+  controller?.setVolume(volume);
+  usePlayerStore.setState({ volume });
+  storeVolume(volume, muted);
 }
 
 function storeVolume(volume: number, muted: boolean): void {
@@ -925,6 +938,22 @@ async function passGate(item: PlaybackGateItem): Promise<boolean> {
   return allowed;
 }
 
+// Hide mode refused an item the player held on to: the resume record must not offer it again
+// on the next reload (restorePlayback replays its stored URL).
+onPlaybackHidden((item) => {
+  const kept = readResume()?.source.ref;
+  if (kept && itemKey(kept) === itemKey(item.ref)) clearResume();
+});
+
+/**
+ * Parental controls locked again (`parental.changed` with no unlock running: Lock now, the
+ * unlock ran out, a new lock). The last pass no longer counts, so a replay, failover or queue
+ * advance of that item asks again. Called by the player's parental guard.
+ */
+export function forgetGatePass(): void {
+  allowedRefKey = null;
+}
+
 /** Resolve a catalog item to a PlayerSource by source kind. Exported for tests. */
 export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
   const { ref, episodeId } = args;
@@ -1033,12 +1062,32 @@ async function freshResume(entry: PlayerSource): Promise<PlayerSource> {
 }
 
 export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource[] }): Promise<void> {
+  await startItem(args, opts);
+}
+
+/**
+ * How a start request ended. `refused`: the parental gate said no (prompt cancelled, check
+ * failed, hidden), and what was playing is untouched. `superseded`: a newer request took over.
+ */
+export type StartOutcome = 'started' | 'refused' | 'superseded';
+
+/**
+ * `playItem` with its outcome. `onAllowed` runs once the gate let the item through and before
+ * anything else, so a zap's tuner readout never shows a channel the PIN prompt then refuses.
+ */
+export async function startItem(
+  args: PlayItemArgs,
+  opts?: { queue?: PlayerSource[]; onAllowed?: () => void },
+): Promise<StartOutcome> {
   const seq = ++requestSeq;
   // The user picked something: a countdown firing during the lookup must not override it.
   cancelUpNext();
   // Parental gate first, so a locked item's title never shows behind the PIN prompt.
-  if (!(await passGate(args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title }))) return;
-  if (seq !== requestSeq) return;
+  const gate: PlaybackGateItem = args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title };
+  if (!(await passGate(gate))) return seq === requestSeq ? 'refused' : 'superseded';
+  if (seq !== requestSeq) return 'superseded';
+  opts?.onAllowed?.();
+  const queueOpts = opts?.queue ? { queue: opts.queue } : undefined;
   usePlayerStore.setState({
     status: 'loading',
     error: undefined,
@@ -1057,16 +1106,17 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
     source = await withResume(await resolveSource(args));
   } catch (err) {
     // A newer request won the race: do not clobber it.
-    if (seq !== requestSeq) return;
+    if (seq !== requestSeq) return 'superseded';
     const placeholder: PlayerSource = { url: '', kind: 'direct', title: args.title, isLive: args.isLive, isRadio: !!args.isRadio, ref: args.ref };
     if (args.episodeId) placeholder.episodeId = args.episodeId;
     if (args.subtitle) placeholder.subtitle = args.subtitle;
     if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
-    failResolve(err, placeholder, () => playItem(args, opts));
+    failResolve(err, placeholder, () => playItem(args, queueOpts));
     throw err;
   }
-  if (seq !== requestSeq) return;
-  await usePlayerStore.getState().play(source, opts);
+  if (seq !== requestSeq) return 'superseded';
+  await usePlayerStore.getState().play(source, queueOpts);
+  return 'started';
 }
 
 export async function playSource(source: PlayerSource): Promise<void> {
@@ -1112,10 +1162,13 @@ export async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined):
  * like the list click path.
  */
 export async function playChannel(channel: Channel, sourceKind?: SourceKind): Promise<void> {
+  await tuneChannel(channel, sourceKind);
+}
+
+/** `playChannel` with its outcome: a zap steps past a channel the parental gate refused. */
+async function tuneChannel(channel: Channel, sourceKind?: SourceKind): Promise<StartOutcome> {
   const settings = await getSettings();
   const name = displayChannelName(channel.name, settings?.stripCountryPrefix) || channel.name;
-  // Tuner readout: number big, name below.
-  showOsd(channel.number !== undefined ? String(channel.number) : name, channel.number !== undefined ? name : undefined);
   const [kind, subtitle] = await Promise.all([
     sourceKind ?? sourceKindOf(channel.ref.sourceId),
     nowTitle(channel.ref, settings?.epgOffsetMinutes),
@@ -1130,7 +1183,11 @@ export async function playChannel(channel: Channel, sourceKind?: SourceKind): Pr
   if (channel.categoryId) args.categoryId = channel.categoryId;
   if (channel.logoUrl) args.posterUrl = channel.logoUrl;
   if (subtitle) args.subtitle = subtitle;
-  await playItem(args);
+  // Tuner readout: number big, name below. Only once the gate let the channel through, so a
+  // cancelled PIN prompt leaves no locked channel's name on screen.
+  return startItem(args, {
+    onAllowed: () => showOsd(channel.number !== undefined ? String(channel.number) : name, channel.number !== undefined ? name : undefined),
+  });
 }
 
 function currentLiveRef(): ItemRef | undefined {
@@ -1139,17 +1196,47 @@ function currentLiveRef(): ItemRef | undefined {
   return source.ref;
 }
 
-/** Move to the neighbor channel in the current list context. Returns the channel played, if any. */
+/** Most neighbours one zap press looks at while stepping past refused or locked channels. */
+export const ZAP_SKIP_LIMIT = 50;
+
+/**
+ * Move to the neighbor channel in the current list context. Returns the channel played, if any.
+ *
+ * When the parental gate refuses the neighbour (its PIN prompt was cancelled), the zap goes on
+ * in the same direction from it, so a locked channel never walls off the rest of the list. Past
+ * that first refusal it steps over locked channels without asking again (one prompt per press),
+ * and it stops when it comes round to a channel it already saw or after ZAP_SKIP_LIMIT steps.
+ */
 export async function zap(direction: 'up' | 'down'): Promise<Channel | undefined> {
-  const ref = currentLiveRef();
-  if (!ref) return undefined;
+  const start = currentLiveRef();
+  if (!start) return undefined;
   const ctx = usePlayerStore.getState().zapContext;
-  const args: { ref: ItemRef; categoryId?: string } = { ref };
-  if (ctx?.categoryId && ctx.sourceId === ref.sourceId) args.categoryId = ctx.categoryId;
-  const res = await rpc('catalog.neighbors', args);
-  const target = direction === 'up' ? res.prev : res.next;
-  if (target) await playChannel(target);
-  return target;
+  const seen = new Set<string>([itemKey(start)]);
+  let from = start;
+  let refused = false;
+  for (let step = 0; step < ZAP_SKIP_LIMIT; step++) {
+    const args: { ref: ItemRef; categoryId?: string } = { ref: from };
+    if (ctx?.categoryId && ctx.sourceId === from.sourceId) args.categoryId = ctx.categoryId;
+    const seq = requestSeq;
+    const res = await rpc('catalog.neighbors', args);
+    // Another request (a newer zap, a click) took over meanwhile: this press is done.
+    if (seq !== requestSeq) return undefined;
+    const target = direction === 'up' ? res.prev : res.next;
+    if (!target || seen.has(itemKey(target.ref))) return undefined;
+    seen.add(itemKey(target.ref));
+    from = target.ref;
+    if (refused) {
+      const item: PlaybackGateItem = target.categoryId ? { ref: target.ref, categoryId: target.categoryId } : { ref: target.ref };
+      const locked = await lockedNow(item);
+      if (seq !== requestSeq) return undefined;
+      if (locked) continue;
+    }
+    const outcome = await tuneChannel(target);
+    if (outcome === 'started') return target;
+    if (outcome === 'superseded') return undefined;
+    refused = true;
+  }
+  return undefined;
 }
 
 export async function zapToNumber(n: number): Promise<Channel | undefined> {

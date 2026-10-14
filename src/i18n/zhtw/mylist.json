@@ -65,5 +65,11 @@
   "showWatched": "顯示已觀看",
   "noMatchTitle": "沒有相符結果",
   "noMatchBody": "我的片單中沒有與「{{query}}」相符的內容。",
-  "clearSearch": "清除搜尋"
+  "clearSearch": "清除搜尋",
+  "checkingHint": "正在檢查我的片單…",
+  "retryHint": "無法載入我的片單。按一下即可重試。",
+  "menuChecking": "正在檢查我的片單…",
+  "menuRetry": "重新載入我的片單",
+  "notReady": "我的片單仍在載入中，請稍後再試。",
+  "loadFailed": "無法載入我的片單"
 }

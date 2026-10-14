@@ -2,6 +2,7 @@ import { X } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { create } from 'zustand';
 
 import { cn } from './cn';
 import { focusableIn } from './focus';
@@ -45,6 +46,19 @@ const sizes: Record<DialogSize, string> = {
 };
 
 let openCount = 0;
+
+/**
+ * How many centred (floating card) dialogs are open. The toast viewport reads
+ * it: on a phone-width window a centred dialog spans the width, so a toast in
+ * its bottom corner would sit on the dialog's footer buttons. Drawers are not
+ * counted; they leave no free edge to move to.
+ */
+const useCenteredDialogs = create<{ count: number }>(() => ({ count: 0 }));
+
+/** True while at least one centred dialog is open. */
+export function useCenteredDialogOpen(): boolean {
+  return useCenteredDialogs((s) => s.count > 0);
+}
 
 /**
  * Modal dialog: portal to body, focus trap, Escape and backdrop close,
@@ -110,6 +124,13 @@ export function Dialog({
     };
     // initialFocus is a ref; it is read once on open.
   }, [open]);
+
+  // Counted for the toast viewport (useCenteredDialogOpen).
+  useEffect(() => {
+    if (!open || drawer) return;
+    useCenteredDialogs.setState((s) => ({ count: s.count + 1 }));
+    return () => useCenteredDialogs.setState((s) => ({ count: Math.max(0, s.count - 1) }));
+  }, [open, drawer]);
 
   // Keep focus inside when something outside steals it (e.g. click on body).
   useEffect(() => {

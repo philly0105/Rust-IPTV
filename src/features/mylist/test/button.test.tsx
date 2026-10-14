@@ -19,7 +19,7 @@ const h = await import('./harness');
 const rpc = h.createRpcMock();
 rpcMock.current = rpc;
 const { queryClient } = await import('@/api/query');
-const { MyListButton, useInMyList, useMyListMenuItem } = await import('..');
+const { MyListButton, useInMyList, useMyListMenuItem, useMyListToggle } = await import('..');
 const { LIST_KEY } = await import('../lib/cache');
 
 const arrival: ItemRef = { sourceId: 'src1', contentType: 'movie', itemId: 'm1' };
@@ -49,7 +49,8 @@ describe('MyListButton', () => {
         <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} />
       </Wrap>,
     );
-    await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(1));
+    await waitFor(() => expect(button().dataset['state']).toBe('ready'));
+    expect(rpc.callsOf('watchlist.list')).toHaveLength(1);
     expect(button().getAttribute('aria-pressed')).toBe('false');
     expect(button().textContent).toBe('My List');
     expect(button().dataset['variant']).toBe('button');
@@ -114,7 +115,7 @@ describe('MyListButton', () => {
         <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} />
       </Wrap>,
     );
-    await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(1));
+    await waitFor(() => expect(button().dataset['state']).toBe('ready'));
     fireEvent.click(button());
     expect(button().getAttribute('aria-pressed')).toBe('true');
     await waitFor(() => expect(h.lastToast()?.variant).toBe('error'));
@@ -141,7 +142,8 @@ describe('MyListButton', () => {
         <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} />
       </Wrap>,
     );
-    await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTestId('mylist-button').every((b) => b.dataset['state'] === 'ready')).toBe(true));
+    expect(rpc.callsOf('watchlist.list')).toHaveLength(1);
     const [icon, labelled] = screen.getAllByTestId('mylist-button');
     fireEvent.click(icon!);
     fireEvent.click(icon!);
@@ -163,7 +165,7 @@ describe('MyListButton', () => {
         </div>
       </Wrap>,
     );
-    await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(1));
+    await waitFor(() => expect(button().dataset['state']).toBe('ready'));
     fireEvent.click(button());
     expect(outer).not.toHaveBeenCalled();
     await waitFor(() => expect(h.lastToast()).toBeDefined());
@@ -187,11 +189,97 @@ describe('MyListButton', () => {
         <MyListButton itemRef={dark} snapshot={snap('Dark', dark)} />
       </Wrap>,
     );
-    await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(1));
+    await waitFor(() => expect(button().dataset['state']).toBe('ready'));
+    expect(rpc.callsOf('watchlist.list')).toHaveLength(1);
     expect(button().getAttribute('aria-pressed')).toBe('false');
     core.entries = [h.entry(dark, 'Dark')];
     await act(() => queryClient.invalidateQueries({ queryKey: LIST_KEY }));
     await waitFor(() => expect(button().getAttribute('aria-pressed')).toBe('true'));
+  });
+});
+
+describe('MyListButton before the list is known (V1-10)', () => {
+  it('while the list loads: busy, not pressed either way, and a press sends nothing', async () => {
+    h.installCore(rpc, [h.entry(arrival, 'Arrival')]);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const list = rpc.handlers['watchlist.list']!;
+    rpc.handlers['watchlist.list'] = async (a) => {
+      await gate;
+      return list(a);
+    };
+    render(
+      <Wrap>
+        <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} />
+        <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} variant="icon" />
+      </Wrap>,
+    );
+    const [labelled, icon] = screen.getAllByTestId('mylist-button');
+    for (const b of [labelled!, icon!]) {
+      expect(b.dataset['state']).toBe('loading');
+      expect(b.getAttribute('aria-busy')).toBe('true');
+      expect(b.getAttribute('aria-disabled')).toBe('true');
+      expect(b.hasAttribute('aria-pressed')).toBe(false);
+      expect(b.getAttribute('title')).toBe('Checking My List…');
+      fireEvent.click(b);
+    }
+    expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
+
+    // Once the list arrives the saved title shows as saved, and nothing was taken off.
+    release();
+    await waitFor(() => expect(labelled!.getAttribute('aria-pressed')).toBe('true'));
+    expect(icon!.getAttribute('aria-pressed')).toBe('true');
+    expect(labelled!.hasAttribute('aria-busy')).toBe(false);
+    expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
+  });
+
+  it('after the list failed: offers to read it again instead of toggling', async () => {
+    const core = h.installCore(rpc, [h.entry(arrival, 'Arrival')]);
+    core.fail['watchlist.list'] = 'db';
+    render(
+      <Wrap>
+        <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} variant="icon" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(button().dataset['state']).toBe('error'));
+    expect(button().hasAttribute('aria-pressed')).toBe(false);
+    expect(button().hasAttribute('aria-disabled')).toBe(false);
+    expect(button().getAttribute('title')).toBe("Couldn't load My List. Press to try again.");
+
+    fireEvent.click(button());
+    await waitFor(() => expect(button().getAttribute('aria-pressed')).toBe('true'));
+    expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
+    expect(h.titles(core.entries)).toEqual(['Arrival']);
+  });
+
+  it('says so when reading the list fails again', async () => {
+    const core = h.installCore(rpc, []);
+    core.fail['watchlist.list'] = 'db';
+    render(
+      <Wrap>
+        <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} />
+      </Wrap>,
+    );
+    await waitFor(() => expect(button().dataset['state']).toBe('error'));
+    core.fail['watchlist.list'] = 'db';
+    fireEvent.click(button());
+    await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't load My List"));
+    expect(h.lastToast()?.variant).toBe('error');
+    expect(button().dataset['state']).toBe('error');
+    expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
+  });
+
+  it('the toggle itself refuses an unknown state', async () => {
+    h.installCore(rpc, [h.entry(arrival, 'Arrival')]);
+    rpc.handlers['watchlist.list'] = () => new Promise(() => undefined);
+    const { result } = renderHook(() => useMyListToggle(), { wrapper: Wrap });
+    let out: boolean | undefined = true;
+    await act(async () => {
+      out = await result.current(arrival, snap('Arrival', arrival));
+    });
+    expect(out).toBeUndefined();
+    expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
+    expect(h.lastToast()?.title).toBe('My List is still loading. Try again in a moment.');
   });
 });
 
@@ -217,11 +305,23 @@ describe('useMyListMenuItem', () => {
   it('offers add or remove and toggles like the button', async () => {
     const core = h.installCore(rpc, []);
     const { result } = renderHook(() => useMyListMenuItem({ ref: arrival, snapshot: snap('Arrival', arrival) }), { wrapper: Wrap });
-    await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(1));
-    expect(result.current).toMatchObject({ id: 'mylist', label: 'Add to My List' });
+    await waitFor(() => expect(result.current).toMatchObject({ id: 'mylist', label: 'Add to My List' }));
+    expect(result.current?.disabled).toBeFalsy();
     act(() => result.current!.onSelect());
     await waitFor(() => expect(result.current?.label).toBe('Remove from My List'));
     expect(h.titles(core.entries)).toEqual(['Arrival']);
+  });
+
+  it('is disabled while the list loads, and reads it again after a failure', async () => {
+    const core = h.installCore(rpc, [h.entry(arrival, 'Arrival')]);
+    core.fail['watchlist.list'] = 'db';
+    const { result } = renderHook(() => useMyListMenuItem({ ref: arrival, snapshot: snap('Arrival', arrival) }), { wrapper: Wrap });
+    expect(result.current).toMatchObject({ id: 'mylist', label: 'Checking My List…', disabled: true });
+    await waitFor(() => expect(result.current?.label).toBe('Load My List again'));
+    expect(result.current?.disabled).toBeFalsy();
+    act(() => result.current!.onSelect());
+    await waitFor(() => expect(result.current?.label).toBe('Remove from My List'));
+    expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
   });
 
   it('is null for no target and for live refs', () => {

@@ -192,9 +192,9 @@ export function RecordControl({ compact }: { compact?: boolean }) {
         <span
           data-testid="rec-indicator"
           title={recordPath ? t('recordingTo', { path: recordPath }) : undefined}
-          className="ms-1 inline-flex items-center gap-1.5 rounded-full bg-[#ff4d4d]/15 px-2 py-0.5 font-display text-xs font-semibold text-[#ff7a7a] tabular-nums ring-1 ring-[#ff4d4d]/45"
+          className="ms-1 inline-flex items-center gap-1.5 rounded-full bg-[color:var(--color-danger,#ff7a7a)]/15 px-2 py-0.5 font-display text-xs font-semibold text-[color:var(--color-danger,#ff7a7a)] tabular-nums ring-1 ring-[color:var(--color-danger,#ff7a7a)]/45"
         >
-          <span className="size-2 rounded-full bg-[#ff4d4d] motion-safe:animate-live-pulse" aria-hidden />
+          <span className="size-2 rounded-full bg-[color:var(--color-danger,#ff7a7a)] motion-safe:animate-live-pulse" aria-hidden />
           {t('rec')} {formatTime(elapsed)}
         </span>
       )}

@@ -69,7 +69,7 @@ function Logo({ url, compact }: { url: string | undefined; compact: boolean }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
   const src = safeImageUrl(url);
-  const box = compact ? 'size-9 rounded-sm' : 'size-14 rounded-md';
+  const box = compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
   if (!src || failed) {
     return (
       <span
@@ -160,20 +160,22 @@ function GuideRows({ guide, now, compact }: { guide: EpgNowNext | null | undefin
     );
   }
 
-  // Labels in a column of their own, as wide as the longest one in the language.
+  // Labels in a column of their own, as wide as the longest one in the language. A narrow
+  // banner (a phone) drops the times column so the titles keep the room; the bar still says
+  // how far in, and the minutes left stay for screen readers (out of the grid flow).
   return (
-    <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1 text-sm">
+    <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1 text-sm @max-md:grid-cols-[auto_minmax(0,1fr)]">
       {current && (
         <>
           <span className="player-on-glass-muted text-xs font-medium">{t('zapNow')}</span>
           <span data-testid="zap-now" className="truncate" title={current.title}>
             {current.title}
           </span>
-          <span className="player-on-glass-muted text-xs tabular-nums">
+          <span className="player-on-glass-muted text-xs tabular-nums @max-md:hidden">
             {formatClock(ms(current.start), lang)}–{formatClock(ms(current.end), lang)}
-            <span className="sr-only">, {t('zapMinutesLeft', { minutes: minutesLeft })}</span>
           </span>
-          <Progress share={airedShare(current, now)} className="col-span-2 col-start-2 mb-1 self-center" />
+          <span className="sr-only">, {t('zapMinutesLeft', { minutes: minutesLeft })}</span>
+          <Progress share={airedShare(current, now)} className="col-[2/-1] mb-1 self-center" />
         </>
       )}
       {upcoming && (
@@ -182,7 +184,7 @@ function GuideRows({ guide, now, compact }: { guide: EpgNowNext | null | undefin
           <span data-testid="zap-next" className="player-on-glass-muted truncate" title={upcoming.title}>
             {upcoming.title}
           </span>
-          <span className="player-on-glass-muted text-xs tabular-nums">{formatClock(ms(upcoming.start), lang)}</span>
+          <span className="player-on-glass-muted text-xs tabular-nums @max-md:hidden">{formatClock(ms(upcoming.start), lang)}</span>
         </>
       )}
     </div>
@@ -204,7 +206,8 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
   const now = useClock(shown);
   const ref = shown ? source?.ref : undefined;
   const { info, guide } = useZapData(ref, now);
-  const hover = useZapHover();
+  // Hidden while hovered (the stream failed, the setting went off): no leave comes, so `shown` releases it.
+  const hover = useZapHover(shown);
 
   // The zap readout (number and name, top corner) says what the banner says: drop it.
   const title = source?.title;
@@ -230,7 +233,8 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
       data-mpv-reserved=""
       className={cn(
         'player-glass player-glass-edge pointer-events-auto absolute z-[12] border motion-safe:animate-pop-in',
-        compact ? 'rounded-md px-2.5 py-2' : 'w-[min(30rem,calc(100%-1.5rem))] rounded-xl p-3 sm:p-3.5',
+        // Full: a size container, so the guide rows can fit a phone-width banner.
+        compact ? 'rounded-md px-2.5 py-2' : '@container w-[min(30rem,calc(100%-1.5rem))] rounded-xl p-3 sm:p-3.5',
         className,
       )}
       onPointerEnter={hover.onPointerEnter}
@@ -249,7 +253,7 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
                 data-testid="zap-number"
                 className={cn(
                   'shrink-0 font-display leading-none text-white tabular-nums dark:text-accent-hover',
-                  compact ? 'text-lg' : 'text-3xl',
+                  compact ? 'text-lg' : 'text-3xl @max-md:text-2xl',
                 )}
               >
                 {number}

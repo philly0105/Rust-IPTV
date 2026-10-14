@@ -2,8 +2,9 @@
  * /my-list: every saved movie and series in the user's order.
  *
  * Filter by type (pill tabs with counts), sort by the user's order, newest
- * add or title, hide watched titles, and search from the shell header; all
- * four live in the URL. In the user's own order each row shows its rank and
+ * add or title, hide watched titles, and search from the page toolbar; all
+ * four live in the URL. The search stays out of the shell header so a
+ * phone-width header keeps its room for the page title. In the user's own order each row shows its rank and
  * can be moved by drag (fine pointers), by the up/down buttons, or with
  * Alt+ArrowUp / Alt+ArrowDown on the focused row; moves inside a filtered
  * view reshuffle only the rows on screen. Enter opens the focused title,
@@ -119,10 +120,15 @@ export function MyListPage() {
   const subtitle = all ? t('count', { count: view.base.length }) : undefined;
   const { query: search } = params;
   const onSearch = useCallback((value: string) => setParams({ query: value }), [setParams]);
-  const placeholder = t('searchPlaceholder');
   useEffect(() => {
-    setHeader({ title, ...(subtitle ? { subtitle } : {}), search: { value: search, onChange: onSearch, placeholder } });
-  }, [setHeader, title, subtitle, search, onSearch, placeholder]);
+    setHeader({ title, ...(subtitle ? { subtitle } : {}) });
+  }, [setHeader, title, subtitle]);
+
+  /** Enter or ArrowDown in the search box: on to the list's current row. */
+  const focusList = useCallback(() => {
+    const list = document.querySelector<HTMLElement>('[data-testid="mylist-list"]');
+    (list?.querySelector<HTMLElement>('[role="listitem"][tabindex="0"]') ?? list?.querySelector<HTMLElement>('[role="listitem"]'))?.focus();
+  }, []);
 
   const open = useCallback((e: WatchlistEntry) => void navigate(itemPath(e.ref)), [navigate]);
 
@@ -322,6 +328,9 @@ export function MyListPage() {
           hideWatched={params.hideWatched}
           counts={view.counts}
           watchedCount={view.typed.filter((e) => e.watched).length}
+          query={search}
+          onQuery={onSearch}
+          onLeaveSearch={focusList}
           onFilter={(filter) => setParams({ filter })}
           onSort={(sort) => setParams({ sort })}
           onHideWatched={(hideWatched) => setParams({ hideWatched })}

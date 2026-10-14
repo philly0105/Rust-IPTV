@@ -223,5 +223,8 @@
   "zapNoGuide": "가이드 정보 없음",
   "zapMinutesLeft": "{{minutes}}분 남음",
   "zapNow": "현재",
-  "zapNext": "다음"
+  "zapNext": "다음",
+  "parentalHiddenTitle": "자녀 보호 기능으로 잠김",
+  "parentalHidden": "자녀 보호 기능이 이 항목을 숨기고 있습니다. 시청하려면 설정에서 잠금을 해제하세요.",
+  "parentalStopped": "재생이 중지되었습니다. 다시 재생하고 PIN을 입력하면 계속 시청할 수 있습니다."
 }

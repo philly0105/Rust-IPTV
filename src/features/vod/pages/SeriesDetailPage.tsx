@@ -44,8 +44,6 @@ export function SeriesDetailPage() {
   const { t } = useTranslation('vod');
   const { sourceId = '', itemId = '' } = useParams();
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'series', itemId }), [sourceId, itemId]);
-  // C2: in Ask mode a locked series shows nothing until the PIN is entered.
-  const gate = useOpenGate(ref);
   const scrollRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
@@ -56,6 +54,13 @@ export function SeriesDetailPage() {
   const twin = useTwinProbe(source.data, ref, probeTwin);
   const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
+  // C2: in Ask mode a locked series shows nothing until the PIN is entered. Stalker titles are not
+  // in the local catalog, so the core learns their group only from the details: wait for them.
+  const stalkerSource = source.data?.kind === 'stalker';
+  const gate = useOpenGate(ref, {
+    categoryId: stalkerSource ? item?.categoryId : undefined,
+    waitForCategory: source.isPending || (stalkerSource && detail.isPending),
+  });
   const tmdb = useTmdbTv(item, tmdbOn);
   const model = useMemo(() => (detail.data ? mergeSeriesDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
   const similarFallback = useTmdbSimilar('tv', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
@@ -185,6 +190,7 @@ export function SeriesDetailPage() {
         ) : (
           <ParentalLocked
             itemRef={ref}
+            categoryId={stalkerSource ? item?.categoryId : undefined}
             title={model?.title}
             failed={gate.state === 'failed'}
             onRetry={gate.retry}

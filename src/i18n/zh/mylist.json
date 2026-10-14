@@ -65,5 +65,11 @@
   "showWatched": "显示已观看",
   "noMatchTitle": "无匹配结果",
   "noMatchBody": "我的片单中没有与“{{query}}”匹配的内容。",
-  "clearSearch": "清除搜索"
+  "clearSearch": "清除搜索",
+  "checkingHint": "正在检查我的片单…",
+  "retryHint": "无法加载我的片单。点击即可重试。",
+  "menuChecking": "正在检查我的片单…",
+  "menuRetry": "重新加载我的片单",
+  "notReady": "我的片单仍在加载，请稍后再试。",
+  "loadFailed": "无法加载我的片单"
 }

@@ -69,5 +69,11 @@
   "showWatched": "Afficher les vus",
   "noMatchTitle": "Aucun résultat",
   "noMatchBody": "Rien dans Ma liste ne correspond à « {{query}} ».",
-  "clearSearch": "Effacer la recherche"
+  "clearSearch": "Effacer la recherche",
+  "checkingHint": "Vérification de Ma liste…",
+  "retryHint": "Impossible de charger Ma liste. Appuyez pour réessayer.",
+  "menuChecking": "Vérification de Ma liste…",
+  "menuRetry": "Recharger Ma liste",
+  "notReady": "Ma liste est encore en cours de chargement. Réessayez dans un instant.",
+  "loadFailed": "Impossible de charger Ma liste"
 }

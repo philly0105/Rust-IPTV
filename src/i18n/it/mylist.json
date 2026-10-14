@@ -69,5 +69,11 @@
   "showWatched": "Mostra visti",
   "noMatchTitle": "Nessun risultato",
   "noMatchBody": "Niente nella mia lista corrisponde a «{{query}}».",
-  "clearSearch": "Cancella la ricerca"
+  "clearSearch": "Cancella la ricerca",
+  "checkingHint": "Controllo della mia lista…",
+  "retryHint": "Impossibile caricare la mia lista. Premi per riprovare.",
+  "menuChecking": "Controllo della mia lista…",
+  "menuRetry": "Ricarica la mia lista",
+  "notReady": "La mia lista è ancora in caricamento. Riprova tra un attimo.",
+  "loadFailed": "Impossibile caricare la mia lista"
 }

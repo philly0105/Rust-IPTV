@@ -38,6 +38,17 @@ export function openShortcutHelp(): void {
 
 let playbackRestored = false;
 
+/**
+ * Focuses the search field once it exists. The search page loads lazily, so on a first visit its
+ * field (in the header) mounts only after the chunk arrives, which can take well over a frame:
+ * poll briefly instead of guessing one delay.
+ */
+function focusSearchWhenReady(deadline = Date.now() + 3000) {
+  const field = document.querySelector<HTMLInputElement>('[data-page-search], [data-shell-search]');
+  if (field) field.focus();
+  else if (Date.now() < deadline) setTimeout(() => focusSearchWhenReady(deadline), 50);
+}
+
 function GlobalShortcuts() {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
@@ -63,8 +74,7 @@ function GlobalShortcuts() {
         return;
       }
       navigate('/search');
-      // The search page focuses its own input; this covers the case it is already open.
-      setTimeout(() => document.querySelector<HTMLInputElement>('[data-page-search], [data-shell-search]')?.focus(), 50);
+      focusSearchWhenReady();
     },
     { description: t('scSearch'), area, allowInInput: true },
   );

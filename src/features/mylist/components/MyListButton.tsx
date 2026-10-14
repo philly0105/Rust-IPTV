@@ -8,18 +8,24 @@
  * work (optimistic patch, toasts, Undo) lives in `useMyListToggle`. Live and
  * radio refs render nothing.
  *
+ * The state comes from the shared list, so until that list has loaded the
+ * button cannot know it: it shows a plain bookmark, busy and disabled, with no
+ * `aria-pressed` (a toggle from an unknown state would take a saved title off
+ * the list). When the list could not be read it offers to read it again
+ * instead of toggling.
+ *
  * The icon variant must sit beside a poster link, not inside it: a button
  * inside a link or a listbox option is a nested interactive control.
  */
 
-import { BookmarkCheck, BookmarkPlus } from 'lucide-react';
+import { Bookmark, BookmarkCheck, BookmarkPlus, RefreshCw } from 'lucide-react';
 import { useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type ItemRef, type ItemSnapshot } from '@/api/types';
 
 import { Button, cn } from '../deps';
-import { useMyListKeys } from '../hooks/useMyList';
+import { useMyListState } from '../hooks/useMyList';
 import { useMyListToggle } from '../hooks/useMyListToggle';
 import { canSave } from '../lib/list';
 
@@ -30,41 +36,53 @@ export interface MyListButtonProps {
   /** Height of the `button` variant, matching the detail page's other actions. Default `lg`. */
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  /** For a host with roving focus (a dashboard rail is one Tab stop): -1 keeps the toggle out of the Tab order. */
+  tabIndex?: number;
 }
 
-export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg', className }: MyListButtonProps) {
+export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg', className, tabIndex }: MyListButtonProps) {
   const { t } = useTranslation('mylist');
-  const keys = useMyListKeys();
+  const { keys, status, retry } = useMyListState();
   const toggle = useMyListToggle();
   const [pending, setPending] = useState(false);
   if (!canSave(itemRef)) return null;
 
-  const inList = keys.has(itemKey(itemRef));
+  const ready = status === 'ready';
+  const loading = status === 'loading';
+  const inList = ready && keys.has(itemKey(itemRef));
   const title = snapshot.title;
 
   const onClick = (e: MouseEvent<HTMLButtonElement>) => {
     // The icon variant sits over a poster link: the click is ours alone.
     e.preventDefault();
     e.stopPropagation();
-    if (pending) return;
+    if (pending || loading) return;
     setPending(true);
-    void toggle(itemRef, snapshot).finally(() => setPending(false));
+    const work = ready ? toggle(itemRef, snapshot) : retry();
+    void work.finally(() => setPending(false));
   };
 
-  const hint = inList ? t('removeHint') : t('addHint');
-  const Icon = inList ? BookmarkCheck : BookmarkPlus;
+  const hint = loading ? t('checkingHint') : !ready ? t('retryHint') : inList ? t('removeHint') : t('addHint');
+  const Icon = loading ? Bookmark : !ready ? RefreshCw : inList ? BookmarkCheck : BookmarkPlus;
+  // Pressed or not only once the state is known.
+  const pressed = ready ? inList : undefined;
+  const busy = pending || loading || undefined;
 
   if (variant === 'icon') {
     return (
       <button
         type="button"
         aria-label={t('toggleLabel', { title })}
-        aria-pressed={inList}
-        aria-busy={pending || undefined}
+        aria-pressed={pressed}
+        aria-busy={busy}
+        // aria-disabled, not disabled: focus stays put while the list loads.
+        aria-disabled={loading || undefined}
         title={hint}
+        tabIndex={tabIndex}
         onClick={onClick}
         data-testid="mylist-button"
         data-variant="icon"
+        data-state={status}
         data-in-list={inList || undefined}
         className={cn(
           'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border shadow-1',
@@ -73,11 +91,12 @@ export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg
           inList
             ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover active:bg-accent-pressed'
             : 'border-glass-border bg-glass text-on-glass backdrop-blur-glass hover:bg-glass-strong',
-          pending && 'cursor-progress',
+          (pending || loading) && 'cursor-progress',
+          loading && 'opacity-70',
           className,
         )}
       >
-        <Icon aria-hidden size={17} strokeWidth={2.25} />
+        <Icon aria-hidden size={17} strokeWidth={2.25} className={cn(loading && 'motion-safe:animate-pulse')} />
       </button>
     );
   }
@@ -87,14 +106,18 @@ export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg
       size={size}
       variant="secondary"
       icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(inList && 'text-accent')} />}
-      aria-pressed={inList}
-      aria-busy={pending || undefined}
+      // Spinner in place of the glyph, aria-disabled and aria-busy while the list loads.
+      loading={loading}
+      aria-pressed={pressed}
+      aria-busy={busy}
       title={hint}
+      tabIndex={tabIndex}
       onClick={onClick}
       data-testid="mylist-button"
       data-variant="button"
+      data-state={status}
       data-in-list={inList || undefined}
-      className={cn(inList && 'border-accent/70', pending && 'cursor-progress', className)}
+      className={cn(inList && 'border-accent/70', (pending || loading) && 'cursor-progress', className)}
     >
       {t('buttonLabel')}
     </Button>

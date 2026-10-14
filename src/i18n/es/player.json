@@ -223,5 +223,8 @@
   "zapNoGuide": "Sin información de la guía",
   "zapMinutesLeft": "quedan {{minutes}} min",
   "zapNow": "Ahora",
-  "zapNext": "Después"
+  "zapNext": "Después",
+  "parentalHiddenTitle": "Bloqueado por el control parental",
+  "parentalHidden": "El control parental lo oculta. Desbloquéalo en Ajustes para verlo.",
+  "parentalStopped": "La reproducción se detuvo. Vuelve a reproducirlo e introduce el PIN para seguir viéndolo."
 }

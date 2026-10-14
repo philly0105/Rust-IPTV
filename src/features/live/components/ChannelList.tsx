@@ -3,11 +3,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
+import { useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { CHANNEL_ROW_HEIGHT, ChannelRow } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ChannelRow } from './ChannelRow';
 
 export interface ChannelListProps {
   paged: PagedChannels;
@@ -94,15 +95,24 @@ export function ChannelList(props: ChannelListProps) {
     setActive((a) => Math.max(0, Math.min(a, knownTotal - 1)));
   }, [knownTotal]);
 
+  // Rows follow the UI scale, and compact density tightens their padding and gaps.
+  const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
   const virtualizer = useVirtualizer({
     count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => CHANNEL_ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 8,
     initialRect: { width: 360, height: props.initialHeight ?? 800 },
     // First paint already shows the remembered rows: no flash of the top of the list.
     initialOffset: () => listMemory.get(resetKey)?.scrollTop ?? 0,
   });
+  // A new scale or density: drop the cached row sizes so every row takes the new height.
+  const measuredHeight = useRef(rowHeight);
+  useLayoutEffect(() => {
+    if (measuredHeight.current === rowHeight) return;
+    measuredHeight.current = rowHeight;
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
   const items = virtualizer.getVirtualItems();
   const first = items[0]?.index ?? 0;
   const last = items[items.length - 1]?.index ?? 0;
@@ -245,7 +255,7 @@ export function ChannelList(props: ChannelListProps) {
     // Ctrl+S, Alt+Enter and friends belong to the app and the browser, not to the row.
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
     const active = activeRef.current;
-    const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 640) / CHANNEL_ROW_HEIGHT) - 1);
+    const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 640) / rowHeight) - 1);
     switch (e.key) {
       case 'ArrowDown':
         moveTo(active + 1);

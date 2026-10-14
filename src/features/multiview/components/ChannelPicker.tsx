@@ -68,10 +68,15 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
   // Every connection of the chosen account already plays on the wall: one more may be refused.
   const { byId } = useSources(open);
   const loads = useSourceLoads(tiles, byId);
-  const atLimit =
-    source !== ALL && (mode.kind === 'add' || replacing?.ref.sourceId !== source)
-      ? loads.find((l) => l.sourceId === source && l.max > 0 && l.tiles >= l.max)
-      : undefined;
+  // Sources a pick would push past their limit. Replacing a tile with a channel of its own
+  // source adds no connection, so that source is left out.
+  const limited = useMemo(
+    () => loads.filter((l) => l.max > 0 && l.tiles >= l.max && (mode.kind === 'add' || replacing?.ref.sourceId !== l.sourceId)),
+    [loads, mode.kind, replacing?.ref.sourceId],
+  );
+  const limitedIds = useMemo(() => new Set(limited.map((l) => l.sourceId)), [limited]);
+  // One source: its warning. All sources: every source at its limit, and its rows marked.
+  const atLimit = source === ALL ? limited : limited.filter((l) => l.sourceId === source);
 
   // Each opening starts from a clean search, on the last source used (or the replaced tile's).
   useEffect(() => {
@@ -211,6 +216,8 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
             const busy = pending === rowKey;
             const disabled = (onWall && !isCurrent) || (full && !onWall) || (pending !== null && !busy);
             const label = mode.kind === 'replace' ? t('pickerPickLabel', { name: ch.name }) : t('pickerAddLabel', { name: ch.name });
+            // Under "All sources" the banner cannot say which rows it means: the rows say it.
+            const rowLimited = source === ALL && !onWall && !disabled && limitedIds.has(ch.ref.sourceId);
             return (
               <li key={rowKey}>
                 <button
@@ -218,7 +225,8 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                   data-picker-row=""
                   data-testid="multiview-picker-row"
                   disabled={disabled || isCurrent}
-                  aria-label={onWall ? `${ch.name}, ${t('pickerOnSlot', { slot: slotOf + 1 })}` : label}
+                  aria-label={onWall ? `${ch.name}, ${t('pickerOnSlot', { slot: slotOf + 1 })}` : rowLimited ? `${label}, ${t('errorLimitTitle')}` : label}
+                  data-at-limit={rowLimited ? 'true' : undefined}
                   aria-busy={busy || undefined}
                   onClick={() => void pick(ch)}
                   className={cn(
@@ -241,6 +249,12 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                       {source === ALL ? (
                         <span dir="auto" className="shrink-0 truncate text-fg-subtle">
                           {sourceName(ch.ref.sourceId)}
+                        </span>
+                      ) : null}
+                      {rowLimited ? (
+                        <span className="inline-flex min-w-0 items-center gap-1" data-testid="multiview-picker-row-limit">
+                          <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
+                          <span className="truncate">{t('errorLimitTitle')}</span>
                         </span>
                       ) : null}
                     </span>
@@ -316,15 +330,19 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
         <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-fg" role="status">
           {t('pickerFull')}
         </p>
-      ) : atLimit ? (
-        <p
-          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-fg"
-          role="status"
-          data-testid="multiview-picker-limit"
-        >
-          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
-          <span>{t('pickerAtLimit', { source: atLimit.name || t('limitUnknownSource') })}</span>
-        </p>
+      ) : atLimit.length > 0 ? (
+        <div className="flex flex-col gap-2" role="status">
+          {atLimit.map((l) => (
+            <p
+              key={l.sourceId}
+              className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-fg"
+              data-testid="multiview-picker-limit"
+            >
+              <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+              <span>{t('pickerAtLimit', { source: l.name || t('limitUnknownSource') })}</span>
+            </p>
+          ))}
+        </div>
       ) : null}
       <div className="max-h-[min(26rem,55dvh)] min-h-40 overflow-y-auto">{body}</div>
     </Dialog>

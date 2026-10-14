@@ -498,4 +498,113 @@ describe('empty wall', () => {
     expect(await within(tileEl(1)).findByTestId('multiview-tile-missing')).toBeTruthy();
     expect(engineFor(1)).toHaveLength(0);
   });
+
+  it('names the layouts for screen readers while they show only their glyphs', async () => {
+    renderPage();
+    await screen.findByTestId('multiview-empty');
+    // The visible name is hidden below the intro's 42rem width, never dropped.
+    for (const name of ['Side by side', 'Grid of four', 'One large, three small']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.getAttribute('title')).toBe(name);
+      expect(within(button).getByTestId('multiview-empty-layout-label').className).toContain('sr-only');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stacked wall geometry (classes; the e2e spec measures the boxes)
+// ---------------------------------------------------------------------------
+
+describe('stacked wall', () => {
+  it('sizes the grid to its slots instead of stretching it to the host', async () => {
+    renderPage();
+    const wall = await screen.findByTestId('multiview-wall');
+    const classes = wall.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['self-start', 'content-start']));
+    // A free slot lets its 16:9 height (or its label) size its row when stacked.
+    for (const slot of screen.getAllByTestId('multiview-empty-slot')) {
+      const own = slot.className.split(/\s+/);
+      expect(own).toContain('aspect-video');
+      expect(own).not.toContain('min-h-0');
+      expect(own).toContain('@2xl:min-h-0');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error panels and the label strip
+// ---------------------------------------------------------------------------
+
+describe('tile panels', () => {
+  it('keeps an error panel above the label strip, and a status pill on the whole tile', async () => {
+    h.failUrls.add('http://mock/c2.m3u8');
+    seed([1, 2]);
+    renderPage();
+    await waitFor(() => expect(within(tileEl(2)).getByTestId('multiview-tile-error')).toBeTruthy());
+    const centre = within(tileEl(2)).getByTestId('multiview-tile-centre').className.split(/\s+/);
+    // bottom-11 clears the strip (bottom-2 plus its 2rem): the strip never covers Retry.
+    expect(centre).toContain('bottom-11');
+    expect(centre).not.toContain('inset-0');
+    // The panel steps up with the tile: the help line only from 26rem.
+    const hint = within(tileEl(2)).getByTestId('multiview-tile-error').querySelector('p.text-xs')!;
+    expect(hint.className).toContain('@[26rem]/tile:block');
+    // Tile 1 is still tuning: its pill is centred on the whole tile.
+    expect(within(tileEl(1)).getByTestId('multiview-tile-centre').className.split(/\s+/)).toContain('inset-0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Main player hand-off and arrival focus
+// ---------------------------------------------------------------------------
+
+describe('main player', () => {
+  it('stops the in-app player when the page opens, even with an empty wall', async () => {
+    const { usePlayerStore } = await import('@/features/player');
+    const player = usePlayerStore as unknown as { setState(s: { source: unknown; mode: string }): void; getState(): { source: unknown } };
+    player.setState({ source: { url: 'http://main' }, mode: 'html5' });
+    renderPage();
+    await screen.findByTestId('multiview-empty');
+    expect(player.getState().source).toBeNull();
+  });
+
+  it('leaves an external player alone', async () => {
+    const { usePlayerStore } = await import('@/features/player');
+    const player = usePlayerStore as unknown as { setState(s: { source: unknown; mode: string }): void; getState(): { source: unknown } };
+    player.setState({ source: { url: 'http://main' }, mode: 'external' });
+    renderPage();
+    await screen.findByTestId('multiview-empty');
+    expect(player.getState().source).not.toBeNull();
+    player.setState({ source: null, mode: 'html5' });
+  });
+});
+
+describe('arrival focus', () => {
+  it('focuses the tile named in the route state', async () => {
+    seed([1, 2, 3]);
+    renderWithApp(<MultiviewPage />, { pathname: '/multiview', state: { focusTile: 'k3' } });
+    await waitFor(() => expect(document.activeElement).toBe(mainOf(3)));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Picker: connection limit under "All sources"
+// ---------------------------------------------------------------------------
+
+describe('picker connection limit', () => {
+  it('under All sources warns about every source at its limit and marks its rows', async () => {
+    // Demo TV (Xtream) allows 2 streams and has 2 tiles up; the playlist has no limit.
+    seed([1, 2], 'src1');
+    handlers['catalog.search'] = () => ({ live: [channel(7, 'src1'), channel(8, 'm3u1')], movies: [], series: [] });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-add'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add channels' });
+    fireEvent.change(within(dialog).getByLabelText('Source'), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'Channel' } });
+    const banner = await within(dialog).findByTestId('multiview-picker-limit');
+    expect(banner.textContent).toContain('Demo TV');
+    const limited = await within(dialog).findByRole('button', { name: 'Add Channel 7 to the wall, Connection limit reached' });
+    expect(within(limited).getByTestId('multiview-picker-row-limit')).toBeTruthy();
+    const free = within(dialog).getByRole('button', { name: 'Add Channel 8 to the wall' });
+    expect(within(free).queryByTestId('multiview-picker-row-limit')).toBeNull();
+  });
 });

@@ -199,5 +199,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Nie udało się wczytać tych tytułów",
   "searchPartialError": "Nie udało się wczytać części wyników.",
-  "previousEpisode": "Poprzedni odcinek"
+  "previousEpisode": "Poprzedni odcinek",
+  "posterInMyList": "Na Mojej liście",
+  "shortcutMyList": "Zapisz tytuł pod kursorem na Mojej liście lub go z niej usuń",
+  "shortcutPosterMenu": "Otwórz menu tytułu pod kursorem"
 }

@@ -1,9 +1,10 @@
-import { Play } from 'lucide-react';
+import { BookmarkCheck, Play } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import type { ContentType, ItemRef, Source, SourceKind } from '@/api/types';
+import { itemKey, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
+import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { CARD_ART, CARD_ROOT, LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
@@ -82,13 +83,54 @@ export interface PosterCardProps {
   onPlay?: () => void;
   to?: string;
   ariaLabel?: string;
+  /**
+   * The movie or series My List saves (C3). A linked card gets the toggle beside its link; a play
+   * card (Continue watching) gets the saved marker. Defaults to the title an `itemPath` link opens,
+   * so the My List rail's cards take part too. Live, radio and search cards get neither.
+   */
+  myList?: { itemRef: ItemRef; snapshot: ItemSnapshot } | undefined;
+}
+
+/**
+ * The art's hover state driven by the wrapper of a card that has a My List toggle beside its
+ * link, so moving the pointer from the poster onto the toggle keeps the card lifted. The toggle
+ * layer takes the same lift, so the two move together (as on the VOD posters).
+ */
+const WRAPPER_HOVER_ART = 'group-hover/poster:shadow-2 group-hover/poster:ring-fg-subtle motion-safe:group-hover/poster:-translate-y-0.5';
+const WRAPPER_HOVER_LAYER =
+  'motion-safe:transition-[translate] motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
+
+const SAVED_PATH = /^\/s\/([^/]+)\/(movie|series)\/([^/?#]+)$/;
+
+/** The movie or series an `itemPath` link opens, as a My List target; undefined for any other link. */
+function linkTarget(to: string | undefined, title: string, posterUrl: string | undefined): PosterCardProps['myList'] {
+  const m = to ? SAVED_PATH.exec(to) : null;
+  if (!m) return undefined;
+  const contentType = m[2] as 'movie' | 'series';
+  const snapshot: ItemSnapshot = { title, contentType };
+  if (posterUrl) snapshot.posterUrl = posterUrl;
+  return { itemRef: { sourceId: decodeURIComponent(m[1]!), contentType, itemId: decodeURIComponent(m[3]!) }, snapshot };
 }
 
 /** 2:3 artwork card; activates `onPlay` (button) or navigates to `to` (link). */
-export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, onPlay, to, ariaLabel }: PosterCardProps) {
+export function PosterCard(props: PosterCardProps) {
+  const target = props.myList ?? (props.onPlay ? undefined : linkTarget(props.to, props.title, props.posterUrl));
+  if (!target || !canSave(target.itemRef)) return <PosterCardView {...props} />;
+  if (props.onPlay) return <SavedMarkerCard {...props} itemRef={target.itemRef} />;
+  return <MyListPosterCard {...props} myList={target} />;
+}
+
+interface PosterCardViewProps extends PosterCardProps {
+  /** Drawn over the artwork's corner (the saved marker). */
+  artCorner?: ReactNode;
+  /** Extra classes for the artwork frame. */
+  artClassName?: string;
+}
+
+function PosterCardView({ rail, title, subtitle, posterUrl, progress, badge, onPlay, to, ariaLabel, artCorner, artClassName }: PosterCardViewProps) {
   const body = (
     <>
-      <div className={CARD_ART}>
+      <div className={cn(CARD_ART, artClassName)}>
         {/* The caption below names the card; alt text would read the title twice. */}
         <Poster src={posterUrl} alt="" label={title} aspect="poster" className="after:hidden">
           {onPlay && <PlayGlyph />}
@@ -98,6 +140,7 @@ export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, 
               <ProgressBar value={Math.min(1, progress) * 100} size="xs" className="bg-black/50" />
             </span>
           )}
+          {artCorner}
         </Poster>
       </div>
       {/* dir="auto": a Latin title in an RTL UI truncates at its own end, not its start. */}
@@ -116,6 +159,66 @@ export function PosterCard({ rail, title, subtitle, posterUrl, progress, badge, 
     <Link to={to ?? '#'} {...rail} aria-label={ariaLabel} className={cardRoot}>
       {body}
     </Link>
+  );
+}
+
+/** Above the progress bar when there is one, else in the poster's bottom corner. */
+const cornerOffset = (progress: number | undefined) => (progress !== undefined && progress > 0 ? 'bottom-5' : 'bottom-1.5');
+
+/**
+ * A play card (Continue watching) of a saved title: the VOD grid's saved marker on the poster's
+ * corner and "In My List" in the card's name. A toggle there would sit inside the play button.
+ */
+function SavedMarkerCard({ itemRef, ...props }: PosterCardProps & { itemRef: ItemRef }) {
+  const { t, i18n } = useTranslation('vod');
+  const inList = useInMyList([itemRef]).has(itemKey(itemRef));
+  if (!inList) return <PosterCardView {...props} />;
+  return (
+    <PosterCardView
+      {...props}
+      ariaLabel={joinList([props.ariaLabel ?? props.title, t('posterInMyList')], i18n.language)}
+      artCorner={
+        <span
+          aria-hidden
+          data-testid="mylist-saved-marker"
+          className={cn(
+            'absolute end-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-accent text-accent-fg shadow-1',
+            cornerOffset(props.progress),
+          )}
+        >
+          <BookmarkCheck aria-hidden size={17} strokeWidth={2.25} />
+        </span>
+      }
+    />
+  );
+}
+
+/**
+ * A linked card with the My List toggle beside the link, not inside it (a button in a link is a
+ * nested interactive control). Once the title is saved the toggle stays on show in the accent
+ * colour, which is the card's saved marker.
+ */
+function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
+  const { rail, myList, progress } = props;
+  return (
+    <div className="group/poster relative min-w-0">
+      <PosterCardView {...props} artClassName={WRAPPER_HOVER_ART} />
+      {/* The artwork's box (2:3 at the card's width), so the toggle sits on the poster's corner. */}
+      <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
+        {/* The rail is one Tab stop (roving tabindex): only the card holding it also offers its toggle. */}
+        <MyListButton
+          tabIndex={rail.tabIndex}
+          variant="icon"
+          itemRef={myList.itemRef}
+          snapshot={myList.snapshot}
+          className={cn(
+            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
+            'motion-safe:transition-[opacity,background-color,color,transform]',
+            cornerOffset(progress),
+          )}
+        />
+      </div>
+    </div>
   );
 }
 

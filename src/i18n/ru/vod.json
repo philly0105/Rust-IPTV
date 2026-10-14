@@ -199,5 +199,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Не удалось загрузить эти названия",
   "searchPartialError": "Не удалось загрузить часть результатов.",
-  "previousEpisode": "Предыдущий эпизод"
+  "previousEpisode": "Предыдущий эпизод",
+  "posterInMyList": "В моём списке",
+  "shortcutMyList": "Сохранить название под курсором в мой список или убрать его оттуда",
+  "shortcutPosterMenu": "Открыть меню названия под курсором"
 }

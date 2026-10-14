@@ -134,19 +134,32 @@ pub fn item_row(conn: &Connection, hide: Hide) -> CoreResult<String> {
 
 /// Clauses for user-state rows (alias `a` with `source_id`, `content_type`
 /// and `item_id`): the item's own lock, and its category's lock or adult
-/// name when the catalog has the item.
+/// name when the catalog knows the item's category. That is `items` for
+/// everything the catalog stores, and the Stalker row cache
+/// (`stalker_items.category_id`) for Stalker movies and series, which the
+/// catalog never stores.
 pub fn by_ref(conn: &Connection, a: &str, hide: Hide) -> CoreResult<String> {
+    let mut homes = vec!["items"];
+    if crate::stalker::items_have_categories(conn)? {
+        homes.push("stalker_items");
+    }
     let mut sql = String::new();
     if any_lock(conn)? {
         sql.push_str(&format!(
-            " AND NOT EXISTS (SELECT 1 FROM parental_locks pl WHERE pl.source_id = {a}.source_id AND pl.content_type = {a}.content_type AND pl.kind = 'item' AND pl.target_id = {a}.item_id) \
-             AND NOT EXISTS (SELECT 1 FROM items pi JOIN parental_locks pl ON pl.source_id = pi.source_id AND pl.content_type = pi.content_type AND pl.kind = 'category' AND pl.target_id = pi.category_id WHERE pi.source_id = {a}.source_id AND pi.content_type = {a}.content_type AND pi.item_id = {a}.item_id)"
+            " AND NOT EXISTS (SELECT 1 FROM parental_locks pl WHERE pl.source_id = {a}.source_id AND pl.content_type = {a}.content_type AND pl.kind = 'item' AND pl.target_id = {a}.item_id)"
         ));
+        for t in &homes {
+            sql.push_str(&format!(
+                " AND NOT EXISTS (SELECT 1 FROM {t} pi JOIN parental_locks pl ON pl.source_id = pi.source_id AND pl.content_type = pi.content_type AND pl.kind = 'category' AND pl.target_id = pi.category_id WHERE pi.source_id = {a}.source_id AND pi.content_type = {a}.content_type AND pi.item_id = {a}.item_id)"
+            ));
+        }
     }
     if hide.auto_adult {
-        sql.push_str(&format!(
-            " AND NOT EXISTS (SELECT 1 FROM items pi JOIN categories pc ON pc.source_id = pi.source_id AND pc.content_type = pi.content_type AND pc.category_id = pi.category_id WHERE pi.source_id = {a}.source_id AND pi.content_type = {a}.content_type AND pi.item_id = {a}.item_id AND adult_category(pc.name))"
-        ));
+        for t in &homes {
+            sql.push_str(&format!(
+                " AND NOT EXISTS (SELECT 1 FROM {t} pi JOIN categories pc ON pc.source_id = pi.source_id AND pc.content_type = pi.content_type AND pc.category_id = pi.category_id WHERE pi.source_id = {a}.source_id AND pi.content_type = {a}.content_type AND pi.item_id = {a}.item_id AND adult_category(pc.name))"
+            ));
+        }
     }
     Ok(sql)
 }

@@ -9,6 +9,12 @@ import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, program
 import { ChannelLogo } from './ChannelLogo';
 
 export const CHANNEL_ROW_HEIGHT = 64;
+/**
+ * The part of {@link CHANNEL_ROW_HEIGHT} made of Tailwind spacing at 100 %,
+ * which compact density tightens: py-2 (15 px at the 15 px root) plus the two
+ * gap-0.5 between name, programme and progress bar (3.75 px).
+ */
+export const CHANNEL_ROW_SPACING = 19;
 
 export interface ChannelRowProps {
   index: number;

@@ -92,7 +92,8 @@ export function scheduleRemoval(opts: ScheduleRemovalOptions): () => void {
     return opts
       .remove()
       .then(() => {
-        // The caller drops it from the cache first, so un-hiding cannot flash it back.
+        // The caller drops it (and its titles in My List, Favorites, Recent, Continue watching)
+        // from the caches first, so un-hiding cannot flash it back.
         opts.onRemoved?.();
         setHidden(opts.id, false);
       })

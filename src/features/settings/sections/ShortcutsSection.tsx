@@ -2,37 +2,23 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Kbd } from '@/ui';
-import { DOCUMENTED_SHORTCUTS, groupShortcuts, useShortcutList } from '@/shell';
+import { useShortcutList } from '@/shell';
+import { shortcutReference } from '@/shell/ShortcutOverlay';
 import { SettingsGroup, SettingsSection } from '../components';
 import type { SectionProps } from './types';
-
-/** Area ids used by the shell and features, mapped to their `shell` label keys (same as the ? overlay). */
-const AREA_KEYS: Record<string, string> = {
-  Global: 'areaGlobal',
-  Navigation: 'areaNavigation',
-  Live: 'areaLive',
-  Vod: 'areaVod',
-  Playback: 'areaPlayback',
-  'Dialogs and lists': 'areaDialogs',
-};
 
 /**
  * The full shortcut reference: registered shortcuts merged with the documented
  * ones (so keys bound only on other screens, like PiP Escape or Live search,
- * still show), grouped and labelled exactly like the ? overlay.
+ * still show). It comes from the same `shortcutReference` as the ? overlay,
+ * so every area (Multi-view, My List, Seek bar...) gets the same translated
+ * heading in both places.
  */
 export function ShortcutsSection(_props: SectionProps) {
   const { t } = useTranslation('settings');
   const { t: ts } = useTranslation('shell');
   const registered = useShortcutList();
-  const groups = useMemo(() => {
-    const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: ts(d.descKey) }));
-    const label = (area: string) => {
-      const key = AREA_KEYS[area];
-      return key ? ts(key) : area;
-    };
-    return groupShortcuts(registered, documented, label);
-  }, [registered, ts]);
+  const groups = useMemo(() => shortcutReference(registered, ts), [registered, ts]);
 
   return (
     <SettingsSection title={t('sectionShortcuts')} description={t('sectionShortcutsLead')} testId="settings-shortcuts">

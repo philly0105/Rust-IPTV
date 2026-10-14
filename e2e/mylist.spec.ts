@@ -171,6 +171,21 @@ test.describe('My List', () => {
         await expect(page.getByTestId('mylist-page')).toBeVisible();
         await settle(page, 500);
         await expectNoHorizontalScroll(page, `${path} @ ${vp.width}x${vp.height}`);
+        if (vp.width === 390 && path === '/my-list') {
+          // R1-craft: on a phone the title gets the row's width (rank on the poster, actions on a line of their own).
+          const rows = await page.getByTestId('mylist-row').evaluateAll((els) =>
+            els.map((r) => {
+              const title = r.querySelector<HTMLElement>('[data-testid="mylist-title"]')!;
+              return { row: r.getBoundingClientRect().width, title: title.getBoundingClientRect().width, clipped: title.scrollHeight > title.clientHeight + 1 };
+            }),
+          );
+          expect(rows.length).toBeGreaterThan(0);
+          for (const r of rows) expect(r.title / r.row, 'title share of the row at 390 px').toBeGreaterThan(0.6);
+          expect(rows.filter((r) => r.clipped), 'titles cut short at 390 px').toEqual([]);
+          // The move buttons show without hover, and the search sits in the page toolbar.
+          expect(await page.getByTestId('mylist-move').first().evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+          await expect(page.getByTestId('mylist-search')).toBeVisible();
+        }
         for (const v of await seriousViolations(page)) failures.push(`${path} @ ${vp.width}: ${v}`);
       }
     }

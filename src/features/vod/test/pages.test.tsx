@@ -156,6 +156,85 @@ describe('CategoryGridPage', () => {
     expect(callsOf('stalker.movies')[0]!.args).toEqual({ sourceId: 'src1', query: { offset: 0, limit: 42, sort: 'added', dir: 'desc' } });
   });
 
+  it('marks saved titles and toggles My List from the poster corner and the S key (C3)', async () => {
+    const saved = movie(1);
+    const toggles: unknown[] = [];
+    const list = [{ ref: saved.ref, snapshot: { title: saved.title, contentType: 'movie' as const }, addedAt: '2026-10-10T00:00:00Z', watched: false }];
+    rpcMock.handlers['watchlist.list'] = () => list;
+    // The toggle reads the app-wide list cache (the harness renders with its own client).
+    const { queryClient } = await import('@/api/query');
+    queryClient.setQueryData(['watchlist.list', {}], list);
+    rpcMock.handlers['watchlist.toggle'] = (a) => {
+      toggles.push(a);
+      return { inList: true };
+    };
+    renderAt('/s/src1/movies/c/c1', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
+    await screen.findByText('Movie 0');
+    // The saved title says so in its option name and keeps its marker; others have a hover toggle.
+    await waitFor(() => expect(screen.getByRole('group', { name: /^Movie 1 \(.*, In My List$/ })).toBeTruthy());
+    const marker = (name: RegExp) => screen.getByRole('group', { name }).querySelector('[data-testid="mylist-grid-toggle"]');
+    expect(marker(/^Movie 1 \(/)?.getAttribute('data-in-list')).toBe('true');
+    expect(marker(/^Movie 0 \(/)?.hasAttribute('data-in-list')).toBe(false);
+    // Nothing focusable inside an option (axe nested-interactive).
+    expect(document.querySelectorAll('[role="option"] button, [role="option"] a, [role="option"] [tabindex]')).toHaveLength(0);
+
+    // The corner toggles without opening the title.
+    const before = currentLocation;
+    fireEvent.click(marker(/^Movie 0 \(/)!);
+    await waitFor(() => expect(toggles).toHaveLength(1));
+    expect((toggles[0] as { ref: { itemId: string } }).ref.itemId).toBe(movie(0).ref.itemId);
+    expect(currentLocation).toBe(before);
+
+    // S toggles the title under the keyboard cursor.
+    const grid = screen.getByTestId('vod-grid');
+    grid.focus();
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 's' });
+    await waitFor(() => expect(toggles).toHaveLength(2));
+    expect((toggles[1] as { ref: { itemId: string } }).ref.itemId).toBe(movie(1).ref.itemId);
+
+    // A poster's menu (right click, or Shift+F10 on the cursor) offers My List too.
+    fireEvent.contextMenu(screen.getByRole('group', { name: /^Movie 2 \(/ }), { clientX: 30, clientY: 30 });
+    let menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Open details' })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /menuAdd|Add to My List/ }));
+    await waitFor(() => expect(toggles).toHaveLength(3));
+    expect((toggles[2] as { ref: { itemId: string } }).ref.itemId).toBe(movie(2).ref.itemId);
+    grid.focus();
+    // The cursor's card shows its toggle (S acts on it).
+    expect(screen.getByRole('group', { name: /^Movie 1 \(/ }).querySelector('[data-testid="mylist-grid-toggle"]')!.className).toContain('opacity-100');
+    fireEvent.keyDown(grid, { key: 'F10', shiftKey: true });
+    menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Open details' })).toBeTruthy();
+    queryClient.clear();
+  });
+
+  it('the corner toggle is busy and neither pressed nor saved until My List has loaded (C3)', async () => {
+    let resolve: ((v: unknown) => void) | undefined;
+    rpcMock.handlers['watchlist.list'] = () => new Promise((r) => (resolve = r));
+    rpcMock.handlers['watchlist.toggle'] = () => ({ inList: true });
+    renderAt('/s/src1/movies/c/c1', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
+    await screen.findByText('Movie 0');
+    const corner = () => screen.getByRole('group', { name: /^Movie 0 \(/ }).querySelector('[data-testid="mylist-grid-toggle"]')!;
+    expect(corner().getAttribute('aria-busy')).toBe('true');
+    expect(corner().hasAttribute('aria-pressed')).toBe(false);
+    expect(corner().hasAttribute('data-in-list')).toBe(false);
+
+    // Neither the corner nor S sends a toggle from the unknown state.
+    fireEvent.click(corner());
+    const grid = screen.getByTestId('vod-grid');
+    grid.focus();
+    fireEvent.keyDown(grid, { key: 's' });
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(callsOf('watchlist.toggle')).toHaveLength(0);
+
+    resolve?.([]);
+    await waitFor(() => expect(corner().getAttribute('aria-pressed')).toBe('false'));
+    expect(corner().hasAttribute('aria-busy')).toBe(false);
+    expect(corner().getAttribute('data-state')).toBe('ready');
+  });
+
   it('shows the empty search state when nothing matches', async () => {
     rpcMock.handlers['catalog.movies'] = () => ({ items: [], total: 0, offset: 0, limit: 60 });
     renderAt('/s/src1/movies/c/c1?q=zzz', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);

@@ -65,5 +65,11 @@
   "showWatched": "시청한 작품 표시",
   "noMatchTitle": "결과 없음",
   "noMatchBody": "내 목록에서 ‘{{query}}’에 맞는 작품이 없습니다.",
-  "clearSearch": "검색 지우기"
+  "clearSearch": "검색 지우기",
+  "checkingHint": "내 목록 확인 중…",
+  "retryHint": "내 목록을 불러오지 못했습니다. 눌러서 다시 시도하세요.",
+  "menuChecking": "내 목록 확인 중…",
+  "menuRetry": "내 목록 다시 불러오기",
+  "notReady": "내 목록을 아직 불러오는 중입니다. 잠시 후 다시 시도하세요.",
+  "loadFailed": "내 목록을 불러오지 못했습니다"
 }

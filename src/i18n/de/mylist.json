@@ -67,5 +67,11 @@
   "showWatched": "Angesehene anzeigen",
   "noMatchTitle": "Keine Treffer",
   "noMatchBody": "Nichts in meiner Liste passt zu „{{query}}“.",
-  "clearSearch": "Suche löschen"
+  "clearSearch": "Suche löschen",
+  "checkingHint": "Meine Liste wird geprüft…",
+  "retryHint": "Meine Liste konnte nicht geladen werden. Zum erneuten Versuch drücken.",
+  "menuChecking": "Meine Liste wird geprüft…",
+  "menuRetry": "Meine Liste erneut laden",
+  "notReady": "Meine Liste wird noch geladen. Versuchen Sie es gleich noch einmal.",
+  "loadFailed": "Meine Liste konnte nicht geladen werden"
 }

@@ -223,5 +223,8 @@
   "zapNoGuide": "Nincs műsorinformáció",
   "zapMinutesLeft": "még {{minutes}} perc",
   "zapNow": "Most",
-  "zapNext": "Következik"
+  "zapNext": "Következik",
+  "parentalHiddenTitle": "Szülői felügyelet zárolta",
+  "parentalHidden": "A szülői felügyelet elrejti ezt. Oldja fel a Beállításokban a megtekintéshez.",
+  "parentalStopped": "A lejátszás leállt. Indítsa újra, és adja meg a PIN-kódot a folytatáshoz."
 }

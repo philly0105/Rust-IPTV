@@ -223,5 +223,8 @@
   "zapNoGuide": "Geen gidsinformatie",
   "zapMinutesLeft": "nog {{minutes}} min",
   "zapNow": "Nu",
-  "zapNext": "Straks"
+  "zapNext": "Straks",
+  "parentalHiddenTitle": "Vergrendeld door ouderlijk toezicht",
+  "parentalHidden": "Ouderlijk toezicht verbergt dit. Ontgrendel het in Instellingen om het te bekijken.",
+  "parentalStopped": "Afspelen gestopt. Start het opnieuw en voer de pincode in om verder te kijken."
 }

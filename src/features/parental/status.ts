@@ -10,11 +10,14 @@
 
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
-import { rpc, type RpcError } from '@/api/transport';
+import { rpc, RpcError } from '@/api/transport';
 import type { ParentalStatus } from '@/api/types';
+import { useShortcut } from '@/shell/shortcuts';
+import { toast } from '@/ui';
 
 /** Query key of `parental.status`. */
 export const STATUS_KEY = rpcKey('parental.status');
@@ -95,6 +98,24 @@ export async function lockNow(): Promise<ParentalStatus> {
 }
 
 /**
+ * Mod+Alt+L locks at once, bound only while a session unlock is active.
+ * Not while typing: on Windows Ctrl+Alt is AltGr, and AltGr+L types a letter
+ * on some layouts (Polish "ł").
+ */
+function useLockNowShortcut(s: ParentalStatus | undefined): void {
+  const { t } = useTranslation('parental');
+  useShortcut(
+    'mod+alt+l',
+    () =>
+      void lockNow().then(
+        () => toast({ variant: 'success', title: t('lockedNowToast') }),
+        (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: RpcError.from(err).message }),
+      ),
+    { description: t('shortcutLockNow'), area: t('shell:settingsParental'), enabled: !!s?.enabled && s.unlocked },
+  );
+}
+
+/**
  * True when the core reported, at or after `since` (a `Date.now()` value),
  * that locked content may open: controls off or a session unlock active.
  * Lets a PIN request that raced an unlock (another dialog, another window)
@@ -130,12 +151,14 @@ const EXPIRY_GRACE_MS = 750;
  * status, and the lock list, lock checks, and (when Hide mode's filter
  * changed) the catalog, favorites, recent and positions queries refetch.
  * Also asks the core again when a timed unlock runs out, in case the event
- * stream is down at that moment. Mount once, in the shell's effects.
+ * stream is down at that moment, and binds the lock-now shortcut. Mount once,
+ * in the shell's effects.
  */
 export function useParentalEvents(): void {
   useEffect(() => onAppEvent('parental.changed', (status) => applyStatus(status)), []);
 
   const { data } = useParentalStatus();
+  useLockNowShortcut(data);
   const remaining = unlockRemainingMs(data);
   useEffect(() => {
     if (remaining === null) return;

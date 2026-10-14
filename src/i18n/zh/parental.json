@@ -63,6 +63,7 @@
   "unlockTimeLeft": "解锁剩余时间",
   "lockNow": "立即锁定",
   "lockedNowToast": "家长控制已锁定",
+  "shortcutLockNow": "立即锁定家长控制",
   "lockoutActive": "错误的 PIN 码输入次数过多。{{time}} 后可再次输入 PIN 码。",
   "behaviourTitle": "锁定方式",
   "behaviourPinNote": "在此处更改需要输入 PIN 码。",

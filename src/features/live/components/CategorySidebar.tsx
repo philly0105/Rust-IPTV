@@ -6,10 +6,16 @@ import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
 
-import { Button, ErrorState, IconButton, Skeleton } from '@/ui';
+import { Button, ErrorState, IconButton, Skeleton, useRowHeight } from '@/ui';
 import { documentIsRtl } from '../lib/rtl';
 
+/** A group row's slot at 100 %. */
 const ROW = 36;
+/**
+ * The slot's vertical breathing room at 100 %, which compact density tightens:
+ * 36 px less the text-sm line (1.25rem = 18.75 px at the 15 px root).
+ */
+const ROW_SPACING = 17;
 /** Index of the "All channels" link in the keyboard order (the groups follow from 0). */
 const ALL = -1;
 
@@ -51,6 +57,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  // Rows follow the UI scale, and compact density tightens them.
+  const rowHeight = useRowHeight(ROW, ROW_SPACING);
 
   const visible = useMemo(() => {
     const q = foldForFilter(filter.trim());
@@ -62,15 +70,22 @@ export function CategorySidebar(props: CategorySidebarProps) {
   // The open group is in view on arrival, even when it is row 1500 of a virtualized list:
   // the first paint already starts a few rows above it, and later changes scroll to it.
   const activeIndex = useMemo(() => (props.activeId ? visible.findIndex((c) => c.id === props.activeId) : -1), [visible, props.activeId]);
-  const initialTop = activeIndex > 3 ? (activeIndex - 3) * ROW : 0;
+  const initialTop = activeIndex > 3 ? (activeIndex - 3) * rowHeight : 0;
   const virtualizer = useVirtualizer({
     count: visible.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW,
+    estimateSize: () => rowHeight,
     overscan: 10,
     initialRect: { width: 240, height: 600 },
     initialOffset: initialTop,
   });
+  // A new scale or density: drop the cached row sizes so every row takes the new height.
+  const measuredHeight = useRef(rowHeight);
+  useLayoutEffect(() => {
+    if (measuredHeight.current === rowHeight) return;
+    measuredHeight.current = rowHeight;
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
   const scrolledFor = useRef<string | undefined>(activeIndex >= 0 ? props.activeId : undefined);
   useLayoutEffect(() => {
     // initialOffset placed the virtualizer; make the element agree with it.
@@ -133,7 +148,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
       if (openGroupMenu(e.target, at)) e.preventDefault();
       return;
     }
-    const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 480) / ROW) - 1);
+    const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? 480) / rowHeight) - 1);
     switch (e.key) {
       case 'ArrowDown':
         moveTo(at + 1);
@@ -196,7 +211,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
         </label>
       </div>
 
-      <div className="px-2" style={{ height: ROW }}>
+      <div className="px-2" style={{ height: rowHeight }}>
         {/* Plain links with an explicit aria-current: radio groups differ only in `?category=`, which NavLink ignores. */}
         <Link
           to={props.hrefFor(undefined)}
@@ -215,8 +230,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
       ) : props.isLoading ? (
         <div className="flex flex-col px-2 pt-0.5" aria-busy="true" aria-label={t('loadingGroups')}>
           {Array.from({ length: 10 }, (_, i) => (
-            // One 36px slot per row, like the loaded links, so the column does not shift.
-            <div key={i} className="flex items-center px-2.5" style={{ height: ROW }}>
+            // One slot per row, like the loaded links, so the column does not shift.
+            <div key={i} className="flex items-center px-2.5" style={{ height: rowHeight }}>
               <Skeleton className="h-3.5 flex-1" />
             </div>
           ))}
@@ -243,7 +258,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
               const c = visible[v.index]!;
               const active = props.activeId === c.id;
               return (
-                <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: ROW, transform: `translateY(${v.start}px)` }}>
+                <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}>
                   <Link
                     to={props.hrefFor(c.id)}
                     onClick={props.onNavigate}

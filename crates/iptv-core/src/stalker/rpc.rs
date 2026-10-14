@@ -115,12 +115,16 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
         crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<SeriesDetail, RpcError>(vod::series_detail(&s, &a.item_ref).await?)
     });
+    // So do the stream and catch-up URLs: a stale history or resume entry
+    // must not play a locked channel or title without the PIN.
     r.add("stalker.streamUrl", |s, a: StreamArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
             playback::stream_url(&s, &a.item_ref, a.episode_id.as_deref()).await?,
         )
     });
     r.add("stalker.catchupUrl", |s, a: CatchupArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
             playback::catchup_url(&s, &a.item_ref, &a.start, a.duration_minutes).await?,
         )

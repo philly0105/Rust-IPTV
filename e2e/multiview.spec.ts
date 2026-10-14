@@ -115,6 +115,50 @@ async function expectTilesPlaying(page: Page, keys: readonly string[], advance =
     .toBe('playing');
 }
 
+interface Rect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** Boxes of every slot on the wall (tiles and free frames), in slot order. */
+function slotRects(page: Page): Promise<Rect[]> {
+  return page.locator('[data-testid="multiview-wall"] > [data-slot]').evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    }),
+  );
+}
+
+/** Whether two boxes share more than a rounding pixel. */
+function intersects(a: Rect, b: Rect): boolean {
+  return Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+}
+
+/** No two slots overlap, and stacked slots follow each other without a band between them. */
+async function expectSlotsTiled(page: Page, count: number): Promise<void> {
+  await expect.poll(async () => (await slotRects(page)).length).toBe(count);
+  const rects = await slotRects(page);
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      expect(intersects(rects[i]!, rects[j]!), `slot ${i + 1} overlaps slot ${j + 1}: ${JSON.stringify([rects[i], rects[j]])}`).toBe(false);
+    }
+  }
+  // Stacked in one column: each slot starts within a gap of the one above.
+  const oneColumn = rects.every((r) => Math.abs(r.left - rects[0]!.left) < 1);
+  if (oneColumn) {
+    for (let i = 1; i < rects.length; i++) {
+      expect(rects[i]!.top - rects[i - 1]!.bottom, `gap above slot ${i + 1}`).toBeLessThan(12);
+    }
+  }
+}
+
+async function setUiScale(page: Page, uiScale: number): Promise<void> {
+  await rpc(page.request, 'settings.update', { patch: { uiScale } });
+}
+
 /** `muted` of every tile's video, in slot order. */
 function mutedStates(page: Page): Promise<boolean[]> {
   return page.getByTestId('multiview-video').evaluateAll((els) => els.map((el) => (el as HTMLVideoElement).muted));
@@ -197,6 +241,63 @@ test.describe.serial('multi-view', () => {
     await expect(banner).toBeVisible();
     await expect(banner).toContainText(XTREAM_NAME);
     await expect(banner).toContainText('allows 2 streams');
+  });
+
+  test('stacked walls tile their slots: no overlap, no gaps (390 px and 1024x768 at 125 %)', async ({ page }) => {
+    const four = GOOD.map((name, i) => ({ key: `stack-${i + 1}`, channel: byName(name) }));
+    const two = four.slice(0, 2);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const layout of ['2x2', '1+3'] as const) {
+      await openWall(page, four, layout);
+      await expectSlotsTiled(page, 4);
+    }
+    await openWall(page, two, '1x2');
+    await expectSlotsTiled(page, 2);
+    await openWall(page, two, '2x2');
+    await expectSlotsTiled(page, 4);
+
+    // The empty wall: free frames keep their "Add channel" label clear of the next frame.
+    await page.evaluate((k) => localStorage.removeItem(k), WALL_KEY);
+    await page.reload();
+    await expect(page.getByTestId('multiview-empty')).toBeVisible();
+    await expectSlotsTiled(page, 4);
+    // The layout choice fits the phone: no button past the viewport, no label spilling out of its pill.
+    for (const l of ['1x2', '2x2', '1+3']) {
+      const box = (await page.getByTestId(`multiview-empty-layout-${l}`).boundingBox())!;
+      expect(box.x + box.width, `layout ${l} inside the viewport`).toBeLessThanOrEqual(390);
+      expect(box.height).toBeLessThan(48);
+    }
+
+    // 125 % UI scale on a 1024x768 window stays below the wall's 42rem breakpoint: stacked too.
+    await setUiScale(page, 1.25);
+    try {
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await openWall(page, four, '2x2');
+      await expectSlotsTiled(page, 4);
+    } finally {
+      await setUiScale(page, 1);
+    }
+  });
+
+  test('a broken small tile keeps its buttons clear of the label strip (1280x800, 1+3)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const tiles = [
+      { key: 'big', channel: byName(GOOD[0]) },
+      { key: 'side-1', channel: byName(GOOD[1]) },
+      { key: 'side-broken', channel: byName(BROKEN) },
+      { key: 'side-3', channel: byName(GOOD[2]) },
+    ];
+    await openWall(page, tiles, '1+3');
+    const broken = tile(page, 'side-broken');
+    await expect(broken.getByTestId('multiview-tile-error')).toBeVisible({ timeout: 30_000 });
+    const strip = (await broken.getByTestId('multiview-tile-strip').boundingBox())!;
+    for (const button of await broken.getByTestId('multiview-tile-error').getByRole('button').all()) {
+      const b = (await button.boundingBox())!;
+      const r = { left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height };
+      const s = { left: strip.x, top: strip.y, right: strip.x + strip.width, bottom: strip.y + strip.height };
+      expect(intersects(r, s), `${await button.textContent()} under the label strip: ${JSON.stringify([r, s])}`).toBe(false);
+    }
   });
 
   test('channels go on the wall from the picker, and keys drive the wall', async ({ page }) => {

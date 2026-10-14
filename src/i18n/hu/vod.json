@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "Nem sikerült betölteni ezeket a címeket",
   "searchPartialError": "Néhány találatot nem sikerült betölteni.",
-  "previousEpisode": "Előző epizód"
+  "previousEpisode": "Előző epizód",
+  "posterInMyList": "A Saját listában",
+  "shortcutMyList": "A kurzor alatti cím mentése a Saját listába vagy eltávolítása onnan",
+  "shortcutPosterMenu": "A kurzor alatti cím menüjének megnyitása"
 }

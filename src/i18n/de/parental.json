@@ -67,6 +67,7 @@
   "unlockTimeLeft": "Verbleibende entsperrte Zeit",
   "lockNow": "Jetzt sperren",
   "lockedNowToast": "Jugendschutz gesperrt",
+  "shortcutLockNow": "Jugendschutz jetzt sperren",
   "lockoutActive": "Zu viele falsche PINs. Die PIN kann in {{time}} erneut eingegeben werden.",
   "behaviourTitle": "So wirken Sperren",
   "behaviourPinNote": "Änderungen hier erfordern die PIN.",

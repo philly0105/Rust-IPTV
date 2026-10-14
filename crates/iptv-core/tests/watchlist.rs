@@ -332,15 +332,23 @@ async fn reorder_sets_the_order_and_new_adds_stay_on_top() {
     )
     .await;
     assert_eq!(a.ids().await, ["1", "2", "3", "4"]);
-    // A partial list moves those to the front; unknown refs are ignored.
+    // A partial list reorders those within the places they held (2nd and
+    // 4th); the others stay put and unknown refs are ignored.
     a.call(
         "watchlist.reorder",
         json!({"refs": [movie("4"), movie("99"), movie("2")]}),
     )
     .await;
-    assert_eq!(a.ids().await, ["4", "2", "1", "3"]);
+    assert_eq!(a.ids().await, ["1", "4", "3", "2"]);
+    // Swapping two neighbours needs only those two.
+    a.call(
+        "watchlist.reorder",
+        json!({"refs": [movie("3"), movie("4")]}),
+    )
+    .await;
+    assert_eq!(a.ids().await, ["1", "3", "4", "2"]);
     a.toggle(movie("5"), "5").await;
-    assert_eq!(a.ids().await, ["5", "4", "2", "1", "3"]);
+    assert_eq!(a.ids().await, ["5", "1", "3", "4", "2"]);
     // The order survives a restart of the app state (it lives in SQLite).
     let entries = a.export().await;
     assert_eq!(
@@ -348,7 +356,7 @@ async fn reorder_sets_the_order_and_new_adds_stay_on_top() {
             .iter()
             .map(|e| e.item_id.as_str())
             .collect::<Vec<_>>(),
-        ["5", "4", "2", "1", "3"]
+        ["5", "1", "3", "4", "2"]
     );
     assert_eq!(
         entries.iter().map(|e| e.position).collect::<Vec<_>>(),
@@ -475,6 +483,38 @@ async fn removing_a_source_removes_its_entries() {
         .await
         .unwrap();
     assert_eq!(left, 0);
+}
+
+/// The My List page sends the order it shows; in hide mode that leaves the
+/// locked titles out, and they must keep their places rather than drop to
+/// the end.
+#[tokio::test]
+async fn reordering_in_hide_mode_keeps_hidden_titles_in_place() {
+    let a = app().await;
+    for id in ["5", "4", "1", "3"] {
+        a.toggle(movie(id), id).await;
+    }
+    assert_eq!(a.ids().await, ["3", "1", "4", "5"]);
+    a.call(
+        "parental.setLocked",
+        json!({"target": {"sourceId": "s1", "contentType": "movie", "kind": "item", "targetId": "1", "name": "One"}, "locked": true}),
+    )
+    .await;
+    a.call("parental.setPin", json!({"newPin": "2468"})).await;
+    assert_eq!(a.ids().await, ["3", "4", "5"]);
+    // One step up for the last visible title, as Alt+ArrowUp sends it.
+    a.call(
+        "watchlist.reorder",
+        json!({"refs": [movie("3"), movie("5"), movie("4")]}),
+    )
+    .await;
+    assert_eq!(a.ids().await, ["3", "5", "4"]);
+    a.call("parental.unlock", json!({"pin": "2468"})).await;
+    assert_eq!(
+        a.ids().await,
+        ["3", "1", "5", "4"],
+        "the hidden title is still second"
+    );
 }
 
 #[tokio::test]

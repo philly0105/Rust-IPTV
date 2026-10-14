@@ -71,6 +71,7 @@
   "unlockTimeLeft": "Temps de déverrouillage restant",
   "lockNow": "Verrouiller maintenant",
   "lockedNowToast": "Contrôle parental verrouillé",
+  "shortcutLockNow": "Verrouiller le contrôle parental maintenant",
   "lockoutActive": "Trop de codes PIN erronés. Le code pourra être saisi à nouveau dans {{time}}.",
   "behaviourTitle": "Fonctionnement des verrous",
   "behaviourPinNote": "Les modifications ici demandent le code PIN.",

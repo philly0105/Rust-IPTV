@@ -16,6 +16,8 @@ import { peekSettings, usePlayerStore } from './store';
 export const ZAP_BANNER_MS = 5000;
 /** How long it lingers after the pointer leaves the title or the banner. */
 export const ZAP_HOVER_GRACE_MS = 600;
+/** The longest a hover holds it after the last pointer enter, so a lost leave cannot pin it. */
+export const ZAP_HOLD_MAX_MS = 30_000;
 
 export interface ZapBannerState {
   visible: boolean;
@@ -34,10 +36,33 @@ export const useZapBanner: UseBoundStore<StoreApi<ZapBannerState>> = create<ZapB
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
 /** Pointers resting on the title or the banner: while any does, the banner stays. */
 let holds = 0;
+/**
+ * Bumped whenever every hold is dropped at once (hidden, or held too long). A hold carries the
+ * generation it was taken in; a release from an older one is stale and does nothing.
+ */
+let holdGen = 0;
+let capTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearHide(): void {
   if (hideTimer) clearTimeout(hideTimer);
   hideTimer = null;
+}
+
+function clearCap(): void {
+  if (capTimer) clearTimeout(capTimer);
+  capTimer = null;
+}
+
+/** Drop every hold: their pending releases become stale, and the next hover holds afresh. */
+function releaseHolds(): void {
+  clearCap();
+  holds = 0;
+  holdGen++;
+}
+
+/** The generation current holds belong to (see `useZapHover`). */
+export function zapHoldGeneration(): number {
+  return holdGen;
 }
 
 /** The banner applies to what plays now: a live TV channel inside the app, with the setting on. */
@@ -72,24 +97,37 @@ export function showZapBanner(ms = ZAP_BANNER_MS): void {
 
 export function hideZapBanner(): void {
   clearHide();
-  holds = 0;
+  releaseHolds();
   if (useZapBanner.getState().visible) useZapBanner.setState({ visible: false });
 }
 
 /**
  * The pointer entered (`true`) or left (`false`) the channel title or the banner. Entering
- * shows it; leaving the last one starts the grace. Every enter needs its leave (an unmount
- * while hovered calls it too, see `useZapHover`).
+ * shows it; leaving the last one starts the grace. Every enter needs its leave, passing the
+ * generation the enter returned (`useZapHover` also leaves when its element stops being
+ * hoverable or unmounts). A leave from an older generation is ignored: hiding the banner, or
+ * a hold outliving `ZAP_HOLD_MAX_MS`, drops every hold at once.
  */
-export function holdZapBanner(on: boolean): void {
+export function holdZapBanner(on: boolean, gen: number = holdGen): number {
   if (on) {
     holds++;
     if (!useZapBanner.getState().visible) showZapBanner();
     clearHide();
-    return;
+    clearCap();
+    capTimer = setTimeout(() => {
+      capTimer = null;
+      releaseHolds();
+      if (useZapBanner.getState().visible) hideAfter(ZAP_HOVER_GRACE_MS);
+    }, ZAP_HOLD_MAX_MS);
+    return holdGen;
   }
-  holds = Math.max(0, holds - 1);
-  if (holds === 0 && useZapBanner.getState().visible) hideAfter(ZAP_HOVER_GRACE_MS);
+  if (gen !== holdGen || holds === 0) return holdGen;
+  holds--;
+  if (holds === 0) {
+    clearCap();
+    if (useZapBanner.getState().visible) hideAfter(ZAP_HOVER_GRACE_MS);
+  }
+  return holdGen;
 }
 
 // Every live channel change brings it up; leaving live TV (or the player) takes it down.
@@ -150,7 +188,7 @@ export function fetchChannelInfo(ref: ItemRef): Promise<ZapChannelInfo> {
 /** Testing only. */
 export function __resetZapBannerForTests(): void {
   clearHide();
-  holds = 0;
+  releaseHolds();
   infoCache.clear();
   infoPending.clear();
   useZapBanner.setState({ visible: false, channelKey: null, showing: 0 });

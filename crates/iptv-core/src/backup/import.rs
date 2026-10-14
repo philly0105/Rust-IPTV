@@ -785,13 +785,33 @@ async fn restore_settings(
                 .push(format!("EPG URLs could not be restored: {err}"));
         }
     }
-    // Settings: app-level preferences (Tsrust extension).
+    // Settings: app-level preferences (Tsrust extension). Each key is checked
+    // on its own first, so a value this build refuses (an accent added by a
+    // later version, a scale out of range) skips only that key, with its own
+    // warning, instead of every setting in the backup.
     if !manifest.app_settings.is_empty() {
-        let patch = Value::Object(manifest.app_settings.clone());
-        if let Err(err) = crate::settings::update(state, patch).await {
-            report
-                .warnings
-                .push(format!("App settings could not be restored: {err}"));
+        let current = state.settings_snapshot();
+        let mut patch = Map::new();
+        for (key, value) in &manifest.app_settings {
+            let mut one = Map::new();
+            one.insert(key.clone(), value.clone());
+            match crate::settings::apply_patch(&current, &Value::Object(one)) {
+                Ok(_) => {
+                    patch.insert(key.clone(), value.clone());
+                }
+                Err(err) => report.warnings.push(format!(
+                    "App setting {key} was not restored: {}",
+                    crate::sources::error_text(&err)
+                )),
+            }
+        }
+        if !patch.is_empty() {
+            if let Err(err) = crate::settings::update(state, Value::Object(patch)).await {
+                report.warnings.push(format!(
+                    "App settings could not be restored: {}",
+                    crate::sources::error_text(&err)
+                ));
+            }
         }
     }
     // parental: options (Tsrust extension). Refused with a warning while

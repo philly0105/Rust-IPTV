@@ -67,5 +67,11 @@
   "showWatched": "Show watched",
   "noMatchTitle": "No matches",
   "noMatchBody": "Nothing in My List matches “{{query}}”.",
-  "clearSearch": "Clear search"
+  "clearSearch": "Clear search",
+  "checkingHint": "Checking My List…",
+  "retryHint": "Couldn't load My List. Press to try again.",
+  "menuChecking": "Checking My List…",
+  "menuRetry": "Load My List again",
+  "notReady": "My List is still loading. Try again in a moment.",
+  "loadFailed": "Couldn't load My List"
 }

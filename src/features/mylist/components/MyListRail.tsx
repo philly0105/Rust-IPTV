@@ -72,6 +72,7 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
             subtitle={subtitle}
             posterUrl={e.snapshot.posterUrl}
             to={itemPath(e.ref)}
+            myList={{ itemRef: e.ref, snapshot: e.snapshot }}
             badge={e.watched ? <WatchedTag label={t('watched')} /> : undefined}
             ariaLabel={joinList([e.snapshot.title, subtitle, e.watched && t('watched')], i18n.language)}
           />

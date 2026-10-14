@@ -603,9 +603,10 @@ pub async fn hidden(
         .await
 }
 
-/// For commands that take a ref directly (provider details): `not_found` while
-/// hide mode drops `r`, as `catalog.item` does, so a deep link or a stale
-/// route cannot open a hidden title.
+/// For commands that take a ref directly (provider details, stream and
+/// catch-up URLs): `not_found` while hide mode drops `r`, as `catalog.item`
+/// does, so a deep link, a stale route, zap history or a resume record cannot
+/// open or play a hidden title.
 pub async fn refuse_hidden(state: &AppState, r: &ItemRef) -> CoreResult<()> {
     if hidden(state, vec![(r.clone(), None)]).await?.is_empty() {
         return Ok(());

@@ -223,5 +223,8 @@
   "zapNoGuide": "Rehber bilgisi yok",
   "zapMinutesLeft": "{{minutes}} dk kaldı",
   "zapNow": "Şimdi",
-  "zapNext": "Sonra"
+  "zapNext": "Sonra",
+  "parentalHiddenTitle": "Ebeveyn denetimiyle kilitli",
+  "parentalHidden": "Ebeveyn denetimi bunu gizliyor. İzlemek için Ayarlar'dan kilidini açın.",
+  "parentalStopped": "Oynatma durdu. İzlemeye devam etmek için yeniden başlatıp PIN'i girin."
 }

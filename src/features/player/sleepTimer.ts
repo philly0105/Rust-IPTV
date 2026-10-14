@@ -10,9 +10,11 @@
  * player shows it as a toast (and inside fullscreen or picture-in-picture, where toasts cannot
  * be seen) with "Keep watching" (+15 min) and Cancel.
  *
- * A person changing the volume or mute during the fade takes the volume over: the ramp stops
- * there and nothing is restored afterwards. If the app closes mid-fade, the level before the
- * fade is put back on the next start.
+ * A person changing the volume level during the fade (slider, arrow keys) takes the volume over:
+ * the ramp stops there and nothing is restored afterwards. Muting during the fade only silences
+ * it: the ramp holds while muted (an unmute carries on from the faded level), and the level
+ * before the fade still comes back at the end or on Cancel, with the mute left as the person set
+ * it. If the app closes mid-fade, the level before the fade is put back on the next start.
  */
 
 import i18next from 'i18next';
@@ -24,7 +26,7 @@ import { toast } from '@/ui/Toast';
 
 import { showOsd, useMediaStore } from './media';
 import { fetchNowNext, peekNowNext } from './nowNext';
-import { cancelUpNext, isEndedState, setPaused, subscribeVolumeIntent, usePlayerStore } from './store';
+import { cancelUpNext, isEndedState, restoreVolumeLevel, setPaused, subscribeVolumeIntent, usePlayerStore } from './store';
 
 export type SleepTarget = { kind: 'minutes'; minutes: 15 | 30 | 45 | 60 | 90 | number } | { kind: 'programmeEnd' } | { kind: 'episodeEnd' };
 
@@ -85,6 +87,10 @@ let fadeBase: number | null = null;
 let fadeSpan = SLEEP_FADE_MS;
 /** Set while the fade itself calls `setVolume`, so its own changes are not taken for a person's. */
 let applying = false;
+/** The level the fade last left in the store: a volume intent that leaves it there is a mute toggle. */
+let fadeLevel: number | null = null;
+/** A countdown made from another timer (Keep watching, a zap off its channel): `Z` turns it off. */
+let derivedTarget: SleepTarget | null = null;
 
 const t = (key: string, opts?: Record<string, unknown>): string => i18next.t(`player:${key}`, opts);
 
@@ -128,6 +134,23 @@ function applyVolume(v: number): void {
   } finally {
     applying = false;
   }
+  fadeLevel = usePlayerStore.getState().volume;
+}
+
+/** Puts `level` back; a mute set meanwhile stays on, and a muted surface is never unmuted on the way. */
+function restoreLevel(level: number): void {
+  if (!usePlayerStore.getState().muted) {
+    applyVolume(level);
+    return;
+  }
+  restoreVolumeLevel(Math.round(level * 1000) / 1000);
+  fadeLevel = usePlayerStore.getState().volume;
+}
+
+/** A plain countdown to `endsAt` made from another timer; remembered so `Z` turns it off. */
+function derivedCountdown(endsAt: number, now = Date.now()): SleepTarget {
+  derivedTarget = { kind: 'minutes', minutes: Math.max(1, Math.round((endsAt - now) / MINUTE)) };
+  return derivedTarget;
 }
 
 /** Positive, finite, at most a day; anything else is not a duration. */
@@ -182,6 +205,7 @@ function beginFade(remaining: number): void {
     fadeBase = null;
   } else {
     fadeBase = volume;
+    fadeLevel = volume;
     writeMarker(volume);
   }
   useSleepTimer.setState({ fading: true });
@@ -192,13 +216,15 @@ function endFade(restore: boolean): void {
   const base = fadeBase;
   fadeBase = null;
   clearMarker();
-  if (restore && base !== null) applyVolume(base);
+  if (restore && base !== null) restoreLevel(base);
   if (useSleepTimer.getState().fading) useSleepTimer.setState({ fading: false });
 }
 
-// A person's volume or mute change during the fade: they have the volume now.
+// A person's level change during the fade: they have the volume now. A mute toggle leaves the
+// level where the fade put it and only silences the fade; the earlier level still comes back.
 subscribeVolumeIntent(() => {
   if (applying || fadeBase === null) return;
+  if (usePlayerStore.getState().volume === fadeLevel) return;
   fadeBase = null;
   clearMarker();
 });
@@ -247,7 +273,8 @@ function tick(): void {
 
   if (remaining <= SLEEP_FADE_MS) {
     if (!useSleepTimer.getState().fading) beginFade(remaining);
-    if (fadeBase !== null) applyVolume(fadeBase * Math.min(1, remaining / fadeSpan));
+    // Held while muted: `setVolume` would lift the mute.
+    if (fadeBase !== null && !usePlayerStore.getState().muted) applyVolume(fadeBase * Math.min(1, remaining / fadeSpan));
     schedule(Math.min(FADE_TICK_MS, remaining));
     return;
   }
@@ -282,7 +309,7 @@ function expire(): void {
       setPaused(true);
     }
   }
-  if (base !== null) applyVolume(base);
+  if (base !== null) restoreLevel(base);
   if (!acted) return;
   const at = formatClock(Date.now(), i18next.language);
   toast({ id: SLEEP_DONE_TOAST, title: t('sleepStopped'), description: t('sleepStoppedAt', { time: at }), variant: 'info', duration: 0 });
@@ -344,6 +371,7 @@ export const useSleepTimer: UseBoundStore<StoreApi<SleepTimerState>> = create<Sl
       return;
     }
     const gen = generation;
+    const key = itemKey(ref);
     useSleepTimerExtras.setState({ resolving: true });
     void fetchNowNext(ref).then((nn) => {
       if (gen !== generation) return;
@@ -353,7 +381,10 @@ export const useSleepTimer: UseBoundStore<StoreApi<SleepTimerState>> = create<Sl
         noGuide();
         return;
       }
-      useSleepTimer.setState({ endsAt: end });
+      // Zapped away while the guide was asked: the plain countdown a zap after the answer makes.
+      const playingRef = usePlayerStore.getState().source?.ref;
+      if (!playingRef || itemKey(playingRef) !== key) useSleepTimer.setState({ target: derivedCountdown(end), endsAt: end });
+      else useSleepTimer.setState({ endsAt: end });
       tick();
     });
   },
@@ -371,7 +402,7 @@ export const useSleepTimer: UseBoundStore<StoreApi<SleepTimerState>> = create<Sl
     reset();
     endFade(true);
     // From here it is a plain countdown: the programme or episode no longer decides the end.
-    useSleepTimer.setState({ target: { kind: 'minutes', minutes: Math.max(1, Math.round((endsAt - now) / MINUTE)) }, endsAt, fading: false });
+    useSleepTimer.setState({ target: derivedCountdown(endsAt, now), endsAt, fading: false });
     tick();
   },
 
@@ -400,7 +431,7 @@ usePlayerStore.subscribe((s, prev) => {
   const before = prev.source?.ref;
   const { endsAt } = useSleepTimer.getState();
   if (target.kind === 'programmeEnd' && endsAt !== null && (!ref || !before || itemKey(ref) !== itemKey(before))) {
-    useSleepTimer.setState({ target: { kind: 'minutes', minutes: Math.max(1, Math.round((endsAt - Date.now()) / MINUTE)) } });
+    useSleepTimer.setState({ target: derivedCountdown(endsAt) });
   }
 });
 
@@ -410,15 +441,16 @@ useMediaStore.subscribe((s, prev) => {
 });
 
 /**
- * `Z`: off, 15, 30, 45, 60, 90, off. From a programme or episode end (or a time Keep watching
- * made), the next press turns the timer off. Returns the new target.
+ * `Z`: off, 15, 30, 45, 60, 90, off. From a programme or episode end (or a countdown Keep
+ * watching or a zap made from another timer), the next press turns the timer off. Returns the
+ * new target.
  */
 export function cycleSleepTimer(): SleepTarget | null {
   const st = useSleepTimer.getState();
   const target = st.target;
   let next: number | null;
   if (!target) next = SLEEP_PRESETS[0];
-  else if (target.kind !== 'minutes') next = null;
+  else if (target.kind !== 'minutes' || target === derivedTarget) next = null;
   else next = SLEEP_PRESETS.find((m) => m > target.minutes) ?? null;
   if (next === null) {
     st.cancel();
@@ -439,7 +471,7 @@ function restoreInterruptedFade(): void {
   const base = readMarker();
   if (base === null) return;
   clearMarker();
-  applyVolume(base);
+  restoreLevel(base);
 }
 restoreInterruptedFade();
 
@@ -450,6 +482,8 @@ export function __resetSleepTimerForTests(): void {
   fadeBase = null;
   fadeSpan = SLEEP_FADE_MS;
   applying = false;
+  fadeLevel = null;
+  derivedTarget = null;
   clearMarker();
   useSleepTimer.setState({ endsAt: null, target: null, fading: false });
   useSleepTimerExtras.setState({ warning: false, resolving: false });

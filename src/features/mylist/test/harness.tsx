@@ -126,9 +126,16 @@ export function installCore(rpc: RpcMock, initial: WatchlistEntry[] = [], settin
   rpc.handlers['watchlist.reorder'] = (raw) => {
     guard('watchlist.reorder');
     const a = raw as { refs: ItemRef[] };
-    const listed = a.refs.map((r) => core.entries.find((e) => sameRef(e.ref, r))).filter((e): e is WatchlistEntry => e !== undefined);
-    const rest = core.entries.filter((e) => !a.refs.some((r) => sameRef(r, e.ref)));
-    core.entries = [...listed, ...rest];
+    // The core's rule: listed refs fill the slots they held before, in the
+    // given order; unlisted entries stay where they are. Refs not in the list
+    // are ignored and a ref listed twice keeps its first place.
+    const listed: WatchlistEntry[] = [];
+    for (const r of a.refs) {
+      const e = core.entries.find((x) => sameRef(x.ref, r));
+      if (e && !listed.includes(e)) listed.push(e);
+    }
+    let next = 0;
+    core.entries = core.entries.map((e) => (listed.includes(e) ? listed[next++]! : e));
   };
   rpc.handlers['settings.get'] = () => ({ ...DEFAULT_SETTINGS, ...settings });
   rpc.handlers['sources.list'] = () => SOURCES;

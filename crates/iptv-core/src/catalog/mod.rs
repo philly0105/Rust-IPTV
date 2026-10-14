@@ -784,9 +784,11 @@ pub fn english_categories(
     }
     let mut counts: HashMap<String, i64> = HashMap::new();
     {
-        let mut stmt = conn.prepare_cached(
-            "SELECT i.category_id, count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE i.source_id = ?1 AND i.content_type = ?2 AND non_english(i.title, c.name) = 0 GROUP BY i.category_id",
-        )?;
+        // An index-only walk of `idx_items_cat` with a rowid probe per row.
+        let hidden = language::hidden_rowids(conn, source_id, content_type.as_str())?;
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT i.category_id, count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2{hidden} GROUP BY i.category_id"
+        ))?;
         let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })?;
@@ -897,12 +899,33 @@ pub fn set_categories_hidden(
 pub(crate) const SELECT_NAMED: &str = "SELECT i.source_id, i.content_type, i.item_id, i.category_id, i.title, i.title_base, i.number, i.logo_url, i.poster_url, i.backdrop_url, i.rating, i.added, i.year, i.epg_channel_id, i.url, i.container_extension, i.is_radio, i.archive_hours, i.extra_json, i.position, c.name FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id";
 
 /// `AND` clause of the English-only filter, or nothing. Needs the `c` join of
-/// [`SELECT_NAMED`].
+/// [`SELECT_NAMED`]; for readers across sources, which look at few rows.
 fn english_clause(english_only: bool) -> &'static str {
     if english_only {
         language::ENGLISH_ONLY_SQL
     } else {
         ""
+    }
+}
+
+/// `AND` clause of the English-only filter for rows of one source and
+/// content type, or nothing: a probe into this connection's cached set of
+/// hidden rowids (see [`language::hidden_rowids`]), so a count over 50k rows
+/// stays an index-only scan within the query budget.
+fn english_scoped(
+    conn: &Connection,
+    english_only: bool,
+    source_id: &str,
+    content_type: ContentType,
+) -> CoreResult<&'static str> {
+    if english_only {
+        Ok(language::hidden_rowids(
+            conn,
+            source_id,
+            content_type.as_str(),
+        )?)
+    } else {
+        Ok("")
     }
 }
 
@@ -1042,6 +1065,7 @@ pub fn query_named(
         Some(h) => parental::filter::scoped(conn, &q.source_id, q.content_type, h, "?1", "?2")?,
         None => String::new(),
     };
+    let english = english_scoped(conn, q.english_only, &q.source_id, q.content_type)?;
     for (i, m) in attempts.iter().enumerate() {
         let mut where_sql = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
@@ -1062,7 +1086,7 @@ pub fn query_named(
             args.push(min.into());
             where_sql.push_str(&format!(" AND i.rating >= ?{}", args.len()));
         }
-        where_sql.push_str(english_clause(q.english_only));
+        where_sql.push_str(english);
         if let Some(s) = search {
             match m {
                 Match::Fts => {
@@ -1081,13 +1105,10 @@ pub fn query_named(
         // After the search: SQLite tests index-covered terms in this order,
         // so the few FTS matches are found before the hidden-rowid probe.
         where_sql.push_str(&locked);
-        // The join only adds the category name; it cannot change the count
-        // (categories' key is unique). Only the English-only filter reads it.
-        let count_sql = if q.english_only {
-            format!("SELECT count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE {where_sql}")
-        } else {
-            format!("SELECT count(*) FROM items i WHERE {where_sql}")
-        };
+        // No join: it only adds the category name, which cannot change the
+        // count (categories' key is unique), and the English-only clause
+        // reads categories through its own sets.
+        let count_sql = format!("SELECT count(*) FROM items i WHERE {where_sql}");
         let total: i64 = conn
             .prepare_cached(&count_sql)?
             .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
@@ -1293,7 +1314,12 @@ pub fn neighbors(
         }
         None => scope.push_str(" AND COALESCE(c.hidden, 0) = 0"),
     }
-    scope.push_str(english_clause(english_only));
+    scope.push_str(english_scoped(
+        conn,
+        english_only,
+        &r.source_id,
+        r.content_type,
+    )?);
     if let Some(h) = hide {
         scope.push_str(&parental::filter::scoped(
             conn,
@@ -1414,7 +1440,7 @@ pub fn all_live_channels(
     };
     let sql = format!(
         "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{}{locked} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
-        english_clause(english_only)
+        english_scoped(conn, english_only, source_id, ContentType::Live)?
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt

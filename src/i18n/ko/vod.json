@@ -181,5 +181,8 @@
   "searchCountMore_other": "{{count}}+",
   "pageLoadFailed": "이 타이틀을 불러오지 못했습니다",
   "searchPartialError": "일부 결과를 불러오지 못했습니다.",
-  "previousEpisode": "이전 에피소드"
+  "previousEpisode": "이전 에피소드",
+  "posterInMyList": "내 목록에 있음",
+  "shortcutMyList": "커서가 있는 작품을 내 목록에 저장하거나 빼기",
+  "shortcutPosterMenu": "커서가 있는 작품의 메뉴 열기"
 }

@@ -209,9 +209,13 @@ pub async fn remember_rows(
             raw["__kind"] = Value::from("series");
         }
         let r = ItemRef::new(source_id, ct, id);
+        // `*` is the all-categories listing of a row that names none.
+        let category_id = (!row.category_id.is_empty() && row.category_id != "*")
+            .then(|| row.category_id.clone());
         let item = CachedItem {
             raw,
             category_name: names.get(&row.category_id).cloned(),
+            category_id,
         };
         runtime.remember(&r, item.clone());
         persisted.push((r, item));

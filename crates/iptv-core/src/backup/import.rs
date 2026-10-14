@@ -132,6 +132,8 @@ struct Manifest {
     /// parental: `settings.tsrustParental` (Tsrust extension).
     parental: Option<Value>,
     playlists: Vec<Value>,
+    /// lists: top-level `tsrustCustomLists` (Tsrust extension, Run 2 C8).
+    custom_lists: Vec<Value>,
 }
 
 fn parse_manifest(json: &str) -> CoreResult<Manifest> {
@@ -182,11 +184,13 @@ fn parse_manifest(json: &str) -> CoreResult<Manifest> {
         .and_then(|s| s.get(super::EXT_PARENTAL_SETTINGS))
         .filter(|p| !p.is_null())
         .cloned();
+    let custom_lists = arr(&v, super::EXT_CUSTOM_LISTS).to_vec();
     Ok(Manifest {
         epg_urls,
         app_settings,
         parental,
         playlists: playlists.clone(),
+        custom_lists,
     })
 }
 
@@ -590,6 +594,10 @@ pub async fn import(
     // one call at the end) and whether locks were added.
     let mut watch: Vec<crate::watchlist::WatchlistBackupEntry> = Vec::new();
     let mut locks_added = false;
+    // lists: backup `exportedId` -> the source id it was imported as, for the
+    // custom lists restored after every entry (C8).
+    let mut source_map: HashMap<String, String> = HashMap::new();
+    let mut fingerprint_targets: HashMap<String, String> = HashMap::new();
     // Plain reasons a catalog did not load, for the Replace rollback message.
     let mut failures: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
@@ -608,6 +616,13 @@ pub async fn import(
             }
         }
         if !seen.insert(entry.fingerprint.clone()) {
+            // The same playlist twice: its list items belong to the first copy.
+            if let (Some(x), Some(t)) = (
+                &entry.exported_id,
+                fingerprint_targets.get(&entry.fingerprint),
+            ) {
+                source_map.entry(x.clone()).or_insert_with(|| t.clone());
+            }
             report.skipped += 1;
             report
                 .warnings
@@ -627,6 +642,14 @@ pub async fn import(
         existing_ids.insert(target_id.clone());
         if matched.is_none() {
             created.push(target_id.clone());
+        }
+        // Mapped even when the import fails below: a source row that stayed
+        // keeps its list items; one that did not is dropped by the restore.
+        fingerprint_targets.insert(entry.fingerprint.clone(), target_id.clone());
+        if let Some(x) = &entry.exported_id {
+            source_map
+                .entry(x.clone())
+                .or_insert_with(|| target_id.clone());
         }
         match import_entry(
             state,
@@ -719,6 +742,15 @@ pub async fn import(
     }
 
     restore_watchlist(state, &lock, watch, mode, &mut report.warnings).await?;
+    restore_custom_lists(
+        state,
+        &lock,
+        &manifest.custom_lists,
+        source_map,
+        mode,
+        &mut report.warnings,
+    )
+    .await?;
     if locks_added {
         crate::parental::announce(state).await?;
     }
@@ -907,6 +939,111 @@ async fn restore_watchlist(
     }
     if applied > 0 || replace {
         state.emit(crate::watchlist::CHANGED_EVENT, json!({}));
+    }
+    Ok(())
+}
+
+/// lists: reads the manifest's `tsrustCustomLists` leniently: a list without
+/// a name and an item without a source, content type or item id are dropped
+/// and counted.
+fn parse_custom_lists(raw: &[Value]) -> (Vec<crate::lists::CustomListBackup>, usize) {
+    let mut bad = 0usize;
+    let mut out = Vec::new();
+    for (n, v) in raw.iter().enumerate() {
+        let Some(name) = s_field(v, "name") else {
+            bad += arr(v, "items").len().max(1);
+            continue;
+        };
+        let mut items = Vec::new();
+        for (m, it) in arr(v, "items").iter().enumerate() {
+            let ct = s_field(it, "contentType").and_then(|c| c.parse::<ContentType>().ok());
+            let (Some(sid), Some(ct), Some(item_id)) =
+                (s_field(it, "sourceExportedId"), ct, s_field(it, "itemId"))
+            else {
+                bad += 1;
+                continue;
+            };
+            items.push(crate::lists::CustomListItemBackup {
+                source_exported_id: sid,
+                content_type: ct,
+                item_id,
+                title: s_field(it, "title").unwrap_or_default(),
+                logo_url: s_field(it, "logoUrl"),
+                position: i_field(it, "position").unwrap_or(m as i64),
+                added_at: it.get("addedAt").and_then(normalize_ts).unwrap_or_default(),
+            });
+        }
+        out.push(crate::lists::CustomListBackup {
+            id: s_field(v, "id").unwrap_or_default(),
+            name,
+            position: i_field(v, "position").unwrap_or(n as i64),
+            on_dashboard: v.get("onDashboard").is_none() || b_field(v, "onDashboard"),
+            created_at: v
+                .get("createdAt")
+                .and_then(normalize_ts)
+                .unwrap_or_default(),
+            items,
+        });
+    }
+    (out, bad)
+}
+
+/// lists: restores the manifest's custom lists once every entry is imported,
+/// mapping each item's source through `source_map` (backup `exportedId` ->
+/// imported source id). Replace recreates the lists, clearing them even when
+/// the backup has none; Merge adds to lists of the same name. Items whose
+/// source is not in the backup are dropped with a warning.
+async fn restore_custom_lists(
+    state: &Arc<AppState>,
+    lock: &tokio::sync::Mutex<()>,
+    raw: &[Value],
+    source_map: HashMap<String, String>,
+    mode: ImportMode,
+    warnings: &mut Vec<String>,
+) -> CoreResult<()> {
+    let replace = mode == ImportMode::Replace;
+    if raw.is_empty() && !replace {
+        return Ok(());
+    }
+    let (lists, bad) = parse_custom_lists(raw);
+    if bad > 0 {
+        warnings.push(format!(
+            "Custom lists: skipped {bad} unreadable entr{} in the backup",
+            if bad == 1 { "y" } else { "ies" }
+        ));
+    }
+    let mut misses = Misses::default();
+    let mut unmapped = 0usize;
+    for it in lists.iter().flat_map(|l| &l.items) {
+        if !source_map.contains_key(&it.source_exported_id) {
+            unmapped += 1;
+            let what = if it.title.is_empty() {
+                &it.item_id
+            } else {
+                &it.title
+            };
+            misses.add("channels", what.clone());
+        }
+    }
+    misses.flush("Custom lists (source not in the backup)", warnings);
+    let _guard = lock.lock().await;
+    let (written, dropped) = state
+        .db_call(move |c| {
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let out = crate::lists::import_lists(&tx, &lists, &source_map, replace)?;
+            tx.commit()?;
+            Ok(out)
+        })
+        .await?;
+    drop(_guard);
+    if dropped > unmapped {
+        warnings.push(format!(
+            "Custom lists: {} channel(s) were not restored (their source is gone, they are not live or radio channels, or a list or the lists are full)",
+            dropped - unmapped
+        ));
+    }
+    if written > 0 || replace {
+        state.emit(crate::lists::CHANGED_EVENT, json!({}));
     }
     Ok(())
 }
@@ -1492,6 +1629,75 @@ fn apply_tsrust_state(
         )?;
         if n == 0 {
             misses.add("hidden categories", cat);
+        }
+    }
+    // Run 2 (C8): channel edits, recording rules and the watch log. Keyed by
+    // catalog id like the rest, but they do not need the item in the catalog.
+    apply_run2_ext(
+        conn,
+        id,
+        us,
+        super::EXT_CHANNEL_EDITS,
+        "channel edits",
+        crate::channeledit::import_edits,
+        misses,
+    )?;
+    apply_run2_ext(
+        conn,
+        id,
+        us,
+        super::EXT_RECORDING_RULES,
+        "recording rules",
+        crate::recording::import_rules,
+        misses,
+    )?;
+    apply_run2_ext(
+        conn,
+        id,
+        us,
+        super::EXT_WATCH_LOG,
+        "watch history days",
+        crate::stats::import_log,
+        misses,
+    )?;
+    Ok(())
+}
+
+/// Run 2 (C8): parses one per-entry extension array into its module's backup
+/// rows and stores them under source `id` with that module's import
+/// function. An unreadable row is skipped; a store that fails is rolled back
+/// on its own (a savepoint), so neither costs the rest of the entry's state.
+/// Both are reported through `misses`.
+fn apply_run2_ext<T: serde::de::DeserializeOwned>(
+    conn: &Connection,
+    id: &str,
+    us: &Value,
+    key: &str,
+    what: &'static str,
+    store: fn(&Connection, &str, &[T]) -> CoreResult<usize>,
+    misses: &mut Misses,
+) -> CoreResult<()> {
+    let raw = arr(us, key);
+    if raw.is_empty() {
+        return Ok(());
+    }
+    let mut rows = Vec::with_capacity(raw.len());
+    for (n, v) in raw.iter().enumerate() {
+        match serde_json::from_value::<T>(v.clone()) {
+            Ok(r) => rows.push(r),
+            Err(_) => misses.add(what, format!("#{} (unreadable)", n + 1)),
+        }
+    }
+    if rows.is_empty() {
+        return Ok(());
+    }
+    conn.execute_batch("SAVEPOINT backup_run2_ext")?;
+    match store(conn, id, &rows) {
+        Ok(_) => conn.execute_batch("RELEASE backup_run2_ext")?,
+        Err(err) => {
+            conn.execute_batch("ROLLBACK TO backup_run2_ext; RELEASE backup_run2_ext")?;
+            tracing::warn!(source_id = %id, key, error = %err, "backup: could not restore an extension");
+            misses.add(what, format!("all {} ({err})", rows.len()));
         }
     }
     Ok(())

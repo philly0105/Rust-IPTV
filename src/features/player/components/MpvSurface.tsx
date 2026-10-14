@@ -11,7 +11,7 @@ import type { EngineTracks, TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
 import { modalOpen } from '../format';
 import { setMediaCommands, useMediaStore } from '../media';
-import { bindMpvExtras } from '../mpvExtras';
+import { bindMpvExtras, sendSubtitleStyle } from '../mpvExtras';
 import { useStreamInfoStore } from '../streamInfo';
 import { measureMpvBounds, measureMpvLayout } from '../mpvBounds';
 import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
@@ -415,7 +415,10 @@ export function MpvSurface({ className }: { className?: string }) {
     loadedKey.current = null;
     rpc('mpv.load', { source: src })
       .then(() => {
-        if (!stale) loadedKey.current = loadKey;
+        if (stale) return;
+        loadedKey.current = loadKey;
+        // The subtitle look again for the new file (C6).
+        void sendSubtitleStyle();
       })
       .catch((err: unknown) => {
         if (stale) return;

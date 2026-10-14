@@ -60,6 +60,73 @@ export function localDayKey(t: number): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
+// guide: jump to a date and time (Run 2 C5). Calendar days are built from local dates, never by
+// adding 24 h, so a 23 h or 25 h DST day still lands on the right midnight.
+
+/** First instant of the local calendar day holding `t` (01:00 where midnight does not exist). */
+export function localDayStart(t: number): number {
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** Start of each local day from `back` days before `now`'s day to `ahead` days after it. */
+export function jumpDays(now: number, back = 2, ahead = 13): number[] {
+  const d = new Date(now);
+  const out: number[] = [];
+  for (let i = -back; i <= ahead; i++) out.push(new Date(d.getFullYear(), d.getMonth(), d.getDate() + i).getTime());
+  return out;
+}
+
+/** Whole local days from `now`'s day to `t`'s day (0 today, -1 yesterday), counted on the calendar. */
+export function localDayDiff(t: number, now: number): number {
+  const a = new Date(t);
+  const b = new Date(now);
+  return Math.round((Date.UTC(a.getFullYear(), a.getMonth(), a.getDate()) - Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())) / DAY);
+}
+
+/** Minutes past local midnight on the wall clock (01:30 -> 90), whatever the DST state. */
+export function wallMinutes(t: number): number {
+  const d = new Date(t);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/**
+ * The 30-minute instants of the local day starting at `day`: 48 on most days, 46 on a
+ * spring-forward day (the skipped hour has no slots), 50 on a fall-back day (the repeated hour
+ * appears twice, as two different instants).
+ */
+export function daySlots(day: number, stepMinutes = 30): number[] {
+  const key = localDayKey(day);
+  const out: number[] = [];
+  // Step real time, re-snapped to the local grid, so :30 and :45 zones stay on local :00/:30.
+  for (let t = floorLocal(day, stepMinutes), guard = 0; localDayKey(t) === key && guard < 200; guard++) {
+    if (t >= day) out.push(t);
+    t = floorLocal(t + stepMinutes * MINUTE + MINUTE, stepMinutes);
+  }
+  return out;
+}
+
+/**
+ * The instant of wall time `minutes` (past midnight) on the local day starting at `day`: the
+ * first of the two in a repeated hour, the next slot that exists when a DST gap swallowed it.
+ */
+export function atWallTime(day: number, minutes: number, stepMinutes = 30): number {
+  const slots = daySlots(day, stepMinutes);
+  return slots.find((t) => wallMinutes(t) >= minutes) ?? slots[slots.length - 1] ?? day;
+}
+
+/** Earliest and latest window starts the `at` URL parameter accepts (2000-01-01 .. 2100-01-01 UTC). */
+const AT_MIN = Date.UTC(2000, 0, 1);
+const AT_MAX = Date.UTC(2100, 0, 1);
+
+/** Reads the guide's `at=<epoch ms>` URL parameter, floored to the local 30-minute slot; null when absent or unusable. */
+export function parseWindowAt(raw: string | null | undefined): number | null {
+  if (!raw || !/^\d{1,15}$/.test(raw)) return null;
+  const t = Number(raw);
+  if (!Number.isSafeInteger(t) || t < AT_MIN || t > AT_MAX) return null;
+  return floorLocal(t, 30);
+}
+
 /** Local whole-hour instants in (from, to): the ribbon's ticks. Skips the hour a DST jump removes. */
 export function localHourTicks(from: number, to: number): number[] {
   const out: number[] = [];
@@ -116,6 +183,18 @@ export function formatDay(t: number, locale?: string): string {
   if (!f) {
     f = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' });
     dayFormatters.set(key, f);
+  }
+  return f.format(t);
+}
+
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+/** Clock time with the zone's short name ("01:30 GMT+1"): tells the two 01:30s of a fall-back night apart. */
+export function formatClockZone(t: number, locale?: string): string {
+  const key = locale ?? '';
+  let f = zoneFormatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    zoneFormatters.set(key, f);
   }
   return f.format(t);
 }

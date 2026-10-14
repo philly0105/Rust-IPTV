@@ -252,7 +252,8 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
           <LiveBadge />
         </span>
         {nowProgress !== undefined && (
-          <span className="absolute inset-x-0 bottom-0">
+          // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
+          <span className="absolute inset-x-0 bottom-0" aria-hidden>
             <ProgressBar value={nowProgress * 100} size="xs" className="rounded-none bg-black/40" />
           </span>
         )}

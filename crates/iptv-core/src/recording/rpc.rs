@@ -1,6 +1,6 @@
 //! `reminders.*` and `recordings.*` RPC commands.
 
-use super::{library, ReminderRequest, ScheduleRequest};
+use super::{library, rules, ReminderRequest, ScheduleRequest};
 use crate::error::RpcError;
 use crate::rpc::RpcRouter;
 use crate::state::AppState;
@@ -23,6 +23,11 @@ pub const COMMANDS: &[&str] = &[
     "recordings.playSource",
     "recordings.reveal",
     "recordings.delete",
+    // Run 2 C5: series recording rules.
+    "recordings.rules",
+    "recordings.addRule",
+    "recordings.setRuleEnabled",
+    "recordings.removeRule",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +84,26 @@ pub fn register(r: &mut RpcRouter) {
     r.add("recordings.delete", |s: S, a: IdArgs| async move {
         Ok::<_, RpcError>(library::delete(&s, &a.id).await?)
     });
+    // Series recording rules (Run 2 C5).
+    r.add("recordings.rules", |s: S, _: ()| async move {
+        Ok::<_, RpcError>(rules::list(&s).await?)
+    });
+    r.add(
+        "recordings.addRule",
+        |s: S, a: rules::AddRuleRequest| async move { Ok::<_, RpcError>(rules::add(&s, a).await?) },
+    );
+    r.add(
+        "recordings.setRuleEnabled",
+        |s: S, a: rules::SetRuleEnabledRequest| async move {
+            Ok::<_, RpcError>(rules::set_enabled(&s, &a.id, a.enabled).await?)
+        },
+    );
+    r.add(
+        "recordings.removeRule",
+        |s: S, a: rules::RemoveRuleRequest| async move {
+            Ok::<_, RpcError>(rules::remove(&s, &a.id, a.keep_scheduled.unwrap_or(false)).await?)
+        },
+    );
 }
 
 #[cfg(test)]

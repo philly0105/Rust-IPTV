@@ -414,6 +414,32 @@ void _allDensitiesListed;
 export const UI_SCALE_MIN = 0.9;
 /** Largest accepted `settings.uiScale` (`settings::UI_SCALE_RANGE` in the core). */
 export const UI_SCALE_MAX = 1.25;
+// subtitles:
+/** Subtitle text size (`settings.subtitleSize`): 0.8, 1.0, 1.25 and 1.5 times the base size. */
+export type SubtitleSize = 'small' | 'medium' | 'large' | 'xlarge';
+/** Subtitle text colour (`settings.subtitleColor`). */
+export type SubtitleColor = 'white' | 'yellow' | 'cyan' | 'green';
+/** What sits behind subtitle text (`settings.subtitleBackground`): text shadow only, translucent box, opaque box. */
+export type SubtitleBackground = 'shadow' | 'box' | 'solid';
+/** Every subtitle size, in picker order (same order as `SubtitleSize::ALL` in model.rs). */
+export const SUBTITLE_SIZES = ['small', 'medium', 'large', 'xlarge'] as const satisfies readonly SubtitleSize[];
+/** Every subtitle colour, in picker order (same order as `SubtitleColor::ALL` in model.rs). */
+export const SUBTITLE_COLORS = ['white', 'yellow', 'cyan', 'green'] as const satisfies readonly SubtitleColor[];
+/** Every subtitle background, in picker order (same order as `SubtitleBackground::ALL` in model.rs). */
+export const SUBTITLE_BACKGROUNDS = ['shadow', 'box', 'solid'] as const satisfies readonly SubtitleBackground[];
+// Compile-time checks that the lists name every value.
+const _allSubtitleSizesListed: [Exclude<SubtitleSize, (typeof SUBTITLE_SIZES)[number]>] extends [never] ? true : never = true;
+const _allSubtitleColorsListed: [Exclude<SubtitleColor, (typeof SUBTITLE_COLORS)[number]>] extends [never] ? true : never = true;
+const _allSubtitleBackgroundsListed: [Exclude<SubtitleBackground, (typeof SUBTITLE_BACKGROUNDS)[number]>] extends [never]
+  ? true
+  : never = true;
+void _allSubtitleSizesListed;
+void _allSubtitleColorsListed;
+void _allSubtitleBackgroundsListed;
+/** Smallest accepted `settings.subtitlePosition` (`settings::SUBTITLE_POSITION_RANGE` in the core). */
+export const SUBTITLE_POSITION_MIN = 0;
+/** Largest accepted `settings.subtitlePosition` (`settings::SUBTITLE_POSITION_RANGE` in the core). */
+export const SUBTITLE_POSITION_MAX = 40;
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -529,6 +555,21 @@ export interface Settings {
   uiScale: number;
   /** Now/next banner inside the player on every live channel change. */
   zapBanner: boolean;
+  // subtitles:
+  /** Subtitle text size in mpv and the built-in player. */
+  subtitleSize: SubtitleSize;
+  /** Subtitle text colour. */
+  subtitleColor: SubtitleColor;
+  /** Shadow only, translucent box (`rgb(0 0 0 / .72)`) or opaque box behind subtitle text. */
+  subtitleBackground: SubtitleBackground;
+  /**
+   * Percent of the picture height subtitles are raised from the bottom: an
+   * integer in `SUBTITLE_POSITION_MIN..=SUBTITLE_POSITION_MAX` (0..40).
+   */
+  subtitlePosition: number;
+  // vod:
+  /** The VOD grid's "Hide watched" toggle (`hideWatched` on `catalog.movies` / `catalog.series`). */
+  vodHideWatched: boolean;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -594,6 +635,13 @@ export const DEFAULT_SETTINGS: Settings = {
   density: 'comfortable',
   uiScale: 1,
   zapBanner: true,
+  // subtitles:
+  subtitleSize: 'medium',
+  subtitleColor: 'white',
+  subtitleBackground: 'box',
+  subtitlePosition: 0,
+  // vod:
+  vodHideWatched: false,
 };
 
 export interface WindowState {
@@ -920,6 +968,11 @@ export interface AppEventMap {
   // watchlist:
   /** After every My List write. */
   'watchlist.changed': EmptyEvent;
+  // Run 2 (C10):
+  /** After every custom-list write, and when a source removal cascades list items away. */
+  'lists.changed': EmptyEvent;
+  /** After every channel edit (rename, hide, restore). */
+  'channels.changed': ChannelsChangedEvent;
 }
 
 export type AppEventType = keyof AppEventMap;
@@ -1005,6 +1058,8 @@ export interface Recording {
   startedAt?: string;
   endedAt?: string;
   engine?: string;
+  /** Set when a series recording rule (`RecordingRule.id`) created it; absent for manual recordings. */
+  ruleId?: string;
 }
 
 /** `recordings.schedule`: a programme (`title`, `start`, `end`) or a channel for `durationMinutes`. */
@@ -1104,4 +1159,111 @@ export interface WatchlistEntry {
   snapshot: ItemSnapshot;
   addedAt: string;
   watched: boolean;
+}
+
+// channeledit: hide and rename channels (Run 2 contract C2; crates/iptv-core/src/channeledit).
+/** One channel edit (live or radio). A row with `hidden: false` and no `name` does not exist. */
+export interface ChannelEdit {
+  ref: ItemRef;
+  hidden: boolean;
+  /** Custom name; absent = the provider name. */
+  name?: string;
+  /** Provider name when last edited (shown in the hidden-channels list). */
+  originalName: string;
+  /** RFC 3339 UTC. */
+  updatedAt: string;
+}
+
+/** `channels.changed` payload, emitted after every write. */
+export interface ChannelsChangedEvent {
+  sourceId: string;
+}
+
+// lists: custom channel lists (Run 2 contract C3; crates/iptv-core/src/lists).
+/** A user-named list of live/radio channels from any sources. */
+export interface CustomList {
+  id: string;
+  /** Trimmed, 1..60 chars, unique (case-insensitive). */
+  name: string;
+  position: number;
+  /** Shown as a dashboard rail. */
+  onDashboard: boolean;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One channel of a custom list (`lists.items`). */
+export interface CustomListEntry {
+  ref: ItemRef;
+  /** Stored title/logo, for items the provider dropped and for rails. */
+  snapshot: ItemSnapshot;
+  /** Present when the item is in the catalog now (custom name applied). */
+  channel?: Channel;
+  /** False when the provider dropped it (rendered greyed with Remove). */
+  available: boolean;
+  position: number;
+  addedAt: string;
+}
+
+// vod: VOD browsing (Run 2 contract C4).
+/** `catalog.yearFacets`: titles per year, newest first. */
+export interface YearFacet {
+  year: number;
+  count: number;
+}
+
+// guide: guide search and series recording rules (Run 2 contract C5).
+/** One `epg.search` hit: a programme on one of the source's channels. */
+export interface GuideSearchHit {
+  ref: ItemRef;
+  channelName: string;
+  channelNumber?: number;
+  logoUrl?: string;
+  categoryId?: string;
+  /** Raw guide times like `epg.programs` (the UI applies the EPG offset). */
+  program: EpgProgram;
+}
+
+/** A series recording rule: record every airing of `title` on one channel. */
+export interface RecordingRule {
+  id: string;
+  ref: ItemRef;
+  channelName: string;
+  title: string;
+  enabled: boolean;
+  createdAt: string;
+  /** Scheduled recordings this rule has made that have not started yet. */
+  upcoming: number;
+  /** Start of the next of those, RFC 3339. */
+  nextStart?: string;
+}
+
+// stats: watch statistics (Run 2 contract C7; crates/iptv-core/src/stats).
+/** One day of `stats.summary`; `seconds = liveSeconds + vodSeconds`. */
+export interface WatchStatsDay {
+  /** Client-local date, YYYY-MM-DD. */
+  day: string;
+  seconds: number;
+  liveSeconds: number;
+  vodSeconds: number;
+}
+
+/** One channel or title in a `stats.summary` top list. */
+export interface WatchStatsTop {
+  ref: ItemRef;
+  title: string;
+  posterUrl?: string;
+  seconds: number;
+  sourceName?: string;
+}
+
+/** `stats.summary`: `days` has exactly the asked number of entries ending at `today`, zero-filled. */
+export interface WatchStats {
+  days: WatchStatsDay[];
+  totalSeconds: number;
+  /** Live and radio. */
+  topChannels: WatchStatsTop[];
+  /** Movies and series. */
+  topTitles: WatchStatsTop[];
 }

@@ -45,6 +45,9 @@ pub struct RecordingRow {
     pub ended_at: Option<i64>,
     pub engine: Option<String>,
     pub created_at: i64,
+    /// The series rule that created it (`recording_rules.id`, migration
+    /// 0015); `None` for a recording scheduled by hand.
+    pub rule_id: Option<String>,
 }
 
 impl RecordingRow {
@@ -191,7 +194,7 @@ pub fn set_reminder_times(c: &Connection, id: &str, start_at: i64, end_at: i64) 
     Ok(())
 }
 
-const RECORDING_COLS: &str = "id, source_id, content_type, item_id, channel_name, title, kind, start_at, end_at, padding_before, padding_after, status, error_message, parts_json, bytes, started_at, ended_at, engine, created_at";
+const RECORDING_COLS: &str = "id, source_id, content_type, item_id, channel_name, title, kind, start_at, end_at, padding_before, padding_after, status, error_message, parts_json, bytes, started_at, ended_at, engine, created_at, rule_id";
 
 fn recording(r: &Row<'_>) -> rusqlite::Result<RecordingRow> {
     let parts: String = r.get(13)?;
@@ -217,14 +220,15 @@ fn recording(r: &Row<'_>) -> rusqlite::Result<RecordingRow> {
         ended_at: r.get(16)?,
         engine: r.get(17)?,
         created_at: r.get(18)?,
+        rule_id: r.get(19)?,
     })
 }
 
 pub fn insert_recording(c: &Connection, r: &RecordingRow) -> CoreResult<()> {
     c.execute(
         "INSERT INTO recordings (id, source_id, content_type, item_id, channel_name, title, kind, start_at, end_at,
-           padding_before, padding_after, status, error_message, parts_json, bytes, started_at, ended_at, engine, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+           padding_before, padding_after, status, error_message, parts_json, bytes, started_at, ended_at, engine, created_at, rule_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             r.id,
             r.item_ref.source_id,
@@ -244,7 +248,8 @@ pub fn insert_recording(c: &Connection, r: &RecordingRow) -> CoreResult<()> {
             r.started_at,
             r.ended_at,
             r.engine,
-            r.created_at
+            r.created_at,
+            r.rule_id
         ],
     )?;
     Ok(())

@@ -14,6 +14,8 @@
 //! several writes in the same second.
 
 pub mod rpc;
+// vod: watched lookups for posters and "Hide watched" (Run 2 C4).
+pub mod watched;
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
@@ -28,8 +30,8 @@ use std::sync::Arc;
 
 /// Recent entries kept per source; older ones are trimmed on insert.
 pub const RECENT_CAP_PER_SOURCE: i64 = 200;
-/// A position at or beyond this fraction of the duration counts as finished
-/// and is deleted.
+/// A position at or beyond this fraction of the duration counts as finished:
+/// the row becomes a watched row at the end of the item (see [`position_set`]).
 pub const COMPLETE_RATIO: f64 = 0.95;
 /// Default and maximum `recent.list` page.
 pub const RECENT_DEFAULT_LIMIT: i64 = 100;
@@ -176,27 +178,44 @@ fn map_fk(err: rusqlite::Error, source_id: &str) -> CoreError {
 // Favorites
 // ---------------------------------------------------------------------------
 
-/// Favorites ordered by `position`, then `added_at`. `source_id = None` lists all sources.
+/// Favorites ordered by `position`, then `added_at`. `source_id = None` lists
+/// all sources. Every stored row, as stored (reorder and backup use it).
 pub fn favorites_list(
     conn: &Connection,
     source_id: Option<&str>,
 ) -> CoreResult<Vec<FavoriteEntry>> {
-    favorites_list_filtered(conn, source_id, None)
+    favorites_read(conn, source_id, None, false)
 }
 
-/// [`favorites_list`] without the entries parental hide mode drops (`hide`).
+/// The `favorites.list` reader: [`favorites_list`] without the entries
+/// parental hide mode drops (`hide`) and without channels hidden by a
+/// channel edit, with custom channel names in the snapshot titles (C2).
 pub fn favorites_list_filtered(
     conn: &Connection,
     source_id: Option<&str>,
     hide: Option<Hide>,
 ) -> CoreResult<Vec<FavoriteEntry>> {
+    favorites_read(conn, source_id, hide, true)
+}
+
+fn favorites_read(
+    conn: &Connection,
+    source_id: Option<&str>,
+    hide: Option<Hide>,
+    edits: bool,
+) -> CoreResult<Vec<FavoriteEntry>> {
     let locked = match hide {
         Some(h) => crate::parental::filter::by_ref(conn, "f", h)?,
         None => String::new(),
     };
+    let edited = if edits {
+        crate::channeledit::by_ref(conn, "f")?
+    } else {
+        String::new()
+    };
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT f.source_id, f.content_type, f.item_id, f.added_at, f.position, f.snapshot_json
-         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}{edited}
          ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC"
     ))?;
     let rows = stmt.query_map(params![source_id], |row| {
@@ -216,6 +235,12 @@ pub fn favorites_list_filtered(
             position,
             snapshot,
         });
+    }
+    if edits {
+        crate::channeledit::apply_snapshot_names(
+            conn,
+            out.iter_mut().map(|e| (&e.item_ref, &mut e.snapshot)),
+        )?;
     }
     Ok(out)
 }
@@ -387,21 +412,33 @@ pub fn favorites_reorder(
 // Recent
 // ---------------------------------------------------------------------------
 
-/// Recently viewed, newest first.
+/// Recently viewed, newest first. Every stored row, as stored.
 pub fn recent_list(
     conn: &Connection,
     source_id: Option<&str>,
     limit: Option<i64>,
 ) -> CoreResult<Vec<RecentEntry>> {
-    recent_list_filtered(conn, source_id, limit, None)
+    recent_read(conn, source_id, limit, None, false)
 }
 
-/// [`recent_list`] without the entries parental hide mode drops (`hide`).
+/// The `recent.list` reader: [`recent_list`] without the entries parental
+/// hide mode drops (`hide`) and without channels hidden by a channel edit,
+/// with custom channel names in the snapshot titles (C2).
 pub fn recent_list_filtered(
     conn: &Connection,
     source_id: Option<&str>,
     limit: Option<i64>,
     hide: Option<Hide>,
+) -> CoreResult<Vec<RecentEntry>> {
+    recent_read(conn, source_id, limit, hide, true)
+}
+
+fn recent_read(
+    conn: &Connection,
+    source_id: Option<&str>,
+    limit: Option<i64>,
+    hide: Option<Hide>,
+    edits: bool,
 ) -> CoreResult<Vec<RecentEntry>> {
     let limit = limit
         .unwrap_or(RECENT_DEFAULT_LIMIT)
@@ -410,9 +447,14 @@ pub fn recent_list_filtered(
         Some(h) => crate::parental::filter::by_ref(conn, "r", h)?,
         None => String::new(),
     };
+    let edited = if edits {
+        crate::channeledit::by_ref(conn, "r")?
+    } else {
+        String::new()
+    };
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT r.source_id, r.content_type, r.item_id, r.viewed_at, r.snapshot_json
-         FROM recent r WHERE (?1 IS NULL OR r.source_id = ?1){locked}
+         FROM recent r WHERE (?1 IS NULL OR r.source_id = ?1){locked}{edited}
          ORDER BY r.viewed_at DESC, r.rowid DESC LIMIT ?2"
     ))?;
     let rows = stmt.query_map(params![source_id, limit], |row| {
@@ -431,6 +473,12 @@ pub fn recent_list_filtered(
             viewed_at: crate::db::to_rfc3339(&viewed_at),
             snapshot,
         });
+    }
+    if edits {
+        crate::channeledit::apply_snapshot_names(
+            conn,
+            out.iter_mut().map(|e| (&e.item_ref, &mut e.snapshot)),
+        )?;
     }
     Ok(out)
 }
@@ -630,9 +678,11 @@ pub fn is_complete(position_seconds: i64, duration_seconds: Option<i64>) -> bool
 
 /// Saves a position. Returns true when a row is stored afterwards.
 ///
-/// - Reaching [`COMPLETE_RATIO`] of the duration: an episode is kept as a
-///   watched row at its end (C13); an item-level row (a movie) is deleted
-///   unless it is marked watched.
+/// - Reaching [`COMPLETE_RATIO`] of the duration: the row becomes a watched
+///   row with the position at the end, for an episode (C13) and for an
+///   item-level row such as a movie (Run 2 C2/C4: the movie then counts as
+///   watched for the poster tick, "Hide watched" and My List). Continue
+///   Watching skips watched rows and the player does not resume from them.
 /// - Below that, a live save (no `updated_at`) above [`MIN_RESUME_SECONDS`]
 ///   clears a watched flag: the episode is being rewatched, so it is the
 ///   series' place to resume. A save at or below it (the player's first tick)
@@ -667,11 +717,12 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
     };
     let updated_at = p.updated_at.clone().unwrap_or_else(now_ts);
     let complete = is_complete(p.position_seconds, duration);
-    if complete && !ep.is_empty() {
+    if complete {
         // A finished episode stays as a watched row (position at the end):
         // Continue Watching ranks a series by its newest row, so the record
         // that a later episode was finished keeps an older half-watched one
-        // from resurfacing (C13).
+        // from resurfacing (C13). A finished movie stays the same way, as its
+        // watched mark (Run 2 C2).
         conn.execute(
             &format!(
                 "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
@@ -698,15 +749,6 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
         )
         .map_err(|e| map_fk(e, &r.source_id))?;
         return Ok(true);
-    }
-    if !p.watched && complete {
-        conn.execute(
-            "DELETE FROM playback_positions
-             WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4 AND watched = 0
-               AND (NOT ?6 OR COALESCE(julianday(?5) > julianday(updated_at), 1))",
-            params![r.source_id, r.content_type.as_str(), r.item_id, ep, updated_at, dated],
-        )?;
-        return Ok(position_get(conn, r, Some(ep))?.is_some());
     }
     conn.execute(
         &format!(
@@ -1025,13 +1067,21 @@ mod tests {
         assert!(done.watched);
         assert_eq!(done.position_seconds, 1000);
         assert!(continue_watching(&c, Some(10)).unwrap().is_empty());
-        // A movie (item-level row) is still deleted when finished.
+        // A finished movie (item-level row) becomes a watched row at its
+        // end (Run 2 C2) and stays out of Continue Watching.
         let movie = |pos| PositionInput {
             item_ref: ItemRef::new("s2", ContentType::Movie, "m"),
             ..p("x", None, pos, Some(1000))
         };
         assert!(position_set(&c, &movie(100)).unwrap());
-        assert!(!position_set(&c, &movie(990)).unwrap());
+        assert_eq!(continue_watching(&c, Some(10)).unwrap().len(), 1);
+        assert!(position_set(&c, &movie(990)).unwrap());
+        let m = ItemRef::new("s2", ContentType::Movie, "m");
+        let done = position_get(&c, &m, None).unwrap().unwrap();
+        assert!(done.watched);
+        assert_eq!(done.position_seconds, 1000);
+        assert_eq!(done.duration_seconds, Some(1000));
+        assert!(continue_watching(&c, Some(10)).unwrap().is_empty());
         assert!(position_set(&c, &p("show", Some("e1"), -1, None)).is_err());
     }
 }

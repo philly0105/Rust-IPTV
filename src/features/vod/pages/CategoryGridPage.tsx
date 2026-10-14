@@ -1,4 +1,4 @@
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, Clapperboard, Info, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, CalendarX2, CircleCheck, Clapperboard, Info, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -6,16 +6,19 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useRpcQuery } from '@/api/query';
-import type { CoverSize, ItemRef, SeriesItem, VodItem } from '@/api/types';
+import { itemKey, type CoverSize, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
 
 import { useMyListMenuItem } from '@/features/mylist/hooks/useMyListMenuItem';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
+import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useShortcut } from '@/shell';
 
 import { PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
+import { VodFilterBar } from '../components/VodFilterBar';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
+import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { formatRating } from '../lib/format';
@@ -37,6 +40,7 @@ import {
   type VodSortKey,
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
+import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
 import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass } from '@/ui';
 
 export const COVER_WIDTH: Record<CoverSize, number> = { small: 128, medium: 164, large: 212 };
@@ -83,14 +87,26 @@ function GridCell({ input, index, pageSize, active, resume }: GridCellProps) {
   const page = pageOf(index, pageSize);
   const q = useVodPage(input, page);
   const item = q.data?.items[index - page * pageSize];
+  // C4: one watched lookup per loaded page, shared by its cells.
+  const watched = useWatchedKeys(q.data?.items);
   if (!item) {
     if (q.isError && !q.isFetching) return <GridCellError />;
     return <PosterCardSkeleton />;
   }
-  return <GridPoster item={item} active={active} resume={resume} />;
+  return <GridPoster item={item} active={active} resume={resume} watched={watched.has(itemKey(item.ref))} />;
 }
 
-function GridPoster({ item, active, resume }: { item: VodItem | SeriesItem; active: boolean; resume: Map<string, number> }) {
+function GridPoster({
+  item,
+  active,
+  resume,
+  watched,
+}: {
+  item: VodItem | SeriesItem;
+  active: boolean;
+  resume: Map<string, number>;
+  watched: boolean;
+}) {
   return (
     <PosterCard
       interactive={false}
@@ -101,7 +117,8 @@ function GridPoster({ item, active, resume }: { item: VodItem | SeriesItem; acti
       posterUrl={item.posterUrl}
       year={item.year}
       rating={item.rating}
-      progress={resume.get(resumeKey(item.ref))}
+      progress={watched ? undefined : resume.get(resumeKey(item.ref))}
+      watched={watched}
       language={itemLanguage(item.title, item.categoryName)}
       // C3: the saved marker and pointer toggle on the corner; S toggles it from the keyboard.
       myList={myListTarget(item)}
@@ -114,7 +131,13 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const navigate = useNavigate();
   const { sourceId = '', categoryId = ALL_CATEGORIES } = useParams();
   const [params, setParams] = useSearchParams();
-  const { sort, dir, search } = readGridParams(params);
+  const { sort, dir, search, yearFrom, yearTo } = readGridParams(params);
+  const years = useMemo<YearRange>(
+    () => ({ ...(yearFrom !== undefined ? { from: yearFrom } : {}), ...(yearTo !== undefined ? { to: yearTo } : {}) }),
+    [yearFrom, yearTo],
+  );
+  const yearKey = yearRangeKey(years);
+  const yearFiltered = hasYearRange(years);
   const [searchDraft, setSearchDraft] = useState(search);
   const settings = useSettings();
   const source = useSource(sourceId);
@@ -154,6 +177,12 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
       return next;
     });
 
+  // C4: the year range lives in the URL (yf/yt); "Hide watched" is a setting.
+  const setYears = (range: YearRange) => setParams((prev) => writeYearRange(prev, range));
+  const hideWatched = settings.vodHideWatched === true;
+  const updateSettings = useUpdateSettings();
+  const setHideWatched = (on: boolean) => void updateSettings({ vodHideWatched: on });
+
   const settingMinRating = effectiveMinRating(settings.vodMinRating, new URLSearchParams());
   const minRating = effectiveMinRating(settingMinRating, params);
   const ratingFilterSet = settingMinRating > 0;
@@ -161,21 +190,38 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const input = useMemo<GridQueryInput | undefined>(
     () =>
       source.data
-        ? { sourceKind: source.data.kind, kind, sourceId, categoryId, sort, dir, search, minRating }
+        ? {
+            sourceKind: source.data.kind,
+            kind,
+            sourceId,
+            categoryId,
+            sort,
+            dir,
+            search,
+            minRating,
+            ...(yearFrom !== undefined ? { yearFrom } : {}),
+            ...(yearTo !== undefined ? { yearTo } : {}),
+            ...(hideWatched ? { hideWatched } : {}),
+          }
         : undefined,
-    [source.data, kind, sourceId, categoryId, sort, dir, search, minRating],
+    [source.data, kind, sourceId, categoryId, sort, dir, search, minRating, yearFrom, yearTo, hideWatched],
   );
-  // m3u/xtream filter in SQLite and page like any grid. Stalker portals cannot
-  // filter by rating or language, so only there the grid loads pages in order and filters them.
+  // m3u/xtream filter in SQLite and page like any grid. Stalker portals cannot filter by
+  // rating, language, year or watched, so only there the grid loads pages in order and filters them.
   const stalker = !!source.data && !ratingFilterInCore(source.data.kind);
   const englishOnly = stalker && settings.englishOnly === true;
-  const clientFiltered = stalker && (filtered || englishOnly);
+  const clientFiltered = stalker && (filtered || englishOnly || yearFiltered || hideWatched);
   const inOrder = useVodPagesInOrder(input, clientFiltered);
+  // Watched ticks for the loaded pages; with Hide watched, a page shows once its lookup has answered.
+  const watchedPages = useWatchedPages(inOrder.data?.pages, clientFiltered);
   const filteredItems = useMemo(() => {
     if (!clientFiltered) return [];
-    const rated = filterByRating((inOrder.data?.pages ?? []).flatMap((p) => p.items), minRating);
-    return englishOnly ? rated.filter((i) => !isNonEnglish(i.title, i.categoryName)) : rated;
-  }, [clientFiltered, englishOnly, inOrder.data, minRating]);
+    const pages = inOrder.data?.pages ?? [];
+    const loaded = (hideWatched ? pages.slice(0, watchedPages.settled) : pages).flatMap((p) => p.items);
+    const unwatched = hideWatched ? loaded.filter((i) => !watchedPages.keys.has(itemKey(i.ref))) : loaded;
+    const kept = filterByYear(filterByRating(unwatched, minRating), years);
+    return englishOnly ? kept.filter((i) => !isNonEnglish(i.title, i.categoryName)) : kept;
+  }, [clientFiltered, englishOnly, inOrder.data, minRating, years, hideWatched, watchedPages]);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = inOrder;
   // Keep loading while the filter leaves too few titles to fill the view.
   useEffect(() => {
@@ -194,7 +240,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
 
   const first = useVodPage(clientFiltered ? undefined : input, 0);
   // With the client-side filter, the count is known only once every page has arrived.
-  const filteredDone = clientFiltered && inOrder.isSuccess && !hasNextPage;
+  const filteredDone =
+    clientFiltered && inOrder.isSuccess && !hasNextPage && (!hideWatched || watchedPages.settled >= (inOrder.data?.pages.length ?? 0));
   const total = clientFiltered ? filteredItems.length : (first.data?.total ?? 0);
   const firstReady = clientFiltered ? filteredDone : !!first.data;
   const indices = useMemo(() => Array.from({ length: total }, (_, i) => i), [total]);
@@ -286,6 +333,18 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     },
     { description: t('shortcutMyList'), area: 'Vod', enabled: gridShown },
   );
+  // C4: W marks the title under the cursor watched (or unwatched); Shift+W hides or shows watched titles.
+  const toggleWatched = useToggleWatched();
+  useShortcut(
+    'w',
+    () => {
+      const at = activeCell();
+      const item = at ? itemAt(at.index) : undefined;
+      if (item) void toggleWatched(item.ref);
+    },
+    { description: t('shortcutWatched'), area: 'Vod', enabled: gridShown },
+  );
+  useShortcut('shift+w', () => setHideWatched(!hideWatched), { description: t('shortcutHideWatched'), area: 'Vod', enabled: !!input });
 
   // A poster's menu (right click, Shift+F10, the context-menu key): open it, or My List.
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; item: VodItem | SeriesItem; index: number } | null>(null);
@@ -364,6 +423,19 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         />
       </div>
 
+      {input && (
+        <VodFilterBar
+          sourceId={sourceId}
+          kind={kind}
+          categoryId={categoryId}
+          stalker={stalker}
+          range={years}
+          onRangeChange={setYears}
+          hideWatched={hideWatched}
+          onHideWatchedChange={setHideWatched}
+        />
+      )}
+
       {ratingFilterSet && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-divider px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
           <Star aria-hidden size={14} className="fill-current text-accent" />
@@ -406,6 +478,26 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 </button>
               }
             />
+          ) : yearFiltered ? (
+            <EmptyState
+              icon={<CalendarX2 size={32} />}
+              title={t('yearEmptyTitle')}
+              action={
+                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setYears({})}>
+                  {t('yearAll')}
+                </button>
+              }
+            />
+          ) : hideWatched ? (
+            <EmptyState
+              icon={<CircleCheck size={32} />}
+              title={t('watchedEmptyTitle')}
+              action={
+                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setHideWatched(false)}>
+                  {t('showWatched')}
+                </button>
+              }
+            />
           ) : search ? (
             <EmptyState
               icon={<SearchX size={32} />}
@@ -431,7 +523,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           )
         ) : clientFiltered ? (
           <VirtualGrid<VodItem | SeriesItem>
-            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${englishOnly}`}
+            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${englishOnly}|${yearKey}|${hideWatched}`}
             items={filteredItems}
             minColumnWidth={coverWidth}
             aspect="poster"
@@ -439,7 +531,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             testId="vod-grid"
             initialActiveIndex={restoredIndex}
             getKey={(item) => item.ref.itemId}
-            render={(item, _index, state) => <GridPoster item={item} active={state.active} resume={resume} />}
+            render={(item, _index, state) => (
+              <GridPoster item={item} active={state.active} resume={resume} watched={watchedPages.keys.has(itemKey(item.ref))} />
+            )}
             onEndReached={() => {
               if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
             }}
@@ -455,7 +549,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           />
         ) : (
           <VirtualGrid<number>
-            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}`}
+            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${yearKey}|${hideWatched}`}
             items={indices}
             minColumnWidth={coverWidth}
             aspect="poster"

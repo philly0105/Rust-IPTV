@@ -112,10 +112,17 @@ pub fn parse_tracks(data: &Value) -> Vec<MpvTrack> {
                     .filter(|s| !s.is_empty())
                     .map(str::to_string)
             };
+            // An external subtitle without a title shows its file name.
+            let title = text("title").or_else(|| match track_type {
+                MpvTrackType::Sub => text("external-filename")
+                    .and_then(|f| f.rsplit(['/', '\\']).next().map(str::to_string))
+                    .filter(|n| !n.is_empty()),
+                _ => None,
+            });
             Some(MpvTrack {
                 id,
                 track_type,
-                title: text("title"),
+                title,
                 lang: text("lang"),
                 selected: t.get("selected").and_then(Value::as_bool).unwrap_or(false),
             })
@@ -164,4 +171,26 @@ pub fn apply_event(state: &mut MpvState, event: &Value) -> bool {
         _ => return false,
     }
     *state != before
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn untitled_external_subtitle_is_named_after_its_file() {
+        let tracks = parse_tracks(&json!([
+            {"id": 1, "type": "sub", "external": true,
+             "external-filename": r"C:\Subs\Movie.en.srt", "selected": true},
+            {"id": 2, "type": "sub", "external-filename": "/home/u/a.ass", "title": "Signs"},
+            {"id": 3, "type": "sub", "external-filename": "C:/Subs/"},
+            {"id": 1, "type": "audio", "external-filename": r"C:\a.mka"}
+        ]));
+        assert_eq!(tracks[0].title.as_deref(), Some("Movie.en.srt"));
+        assert!(tracks[0].selected);
+        assert_eq!(tracks[1].title.as_deref(), Some("Signs"), "a title wins");
+        assert_eq!(tracks[2].title, None);
+        assert_eq!(tracks[3].title, None, "only subtitles get the fallback");
+    }
 }

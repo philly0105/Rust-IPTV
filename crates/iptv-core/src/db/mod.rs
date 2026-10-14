@@ -159,6 +159,30 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0012_watchlist",
         sql: include_str!("migrations/0012_watchlist.sql"),
     },
+    // channeledit: channel_edits and the items year index (Run 2 C2, C4).
+    Migration {
+        version: 13,
+        name: "0013_catalog_edits",
+        sql: include_str!("migrations/0013_catalog_edits.sql"),
+    },
+    // lists: custom_lists and custom_list_items (Run 2 C3).
+    Migration {
+        version: 14,
+        name: "0014_custom_lists",
+        sql: include_str!("migrations/0014_custom_lists.sql"),
+    },
+    // guide: epg_programs_fts, recording_rules and rule skips (Run 2 C5).
+    Migration {
+        version: 15,
+        name: "0015_guide",
+        sql: include_str!("migrations/0015_guide.sql"),
+    },
+    // stats: watch_log (Run 2 C7).
+    Migration {
+        version: 16,
+        name: "0016_watch_log",
+        sql: include_str!("migrations/0016_watch_log.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -442,6 +466,9 @@ mod tests {
             "DELETE FROM epg_programs WHERE epg_url = ?1",
             "UPDATE OR IGNORE epg_programs SET epg_url = ?1 WHERE epg_url = ?2",
             "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
+            // epg/search.rs: guide search through the title index, and its fallback scan.
+            crate::epg::search::FTS_SQL,
+            crate::epg::search::SCAN_SQL,
         ];
         for sql in statements {
             let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
@@ -456,9 +483,10 @@ mod tests {
                 .filter(|d| matches!(d.split_whitespace().nth(1), Some("p" | "epg_programs")))
                 .collect();
             assert!(!programmes.is_empty(), "{sql}: {plan:?}");
+            // The search reads each FTS hit's programme by rowid: `USING INTEGER PRIMARY KEY`.
             for d in programmes {
                 assert!(
-                    d.starts_with("SEARCH") && d.contains("INDEX"),
+                    d.starts_with("SEARCH") && (d.contains("INDEX") || d.contains("PRIMARY KEY")),
                     "{sql} does not use an index: {plan:?}"
                 );
             }
@@ -499,6 +527,26 @@ mod tests {
             );
         }
         assert_eq!(latest_version(), MIGRATIONS.len() as i64);
+    }
+
+    /// Run 2 slots: each file sits at its contract number, so builders that
+    /// fill them in parallel never renumber one another's migration.
+    #[test]
+    fn run2_migration_slots_are_reserved() {
+        let names: Vec<&str> = MIGRATIONS.iter().map(|m| m.name).collect();
+        for (version, name) in [
+            (13, "0013_catalog_edits"),
+            (14, "0014_custom_lists"),
+            (15, "0015_guide"),
+            (16, "0016_watch_log"),
+        ] {
+            assert_eq!(
+                names.get(version - 1).copied(),
+                Some(name),
+                "migration {version} is {name}"
+            );
+        }
+        assert!(latest_version() >= 16);
     }
 
     /// A database left at any earlier version (including one that stopped

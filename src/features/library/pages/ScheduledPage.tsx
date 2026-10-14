@@ -21,6 +21,7 @@ import {
   ErrorState,
   IconButton,
   ProgressBar,
+  RecordingRulesPanel,
   SkeletonList,
   clockDuration,
   elapsedSeconds,
@@ -163,6 +164,8 @@ export function ScheduledPage() {
         </p>
       ) : null}
       {body}
+      {/* Run 2 C5: series rules ("Record series" in the guide). */}
+      <RecordingRulesPanel />
     </div>
   );
 }

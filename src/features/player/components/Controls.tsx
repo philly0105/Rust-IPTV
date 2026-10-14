@@ -37,7 +37,7 @@ import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '.
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { InlineSpinner } from './InlineSpinner';
 // failover: AlternatesMenu, AlternatesRow
-import { AlternatesMenu, AlternatesRow, ChannelHistory, SleepChip, SleepMenu, SleepRowValue } from './lazyParts';
+import { AlternatesMenu, AlternatesRow, ChannelHistory, SleepChip, SleepMenu, SleepRowValue, SubtitleStyleMenu, SubtitleTrackMenu } from './lazyParts';
 import { SeekBar } from './SeekBar';
 import { SyncRows, useSyncSummary } from './SyncMenu';
 
@@ -264,7 +264,7 @@ export function BarReadout({
   );
 }
 
-type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'speed' | 'sync' | 'sources' | 'sleep'; // failover: + 'sources'
+type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'subStyle' | 'speed' | 'sync' | 'sources' | 'sleep'; // failover: + 'sources'
 
 /** A row that opens a submenu (shared with the video's context menu). */
 export function MenuRow({ label, value, onClick }: { label: string; value?: ReactNode; onClick(): void }) {
@@ -361,7 +361,7 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
           type="button"
           role="menuitem"
           data-menu-back
-          onClick={() => setView('root')}
+          onClick={() => setView(view === 'subStyle' ? 'text' : 'root')}
           className="flex flex-1 items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
         >
           <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
@@ -371,7 +371,9 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
               ? t('audioTrack')
               : view === 'text'
                 ? t('subtitles')
-                : view === 'sync'
+                : view === 'subStyle'
+                  ? t('subtitleStyle.menuTitle')
+                  : view === 'sync'
                   ? t('sync')
                   : view === 'sources'
                     ? t('alternateSources')
@@ -400,12 +402,12 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
-          setView(view === 'root' ? null : 'root');
+          setView(view === 'root' ? null : view === 'subStyle' ? 'text' : 'root');
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
-          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []);
+          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input[type="range"]:not(:disabled)') ?? []);
           const i = items.indexOf(document.activeElement as HTMLElement);
           const next = items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
           next?.focus();
@@ -418,7 +420,8 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
           {header}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}
           {tracks.audio.length > 0 && <MenuRow label={t('audioTrack')} value={audioValue} onClick={() => setView('audio')} />}
-          {tracks.text.length > 0 && <MenuRow label={t('subtitles')} value={textValue} onClick={() => setView('text')} />}
+          {/* Always there (C6): a file can be loaded into a stream without subtitles. */}
+          <MenuRow label={t('subtitles')} value={textValue} onClick={() => setView('text')} />
           {isVod && (
             <MenuRow
               label={t('speed')}
@@ -472,10 +475,13 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
       {view === 'text' && (
         <>
           {header}
-          <MenuChoice label={t('off')} selected={!tracks.text.some((x) => x.selected)} onClick={() => pick(() => commands?.setText(null))} />
-          {tracks.text.map((a) => (
-            <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => pick(() => commands?.setText(a.id))} />
-          ))}
+          <SubtitleTrackMenu onDone={() => setView(null)} onStyle={() => setView('subStyle')} />
+        </>
+      )}
+      {view === 'subStyle' && (
+        <>
+          {header}
+          <SubtitleStyleMenu />
         </>
       )}
       {view === 'speed' && (
@@ -539,6 +545,14 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   useEffect(() => {
     if (!visible && menu) setMenu(null);
   }, [visible]);
+
+  // Shift+C (C6): the Subtitles submenu, asked for just now (a bar mounting later must not open it).
+  const subtitleMenuAt = useMediaStore((s) => s.subtitleMenuAt);
+  useEffect(() => {
+    if (subtitleMenuAt === undefined) return;
+    useMediaStore.setState({ subtitleMenuAt: undefined });
+    if (Date.now() - subtitleMenuAt < 1000) setMenu('text');
+  }, [subtitleMenuAt]);
 
   // The history popover (also opened by Shift+B) keeps the chrome up like a menu, and only one
   // of them is open at a time.

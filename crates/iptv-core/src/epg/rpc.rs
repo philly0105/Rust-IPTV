@@ -119,7 +119,12 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("epg.clearAll", |s, _a: ()| async move {
         let deleted = s
-            .db_call(super::store::clear_all)
+            .db_call(|c| {
+                let deleted = super::store::clear_all(c)?;
+                // Guide search (C5): re-index what is left (staging rows only).
+                super::search::refresh_index(c);
+                Ok(deleted)
+            })
             .await
             .map_err(RpcError::from)?;
         super::ingest::runtime(&s).bump();
@@ -127,4 +132,11 @@ pub fn register(r: &mut RpcRouter) {
         s.emit("epg.changed", serde_json::json!({}));
         Ok::<(), RpcError>(())
     });
+    // guide: programme search (Run 2 C5).
+    r.add(
+        "epg.search",
+        |s, a: super::search::SearchRequest| async move {
+            super::search::search(&s, a).await.map_err(RpcError::from)
+        },
+    );
 }

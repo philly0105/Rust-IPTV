@@ -193,5 +193,17 @@
   "previousEpisode": "Episódio anterior",
   "posterInMyList": "Na Minha lista",
   "shortcutMyList": "Guardar o título sob o cursor na Minha lista ou removê-lo",
-  "shortcutPosterMenu": "Abrir o menu do título sob o cursor"
+  "shortcutPosterMenu": "Abrir o menu do título sob o cursor",
+  "yearAll": "Todos os anos",
+  "decade": "Anos {{decade}}",
+  "yearFrom": "De",
+  "yearTo": "Até",
+  "yearEmptyTitle": "Nenhum título destes anos",
+  "hideWatched": "Ocultar assistidos",
+  "watchedEmptyTitle": "Já assistiu a tudo aqui",
+  "showWatched": "Mostrar assistidos",
+  "markSeriesWatched": "Marcar série como assistida",
+  "markSeriesUnwatched": "Marcar série como não assistida",
+  "shortcutWatched": "Marcar como assistido ou não assistido",
+  "shortcutHideWatched": "Ocultar ou mostrar títulos assistidos"
 }

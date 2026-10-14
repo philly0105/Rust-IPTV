@@ -151,8 +151,26 @@ pub fn build_manifest(
         };
         add_user_state_ext(&mut entry, super::EXT_PARENTAL_LOCKS, locks.remove(&s.id));
         add_user_state_ext(&mut entry, super::EXT_WATCHLIST, watch.remove(&s.id));
+        // Run 2: channel edits, recording rules and the watch log (C8).
+        add_user_state_ext(
+            &mut entry,
+            super::EXT_CHANNEL_EDITS,
+            Some(to_values(crate::channeledit::export_edits(conn, &s.id)?)?),
+        );
+        add_user_state_ext(
+            &mut entry,
+            super::EXT_RECORDING_RULES,
+            Some(to_values(crate::recording::export_rules(conn, &s.id)?)?),
+        );
+        add_user_state_ext(
+            &mut entry,
+            super::EXT_WATCH_LOG,
+            Some(to_values(crate::stats::export_log(conn, &s.id)?)?),
+        );
         playlists.push(entry);
     }
+    // lists: custom lists cross sources, so they sit at the top level.
+    let lists = to_values(crate::lists::export_lists(conn)?)?;
     let mut m = Map::new();
     m.insert("kind".into(), json!(BACKUP_KIND));
     m.insert("version".into(), json!(BACKUP_VERSION));
@@ -165,7 +183,16 @@ pub fn build_manifest(
     settings[super::EXT_PARENTAL_SETTINGS] = crate::parental::backup_options(conn)?;
     m.insert("settings".into(), settings);
     m.insert("playlists".into(), Value::Array(playlists));
+    if !lists.is_empty() {
+        m.insert(super::EXT_CUSTOM_LISTS.into(), Value::Array(lists));
+    }
     Ok(Value::Object(m))
+}
+
+fn to_values<T: serde::Serialize>(rows: Vec<T>) -> CoreResult<Vec<Value>> {
+    rows.into_iter()
+        .map(|r| Ok(serde_json::to_value(r)?))
+        .collect()
 }
 
 /// Adds a Tsrust extension array to an entry's `userState` when it has rows.

@@ -5,11 +5,12 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { itemKey, type Channel, type EpgProgram, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
+import { rpc } from '@/api/transport';
+import { itemKey, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
 import { Button, buttonClass, EmptyState, ErrorState, Select, Skeleton, useToast, type SelectOption } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
-import { useShell } from '@/shell';
+import { useShell, useShortcut } from '@/shell';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
@@ -32,6 +33,7 @@ import {
   layoutBlocks,
   localDayKey,
   ms,
+  parseWindowAt,
   programIndexAt,
   programWhen,
   shiftPrograms,
@@ -43,6 +45,10 @@ import { GuideUnavailableNotice } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
 // recording:
 import { ProgramActions, ScheduleMark } from '@/features/recording';
+// guide (Run 2 C5): jump to a date and time, guide search.
+import { GuideSearch } from '../guide/GuideSearchPanel';
+import { JumpToDialog } from '../guide/JumpToDialog';
+import { findChannelIndex, groupForHit } from '../guide/search';
 
 export const GRID_ROW = 56;
 export const GRID_SLOT_MIN = 30;
@@ -136,9 +142,23 @@ interface Selection {
   rect: { left: number; right: number; top: number; bottom: number };
 }
 
+/** How long a channel row stays highlighted after a guide search hit moved the grid to it. */
+export const HIGHLIGHT_MS = 3000;
+
+/** A search hit the grid is moving to: its channel's row is looked up once the list is loaded. */
+interface Reveal {
+  key: ItemKey;
+  /** Display time of the hit's start; the keyboard cursor lands on it. */
+  time: number;
+  channelName: string;
+  /** The group the list must show before the lookup (undefined: all channels). */
+  categoryId: string | undefined;
+}
+
 /** Multi-channel guide: virtualized channel rows x 30-minute columns over a window of at least 6 h that fills the page width. */
 export function EpgGridPage() {
   const { t, i18n } = useTranslation('live');
+  const { t: tg } = useTranslation('guide');
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const now = useNow(30_000);
@@ -154,7 +174,12 @@ export function EpgGridPage() {
   const kind: SourceKind | undefined = source?.kind;
   const categories = useRpcQuery('catalog.categories', { sourceId, contentType: 'live' }, { enabled: !!sourceId });
 
-  const [start, setStart] = useState(() => defaultStart(Date.now()));
+  // The window start lives in the URL (`at`, epoch ms on a 30-minute slot), so back and forward
+  // restore it. Without `at` the window follows "now" as it was when the page opened or Jump to
+  // now was last pressed.
+  const atParam = parseWindowAt(params.get('at'));
+  const [nowStart, setNowStart] = useState(() => defaultStart(Date.now()));
+  const start = atParam ?? nowStart;
   const [measurePage, pageWidth] = useElementWidth();
   const windowMs = gridWindowFor(pageWidth, channelCol);
   const end = start + windowMs;
@@ -261,10 +286,42 @@ export function EpgGridPage() {
     !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
 
   // ---- navigation ---------------------------------------------------------
-  const shift = useCallback((delta: number) => setStart((s) => s + delta), []);
+  // Clicks and key repeat can outrun renders: each move starts from here, not from a stale render.
+  const startRef = useRef(start);
+  startRef.current = start;
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  /** Moves the window to `at` (floored to its slot): a new history entry, or `replace` for key-driven moves. */
+  const goTo = useCallback(
+    (at: number, opts: { replace?: boolean; category?: null } = {}) => {
+      const next = new URLSearchParams(paramsRef.current);
+      const slot = floorLocal(at, GRID_SLOT_MIN);
+      next.set('at', String(slot));
+      if (opts.category === null) next.delete('category');
+      startRef.current = slot;
+      paramsRef.current = next;
+      setParams(next, { replace: opts.replace });
+    },
+    [setParams],
+  );
+  const shift = useCallback((delta: number, replace = false) => goTo(startRef.current + delta, { replace }), [goTo]);
   // A calendar day, not 24 h: across a DST change the window keeps its wall-clock time.
-  const shiftDay = useCallback((days: number) => setStart((s) => addLocalDays(s, days)), []);
-  const toNow = useCallback(() => setStart(defaultStart(Date.now())), []);
+  const shiftDay = useCallback((days: number) => goTo(addLocalDays(startRef.current, days)), [goTo]);
+  const toNow = useCallback(() => {
+    const s = defaultStart(Date.now());
+    setNowStart(s);
+    startRef.current = s;
+    if (!paramsRef.current.has('at')) return;
+    const next = new URLSearchParams(paramsRef.current);
+    next.delete('at');
+    paramsRef.current = next;
+    setParams(next);
+  }, [setParams]);
+  // Back to an entry without `at` (or a link without it): the window follows now again.
+  const followsNow = atParam === null;
+  useEffect(() => {
+    if (followsNow) setNowStart(defaultStart(Date.now()));
+  }, [followsNow]);
   const setQuery = (key: string, value: string | undefined) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
@@ -369,13 +426,13 @@ export function EpgGridPage() {
         break;
       case 'later': {
         const nextT = cur ? ms(cur.end) : time + GRID_SLOT_MIN * MINUTE;
-        if (nextT >= end) shift(3 * HOUR);
+        if (nextT >= end) shift(3 * HOUR, true);
         time = nextT;
         break;
       }
       case 'earlier': {
         const prevT = cur ? ms(cur.start) - 1 : time - GRID_SLOT_MIN * MINUTE;
-        if (prevT < start) shift(-3 * HOUR);
+        if (prevT < start) shift(-3 * HOUR, true);
         time = Math.max(prevT, start - 3 * HOUR);
         break;
       }
@@ -415,6 +472,81 @@ export function EpgGridPage() {
     syncGridScroll(el); // before first paint: cells already clipped by the edge show their text
   }, [start, rtl, gridMounted]);
 
+  // ---- guide search and jump (Run 2 C5) ----------------------------------------
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
+  const [highlight, setHighlight] = useState<ItemKey | null>(null);
+  const guideArea = tg('shortcutArea');
+  useShortcut(
+    '/',
+    (e) => {
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    },
+    { description: tg('searchLabel'), area: guideArea },
+  );
+  useShortcut(
+    't',
+    (e) => {
+      e.preventDefault();
+      setJumpOpen(true);
+    },
+    { description: tg('jumpTitle'), area: guideArea },
+  );
+
+  /** A search hit (display time): move the window to its start, in a group that holds the channel. */
+  const selectHit = (hit: GuideSearchHit) => {
+    const time = ms(hit.program.start);
+    const group = groupForHit(categoryId, hit);
+    goTo(time, { category: group === categoryId ? undefined : null });
+    setHighlight(null);
+    setReveal({ key: itemKey(hit.ref), time, channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
+  };
+
+  // Once the list the hit needs is on screen, find the channel's row, scroll to it, put the
+  // keyboard cursor on the programme and highlight the row for a moment.
+  const listReady = !!sourceId && !paged.isLoading && !paged.refreshing && !paged.error;
+  useEffect(() => {
+    if (!reveal || !listReady || categoryId !== reveal.categoryId) return;
+    let cancelled = false;
+    const known = paged.loaded.find((l) => itemKey(l.channel.ref) === reveal.key)?.index;
+    const lookup =
+      known !== undefined
+        ? Promise.resolve(known)
+        : findChannelIndex((offset, limit) => rpc('catalog.channels', { sourceId, categoryId, query: { offset, limit } }), reveal.key, () => cancelled);
+    lookup
+      .then((index) => {
+        if (cancelled) return;
+        setReveal(null);
+        if (index === null) {
+          toast({ title: tg('hitNotFound', { channel: reveal.channelName }) });
+          return;
+        }
+        virtualizer.scrollToIndex(index, { align: 'center' });
+        cursorRef.current = { row: index, time: reveal.time };
+        setCursor({ row: index, time: reveal.time });
+        focusPending.current = true;
+        scroller.current?.focus({ preventScroll: true });
+        setHighlight(reveal.key);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setReveal(null);
+        toast({ title: tg('hitNotFound', { channel: reveal.channelName }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `paged.loaded` is read once the list is ready; later page loads must not start another lookup.
+  }, [reveal, listReady, sourceId, categoryId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!highlight) return;
+    const id = setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
+    return () => clearTimeout(id);
+  }, [highlight]);
+
   // ---- actions --------------------------------------------------------------
   // `kind` is the selected source's; rows kept on screen from the previous source while the new
   // one loads must not be played as this kind.
@@ -426,6 +558,17 @@ export function EpgGridPage() {
       toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
     );
   };
+  /** Watch on an airing search hit: the hit carries what playback needs of the channel. */
+  const watchHit = (hit: GuideSearchHit) =>
+    playLive({
+      ref: hit.ref,
+      name: hit.channelName,
+      number: hit.channelNumber,
+      logoUrl: hit.logoUrl,
+      categoryId: hit.categoryId ?? '',
+      categoryName: '',
+      isRadio: hit.ref.contentType === 'radio',
+    });
   const catchup = (channel: Channel, program: EpgProgram) => {
     const kind = ownKind(channel);
     if (!kind) return;
@@ -501,12 +644,35 @@ export function EpgGridPage() {
           options={groupOptions}
           onValueChange={(v) => setQuery('category', v || undefined)}
         />
+        {sourceId ? (
+          <GuideSearch
+            inputRef={searchRef}
+            sourceId={sourceId}
+            offsetMinutes={prefs.epgOffsetMinutes}
+            now={now}
+            stripCountryPrefix={prefs.stripCountryPrefix}
+            onSelect={selectHit}
+            onWatch={watchHit}
+          />
+        ) : null}
         <div className="ms-auto flex items-center gap-1" role="group" aria-label={t('guideTime')}>
           <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(-1)} aria-label={t('previousDay')} title={t('previousDay')} />
           <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => shift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
-          <span className="min-w-36 px-1 text-center text-sm tabular-nums text-fg" aria-live="polite">
-            {formatDay(start, i18n.language)} {formatClock(start, i18n.language)}–{formatClock(end, i18n.language)}
-          </span>
+          {/* The window's span; pressing it opens Jump to date and time (`t`). */}
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            title={tg('jumpTitle')}
+            onClick={() => setJumpOpen(true)}
+            data-testid="guide-window"
+            className="inline-flex h-8 min-w-36 items-center justify-center gap-1.5 rounded-md px-2 text-sm tabular-nums text-fg outline-none hover:bg-surface-2 active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent motion-safe:transition-colors"
+          >
+            <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />
+            <span aria-live="polite">
+              {formatDay(start, i18n.language)} {formatClock(start, i18n.language)}–{formatClock(end, i18n.language)}
+            </span>
+            <span className="sr-only">, {tg('jumpTitle')}</span>
+          </button>
           <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => shift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
           <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(1)} aria-label={t('nextDay')} title={t('nextDay')} />
           <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} onClick={toNow}>
@@ -514,6 +680,7 @@ export function EpgGridPage() {
           </Button>
         </div>
       </div>
+      <JumpToDialog open={jumpOpen} onClose={() => setJumpOpen(false)} start={start} now={now} onJump={(at) => goTo(at)} onNow={toNow} />
 
       {gridError ? (
         <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
@@ -589,6 +756,7 @@ export function EpgGridPage() {
               const ch = paged.getChannel(v.index);
               const programs = programsFor(ch);
               const chName = displayChannelName(ch?.name, prefs.stripCountryPrefix);
+              const highlighted = !!ch && highlight === itemKey(ch.ref);
               return (
                 <div
                   key={v.key}
@@ -597,11 +765,18 @@ export function EpgGridPage() {
                   className="absolute start-0 flex border-b border-divider"
                   style={{ top: HEADER_H + v.start, height: GRID_ROW, width: channelCol + trackWidth }}
                 >
-                  <div role="rowheader" className="sticky start-0 z-10 border-e border-divider bg-surface" style={{ width: channelCol }}>
+                  <div
+                    role="rowheader"
+                    className={`sticky start-0 z-10 border-e border-divider motion-safe:transition-colors motion-safe:duration-500 ${highlighted ? 'bg-surface-3' : 'bg-surface'}`}
+                    style={{ width: channelCol }}
+                  >
+                    {/* guide search: the row a hit moved to, marked for a moment. */}
+                    {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent" /> : null}
                     {ch ? (
                       <button
                         type="button"
                         data-channel-row={v.index}
+                        data-highlighted={highlighted ? '' : undefined}
                         tabIndex={v.index === cursor.row && (!programs || programs.length === 0) ? 0 : -1}
                         onClick={() => playLive(ch)}
                         title={t('playChannel', { name: chName })}
@@ -748,6 +923,8 @@ function ProgramPopover({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
+      // A dialog opened from the popover (Record series) is a portal: pressing in it is not outside.
+      if (e.target instanceof Element && e.target.closest('[data-dialog-layer]')) return;
       if (ref.current && e.target instanceof Node && !ref.current.contains(e.target)) onClose();
     };
     window.addEventListener('mousedown', onDown);
@@ -761,6 +938,8 @@ function ProgramPopover({
       aria-modal="true"
       aria-label={program.title}
       onKeyDown={(e) => {
+        // Keys from a portal dialog opened here bubble through React; they are the dialog's.
+        if (!(e.target instanceof Node) || !ref.current?.contains(e.target)) return;
         if (e.key === 'Escape') {
           e.stopPropagation();
           onClose();

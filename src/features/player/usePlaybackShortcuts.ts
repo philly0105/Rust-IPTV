@@ -50,8 +50,8 @@ export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'play
 
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down; and the player
- * slice's j/l, g/h, i, b, shift+b, shift+p, and z for the sleep timer). Registered once by
- * the dock; active while something plays in-app.
+ * slice's j/l, g/h, i, b, shift+b, shift+p, z for the sleep timer, and shift+c for the
+ * Subtitles menu). Registered once by the dock; active while something plays in-app.
  */
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
   const { t, i18n } = useTranslation('player');
@@ -168,6 +168,12 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     }),
     { ...base, description: opts.channelPanelAvailable ? t('shortcutChannelPanel') : t('shortcutCaptions') },
   );
+  // Subtitles (C6): Shift+C opens the control bar's Subtitles submenu (tracks, loading a file, style).
+  useShortcut('shift+c', guard('letter', () => useMediaStore.setState({ subtitleMenuAt: Date.now() })), {
+    ...base,
+    enabled: active && video,
+    description: t('shortcutSubtitleMenu'),
+  });
   // J/L: 10 s, like most video sites. Live only inside a rewind window.
   const seekJL = (delta: number) => () => {
     if (!seekWindow()) {

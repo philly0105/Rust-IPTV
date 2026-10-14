@@ -1,0 +1,7 @@
+WEBVTT
+
+00:00.500 --> 00:30.000
+Web cue one
+
+00:30.500 --> 10:00.000 line:90%
+<v Anna>Web cue two</v>

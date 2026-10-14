@@ -837,7 +837,8 @@ describe('epg mapping dialog (round 2)', () => {
 
 describe('Live context menu: Copy stream address (round 2)', () => {
   const openMenu = async (row: number) => {
-    await screen.findByText(`Channel ${row}`);
+    // The row, not its text: once the cursor settles on the row, the guide ribbon shows the same name.
+    await waitFor(() => expect(rowButton(row)).toBeTruthy());
     fireEvent.contextMenu(rowButton(row)!.parentElement!, { clientX: 40, clientY: 40 });
     return screen.findByRole('menu');
   };

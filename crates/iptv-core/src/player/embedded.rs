@@ -52,6 +52,8 @@ const CLICK_MESSAGE: &str = "tsrust-click";
 /// else is refused, including mpv's command prefixes (`no-osd`, `async`,
 /// `raw`, ...), which would otherwise smuggle any command in as an argument,
 /// and `keybind`, `run`, `loadfile`, `dump-cache`, `screenshot-to-file`.
+/// `sub-add` is refused too: it reads any path, so it only runs through
+/// `mpv.addSubtitle`, which checks the file first.
 const ALLOWED_COMMANDS: &[&str] = &["seek", "get_property", "get_property_string"];
 
 /// Properties `mpv.setProperty` (and property commands sent through
@@ -70,7 +72,32 @@ pub const SETTABLE_PROPERTIES: &[&str] = &[
     "sub-delay",
     "sub-visibility",
     "time-pos",
+    // subtitles:
+    "sub-scale",
+    "sub-color",
+    "sub-back-color",
+    "sub-border-style",
+    "sub-border-size",
+    "sub-shadow-offset",
+    "sub-pos",
+    "sub-ass-override",
 ];
+
+/// Subtitle style properties: their values are range-checked by
+/// [`validate_property_value`], so only plain `set` commands may change them.
+const STYLE_PROPERTIES: &[&str] = &[
+    "sub-scale",
+    "sub-color",
+    "sub-back-color",
+    "sub-border-style",
+    "sub-border-size",
+    "sub-shadow-offset",
+    "sub-pos",
+    "sub-ass-override",
+];
+
+/// Property commands that set a value outright (no relative change).
+const SET_COMMANDS: &[&str] = &["set", "set_property", "set_property_string"];
 
 /// IPC commands whose first argument names a property to change; accepted
 /// only for [`SETTABLE_PROPERTIES`].
@@ -96,6 +123,112 @@ pub fn validate_property(name: &str) -> CoreResult<()> {
         )));
     }
     Ok(())
+}
+
+/// A JSON number, or a string holding one (`set_property_string` sends
+/// strings); non-finite values are refused.
+fn number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|n| n.is_finite())
+}
+
+/// `#RRGGBB` or `#AARRGGBB`, the color forms mpv parses.
+fn is_hex_color(value: &Value) -> bool {
+    value.as_str().is_some_and(|s| {
+        s.strip_prefix('#').is_some_and(|hex| {
+            (hex.len() == 6 || hex.len() == 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+        })
+    })
+}
+
+/// Checks the value of a subtitle style property; other properties pass
+/// unchecked. Keeps the UI's sliders and pickers inside sane ranges.
+pub fn validate_property_value(name: &str, value: &Value) -> CoreResult<()> {
+    let in_range = |lo: f64, hi: f64| number(value).is_some_and(|n| (lo..=hi).contains(&n));
+    let one_of = |allowed: &[&str]| value.as_str().is_some_and(|s| allowed.contains(&s));
+    let (ok, expected) = match name.trim() {
+        "sub-scale" => (in_range(0.5, 3.0), "a number from 0.5 to 3"),
+        "sub-color" | "sub-back-color" => (
+            is_hex_color(value),
+            "a color in the form #RRGGBB or #AARRGGBB",
+        ),
+        "sub-border-style" => (
+            one_of(&["outline-and-shadow", "opaque-box", "background-box"]),
+            "outline-and-shadow, opaque-box, or background-box",
+        ),
+        "sub-border-size" | "sub-shadow-offset" => (in_range(0.0, 10.0), "a number from 0 to 10"),
+        "sub-pos" => (
+            in_range(0.0, 150.0) && number(value).is_some_and(|n| n.fract() == 0.0),
+            "a whole number from 0 to 150",
+        ),
+        "sub-ass-override" => (
+            one_of(&["no", "yes", "scale", "force", "strip"]),
+            "no, yes, scale, force, or strip",
+        ),
+        _ => return Ok(()),
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(CoreError::invalid(format!(
+            "mpv property {:?} must be {expected}.",
+            name.trim()
+        )))
+    }
+}
+
+/// Largest subtitle file `mpv.addSubtitle` accepts.
+pub const MAX_SUBTITLE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Subtitle file extensions `mpv.addSubtitle` accepts (compared ignoring case).
+pub const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "vtt", "ass", "ssa"];
+
+/// Checks a subtitle file for `mpv.addSubtitle`: an absolute path to an
+/// existing regular file with a subtitle extension, at most 5 MB. mpv's
+/// `sub-add` opens whatever it is given (URLs and protocols included), so
+/// only plain local files pass.
+pub fn validate_subtitle_path(path: &str) -> CoreResult<PathBuf> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(CoreError::invalid("Choose a subtitle file to add."));
+    }
+    let p = PathBuf::from(path);
+    if !p.is_absolute() {
+        return Err(CoreError::invalid(
+            "The subtitle path must be a full path to a file, including the drive or share.",
+        ));
+    }
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if !ext.is_some_and(|e| SUBTITLE_EXTENSIONS.contains(&e.as_str())) {
+        return Err(CoreError::invalid(
+            "Only .srt, .vtt, .ass, and .ssa subtitle files can be added.",
+        ));
+    }
+    let meta = std::fs::metadata(&p).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CoreError::invalid("The subtitle file was not found. Check that it still exists.")
+        } else {
+            CoreError::invalid(format!("The subtitle file could not be read ({e})."))
+        }
+    })?;
+    if !meta.is_file() {
+        return Err(CoreError::invalid(
+            "The subtitle path is a folder, not a file. Choose a subtitle file.",
+        ));
+    }
+    if meta.len() > MAX_SUBTITLE_BYTES {
+        return Err(CoreError::invalid(
+            "The subtitle file is larger than 5 MB. Choose a smaller file.",
+        ));
+    }
+    Ok(p)
 }
 
 /// The single embedded mpv session holder.
@@ -470,7 +603,9 @@ pub async fn command(state: &Arc<AppState>, cmd: Vec<Value>) -> CoreResult<Value
 }
 
 /// Accepts only [`ALLOWED_COMMANDS`] and [`PROPERTY_COMMANDS`] aimed at
-/// [`SETTABLE_PROPERTIES`], with scalar arguments.
+/// [`SETTABLE_PROPERTIES`], with scalar arguments. Subtitle style properties
+/// take only a plain set with a checked value: `add`, `multiply`, and
+/// `cycle` would step past the allowed range.
 pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
     let Some(name) = cmd.first().and_then(Value::as_str) else {
         return Err(CoreError::invalid(
@@ -495,6 +630,23 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
             .and_then(Value::as_str)
             .unwrap_or("");
         validate_property(prop)?;
+        if STYLE_PROPERTIES.contains(&prop.trim()) {
+            if !SET_COMMANDS.contains(&name) {
+                return Err(CoreError::invalid(format!(
+                    "mpv property {:?} can only be set to a value, not changed with {name:?}",
+                    prop.trim()
+                )));
+            }
+            match cmd {
+                [_, _, value] => validate_property_value(prop, value)?,
+                _ => {
+                    return Err(CoreError::invalid(format!(
+                        "mpv command {name:?} needs exactly one value for {:?}",
+                        prop.trim()
+                    )))
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -637,8 +789,38 @@ async fn stop_recording(s: &Session) {
 pub async fn set_property(state: &Arc<AppState>, name: &str, value: Value) -> CoreResult<()> {
     ensure_platform()?;
     validate_property(name)?;
+    validate_property_value(name, &value)?;
     let s = current(&manager(state)).ok_or_else(not_attached)?;
     s.client.set_property(name.trim(), value).await
+}
+
+/// `mpv.addSubtitle`: loads an external subtitle file into the playing item
+/// and selects it. The path is checked before the session so a bad file is
+/// Invalid even when nothing is attached.
+pub async fn add_subtitle(state: &Arc<AppState>, path: &str) -> CoreResult<()> {
+    ensure_platform()?;
+    let path = validate_subtitle_path(path)?;
+    let s = current(&manager(state)).ok_or_else(not_attached)?;
+    if !s.client.state().loaded {
+        return Err(CoreError::Conflict(
+            "Nothing is playing in the embedded player, so there is nothing to add subtitles to."
+                .into(),
+        ));
+    }
+    // The file name becomes the track title shown in the subtitle menu.
+    let title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    s.client
+        .command(vec![
+            json!("sub-add"),
+            json!(path.display().to_string()),
+            json!("select"),
+            json!(title),
+        ])
+        .await
+        .map(|_| ())
 }
 
 /// How long `mpv.stats` waits for all of its property reads.

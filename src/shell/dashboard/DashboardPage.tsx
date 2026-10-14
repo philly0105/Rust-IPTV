@@ -16,6 +16,7 @@ import {
   type TmdbBrief,
   type VodItem,
 } from '@/api/types';
+import { CustomListRails } from '@/features/lists/rails';
 import { MyListRail } from '@/features/mylist/components/MyListRail';
 import { useMyList } from '@/features/mylist/hooks/useMyList';
 import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
@@ -378,6 +379,8 @@ function DashboardBody() {
 
       {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
       {visible('myList') && <MyListRail hideError={showSharedError} />}
+      {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
+      <CustomListRails />
 
       {visible('liveFavorites') && (
         <DashboardRail<FavoriteEntry>

@@ -425,6 +425,7 @@ mod tests {
             ended_at: Some(1_800_003_000),
             engine: Some("mpv".into()),
             created_at: 1,
+            rule_id: None,
         }
     }
 

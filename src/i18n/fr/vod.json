@@ -193,5 +193,17 @@
   "previousEpisode": "Épisode précédent",
   "posterInMyList": "Dans Ma liste",
   "shortcutMyList": "Enregistrer le titre sous le curseur dans Ma liste ou l'en retirer",
-  "shortcutPosterMenu": "Ouvrir le menu du titre sous le curseur"
+  "shortcutPosterMenu": "Ouvrir le menu du titre sous le curseur",
+  "yearAll": "Toutes les années",
+  "decade": "Années {{decade}}",
+  "yearFrom": "Depuis",
+  "yearTo": "Jusqu'à",
+  "yearEmptyTitle": "Aucun titre de ces années",
+  "hideWatched": "Masquer les titres vus",
+  "watchedEmptyTitle": "Vous avez tout vu ici",
+  "showWatched": "Afficher les titres vus",
+  "markSeriesWatched": "Marquer la série comme vue",
+  "markSeriesUnwatched": "Marquer la série comme non vue",
+  "shortcutWatched": "Marquer comme vu ou non vu",
+  "shortcutHideWatched": "Masquer ou afficher les titres vus"
 }

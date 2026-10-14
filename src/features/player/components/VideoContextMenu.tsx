@@ -10,12 +10,13 @@ import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { MenuChoice, MenuRow, MenuToggle } from './Controls';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
+import { SubtitleStyleMenu, SubtitleTrackMenu } from './SubtitleMenu';
 import { SyncRows, useSyncSummary } from './SyncMenu';
 
 /** Gap kept between the menu and the window edges, in CSS px. */
 const EDGE = 8;
 
-type View = 'root' | 'audio' | 'text' | 'sync' | 'sleep';
+type View = 'root' | 'audio' | 'text' | 'style' | 'sync' | 'sleep';
 
 function MenuAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick(): void }) {
   return (
@@ -116,11 +117,19 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   const back = (
     <button
       type="button"
-      onClick={() => setView('root')}
+      onClick={() => setView(view === 'style' ? 'text' : 'root')}
       className="mb-1 flex w-full items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
     >
       <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
-      {view === 'audio' ? t('audioTrack') : view === 'sync' ? t('sync') : view === 'sleep' ? t('sleepTimer') : t('subtitles')}
+      {view === 'audio'
+        ? t('audioTrack')
+        : view === 'sync'
+          ? t('sync')
+          : view === 'sleep'
+            ? t('sleepTimer')
+            : view === 'style'
+              ? t('subtitleStyle.menuTitle')
+              : t('subtitles')}
     </button>
   );
   const icon = 'size-4 shrink-0';
@@ -139,12 +148,12 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
       onKeyDown={(e) => {
         if (e.key === 'ArrowLeft' && view !== 'root') {
           e.preventDefault();
-          setView('root');
+          setView(view === 'style' ? 'text' : 'root');
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           e.stopPropagation();
-          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []);
+          const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input[type="range"]:not(:disabled)') ?? []);
           const i = items.indexOf(document.activeElement as HTMLElement);
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
@@ -179,9 +188,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
               onClick={() => setView('audio')}
             />
           )}
-          {tracks.text.length > 0 && (
-            <MenuRow label={t('subtitles')} value={tracks.text.find((a) => a.selected)?.label ?? t('off')} onClick={() => setView('text')} />
-          )}
+          {/* Always there (C6): a file can be loaded into a stream without subtitles. */}
+          <MenuRow label={t('subtitles')} value={tracks.text.find((a) => a.selected)?.label ?? t('off')} onClick={() => setView('text')} />
           <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
           {/* Sleep timer (C5), as in the options menu. */}
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
@@ -214,10 +222,13 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
       {view === 'text' && (
         <>
           {back}
-          <MenuChoice label={t('off')} selected={!tracks.text.some((x) => x.selected)} onClick={() => pick(() => commands?.setText(null))} />
-          {tracks.text.map((a) => (
-            <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => pick(() => commands?.setText(a.id))} />
-          ))}
+          <SubtitleTrackMenu onDone={onClose} onStyle={() => setView('style')} />
+        </>
+      )}
+      {view === 'style' && (
+        <>
+          {back}
+          <SubtitleStyleMenu />
         </>
       )}
     </div>

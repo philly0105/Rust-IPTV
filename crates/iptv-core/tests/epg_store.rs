@@ -171,6 +171,8 @@ async fn registers_exactly_the_c4_commands() {
         "epg.resolve",
         "epg.setEnabled",
         "epg.clearAll",
+        // Run 2 C5.
+        "epg.search",
     ];
     expected.sort_unstable();
     assert_eq!(e.router.names(), expected);

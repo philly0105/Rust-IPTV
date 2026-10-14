@@ -133,6 +133,22 @@ impl RpcRouter {
     }
 }
 
+/// Registers each name as a placeholder that answers `unsupported`
+/// ("`<name>` is not implemented yet") for any args. Wave 0 of a run uses it
+/// so every new command is in the router (and in the `RPC_COMMANDS` parity
+/// test) before its module lands. A builder replaces a stub by dropping the
+/// name from the list and registering the real handler with [`RpcRouter::add`]
+/// (registering both panics, like any duplicate name).
+pub fn add_stubs(r: &mut RpcRouter, names: &[&'static str]) {
+    for &name in names {
+        r.add(name, move |_state, _args: serde_json::Value| async move {
+            Err::<(), _>(RpcError::unsupported(format!(
+                "{name} is not implemented yet"
+            )))
+        });
+    }
+}
+
 /// Builds the full router: every C4 command of every module.
 pub fn build_router() -> RpcRouter {
     let mut r = RpcRouter::new();
@@ -162,6 +178,12 @@ pub fn build_router() -> RpcRouter {
     crate::parental::rpc::register(&mut r);
     // watchlist:
     crate::watchlist::rpc::register(&mut r);
+    // channeledit: hide and rename channels (Run 2 C2).
+    crate::channeledit::rpc::register(&mut r);
+    // lists: custom channel lists (Run 2 C3).
+    crate::lists::rpc::register(&mut r);
+    // stats: watch statistics (Run 2 C7).
+    crate::stats::rpc::register(&mut r);
     r
 }
 
@@ -190,6 +212,11 @@ pub async fn init_all(state: Arc<AppState>) -> CoreResult<()> {
     run_init("parental", crate::parental::init(state.clone())).await;
     // watchlist:
     run_init("watchlist", crate::watchlist::init(state.clone())).await;
+    // lists: nothing runs in the background; `sources::remove` calls
+    // `lists::forget_source`, which emits `lists.changed` after the cascade.
+    run_init("lists", crate::lists::init(state.clone())).await;
+    // stats: prunes watch log rows older than 90 days.
+    run_init("stats", crate::stats::init(state.clone())).await;
     run_init("player", crate::player::init(state)).await;
     tracing::info!("module init complete");
     Ok(())
@@ -307,7 +334,7 @@ mod tests {
             .collect();
 
         // Every module's own command list is registered.
-        let module_lists: [&[&str]; 8] = [
+        let module_lists: [&[&str]; 11] = [
             crate::downloads::rpc::COMMANDS,
             crate::player::rpc::COMMANDS,
             &crate::remote::rpc::COMMANDS,
@@ -318,6 +345,10 @@ mod tests {
             crate::parental::rpc::COMMANDS,
             // watchlist:
             crate::watchlist::rpc::COMMANDS,
+            // channeledit, lists, stats (Run 2):
+            crate::channeledit::rpc::COMMANDS,
+            crate::lists::rpc::COMMANDS,
+            crate::stats::rpc::COMMANDS,
         ];
         for list in module_lists {
             for c in list {
@@ -359,6 +390,55 @@ mod tests {
             );
         }
         crate::player::kill_embedded(&s);
+    }
+
+    #[tokio::test]
+    async fn stubs_answer_unsupported_for_any_args() {
+        let (_tmp, s) = state().await;
+        let mut r = RpcRouter::new();
+        add_stubs(&mut r, &["test.later", "test.alsoLater"]);
+        assert_eq!(r.names(), ["test.alsoLater", "test.later"]);
+        for args in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"id": 5, "refs": []}),
+            serde_json::json!([1, 2]),
+        ] {
+            let e = r.dispatch(s.clone(), "test.later", args).await.unwrap_err();
+            assert_eq!(e.code, RpcErrorCode::Unsupported);
+            assert_eq!(e.message, "test.later is not implemented yet");
+        }
+    }
+
+    /// Every Run 2 command is in the router from wave 0 on (as a stub until
+    /// its module lands).
+    #[test]
+    fn run2_commands_are_registered() {
+        let r = build_router();
+        for c in [
+            "catalog.yearFacets",
+            "positions.watchedContains",
+            "epg.search",
+            "recordings.rules",
+            "recordings.addRule",
+            "recordings.setRuleEnabled",
+            "recordings.removeRule",
+            "mpv.addSubtitle",
+        ]
+        .iter()
+        .chain(crate::channeledit::rpc::COMMANDS)
+        .chain(crate::lists::rpc::COMMANDS)
+        .chain(crate::stats::rpc::COMMANDS)
+        {
+            assert!(r.contains(c), "{c} is not registered");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "registered twice")]
+    fn add_stubs_rejects_a_registered_name() {
+        let mut r = build_router();
+        add_stubs(&mut r, &["app.ping"]);
     }
 
     #[test]

@@ -7,8 +7,9 @@
 //!   their counts, neighbors, the zap list). One non-correlated
 //!   `i.rowid NOT IN (...)` set built once per statement, and skipped when
 //!   that source and type have nothing locked or adult.
-//! - [`item_set`]: any source, many rows (search). Row-value `NOT IN` lists
-//!   over every lock and adult category, built once per statement.
+//! - [`item_set`]: any source, many rows (search). One `i.rowid NOT IN`
+//!   set over the items of every item lock, locked category and adult
+//!   category, built once per statement.
 //! - [`item_row`] / [`by_ref`]: few rows (recently added, same title,
 //!   channel by number, favorites, history, continue watching). Correlated
 //!   primary-key probes per row.
@@ -89,31 +90,32 @@ pub fn scoped(
 /// Clauses for rows of `items i` from any source, for statements that look
 /// at many rows.
 pub fn item_set(conn: &Connection, hide: Hide) -> CoreResult<String> {
-    let locks = any_lock(conn)?;
-    let mut sql = String::new();
-    if locks {
-        sql.push_str(
-            " AND (i.source_id, i.content_type, i.item_id) NOT IN (SELECT source_id, content_type, target_id FROM parental_locks WHERE kind = 'item')",
+    // One rowid set, built once per statement, as in `scoped`: a row-value
+    // `(source_id, content_type, item_id) NOT IN (...)` is rescanned per
+    // row, about 20x slower on a wide search (see `channeledit`). Each part
+    // keeps the few locks or adult categories as the outer loop (CROSS
+    // JOIN) and finds their items by primary key or `idx_items_cat`.
+    let mut hidden = Vec::new();
+    if any_lock(conn)? {
+        hidden.push(
+            "SELECT h.rowid FROM parental_locks pl CROSS JOIN items h ON h.source_id = pl.source_id AND h.content_type = pl.content_type AND h.item_id = pl.target_id WHERE pl.kind = 'item'",
         );
-    }
-    let mut blocked = Vec::new();
-    if locks {
-        blocked.push(
-            "SELECT source_id, content_type, target_id FROM parental_locks WHERE kind = 'category'",
+        hidden.push(
+            "SELECT h.rowid FROM parental_locks pl CROSS JOIN items h ON h.source_id = pl.source_id AND h.content_type = pl.content_type AND h.category_id = pl.target_id WHERE pl.kind = 'category'",
         );
     }
     if hide.auto_adult {
-        blocked.push(
-            "SELECT source_id, content_type, category_id FROM categories WHERE adult_category(name)",
+        hidden.push(
+            "SELECT h.rowid FROM categories ac CROSS JOIN items h ON h.source_id = ac.source_id AND h.content_type = ac.content_type AND h.category_id = ac.category_id WHERE adult_category(ac.name)",
         );
     }
-    if !blocked.is_empty() {
-        sql.push_str(&format!(
-            " AND (i.source_id, i.content_type, i.category_id) NOT IN ({})",
-            blocked.join(" UNION ALL ")
-        ));
+    if hidden.is_empty() {
+        return Ok(String::new());
     }
-    Ok(sql)
+    Ok(format!(
+        " AND i.rowid NOT IN ({})",
+        hidden.join(" UNION ALL ")
+    ))
 }
 
 /// Clauses for rows of `items i` joined to `categories c` (as in

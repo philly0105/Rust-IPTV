@@ -3,6 +3,7 @@ import {
   AlarmClock,
   Bookmark,
   CalendarRange,
+  ChartColumn,
   ChevronDown,
   Download,
   HardDrive,
@@ -11,6 +12,7 @@ import {
   House,
   Keyboard,
   LayoutGrid,
+  ListOrdered,
   ListVideo,
   PanelLeftClose,
   PanelLeftOpen,
@@ -48,11 +50,14 @@ const PRIMARY: PrimaryLink[] = [
   { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
   { to: '/my-list', labelKey: 'navMyList', icon: Bookmark },
+  // Run 2: custom channel lists and watch stats reuse their pages' titles.
+  { to: '/lists', labelKey: 'lists:title', icon: ListOrdered },
   { to: '/recent', labelKey: 'navRecent', icon: History },
   { to: '/downloads', labelKey: 'navDownloads', icon: Download },
   { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive },
   // recording:
   { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock },
+  { to: '/stats', labelKey: 'stats:title', icon: ChartColumn },
 ];
 
 const KIND_LABEL: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'XC', stalker: 'STB' };

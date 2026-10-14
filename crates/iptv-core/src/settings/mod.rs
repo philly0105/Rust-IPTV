@@ -61,6 +61,10 @@ pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f64> = 0.9..=1.25;
 /// floating-point noise from slider arithmetic (`0.8999999999999999`,
 /// `1.2500000000000002`) neither fails the range check nor gets stored.
 const UI_SCALE_DECIMALS: i32 = 4;
+// subtitles:
+/// Accepted `subtitlePosition` range: percent of the picture height subtitles
+/// are raised from the bottom (mpv `sub-pos = 100 - position`).
+pub const SUBTITLE_POSITION_RANGE: std::ops::RangeInclusive<u32> = 0..=40;
 
 /// Fields only the desktop app may change: they name executables, their
 /// arguments, and folders on the machine running the core. In server (PWA)
@@ -411,6 +415,14 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
             UI_SCALE_RANGE.end()
         )));
     }
+    // subtitles:
+    if !SUBTITLE_POSITION_RANGE.contains(&next.subtitle_position) {
+        return Err(CoreError::invalid(format!(
+            "subtitlePosition must be a whole number between {} and {}",
+            SUBTITLE_POSITION_RANGE.start(),
+            SUBTITLE_POSITION_RANGE.end()
+        )));
+    }
     let changed = |a: &Option<String>, b: &Option<String>| a != b;
     if changed(&current.mpv_path, &next.mpv_path) {
         check_file("mpvPath", next.mpv_path.as_deref())?;
@@ -655,6 +667,88 @@ mod tests {
             f64::MAX,
             "overflow keeps the value"
         );
+    }
+
+    /// Run 2 C1: subtitle style enums, the 0..=40 position and Hide watched.
+    #[test]
+    fn subtitle_and_vod_fields_validate() {
+        use crate::model::{SubtitleBackground, SubtitleColor, SubtitleSize};
+        let cur = Settings::default();
+        let n = apply_patch(
+            &cur,
+            &json!({
+                "subtitleSize": "large",
+                "subtitleColor": "cyan",
+                "subtitleBackground": "shadow",
+                "subtitlePosition": 40,
+                "vodHideWatched": true
+            }),
+        )
+        .unwrap();
+        assert_eq!(n.subtitle_size, SubtitleSize::Large);
+        assert_eq!(n.subtitle_color, SubtitleColor::Cyan);
+        assert_eq!(n.subtitle_background, SubtitleBackground::Shadow);
+        assert_eq!(n.subtitle_position, 40);
+        assert!(n.vod_hide_watched);
+        for size in SubtitleSize::ALL {
+            let n = apply_patch(&cur, &json!({ "subtitleSize": size.as_str() })).unwrap();
+            assert_eq!(n.subtitle_size, *size);
+        }
+        for color in SubtitleColor::ALL {
+            let n = apply_patch(&cur, &json!({ "subtitleColor": color.as_str() })).unwrap();
+            assert_eq!(n.subtitle_color, *color);
+        }
+        for bg in SubtitleBackground::ALL {
+            let n = apply_patch(&cur, &json!({ "subtitleBackground": bg.as_str() })).unwrap();
+            assert_eq!(n.subtitle_background, *bg);
+        }
+        assert_eq!(
+            apply_patch(&cur, &json!({"subtitlePosition": 0}))
+                .unwrap()
+                .subtitle_position,
+            0
+        );
+        let err = apply_patch(&cur, &json!({"subtitlePosition": 41})).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("subtitlePosition must be a whole number between 0 and 40"),
+            "{err}"
+        );
+        for bad in [
+            json!({"subtitlePosition": -1}),
+            json!({"subtitlePosition": 12.5}),
+            json!({"subtitlePosition": "10"}),
+            json!({"subtitleSize": "huge"}),
+            json!({"subtitleSize": "x-large"}),
+            json!({"subtitleColor": "red"}),
+            json!({"subtitleColor": "#FFFFFF"}),
+            json!({"subtitleBackground": "none"}),
+            json!({"vodHideWatched": "yes"}),
+        ] {
+            assert!(apply_patch(&cur, &bad).is_err(), "{bad} should be invalid");
+        }
+        // Removing a key falls back to its default.
+        let back =
+            apply_patch(&n, &json!({"subtitleSize": null, "subtitlePosition": null})).unwrap();
+        assert_eq!(back.subtitle_size, SubtitleSize::Medium);
+        assert_eq!(back.subtitle_position, 0);
+        assert_eq!(back.subtitle_color, SubtitleColor::Cyan, "others are kept");
+        // A Rust caller of `save` is caught by `validate` too.
+        let next = normalize(Settings {
+            subtitle_position: 41,
+            ..Settings::default()
+        });
+        assert!(validate(&cur, next).is_err());
+        // None of the five is desktop-only.
+        for key in [
+            "subtitleSize",
+            "subtitleColor",
+            "subtitleBackground",
+            "subtitlePosition",
+            "vodHideWatched",
+        ] {
+            assert!(!DESKTOP_ONLY_FIELDS.contains(&key), "{key}");
+        }
     }
 
     #[test]

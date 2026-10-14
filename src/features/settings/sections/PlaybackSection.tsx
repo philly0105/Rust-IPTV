@@ -1,8 +1,11 @@
 import { clsx } from 'clsx';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
 import type { Settings, StreamFormat, VideoPlayer } from '@/api/types';
+import { BackgroundChoice, ColorChoice, PositionSlider, SizeChoice, SubtitlePreview } from '@/features/player/components/SubtitleStyleFields';
+import { styleFromSettings } from '@/features/player/subtitles/style';
 
 import { Button, Skeleton } from '@/ui';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
@@ -25,6 +28,61 @@ const TOGGLES: { key: BoolKey; label: string; hint: string }[] = [
   { key: 'showCaptions', label: 'showCaptions', hint: 'showCaptionsHint' },
   { key: 'openStreamOnDoubleClick', label: 'doubleClick', hint: 'doubleClickHint' },
 ];
+
+/** The subtitle look for both players (C6), with a preview that follows every change at once. */
+function SubtitleGroup({ settings, update }: SectionProps) {
+  const { t } = useTranslation('player');
+  // The slider's position while it moves; saved when the drag or key press ends.
+  const [draftPosition, setDraftPosition] = useState<number | null>(null);
+  const saved = styleFromSettings(settings);
+  const style = draftPosition === null ? saved : { ...saved, position: draftPosition };
+  return (
+    <SettingsGroup title={t('subtitleStyle.title')} description={t('subtitleStyle.description')}>
+      <div className="px-4 pt-4 pb-1" data-testid="settings-subtitles">
+        <div className="mx-auto w-full max-w-xl">
+          <SubtitlePreview style={style} />
+        </div>
+      </div>
+      <SettingsRow label={t('subtitleStyle.size')} description={t('subtitleStyle.sizeHint')}>
+        {({ id, describedBy }) => (
+          <SizeChoice tone="page" id={id} describedBy={describedBy} value={style.size} onChange={(subtitleSize) => void update({ subtitleSize })} />
+        )}
+      </SettingsRow>
+      <SettingsRow label={t('subtitleStyle.color')} description={t('subtitleStyle.colorHint')}>
+        {({ id, describedBy }) => (
+          <ColorChoice tone="page" id={id} describedBy={describedBy} value={style.color} onChange={(subtitleColor) => void update({ subtitleColor })} />
+        )}
+      </SettingsRow>
+      <SettingsRow label={t('subtitleStyle.background')} description={t('subtitleStyle.backgroundHint')}>
+        {({ id, describedBy }) => (
+          <BackgroundChoice
+            tone="page"
+            id={id}
+            describedBy={describedBy}
+            value={style.background}
+            color={style.color}
+            onChange={(subtitleBackground) => void update({ subtitleBackground })}
+          />
+        )}
+      </SettingsRow>
+      <SettingsRow label={t('subtitleStyle.position')} description={t('subtitleStyle.positionHint')}>
+        {({ id, describedBy }) => (
+          <PositionSlider
+            tone="page"
+            id={id}
+            describedBy={describedBy}
+            value={saved.position}
+            onPreview={setDraftPosition}
+            onCommit={(subtitlePosition) => {
+              setDraftPosition(null);
+              if (subtitlePosition !== saved.position) void update({ subtitlePosition });
+            }}
+          />
+        )}
+      </SettingsRow>
+    </SettingsGroup>
+  );
+}
 
 export function PlaybackSection({ settings, update }: SectionProps) {
   const { t } = useTranslation('settings');
@@ -133,6 +191,8 @@ export function PlaybackSection({ settings, update }: SectionProps) {
           />
         ))}
       </SettingsGroup>
+
+      <SubtitleGroup settings={settings} update={update} />
     </SettingsSection>
   );
 }

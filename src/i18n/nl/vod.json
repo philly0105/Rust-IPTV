@@ -184,5 +184,17 @@
   "previousEpisode": "Vorige aflevering",
   "posterInMyList": "In Mijn lijst",
   "shortcutMyList": "Titel onder de cursor opslaan in Mijn lijst of eruit halen",
-  "shortcutPosterMenu": "Menu openen voor de titel onder de cursor"
+  "shortcutPosterMenu": "Menu openen voor de titel onder de cursor",
+  "yearAll": "Alle jaren",
+  "decade": "Jaren {{decade}}",
+  "yearFrom": "Van",
+  "yearTo": "Tot",
+  "yearEmptyTitle": "Geen titels uit deze jaren",
+  "hideWatched": "Bekeken verbergen",
+  "watchedEmptyTitle": "Alles hier is bekeken",
+  "showWatched": "Bekeken tonen",
+  "markSeriesWatched": "Serie markeren als bekeken",
+  "markSeriesUnwatched": "Serie markeren als niet bekeken",
+  "shortcutWatched": "Markeren als bekeken of niet bekeken",
+  "shortcutHideWatched": "Bekeken titels verbergen of tonen"
 }

@@ -17,6 +17,7 @@ import {
   worthSniffingAsMpegTs,
   type Engine,
   type EngineError,
+  type EngineTracks,
 } from '../engines';
 import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
@@ -32,6 +33,7 @@ import {
   setController,
   usePlayerStore,
 } from '../store';
+import { clearExternal, selectText, setInlineSubtitleTarget, withExternal } from '../subtitles/tracks';
 import { usePlayerSettings } from '../useSettings';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 
@@ -71,6 +73,13 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
   const sniffedRef = useRef<string | null>(null);
   const key = mediaKey(source);
   const captionsDefault = settings?.showCaptions ?? false;
+  /** The engine's own tracks; the store gets them with any loaded subtitle files added (C6). */
+  const engineTracks = useRef<EngineTracks>(EMPTY_TRACKS);
+  const publishTracks = useCallback((tracks?: EngineTracks) => {
+    if (tracks) engineTracks.current = tracks;
+    const el = elRef.current;
+    useMediaStore.setState({ tracks: el ? withExternal(el, engineTracks.current) : engineTracks.current });
+  }, []);
 
   /**
    * Fatal error: report it. Smart reconnect and failover (`reconnect.ts`) take it from there and
@@ -93,7 +102,8 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     if (!el || !src || !src.url) return;
     let disposed = false;
     const abort = new AbortController();
-    useMediaStore.setState({ tracks: EMPTY_TRACKS, buffered: [], seekable: undefined, waiting: true });
+    useMediaStore.setState({ buffered: [], seekable: undefined, waiting: true });
+    publishTracks(EMPTY_TRACKS);
     const loadUrl = proxiedUrl(src);
 
     const onFatal = (err: EngineError): void => {
@@ -106,7 +116,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       loadUrl,
       {
         onTracks: (tracks) => {
-          if (!disposed) useMediaStore.setState({ tracks });
+          if (!disposed) publishTracks(tracks);
         },
         onError: onFatal,
       },
@@ -148,6 +158,14 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     // The engine is rebuilt only when the media itself changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, retryNonce]);
+
+  // Subtitle files belong to one item: a new one empties and hides them (C6).
+  useEffect(() => {
+    const el = elRef.current;
+    return () => {
+      if (el) clearExternal(el);
+    };
+  }, [key]);
 
   // Media element -> store.
   useEffect(() => {
@@ -244,8 +262,10 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     const unCommands = setMediaCommands({
       setQuality: (id) => engineRef.current?.setQuality(id),
       setAudio: (id) => engineRef.current?.setAudio(id),
+      // Engine tracks and loaded subtitle files (`ext:<n>`) alike.
       setText: (id) => {
-        engineRef.current?.setText(id);
+        selectText(el, engineRef.current, id);
+        publishTracks();
         useMediaStore.setState({ captionsOn: id !== null });
       },
       setRate: (r) => {
@@ -260,6 +280,18 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     });
     // Subtitle delay (Sync menu) and the stream info overlay.
     const unExtras = bindInlineExtras(el, () => engineRef.current);
+    // Subtitle files load into this element; cue placement follows the settings (C6). Video only.
+    let unTarget: () => void = () => undefined;
+    let unCues: () => void = () => undefined;
+    let unmounted = false;
+    if (as === 'video') {
+      unTarget = setInlineSubtitleTarget({ el, engine: () => engineRef.current, publish: () => publishTracks() });
+      void import('../subtitles/inline')
+        .then((m) => {
+          if (!unmounted) unCues = m.bindCuePosition(el);
+        })
+        .catch(() => undefined);
+    }
 
     return () => {
       el.removeEventListener('timeupdate', onTime);
@@ -277,6 +309,9 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       unController();
       unCommands();
       unExtras();
+      unmounted = true;
+      unCues();
+      unTarget();
       if (document.pictureInPictureElement === el) void document.exitPictureInPicture().catch(() => undefined);
     };
   }, [as]);

@@ -68,6 +68,16 @@ import type {
 import type { ParentalLock, ParentalLockTarget, ParentalMode, ParentalStatus } from './types';
 // watchlist:
 import type { WatchlistEntry } from './types';
+// Run 2: channel edits, custom lists, VOD browsing, guide search, stats.
+import type {
+  ChannelEdit,
+  CustomList,
+  CustomListEntry,
+  GuideSearchHit,
+  RecordingRule,
+  WatchStats,
+  YearFacet,
+} from './types';
 
 /** One command: payload and resolved value. */
 interface Cmd<A, R> {
@@ -274,6 +284,27 @@ export interface BackupImportResult {
 /** Value accepted in an mpv JSON IPC command array. */
 export type MpvArg = string | number | boolean;
 
+/** `catalog.movies` / `catalog.series` args. */
+export interface VodListArgs {
+  sourceId: string;
+  categoryId?: string;
+  query: PageQuery;
+  /** Only titles rated at least this (unrated drop out); `total` counts the filtered set. */
+  minRating?: number;
+  // vod: Run 2 C4.
+  /** 1900..2100; `yearFrom <= yearTo` else invalid. Titles without a year drop out when either bound is set. */
+  yearFrom?: number;
+  yearTo?: number;
+  /** Drops titles with an item-level watched row. `total` counts the filtered set. */
+  hideWatched?: boolean;
+}
+
+/** A ref with the title/logo snapshot stored next to it (`lists.create`, `lists.addItems`). */
+export interface RefWithSnapshot {
+  ref: ItemRef;
+  snapshot: ItemSnapshot;
+}
+
 // ---------------------------------------------------------------------------
 // The map
 // ---------------------------------------------------------------------------
@@ -325,8 +356,11 @@ export interface RpcMap {
     { sourceId: string; categoryId?: string; query: PageQuery; includeHidden?: boolean; radio?: boolean },
     Page<Channel>
   >;
-  'catalog.movies': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery; /** Only titles rated at least this (unrated drop out); `total` counts the filtered set. */ minRating?: number }, Page<VodItem>>;
-  'catalog.series': Cmd<{ sourceId: string; categoryId?: string; query: PageQuery; /** Only titles rated at least this (unrated drop out); `total` counts the filtered set. */ minRating?: number }, Page<SeriesItem>>;
+  'catalog.movies': Cmd<VodListArgs, Page<VodItem>>;
+  'catalog.series': Cmd<VodListArgs, Page<SeriesItem>>;
+  // vod: Run 2 C4.
+  /** Years present (count per year, newest first) for the decade chips. Hidden categories excluded. */
+  'catalog.yearFacets': Cmd<{ sourceId: string; contentType: 'movie' | 'series'; categoryId?: string }, YearFacet[]>;
   /** Shape by `ref.contentType`. */
   'catalog.item': Cmd<{ ref: ItemRef }, Channel | VodItem | SeriesItem>;
   'catalog.channelByNumber': Cmd<{ sourceId: string; number: number; contentType?: 'live' | 'radio' }, Channel | null>;
@@ -379,6 +413,9 @@ export interface RpcMap {
   /** Snapshot filled. */
   'positions.continueWatching': Cmd<{ limit: number }, PlaybackPosition[]>;
   'positions.remove': Cmd<{ ref: ItemRef; episodeId?: string; allEpisodes?: boolean }, void>;
+  // vod: Run 2 C4.
+  /** Refs among the input that are watched (item-level row, empty episode id, watched = 1). 1..500 refs else invalid. */
+  'positions.watchedContains': Cmd<{ refs: ItemRef[] }, ItemRef[]>;
   /** Watched: row kept with watched = true (position = duration when known). Unwatched: row cleared. */
   'userstate.setWatched': Cmd<{ ref: ItemRef; episodeId?: string; watched: boolean }, void>;
 
@@ -441,6 +478,14 @@ export interface RpcMap {
   'epg.setEnabled': Cmd<{ url: string; enabled: boolean }, void>;
   /** Deletes all programmes and guide channels (urls and mappings kept); emits epg.changed. */
   'epg.clearAll': Cmd<void, void>;
+  // guide: Run 2 C5.
+  /**
+   * query trimmed 2..100 chars else invalid. from default now, to default from+14 d; to > from and span <= 16 d else invalid.
+   * limit default 50, 1..200. Times are raw guide times like epg.programs (the UI applies the EPG offset).
+   * Hits map to this source's channels by manual mapping, items.epg_channel_id (case-insensitive) or exact normalised name
+   * (no similarity matching). Hidden and parental-hidden channels are excluded. Ordered by start, then channel number.
+   */
+  'epg.search': Cmd<{ sourceId: string; query: string; from?: string; to?: string; limit?: number }, GuideSearchHit[]>;
 
   // ---- downloads (B6) -----------------------------------------------------
   'downloads.list': Cmd<void, Download[]>;
@@ -504,6 +549,12 @@ export interface RpcMap {
   'mpv.record': Cmd<{ start: boolean }, { recording: boolean; path: string | null }>;
   // player: stream info overlay snapshot (desktop only; Unsupported in server mode).
   'mpv.stats': Cmd<void, import('./types').MpvStats>;
+  // subtitles: Run 2 C6.
+  /**
+   * Desktop only (else unsupported). No attached session -> conflict. Path absolute, existing file,
+   * extension srt/vtt/ass/ssa, <= 5 MB, else invalid. Runs `sub-add <path> select` on the IPC client.
+   */
+  'mpv.addSubtitle': Cmd<{ path: string }, void>;
   // failover: the same live channel on other sources, best first.
   'live.alternates': Cmd<{ ref: ItemRef }, LiveAlternates>;
 
@@ -546,6 +597,13 @@ export interface RpcMap {
   'recordings.reveal': Cmd<{ id: string }, void>;
   /** Moves the file to the Recycle Bin (deletes it on a server that is not Windows). */
   'recordings.delete': Cmd<{ id: string }, void>;
+  // Run 2 C5: series recording rules. Rule changes emit `recordings.update`.
+  'recordings.rules': Cmd<void, RecordingRule[]>;
+  /** Same capability/live-only checks as recordings.schedule (unsupported/invalid). Duplicate -> conflict. title 1..200. Max 100 rules -> invalid. */
+  'recordings.addRule': Cmd<{ ref: ItemRef; channelName: string; title: string }, RecordingRule>;
+  'recordings.setRuleEnabled': Cmd<{ id: string; enabled: boolean }, RecordingRule>;
+  /** Cancels the rule's still-scheduled recordings unless keepScheduled; running ones continue. */
+  'recordings.removeRule': Cmd<{ id: string; keepScheduled?: boolean }, void>;
 
   // parental: parental controls (contract C2). Every change emits `parental.changed`.
   'parental.status': Cmd<void, ParentalStatus>;
@@ -576,6 +634,55 @@ export interface RpcMap {
   'watchlist.remove': Cmd<{ ref: ItemRef }, void>;
   /** New order of My List. */
   'watchlist.reorder': Cmd<{ refs: ItemRef[] }, void>;
+
+  // channeledit: hide and rename channels (Run 2 C2). Every write emits `channels.changed` with `{ sourceId }`.
+  /** Edits of one source, newest first. hiddenOnly filters to hidden rows. */
+  'channels.edits': Cmd<{ sourceId: string; hiddenOnly?: boolean }, ChannelEdit[]>;
+  /**
+   * 1..500 refs else invalid; contentType not live/radio -> invalid. hidden:true with a ref missing from the
+   * catalog -> not_found (nothing written); hidden:false never answers not_found, so a channel the provider
+   * dropped can still be unhidden.
+   */
+  'channels.setHidden': Cmd<{ refs: ItemRef[]; hidden: boolean }, void>;
+  /** name trimmed 1..120 chars else invalid; null or '' resets to the provider name. Returns the row, or null when it was removed. */
+  'channels.rename': Cmd<{ ref: ItemRef; name: string | null }, ChannelEdit | null>;
+  /** Drops every edit of the source. */
+  'channels.reset': Cmd<{ sourceId: string }, void>;
+
+  // lists: custom channel lists (Run 2 C3). Every write emits `lists.changed` with `{}`.
+  /** By position. */
+  'lists.list': Cmd<void, CustomList[]>;
+  /** name empty/too long -> invalid; duplicate name (case-insensitive) -> conflict; 51st list -> invalid. */
+  'lists.create': Cmd<{ name: string; items?: RefWithSnapshot[] }, CustomList>;
+  /** Unknown id -> not_found. */
+  'lists.update': Cmd<{ id: string; name?: string; onDashboard?: boolean }, CustomList>;
+  'lists.remove': Cmd<{ id: string }, void>;
+  /** Must be a permutation of all list ids else invalid. */
+  'lists.reorder': Cmd<{ ids: string[] }, void>;
+  /** Hidden and parental-hidden channels are left out; renames applied. */
+  'lists.items': Cmd<{ id: string }, CustomListEntry[]>;
+  /** Non live/radio ref -> invalid; already present -> ignored; over 2000 -> invalid (nothing written). Appends at the end. */
+  'lists.addItems': Cmd<{ id: string; items: RefWithSnapshot[] }, { added: number }>;
+  'lists.removeItems': Cmd<{ id: string; refs: ItemRef[] }, void>;
+  /** Must be a permutation of the list's refs else invalid. */
+  'lists.reorderItems': Cmd<{ id: string; refs: ItemRef[] }, void>;
+  /** Ids of lists that hold the ref (menu check marks). */
+  'lists.containing': Cmd<{ ref: ItemRef }, string[]>;
+  /** Prev/next available, visible channel in list order; wraps like catalog.neighbors. */
+  'lists.neighbors': Cmd<{ id: string; ref: ItemRef }, { prev?: Channel; next?: Channel }>;
+
+  // stats: watch statistics (Run 2 C7). No event; `stats.clear` invalidates locally.
+  /**
+   * seconds integer 1..300 else invalid; day YYYY-MM-DD within 2 days of the core's UTC date else invalid;
+   * title trimmed 1..300; unknown source -> not_found. Adds seconds to the (day, ref) row and refreshes title/poster.
+   */
+  'stats.record': Cmd<{ ref: ItemRef; title: string; posterUrl?: string; seconds: number; day: string }, void>;
+  /**
+   * days must be 7 or 30 else invalid; `days` has exactly that many entries ending at `today`, zero-filled.
+   * topChannels = live+radio, topTitles = movie+series; top default 10, 1..50; ordered by seconds desc, then title.
+   */
+  'stats.summary': Cmd<{ days: 7 | 30; today: string; top?: number }, WatchStats>;
+  'stats.clear': Cmd<void, void>;
 }
 
 /** Every command name, for runtime checks and tests. Kept in sync with `RpcMap` by the type below. */
@@ -609,6 +716,7 @@ export const RPC_COMMANDS = [
   'catalog.recentlyAdded',
   'catalog.sameTitle',
   'catalog.allLiveChannels',
+  'catalog.yearFacets',
   'm3u.raw',
   'm3u.parsePreview',
   'favorites.list',
@@ -625,6 +733,7 @@ export const RPC_COMMANDS = [
   'positions.forSeries',
   'positions.continueWatching',
   'positions.remove',
+  'positions.watchedContains',
   'userstate.setWatched',
   'settings.get',
   'settings.update',
@@ -664,6 +773,7 @@ export const RPC_COMMANDS = [
   'epg.resolve',
   'epg.setEnabled',
   'epg.clearAll',
+  'epg.search',
   'downloads.list',
   'downloads.get',
   'downloads.start',
@@ -708,6 +818,7 @@ export const RPC_COMMANDS = [
   'mpv.state',
   'mpv.record',
   'mpv.stats',
+  'mpv.addSubtitle',
   'live.alternates',
   'account.status',
   'account.statusAll',
@@ -728,6 +839,10 @@ export const RPC_COMMANDS = [
   'recordings.playSource',
   'recordings.reveal',
   'recordings.delete',
+  'recordings.rules',
+  'recordings.addRule',
+  'recordings.setRuleEnabled',
+  'recordings.removeRule',
   'parental.status',
   'parental.setPin',
   'parental.disable',
@@ -743,6 +858,24 @@ export const RPC_COMMANDS = [
   'watchlist.contains',
   'watchlist.remove',
   'watchlist.reorder',
+  'channels.edits',
+  'channels.setHidden',
+  'channels.rename',
+  'channels.reset',
+  'lists.list',
+  'lists.create',
+  'lists.update',
+  'lists.remove',
+  'lists.reorder',
+  'lists.items',
+  'lists.addItems',
+  'lists.removeItems',
+  'lists.reorderItems',
+  'lists.containing',
+  'lists.neighbors',
+  'stats.record',
+  'stats.summary',
+  'stats.clear',
 ] as const satisfies readonly (keyof RpcMap)[];
 
 // Compile-time check that RPC_COMMANDS lists every RpcMap key.

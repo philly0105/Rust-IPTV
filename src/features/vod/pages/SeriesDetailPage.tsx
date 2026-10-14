@@ -226,6 +226,8 @@ export function SeriesDetailPage() {
   const trailer = youtubeKey(model.trailerKey ?? model.trailerUrl);
   const seasonEpisodeIds = episodes.map((e) => e.id);
   const seasonWatched = episodes.length > 0 && episodes.every((e) => isWatched(positions.get(e.id)));
+  // Watched as a whole: the item-level row (no episode id), as `positions.watchedContains` reads it.
+  const seriesWatched = positionList.some((p) => !p.episodeId && p.watched === true);
   const snapshot = { title: model.title, posterUrl: model.posterUrl, contentType: 'series' as const };
   // My List saves what a poster card saves (myListTarget): the base title, with the year as the subtitle.
   const listSnapshot = { ...snapshot, title: model.titleBase ?? model.title, ...(model.year ? { subtitle: String(model.year) } : {}) };
@@ -233,6 +235,13 @@ export function SeriesDetailPage() {
     <>
       <MyListButton itemRef={ref} snapshot={listSnapshot} size={watch.active ? 'sm' : 'lg'} />
       <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact={watch.active} />
+      {/* C4: the series as a whole, which ticks its poster; watched episodes never do. */}
+      <WatchedButton
+        itemRef={ref}
+        watched={seriesWatched}
+        compact={watch.active}
+        labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
+      />
       {/* C2: lock or remove the lock (only while parental controls are on). */}
       {lockItems.map((a) => (
         <Button key={a.id} size={watch.active ? 'sm' : 'lg'} variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>

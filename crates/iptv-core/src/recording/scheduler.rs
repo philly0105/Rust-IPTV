@@ -240,6 +240,7 @@ mod tests {
             ended_at: None,
             engine: None,
             created_at: T0 - 1000,
+            rule_id: None,
         }
     }
 

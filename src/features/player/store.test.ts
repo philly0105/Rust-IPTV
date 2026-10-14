@@ -556,6 +556,33 @@ describe('zap', () => {
     expect(usePlayerStore.getState().source?.title).toBe('UK | Gamma');
   });
 
+  it('walks lists.neighbors when the zap context names a list; digit entry keeps source numbering', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', categoryId: 'news', listId: 'list-7' } });
+    // The list's neighbour lives on another source: lists cross sources.
+    const other = channel(9, { ref: { sourceId: 's2', contentType: 'live', itemId: '555' } });
+    handlers['lists.neighbors'] = () => ({ prev: channel(0), next: other });
+    const played = await zap('down');
+    expect(calls('lists.neighbors')).toEqual([{ id: 'list-7', ref: channel(1).ref }]);
+    expect(calls('catalog.neighbors')).toHaveLength(0);
+    expect(played?.ref.itemId).toBe('555');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('555');
+
+    // Digit entry uses the playing channel's own source numbering, not the list order.
+    handlers['catalog.channelByNumber'] = () => channel(4);
+    await zapToNumber(4);
+    expect(calls('catalog.channelByNumber')).toEqual([{ sourceId: 's2', number: 4 }]);
+
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', listId: 'list-7' } });
+    await zap('up');
+    expect(calls('lists.neighbors')).toEqual([
+      { id: 'list-7', ref: channel(1).ref },
+      { id: 'list-7', ref: channel(4).ref },
+    ]);
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('100');
+    expect(calls('catalog.neighbors')).toHaveLength(0);
+  });
+
   it('zapToNumber resolves catalog.channelByNumber', async () => {
     await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
     handlers['catalog.channelByNumber'] = () => channel(42);

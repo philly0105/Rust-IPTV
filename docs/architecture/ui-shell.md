@@ -107,6 +107,7 @@ Wire them as:
 
 - hero: the first `positions.continueWatching` entry, with a Resume button
 - continue watching
+- My List (`settings.dashboardRails.myList`), then one rail per custom list with "Show on Home" on (`CustomListRails` from `src/features/lists/rails`, in list order; a list's own `onDashboard` flag decides, not `dashboardRails`; see lists.md)
 - favorite channels: live and radio favorites, with EPG now-playing from `epg.nowNext`
 - recently watched channels
 - favorite movies and series

@@ -69,3 +69,6 @@ export const SleepMenu = lazyPart(() => import('./SleepTimer').then((m) => m.Sle
 export const SleepRowValue = lazyPart(() => import('./SleepTimer').then((m) => m.SleepRowValue));
 export const SleepTimerHost = lazyPart(() => import('./SleepTimer').then((m) => m.SleepTimerHost));
 export const SleepPrompt = lazyPart(() => import('./SleepTimer').then((m) => m.SleepPrompt));
+/** The Subtitles submenu and its compact style view (C6). */
+export const SubtitleTrackMenu = lazyPart(() => import('./SubtitleMenu').then((m) => m.SubtitleTrackMenu));
+export const SubtitleStyleMenu = lazyPart(() => import('./SubtitleMenu').then((m) => m.SubtitleStyleMenu));

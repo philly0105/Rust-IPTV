@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RPC_ERROR_CODES, RpcError, isCancelledRun, isDesktop, proxiedUrl, rpc, sourceRunDetails } from './transport';
+import { RPC_ERROR_CODES, RpcError, isCancelledRun, isDesktop, proxiedUrl, rpc, rpcRaw, sourceRunDetails } from './transport';
 import type { PlayerSource } from './types';
 
 const base: PlayerSource = { url: 'http://cdn.example/a.m3u8', kind: 'hls', title: 't', isLive: true, isRadio: false };
@@ -57,6 +57,14 @@ describe('rpc (web)', () => {
     vi.stubGlobal('fetch', fetchMock);
     await expect(rpc('app.ping')).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith('/api/rpc/app.ping', expect.objectContaining({ method: 'POST', body: 'null' }));
+  });
+
+  it('sends with keepalive only when asked (a pagehide flush)', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('null', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await rpc('app.ping');
+    await rpcRaw('app.ping', undefined, { keepalive: true });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.keepalive)).toEqual([undefined, true]);
   });
 
   it('surfaces the server error body as RpcError without retrying', async () => {

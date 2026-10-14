@@ -4,7 +4,7 @@
  * reaches them.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { onAppEvent } from '@/api/events';
@@ -320,10 +320,22 @@ export function useSetWatched() {
       }
       await Promise.all(episodeIds.map((episodeId) => rpcRaw('userstate.setWatched', { ref, episodeId, watched })));
     },
-    onSettled: async () => {
-      await qc.invalidateQueries({
-        predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0].startsWith('positions.') || q.queryKey[0].startsWith('userstate.')),
-      });
+    onSettled: () => invalidateWatched(qc),
+  });
+}
+
+/**
+ * Refreshes what a watched mark changes: positions and user state, and the
+ * grid pages that "Hide watched" filters in the core (C4).
+ */
+export function invalidateWatched(qc: QueryClient): Promise<void> {
+  return qc.invalidateQueries({
+    predicate: (q) => {
+      const head = q.queryKey[0];
+      if (typeof head !== 'string') return false;
+      if (head.startsWith('positions.') || head.startsWith('userstate.')) return true;
+      const args = q.queryKey[1] as { hideWatched?: boolean } | null | undefined;
+      return (head === 'catalog.movies' || head === 'catalog.series') && args?.hideWatched === true;
     },
   });
 }

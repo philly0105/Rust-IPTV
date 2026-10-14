@@ -1,6 +1,6 @@
 # Guide reminders and scheduled recordings
 
-Code: `crates/iptv-core/src/recording/` (core), `src/features/recording/` (guide actions, reminder handling), `src/features/library/pages/ScheduledPage.tsx` and `src/features/library/components/RecordingsPanel.tsx` (Library pages), `src/features/settings/sections/RecordingSection.tsx` (settings). Tests: `crates/iptv-core/tests/recording.rs` (records real bytes from the mock), unit tests in `scheduler.rs`, `naming.rs`, `engine.rs`, `store.rs`, and Vitest in `src/features/recording/test/` and `src/features/library/test/recording.test.tsx`.
+Code: `crates/iptv-core/src/recording/` (core), `src/features/recording/` (guide actions, reminder handling), `src/features/library/pages/ScheduledPage.tsx` and `src/features/library/components/RecordingsPanel.tsx` (Library pages), `src/features/settings/sections/RecordingSection.tsx` (settings). Tests: `crates/iptv-core/tests/recording.rs` (records real bytes from the mock), `crates/iptv-core/tests/recording_rules.rs` (series rules on a manual clock), unit tests in `scheduler.rs`, `naming.rs`, `engine.rs`, `store.rs`, and Vitest in `src/features/recording/test/` and `src/features/library/test/recording.test.tsx`.
 
 ## Layout
 
@@ -10,7 +10,8 @@ Code: `crates/iptv-core/src/recording/` (core), `src/features/recording/` (guide
 | `scheduler.rs` | Pure decisions: `plan(now, reminders, recordings, settings)` returns fire / miss / start / stop / purge actions. "Now" comes from a `Clock` (`SystemClock`, or `ManualClock` in tests). Also `rematch`. |
 | `engine.rs` | Engine choice and the two engines: headless mpv (`--stream-record`) and a direct HTTP copy. |
 | `naming.rs` | `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`, Windows-sanitized, never overwriting; `(part N)` suffixes. |
-| `store.rs` | SQL for the `reminders` and `recordings` tables (migration `0010_recordings.sql`). |
+| `store.rs` | SQL for the `reminders` and `recordings` tables (migration `0010_recordings.sql`; `recordings.rule_id` from `0015_guide.sql`). |
+| `rules.rs` | Series recording rules: the `recording_rules` and `recording_rule_skips` tables (migration `0015_guide.sql`), their commands, materialisation into scheduled recordings, and the backup export and import. |
 | `library.rs` | My Videos > Recordings: rows plus loose files in the recordings folder, play, reveal, delete to the Recycle Bin (Windows; elsewhere the file is deleted). |
 | `rpc.rs` | `reminders.*` and `recordings.*` registration and `COMMANDS`. |
 
@@ -32,6 +33,10 @@ Code: `crates/iptv-core/src/recording/` (core), `src/features/recording/` (guide
 | `recordings.playSource` | `{id}` | `PlayerSource` |
 | `recordings.reveal` | `{id}` | null (desktop) |
 | `recordings.delete` | `{id}` | null (file to the Recycle Bin on Windows, deleted elsewhere; a missing file just drops the entry) |
+| `recordings.rules` | none | `RecordingRule[]`, oldest first |
+| `recordings.addRule` | `{ref, channelName, title}` | `RecordingRule`, with its airings already scheduled |
+| `recordings.setRuleEnabled` | `{id, enabled}` | `RecordingRule` |
+| `recordings.removeRule` | `{id, keepScheduled?}` | null |
 
 Events: `reminders.update {}`, `reminders.fire {reminder, action, firedAt}`, `recordings.update {}`, `recordings.progress {id, bytes, elapsedSeconds}` (every 2 s while writing).
 
@@ -64,6 +69,21 @@ All times on the wire are RFC 3339 in display time: the UI sends programme times
 - Removing a source deletes its reminders, cancels its scheduled recordings ("The source of this channel was removed.") and stops running ones. Finished rows and files stay.
 - Each `Recording` carries `errorCode` when its note is one of the core's own messages (`reconnecting`, `engineMissing`, `missedNotRunning`, `stoppedShutdown`, `closedEarly`, `closedNothing`, `nothingRecorded`, `stopped`, `sourceRemoved`, `streamDropped`); the UI shows `library:recError<Code>`. Network errors are shown as written.
 - Xtream `max_connections`: scheduling returns a warning (not an error) when the recordings on that source that overlap the new one (itself included) exceed the account's limit. Live playback is not counted.
+
+## Series rules
+
+A rule records every airing of one title on one channel: `RecordingRule {id, ref, channelName, title, enabled, createdAt, upcoming, nextStart?}`, where `upcoming` counts the rule's scheduled recordings and `nextStart` is the earliest of them.
+
+- The title is matched by its key: letters and digits, lowercased (`scheduler::title_key`, the same key re-matching uses). "The Daily Show", "THE DAILY SHOW!" and "the-daily-show" are one series. A second rule with the same channel and key is a `conflict`.
+- `addRule` has the same checks as `recordings.schedule`: `unsupported` without recording support (server without mpv), `invalid` for a non-live channel, `engine_missing` for an HLS or DASH stream with no mpv, `not_found` for an unknown source. The title is trimmed and must be 1 to 200 characters with at least one letter or digit. At most 100 rules; `channelName` falls back to the item id.
+- Materialisation turns rules into ordinary `scheduled` recordings with `ruleId` set. It runs on the re-match triggers below (after each guide refresh, at most every 5 minutes otherwise), after the re-match itself so a moved airing is followed rather than added twice, and right after `addRule` and `setRuleEnabled(true)`. It holds the loop's tick lock, so a tick in progress cannot add the same airing.
+- It looks 7 days ahead of the clock and takes the channel's guide programmes whose title key matches, in display time (guide time plus `epgOffsetMinutes`), starting after now. Padding comes from the settings at that moment and the recording keeps the guide's own title.
+- An airing is never created twice. A start already present in `recordings` for the channel (any status, so a cancelled, failed, missed or finished recording counts, as does a manual one) is left alone, and so is a start in `recording_rule_skips`.
+- Cancelling a rule's scheduled recording writes a skip row for its start, so removing the cancelled row from the list does not bring the airing back.
+- Each rule keeps at most 20 scheduled recordings; as they run or are cancelled, later airings take their place on the next pass.
+- `setRuleEnabled(false)` stops new airings and keeps the ones already scheduled.
+- `removeRule` deletes the rule and its skips and cancels its scheduled recordings; with `keepScheduled: true` they stay (they keep their `ruleId`). Running recordings go on either way. Removing a source deletes its rules.
+- Backup: `recording::export_rules` and `import_rules` carry `{contentType, itemId, channelName, title, enabled, createdAt}` per source. Import skips non-live rules, blank titles or items, duplicates and anything past 100 rules; imported rules are scheduled on the next re-match pass.
 
 ## Re-matching after a guide refresh
 

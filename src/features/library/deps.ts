@@ -38,5 +38,7 @@ export {
   useRecordings,
   useReminders,
   useScheduleActions,
+  // Run 2 C5: series recording rules, listed on the Scheduled page.
+  RecordingRulesPanel,
   type UpcomingEntry,
 } from '@/features/recording';

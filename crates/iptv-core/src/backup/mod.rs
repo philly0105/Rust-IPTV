@@ -61,13 +61,26 @@ pub const EXT_PARENTAL_LOCKS: &str = "tsrustParentalLocks";
 /// Tsrust extension in an entry's `userState`: the source's My List rows
 /// (`[WatchlistBackupEntry]`, contract C3).
 pub const EXT_WATCHLIST: &str = "tsrustWatchlist";
+/// Tsrust extension in an entry's `userState`: hidden and renamed channels
+/// of the source (`[ChannelEditBackup]`, Run 2 contract C2).
+pub const EXT_CHANNEL_EDITS: &str = "tsrustChannelEdits";
+/// Tsrust extension in an entry's `userState`: series recording rules of
+/// the source (`[RecordingRuleBackup]`, Run 2 contract C5).
+pub const EXT_RECORDING_RULES: &str = "tsrustRecordingRules";
+/// Tsrust extension in an entry's `userState`: the source's daily watch log
+/// (`[WatchLogBackup]`, Run 2 contract C7).
+pub const EXT_WATCH_LOG: &str = "tsrustWatchLog";
+/// Tsrust extension at the manifest's top level, next to `playlists`: custom
+/// channel lists (`[CustomListBackup]`, Run 2 contract C3). Lists mix
+/// sources, so each item names its source by the entry's `exportedId`.
+pub const EXT_CUSTOM_LISTS: &str = "tsrustCustomLists";
 /// Tsrust extension in the manifest's `settings`: parental options
 /// (`{mode, autoAdult, unlockMinutes}`). Never the PIN, its hash or salt.
 pub const EXT_PARENTAL_SETTINGS: &str = "tsrustParental";
 /// App-level settings carried in the manifest's `settings` object next to
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
 /// specific values (player paths, folders) are deliberately not exported.
-pub const APP_SETTING_KEYS: [&str; 19] = [
+pub const APP_SETTING_KEYS: [&str; 24] = [
     "stripCountryPrefix",
     "epgOffsetMinutes",
     "playerReuseInstance",
@@ -91,6 +104,13 @@ pub const APP_SETTING_KEYS: [&str; 19] = [
     "density",
     "uiScale",
     "zapBanner",
+    // subtitles:
+    "subtitleSize",
+    "subtitleColor",
+    "subtitleBackground",
+    "subtitlePosition",
+    // vod:
+    "vodHideWatched",
 ];
 
 /// `backup.import` mode.

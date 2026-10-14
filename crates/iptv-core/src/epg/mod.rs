@@ -14,12 +14,15 @@ pub mod ingest;
 pub mod query;
 pub mod resolve;
 pub mod rpc;
+// guide: programme search over an FTS5 index (Run 2 C5).
+pub mod search;
 pub mod store;
 pub mod xmltv;
 
 pub use ingest::{refresh_now, runtime, spawn_refresh, EpgRuntime, IngestStats};
 pub use query::ChannelMatch;
 pub use resolve::{Resolution, Via};
+pub use search::{GuideSearchHit, SearchRequest};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{EpgNowNext, EpgProgram, EpgSourceStatus, ItemRef};
@@ -37,8 +40,13 @@ pub const SEARCH_MAX_LIMIT: usize = 500;
 /// Starts the EPG runtime: cleans leftovers of an interrupted import, then
 /// refreshes never-fetched or stale (> 12 h) enabled urls 10 s after boot and
 /// keeps checking every 30 s (newly added urls, failed urls after 30 min).
+///
+/// A guide search index missing at startup (a database upgraded to
+/// migration 0015) is built in the background ([`search`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
-    ingest::start(state, ingest::BOOT_DELAY).await
+    ingest::start(state.clone(), ingest::BOOT_DELAY).await?;
+    search::spawn_startup_build(&state);
+    Ok(())
 }
 
 /// `epg.sources`: every configured url with its status.

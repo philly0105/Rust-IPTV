@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 
-import type { Channel, Page as RpcPage } from '../src/api/types';
+import type { Channel, CustomList, GuideSearchHit, Page as RpcPage } from '../src/api/types';
 import { ensureSource, resetApp, rpc } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
@@ -11,12 +11,21 @@ import { expectNoHorizontalScroll, settle } from './helpers/layout';
 // 2560x1440 on the main screens: dashboard, sources, live, movies landing,
 // movies grid, series detail, settings, and this round's screens: multi-view
 // (empty and with two tiles), My List and the parental controls section.
+// Run 2 (check 12): a custom list page, watch stats, the guide with its
+// search panel open, and the hidden-channels and rename dialogs.
 
 const NAME = 'A11y Xtream';
 const VIEWPORTS = [
   { width: 800, height: 600 },
   { width: 2560, height: 1440 },
 ];
+
+/** Local date `YYYY-MM-DD` (stats.record takes the browser's local day). */
+function localDay(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 async function seriousViolations(page: Page): Promise<string[]> {
   const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']).analyze();
@@ -40,6 +49,20 @@ test.describe('accessibility and layout', () => {
       layout: '1x2',
       audioKey: 'a11y-0',
     });
+    // Run 2 fixtures: a list of three channels, one hidden channel, half an hour of watch time,
+    // and a guide that search can see (the panel shows results, not its loading state).
+    const first = await rpc<RpcPage<Channel>>(request, 'catalog.channels', { sourceId: id, query: { offset: 0, limit: 6, sort: 'number', dir: 'asc' } });
+    for (const l of await rpc<CustomList[]>(request, 'lists.list')) if (l.name === 'A11y list') await rpc(request, 'lists.remove', { id: l.id });
+    const list = await rpc<CustomList>(request, 'lists.create', {
+      name: 'A11y list',
+      items: first.items.slice(0, 3).map((c) => ({ ref: c.ref, snapshot: { title: c.name, contentType: c.ref.contentType } })),
+    });
+    await rpc(request, 'channels.setHidden', { refs: [first.items[5]!.ref], hidden: true });
+    // The core takes at most 300 s per call.
+    for (let i = 0; i < 6; i++) await rpc(request, 'stats.record', { ref: first.items[0]!.ref, title: first.items[0]!.name, seconds: 300, day: localDay() });
+    await expect
+      .poll(async () => (await rpc<GuideSearchHit[]>(request, 'epg.search', { sourceId: id, query: 'news' })).length, { timeout: 30_000 })
+      .toBeGreaterThan(0);
     pages = [
       { name: 'dashboard', path: '/dashboard', ready: (p) => expect(p.getByTestId('dashboard')).toBeVisible() },
       { name: 'live', path: `/s/${id}/live`, ready: (p) => expect(p.getByRole('list', { name: 'Channels' }).getByRole('listitem').first()).toBeVisible() },
@@ -77,6 +100,44 @@ test.describe('accessibility and layout', () => {
         name: 'settings parental',
         path: '/settings/parental',
         ready: (p) => expect(p.getByRole('main').getByRole('heading', { name: 'Parental controls' }).first()).toBeVisible(),
+      },
+      {
+        name: 'list page',
+        path: `/lists/${list.id}`,
+        ready: (p) => expect(p.getByTestId('list-page').getByTestId('channel-list').locator('button[data-row-index]').first()).toBeVisible(),
+      },
+      { name: 'stats', path: '/stats', ready: (p) => expect(p.getByTestId('stats-chart')).toBeVisible() },
+      {
+        name: 'guide search',
+        path: `/epg?source=${encodeURIComponent(id)}`,
+        ready: async (p) => {
+          await expect(p.getByTestId('epg-grid')).toBeVisible();
+          await p.getByRole('searchbox', { name: 'Search the guide' }).fill('news');
+          await expect(p.getByTestId('guide-search-panel')).toHaveAttribute('data-state', 'results');
+        },
+      },
+      {
+        name: 'hidden channels dialog',
+        path: `/s/${id}/live`,
+        ready: async (p) => {
+          await expect(p.getByTestId('channel-list').locator('button[data-row-index]').first()).toBeVisible();
+          // Below 1024 px the groups (and this button) are in a drawer.
+          const open = p.getByRole('button', { name: /^Hidden channels/ });
+          if (!(await open.isVisible())) await p.getByRole('button', { name: 'Show groups', exact: true }).click();
+          await open.click();
+          await expect(p.getByTestId('hidden-channels-dialog').getByTestId('hidden-channel-row').first()).toBeVisible();
+        },
+      },
+      {
+        name: 'rename dialog',
+        path: `/s/${id}/live`,
+        ready: async (p) => {
+          const row = p.getByTestId('channel-list').locator('button[data-row-index]').first();
+          await expect(row).toBeVisible();
+          await row.focus();
+          await p.keyboard.press('F2');
+          await expect(p.getByTestId('channel-rename-dialog')).toBeVisible();
+        },
       },
     ];
   });

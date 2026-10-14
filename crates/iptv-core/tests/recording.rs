@@ -486,6 +486,7 @@ fn row(
         ended_at: None,
         engine: None,
         created_at: start - 1000,
+        rule_id: None,
     }
 }
 

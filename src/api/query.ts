@@ -83,13 +83,19 @@ export function invalidate(prefix: string): Promise<void> {
  * (the server dropped events for a slow socket) invalidates everything.
  */
 export const DEFAULT_EVENT_INVALIDATION: Readonly<Record<string, readonly string[]>> = {
-  'sources.changed': ['catalog.', 'sources.'],
-  'import.progress': ['catalog.', 'sources.'],
+  // lists.: a re-import or source change can make list items (un)available.
+  'sources.changed': ['catalog.', 'sources.', 'lists.'],
+  'import.progress': ['catalog.', 'sources.', 'lists.'],
   'epg.changed': ['epg.'],
   'downloads.update': ['downloads.', 'myvideos.'],
   'settings.changed': ['settings.'],
   // C7: My List writes (this window or another).
   'watchlist.changed': ['watchlist.'],
+  // Run 2 C10: custom list writes, and channel renames/hides (which every channel reader shows).
+  'lists.changed': ['lists.'],
+  'channels.changed': ['catalog.', 'channels.', 'lists.', 'favorites.', 'recent.', 'epg.search'],
+  // Also covers `recordings.rules` (same prefix).
+  'recordings.update': ['recordings.'],
 };
 
 /** Events after which no cached query can be trusted. */

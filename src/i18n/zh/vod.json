@@ -184,5 +184,17 @@
   "previousEpisode": "上一集",
   "posterInMyList": "已在我的片单",
   "shortcutMyList": "将光标所在的影片加入我的片单或从中移除",
-  "shortcutPosterMenu": "打开光标所在影片的菜单"
+  "shortcutPosterMenu": "打开光标所在影片的菜单",
+  "yearAll": "所有年份",
+  "decade": "{{decade}}年代",
+  "yearFrom": "起始年",
+  "yearTo": "结束年",
+  "yearEmptyTitle": "这些年份没有影片",
+  "hideWatched": "隐藏已观看",
+  "watchedEmptyTitle": "这里的影片已全部看完",
+  "showWatched": "显示已观看",
+  "markSeriesWatched": "将剧集标记为已观看",
+  "markSeriesUnwatched": "将剧集标记为未观看",
+  "shortcutWatched": "标记为已观看或未观看",
+  "shortcutHideWatched": "隐藏或显示已观看的影片"
 }

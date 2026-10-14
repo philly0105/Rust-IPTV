@@ -17,6 +17,8 @@ pub mod engine;
 pub mod library;
 pub mod naming;
 pub mod rpc;
+// guide: series recording rules (Run 2 C5).
+pub mod rules;
 pub mod scheduler;
 pub mod store;
 
@@ -110,6 +112,9 @@ pub struct Recording {
     pub ended_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
+    /// The series rule that created it (C5); absent for manual recordings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
 }
 
 /// `recordings.schedule` warning: more overlapping recordings on one
@@ -320,6 +325,7 @@ impl From<&RecordingRow> for Recording {
             started_at: r.started_at.map(rfc3339),
             ended_at: r.ended_at.map(rfc3339),
             engine: r.engine.clone(),
+            rule_id: r.rule_id.clone(),
         }
     }
 }
@@ -620,45 +626,13 @@ pub async fn schedule(state: &Arc<AppState>, req: ScheduleRequest) -> CoreResult
         ended_at: None,
         engine: None,
         created_at: now,
+        rule_id: None,
     };
     if row.effective_end() <= now {
         return Err(CoreError::invalid("This programme has already ended."));
     }
     let insert = row.clone();
-    let overlapping = state
-        .db_call(move |c| {
-            let all = store::recordings(c)?;
-            let busy: Vec<&RecordingRow> = all
-                .iter()
-                .filter(|r| {
-                    matches!(
-                        r.status,
-                        RecordingStatus::Scheduled | RecordingStatus::Recording
-                    )
-                })
-                .collect();
-            if busy.iter().any(|r| {
-                r.item_ref == insert.item_ref
-                    && r.kind == RecordingKind::Programme
-                    && insert.kind == RecordingKind::Programme
-                    && r.start_at == insert.start_at
-            }) {
-                return Err(CoreError::Conflict(
-                    "This programme is already scheduled to record.".into(),
-                ));
-            }
-            let overlapping = busy
-                .iter()
-                .filter(|r| {
-                    r.item_ref.source_id == insert.item_ref.source_id
-                        && r.effective_start() < insert.effective_end()
-                        && insert.effective_start() < r.effective_end()
-                })
-                .count() as i64;
-            store::insert_recording(c, &insert)?;
-            Ok(overlapping + 1)
-        })
-        .await?;
+    let overlapping = state.db_call(move |c| insert_scheduled(c, &insert)).await?;
     changed(state, EVENT_RECORDINGS_UPDATE);
     rt.wake.notify_one();
     let warning = connection_warning(state, &req.item_ref.source_id, overlapping).await;
@@ -666,6 +640,44 @@ pub async fn schedule(state: &Arc<AppState>, req: ScheduleRequest) -> CoreResult
         recording: Recording::from(&row),
         warning,
     })
+}
+
+/// The insert step of [`schedule`], shared with series rules
+/// ([`rules::materialise`]): refuses a programme already scheduled or
+/// recording on the same channel at the same start (`Conflict`), then
+/// inserts `insert` and returns how many scheduled or running recordings
+/// of the source overlap it, itself included.
+fn insert_scheduled(c: &rusqlite::Connection, insert: &RecordingRow) -> CoreResult<i64> {
+    let all = store::recordings(c)?;
+    let busy: Vec<&RecordingRow> = all
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.status,
+                RecordingStatus::Scheduled | RecordingStatus::Recording
+            )
+        })
+        .collect();
+    if busy.iter().any(|r| {
+        r.item_ref == insert.item_ref
+            && r.kind == RecordingKind::Programme
+            && insert.kind == RecordingKind::Programme
+            && r.start_at == insert.start_at
+    }) {
+        return Err(CoreError::Conflict(
+            "This programme is already scheduled to record.".into(),
+        ));
+    }
+    let overlapping = busy
+        .iter()
+        .filter(|r| {
+            r.item_ref.source_id == insert.item_ref.source_id
+                && r.effective_start() < insert.effective_end()
+                && insert.effective_start() < r.effective_end()
+        })
+        .count() as i64;
+    store::insert_recording(c, insert)?;
+    Ok(overlapping + 1)
 }
 
 /// Without mpv only plain streams can be recorded (the HTTP copy). Refuses
@@ -724,16 +736,22 @@ pub async fn cancel(state: &Arc<AppState>, id: &str) -> CoreResult<()> {
         RecordingStatus::Scheduled => {
             let key = id.to_string();
             let now = rt.now();
+            let rule = row.rule_id.clone().map(|r| (r, row.start_at));
             let done = state
                 .db_call(move |c| {
-                    store::transition(
+                    let done = store::transition(
                         c,
                         &key,
                         &[RecordingStatus::Scheduled],
                         RecordingStatus::Cancelled,
                         Some(now),
                         None,
-                    )
+                    )?;
+                    // Its series rule must not create this airing again (C5).
+                    if let (true, Some((rule_id, start))) = (done, rule) {
+                        rules::add_skip(c, &rule_id, start)?;
+                    }
+                    Ok(done)
                 })
                 .await?;
             if done {
@@ -1420,6 +1438,11 @@ async fn maybe_rematch(state: &Arc<AppState>, rt: &Runtime, now: i64) {
     if let Err(e) = rematch(state, now).await {
         tracing::debug!(error = %e, "guide re-match skipped");
     }
+    // Series rules (C5): same triggers, after the re-match so an airing
+    // that moved is found at its new time instead of being added twice.
+    if let Err(e) = rules::materialise(state, rt, now).await {
+        tracing::debug!(error = %e, "series rules skipped");
+    }
 }
 
 async fn rematch(state: &Arc<AppState>, now: i64) -> CoreResult<()> {
@@ -1533,6 +1556,44 @@ pub async fn shutdown(state: &Arc<AppState>) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Series recording rules: backup surface (Run 2 C5, C8)
+// ---------------------------------------------------------------------------
+//
+// The rules themselves live in [`rules`].
+
+/// One series recording rule in a backup file (per-entry
+/// `userState.tsrustRecordingRules`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingRuleBackup {
+    pub content_type: ContentType,
+    pub item_id: String,
+    pub channel_name: String,
+    pub title: String,
+    pub enabled: bool,
+    pub created_at: String,
+}
+
+/// Every rule of a source, for `backup.export` (oldest first).
+pub fn export_rules(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+) -> CoreResult<Vec<RecordingRuleBackup>> {
+    rules::export(conn, source_id)
+}
+
+/// Adds the rules to a source; duplicates by `title_key` are ignored.
+/// Returns rows written. The scheduler schedules their airings on its next
+/// re-match pass (within `REMATCH_EVERY`).
+pub fn import_rules(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+    rules: &[RecordingRuleBackup],
+) -> CoreResult<usize> {
+    rules::import(conn, source_id, rules)
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-import { Bookmark, BookmarkCheck, BookmarkPlus, Star } from 'lucide-react';
+import { Bookmark, BookmarkCheck, BookmarkPlus, Check, Star } from 'lucide-react';
 import { useState, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -24,6 +24,8 @@ export interface PosterCardProps {
   rating?: number;
   /** 0..1 watched fraction; shows a thin bar over the poster when > 0. */
   progress?: number;
+  /** Watched as a whole (C4): a tick on the poster's top-end corner, with the rating beside it. */
+  watched?: boolean | undefined;
   /** Small overlay in the top-left corner (source badge, "New"). */
   badge?: ReactNode;
   /** Text of `badge` for the card's accessible name (the overlay itself is decorative). */
@@ -87,6 +89,8 @@ export function posterCardLabel(parts: {
   ratedLabel: (rating: string) => string;
   /** "40% watched" when the title has a saved position. */
   progressLabel?: string | undefined;
+  /** "Watched" when the title is watched as a whole. */
+  watchedLabel?: string | undefined;
 }): string {
   const yearText = parts.year !== undefined ? String(parts.year) : undefined;
   const name = yearText && !parts.title.includes(yearText) ? `${parts.title} (${yearText})` : parts.title;
@@ -96,6 +100,7 @@ export function posterCardLabel(parts: {
   if (parts.languageLabel) out.push(parts.languageLabel);
   if (parts.badgeLabel) out.push(parts.badgeLabel);
   if (parts.rating) out.push(parts.ratedLabel(parts.rating));
+  if (parts.watchedLabel) out.push(parts.watchedLabel);
   if (parts.progressLabel) out.push(parts.progressLabel);
   return out.join(', ');
 }
@@ -126,6 +131,7 @@ function PosterCardView({
   year,
   rating,
   progress,
+  watched,
   badge,
   badgeLabel,
   meta,
@@ -154,6 +160,7 @@ function PosterCardView({
     rating: r ?? undefined,
     ratedLabel: (v) => t('posterRated', { rating: v }),
     progressLabel,
+    watchedLabel: watched ? t('watched') : undefined,
   });
   const fullLabel = extraLabel ? `${label}, ${extraLabel}` : label;
   const secondary = meta ?? year;
@@ -167,11 +174,21 @@ function PosterCardView({
             {badge}
           </div>
         )}
-        {r && (
-          <div aria-hidden className="tabular pointer-events-none absolute end-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-glass-strong px-1.5 py-1 text-xs leading-none font-semibold text-on-glass">
-            {/* Glass chips stay dark in every theme, so the star takes the bright glass accent, not the light theme's deep one. */}
-            <Star aria-hidden size={11} className="fill-current text-glass-accent" />
-            {r}
+        {(r || watched) && (
+          // The tick holds the corner; the rating sits beside it.
+          <div aria-hidden className="pointer-events-none absolute end-1.5 top-1.5 flex items-center gap-1">
+            {r && (
+              <div aria-hidden className="tabular inline-flex items-center gap-1 rounded-sm bg-glass-strong px-1.5 py-1 text-xs leading-none font-semibold text-on-glass">
+                {/* Glass chips stay dark in every theme, so the star takes the bright glass accent, not the light theme's deep one. */}
+                <Star aria-hidden size={11} className="fill-current text-glass-accent" />
+                {r}
+              </div>
+            )}
+            {watched && (
+              <div aria-hidden data-testid="poster-watched" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-accent text-glass-accent-fg shadow-1">
+                <Check aria-hidden size={13} strokeWidth={3} />
+              </div>
+            )}
           </div>
         )}
         {language && (

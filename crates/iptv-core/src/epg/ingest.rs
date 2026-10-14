@@ -136,6 +136,9 @@ pub fn ingest_reader(
     let autockpt: i64 = conn.query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))?;
     conn.execute_batch("PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0;")?;
     let result = ingest_inner(conn, url, reader, window, etag, on_progress);
+    // Guide search (C5): the swap (or a discarded staging) marked the title
+    // index stale; rebuild it while the bulk-load cache is still large.
+    super::search::refresh_index(conn);
     let restore = conn.execute_batch(&format!(
         "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt};"
     ));
@@ -517,6 +520,9 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
     let (rows, pruned) = state
         .db_call(move |c| {
             let pruned = store::prune(c, &keep)?;
+            if pruned > 0 {
+                super::search::refresh_index(c);
+            }
             let mut rows = Vec::with_capacity(keep.len());
             for k in &keep {
                 rows.push((k.url.clone(), store::source_row(c, &k.url)?));

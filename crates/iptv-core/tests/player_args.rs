@@ -8,7 +8,8 @@ use iptv_core::player::args::{
 };
 use iptv_core::player::embedded::{
     is_click_message, legacy_options, recording_file_name, stream_record_command, validate_command,
-    validate_property, SETTABLE_PROPERTIES,
+    validate_property, validate_property_value, validate_subtitle_path, MAX_SUBTITLE_BYTES,
+    SETTABLE_PROPERTIES, SUBTITLE_EXTENSIONS,
 };
 use iptv_core::player::external::{build_args, ExternalPlayer};
 use serde_json::json;
@@ -469,7 +470,22 @@ fn raw_commands_are_validated() {
 #[test]
 fn only_ui_properties_can_be_set() {
     // Everything the player UI sends through mpv.setProperty.
-    for name in ["pause", "volume", "mute", "speed", "aid", "sid"] {
+    for name in [
+        "pause",
+        "volume",
+        "mute",
+        "speed",
+        "aid",
+        "sid",
+        "sub-scale",
+        "sub-color",
+        "sub-back-color",
+        "sub-border-style",
+        "sub-border-size",
+        "sub-shadow-offset",
+        "sub-pos",
+        "sub-ass-override",
+    ] {
         assert!(validate_property(name).is_ok(), "{name}");
         assert!(SETTABLE_PROPERTIES.contains(&name));
     }
@@ -620,4 +636,268 @@ fn only_our_script_message_counts_as_a_video_click() {
     assert!(!is_click_message(
         &json!({"event": "property-change", "name": "pause"})
     ));
+}
+
+// ---- subtitles (Run 2 C6) ---------------------------------------------------
+
+#[test]
+fn subtitle_style_values_in_range_are_accepted() {
+    for (name, value) in [
+        ("sub-scale", json!(0.5)),
+        ("sub-scale", json!(3.0)),
+        ("sub-scale", json!(1)),
+        ("sub-scale", json!("1.25")),
+        ("sub-color", json!("#FFFFFF")),
+        ("sub-color", json!("#ffe600")),
+        ("sub-color", json!("#80000000")),
+        ("sub-back-color", json!("#80000000")),
+        ("sub-back-color", json!("#aaBBcc")),
+        ("sub-border-style", json!("outline-and-shadow")),
+        ("sub-border-style", json!("opaque-box")),
+        ("sub-border-style", json!("background-box")),
+        ("sub-border-size", json!(0)),
+        ("sub-border-size", json!(10)),
+        ("sub-border-size", json!(2.5)),
+        ("sub-shadow-offset", json!(0)),
+        ("sub-shadow-offset", json!(10.0)),
+        ("sub-shadow-offset", json!("3")),
+        ("sub-pos", json!(0)),
+        ("sub-pos", json!(150)),
+        ("sub-pos", json!(80.0)),
+        ("sub-pos", json!("100")),
+        ("sub-ass-override", json!("no")),
+        ("sub-ass-override", json!("yes")),
+        ("sub-ass-override", json!("scale")),
+        ("sub-ass-override", json!("force")),
+        ("sub-ass-override", json!("strip")),
+        (" sub-scale ", json!(2)),
+    ] {
+        assert!(
+            validate_property_value(name, &value).is_ok(),
+            "{name} = {value}"
+        );
+    }
+    // The older properties keep their unchecked values (mpv checks them).
+    for (name, value) in [
+        ("volume", json!(250)),
+        ("pause", json!(true)),
+        ("sub-delay", json!("-1.5")),
+        ("sid", json!("no")),
+        ("time-pos", json!(null)),
+    ] {
+        assert!(
+            validate_property_value(name, &value).is_ok(),
+            "{name} = {value}"
+        );
+    }
+}
+
+#[test]
+fn subtitle_style_values_out_of_range_are_invalid() {
+    for (name, value) in [
+        ("sub-scale", json!(4)),
+        ("sub-scale", json!(0.1)),
+        ("sub-scale", json!(3.0001)),
+        ("sub-scale", json!("big")),
+        ("sub-scale", json!("NaN")),
+        ("sub-scale", json!("inf")),
+        ("sub-scale", json!(" 1.5")),
+        ("sub-scale", json!(true)),
+        ("sub-scale", json!(null)),
+        ("sub-scale", json!([1])),
+        ("sub-scale", json!({"v": 1})),
+        (" sub-scale ", json!(4)),
+        ("sub-color", json!("red")),
+        ("sub-color", json!("#12345")),
+        ("sub-color", json!("#1234567")),
+        ("sub-color", json!("FFFFFF")),
+        ("sub-color", json!("#GGGGGG")),
+        ("sub-color", json!("#FFFFFF ")),
+        ("sub-color", json!("")),
+        ("sub-color", json!(16777215)),
+        ("sub-back-color", json!("#123456789")),
+        ("sub-back-color", json!("1.0/0.5/0.0")),
+        ("sub-border-style", json!("box")),
+        ("sub-border-style", json!("Opaque-Box")),
+        ("sub-border-style", json!(1)),
+        ("sub-border-size", json!(11)),
+        ("sub-border-size", json!(-0.5)),
+        ("sub-border-size", json!("x")),
+        ("sub-shadow-offset", json!(-1)),
+        ("sub-shadow-offset", json!(10.5)),
+        ("sub-pos", json!(151)),
+        ("sub-pos", json!(-1)),
+        ("sub-pos", json!(10.5)),
+        ("sub-pos", json!("10.5")),
+        ("sub-pos", json!(false)),
+        ("sub-ass-override", json!(true)),
+        ("sub-ass-override", json!(false)),
+        ("sub-ass-override", json!("YES")),
+        ("sub-ass-override", json!("maybe")),
+        ("sub-ass-override", json!(1)),
+    ] {
+        let err = validate_property_value(name, &value).unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains(name.trim()) && m.contains("must be")),
+            "{name} = {value}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn subtitle_style_commands_set_checked_values_only() {
+    for set in ["set", "set_property", "set_property_string"] {
+        for (name, value) in [
+            ("sub-scale", json!("1.5")),
+            ("sub-color", json!("#FFE600")),
+            ("sub-back-color", json!("#80000000")),
+            ("sub-border-style", json!("opaque-box")),
+            ("sub-border-size", json!("2")),
+            ("sub-shadow-offset", json!(1)),
+            ("sub-pos", json!(90)),
+            ("sub-ass-override", json!("force")),
+        ] {
+            assert!(
+                validate_command(&[json!(set), json!(name), value.clone()]).is_ok(),
+                "{set} {name} {value}"
+            );
+        }
+        for cmd in [
+            vec![json!(set), json!("sub-scale"), json!(4)],
+            vec![json!(set), json!("sub-color"), json!("red")],
+            vec![json!(set), json!("sub-pos"), json!(10.5)],
+            vec![json!(set), json!("sub-border-style"), json!("box")],
+            vec![json!(set), json!("sub-ass-override"), json!(true)],
+            // The value is required, and only one.
+            vec![json!(set), json!("sub-scale")],
+            vec![json!(set), json!("sub-scale"), json!(1), json!(2)],
+            // A leading flag does not move the checked value.
+            vec![json!(set), json!("!reverse"), json!("sub-scale"), json!(9)],
+        ] {
+            let err = validate_command(&cmd).unwrap_err();
+            assert!(matches!(err, CoreError::Invalid(_)), "{cmd:?}: {err:?}");
+        }
+    }
+    // Relative changes would step past the allowed range.
+    for cmd in [
+        vec![json!("add"), json!("sub-scale"), json!(0.1)],
+        vec![json!("add"), json!("sub-pos"), json!(1000)],
+        vec![json!("multiply"), json!("sub-scale"), json!(10)],
+        vec![json!("multiply"), json!("sub-border-size"), json!(2)],
+        vec![json!("cycle"), json!("sub-ass-override")],
+        vec![json!("cycle"), json!("sub-border-style")],
+        vec![
+            json!("cycle-values"),
+            json!("sub-border-style"),
+            json!("opaque-box"),
+            json!("box"),
+        ],
+        vec![
+            json!("cycle-values"),
+            json!("!reverse"),
+            json!("sub-pos"),
+            json!(1),
+            json!(500),
+        ],
+    ] {
+        let err = validate_command(&cmd).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{cmd:?}: {err:?}");
+    }
+    // The older subtitle properties keep their relative commands.
+    assert!(validate_command(&[json!("add"), json!("sub-delay"), json!(0.1)]).is_ok());
+    assert!(validate_command(&[json!("cycle"), json!("sub-visibility")]).is_ok());
+    assert!(validate_command(&[json!("cycle"), json!("sid")]).is_ok());
+}
+
+#[test]
+fn sub_add_only_runs_through_add_subtitle() {
+    for cmd in [
+        vec![json!("sub-add"), json!("C:/x.srt")],
+        vec![json!("sub-add"), json!("C:/x.srt"), json!("select")],
+        vec![json!("no-osd"), json!("sub-add"), json!("C:/x.srt")],
+        vec![json!("screenshot-to-file"), json!("C:/x.png")],
+    ] {
+        let err = validate_command(&cmd).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{cmd:?}: {err:?}");
+    }
+}
+
+fn subtitle_error(path: &str) -> String {
+    match validate_subtitle_path(path) {
+        Err(CoreError::Invalid(m)) => m,
+        other => panic!("{path:?} should be Invalid, got {other:?}"),
+    }
+}
+
+#[test]
+fn subtitle_paths_are_checked() {
+    assert_eq!(SUBTITLE_EXTENSIONS, ["srt", "vtt", "ass", "ssa"]);
+    assert_eq!(MAX_SUBTITLE_BYTES, 5 * 1024 * 1024);
+    let dir = tempfile::tempdir().unwrap();
+    let p = |name: &str| dir.path().join(name).display().to_string();
+
+    // Empty and relative paths (URLs and mpv protocols are not absolute).
+    for empty in ["", "   "] {
+        assert!(subtitle_error(empty).contains("Choose"), "{empty:?}");
+    }
+    for relative in [
+        "x.srt",
+        "subs/x.srt",
+        r"subs\x.srt",
+        "C:x.srt",
+        "http://h/x.srt",
+        "memory://x.srt",
+    ] {
+        assert!(
+            subtitle_error(relative).contains("full path"),
+            "{relative:?}"
+        );
+    }
+
+    // The extension is checked before the file is opened.
+    for name in ["x.txt", "x.srt.exe", "x", "x.srt.", "x.sub", "srt"] {
+        std::fs::write(dir.path().join(name), b"1").unwrap();
+        assert!(subtitle_error(&p(name)).contains(".srt, .vtt"), "{name}");
+    }
+    assert!(subtitle_error(&p("never-made.idx")).contains(".srt, .vtt"));
+
+    // Missing files, folders, and oversized files.
+    assert!(subtitle_error(&p("missing.srt")).contains("not found"));
+    std::fs::create_dir(dir.path().join("folder.srt")).unwrap();
+    assert!(subtitle_error(&p("folder.srt")).contains("folder"));
+    let big = std::fs::File::create(dir.path().join("big.srt")).unwrap();
+    big.set_len(MAX_SUBTITLE_BYTES + 1).unwrap();
+    drop(big);
+    assert!(subtitle_error(&p("big.srt")).contains("5 MB"));
+
+    // Accepted: every extension in any case, up to exactly 5 MB.
+    let edge = std::fs::File::create(dir.path().join("edge.srt")).unwrap();
+    edge.set_len(MAX_SUBTITLE_BYTES).unwrap();
+    drop(edge);
+    let names = [
+        "ok.srt",
+        "UPPER.SRT",
+        "styled.ass",
+        "web.vtt",
+        "old.ssa",
+        "Mixed.Vtt",
+        "Movie, part 1.en.srt",
+    ];
+    for name in names {
+        std::fs::write(
+            dir.path().join(name),
+            b"1\n00:00:00,000 --> 00:00:01,000\nHi\n",
+        )
+        .unwrap();
+    }
+    for name in names.into_iter().chain(["edge.srt"]) {
+        let got = validate_subtitle_path(&p(name)).unwrap();
+        assert_eq!(got, dir.path().join(name), "{name}");
+    }
+    // Surrounding whitespace is trimmed.
+    let padded = format!("  {}\t", p("ok.srt"));
+    assert_eq!(
+        validate_subtitle_path(&padded).unwrap(),
+        dir.path().join("ok.srt")
+    );
 }

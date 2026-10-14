@@ -184,5 +184,17 @@
   "previousEpisode": "前のエピソード",
   "posterInMyList": "マイリストに保存済み",
   "shortcutMyList": "カーソル位置の作品をマイリストに保存、または削除",
-  "shortcutPosterMenu": "カーソル位置の作品のメニューを開く"
+  "shortcutPosterMenu": "カーソル位置の作品のメニューを開く",
+  "yearAll": "すべての年",
+  "decade": "{{decade}}年代",
+  "yearFrom": "開始年",
+  "yearTo": "終了年",
+  "yearEmptyTitle": "この年代の作品はありません",
+  "hideWatched": "視聴済みを隠す",
+  "watchedEmptyTitle": "ここはすべて視聴済みです",
+  "showWatched": "視聴済みを表示",
+  "markSeriesWatched": "シリーズを視聴済みにする",
+  "markSeriesUnwatched": "シリーズを未視聴にする",
+  "shortcutWatched": "視聴済み・未視聴を切り替える",
+  "shortcutHideWatched": "視聴済みの作品を隠す・表示する"
 }

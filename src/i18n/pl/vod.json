@@ -202,5 +202,17 @@
   "previousEpisode": "Poprzedni odcinek",
   "posterInMyList": "Na Mojej liście",
   "shortcutMyList": "Zapisz tytuł pod kursorem na Mojej liście lub go z niej usuń",
-  "shortcutPosterMenu": "Otwórz menu tytułu pod kursorem"
+  "shortcutPosterMenu": "Otwórz menu tytułu pod kursorem",
+  "yearAll": "Wszystkie lata",
+  "decade": "Lata {{decade}}",
+  "yearFrom": "Od",
+  "yearTo": "Do",
+  "yearEmptyTitle": "Brak tytułów z tych lat",
+  "hideWatched": "Ukryj obejrzane",
+  "watchedEmptyTitle": "Wszystko tutaj jest obejrzane",
+  "showWatched": "Pokaż obejrzane",
+  "markSeriesWatched": "Oznacz serial jako obejrzany",
+  "markSeriesUnwatched": "Oznacz serial jako nieobejrzany",
+  "shortcutWatched": "Oznacz jako obejrzane lub nieobejrzane",
+  "shortcutHideWatched": "Ukryj lub pokaż obejrzane tytuły"
 }

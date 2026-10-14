@@ -1,6 +1,6 @@
 # Tsrust IPTV
 
-An IPTV player for Windows, rebuilt from the IPTVnator fork on Tauri 2 with a Rust core. It plays M3U/M3U8 playlists, Xtream Codes accounts, and Stalker/Ministra portals. It has live TV with an EPG, a multi-view wall for up to four channels, movies and series with a My List, catch-up, parental controls with a PIN, a sleep timer, downloads with an offline library, optional TMDB metadata, and a remote control for a browser on this computer or, after QR pairing, phones on the local network. The same core also runs as a small web server, so the UI works in a browser (self-hosted PWA mode).
+An IPTV player for Windows, rebuilt from the IPTVnator fork on Tauri 2 with a Rust core. It plays M3U/M3U8 playlists, Xtream Codes accounts, and Stalker/Ministra portals. It has live TV with a searchable EPG, custom channel lists that mix sources, a multi-view wall for up to four channels, movies and series with a My List, catch-up, parental controls with a PIN, a sleep timer, series recording rules, watch stats, downloads with an offline library, optional TMDB metadata, and a remote control for a browser on this computer or, after QR pairing, phones on the local network. The same core also runs as a small web server, so the UI works in a browser (self-hosted PWA mode).
 
 The Rust core (`crates/iptv-core`) owns parsing, storage, portals, EPG, downloads, TMDB, remote control, and players. The React UI never holds a whole catalog: it pages rows out of SQLite over one `rpc(cmd, args)` call.
 
@@ -69,6 +69,12 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 - My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. In a movie or series group, saved posters carry a marker and a corner toggle, S saves or removes the title under the cursor, and Shift+F10 or the context-menu key opens the poster menu (also on right click) with Add to or Remove from My List. Reorder it by dragging, with the arrow buttons, or with Alt+Up/Down, mark movies watched with W, and remove the focused title with Delete. Removing a source also removes its titles from My List.
 - Multi-view plays two to four live channels at once: right-click a channel and choose "Add to multi-view". Pick side by side, a grid of four, or one large and three small. Only the tile you click has sound. When a source would play on more tiles than its account allows connections, the page warns. Keys on the multi-view page: 1 to 4 give that tile the sound, F fills the screen, M mutes the wall, L switches layout, and A adds a channel. On the focused tile, arrow keys move between tiles, Enter gives it the sound, R replaces its channel, S swaps it with another tile, and Delete closes it.
 - Parental controls (Settings > Parental controls): set a 4 to 8 digit PIN, then lock whole groups there or from a group's right-click menu, a channel from its right-click menu, and a movie or series from its page. Adult groups can be locked automatically. Locked content is either hidden everywhere until the PIN is entered, or stays visible and asks for the PIN before it opens. An unlock lasts 15 minutes by default; "Lock now" (Settings > Parental controls, "Lock parental controls now" in the command palette, Ctrl+K, or Ctrl+Alt+L) ends it.
+- Channel edits: right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels" under the group list shows them and brings them back. The provider's catalog is never changed, so edits survive refreshes.
+- Custom lists hold live channels from any of your sources. Press L on a channel or choose "Add to list…" in its right-click menu. Lists are in the side rail (`/lists`) and at the top of the live group sidebar, and a channel played from a list zaps through the list in its order (Page Up / Page Down). Manage lists renames, reorders (also with Alt+Up/Down) and deletes them with Undo, and a list can show as a rail on the dashboard. A channel the provider drops stays in the list, marked unavailable.
+- TV guide: the time window is part of the URL, so Back and Forward step through it and a link opens the same window. T, or the window label, jumps to a date and time. / searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. "Record series" on a hit records every airing of that title on that channel; Library > Scheduled lists the rules, which can be paused or removed.
+- Subtitle files: in the player's options menu (Shift+C), Subtitles > "Load subtitle file…" takes SRT, WebVTT or ASS/SSA files, and Off turns them off. Settings > Playback sets the subtitle size, colour, background and position with a live preview; the player menu changes the same look in place.
+- Movie and series grids filter by decade or an exact year range (kept in the URL), mark watched titles with a tick, and "Hide watched" (Shift+W) leaves them out. W marks the title under the cursor watched or unwatched, and a series page can mark the whole series watched.
+- Watch stats (`/stats`, in the side rail): time watched per day over the last 7 or 30 days (7 and 3 switch), split into live TV and movies and series, with the most watched channels and titles. The log stays on this device, keeps 90 days, and Clear stats empties it.
 - Settings > Appearance: light, dark or system theme, OLED black for the dark theme, seven accent colours, a compact density, and an interface size from 90 to 125 %.
 
 ## Data
@@ -104,9 +110,10 @@ Press `?` in the app for the full list. The main ones:
 | F8 | Move focus to notifications |
 | ? | Shortcut help |
 | Ctrl+B | Toggle the live TV group sidebar |
-| / | Focus the live TV channel search |
+| / | Focus the live TV channel search (in the TV guide: the programme search) |
+| T | Jump to a date and time (TV guide) |
 | 0-9 | Type a channel number to zap |
-| Page Up / Page Down | Previous / next channel (live TV) |
+| Page Up / Page Down | Previous / next channel (live TV; from a custom list, the list's order) |
 | Space or K | Play / pause |
 | F | Fullscreen (in picture-in-picture: back to the full window) |
 | Left / Right | Seek 10 s |
@@ -122,10 +129,16 @@ Press `?` in the app for the full list. The main ones:
 | Up / Down | Volume 5 % |
 | M | Mute |
 | C | Captions on / off (in fullscreen live TV: the channel panel) |
+| Shift+C | Subtitles menu: load a subtitle file, pick a track, change the look |
 | Z | Sleep timer: off, 15, 30, 45, 60, 90 minutes |
 | Shift+N | Add a source (Sources page) |
-| Alt+Up / Alt+Down | Move the focused favorite or title up / down (Favorites, My List) |
-| W | Mark the focused movie watched or unwatched (My List) |
+| L | Add the focused channel to a custom list (live TV, list pages) |
+| F2 | Rename the focused channel (live TV, list pages) |
+| Shift+Delete | Hide the focused channel (live TV, list pages) |
+| Alt+Up / Alt+Down | Move the focused favorite, title, list or list channel up / down (Favorites, My List, Manage lists) |
+| W | Mark the focused movie watched or unwatched (My List), or the title under the cursor (movie and series grids) |
+| Shift+W | Hide or show watched titles (movie and series grids) |
+| 7 / 3 | Show the last 7 / 30 days (Watch stats) |
 | S | Add or remove the title under the cursor in My List (movie and series groups) |
 | Shift+F10 or the context-menu key | Open the poster menu for the title under the cursor (movie and series groups) |
 | Delete | Remove the focused title (My List), favorite (Favorites), or item (Recently watched, My Videos) |

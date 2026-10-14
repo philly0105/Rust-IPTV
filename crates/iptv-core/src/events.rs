@@ -7,7 +7,9 @@
 //! `epg.progress`, `epg.changed`, `downloads.update`, `downloads.progress`,
 //! `remote.command`, `mpv.state`, `settings.changed`, `player.external`,
 //! `parental.changed` (payload `ParentalStatus`), `watchlist.changed`
-//! (payload `{}`).
+//! (payload `{}`), `lists.changed` (payload `{}`, after every custom-list
+//! write and when a source removal cascades list items away),
+//! `channels.changed` (payload `{ sourceId }`, after every channel edit).
 
 use serde::{Deserialize, Serialize};
 

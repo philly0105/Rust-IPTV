@@ -2,9 +2,12 @@ import { lazy, Suspense, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate } from 'react-router';
 
+import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
+import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import { ExternalPlaybackFooter, PlayerDock, restorePlayback } from '@/features/player';
+import { useWatchStatsReporter } from '@/features/stats/reporter';
 import '@/i18n';
 import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
 
@@ -171,6 +174,8 @@ export function ShellLayout() {
 
   useShellEvents();
   useParentalEvents();
+  // Run 2 C7: counts watch time from the player store; renders nothing.
+  useWatchStatsReporter();
   // The layout counts as the parental gate's host from its first render, so a PIN request made
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
@@ -242,6 +247,9 @@ export function ShellLayout() {
       <Suspense fallback={null}>
         <RecordingWatcher />
       </Suspense>
+      {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
+      <ListsDialogHost />
+      <ChannelEditDialogHost />
     </div>
   );
 }

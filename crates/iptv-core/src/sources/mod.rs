@@ -1335,6 +1335,8 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     crate::catchup::forget_source(state, id);
     // recording: drop its reminders, cancel or stop its recordings.
     crate::recording::forget_source(state, id).await;
+    // lists: the cascade dropped the source's list items; announce `lists.changed`.
+    crate::lists::forget_source(state, id).await;
     if let Some(locks) = state.ext::<LockMap>(LOCKS_KEY) {
         locks.remove(id);
     }

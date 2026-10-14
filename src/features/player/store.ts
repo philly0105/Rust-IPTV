@@ -35,6 +35,8 @@ export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 export interface ZapContext {
   sourceId: string;
   categoryId?: string;
+  /** Set when playback started from a custom list: zapping walks `lists.neighbors` (Run 2 C3). */
+  listId?: string;
 }
 
 export interface PlayerState {
@@ -1215,10 +1217,16 @@ export async function zap(direction: 'up' | 'down'): Promise<Channel | undefined
   let from = start;
   let refused = false;
   for (let step = 0; step < ZAP_SKIP_LIMIT; step++) {
-    const args: { ref: ItemRef; categoryId?: string } = { ref: from };
-    if (ctx?.categoryId && ctx.sourceId === from.sourceId) args.categoryId = ctx.categoryId;
     const seq = requestSeq;
-    const res = await rpc('catalog.neighbors', args);
+    let res: { prev?: Channel; next?: Channel };
+    if (ctx?.listId) {
+      // Played from a channel list: step through the list's order, across sources.
+      res = await rpc('lists.neighbors', { id: ctx.listId, ref: from });
+    } else {
+      const args: { ref: ItemRef; categoryId?: string } = { ref: from };
+      if (ctx?.categoryId && ctx.sourceId === from.sourceId) args.categoryId = ctx.categoryId;
+      res = await rpc('catalog.neighbors', args);
+    }
     // Another request (a newer zap, a click) took over meanwhile: this press is done.
     if (seq !== requestSeq) return undefined;
     const target = direction === 'up' ? res.prev : res.next;
@@ -1240,7 +1248,11 @@ export async function zap(direction: 'up' | 'down'): Promise<Channel | undefined
 }
 
 export async function zapToNumber(n: number): Promise<Channel | undefined> {
-  const sourceId = usePlayerStore.getState().zapContext?.sourceId ?? usePlayerStore.getState().source?.ref?.sourceId;
+  const { zapContext, source } = usePlayerStore.getState();
+  // A list spans sources: digits follow the playing channel's own source, not the list's first.
+  const sourceId = zapContext?.listId
+    ? (source?.ref?.sourceId ?? zapContext.sourceId)
+    : (zapContext?.sourceId ?? source?.ref?.sourceId);
   if (!sourceId || !Number.isFinite(n)) return undefined;
   const ch = await rpc('catalog.channelByNumber', { sourceId, number: n });
   if (ch) await playChannel(ch);

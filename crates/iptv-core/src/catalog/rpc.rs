@@ -1,6 +1,6 @@
 //! `catalog.*` RPC commands (SPEC C4).
 
-use super::{CatalogQuery, NamedRow};
+use super::{CatalogQuery, NamedRow, VodFilter};
 use crate::error::RpcError;
 use crate::model::{Category, Channel, ContentType, ItemRef, Page, PageQuery, SeriesItem, VodItem};
 use crate::rpc::RpcRouter;
@@ -67,6 +67,29 @@ pub struct VodListArgs {
     /// Only items rated at least this; the count covers the filtered set.
     #[serde(default)]
     pub min_rating: Option<f64>,
+    // vod: Run 2 C4.
+    /// 1900..=2100 and `yearFrom <= yearTo` else invalid. Titles without a
+    /// year drop out when either bound is set.
+    #[serde(default)]
+    pub year_from: Option<i32>,
+    #[serde(default)]
+    pub year_to: Option<i32>,
+    /// Drops titles with an item-level watched row; `total` counts the filtered set.
+    #[serde(default)]
+    pub hide_watched: bool,
+}
+
+impl VodListArgs {
+    /// The C4 filter of these args, validated.
+    fn vod_filter(&self) -> Result<VodFilter, RpcError> {
+        let f = VodFilter {
+            year_from: self.year_from,
+            year_to: self.year_to,
+            hide_watched: self.hide_watched,
+        };
+        super::vodfilter::validate(&f)?;
+        Ok(f)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,12 +258,15 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
         include_hidden: a.include_hidden,
         min_rating: None,
         english_only: english_only(&state),
+        vod: VodFilter::default(),
     };
     // guide: M3U catch-up overrides are applied on read.
     let page = state
         .db_call(move |c| {
             let mut page = super::query_named(c, &q, hide)?.map(NamedRow::into_channel);
             crate::catchup::m3u::apply_overrides(c, &mut page.items)?;
+            // C2: custom names on read.
+            crate::channeledit::apply_names(c, &mut page.items)?;
             Ok(page)
         })
         .await?;
@@ -248,6 +274,7 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
 }
 
 pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem>, RpcError> {
+    let vod = a.vod_filter()?;
     let hide = hide(&state).await?;
     let q = CatalogQuery {
         source_id: a.source_id,
@@ -257,6 +284,7 @@ pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem
         include_hidden: false,
         min_rating: a.min_rating,
         english_only: english_only(&state),
+        vod,
     };
     let page = state
         .db_call(move |c| super::query_named(c, &q, hide))
@@ -265,6 +293,7 @@ pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem
 }
 
 pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesItem>, RpcError> {
+    let vod = a.vod_filter()?;
     let hide = hide(&state).await?;
     let q = CatalogQuery {
         source_id: a.source_id,
@@ -274,6 +303,7 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
         include_hidden: false,
         min_rating: a.min_rating,
         english_only: english_only(&state),
+        vod,
     };
     let page = state
         .db_call(move |c| super::query_named(c, &q, hide))
@@ -301,6 +331,9 @@ pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError>
             // guide: M3U catch-up overrides are applied on read.
             if let AnyItem::Channel(ch) = &mut item {
                 crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
+                // C2: a hidden channel is still returned (the hidden-channels
+                // dialog and the player open it), with its custom name.
+                crate::channeledit::apply_names(c, std::slice::from_mut(ch))?;
             }
             Ok((Some(item), false))
         })
@@ -326,6 +359,7 @@ pub async fn channel_by_number(
                 .map(NamedRow::into_channel);
             // guide: M3U catch-up overrides are applied on read.
             crate::catchup::m3u::apply_overrides(c, ch.as_mut_slice())?;
+            crate::channeledit::apply_names(c, ch.as_mut_slice())?;
             Ok(ch)
         })
         .await?;
@@ -352,6 +386,8 @@ pub async fn neighbors(
             // guide: M3U catch-up overrides are applied on read.
             crate::catchup::m3u::apply_overrides(c, prev.as_mut_slice())?;
             crate::catchup::m3u::apply_overrides(c, next.as_mut_slice())?;
+            crate::channeledit::apply_names(c, prev.as_mut_slice())?;
+            crate::channeledit::apply_names(c, next.as_mut_slice())?;
             Ok((prev, next))
         })
         .await?;
@@ -389,6 +425,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                 .collect();
                 // guide: M3U catch-up overrides are applied on read.
                 crate::catchup::m3u::apply_overrides(c, &mut out.live)?;
+                crate::channeledit::apply_names(c, &mut out.live)?;
             }
             if wanted.contains(&ContentType::Movie) {
                 out.movies = super::search_named(
@@ -471,6 +508,7 @@ pub async fn all_live_channels(
                 .collect();
             // guide: M3U catch-up overrides are applied on read.
             crate::catchup::m3u::apply_overrides(c, &mut v)?;
+            crate::channeledit::apply_names(c, &mut v)?;
             Ok(v)
         })
         .await?;
@@ -492,4 +530,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("catalog.recentlyAdded", recently_added);
     r.add("catalog.sameTitle", same_title);
     r.add("catalog.allLiveChannels", all_live_channels);
+    // vod: `catalog.yearFacets` (Run 2 C4) is registered by the vodfilter
+    // module, which owns its handler.
+    super::vodfilter::register(r);
 }

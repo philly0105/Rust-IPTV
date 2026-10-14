@@ -7,6 +7,8 @@ export interface MenuItem {
   label: ReactNode;
   icon?: ReactNode;
   disabled?: boolean;
+  /** Key hint shown at the inline end, e.g. `F2`. Display only (hidden from the accessible name). */
+  hint?: ReactNode;
   onSelect(): void;
 }
 
@@ -96,7 +98,17 @@ export function ContextMenu({
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-start outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-40"
         >
           <span className="inline-flex size-4 items-center justify-center text-fg-muted">{it.icon}</span>
-          {it.label}
+          {it.hint ? (
+            <>
+              <span className="min-w-0 flex-1">{it.label}</span>
+              {/* Out of the accessible name: the item is named by its label alone. */}
+              <span className="ms-4 text-xs text-fg-subtle" aria-hidden>
+                {it.hint}
+              </span>
+            </>
+          ) : (
+            it.label
+          )}
         </button>
       ))}
     </div>

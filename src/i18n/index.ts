@@ -31,6 +31,11 @@ export const NAMESPACES = [
   'multiview',
   'parental',
   'mylist',
+  // Run 2: custom lists, channel editing, guide search, watch stats.
+  'lists',
+  'channels',
+  'guide',
+  'stats',
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -97,28 +102,30 @@ export const resources: Resource = buildResources(
   import.meta.glob('./en/*.json', { eager: true }) as Record<string, unknown>,
 );
 
-/** Lazy loaders for every non-English `./<folder>/<ns>.json`, one chunk each. */
-const lazyModules = import.meta.glob(['./*/*.json', '!./en/*.json']) as Record<string, () => Promise<unknown>>;
-
 const loading = new Map<string, Promise<void>>();
 
 /**
  * Loads every namespace of a language folder into i18next (under its BCP 47
  * key). Cached per folder; a failed load is forgotten so a later call retries.
- * English and unknown codes resolve immediately.
+ * English resolves immediately; unknown codes load nothing. The loader map
+ * itself is a lazy chunk (`lazyLocales.ts`), so it stays out of the entry.
  */
 export function loadLanguage(code: string): Promise<void> {
   if (code === DEFAULT_LANGUAGE) return Promise.resolve();
   const cached = loading.get(code);
   if (cached) return cached;
   const prefix = `./${code}/`;
-  const entries = Object.entries(lazyModules).filter(([path]) => path.startsWith(prefix));
-  const job = Promise.all(entries.map(async ([path, load]) => [path, await load()] as const)).then((mods) => {
-    const res = buildResources(Object.fromEntries(mods));
-    for (const [lng, bundles] of Object.entries(res)) {
-      for (const [ns, data] of Object.entries(bundles)) i18next.addResourceBundle(lng, ns, data, true, true);
-    }
-  });
+  const job = import('./lazyLocales')
+    .then(({ lazyModules }) => {
+      const entries = Object.entries(lazyModules).filter(([path]) => path.startsWith(prefix));
+      return Promise.all(entries.map(async ([path, load]) => [path, await load()] as const));
+    })
+    .then((mods) => {
+      const res = buildResources(Object.fromEntries(mods));
+      for (const [lng, bundles] of Object.entries(res)) {
+        for (const [ns, data] of Object.entries(bundles)) i18next.addResourceBundle(lng, ns, data, true, true);
+      }
+    });
   loading.set(code, job);
   job.catch(() => loading.delete(code));
   return job;

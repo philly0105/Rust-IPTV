@@ -7,14 +7,21 @@
 //! Readers: [`categories`], [`query`], [`get`], [`search`] plus the helpers
 //! behind the rpc commands (neighbors, channel by number, recently added,
 //! same title). The rpc readers take an optional parental [`Hide`] filter
-//! (`docs/architecture/parental.md`). See `docs/architecture/catalog.md`.
+//! (`docs/architecture/parental.md`). Channels hidden by a channel edit
+//! leave every reader and count, and custom names are applied by the rpc
+//! layer (`docs/architecture/channel-edits.md`). See
+//! `docs/architecture/catalog.md`.
 
 pub mod language;
 pub mod rpc;
 mod title;
+// vod: year range and "Hide watched" filters (Run 2 C4).
+pub mod vodfilter;
 
 pub use title::title_base;
+pub use vodfilter::VodFilter;
 
+use crate::channeledit;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ArchiveInfo, CatchupInfo, Category, Channel, ContentType, ItemRef, Page, PageQuery,
@@ -254,6 +261,10 @@ pub struct CatalogQuery {
     /// Drop items that are clearly in another language (`englishOnly`, see
     /// [`language`]); `total` counts what is left.
     pub english_only: bool,
+    // vod:
+    /// Year range and "Hide watched" of `catalog.movies` / `catalog.series`
+    /// (Run 2 C4); empty (the default) for channels.
+    pub vod: VodFilter,
 }
 
 // ---------------------------------------------------------------------------
@@ -597,10 +608,8 @@ impl<'c> CatalogWriter<'c> {
                     next_pos += 1;
                 }
             }
-            self.conn.execute(
-                "UPDATE categories SET item_count = (SELECT count(*) FROM items i WHERE i.source_id = categories.source_id AND i.content_type = categories.content_type AND i.category_id = categories.category_id) WHERE source_id = ?1 AND content_type = ?2",
-                params![self.source_id, ct.as_str()],
-            )?;
+            // C2: hidden channels (kept across the rewrite) leave the counts.
+            recount_categories(self.conn, &self.source_id, *ct)?;
         }
         for ct in &self.types {
             self.conn.execute(
@@ -644,8 +653,35 @@ pub fn replace_catalog(
     Ok(n)
 }
 
-/// Recomputes `source_counts` for one source (channels = live only; the
-/// radio count is read from `items` by the source readers).
+/// Recomputes `item_count` of every category of one source and content type
+/// from `items`, leaving out channels hidden by a channel edit (C2). Called
+/// by the catalog writer and after every change to the hidden set.
+pub fn recount_categories(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+) -> CoreResult<()> {
+    conn.prepare_cached(
+        "UPDATE categories SET item_count = (SELECT count(*) FROM items i WHERE i.source_id = categories.source_id AND i.content_type = categories.content_type AND i.category_id = categories.category_id) WHERE source_id = ?1 AND content_type = ?2",
+    )?
+    .execute(params![source_id, content_type.as_str()])?;
+    // A handful of hidden channels per category: subtract them rather than
+    // probe `channel_edits` once per item.
+    let hidden = channeledit::hidden_counts(conn, source_id, content_type)?;
+    if !hidden.is_empty() {
+        let mut stmt = conn.prepare_cached(
+            "UPDATE categories SET item_count = MAX(item_count - ?4, 0) WHERE source_id = ?1 AND content_type = ?2 AND category_id = ?3",
+        )?;
+        for (category_id, n) in &hidden {
+            stmt.execute(params![source_id, content_type.as_str(), category_id, n])?;
+        }
+    }
+    Ok(())
+}
+
+/// Recomputes `source_counts` for one source (channels = live only, without
+/// channels hidden by a channel edit; the radio count is read from `items`
+/// by the source readers).
 ///
 /// Stalker portals serve VOD and series live (only their categories are
 /// stored), so for stalker sources the movie and series counts are the portal
@@ -663,6 +699,10 @@ pub fn update_counts(conn: &Connection, source_id: &str) -> CoreResult<()> {
             let (ct, n) = row?;
             counts.insert(ct, n);
         }
+    }
+    let hidden_live = channeledit::hidden_count(conn, source_id, ContentType::Live)?;
+    if let Some(n) = counts.get_mut("live") {
+        *n = (*n - hidden_live).max(0);
     }
     let get = |k: &str| counts.get(k).copied().unwrap_or(0);
     let kind: Option<String> = conn
@@ -707,13 +747,14 @@ pub fn set_remote_counts(
     Ok(())
 }
 
-/// Number of radio stations of one source.
+/// Number of radio stations of one source, without hidden ones (C2).
 pub fn radio_count(conn: &Connection, source_id: &str) -> CoreResult<i64> {
-    Ok(conn.query_row(
+    let all: i64 = conn.query_row(
         "SELECT count(*) FROM items WHERE source_id = ?1 AND content_type = 'radio'",
         [source_id],
         |r| r.get(0),
-    )?)
+    )?;
+    Ok((all - channeledit::hidden_count(conn, source_id, ContentType::Radio)?).max(0))
 }
 
 /// Cached counts of one source: `(live channels, movies, series)`.
@@ -733,6 +774,11 @@ pub fn source_counts(conn: &Connection, source_id: &str) -> CoreResult<(i64, i64
 // ---------------------------------------------------------------------------
 
 /// Categories of one source and content type, ordered by position.
+///
+/// `item_count` leaves out channels hidden by a channel edit (C2; stored
+/// that way by [`recount_categories`]). Without `include_hidden`, a category
+/// whose channels are all hidden is dropped like a hidden category; the
+/// manage-categories view (`include_hidden`) still lists it, with 0.
 pub fn categories(
     conn: &Connection,
     source_id: &str,
@@ -756,7 +802,14 @@ pub fn categories(
             position: r.get(4)?,
         })
     })?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    let mut all: Vec<Category> = rows.collect::<Result<_, _>>()?;
+    if !include_hidden {
+        let emptied = channeledit::hidden_counts(conn, source_id, content_type)?;
+        if !emptied.is_empty() {
+            all.retain(|c| c.item_count > 0 || !emptied.contains_key(&c.id));
+        }
+    }
+    Ok(all)
 }
 
 /// [`categories`] for the English-only mode. Where the items are stored,
@@ -784,10 +837,12 @@ pub fn english_categories(
     }
     let mut counts: HashMap<String, i64> = HashMap::new();
     {
-        // An index-only walk of `idx_items_cat` with a rowid probe per row.
+        // An index-only walk of `idx_items_cat` with a rowid probe per row
+        // (two when channels are hidden, C2).
         let hidden = language::hidden_rowids(conn, source_id, content_type.as_str())?;
+        let edited = channeledit::scoped(conn, source_id, content_type, "?1", "?2")?;
         let mut stmt = conn.prepare_cached(&format!(
-            "SELECT i.category_id, count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2{hidden} GROUP BY i.category_id"
+            "SELECT i.category_id, count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2{hidden}{edited} GROUP BY i.category_id"
         ))?;
         let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
@@ -831,8 +886,14 @@ pub fn visible_categories(
         return Ok(all);
     };
     let locked = parental::filter::locked_categories(conn, source_id, content_type)?;
-    let removed =
+    let mut removed =
         parental::filter::locked_item_counts(conn, source_id, content_type, english_only)?;
+    // C2: a locked channel that is also hidden has already left `item_count`.
+    for (category_id, n) in locked_hidden_counts(conn, source_id, content_type, english_only)? {
+        if let Some(r) = removed.get_mut(&category_id) {
+            *r = (*r - n).max(0);
+        }
+    }
     all.retain_mut(|c| {
         if locked.contains(&c.id) || (hide.auto_adult && parental::is_adult_category(&c.name)) {
             return false;
@@ -846,6 +907,30 @@ pub fn visible_categories(
         }
     });
     Ok(all)
+}
+
+/// Channels both item-locked (parental) and hidden by a channel edit, per
+/// category id, counted like `parental::filter::locked_item_counts` (empty
+/// when the source hides nothing of that type).
+fn locked_hidden_counts(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    english_only: bool,
+) -> CoreResult<HashMap<String, i64>> {
+    if !channeledit::has_hidden(conn, source_id, content_type)? {
+        return Ok(HashMap::new());
+    }
+    let sql = if english_only {
+        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND non_english(i.title, c.name) = 0 AND EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = pl.source_id AND e.content_type = pl.content_type AND e.item_id = pl.target_id AND e.hidden = 1) GROUP BY i.category_id"
+    } else {
+        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = pl.source_id AND e.content_type = pl.content_type AND e.item_id = pl.target_id AND e.hidden = 1) GROUP BY i.category_id"
+    };
+    let mut stmt = conn.prepare_cached(sql)?;
+    let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Sets `hidden` on one category. NotFound when it does not exist.
@@ -1033,7 +1118,9 @@ pub fn query(conn: &Connection, q: &CatalogQuery) -> CoreResult<Page<ItemRow>> {
 }
 
 /// [`query`] with category names joined; `hide` drops parentally locked
-/// items from the page and the total.
+/// items from the page and the total. Channels hidden by a channel edit are
+/// always dropped, and a search also matches custom names (C2). Names are
+/// not applied here: the rpc layer calls [`channeledit::apply_names`].
 pub fn query_named(
     conn: &Connection,
     q: &CatalogQuery,
@@ -1066,6 +1153,10 @@ pub fn query_named(
         None => String::new(),
     };
     let english = english_scoped(conn, q.english_only, &q.source_id, q.content_type)?;
+    // C2: hidden channels leave the page and the total (also with
+    // `include_hidden`); custom names are searched too, when there are any.
+    let edited = channeledit::scoped(conn, &q.source_id, q.content_type, "?1", "?2")?;
+    let named = search.is_some() && channeledit::has_names(conn, &q.source_id, q.content_type)?;
     for (i, m) in attempts.iter().enumerate() {
         let mut where_sql = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
@@ -1086,25 +1177,46 @@ pub fn query_named(
             args.push(min.into());
             where_sql.push_str(&format!(" AND i.rating >= ?{}", args.len()));
         }
+        // vod: year range and "Hide watched" (C4; nothing for channels).
+        where_sql.push_str(&vodfilter::vod_filter_sql(&q.vod, &mut args));
         where_sql.push_str(english);
         if let Some(s) = search {
             match m {
                 Match::Fts => {
                     args.push(fts_query(s).unwrap_or_default().into());
-                    where_sql.push_str(&format!(
-                        " AND i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?{})",
-                        args.len()
-                    ));
+                    let fts = args.len();
+                    if named {
+                        // Provider names by word prefix, custom names by
+                        // substring (a few rows from `channel_edits`).
+                        args.push(like_pattern(s).into());
+                        where_sql.push_str(&format!(
+                            " AND i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?{fts} UNION {})",
+                            channeledit::named_rowids("?1", "?2", &format!("?{}", args.len()))
+                        ));
+                    } else {
+                        where_sql.push_str(&format!(
+                            " AND i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?{fts})"
+                        ));
+                    }
                 }
                 Match::Like => {
                     args.push(like_pattern(s).into());
-                    where_sql.push_str(&format!(" AND i.title LIKE ?{} ESCAPE '\\'", args.len()));
+                    let pat = args.len();
+                    if named {
+                        where_sql.push_str(&format!(
+                            " AND (i.title LIKE ?{pat} ESCAPE '\\' OR i.rowid IN ({}))",
+                            channeledit::named_rowids("?1", "?2", &format!("?{pat}"))
+                        ));
+                    } else {
+                        where_sql.push_str(&format!(" AND i.title LIKE ?{pat} ESCAPE '\\'"));
+                    }
                 }
             }
         }
         // After the search: SQLite tests index-covered terms in this order,
         // so the few FTS matches are found before the hidden-rowid probe.
         where_sql.push_str(&locked);
+        where_sql.push_str(&edited);
         // No join: it only adds the category name, which cannot change the
         // count (categories' key is unique), and the English-only clause
         // reads categories through its own sets.
@@ -1207,10 +1319,14 @@ pub fn search_named(
     let limit = limit.min(rpc::MAX_SEARCH_LIMIT);
     let fts = fts_query(text);
 
+    let channels = types.iter().any(|t| channeledit::is_channel_type(*t));
     let mut filter = String::from(" AND COALESCE(c.hidden, 0) = 0");
     filter.push_str(english_clause(english_only));
     if let Some(h) = hide {
         filter.push_str(&parental::filter::item_set(conn, h)?);
+    }
+    if channels {
+        filter.push_str(&channeledit::item_set(conn, source_id)?);
     }
     let mut base_args: Vec<SqlValue> = Vec::new();
     let placeholders: Vec<String> = types
@@ -1229,6 +1345,34 @@ pub fn search_named(
         filter.push_str(&format!(" AND i.source_id = ?{}", base_args.len() + 1));
     }
 
+    // C2: channels whose custom name contains the text come first (the
+    // user's own names), shortest name first; the provider-name matches
+    // follow without repeating them.
+    let custom = if channels && has_any_names(conn, source_id)? {
+        custom_name_matches(conn, text, &filter, &base_args, limit)?
+    } else {
+        Vec::new()
+    };
+    let merge = |rows: Vec<NamedRow>| -> Vec<NamedRow> {
+        if custom.is_empty() {
+            return rows;
+        }
+        let mut seen: HashSet<(String, ContentType, String)> = HashSet::new();
+        custom
+            .iter()
+            .cloned()
+            .chain(rows)
+            .filter(|n| {
+                seen.insert((
+                    n.row.source_id.clone(),
+                    n.row.content_type,
+                    n.row.item_id.clone(),
+                ))
+            })
+            .take(limit)
+            .collect()
+    };
+
     if let Some(fq) = &fts {
         let sql = format!(
             "{SELECT_NAMED} JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{filter} ORDER BY items_fts.rank, length(i.title), i.position LIMIT {limit}"
@@ -1240,19 +1384,70 @@ pub fn search_named(
             .query_map(rusqlite::params_from_iter(args.iter()), read_named)?
             .collect::<Result<Vec<_>, _>>()?;
         if !rows.is_empty() {
-            return Ok(rows);
+            return Ok(merge(rows));
         }
     }
     let sql = format!(
         "{SELECT_NAMED} WHERE i.title LIKE ?1 ESCAPE '\\'{filter} ORDER BY length(i.title), i.title COLLATE NOCASE LIMIT {limit}"
     );
     let mut args: Vec<SqlValue> = vec![like_pattern(text).into()];
-    args.extend(base_args);
+    args.extend(base_args.iter().cloned());
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(args.iter()), read_named)?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+    Ok(merge(rows))
+}
+
+/// True when a channel of `source_id` (any source when `None`) is renamed.
+fn has_any_names(conn: &Connection, source_id: Option<&str>) -> CoreResult<bool> {
+    match source_id {
+        Some(s) => Ok(channeledit::has_names(conn, s, ContentType::Live)?
+            || channeledit::has_names(conn, s, ContentType::Radio)?),
+        None => channeledit::any_names(conn),
+    }
+}
+
+/// Rows of [`search_named`] whose custom name contains `text`, under the
+/// same `filter` (its placeholders start at `?2`, as in the callers), shortest
+/// custom name first. The edits are the outer loop: a primary-key probe into
+/// `items` per renamed channel that matches.
+fn custom_name_matches(
+    conn: &Connection,
+    text: &str,
+    filter: &str,
+    base_args: &[SqlValue],
+    limit: usize,
+) -> CoreResult<Vec<NamedRow>> {
+    let sql = format!(
+        "{SELECT_NAMED} WHERE i.rowid IN (SELECT h.rowid FROM channel_edits e CROSS JOIN items h ON h.source_id = e.source_id AND h.content_type = e.content_type AND h.item_id = e.item_id WHERE e.name IS NOT NULL AND e.name LIKE ?1 ESCAPE '\\'){filter}"
+    );
+    let mut args: Vec<SqlValue> = vec![like_pattern(text).into()];
+    args.extend(base_args.iter().cloned());
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(args.iter()), read_named)?
+        .collect::<Result<Vec<_>, _>>()?;
+    // Sort by the custom name (the rows still carry the provider name).
+    let mut keyed: Vec<(String, NamedRow)> = Vec::with_capacity(rows.len());
+    for n in rows {
+        let r = ItemRef {
+            source_id: n.row.source_id.clone(),
+            content_type: n.row.content_type,
+            item_id: n.row.item_id.clone(),
+        };
+        let name = channeledit::custom_name(conn, &r)?.unwrap_or_else(|| n.row.title.clone());
+        keyed.push((name, n));
+    }
+    keyed.sort_by(|(a, x), (b, y)| {
+        a.chars()
+            .count()
+            .cmp(&b.chars().count())
+            .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
+            .then_with(|| x.row.position.cmp(&y.row.position))
+    });
+    keyed.truncate(limit);
+    Ok(keyed.into_iter().map(|(_, n)| n).collect())
 }
 
 /// First channel with `number` in playlist order, skipping hidden
@@ -1279,8 +1474,10 @@ pub fn channel_by_number(
         Some(h) => parental::filter::item_row(conn, h)?,
         None => String::new(),
     };
+    // C2: a hidden channel answers null (a correlated probe per candidate).
+    let edited = channeledit::item_row(conn, source_id)?;
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0{locked} ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0{locked}{edited} ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     Ok(stmt
@@ -1330,6 +1527,14 @@ pub fn neighbors(
             "?2",
         )?);
     }
+    // C2: zapping skips hidden channels.
+    scope.push_str(&channeledit::scoped(
+        conn,
+        &r.source_id,
+        r.content_type,
+        "?1",
+        "?2",
+    )?);
     let pos_idx = args.len() + 1;
     let id_idx = args.len() + 2;
     let pick = |cmp: &str, order: &str, wrap: bool| -> CoreResult<Option<NamedRow>> {
@@ -1438,8 +1643,10 @@ pub fn all_live_channels(
         Some(h) => parental::filter::scoped(conn, source_id, ContentType::Live, h, "?1", "'live'")?,
         None => String::new(),
     };
+    // C2: nothing at all while the source hides no channel.
+    let edited = channeledit::scoped(conn, source_id, ContentType::Live, "?1", "'live'")?;
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{}{locked} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{}{locked}{edited} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
         english_scoped(conn, english_only, source_id, ContentType::Live)?
     );
     let mut stmt = conn.prepare_cached(&sql)?;

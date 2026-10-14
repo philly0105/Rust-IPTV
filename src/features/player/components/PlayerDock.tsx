@@ -128,6 +128,19 @@ export function PlayerDock() {
   const channelPanelAvailable = !!source?.isLive && (settings?.fullscreenChannelPanel ?? true) && !!(zapContext ?? source?.ref);
 
   usePlaybackShortcuts({ channelPanelAvailable });
+  // Subtitle look (C6): player.css reads these variables in `video::cue`. The mapping loads
+  // on its own, outside the entry chunk; until then `video::cue` uses its fallbacks.
+  useEffect(() => {
+    if (!settings) return;
+    let live = true;
+    void import('../subtitles/style').then(({ cueCssVars, styleFromSettings }) => {
+      if (!live) return;
+      for (const [name, value] of Object.entries(cueCssVars(styleFromSettings(settings)))) host.style.setProperty(name, value);
+    });
+    return () => {
+      live = false;
+    };
+  }, [host, settings]);
 
   // One-time global bindings.
   useEffect(() => {

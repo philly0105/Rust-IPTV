@@ -184,5 +184,17 @@
   "previousEpisode": "الحلقة اللي قبل",
   "posterInMyList": "فالليستة ديالي",
   "shortcutMyList": "حفظ العنوان اللي عليه المؤشر فالليستة ديالي ولا حيدو منها",
-  "shortcutPosterMenu": "حل القائمة ديال العنوان اللي عليه المؤشر"
+  "shortcutPosterMenu": "حل القائمة ديال العنوان اللي عليه المؤشر",
+  "yearAll": "كاع السنوات",
+  "decade": "سنوات {{decade}}",
+  "yearFrom": "من",
+  "yearTo": "حتى",
+  "yearEmptyTitle": "ما كاين حتى عنوان من هاد السنوات",
+  "hideWatched": "خبّي اللي تشاف",
+  "watchedEmptyTitle": "شفتي كلشي هنا",
+  "showWatched": "ورّي اللي تشاف",
+  "markSeriesWatched": "علّم المسلسل بلي تشاف",
+  "markSeriesUnwatched": "علّم المسلسل بلي ما تشافش",
+  "shortcutWatched": "علّم بلي تشاف ولا ما تشافش",
+  "shortcutHideWatched": "خبّي ولا ورّي العناوين اللي تشافو"
 }

@@ -9,9 +9,10 @@ import { create } from 'zustand';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
-import type { EpgProgram, ItemRef, Recording, RecordingProgressEvent, Reminder } from '@/api/types';
+import type { EpgProgram, ItemRef, Recording, RecordingProgressEvent, RecordingRule, Reminder } from '@/api/types';
 import { useToast } from '@/ui';
 
+import { buildRuleIndex, type RuleKey } from './lib/rules';
 import { buildScheduleIndex, type ScheduleIndex } from './lib/schedule';
 
 const STALE = 30_000;
@@ -137,4 +138,85 @@ export function useScheduleActions() {
   );
 
   return useMemo(() => ({ toggleReminder, record, cancelRecording }), [toggleReminder, record, cancelRecording]);
+}
+
+// ---------------------------------------------------------------------------
+// Series recording rules (Run 2 C5)
+// ---------------------------------------------------------------------------
+
+export function useRecordingRules() {
+  return useRpcQuery('recordings.rules', undefined, { staleTime: STALE });
+}
+
+let lastRules: readonly RecordingRule[] | undefined;
+let lastRuleIndex: ReadonlyMap<RuleKey, RecordingRule> | undefined;
+
+/** Rules by channel and series title, shared by every guide cell (rebuilt when the list changes). */
+export function useRuleIndex(): ReadonlyMap<RuleKey, RecordingRule> {
+  const rules = useRecordingRules().data;
+  if (!lastRuleIndex || lastRules !== rules) {
+    lastRules = rules;
+    lastRuleIndex = buildRuleIndex(rules);
+  }
+  return lastRuleIndex;
+}
+
+/** Add, pause/resume and remove series rules, with their toasts. Each resolves true on success. */
+export function useRuleActions() {
+  const { t } = useTranslation('guide');
+  const { toast } = useToast();
+
+  const addRule = useCallback(
+    async (args: { ref: ItemRef; channelName: string; title: string }): Promise<boolean> => {
+      try {
+        const rule = await rpc('recordings.addRule', args);
+        toast({ variant: 'success', title: t('seriesAdded', { title: rule.title }), description: t('seriesAddedHint', { n: rule.upcoming }) });
+        return true;
+      } catch (e) {
+        const err = RpcError.from(e);
+        toast({
+          variant: 'error',
+          title: err.code === 'conflict' ? t('seriesExists', { title: args.title }) : t('seriesFailed'),
+          description: err.code === 'conflict' ? undefined : err.message,
+        });
+        return false;
+      } finally {
+        void invalidate('recordings.');
+      }
+    },
+    [t, toast],
+  );
+
+  const setRuleEnabled = useCallback(
+    async (rule: RecordingRule, enabled: boolean): Promise<boolean> => {
+      try {
+        await rpc('recordings.setRuleEnabled', { id: rule.id, enabled });
+        return true;
+      } catch (e) {
+        toast({ variant: 'error', title: t('ruleUpdateFailed'), description: message(e) });
+        return false;
+      } finally {
+        void invalidate('recordings.');
+      }
+    },
+    [t, toast],
+  );
+
+  const removeRule = useCallback(
+    async (rule: RecordingRule, cancelScheduled: boolean): Promise<boolean> => {
+      try {
+        await rpc('recordings.removeRule', { id: rule.id, keepScheduled: !cancelScheduled });
+        toast({ title: t('ruleRemoved', { title: rule.title }) });
+        return true;
+      } catch (e) {
+        toast({ variant: 'error', title: t('ruleUpdateFailed'), description: message(e) });
+        return false;
+      } finally {
+        void invalidate('recordings.');
+      }
+    },
+    [t, toast],
+  );
+
+  return useMemo(() => ({ addRule, setRuleEnabled, removeRule }), [addRule, setRuleEnabled, removeRule]);
 }

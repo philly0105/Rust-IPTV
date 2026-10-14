@@ -249,8 +249,12 @@ pub fn mark_not_modified(conn: &Connection, url: &str) -> CoreResult<()> {
 /// Removes staging rows of `url` (cascade deletes its staged channels and programmes).
 pub fn discard_staging(conn: &Connection, url: &str) -> CoreResult<()> {
     let key = staging_key(url);
-    conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [&key])?;
+    let deleted = conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [&key])?;
     conn.execute("DELETE FROM epg_sources WHERE url = ?1", [&key])?;
+    if deleted > 0 {
+        // A rebuild may have indexed them (guide search, C5).
+        super::search::invalidate_index(conn)?;
+    }
     Ok(())
 }
 
@@ -374,6 +378,8 @@ pub fn commit_staging(
         params![url, key],
     )?;
     tx.execute("DELETE FROM epg_sources WHERE url = ?1", [&key])?;
+    // The guide search index no longer matches (rebuilt after the swap, C5).
+    super::search::invalidate_index(&tx)?;
     tx.execute(
         "UPDATE epg_sources SET status = 'ok', error = NULL, last_fetch_at = ?2, channel_count = ?3,
          program_count = ?4, etag = ?5 WHERE url = ?1",
@@ -392,7 +398,9 @@ pub fn cleanup_on_boot(conn: &Connection) -> CoreResult<()> {
         rows.collect::<Result<_, _>>()?
     };
     for key in keys {
-        conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [&key])?;
+        if conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [&key])? > 0 {
+            super::search::invalidate_index(conn)?;
+        }
         conn.execute("DELETE FROM epg_sources WHERE url = ?1", [&key])?;
     }
     conn.execute(
@@ -412,6 +420,10 @@ pub fn prune(conn: &Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize> {
             .filter(|u| !keep.contains(u.as_str()))
             .collect()
     };
+    if !stale.is_empty() {
+        // Before the deletes: a failure part-way leaves the index marked stale.
+        super::search::invalidate_index(conn)?;
+    }
     for url in &stale {
         conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
         conn.execute("DELETE FROM epg_sources WHERE url = ?1", [url])?;
@@ -442,6 +454,7 @@ pub fn clear_all(conn: &mut Connection) -> CoreResult<usize> {
          program_count = 0 WHERE origin <> ?1",
         [STAGING_ORIGIN],
     )?;
+    super::search::invalidate_index(&tx)?;
     tx.commit()?;
     Ok(programs)
 }

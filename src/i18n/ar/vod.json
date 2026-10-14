@@ -220,5 +220,17 @@
   "previousEpisode": "الحلقة السابقة",
   "posterInMyList": "في قائمتي",
   "shortcutMyList": "حفظ العنوان المحدد في قائمتي أو إزالته منها",
-  "shortcutPosterMenu": "فتح قائمة العنوان المحدد"
+  "shortcutPosterMenu": "فتح قائمة العنوان المحدد",
+  "yearAll": "كل السنوات",
+  "decade": "عقد {{decade}}",
+  "yearFrom": "من",
+  "yearTo": "إلى",
+  "yearEmptyTitle": "لا توجد عناوين من هذه السنوات",
+  "hideWatched": "إخفاء ما تمت مشاهدته",
+  "watchedEmptyTitle": "شاهدت كل ما هنا",
+  "showWatched": "إظهار ما تمت مشاهدته",
+  "markSeriesWatched": "تعليم المسلسل كمُشاهَد",
+  "markSeriesUnwatched": "تعليم المسلسل كغير مُشاهَد",
+  "shortcutWatched": "تعليم كمُشاهَد أو كغير مُشاهَد",
+  "shortcutHideWatched": "إخفاء العناوين التي تمت مشاهدتها أو إظهارها"
 }

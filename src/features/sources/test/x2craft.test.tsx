@@ -48,8 +48,14 @@ describe('border contract (D23)', () => {
   it('decorative separators use the divider token, not the 3:1 component border', () => {
     // Single-sided edges, divide-* lists and 1px rules are separators. Three kept on purpose:
     // the modal category drawer's edge (a dialog surface), the EPG midnight marker and the
-    // interface-size scale's ticks in Appearance (both carry meaning).
-    const allowed = [/fixed inset-y-0 start-0 z-50 .*border-e border-border/, /midnight \? 'bg-border'/, /on \? 'bg-accent' : 'bg-border'/];
+    // interface-size scale's ticks in Appearance (both carry meaning). Run 2: the track of the
+    // decade chips' count meter in the movie filters (a bar, not a rule between regions).
+    const allowed = [
+      /fixed inset-y-0 start-0 z-50 .*border-e border-border/,
+      /midnight \? 'bg-border'/,
+      /on \? 'bg-accent' : 'bg-border'/,
+      /on \? 'bg-accent-fg\/25' : 'bg-border'/,
+    ];
     const offenders: string[] = [];
     for (const d of DIRS) {
       for (const file of sourceFiles(join(FEATURES, d))) {

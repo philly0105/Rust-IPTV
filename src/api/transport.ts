@@ -107,13 +107,24 @@ async function callDesktop(cmd: string, args: unknown): Promise<unknown> {
   }
 }
 
-async function callWeb(cmd: string, args: unknown): Promise<unknown> {
+/** Per-call transport options. */
+export interface CallOptions {
+  /**
+   * Web only: send with `keepalive`, so a call made while the page unloads
+   * (a `pagehide` flush) is not cancelled by the navigation. Small bodies only
+   * (64 kB across all keepalive requests in flight).
+   */
+  keepalive?: boolean;
+}
+
+async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/rpc/${encodeURIComponent(cmd)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args ?? null),
+      ...(opts?.keepalive ? { keepalive: true } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network request failed';
@@ -143,8 +154,8 @@ async function callWeb(cmd: string, args: unknown): Promise<unknown> {
 }
 
 /** Untyped call; prefer `rpc()`. */
-export function rpcRaw(cmd: string, args?: unknown): Promise<unknown> {
-  return isDesktop ? callDesktop(cmd, args) : callWeb(cmd, args);
+export function rpcRaw(cmd: string, args?: unknown, opts?: CallOptions): Promise<unknown> {
+  return isDesktop ? callDesktop(cmd, args) : callWeb(cmd, args, opts);
 }
 
 export function rpc<K extends RpcName>(

@@ -1,0 +1,12 @@
+1
+00:00:00,500 --> 00:00:30,000
+First subtitle line
+with a second line
+
+2
+00:00:30,500 --> 00:01:00,000
+<i>Second</i> cue &amp; more
+
+3
+00:01:00,500 --> 00:10:00,000
+Third cue

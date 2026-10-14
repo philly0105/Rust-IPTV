@@ -127,6 +127,7 @@ fn q(source: &str, ct: ContentType, page: PageQuery) -> CatalogQuery {
         include_hidden: false,
         min_rating: None,
         english_only: false,
+        vod: Default::default(),
     }
 }
 

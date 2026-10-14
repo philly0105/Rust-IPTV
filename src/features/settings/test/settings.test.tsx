@@ -145,11 +145,12 @@ describe('Language picker', () => {
     fireEvent.change(select, { target: { value: 'by' } });
     await waitFor(() => expect(rpcMock.callsOf('settings.update')).toEqual([{ patch: { language: 'by' } }]));
     // i18next runs on the BCP 47 tag, never on the folder name.
-    await waitFor(() => expect(i18n.language).toBe('be'));
+    // The first switch loads the locale chunks lazily; a loaded suite can take over 1 s.
+    await waitFor(() => expect(i18n.language).toBe('be'), { timeout: 5_000 });
     expect(document.documentElement.lang).toBe('be');
     fireEvent.change(select, { target: { value: 'zhtw' } });
     await waitFor(() => expect(rpcMock.callsOf('settings.update')[1]).toEqual({ patch: { language: 'zhtw' } }));
-    await waitFor(() => expect(i18n.language).toBe('zh-TW'));
+    await waitFor(() => expect(i18n.language).toBe('zh-TW'), { timeout: 5_000 });
     const { applyLanguage } = await import('@/i18n');
     await applyLanguage('en');
   });

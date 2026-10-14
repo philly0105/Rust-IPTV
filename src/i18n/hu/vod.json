@@ -184,5 +184,17 @@
   "previousEpisode": "Előző epizód",
   "posterInMyList": "A Saját listában",
   "shortcutMyList": "A kurzor alatti cím mentése a Saját listába vagy eltávolítása onnan",
-  "shortcutPosterMenu": "A kurzor alatti cím menüjének megnyitása"
+  "shortcutPosterMenu": "A kurzor alatti cím menüjének megnyitása",
+  "yearAll": "Minden év",
+  "decade": "Évtized: {{decade}}",
+  "yearFrom": "Ettől",
+  "yearTo": "Eddig",
+  "yearEmptyTitle": "Nincs cím ezekből az évekből",
+  "hideWatched": "Megtekintettek elrejtése",
+  "watchedEmptyTitle": "Itt már mindent megnézett",
+  "showWatched": "Megtekintettek megjelenítése",
+  "markSeriesWatched": "Sorozat megjelölése megtekintettként",
+  "markSeriesUnwatched": "Sorozat megjelölése nem megtekintettként",
+  "shortcutWatched": "Megjelölés megtekintettként vagy nem megtekintettként",
+  "shortcutHideWatched": "Megtekintett címek elrejtése vagy megjelenítése"
 }

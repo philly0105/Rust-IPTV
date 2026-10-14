@@ -171,6 +171,20 @@ impl ChannelDirectory {
         best.map(|(_, id)| id)
     }
 
+    /// Channel id whose normalized display name (or id) equals the
+    /// normalized `title`, without the similarity step of [`Self::find_name`]
+    /// (guide search maps hits this way, C5).
+    pub fn find_name_exact(&self, title: &str) -> Option<&str> {
+        if self.names.is_empty() {
+            return None;
+        }
+        let key = normalize_name(title);
+        if key.is_empty() {
+            return None;
+        }
+        self.names.get(&key).map(String::as_str)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
@@ -200,7 +214,7 @@ pub fn manual_mapping(conn: &Connection, r: &ItemRef) -> CoreResult<Option<Optio
         .optional()?)
 }
 
-fn has_programmes(conn: &Connection, channel_id: &str) -> CoreResult<bool> {
+pub(crate) fn has_programmes(conn: &Connection, channel_id: &str) -> CoreResult<bool> {
     Ok(conn
         .query_row(
             "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",

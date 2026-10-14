@@ -184,5 +184,17 @@
   "previousEpisode": "Önceki bölüm",
   "posterInMyList": "Listemde",
   "shortcutMyList": "İmlecin üzerindeki yapımı Listeme kaydet veya listeden çıkar",
-  "shortcutPosterMenu": "İmlecin üzerindeki yapımın menüsünü aç"
+  "shortcutPosterMenu": "İmlecin üzerindeki yapımın menüsünü aç",
+  "yearAll": "Tüm yıllar",
+  "decade": "{{decade}} yılları",
+  "yearFrom": "Başlangıç",
+  "yearTo": "Bitiş",
+  "yearEmptyTitle": "Bu yıllardan yapım yok",
+  "hideWatched": "İzlenenleri gizle",
+  "watchedEmptyTitle": "Buradaki her şeyi izlediniz",
+  "showWatched": "İzlenenleri göster",
+  "markSeriesWatched": "Diziyi izlendi olarak işaretle",
+  "markSeriesUnwatched": "Diziyi izlenmedi olarak işaretle",
+  "shortcutWatched": "İzlendi veya izlenmedi olarak işaretle",
+  "shortcutHideWatched": "İzlenen yapımları gizle veya göster"
 }

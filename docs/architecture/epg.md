@@ -7,13 +7,14 @@ Code: `crates/iptv-core/src/epg/`. Tests: `crates/iptv-core/tests/epg_parser.rs`
 | File | Role |
 | --- | --- |
 | `mod.rs` | Public async API behind the RPC commands. `init`. |
-| `rpc.rs` | Registers the eleven `epg.*` commands. |
+| `rpc.rs` | Registers the twelve `epg.*` commands. |
 | `fetch.rs` | Classifies a URL as remote or local, downloads remote bodies to a temp file, and opens a decoding reader (gzip, BOM). |
 | `xmltv.rs` | Streaming quick-xml parser and XMLTV date parsing. |
 | `store.rs` | `epg_sources` bookkeeping, the configured-URL merge, the staging writer, the atomic swap, pruning. |
 | `ingest.rs` | Refresh runtime: per-URL claim, global semaphore, progress events, boot scheduler. |
 | `resolve.rs` | Maps an item to an XMLTV channel id. |
 | `query.rs` | Programme reads (now/next, ranges, grid) and channel search. |
+| `search.rs` | Programme title search (`epg.search`) and its index; see [guide-search.md](guide-search.md). |
 
 ## Configured URLs (`epg.sources`)
 
@@ -102,6 +103,7 @@ The channel directory is cached and rebuilt when the generation counter changes,
 - Provider fallback: on Xtream sources, channels with no XMLTV programme airing show the panel's short EPG (`epg.shortEpg`, see xtream.md) in the ribbon, the channel rows' now line, the fullscreen channel panel and empty /epg grid rows. Fallback programmes are shifted by the guide offset like XMLTV ones and carry `fromProvider`, which the ribbon and the programme dialog show as "From the provider's guide". `settings.epgShortFallback` (default on, Settings > Guide) turns it off.
 - Archive browser (`/live/archive/:sourceId/:channelId`, lazy): a day picker over the channel's archive window and that day's programmes. The list comes from XMLTV (`epg.programs`); when XMLTV has nothing for the day it falls back to `catchup.programs` (Xtream archive table), then the short EPG for today; Stalker uses `stalker.epg` with `from` set to the day's start. Past programmes play through catch-up, the airing one offers "Watch from start", and future ones are disabled. Entry points: the live context menu, the fullscreen channel panel and the programme dialog's "Browse archive".
 - `epg.channelsSearch {query, limit?}` is a LIKE search on display name or id. Results are ordered by name prefix, then id prefix, then length. The default limit is 50 and the maximum is 500.
+- `epg.search {sourceId, query, from?, to?, limit?}` finds programmes by title on a source's channels. It is documented in [guide-search.md](guide-search.md), with the index it reads and the series rules the guide adds from a hit (recording.md).
 - `epg.setMapping {ref, epgChannelId|null}` and `epg.clearMapping {ref}` write or delete the manual row.
 - `epg.clearAll` deletes every programme and guide channel in one transaction and resets each URL to `idle` with zero counts, no error and no ETag (so the next refresh downloads the whole feed). URLs, enabled flags, `last_fetch_at` (so the scheduler does not re-download at once) and manual mappings are kept, as are the staging rows of a refresh that is running. It bumps the runtime generation and emits `epg.changed`.
 

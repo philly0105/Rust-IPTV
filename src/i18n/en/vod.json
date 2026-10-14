@@ -184,5 +184,17 @@
   "previousEpisode": "Previous episode",
   "posterInMyList": "In My List",
   "shortcutMyList": "Save the title under the cursor to My List, or take it off",
-  "shortcutPosterMenu": "Open the menu for the title under the cursor"
+  "shortcutPosterMenu": "Open the menu for the title under the cursor",
+  "yearAll": "All years",
+  "decade": "{{decade}}s",
+  "yearFrom": "From",
+  "yearTo": "To",
+  "yearEmptyTitle": "No titles from these years",
+  "hideWatched": "Hide watched",
+  "watchedEmptyTitle": "You have watched everything here",
+  "showWatched": "Show watched",
+  "markSeriesWatched": "Mark series watched",
+  "markSeriesUnwatched": "Mark series unwatched",
+  "shortcutWatched": "Mark watched or unwatched",
+  "shortcutHideWatched": "Hide or show watched titles"
 }

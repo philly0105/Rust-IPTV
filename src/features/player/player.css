@@ -44,12 +44,17 @@
   cursor: none;
 }
 
-/* hls.js native text tracks: readable captions over any frame. */
+/*
+ * Every text track (engine tracks and loaded files) in the user's subtitle style (C6): PlayerDock
+ * sets the variables on the host from settings.subtitle* (subtitles/style.ts cueCssVars). The
+ * fallbacks are the defaults: medium white text on a translucent box.
+ */
 [data-player-host] video::cue {
-  background: rgb(0 0 0 / 0.72);
-  color: #fff;
+  background: var(--sub-bg, rgb(0 0 0 / 0.72));
+  color: var(--sub-color, #fff);
+  text-shadow: var(--sub-shadow, none);
   font-family: var(--font-sans);
-  font-size: clamp(14px, 2.4vw, 28px);
+  font-size: calc(clamp(14px, 2.4vw, 28px) * var(--sub-scale, 1));
   line-height: 1.35;
 }
 

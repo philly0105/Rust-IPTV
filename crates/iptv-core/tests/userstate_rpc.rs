@@ -280,7 +280,8 @@ async fn positions_complete_series_and_continue_watching() {
     assert_eq!(got["durationSeconds"], 6000);
     assert_eq!(got["snapshot"]["title"], "Movie");
 
-    // >= 95 % of the duration deletes the row.
+    // Run 2 C2: >= 95 % of the duration keeps the row as the movie's
+    // watched mark, at the end of the movie, out of Continue Watching.
     call(
         &r,
         &s,
@@ -288,10 +289,13 @@ async fn positions_complete_series_and_continue_watching() {
         json!({"ref": movie, "positionSeconds": 5700, "durationSeconds": 6000}),
     )
     .await;
-    assert_eq!(
-        call(&r, &s, "positions.get", json!({"ref": movie})).await,
-        Value::Null
-    );
+    let done = call(&r, &s, "positions.get", json!({"ref": movie})).await;
+    assert_eq!(done["watched"], true, "{done}");
+    assert_eq!(done["positionSeconds"], 6000);
+    assert_eq!(done["durationSeconds"], 6000);
+    assert_eq!(done["snapshot"]["title"], "Movie", "the snapshot is kept");
+    let cw = call(&r, &s, "positions.continueWatching", Value::Null).await;
+    assert!(ids(&cw).is_empty(), "{cw}");
 
     // Series: one row per episode.
     let show = rf("s1", "series", "301");
@@ -503,10 +507,11 @@ async fn completion_uses_the_stored_duration_and_positions_are_bounded() {
         json!({"ref": movie, "positionSeconds": 3500}),
     )
     .await;
+    let done = call(&r, &s, "positions.get", json!({"ref": movie})).await;
     assert_eq!(
-        call(&r, &s, "positions.get", json!({"ref": movie})).await,
-        Value::Null,
-        "97% of the stored duration is complete"
+        (done["watched"].as_bool(), done["positionSeconds"].as_i64()),
+        (Some(true), Some(3600)),
+        "97% of the stored duration is complete (Run 2 C2: a watched row): {done}"
     );
     // Not complete yet: the stored duration is kept.
     call(
@@ -797,7 +802,7 @@ async fn an_older_dated_write_does_not_roll_back_newer_progress() {
     )
     .await;
 
-    // Older: partial, finished movie (would delete), finished episode (would mark watched).
+    // Older: partial, finished movie and finished episode (each would mark watched).
     let old = "2020-01-01T00:00:00Z";
     call(
         &r,

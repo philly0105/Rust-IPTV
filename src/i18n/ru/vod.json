@@ -202,5 +202,17 @@
   "previousEpisode": "Предыдущий эпизод",
   "posterInMyList": "В моём списке",
   "shortcutMyList": "Сохранить название под курсором в мой список или убрать его оттуда",
-  "shortcutPosterMenu": "Открыть меню названия под курсором"
+  "shortcutPosterMenu": "Открыть меню названия под курсором",
+  "yearAll": "Все годы",
+  "decade": "{{decade}}-е",
+  "yearFrom": "С",
+  "yearTo": "По",
+  "yearEmptyTitle": "Нет названий за эти годы",
+  "hideWatched": "Скрыть просмотренное",
+  "watchedEmptyTitle": "Вы посмотрели здесь всё",
+  "showWatched": "Показать просмотренное",
+  "markSeriesWatched": "Отметить сериал как просмотренный",
+  "markSeriesUnwatched": "Отметить сериал как непросмотренный",
+  "shortcutWatched": "Отметить как просмотренное или непросмотренное",
+  "shortcutHideWatched": "Скрыть или показать просмотренные названия"
 }

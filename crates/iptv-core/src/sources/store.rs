@@ -8,7 +8,7 @@ use crate::model::{
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
-const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio'), s.last_error_code, s.last_error_at FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
+const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio' AND NOT EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = i.source_id AND e.content_type = 'radio' AND e.item_id = i.item_id AND e.hidden = 1)), s.last_error_code, s.last_error_at FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
 
 /// Kind-specific configuration of a source.
 #[derive(Debug, Clone, PartialEq)]

@@ -7,6 +7,8 @@
 
 import type { MpvStats, PlayerSource } from '@/api/types';
 
+import { isExternalTrack } from './subtitles/tracks';
+
 export interface TrackOption {
   id: string;
   label: string;
@@ -278,7 +280,8 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
     const text: TrackOption[] = [];
     for (let i = 0; i < el.textTracks.length; i++) {
       const t = el.textTracks[i];
-      if (t && (t.kind === 'subtitles' || t.kind === 'captions')) {
+      // Loaded subtitle files are listed by the player as `ext:<n>` (subtitles/tracks.ts).
+      if (t && !isExternalTrack(t) && (t.kind === 'subtitles' || t.kind === 'captions')) {
         text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: t.mode === 'showing' });
       }
     }

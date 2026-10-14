@@ -6,7 +6,7 @@
 
 The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`) are thin hosts around `crates/iptv-core`. Each builds an `AppState` (SQLite pool, HTTP client, settings cache, event sink), registers every module's commands with `rpc::build_router()`, and starts module runtimes with `rpc::init_all()`. The UI calls `rpc(cmd, args)`: a Tauri command on desktop, `POST /api/rpc/{cmd}` on the server. Core events reach the UI as the Tauri `app-event` event or over the `/api/events` WebSocket, and `src/api/query.ts` turns them into TanStack Query invalidations.
 
-`init_all` order: the importers (m3u, xtream, stalker) register first, then `sources` schedules the startup refresh, then catalog, userstate, settings, backup (applies parked restores), epg, downloads, tmdb, remote, recording, parental (starts the unlock-expiry timer), watchlist, and player. A module that fails to start is logged and skipped.
+`init_all` order: the importers (m3u, xtream, stalker) register first, then `sources` schedules the startup refresh, then catalog, userstate, settings, backup (applies parked restores), epg, downloads, tmdb, remote, recording, parental (starts the unlock-expiry timer), watchlist, lists, stats (prunes the watch log), and player. A module that fails to start is logged and skipped.
 
 ## Core subsystems (`crates/iptv-core`)
 
@@ -29,7 +29,12 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | [remote-control.md](architecture/remote-control.md) | Loopback remote control server and page |
 | [players.md](architecture/players.md) | mpv/VLC detection, external launch, embedded mpv on Windows |
 | [failover.md](architecture/failover.md) | Smart reconnect of dropped streams and live failover to the same channel on another source (`live.alternates`) |
-| [recording.md](architecture/recording.md) | Guide reminders, scheduled recordings (headless mpv or HTTP copy), Scheduled page, My Videos > Recordings |
+| [recording.md](architecture/recording.md) | Guide reminders, scheduled recordings (headless mpv or HTTP copy), series recording rules, Scheduled page, My Videos > Recordings |
+| [channel-edits.md](architecture/channel-edits.md) | Hiding and renaming live and radio channels without touching the provider's data, the Hidden channels dialog, F2 and Shift+Delete |
+| [lists.md](architecture/lists.md) | Custom channel lists across sources: storage, ordering, unavailable items, zapping in list order, backup, the `/lists` pages and the Live sidebar section |
+| [guide-search.md](architecture/guide-search.md) | Guide programme search (`epg.search`): word matching, the window, the title index and its scan fallback |
+| [vod-browsing.md](architecture/vod-browsing.md) | Movie and series year filters, the watched tick, Hide watched and Mark series watched |
+| [stats.md](architecture/stats.md) | Watch stats: the player's reporter, the per-day watch log (90 days) and the `/stats` page |
 
 ## Hosts and UI
 
@@ -40,6 +45,7 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | [ui-shell.md](architecture/ui-shell.md) | Design tokens, UI primitives, shell layout, shortcuts, dashboard, i18n |
 | [appearance.md](architecture/appearance.md) | Accent colours, OLED black, density and UI scale, glass tokens, contrast checks, cards, the dashboard hero |
 | [multiview.md](architecture/multiview.md) | Multi-view wall at `/multiview`: store, layouts, independent tiles, sound, keyboard, connection-limit warning, parental gate |
+| [subtitles.md](architecture/subtitles.md) | Subtitle files (SRT, WebVTT, ASS/SSA) in the built-in player and embedded mpv, and the subtitle look settings |
 
 The rest of the desktop shell is small enough to read directly: `crates/iptv-tauri/src/lib.rs` (plugins, tray, `rpc` command, event bridge, asset scope for the downloads folder, deep links, exit cleanup), `crates/iptv-tauri/src/mpv_window.rs` (the child window embedded mpv draws into, see players.md), `crates/iptv-tauri/src/proxy.rs` (the loopback media proxy) and `crates/iptv-tauri/src/memory.rs` (idle memory trimming on Windows); desktop.md covers the last two.
 

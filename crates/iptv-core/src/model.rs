@@ -919,6 +919,51 @@ pub enum Density {
 }
 string_enum!(Density { Comfortable => "comfortable", Compact => "compact" });
 
+// subtitles:
+/// Subtitle text size (`Settings.subtitleSize`): 0.8, 1.0, 1.25 and 1.5 times
+/// the player's base size (mpv `sub-scale`, the built-in player's `::cue`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubtitleSize {
+    Small,
+    Medium,
+    Large,
+    Xlarge,
+}
+string_enum!(SubtitleSize {
+    Small => "small",
+    Medium => "medium",
+    Large => "large",
+    Xlarge => "xlarge",
+});
+
+/// Subtitle text colour (`Settings.subtitleColor`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubtitleColor {
+    White,
+    Yellow,
+    Cyan,
+    Green,
+}
+string_enum!(SubtitleColor {
+    White => "white",
+    Yellow => "yellow",
+    Cyan => "cyan",
+    Green => "green",
+});
+
+/// What sits behind subtitle text (`Settings.subtitleBackground`): a text
+/// shadow only, a translucent box, or an opaque black box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubtitleBackground {
+    Shadow,
+    Box,
+    Solid,
+}
+string_enum!(SubtitleBackground { Shadow => "shadow", Box => "box", Solid => "solid" });
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -1097,6 +1142,21 @@ pub struct Settings {
     pub ui_scale: f64,
     /// Now/next banner inside the player on every live channel change.
     pub zap_banner: bool,
+    // subtitles:
+    /// Subtitle text size in mpv and the built-in player.
+    pub subtitle_size: SubtitleSize,
+    /// Subtitle text colour.
+    pub subtitle_color: SubtitleColor,
+    /// Shadow, translucent box (today's `rgb(0 0 0 / .72)` cue background) or
+    /// opaque box behind subtitle text.
+    pub subtitle_background: SubtitleBackground,
+    /// Percent of the picture height subtitles are raised from the bottom, an
+    /// integer in [`crate::settings::SUBTITLE_POSITION_RANGE`] (0..=40).
+    pub subtitle_position: u32,
+    // vod:
+    /// The VOD grid's "Hide watched" toggle: `catalog.movies` / `catalog.series`
+    /// are asked with `hideWatched`.
+    pub vod_hide_watched: bool,
 }
 
 impl Default for Settings {
@@ -1156,6 +1216,13 @@ impl Default for Settings {
             density: Density::Comfortable,
             ui_scale: 1.0,
             zap_banner: true,
+            // subtitles:
+            subtitle_size: SubtitleSize::Medium,
+            subtitle_color: SubtitleColor::White,
+            subtitle_background: SubtitleBackground::Box,
+            subtitle_position: 0,
+            // vod:
+            vod_hide_watched: false,
         }
     }
 }
@@ -1617,6 +1684,25 @@ mod tests {
         assert_eq!(Accent::ALL.len(), 7);
         assert!("Amber".parse::<Accent>().is_err());
         assert!("cozy".parse::<Density>().is_err());
+        // subtitles:
+        for s in SubtitleSize::ALL {
+            assert_eq!(serde_json::to_value(s).unwrap(), s.as_str());
+            assert_eq!(s.as_str().parse::<SubtitleSize>().unwrap(), *s);
+        }
+        for c in SubtitleColor::ALL {
+            assert_eq!(serde_json::to_value(c).unwrap(), c.as_str());
+            assert_eq!(c.as_str().parse::<SubtitleColor>().unwrap(), *c);
+        }
+        for b in SubtitleBackground::ALL {
+            assert_eq!(serde_json::to_value(b).unwrap(), b.as_str());
+            assert_eq!(b.as_str().parse::<SubtitleBackground>().unwrap(), *b);
+        }
+        assert_eq!(
+            serde_json::to_value(SubtitleSize::Xlarge).unwrap(),
+            "xlarge",
+            "not kebab-split into x-large"
+        );
+        assert!("x-large".parse::<SubtitleSize>().is_err());
     }
 
     /// Matches the frontend DEFAULT_SETTINGS (`src/api/types.ts`).
@@ -1690,6 +1776,40 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert_eq!(round, saved);
         assert!(serde_json::from_str::<Settings>(r#"{"accent":"neon"}"#).is_err());
+    }
+
+    /// Run 2 C1: subtitle style and the VOD "Hide watched" toggle default
+    /// for JSON stored by older builds and keep saved values.
+    #[test]
+    fn subtitle_and_vod_defaults_and_round_trip() {
+        let old: Settings = serde_json::from_str(r#"{"theme":"dark","accent":"teal"}"#).unwrap();
+        assert_eq!(old.subtitle_size, SubtitleSize::Medium);
+        assert_eq!(old.subtitle_color, SubtitleColor::White);
+        assert_eq!(old.subtitle_background, SubtitleBackground::Box);
+        assert_eq!(old.subtitle_position, 0);
+        assert!(!old.vod_hide_watched);
+
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["subtitleSize"], "medium");
+        assert_eq!(v["subtitleColor"], "white");
+        assert_eq!(v["subtitleBackground"], "box");
+        assert_eq!(v["subtitlePosition"], 0);
+        assert_eq!(v["vodHideWatched"], false);
+
+        let saved: Settings = serde_json::from_str(
+            r#"{"subtitleSize":"xlarge","subtitleColor":"yellow","subtitleBackground":"solid","subtitlePosition":25,"vodHideWatched":true}"#,
+        )
+        .unwrap();
+        assert_eq!(saved.subtitle_size, SubtitleSize::Xlarge);
+        assert_eq!(saved.subtitle_color, SubtitleColor::Yellow);
+        assert_eq!(saved.subtitle_background, SubtitleBackground::Solid);
+        assert_eq!(saved.subtitle_position, 25);
+        assert!(saved.vod_hide_watched);
+        let round: Settings =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(round, saved);
+        assert!(serde_json::from_str::<Settings>(r#"{"subtitleColor":"red"}"#).is_err());
+        assert!(serde_json::from_str::<Settings>(r#"{"subtitlePosition":-1}"#).is_err());
     }
 
     /// Every key `backup.export` / `backup.import` carry is a real top-level
@@ -2011,6 +2131,26 @@ mod tests {
         assert_eq!(constant("UI_SCALE_MAX"), *range.end());
         assert_eq!(union("ParentalMode"), ["hide", "ask"]);
         assert_eq!(union("ParentalLockKind"), ["category", "item"]);
+        // subtitles:
+        let names = |all: Vec<&str>| -> Vec<String> { all.into_iter().map(String::from).collect() };
+        let sizes = names(SubtitleSize::ALL.iter().map(|v| v.as_str()).collect());
+        let colors = names(SubtitleColor::ALL.iter().map(|v| v.as_str()).collect());
+        let backgrounds = names(SubtitleBackground::ALL.iter().map(|v| v.as_str()).collect());
+        assert_eq!(union("SubtitleSize"), sizes);
+        assert_eq!(union("SubtitleColor"), colors);
+        assert_eq!(union("SubtitleBackground"), backgrounds);
+        assert_eq!(list("export const SUBTITLE_SIZES = ["), sizes);
+        assert_eq!(list("export const SUBTITLE_COLORS = ["), colors);
+        assert_eq!(list("export const SUBTITLE_BACKGROUNDS = ["), backgrounds);
+        let position = crate::settings::SUBTITLE_POSITION_RANGE;
+        assert_eq!(
+            constant("SUBTITLE_POSITION_MIN"),
+            f64::from(*position.start())
+        );
+        assert_eq!(
+            constant("SUBTITLE_POSITION_MAX"),
+            f64::from(*position.end())
+        );
     }
 
     #[test]

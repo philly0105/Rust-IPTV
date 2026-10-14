@@ -80,6 +80,6 @@ The importer then runs. If it fails, the source is kept with `last_error` set, a
 
 ## Counts
 
-`sources.list` and `sources.get` return `channelCount` (live only), `radioCount`, `movieCount` and `seriesCount`. All but `radioCount` come from the `source_counts` cache; `radioCount` is counted from `items`. `sources.counts {id}` returns the same four numbers.
+`sources.list` and `sources.get` return `channelCount` (live only), `radioCount`, `movieCount` and `seriesCount`. All but `radioCount` come from the `source_counts` cache; `radioCount` is counted from `items`, leaving out stations hidden with channel edits (channel-edits.md). `sources.counts {id}` returns the same four numbers.
 
 Stalker portals serve VOD and series live; only their categories are stored. For stalker sources `catalog::update_counts` therefore refreshes only `channelCount`, and `run_import` records the portal's movie and series totals from the importer's `ImportSummary` with `catalog::set_remote_counts`. A direct `stalker.sync` (not through `run_import`) must call `set_remote_counts` itself to refresh those two numbers.

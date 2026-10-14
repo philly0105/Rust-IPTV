@@ -1,17 +1,20 @@
 /**
  * Reminder and recording controls in the now/next ribbon header: a bell for
- * the shown programme, and a record menu (this programme, or the channel for
- * a fixed time).
+ * the shown programme, and a record menu (this programme, every airing of it
+ * as a series rule, or the channel for a fixed time).
  */
 
-import { Bell, BellRing, Circle, Square } from 'lucide-react';
+import { Bell, BellRing, Circle, Repeat, Square } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgProgram } from '@/api/types';
 import { IconButton, Menu, type MenuItem } from '@/ui';
 
-import { useRecordingCapabilities, useScheduleActions, useScheduleIndex } from '../hooks';
+import { useRecordingCapabilities, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
+import { canHaveRule, ruleFor } from '../lib/rules';
 import { CHANNEL_DURATIONS, markFor, programOptions } from '../lib/schedule';
+import { RecordSeriesDialog, RemoveRuleDialog, type SeriesTarget } from './SeriesDialogs';
 
 export interface RibbonActionsProps {
   channel: Channel;
@@ -23,7 +26,12 @@ export interface RibbonActionsProps {
 
 export function RibbonActions({ channel, channelName, program, now }: RibbonActionsProps) {
   const { t, i18n } = useTranslation('live');
+  const { t: tg } = useTranslation('guide');
   const index = useScheduleIndex();
+  const ruleIndex = useRuleIndex();
+  const rule = program ? ruleFor(ruleIndex, channel.ref, program.title) : undefined;
+  const [seriesTarget, setSeriesTarget] = useState<SeriesTarget | null>(null);
+  const [removing, setRemoving] = useState(false);
   const caps = useRecordingCapabilities();
   const actions = useScheduleActions();
   const mark = program ? markFor(index, channel.ref, program) : {};
@@ -53,6 +61,12 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
       icon: <Circle className="size-4 fill-live text-live" />,
       onSelect: () => void actions.record(target),
     });
+  }
+  if (rule) {
+    items.push({ id: 'series', label: tg('removeRuleFor', { title: rule.title }), icon: <Repeat className="size-4 text-live" />, onSelect: () => setRemoving(true) });
+  } else if (target && canRecord && canHaveRule(channel.ref, target.program.title)) {
+    const title = target.program.title;
+    items.push({ id: 'series', label: tg('recordSeriesOf', { title }), icon: <Repeat className="size-4" />, onSelect: () => setSeriesTarget({ ref: channel.ref, channelName, title }) });
   }
   if (!running) {
     if (items.length > 0) items.push({ id: 'sep', type: 'separator' });
@@ -87,6 +101,8 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
           trigger={<Circle className={`size-4 ${running ? 'fill-live text-live motion-safe:animate-pulse' : ''}`} aria-hidden />}
         />
       ) : null}
+      <RecordSeriesDialog target={seriesTarget} onClose={() => setSeriesTarget(null)} />
+      <RemoveRuleDialog rule={removing ? (rule ?? null) : null} onClose={() => setRemoving(false)} />
     </>
   );
 }

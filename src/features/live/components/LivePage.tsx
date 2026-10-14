@@ -23,6 +23,8 @@ import { itemKey, sameRef, type Category, type Channel, type ContentType, type E
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast } from '@/ui';
 import { PlayerStage, RadioPlayer, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
+import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
+import { ListsSidebarSection, useAddToListMenuItem, useAddToListShortcut } from '@/features/lists';
 import { channelInput } from '@/features/multiview/addChannel';
 import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
@@ -51,6 +53,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
 import { EpgRibbon } from './EpgRibbon';
+import { HiddenChannelsButton } from './HiddenChannelsButton';
 import { ManageCategoriesDialog } from './ManageCategoriesDialog';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
@@ -137,6 +140,18 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const activeChannel =
     listShown && reported.key === listKey && reported.channel?.ref.sourceId === sourceId ? reported.channel : undefined;
   const ribbonChannel = playingChannel ?? activeChannel;
+  // Run 2: the row that has DOM focus, read from the focus event so a key pressed right after
+  // an arrow acts on that row, not on the cursor channel that settles ACTIVE_SETTLE_MS later.
+  const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const rowIndexOf = (el: EventTarget | null): number | null => {
+    const row = el instanceof Element ? el.closest<HTMLElement>('[data-testid="channel-list"] [data-row-index]') : null;
+    const i = row ? Number(row.dataset.rowIndex) : NaN;
+    return Number.isInteger(i) ? i : null;
+  };
+  const focusedChannel = focusedRow !== null && listShown ? (paged.getChannel(focusedRow) ?? activeChannel) : undefined;
+  // C3 `l`: add the focused row to a list. C2 F2 / Shift+Delete: rename / hide it.
+  useAddToListShortcut(activeChannel, paged.getChannel);
+  useChannelEditShortcuts(focusedChannel);
   const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   const watchingArchive = !!playerSource && !playerSource.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   const offset = prefs.epgOffsetMinutes;
@@ -419,6 +434,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         }
       : null,
   );
+  // Run 2: "Add to list…" (C3) and Rename / Reset name / Hide (C2).
+  const addToListItem = useAddToListMenuItem(menuChannel);
+  const editItems = useChannelEditMenuItems(menuChannel);
   const groupLockItems = useLockMenuItems(
     groupMenu
       ? { sourceId, contentType, kind: 'category', targetId: groupMenu.category.id, name: groupMenu.category.name }
@@ -483,10 +501,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           ]
         : []),
       ...(ch.ref.contentType === 'live' ? [multiviewItem] : []),
+      ...(addToListItem ? [addToListItem] : []),
+      ...editItems,
       { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => setMapping(ch) },
       ...lockItems,
     ];
-  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate, multiviewItem, lockItems]);
+  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate, multiviewItem, addToListItem, editItems, lockItems]);
 
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
@@ -503,20 +523,27 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const hrefFor = (cid?: string) =>
     isRadio ? `/s/${encodeURIComponent(sourceId)}/radio${cid ? `?category=${encodeURIComponent(cid)}` : ''}` : `/s/${encodeURIComponent(sourceId)}/live${cid ? `/${encodeURIComponent(cid)}` : ''}`;
 
+  // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
   const sidebar = (
-    <CategorySidebar
-      categories={categories.data}
-      hiddenCount={hiddenCount}
-      isLoading={categories.isLoading}
-      error={categories.error}
-      onRetry={() => void categories.refetch()}
-      activeId={categoryId}
-      hrefFor={hrefFor}
-      onManage={() => setManageOpen(true)}
-      onNavigate={() => setDrawerOpen(false)}
-      totalLabel={isRadio ? t('allStations') : t('allChannels')}
-      onGroupMenu={parentalOn ? openGroupMenu : undefined}
-    />
+    <>
+      <ListsSidebarSection onNavigate={() => setDrawerOpen(false)} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <CategorySidebar
+          categories={categories.data}
+          hiddenCount={hiddenCount}
+          isLoading={categories.isLoading}
+          error={categories.error}
+          onRetry={() => void categories.refetch()}
+          activeId={categoryId}
+          hrefFor={hrefFor}
+          onManage={() => setManageOpen(true)}
+          onNavigate={() => setDrawerOpen(false)}
+          totalLabel={isRadio ? t('allStations') : t('allChannels')}
+          onGroupMenu={parentalOn ? openGroupMenu : undefined}
+        />
+      </div>
+      <HiddenChannelsButton sourceId={sourceId} />
+    </>
   );
 
   const listEmpty = paged.total === 0;
@@ -634,6 +661,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       {/* channel list: beside the stage from 768 px, under it on a phone */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
+        onFocus={(e) => setFocusedRow(rowIndexOf(e.target))}
+        onBlur={(e) => {
+          if (rowIndexOf(e.relatedTarget) === null) setFocusedRow(null);
+        }}
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">

@@ -179,6 +179,38 @@ test.describe('Watch stats', () => {
     expect(failures).toEqual([]);
   });
 
+  test('the 7-day axis keeps its weekday names apart in Arabic on a phone', async ({ page, request }) => {
+    // Arabic short weekday names are whole words ("الأربعاء"); at 390 px they used to overlap.
+    await seed(request);
+    await rpc(request, 'settings.update', { patch: { language: 'ar' } });
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto('/stats');
+      await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+      await expect(page.getByTestId('stats-chart')).toBeVisible();
+      await settle(page, 500);
+      const labels = await page.getByTestId('stats-day-labels').evaluate((row) =>
+        Array.from(row.children)
+          .filter((el) => el.getAttribute('data-testid') !== 'stats-day-probe' && el.textContent)
+          .map((el) => {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const box = range.getBoundingClientRect();
+            return { text: el.textContent ?? '', left: box.left, right: box.right };
+          })
+          .sort((a, b) => a.left - b.left),
+      );
+      expect(labels).toHaveLength(7);
+      for (let i = 1; i < labels.length; i++) {
+        const [prev, next] = [labels[i - 1]!, labels[i]!];
+        expect(next.left, `"${prev.text}" and "${next.text}" overlap`).toBeGreaterThanOrEqual(prev.right);
+      }
+      await expectNoHorizontalScroll(page, '/stats ar @ 390');
+    } finally {
+      await rpc(request, 'settings.update', { patch: { language: 'en' } });
+    }
+  });
+
   test('playing a film adds its time when playback stops', async ({ page, request }) => {
     await page.goto(`/s/${sourceId}/movie/${MOCK_FACTS.firstMovie.id}`);
     const detail = page.getByTestId('vod-movie-detail');

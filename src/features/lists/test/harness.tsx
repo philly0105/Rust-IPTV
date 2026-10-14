@@ -23,10 +23,12 @@ import common from '@/i18n/en/common.json';
 import lists from '@/i18n/en/lists.json';
 import live from '@/i18n/en/live.json';
 import shell from '@/i18n/en/shell.json';
+import { hasLineBreak, isBlankName, trimName } from '@/lib/names';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { useShellStore } from '@/shell/store';
 import { useToastStore } from '@/ui';
 
+import { resetPendingDeletes } from '../lib/pendingDeletes';
 import { useListsDialogs } from '../store';
 
 export const i18n = i18next.createInstance();
@@ -79,13 +81,15 @@ export interface CoreList {
   id: string;
   name: string;
   onDashboard: boolean;
-  items: { ref: ItemRef; title: string; available: boolean; channel?: Channel }[];
+  /** `hidden` mimics a channel the user hid (or parental controls hide): the core keeps it, `lists.items` leaves it out. */
+  items: { ref: ItemRef; title: string; available: boolean; channel?: Channel; hidden?: boolean }[];
 }
 
 /**
  * The core's lists in miniature. `lists` is in position order. Items keep
  * the channel they were added with; `available: false` mimics a channel the
  * provider dropped. `fail[cmd]` makes the next call of `cmd` throw that code.
+ * Refusals carry the core's own messages, which the UI matches.
  */
 export function installCore(rpc: RpcMock, initial: CoreList[] = []) {
   const core = {
@@ -106,19 +110,22 @@ export function installCore(rpc: RpcMock, initial: CoreList[] = []) {
     name: l.name,
     position,
     onDashboard: l.onDashboard,
-    itemCount: l.items.length,
+    itemCount: l.items.filter((i) => !i.hidden).length,
     createdAt: '2026-10-13T09:00:00.000Z',
     updatedAt: '2026-10-13T09:00:00.000Z',
   });
   const find = (id: string) => {
     const l = core.lists.find((x) => x.id === id);
-    if (!l) throw new RpcError('not_found', `list ${id} not found`);
+    if (!l) throw new RpcError('not_found', `list ${id} does not exist`);
     return l;
   };
   const checkName = (raw: string, except?: string) => {
-    const name = raw.trim();
-    if (!name || [...name].length > 60) throw new RpcError('invalid', 'list name must be 1 to 60 characters');
-    if (core.lists.some((l) => l.id !== except && l.name.toLowerCase() === name.toLowerCase())) throw new RpcError('conflict', 'a list with that name exists');
+    // lists::clean_name: trimmed, something visible, no control character or line break, 1..=60.
+    const name = trimName(raw);
+    if (isBlankName(name)) throw new RpcError('invalid', 'name is required');
+    if (hasLineBreak(name)) throw new RpcError('invalid', 'name must not contain control characters or line breaks');
+    if ([...name].length > 60) throw new RpcError('invalid', 'name must be at most 60 characters');
+    if (core.lists.some((l) => l.id !== except && l.name.toLowerCase() === name.toLowerCase())) throw new RpcError('conflict', `a list named "${name}" already exists`);
     return name;
   };
   const toItems = (items: RefWithSnapshot[] = []) =>
@@ -135,7 +142,7 @@ export function installCore(rpc: RpcMock, initial: CoreList[] = []) {
     guard('lists.create');
     const a = raw as { name: string; items?: RefWithSnapshot[] };
     const name = checkName(a.name);
-    if (core.lists.length >= 50) throw new RpcError('invalid', 'at most 50 lists');
+    if (core.lists.length >= 50) throw new RpcError('invalid', 'there can be at most 50 lists; remove one before creating another');
     const l: CoreList = { id: `new${core.nextId++}`, name, onDashboard: false, items: toItems(a.items) };
     core.lists.push(l);
     return view(l, core.lists.length - 1);
@@ -165,7 +172,7 @@ export function installCore(rpc: RpcMock, initial: CoreList[] = []) {
   rpc.handlers['lists.items'] = (raw) => {
     guard('lists.items');
     const l = find((raw as { id: string }).id);
-    return l.items.map(
+    return l.items.filter((i) => !i.hidden).map(
       (i, position): CustomListEntry => ({
         ref: i.ref,
         snapshot: { title: i.title, contentType: i.ref.contentType },
@@ -181,7 +188,9 @@ export function installCore(rpc: RpcMock, initial: CoreList[] = []) {
     const a = raw as { id: string; items: RefWithSnapshot[] };
     const l = find(a.id);
     const fresh = toItems(a.items).filter((i) => !l.items.some((x) => sameRef(x.ref, i.ref)));
-    if (l.items.length + fresh.length > 2000) throw new RpcError('invalid', 'a list holds at most 2000 items');
+    if (l.items.length + fresh.length > 2000) {
+      throw new RpcError('invalid', `a list holds at most 2000 channels; this one has ${l.items.length} and ${l.items.length + fresh.length - 2000} more do not fit`);
+    }
     l.items.push(...fresh);
     return { added: fresh.length };
   };
@@ -259,6 +268,7 @@ export function installDomStubs(): void {
 
 /** Clears the shared state a test may leave behind. */
 export function resetShared(): void {
+  resetPendingDeletes();
   queryClient.clear();
   queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity } });
   useToastStore.setState({ toasts: [] });

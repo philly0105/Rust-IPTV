@@ -359,9 +359,18 @@ export interface RpcMap {
   'catalog.movies': Cmd<VodListArgs, Page<VodItem>>;
   'catalog.series': Cmd<VodListArgs, Page<SeriesItem>>;
   // vod: Run 2 C4.
-  /** Years present (count per year, newest first) for the decade chips. Hidden categories excluded. */
-  'catalog.yearFacets': Cmd<{ sourceId: string; contentType: 'movie' | 'series'; categoryId?: string }, YearFacet[]>;
-  /** Shape by `ref.contentType`. */
+  /**
+   * Years present (count per year, newest first) for the decade chips. Hidden categories excluded;
+   * `hideWatched` counts only the titles "Hide watched" keeps (absent = false).
+   */
+  'catalog.yearFacets': Cmd<
+    { sourceId: string; contentType: 'movie' | 'series'; categoryId?: string; hideWatched?: boolean },
+    YearFacet[]
+  >;
+  /**
+   * Shape by `ref.contentType`. A ref missing from the catalog -> not_found. An item parental Hide mode locks ->
+   * not_found with `details: { parentalLocked: true }` (still in the catalog; see `isParentalLocked`).
+   */
   'catalog.item': Cmd<{ ref: ItemRef }, Channel | VodItem | SeriesItem>;
   'catalog.channelByNumber': Cmd<{ sourceId: string; number: number; contentType?: 'live' | 'radio' }, Channel | null>;
   /** Channel up/down inside the current list. */
@@ -664,7 +673,11 @@ export interface RpcMap {
   /** Non live/radio ref -> invalid; already present -> ignored; over 2000 -> invalid (nothing written). Appends at the end. */
   'lists.addItems': Cmd<{ id: string; items: RefWithSnapshot[] }, { added: number }>;
   'lists.removeItems': Cmd<{ id: string; refs: ItemRef[] }, void>;
-  /** Must be a permutation of the list's refs else invalid. */
+  /**
+   * Like watchlist.reorder: the listed refs fill the slots they held before, in the given
+   * order, and unlisted refs (e.g. hidden channels) keep theirs, so any subset works. A ref
+   * the list does not hold, or one listed twice -> invalid (nothing written).
+   */
   'lists.reorderItems': Cmd<{ id: string; refs: ItemRef[] }, void>;
   /** Ids of lists that hold the ref (menu check marks). */
   'lists.containing': Cmd<{ ref: ItemRef }, string[]>;

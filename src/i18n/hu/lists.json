@@ -47,7 +47,6 @@
   "deleteLabel": "{{list}} törlése",
   "deleted": "Lista törölve: {{list}}",
   "deleteFailed": "Nem sikerült törölni: {{list}}",
-  "undoFailed": "Nem sikerült visszaállítani: {{list}}",
   "editChannels": "Csatornák szerkesztése",
   "editChannelsOf": "Csatornák szerkesztése: {{list}}",
   "editTitle": "{{list}} szerkesztése",
@@ -62,6 +61,7 @@
   "unavailableHint": "A szolgáltató megszüntette ezeket a csatornákat. Visszakerülnek, ha újra kínálja őket.",
   "unavailableCount_one": "{{formatted}} nem elérhető csatorna",
   "unavailableCount_other": "{{formatted}} nem elérhető csatorna",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Ezek közül egyik csatorna sem érhető el most",
   "listEmptyTitle": "Ez a lista üres",
   "listEmptyHint": "Az Élő tévéadásban nyomja meg az L billentyűt egy csatornán, vagy kattintson rá a jobb gombbal, majd válassza a Hozzáadás listához lehetőséget.",
@@ -76,11 +76,10 @@
   "stageIdleHint": "Válasszon egy csatornát a listából.",
   "errorNameEmpty": "Adjon meg egy nevet.",
   "errorNameLong": "Legfeljebb {{max}} karaktert használjon.",
+  "errorNameControl": "A név nem tartalmazhat tabulátort vagy sortörést.",
   "errorDuplicate": "Már van ilyen nevű lista.",
   "errorTooMany": "Legfeljebb {{max}} listája lehet. Előbb töröljön egyet.",
   "errorListFull": "Egy lista legfeljebb {{max}} csatornát tartalmazhat.",
   "errorGone": "Ezt a listát törölték.",
-  "shortcutAddToList": "A kijelölt csatorna hozzáadása egy listához",
-  "shortcutMoveUp": "A kijelölt lista vagy csatorna mozgatása feljebb",
-  "shortcutMoveDown": "A kijelölt lista vagy csatorna mozgatása lejjebb"
+  "shortcutAddToList": "A kijelölt csatorna hozzáadása egy listához"
 }

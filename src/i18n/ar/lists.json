@@ -51,7 +51,6 @@
   "deleteLabel": "حذف {{list}}",
   "deleted": "تم حذف {{list}}",
   "deleteFailed": "تعذّر حذف {{list}}",
-  "undoFailed": "تعذّرت استعادة {{list}}",
   "editChannels": "تعديل القنوات",
   "editChannelsOf": "تعديل القنوات في {{list}}",
   "editTitle": "تعديل {{list}}",
@@ -70,6 +69,7 @@
   "unavailableCount_few": "{{formatted}} قنوات غير متاحة",
   "unavailableCount_many": "{{formatted}} قناة غير متاحة",
   "unavailableCount_other": "{{formatted}} قناة غير متاحة",
+  "countWithUnavailable": "{{channels}}، {{unavailable}}",
   "allUnavailableTitle": "لا تتوفر أي من هذه القنوات الآن",
   "listEmptyTitle": "هذه القائمة فارغة",
   "listEmptyHint": "في البث المباشر، اضغط L على قناة أو انقر عليها بزر الماوس الأيمن، ثم اختر إضافة إلى قائمة.",
@@ -84,11 +84,10 @@
   "stageIdleHint": "اختر قناة من القائمة.",
   "errorNameEmpty": "أدخل اسمًا.",
   "errorNameLong": "استخدم {{max}} حرفًا على الأكثر.",
+  "errorNameControl": "لا يمكن أن يحتوي الاسم على علامات جدولة أو فواصل أسطر.",
   "errorDuplicate": "توجد قائمة بهذا الاسم بالفعل.",
   "errorTooMany": "يمكنك إنشاء {{max}} قائمة على الأكثر. احذف واحدة أولًا.",
   "errorListFull": "تتسع القائمة لـ {{max}} قناة على الأكثر.",
   "errorGone": "حُذفت هذه القائمة.",
-  "shortcutAddToList": "إضافة القناة المحددة إلى قائمة",
-  "shortcutMoveUp": "نقل القائمة أو القناة المحددة لأعلى",
-  "shortcutMoveDown": "نقل القائمة أو القناة المحددة لأسفل"
+  "shortcutAddToList": "إضافة القناة المحددة إلى قائمة"
 }

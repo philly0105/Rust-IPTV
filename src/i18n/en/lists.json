@@ -47,7 +47,6 @@
   "deleteLabel": "Delete {{list}}",
   "deleted": "Deleted {{list}}",
   "deleteFailed": "Couldn't delete {{list}}",
-  "undoFailed": "Couldn't restore {{list}}",
   "editChannels": "Edit channels",
   "editChannelsOf": "Edit channels in {{list}}",
   "editTitle": "Edit {{list}}",
@@ -62,6 +61,7 @@
   "unavailableHint": "The provider dropped these channels. They return if it offers them again.",
   "unavailableCount_one": "{{formatted}} unavailable channel",
   "unavailableCount_other": "{{formatted}} unavailable channels",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "None of these channels are offered now",
   "listEmptyTitle": "This list is empty",
   "listEmptyHint": "In Live, press L on a channel or right-click it, then choose Add to list.",
@@ -76,11 +76,10 @@
   "stageIdleHint": "Pick a channel from the list.",
   "errorNameEmpty": "Enter a name.",
   "errorNameLong": "Use {{max}} characters or fewer.",
+  "errorNameControl": "Names can't contain tabs or line breaks.",
   "errorDuplicate": "A list with this name already exists.",
   "errorTooMany": "You can have up to {{max}} lists. Delete one first.",
   "errorListFull": "A list holds up to {{max}} channels.",
   "errorGone": "This list was deleted.",
-  "shortcutAddToList": "Add the focused channel to a list",
-  "shortcutMoveUp": "Move the focused list or channel up",
-  "shortcutMoveDown": "Move the focused list or channel down"
+  "shortcutAddToList": "Add the focused channel to a list"
 }

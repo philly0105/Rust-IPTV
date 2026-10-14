@@ -25,8 +25,22 @@ export const STATUS_KEY = rpcKey('parental.status');
 /** How long a cached status is trusted without an event (events keep it current). */
 export const STATUS_STALE_MS = 30_000;
 
-/** Lists the core filters in Hide mode (C2), refreshed when that filter changes. My List follows them. */
-export const FILTERED_PREFIXES = ['catalog.', 'favorites.', 'recent.', 'positions.', 'watchlist.'] as const;
+/**
+ * Reads the core filters in Hide mode (C2), refreshed when that filter
+ * changes: the catalog and user state (My List follows them), custom lists
+ * (`lists.list` counts, `lists.items`), guide search and watch stats.
+ * `epg.search` is exact so the other `epg.` queries are left alone.
+ */
+export const FILTERED_PREFIXES = [
+  'catalog.',
+  'favorites.',
+  'recent.',
+  'positions.',
+  'watchlist.',
+  'lists.',
+  'epg.search',
+  'stats.',
+] as const;
 
 /** Parental queries that follow every change (the lock list and lock checks). */
 const PARENTAL_PREFIXES = ['parental.locks', 'parental.check'] as const;
@@ -149,7 +163,7 @@ const EXPIRY_GRACE_MS = 750;
 /**
  * Subscribes to `parental.changed` (C2/C7): the payload becomes the cached
  * status, and the lock list, lock checks, and (when Hide mode's filter
- * changed) the catalog, favorites, recent and positions queries refetch.
+ * changed) every query in {@link FILTERED_PREFIXES} refetch.
  * Also asks the core again when a timed unlock runs out, in case the event
  * stream is down at that moment, and binds the lock-now shortcut. Mount once,
  * in the shell's effects.

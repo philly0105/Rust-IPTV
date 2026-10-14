@@ -105,13 +105,14 @@ pub fn year_facets(
     ct: ContentType,
     category_id: Option<&str>,
 ) -> CoreResult<Vec<(i32, i64)>> {
-    year_facets_filtered(conn, source_id, ct, category_id, false, None)
+    year_facets_filtered(conn, source_id, ct, category_id, false, None, false)
 }
 
 /// [`year_facets`] over the set the grid shows: `english_only` drops titles
-/// that are clearly in another language and `hide` parentally locked ones,
-/// exactly as `catalog.movies` / `catalog.series` do. Without a category,
-/// titles in hidden categories are left out.
+/// that are clearly in another language, `hide` parentally locked ones and
+/// `hide_watched` titles with an item-level watched row, exactly as
+/// `catalog.movies` / `catalog.series` do. Without a category, titles in
+/// hidden categories are left out.
 pub fn year_facets_filtered(
     conn: &Connection,
     source_id: &str,
@@ -119,6 +120,7 @@ pub fn year_facets_filtered(
     category_id: Option<&str>,
     english_only: bool,
     hide: Option<Hide>,
+    hide_watched: bool,
 ) -> CoreResult<Vec<(i32, i64)>> {
     let mut args: Vec<SqlValue> = vec![
         source_id.to_string().into(),
@@ -146,6 +148,14 @@ pub fn year_facets_filtered(
             conn, source_id, ct, h, "?1", "?2",
         )?);
     }
+    // The same NOT IN set `vod_filter_sql` appends for "Hide watched".
+    where_sql.push_str(&vod_filter_sql(
+        &VodFilter {
+            hide_watched,
+            ..VodFilter::default()
+        },
+        &mut args,
+    ));
     let sql = format!(
         "SELECT i.year, count(*) FROM items i WHERE {where_sql} GROUP BY i.year ORDER BY i.year DESC"
     );
@@ -171,6 +181,9 @@ struct YearFacetsArgs {
     content_type: ContentType,
     #[serde(default)]
     category_id: Option<String>,
+    /// Counts only titles "Hide watched" keeps in the grid.
+    #[serde(default)]
+    hide_watched: bool,
 }
 
 /// One `catalog.yearFacets` entry.
@@ -201,6 +214,7 @@ async fn year_facets_rpc(
                 a.category_id.as_deref().filter(|s| !s.is_empty()),
                 english,
                 hide,
+                a.hide_watched,
             )
         })
         .await?;

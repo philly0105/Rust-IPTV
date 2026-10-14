@@ -47,7 +47,6 @@
   "deleteLabel": "{{list}} verwijderen",
   "deleted": "{{list}} verwijderd",
   "deleteFailed": "Kan {{list}} niet verwijderen",
-  "undoFailed": "Kan {{list}} niet herstellen",
   "editChannels": "Kanalen bewerken",
   "editChannelsOf": "Kanalen in {{list}} bewerken",
   "editTitle": "{{list}} bewerken",
@@ -62,6 +61,7 @@
   "unavailableHint": "De provider heeft deze kanalen geschrapt. Ze komen terug als hij ze weer aanbiedt.",
   "unavailableCount_one": "{{formatted}} niet-beschikbaar kanaal",
   "unavailableCount_other": "{{formatted}} niet-beschikbare kanalen",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Geen van deze kanalen wordt nu aangeboden",
   "listEmptyTitle": "Deze lijst is leeg",
   "listEmptyHint": "Druk in Live tv op L op een kanaal of klik er met de rechtermuisknop op en kies Toevoegen aan lijst.",
@@ -76,11 +76,10 @@
   "stageIdleHint": "Kies een kanaal uit de lijst.",
   "errorNameEmpty": "Voer een naam in.",
   "errorNameLong": "Gebruik maximaal {{max}} tekens.",
+  "errorNameControl": "De naam mag geen tabs of regeleinden bevatten.",
   "errorDuplicate": "Er bestaat al een lijst met deze naam.",
   "errorTooMany": "Je kunt maximaal {{max}} lijsten hebben. Verwijder er eerst een.",
   "errorListFull": "Een lijst bevat maximaal {{max}} kanalen.",
   "errorGone": "Deze lijst is verwijderd.",
-  "shortcutAddToList": "Geselecteerd kanaal aan een lijst toevoegen",
-  "shortcutMoveUp": "Geselecteerde lijst of kanaal omhoog verplaatsen",
-  "shortcutMoveDown": "Geselecteerde lijst of kanaal omlaag verplaatsen"
+  "shortcutAddToList": "Geselecteerd kanaal aan een lijst toevoegen"
 }

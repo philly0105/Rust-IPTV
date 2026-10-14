@@ -275,11 +275,32 @@ describe('U4-fix3: watched state', () => {
     expect(callsOf('userstate.setWatched')[0]!.args).toEqual({ ref: mref, watched: true });
     cleanup();
 
-    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 754, durationSeconds: 9960, updatedAt: '2026-10-10T00:00:00Z', watched: true });
+    // Marked (or finished) with a known duration, the core stores the position at the end.
+    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 9960, durationSeconds: 9960, updatedAt: '2026-10-10T00:00:00Z', watched: true });
     renderAt('/s/src1/movie/m7', movieRoute);
     expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Resume/ })).toBeNull();
+  });
+
+  it('a watched movie replayed part-way offers Resume there and keeps its watched mark', async () => {
+    // Run 2: a partial replay of a watched movie keeps the flag and stores the replay position.
+    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 4980, durationSeconds: 9960, updatedAt: '2026-10-10T00:00:00Z', watched: true });
+    renderAt('/s/src1/movie/m7', movieRoute);
+    expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /Resume/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
+  });
+
+  it('isResumable: a watched movie resumes only between 5 % and 95 %; a watched episode never does', () => {
+    const movie = (positionSeconds: number, durationSeconds?: number) => ({ ref: mref, positionSeconds, durationSeconds, watched: true });
+    expect(isResumable(movie(4980, 9960))).toBe(true);
+    expect(isResumable(movie(498, 9960))).toBe(true); // exactly 5 %
+    expect(isResumable(movie(497, 9960))).toBe(false); // a few minutes into a rewatch is not worth a resume
+    expect(isResumable(movie(9462, 9960))).toBe(false); // 95 %: finished again
+    expect(isResumable(movie(4980))).toBe(false); // no duration: no share to check, the mark wins
+    expect(isResumable({ ref: sref, episodeId: 'e11', positionSeconds: 1500, durationSeconds: 3000, watched: true })).toBe(false);
+    expect(isResumable({ ref: sref, positionSeconds: 1500, durationSeconds: 3000, watched: true })).toBe(false);
   });
 
   it('checks watched episodes, marks one from its row menu, and marks a season', async () => {

@@ -1,7 +1,9 @@
 /**
  * /scheduled: guide reminders and scheduled recordings. Recordings writing now
- * come first (elapsed time, size, stop), then everything upcoming by day,
- * then recently finished recordings with their outcome.
+ * come first (elapsed time, size, stop), then the series recording rules when
+ * there are any, then everything upcoming by day, then recently finished
+ * recordings with their outcome. With no rules the rules panel (an empty
+ * state pointing at the guide) goes last.
  */
 
 import { AlarmClock, Bell, CalendarRange, Square, Trash2, X } from 'lucide-react';
@@ -34,6 +36,7 @@ import {
   useRecordingProgress,
   useRecordings,
   useReminders,
+  useRecordingRules,
   useScheduleActions,
   useToast,
   type UpcomingEntry,
@@ -80,6 +83,7 @@ export function ScheduledPage() {
   const reminders = useReminders();
   const recordings = useRecordings();
   const caps = useRecordingCapabilities();
+  const rules = useRecordingRules();
   const now = useClock(1000);
 
   const title = t('scheduledTitle');
@@ -89,8 +93,14 @@ export function ScheduledPage() {
   const subtitle = reminders.data && recordings.data ? t('scheduledSummary', { count: next.length + nowList.length }) : undefined;
   usePageHeader(title, subtitle);
 
-  const loading = reminders.isLoading || recordings.isLoading;
+  // Rules count toward loading, so the lists appear with the panel already in its place.
+  const loading = reminders.isLoading || recordings.isLoading || rules.isLoading;
   const error = reminders.error ?? recordings.error;
+  // Run 2 C5: series rules ("Record series" in the guide). Above Upcoming when there are any,
+  // since Upcoming and Finished grow with every airing; otherwise last (also while loading, so the
+  // panel's query keeps one observer: remounting it after an error would refetch and loop).
+  const rulesPanel = <RecordingRulesPanel />;
+  let rulesAboveUpcoming = false;
 
   let body;
   if (loading) {
@@ -121,6 +131,7 @@ export function ScheduledPage() {
       />
     );
   } else {
+    rulesAboveUpcoming = (rules.data?.length ?? 0) > 0;
     body = (
       <div className="flex flex-col gap-8">
         {nowList.length > 0 ? (
@@ -130,6 +141,7 @@ export function ScheduledPage() {
             ))}
           </Section>
         ) : null}
+        {rulesAboveUpcoming ? rulesPanel : null}
         <Section title={t('scheduledUpcoming')} count={next.length} testId="scheduled-upcoming">
           {next.length === 0 ? (
             <p className="px-4 py-6 text-sm text-fg-muted">{t('scheduledUpcomingEmpty')}</p>
@@ -164,8 +176,7 @@ export function ScheduledPage() {
         </p>
       ) : null}
       {body}
-      {/* Run 2 C5: series rules ("Record series" in the guide). */}
-      <RecordingRulesPanel />
+      {rulesAboveUpcoming ? null : rulesPanel}
     </div>
   );
 }

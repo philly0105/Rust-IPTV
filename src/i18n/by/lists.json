@@ -49,7 +49,6 @@
   "deleteLabel": "Выдаліць «{{list}}»",
   "deleted": "Спіс «{{list}}» выдалены",
   "deleteFailed": "Не ўдалося выдаліць «{{list}}»",
-  "undoFailed": "Не ўдалося аднавіць «{{list}}»",
   "editChannels": "Змяніць каналы",
   "editChannelsOf": "Змяніць каналы ў «{{list}}»",
   "editTitle": "Змяніць «{{list}}»",
@@ -66,6 +65,7 @@
   "unavailableCount_few": "{{formatted}} недаступныя каналы",
   "unavailableCount_many": "{{formatted}} недаступных каналаў",
   "unavailableCount_other": "{{formatted}} недаступнага канала",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Ніводны з гэтых каналаў зараз не прапануецца",
   "listEmptyTitle": "Гэты спіс пусты",
   "listEmptyHint": "У раздзеле «Прамы эфір» націсніце L на канале або пстрыкніце па ім правай кнопкай мышы, потым выберыце «Дадаць у спіс».",
@@ -80,11 +80,10 @@
   "stageIdleHint": "Выберыце канал са спіса.",
   "errorNameEmpty": "Увядзіце назву.",
   "errorNameLong": "Не больш за {{max}} сімвалаў.",
+  "errorNameControl": "Назва не можа змяшчаць табуляцыю або разрывы радкоў.",
   "errorDuplicate": "Спіс з такой назвай ужо ёсць.",
   "errorTooMany": "Можна мець не больш за {{max}} спісаў. Спачатку выдаліце адзін.",
   "errorListFull": "У спісе можа быць не больш за {{max}} каналаў.",
   "errorGone": "Гэты спіс выдалены.",
-  "shortcutAddToList": "Дадаць выбраны канал у спіс",
-  "shortcutMoveUp": "Перамясціць выбраны спіс або канал вышэй",
-  "shortcutMoveDown": "Перамясціць выбраны спіс або канал ніжэй"
+  "shortcutAddToList": "Дадаць выбраны канал у спіс"
 }

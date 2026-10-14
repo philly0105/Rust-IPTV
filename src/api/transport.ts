@@ -94,6 +94,16 @@ export function isCancelledRun(err: unknown): boolean {
   return sourceRunDetails(err)?.cancelled === true;
 }
 
+/**
+ * True when `catalog.item` answered `not_found` because parental Hide mode
+ * locks the item (`details.parentalLocked`), not because the provider dropped
+ * it. The item is still in the catalog.
+ */
+export function isParentalLocked(err: unknown): boolean {
+  const d = err instanceof RpcError ? err.details : isErrorPayload(err) ? err.details : undefined;
+  return typeof d === 'object' && d !== null && (d as Record<string, unknown>).parentalLocked === true;
+}
+
 /** True inside the Tauri webview. */
 export const isDesktop: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 

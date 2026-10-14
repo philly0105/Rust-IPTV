@@ -49,7 +49,6 @@
   "deleteLabel": "Удалить «{{list}}»",
   "deleted": "Список «{{list}}» удалён",
   "deleteFailed": "Не удалось удалить «{{list}}»",
-  "undoFailed": "Не удалось восстановить «{{list}}»",
   "editChannels": "Изменить каналы",
   "editChannelsOf": "Изменить каналы в «{{list}}»",
   "editTitle": "Изменить «{{list}}»",
@@ -66,6 +65,7 @@
   "unavailableCount_few": "{{formatted}} недоступных канала",
   "unavailableCount_many": "{{formatted}} недоступных каналов",
   "unavailableCount_other": "{{formatted}} недоступного канала",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Ни один из этих каналов сейчас не предлагается",
   "listEmptyTitle": "Этот список пуст",
   "listEmptyHint": "В разделе «Прямой эфир» нажмите L на канале или щёлкните по нему правой кнопкой мыши, затем выберите «Добавить в список».",
@@ -80,11 +80,10 @@
   "stageIdleHint": "Выберите канал из списка.",
   "errorNameEmpty": "Введите название.",
   "errorNameLong": "Не более {{max}} символов.",
+  "errorNameControl": "Название не может содержать табуляцию или переносы строк.",
   "errorDuplicate": "Список с таким названием уже есть.",
   "errorTooMany": "Можно создать не более {{max}} списков. Сначала удалите один.",
   "errorListFull": "В списке может быть не более {{max}} каналов.",
   "errorGone": "Этот список удалён.",
-  "shortcutAddToList": "Добавить выбранный канал в список",
-  "shortcutMoveUp": "Переместить выбранный список или канал вверх",
-  "shortcutMoveDown": "Переместить выбранный список или канал вниз"
+  "shortcutAddToList": "Добавить выбранный канал в список"
 }

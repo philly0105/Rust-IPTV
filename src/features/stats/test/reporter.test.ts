@@ -1,16 +1,23 @@
 // The playback reporter (contract C7) under fake timers: it counts wall time
 // only while the player store says `playing`, never in external mode, sends
-// `stats.record` every 30 s and whenever counting stops, caps sleep gaps, and
-// dates each flush with the local day.
+// `stats.record` every 30 s and whenever counting stops (including the
+// desktop quit), caps sleep gaps without losing a hidden page's throttled
+// ticks, and dates each flush with the local day.
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef, PlayerSource } from '@/api/types';
 
-const calls = vi.hoisted(() => ({ list: [] as { cmd: string; args: unknown; opts?: unknown }[], fail: false }));
+const calls = vi.hoisted(() => ({
+  list: [] as { cmd: string; args: unknown; opts?: unknown }[],
+  fail: false,
+  /** When set, every call stays pending until this settles. */
+  hold: null as Promise<void> | null,
+}));
 vi.mock('@/api/transport', async (importOriginal) => {
   const call = (cmd: string, args?: unknown, opts?: unknown) => {
     calls.list.push({ cmd, args, ...(opts ? { opts } : {}) });
+    if (calls.hold) return calls.hold.then(() => undefined);
     return calls.fail ? Promise.reject(new Error('core gone')) : Promise.resolve(undefined);
   };
   return { ...(await importOriginal<typeof import('@/api/transport')>()), rpc: call, rpcRaw: call, isDesktop: false };
@@ -18,7 +25,8 @@ vi.mock('@/api/transport', async (importOriginal) => {
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 
 const { usePlayerStore } = await import('@/features/player/store');
-const { FLUSH_MS, MAX_TITLE_CHARS, localDay, startWatchStatsReporter, useWatchStatsReporter } = await import('../reporter');
+const { QUIT_FLUSH_EVENT } = await import('@/api/window');
+const { FLUSH_MS, MAX_HIDDEN_GAP_MS, MAX_TITLE_CHARS, localDay, startWatchStatsReporter, useWatchStatsReporter } = await import('../reporter');
 
 interface Recorded {
   ref: ItemRef;
@@ -49,6 +57,19 @@ const set = (patch: Partial<ReturnType<typeof usePlayerStore.getState>>) => useP
 const play = (src: PlayerSource, mode: 'inline' | 'embedded-mpv' | 'external' | 'radio' = 'inline') => set({ source: src, mode, status: 'playing' });
 const wait = (ms: number) => vi.advanceTimersByTime(ms);
 
+/** Shows or hides the page the way a minimised window or a background tab does. */
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+/** The desktop quit (tray Quit, X, Alt+F4) as `flushBeforeQuit` raises it; returns what listeners handed over. */
+function quit(): Promise<unknown>[] {
+  const work: Promise<unknown>[] = [];
+  window.dispatchEvent(new CustomEvent(QUIT_FLUSH_EVENT, { detail: { waitUntil: (p: Promise<unknown>) => void work.push(p) } }));
+  return work;
+}
+
 let initial: ReturnType<typeof usePlayerStore.getState>;
 let stop: (() => void) | null = null;
 
@@ -59,11 +80,14 @@ beforeEach(() => {
   usePlayerStore.setState(initial, true);
   calls.list.length = 0;
   calls.fail = false;
+  calls.hold = null;
 });
 
 afterEach(() => {
   stop?.();
   stop = null;
+  // Back to jsdom's own visibility getter.
+  delete (document as { visibilityState?: unknown }).visibilityState;
   usePlayerStore.setState(initial, true);
   vi.useRealTimers();
 });
@@ -169,6 +193,45 @@ describe('watch stats reporter', () => {
     expect(total()).toBe(5);
   });
 
+  it('counts a hidden page in full though its timer wakes once a minute, but not a suspend', () => {
+    stop = startWatchStatsReporter();
+    // Embedded mpv plays outside the page, so the minimised window is silent and throttled.
+    play(source(FILM, 'Black Harbor'), 'embedded-mpv');
+    wait(2_000);
+    setVisibility('hidden');
+    for (let minute = 0; minute < 5; minute++) {
+      vi.setSystemTime(Date.now() + 59_000);
+      wait(1_000);
+    }
+    // Each throttled wake-up flushed what it counted: 2 s + 60 s, then a minute at a time.
+    expect(records().map((r) => r.seconds)).toEqual([62, 60, 60, 60, 60]);
+
+    // The machine sleeps for an hour while the window is minimised: one capped step.
+    vi.setSystemTime(Date.now() + 60 * 60_000);
+    wait(1_000);
+    expect(total()).toBe(304);
+
+    // Restored 45 s after the last wake-up: that hidden stretch counts too.
+    vi.setSystemTime(Date.now() + 45_000);
+    setVisibility('visible');
+    // Visible again: a gap over 2 s is a stall or a sleep again.
+    vi.setSystemTime(Date.now() + MAX_HIDDEN_GAP_MS / 2);
+    wait(1_000);
+    set({ status: 'paused' });
+    expect(total()).toBe(304 + 45 + 2);
+  });
+
+  it('treats a hidden gap longer than any throttling as a suspend', () => {
+    stop = startWatchStatsReporter();
+    play(source(NEWS, 'BBC One'), 'embedded-mpv');
+    setVisibility('hidden');
+    wait(3_000);
+    vi.setSystemTime(Date.now() + MAX_HIDDEN_GAP_MS);
+    wait(1_000);
+    set({ status: 'paused' });
+    expect(total()).toBe(3 + 2);
+  });
+
   it('dates each flush with the local day at flush time', () => {
     vi.setSystemTime(new Date(2026, 9, 14, 23, 59, 50));
     stop = startWatchStatsReporter();
@@ -229,6 +292,44 @@ describe('watch stats reporter', () => {
     window.dispatchEvent(new Event('pagehide'));
     expect(records().map((r) => r.seconds)).toEqual([4, 2]);
     expect(calls.list.filter((c) => c.cmd === 'stats.record').map((c) => c.opts)).toEqual([{ keepalive: true }, { keepalive: true }]);
+  });
+
+  it('flushes on the desktop quit and holds the quit until the send lands', async () => {
+    stop = startWatchStatsReporter();
+    play(source(FILM, 'Black Harbor'), 'embedded-mpv');
+    wait(6_400);
+    let land!: () => void;
+    calls.hold = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    const work = quit();
+    expect(records()).toEqual([{ ref: FILM, title: 'Black Harbor', seconds: 6, day: '2026-10-14' }]);
+    // A desktop call: Tauri IPC, no keepalive.
+    expect(calls.list.at(-1)?.opts).toBeUndefined();
+    expect(work).toHaveLength(1);
+    let settled = false;
+    void work[0]!.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    land();
+    await work[0];
+    expect(settled).toBe(true);
+  });
+
+  it('lets the quit go at once with nothing to send, and stops listening when stopped', () => {
+    stop = startWatchStatsReporter();
+    play(source(NEWS, 'BBC One'), 'embedded-mpv');
+    set({ status: 'paused' });
+    expect(quit()).toEqual([]);
+    set({ status: 'playing' });
+    wait(5_000);
+    stop();
+    stop = null;
+    expect(records().map((r) => r.seconds)).toEqual([5]);
+    expect(quit()).toEqual([]);
+    expect(records()).toHaveLength(1);
   });
 
   it('as a hook, starts on mount and flushes on unmount', () => {

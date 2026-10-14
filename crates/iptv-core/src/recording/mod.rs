@@ -632,7 +632,14 @@ pub async fn schedule(state: &Arc<AppState>, req: ScheduleRequest) -> CoreResult
         return Err(CoreError::invalid("This programme has already ended."));
     }
     let insert = row.clone();
-    let overlapping = state.db_call(move |c| insert_scheduled(c, &insert)).await?;
+    let overlapping = state
+        .db_call(move |c| {
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let overlapping = insert_scheduled(&tx, &insert)?;
+            tx.commit()?;
+            Ok(overlapping)
+        })
+        .await?;
     changed(state, EVENT_RECORDINGS_UPDATE);
     rt.wake.notify_one();
     let warning = connection_warning(state, &req.item_ref.source_id, overlapping).await;
@@ -647,7 +654,12 @@ pub async fn schedule(state: &Arc<AppState>, req: ScheduleRequest) -> CoreResult
 /// recording on the same channel at the same start (`Conflict`), then
 /// inserts `insert` and returns how many scheduled or running recordings
 /// of the source overlap it, itself included.
+///
+/// Call inside an IMMEDIATE transaction: the check and the insert must not
+/// interleave with another writer's (a manual schedule racing a rule), or
+/// both pass the check and one airing is recorded twice.
 fn insert_scheduled(c: &rusqlite::Connection, insert: &RecordingRow) -> CoreResult<i64> {
+    debug_assert!(!c.is_autocommit(), "insert_scheduled runs in a transaction");
     let all = store::recordings(c)?;
     let busy: Vec<&RecordingRow> = all
         .iter()
@@ -1447,11 +1459,16 @@ async fn maybe_rematch(state: &Arc<AppState>, rt: &Runtime, now: i64) {
 
 async fn rematch(state: &Arc<AppState>, now: i64) -> CoreResult<()> {
     let offset = i64::from(state.settings_snapshot().epg_offset_minutes) * 60;
-    let (reminders, recordings) = state
-        .db_call(|c| Ok((store::reminders(c)?, store::recordings(c)?)))
+    let (reminders, recordings, skips) = state
+        .db_call(move |c| {
+            Ok((
+                store::reminders(c)?,
+                store::recordings(c)?,
+                rules::skip_claims(c, now)?,
+            ))
+        })
         .await?;
     let mut reminders_changed = false;
-    let mut recordings_changed = false;
     for r in reminders
         .iter()
         .filter(|r| r.status == ReminderStatus::Pending && r.start_at > now)
@@ -1466,24 +1483,7 @@ async fn rematch(state: &Arc<AppState>, now: i64) -> CoreResult<()> {
             reminders_changed = true;
         }
     }
-    for r in recordings.iter().filter(|r| {
-        r.status == RecordingStatus::Scheduled
-            && r.kind == RecordingKind::Programme
-            && r.effective_start() > now
-    }) {
-        let Some(title) = r.title.as_deref() else {
-            continue;
-        };
-        if let Some((s, e)) =
-            find_moved(state, &r.item_ref, r.start_at, r.end_at, title, offset).await
-        {
-            let id = r.id.clone();
-            state
-                .db_call(move |c| store::set_recording_times(c, &id, s, e))
-                .await?;
-            recordings_changed = true;
-        }
-    }
+    let recordings_changed = rematch_recordings(state, now, offset, &recordings, skips).await?;
     if reminders_changed {
         changed(state, EVENT_REMINDERS_UPDATE);
     }
@@ -1491,6 +1491,198 @@ async fn rematch(state: &Arc<AppState>, now: i64) -> CoreResult<()> {
         changed(state, EVENT_RECORDINGS_UPDATE);
     }
     Ok(())
+}
+
+/// A stored airing the re-match follows on one channel.
+enum Followed<'a> {
+    /// A scheduled programme recording that has not started.
+    Row(&'a RecordingRow),
+    /// A series rule's cancelled airing ([`rules::SkipClaim`]).
+    Skip(&'a rules::SkipClaim),
+}
+
+impl Followed<'_> {
+    fn claim(&self) -> scheduler::Claim<'_> {
+        match self {
+            Followed::Row(r) => scheduler::Claim {
+                start: r.start_at,
+                end: r.end_at,
+                title: r.title.as_deref().unwrap_or_default(),
+            },
+            Followed::Skip(s) => scheduler::Claim {
+                start: s.start,
+                end: s.end,
+                title: &s.title,
+            },
+        }
+    }
+}
+
+/// One change the re-match makes.
+enum Rematched {
+    Move(String, i64, i64),
+    Drop(String),
+    MoveSkip(rules::SkipClaim, i64, i64),
+}
+
+/// Re-matches, channel by channel, the scheduled programme recordings and
+/// the series rules' cancelled airings against the guide
+/// ([`scheduler::follow`]):
+/// - an airing the guide moved is followed, but never onto a slot another
+///   recording of the channel already holds (one airing, one recording);
+/// - a cancelled rule airing moves too, so the rule does not schedule it
+///   again at its new time (C5: a cancelled airing is not re-created);
+/// - a rule-made recording whose airing is gone (the guide shows something
+///   else there, and no free airing of the title nearby) is deleted: it
+///   never started, and [`rules::materialise`] schedules what the rule
+///   still needs. A manual one stays where the user put it.
+///
+/// Returns whether anything changed.
+async fn rematch_recordings(
+    state: &Arc<AppState>,
+    now: i64,
+    offset: i64,
+    recordings: &[RecordingRow],
+    skips: Vec<rules::SkipClaim>,
+) -> CoreResult<bool> {
+    let mut channels: HashMap<&ItemRef, (HashSet<i64>, Vec<Followed<'_>>)> = HashMap::new();
+    for r in recordings.iter().filter(|r| {
+        r.kind == RecordingKind::Programme
+            && matches!(
+                r.status,
+                RecordingStatus::Scheduled | RecordingStatus::Recording
+            )
+    }) {
+        let (fixed, followed) = channels.entry(&r.item_ref).or_default();
+        let movable = r.status == RecordingStatus::Scheduled
+            && r.effective_start() > now
+            && r.title.as_deref().is_some_and(|t| !t.trim().is_empty());
+        if movable {
+            followed.push(Followed::Row(r));
+        } else {
+            fixed.insert(r.start_at);
+        }
+    }
+    for s in &skips {
+        channels
+            .entry(&s.item_ref)
+            .or_default()
+            .1
+            .push(Followed::Skip(s));
+    }
+    let mut changes = Vec::new();
+    for (item_ref, (fixed, mut followed)) in channels {
+        if followed.is_empty() {
+            continue;
+        }
+        followed.sort_by_key(|f| f.claim().start);
+        let claims: Vec<scheduler::Claim<'_>> = followed.iter().map(Followed::claim).collect();
+        let Some(slots) = guide_slots(state, item_ref, &claims, offset).await else {
+            continue;
+        };
+        let refs: Vec<scheduler::Slot<'_>> =
+            slots.iter().map(|(s, e, t)| (*s, *e, t.as_str())).collect();
+        let found = scheduler::follow(&claims, &refs, &fixed);
+        for ((f, c), hit) in followed.iter().zip(&claims).zip(found) {
+            match (f, hit) {
+                (Followed::Row(r), scheduler::Follow::At(s, e)) if (s, e) != (c.start, c.end) => {
+                    changes.push(Rematched::Move(r.id.clone(), s, e));
+                }
+                (Followed::Row(r), scheduler::Follow::Gone) if r.rule_id.is_some() => {
+                    changes.push(Rematched::Drop(r.id.clone()));
+                }
+                (Followed::Skip(k), scheduler::Follow::At(s, e)) if s != c.start => {
+                    changes.push(Rematched::MoveSkip((*k).clone(), s, e));
+                }
+                _ => {}
+            }
+        }
+    }
+    if changes.is_empty() {
+        return Ok(false);
+    }
+    state
+        .db_call(move |c| {
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let mut changed = false;
+            let mut moves = Vec::new();
+            for change in changes {
+                match change {
+                    Rematched::Move(id, s, e) => moves.push((id, s, e)),
+                    Rematched::Drop(id) => changed |= store::delete_scheduled(&tx, &id)?,
+                    Rematched::MoveSkip(k, s, e) => {
+                        rules::move_skip(&tx, &k, s, e)?;
+                        changed = true;
+                    }
+                }
+            }
+            // A move onto a start another row leaves in this pass succeeds
+            // once that row has moved; whatever is still refused stays put.
+            loop {
+                let before = moves.len();
+                let mut left = Vec::new();
+                for (id, s, e) in moves {
+                    if store::move_scheduled(&tx, &id, s, e)? {
+                        changed = true;
+                    } else {
+                        left.push((id, s, e));
+                    }
+                }
+                moves = left;
+                if moves.is_empty() || moves.len() == before {
+                    break;
+                }
+            }
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await
+}
+
+/// The guide's programmes of `r` around every claim, in display time, each
+/// once. `None` when the guide could not be read.
+async fn guide_slots(
+    state: &Arc<AppState>,
+    r: &ItemRef,
+    claims: &[scheduler::Claim<'_>],
+    offset: i64,
+) -> Option<Vec<(i64, i64, String)>> {
+    let mut seen: HashSet<(i64, i64, String)> = HashSet::new();
+    let mut out = Vec::new();
+    // Neighbouring claims share most of their window: one read per run of
+    // overlapping windows (each well under the guide's 31-day limit).
+    let mut windows: Vec<(i64, i64)> = Vec::new();
+    for c in claims {
+        let from = c.start - scheduler::REMATCH_WINDOW;
+        let to = c.end.max(c.start + 1) + scheduler::REMATCH_WINDOW;
+        match windows.last_mut() {
+            Some(w) if from <= w.1 && to - w.0 <= 7 * 86_400 => w.1 = w.1.max(to),
+            _ => windows.push((from, to)),
+        }
+    }
+    for (from, to) in windows {
+        let programs = crate::epg::programs(
+            state,
+            r.clone(),
+            &rfc3339(from - offset),
+            &rfc3339(to - offset),
+        )
+        .await
+        .ok()?;
+        for p in programs {
+            let (Ok(s), Ok(e)) = (
+                DateTime::parse_from_rfc3339(&p.start),
+                DateTime::parse_from_rfc3339(&p.end),
+            ) else {
+                continue;
+            };
+            let slot = (s.timestamp() + offset, e.timestamp() + offset, p.title);
+            if seen.insert(slot.clone()) {
+                out.push(slot);
+            }
+        }
+    }
+    Some(out)
 }
 
 async fn find_moved(

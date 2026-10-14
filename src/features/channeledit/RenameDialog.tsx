@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { RpcError } from '@/api/transport';
 import type { Channel } from '@/api/types';
+import { trimName } from '@/lib/names';
 import { Button, Dialog, Input, Skeleton, cn } from '@/ui';
 
 import { failureText, renameChannel, renamedToast } from './actions';
@@ -19,8 +20,9 @@ export interface RenameDialogProps {
  * Renames one channel or station (C2). The field starts with the name shown
  * now; the provider's name stays in view underneath with a one-click way back
  * to it. Clearing the field also goes back. Save checks the core's rules
- * first (1 to 120 characters after trimming) and sends nothing when the name
- * did not change; a refusal stays in the dialog, next to the field.
+ * first (1 to 120 characters after trimming, something visible, no control
+ * characters or line breaks) and sends nothing when the name did not change;
+ * a refusal stays in the dialog, next to the field.
  */
 export function RenameDialog({ channel, onClose }: RenameDialogProps) {
   const { t } = useTranslation('channels');
@@ -46,11 +48,17 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
     () => planRename(value, { current: channel.name, provider, renamed }),
     [value, channel.name, provider, renamed],
   );
-  const length = nameLength(value.trim());
+  const length = nameLength(trimName(value));
   const over = length > NAME_MAX;
   const invalidText =
-    plan.kind === 'invalid' ? (plan.reason === 'tooLong' ? t('nameTooLong', { max: NAME_MAX }) : t('nameEmpty')) : null;
-  // "Too long" shows as soon as it happens; "empty" only once Save was tried, not while retyping.
+    plan.kind !== 'invalid'
+      ? null
+      : plan.reason === 'tooLong'
+        ? t('nameTooLong', { max: NAME_MAX })
+        : plan.reason === 'control'
+          ? t('nameControl')
+          : t('nameEmpty');
+  // "Too long" shows as soon as it happens; "empty" and "control" only once Save was tried, not while retyping.
   const fieldError = failure ?? (over || touched ? invalidText : null);
   const radio = channel.ref.contentType === 'radio';
 
@@ -75,7 +83,7 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
       onClose();
     } catch (err) {
       const e = RpcError.from(err);
-      setFailure(e.code === 'invalid' ? e.message : `${t('renameFailed')}. ${failureText(err, t)}`);
+      setFailure(e.code === 'invalid' ? e.message : t('renameFailedReason', { message: failureText(err, t) }));
       setSaving(false);
       inputRef.current?.focus();
     }

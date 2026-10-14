@@ -2,7 +2,7 @@
 //! bounds on `catalog.movies` / `catalog.series` with NULL-year handling and
 //! validation, "Hide watched" with a `total` that counts the filtered set,
 //! `catalog.yearFacets` (hidden categories, categories, parental hide mode,
-//! junk years) and `positions.watchedContains` (item-level rows only, input
+//! "Hide watched", junk years) and `positions.watchedContains` (item-level rows only, input
 //! order, the 1..=500 limit). The filter SQL is also run on its own, so it is
 //! checked independently of the reader that appends it.
 
@@ -313,6 +313,51 @@ async fn an_unfinished_position_is_not_watched() {
 }
 
 #[tokio::test]
+async fn a_movie_finished_in_the_player_counts_as_watched() {
+    let a = app().await;
+    // 95 % of the duration, as the player saves it (no watched field).
+    a.call(
+        "positions.set",
+        json!({"ref": rf("s1", "movie", "m3"), "positionSeconds": 5700, "durationSeconds": 6000}),
+    )
+    .await;
+    assert_eq!(a.watched(vec![rf("s1", "movie", "m3")]).await, ["m3"]);
+    let page = a.movies(json!({"hideWatched": true})).await;
+    assert!(!ids(&page).contains(&"m3".to_string()), "{page}");
+    assert_eq!(page["total"], 7);
+}
+
+#[tokio::test]
+async fn replaying_part_of_a_watched_movie_keeps_it_watched() {
+    let a = app().await;
+    a.set_watched(rf("s1", "movie", "m3"), None, true).await;
+    // The player's saves while the film is replayed: past the first tick and
+    // well short of the end.
+    for at in [3, 600] {
+        a.call(
+            "positions.set",
+            json!({"ref": rf("s1", "movie", "m3"), "positionSeconds": at, "durationSeconds": 6000}),
+        )
+        .await;
+        assert_eq!(
+            a.watched(vec![rf("s1", "movie", "m3")]).await,
+            ["m3"],
+            "still ticked after a save at {at} s"
+        );
+        assert_eq!(a.movies(json!({"hideWatched": true})).await["total"], 7);
+    }
+    // It does not come back as a film to resume.
+    let cw = a
+        .call("positions.continueWatching", json!({"limit": 20}))
+        .await;
+    assert!(cw.as_array().unwrap().is_empty(), "{cw}");
+    // Unmarking it is the way back.
+    a.set_watched(rf("s1", "movie", "m3"), None, false).await;
+    assert!(a.watched(vec![rf("s1", "movie", "m3")]).await.is_empty());
+    assert_eq!(a.movies(json!({"hideWatched": true})).await["total"], 8);
+}
+
+#[tokio::test]
 async fn a_series_is_watched_only_when_marked_as_a_whole() {
     let a = app().await;
     // A watched episode does not make the series watched.
@@ -458,6 +503,59 @@ async fn year_facets_follow_parental_hide_mode() {
 }
 
 #[tokio::test]
+async fn year_facets_with_hide_watched_count_what_the_grid_shows() {
+    let a = app().await;
+    a.set_watched(rf("s1", "movie", "m3"), None, true).await;
+    a.set_watched(rf("s1", "movie", "m4"), None, true).await;
+    // The same item id on another source and a watched episode do not count.
+    a.set_watched(rf("s2", "movie", "m1"), None, true).await;
+    a.set_watched(rf("s1", "series", "sr2"), Some("e1"), true)
+        .await;
+
+    let hidden = a
+        .facets(json!({"sourceId": "s1", "contentType": "movie", "hideWatched": true}))
+        .await;
+    // m3 (1999) drops out of its year's count; m4 (2005) takes its year with it.
+    assert_eq!(hidden, [(2023, 1), (1999, 1), (1992, 1), (1985, 1)]);
+    let page = a
+        .movies(json!({"hideWatched": true, "yearFrom": 1999, "yearTo": 1999}))
+        .await;
+    assert_eq!(page["total"], 1, "the facet count matches the grid");
+
+    let drama = a
+        .facets(json!({"sourceId": "s1", "contentType": "movie", "categoryId": "c2", "hideWatched": true}))
+        .await;
+    assert!(drama.is_empty(), "{drama:?}");
+    let series = a
+        .facets(json!({"sourceId": "s1", "contentType": "series", "hideWatched": true}))
+        .await;
+    assert_eq!(series, [(2010, 1), (1999, 1)]);
+
+    // hideWatched false or absent keeps the old counts.
+    let all = [(2023, 1), (2005, 1), (1999, 2), (1992, 1), (1985, 1)];
+    assert_eq!(
+        a.facets(json!({"sourceId": "s1", "contentType": "movie", "hideWatched": false}))
+            .await,
+        all
+    );
+    assert_eq!(
+        a.facets(json!({"sourceId": "s1", "contentType": "movie"}))
+            .await,
+        all
+    );
+
+    // Not a boolean does not parse.
+    assert_eq!(
+        a.fail(
+            "catalog.yearFacets",
+            json!({"sourceId": "s1", "contentType": "movie", "hideWatched": "yes"})
+        )
+        .await,
+        RpcErrorCode::Invalid
+    );
+}
+
+#[tokio::test]
 async fn year_facets_reject_live_content() {
     let a = app().await;
     for ct in ["live", "radio"] {
@@ -481,6 +579,16 @@ async fn year_facets_function_matches_the_rpc() {
         .await
         .unwrap();
     assert_eq!(v, [(2023, 1), (2005, 1), (1999, 2), (1992, 1), (1985, 1)]);
+
+    a.set_watched(rf("s1", "movie", "m8"), None, true).await;
+    let v = a
+        .state
+        .db_call(|c| {
+            vodfilter::year_facets_filtered(c, "s1", ContentType::Movie, None, false, None, true)
+        })
+        .await
+        .unwrap();
+    assert_eq!(v, [(2023, 1), (2005, 1), (1999, 1), (1992, 1), (1985, 1)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -514,8 +622,8 @@ async fn watched_contains_answers_item_level_watched_rows_in_input_order() {
         "input order, duplicates collapsed"
     );
 
-    // A movie that is finished in the player counts once B1's finished-movie
-    // row lands; marking it is the guaranteed path and is covered above.
+    // The function behind the command; a movie finished in the player is
+    // covered by a_movie_finished_in_the_player_counts_as_watched.
     let set = a
         .state
         .db_call(|c| {

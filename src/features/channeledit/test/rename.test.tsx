@@ -122,6 +122,18 @@ describe('rename dialog', () => {
     expect(screen.getByTestId('channel-rename-dialog')).toBeTruthy();
   });
 
+  it('refuses a name of only invisible characters, and one with a line break, without a call', async () => {
+    await open();
+    type('\u{200B}\u{200F}\u{3164}');
+    fireEvent.click(save());
+    expect(await screen.findByText('Enter a name.')).toBeTruthy();
+    type('BBC\u{2028}One');
+    fireEvent.click(save());
+    expect(await screen.findByText('Remove line breaks and control characters.')).toBeTruthy();
+    expect(input().getAttribute('aria-invalid')).toBe('true');
+    expect(core.callsOf('channels.rename')).toHaveLength(0);
+  });
+
   it('flags a name over 120 characters at once and never sends it', async () => {
     await open();
     type('x'.repeat(121));

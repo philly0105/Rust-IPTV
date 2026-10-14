@@ -1,5 +1,7 @@
-//! `channels.*` RPC commands (Run 2 contract C2). Every successful write
-//! emits [`super::CHANGED_EVENT`] once per source it touched.
+//! `channels.*` RPC commands (Run 2 contract C2). A write that changes a
+//! row emits [`super::CHANGED_EVENT`] once per source it touched; a no-op
+//! (hiding a hidden channel, renaming to the current name, resetting a
+//! source with no edits) emits nothing.
 
 use super::ChannelEdit;
 use crate::error::RpcError;
@@ -71,18 +73,22 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("channels.rename", |state, a: RenameArgs| async move {
         let source_id = a.item_ref.source_id.clone();
-        let row = state
+        let (row, did) = state
             .db_call(move |c| super::rename(c, &a.item_ref, a.name.as_deref()))
             .await?;
-        changed(&state, &source_id);
+        if did {
+            changed(&state, &source_id);
+        }
         Ok::<Option<ChannelEdit>, RpcError>(row)
     });
     r.add("channels.reset", |state, a: SourceArgs| async move {
         let source_id = a.source_id.clone();
-        state
-            .db_call(move |c| super::reset(c, &a.source_id).map(|_| ()))
+        let n = state
+            .db_call(move |c| super::reset(c, &a.source_id))
             .await?;
-        changed(&state, &source_id);
+        if n > 0 {
+            changed(&state, &source_id);
+        }
         Ok::<(), RpcError>(())
     });
 }

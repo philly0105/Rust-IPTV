@@ -69,6 +69,8 @@ export const SleepMenu = lazyPart(() => import('./SleepTimer').then((m) => m.Sle
 export const SleepRowValue = lazyPart(() => import('./SleepTimer').then((m) => m.SleepRowValue));
 export const SleepTimerHost = lazyPart(() => import('./SleepTimer').then((m) => m.SleepTimerHost));
 export const SleepPrompt = lazyPart(() => import('./SleepTimer').then((m) => m.SleepPrompt));
+/** The radio stage (radio only; the Live page's radio view has its own static import). */
+export const RadioPlayer = lazyPart(() => import('./RadioPlayer').then((m) => m.RadioPlayer));
 /** The Subtitles submenu and its compact style view (C6). */
 export const SubtitleTrackMenu = lazyPart(() => import('./SubtitleMenu').then((m) => m.SubtitleTrackMenu));
 export const SubtitleStyleMenu = lazyPart(() => import('./SubtitleMenu').then((m) => m.SubtitleStyleMenu));

@@ -23,8 +23,14 @@ function options(page: Page): Locator {
   return grid(page).getByRole('listbox').getByRole('option');
 }
 
+/** The decade chips (exact: the From/To group is "Year range"). */
 function yearGroup(page: Page): Locator {
-  return page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year' });
+  return page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year', exact: true });
+}
+
+/** The From/To selects, outside the chip scroller. */
+function rangeGroup(page: Page): Locator {
+  return page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year range', exact: true });
 }
 
 async function openAllMovies(page: Page, search = ''): Promise<void> {
@@ -62,8 +68,8 @@ test.describe('VOD year filter and watched', () => {
     await expect(decade).toHaveAttribute('aria-pressed', 'true');
     await expect(options(page).first()).toBeVisible();
 
-    await group.getByRole('combobox', { name: 'From' }).selectOption('2026');
-    await group.getByRole('combobox', { name: 'To' }).selectOption('2026');
+    await rangeGroup(page).getByRole('combobox', { name: 'From' }).selectOption('2026');
+    await rangeGroup(page).getByRole('combobox', { name: 'To' }).selectOption('2026');
     await expect(page).toHaveURL(/[?&]yf=2026&yt=2026/);
     await expect(options(page).first()).toContainText('2026');
     const shown = await options(page).count();
@@ -71,7 +77,7 @@ test.describe('VOD year filter and watched', () => {
 
     // A reload keeps the range.
     await page.reload();
-    await expect(group.getByRole('combobox', { name: 'From' })).toHaveValue('2026');
+    await expect(rangeGroup(page).getByRole('combobox', { name: 'From' })).toHaveValue('2026');
     await group.getByRole('button', { name: 'All years' }).click();
     await expect(page).not.toHaveURL(/yf=/);
   });
@@ -121,6 +127,47 @@ test.describe('VOD year filter and watched', () => {
     await expect(cell.getByTestId('poster-watched')).toBeVisible();
     await page.keyboard.press('w');
     await expect(cell.getByTestId('poster-watched')).toHaveCount(0);
+  });
+
+  test('a long decade row scrolls on its own: From, To and Hide watched stay in view', async ({ page }) => {
+    // Eleven decades (1920s..2020s): more chips than one line holds at 1280 px, let alone at 390.
+    const facets = Array.from({ length: 11 }, (_, i) => ({ year: 2024 - i * 10, count: 2 + i }));
+    await page.route('**/rpc/catalog.yearFacets', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(facets) }),
+    );
+    for (const size of [
+      { width: 1280, height: 800 },
+      { width: 390, height: 844 },
+    ]) {
+      const at = `${size.width} px`;
+      await page.setViewportSize(size);
+      await openAllMovies(page);
+      const chips = yearGroup(page);
+      await expect(chips.getByRole('button', { name: /^1920s, / })).toBeAttached();
+      await settle(page);
+      const bar = (await page.getByTestId('vod-filter-bar').boundingBox())!;
+      for (const control of [
+        rangeGroup(page).getByRole('combobox', { name: 'From' }),
+        rangeGroup(page).getByRole('combobox', { name: 'To' }),
+        page.getByRole('switch', { name: 'Hide watched' }),
+      ]) {
+        await expect(control, at).toBeInViewport({ ratio: 1 });
+        const box = (await control.boundingBox())!;
+        expect(box.x, at).toBeGreaterThanOrEqual(bar.x);
+        expect(box.x + box.width, at).toBeLessThanOrEqual(bar.x + bar.width + 0.5);
+      }
+      // The chips that do not fit scroll inside their own row, and the edge hiding them fades.
+      const row = await chips.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return {
+          overflow: el.scrollWidth - el.clientWidth,
+          mask: style.getPropertyValue('mask-image') || style.getPropertyValue('-webkit-mask-image'),
+        };
+      });
+      if (size.width < 600) expect(row.overflow, at).toBeGreaterThan(1);
+      if (row.overflow > 1) expect(row.mask, at).toContain('linear-gradient');
+      await expectNoHorizontalScroll(page, `vod grid with 11 decades at ${at}`);
+    }
   });
 
   test('the filter row fits a phone without scrolling the page sideways', async ({ page }) => {

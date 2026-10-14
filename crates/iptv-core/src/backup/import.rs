@@ -93,9 +93,10 @@ fn unique_strings(values: &[Value]) -> Vec<String> {
         .collect()
 }
 
-/// Collects unmatched ids per category and renders compact warnings.
+/// Collects unmatched ids per category and renders compact warnings, then
+/// any other warnings of the entry ([`Misses::note`]) under the same label.
 #[derive(Default)]
-struct Misses(Vec<(&'static str, Vec<String>)>);
+struct Misses(Vec<(&'static str, Vec<String>)>, Vec<String>);
 
 impl Misses {
     fn add(&mut self, what: &'static str, id: impl Into<String>) {
@@ -103,6 +104,10 @@ impl Misses {
             Some((_, ids)) => ids.push(id.into()),
             None => self.0.push((what, vec![id.into()])),
         }
+    }
+    /// A warning that is not a "not found" list, shown as `{label}: {text}`.
+    fn note(&mut self, text: String) {
+        self.1.push(text);
     }
     fn flush(self, label: &str, warnings: &mut Vec<String>) {
         for (what, ids) in self.0 {
@@ -117,6 +122,9 @@ impl Misses {
                 ids.len(),
                 examples.join(", ")
             ));
+        }
+        for text in self.1 {
+            warnings.push(format!("{label}: {text}"));
         }
     }
 }
@@ -593,6 +601,10 @@ pub async fn import(
     // parental / watchlist: My List rows of every imported entry (applied in
     // one call at the end) and whether locks were added.
     let mut watch: Vec<crate::watchlist::WatchlistBackupEntry> = Vec::new();
+    // Run 2 (C8): series recording rules of every imported entry, restored
+    // once Replace has removed the old sources (their rules would otherwise
+    // count toward the rule limit).
+    let mut rule_sets: Vec<RuleSet> = Vec::new();
     let mut locks_added = false;
     // lists: backup `exportedId` -> the source id it was imported as, for the
     // custom lists restored after every entry (C8).
@@ -667,6 +679,7 @@ pub async fn import(
                 locks_added |=
                     restore_locks(state, &lock, &entry, &target_id, &mut report.warnings).await?;
                 collect_watchlist(&entry, &target_id, &mut watch, &mut report.warnings);
+                collect_rules(&entry, &target_id, &mut rule_sets, &mut report.warnings);
                 if !any_catalog {
                     any_catalog = has_catalog(state, &target_id).await?;
                 }
@@ -741,6 +754,7 @@ pub async fn import(
         locks_added = true;
     }
 
+    restore_recording_rules(state, &lock, rule_sets, &mut report.warnings).await?;
     restore_watchlist(state, &lock, watch, mode, &mut report.warnings).await?;
     restore_custom_lists(
         state,
@@ -912,6 +926,106 @@ fn collect_watchlist(
     }
 }
 
+/// Run 2 (C8): one imported entry's series recording rules.
+struct RuleSet {
+    source_id: String,
+    label: String,
+    rules: Vec<crate::recording::RecordingRuleBackup>,
+}
+
+/// Run 2 (C8): queues the entry's `tsrustRecordingRules` under source `id`.
+/// Rules do not need the catalog, so they are restored at import even when
+/// the rest of the entry's state is parked until its first refresh.
+fn collect_rules(entry: &Entry, id: &str, out: &mut Vec<RuleSet>, warnings: &mut Vec<String>) {
+    let mut misses = Misses::default();
+    let mut rules = Vec::new();
+    for (n, v) in arr(&entry.user_state, super::EXT_RECORDING_RULES)
+        .iter()
+        .enumerate()
+    {
+        match serde_json::from_value::<crate::recording::RecordingRuleBackup>(v.clone()) {
+            Ok(r) => rules.push(r),
+            Err(_) => misses.add("recording rules", format!("#{} (unreadable)", n + 1)),
+        }
+    }
+    misses.flush(&entry.label, warnings);
+    if !rules.is_empty() {
+        out.push(RuleSet {
+            source_id: id.to_string(),
+            label: entry.label.clone(),
+            rules,
+        });
+    }
+}
+
+/// Run 2 (C8): restores the queued recording rules once every entry is
+/// imported and, on Replace, the previous sources are removed: the rules of
+/// sources about to go must not count toward the rule limit
+/// ([`crate::recording::rules::MAX_RULES`]). Rules the limit leaves out are
+/// reported. One source's rules failing is rolled back on its own.
+async fn restore_recording_rules(
+    state: &Arc<AppState>,
+    lock: &tokio::sync::Mutex<()>,
+    sets: Vec<RuleSet>,
+    warnings: &mut Vec<String>,
+) -> CoreResult<()> {
+    use crate::recording::rules::{import_counted, RuleImport, MAX_RULES};
+    if sets.is_empty() {
+        return Ok(());
+    }
+    let _guard = lock.lock().await;
+    let (mut w, written) = state
+        .db_call(move |c| {
+            // One write transaction: the limit is counted against every rule
+            // there is, including ones a concurrent `addRule` writes.
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let mut w = Vec::new();
+            let mut done = RuleImport::default();
+            for set in &sets {
+                let exists = tx
+                    .prepare_cached("SELECT 1 FROM sources WHERE id = ?1")?
+                    .exists([&set.source_id])?;
+                if !exists {
+                    continue;
+                }
+                tx.execute_batch("SAVEPOINT backup_rules")?;
+                match import_counted(&tx, &set.source_id, &set.rules) {
+                    Ok(n) => {
+                        tx.execute_batch("RELEASE backup_rules")?;
+                        done.written += n.written;
+                        done.over_cap += n.over_cap;
+                    }
+                    Err(err) => {
+                        tx.execute_batch("ROLLBACK TO backup_rules; RELEASE backup_rules")?;
+                        tracing::warn!(source_id = %set.source_id, error = %err, "backup: could not restore the recording rules");
+                        let mut misses = Misses::default();
+                        misses.add("recording rules", format!("all {} ({err})", set.rules.len()));
+                        misses.flush(&set.label, &mut w);
+                    }
+                }
+            }
+            tx.commit()?;
+            if done.over_cap > 0 {
+                let (n, rules, were) = match done.over_cap {
+                    1 => (1, "rule", "was"),
+                    n => (n, "rules", "were"),
+                };
+                w.push(format!(
+                    "{n} series recording {rules} in the backup {were} not restored: you can keep up to {MAX_RULES} series rules"
+                ));
+            }
+            Ok((w, done.written))
+        })
+        .await?;
+    drop(_guard);
+    warnings.append(&mut w);
+    if written > 0 {
+        // The scheduler schedules their airings on its next re-match pass.
+        state.emit(crate::recording::EVENT_RECORDINGS_UPDATE, json!({}));
+    }
+    Ok(())
+}
+
 /// watchlist: stores the queued My List rows in one call (C3). Replace clears
 /// My List first, even when the backup has none; Merge adds to it.
 async fn restore_watchlist(
@@ -992,7 +1106,8 @@ fn parse_custom_lists(raw: &[Value]) -> (Vec<crate::lists::CustomListBackup>, us
 /// mapping each item's source through `source_map` (backup `exportedId` ->
 /// imported source id). Replace recreates the lists, clearing them even when
 /// the backup has none; Merge adds to lists of the same name. Items whose
-/// source is not in the backup are dropped with a warning.
+/// source is not in the backup are dropped with a warning; lists that could
+/// not be created (blank name, list limit) are counted in another.
 async fn restore_custom_lists(
     state: &Arc<AppState>,
     lock: &tokio::sync::Mutex<()>,
@@ -1027,7 +1142,7 @@ async fn restore_custom_lists(
     }
     misses.flush("Custom lists (source not in the backup)", warnings);
     let _guard = lock.lock().await;
-    let (written, dropped) = state
+    let out = state
         .db_call(move |c| {
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let out = crate::lists::import_lists(&tx, &lists, &source_map, replace)?;
@@ -1036,13 +1151,23 @@ async fn restore_custom_lists(
         })
         .await?;
     drop(_guard);
-    if dropped > unmapped {
+    if out.items_dropped > unmapped {
         warnings.push(format!(
             "Custom lists: {} channel(s) were not restored (their source is gone, they are not live or radio channels, or a list or the lists are full)",
-            dropped - unmapped
+            out.items_dropped - unmapped
         ));
     }
-    if written > 0 || replace {
+    if out.lists_dropped > 0 {
+        let (n, lists, were) = match out.lists_dropped {
+            1 => (1, "list", "was"),
+            n => (n, "lists", "were"),
+        };
+        warnings.push(format!(
+            "Custom lists: {n} {lists} in the backup {were} not restored (a blank name, or you can keep up to {} lists)",
+            crate::lists::MAX_LISTS
+        ));
+    }
+    if out.written > 0 || replace {
         state.emit(crate::lists::CHANGED_EVENT, json!({}));
     }
     Ok(())
@@ -1631,8 +1756,9 @@ fn apply_tsrust_state(
             misses.add("hidden categories", cat);
         }
     }
-    // Run 2 (C8): channel edits, recording rules and the watch log. Keyed by
-    // catalog id like the rest, but they do not need the item in the catalog.
+    // Run 2 (C8): channel edits and the watch log. Keyed by catalog id like
+    // the rest, but they do not need the item in the catalog. Recording
+    // rules are restored apart, after the import ([`restore_recording_rules`]).
     apply_run2_ext(
         conn,
         id,
@@ -1642,16 +1768,7 @@ fn apply_tsrust_state(
         crate::channeledit::import_edits,
         misses,
     )?;
-    apply_run2_ext(
-        conn,
-        id,
-        us,
-        super::EXT_RECORDING_RULES,
-        "recording rules",
-        crate::recording::import_rules,
-        misses,
-    )?;
-    apply_run2_ext(
+    let log = apply_run2_ext(
         conn,
         id,
         us,
@@ -1660,6 +1777,16 @@ fn apply_tsrust_state(
         crate::stats::import_log,
         misses,
     )?;
+    if let Some(n) = log.map(|l| l.skipped).filter(|&n| n > 0) {
+        let (entries, were) = match n {
+            1 => ("entry", "was"),
+            _ => ("entries", "were"),
+        };
+        misses.note(format!(
+            "{n} watch history {entries} in the backup {were} not restored (an unreadable date or one outside the last {} days, no title or item id, or no time watched)",
+            crate::stats::RETENTION_DAYS
+        ));
+    }
     Ok(())
 }
 
@@ -1667,19 +1794,20 @@ fn apply_tsrust_state(
 /// rows and stores them under source `id` with that module's import
 /// function. An unreadable row is skipped; a store that fails is rolled back
 /// on its own (a savepoint), so neither costs the rest of the entry's state.
-/// Both are reported through `misses`.
-fn apply_run2_ext<T: serde::de::DeserializeOwned>(
+/// Both are reported through `misses`. Returns what the store returned;
+/// `None` when it did not run or failed.
+fn apply_run2_ext<T: serde::de::DeserializeOwned, R>(
     conn: &Connection,
     id: &str,
     us: &Value,
     key: &str,
     what: &'static str,
-    store: fn(&Connection, &str, &[T]) -> CoreResult<usize>,
+    store: fn(&Connection, &str, &[T]) -> CoreResult<R>,
     misses: &mut Misses,
-) -> CoreResult<()> {
+) -> CoreResult<Option<R>> {
     let raw = arr(us, key);
     if raw.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let mut rows = Vec::with_capacity(raw.len());
     for (n, v) in raw.iter().enumerate() {
@@ -1689,18 +1817,21 @@ fn apply_run2_ext<T: serde::de::DeserializeOwned>(
         }
     }
     if rows.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     conn.execute_batch("SAVEPOINT backup_run2_ext")?;
     match store(conn, id, &rows) {
-        Ok(_) => conn.execute_batch("RELEASE backup_run2_ext")?,
+        Ok(out) => {
+            conn.execute_batch("RELEASE backup_run2_ext")?;
+            Ok(Some(out))
+        }
         Err(err) => {
             conn.execute_batch("ROLLBACK TO backup_run2_ext; RELEASE backup_run2_ext")?;
             tracing::warn!(source_id = %id, key, error = %err, "backup: could not restore an extension");
             misses.add(what, format!("all {} ({err})", rows.len()));
+            Ok(None)
         }
     }
-    Ok(())
 }
 
 // ----- xtream -----------------------------------------------------------------

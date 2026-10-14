@@ -7,7 +7,7 @@
 import type { TFunction } from 'i18next';
 
 import { isDesktop, rpc } from '@/api/transport';
-import { baseName, formatFileSize, pickPathDesktop, readFileText } from '@/features/sources/lib/files';
+import { baseName, pickPathDesktop, readFileText } from '@/features/sources/lib/files';
 import { toast } from '@/ui/Toast';
 
 import { useMediaStore } from '../media';
@@ -94,11 +94,27 @@ export function chooseSubtitleFile(): Promise<File | null> {
   });
 }
 
+/**
+ * The size of a file over the limit, in the limit's unit (MB of 1024 KB, as "5 MB" in the
+ * message). Rounded up to hundredths, so a file just over 5 MB never reads "5 MB".
+ */
+export function oversizeText(bytes: number, lang: string): string {
+  // Hundredths of a MB, rounded up (the tiny slack keeps float noise from adding one).
+  const mb = Math.ceil((Math.max(0, bytes) * 100) / (1024 * 1024) - 1e-6) / 100;
+  let text: string;
+  try {
+    text = new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }).format(mb);
+  } catch {
+    text = String(mb);
+  }
+  return `${text} MB`;
+}
+
 function problemText(t: TFunction<'player'>, err: unknown, file?: File): string {
   if (!(err instanceof SubtitleLoadError)) return err instanceof Error ? err.message : String(err);
   switch (err.problem) {
     case 'tooLarge':
-      return t('subtitleTooLarge', { size: formatFileSize(file?.size ?? 0, document.documentElement.lang || 'en') });
+      return t('subtitleTooLarge', { size: oversizeText(file?.size ?? 0, document.documentElement.lang || 'en') });
     case 'unknownFormat':
       return t('subtitleUnknownFormat');
     case 'noCues':

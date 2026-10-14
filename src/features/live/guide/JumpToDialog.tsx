@@ -6,7 +6,7 @@
  */
 
 import { CalendarClock } from 'lucide-react';
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, cn, Dialog, Select, type SelectOption } from '@/ui';
@@ -58,14 +58,19 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
   const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // Each opening starts from the window on screen (or today, when that is outside the chips).
-  useLayoutEffect(() => {
-    if (!open) return;
-    const d = localDayStart(start);
-    const inRange = days.includes(d);
-    const nextDay = inRange ? d : localDayStart(now);
-    setDay(nextDay);
-    setAt(inRange ? start : atWallTime(nextDay, wallMinutes(start)));
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Set while rendering, not in an effect: the dialog's first frame, and the focus it gives the
+  // selected chip on open, must already show this opening's day rather than the last one's.
+  const [shownOpen, setShownOpen] = useState(false);
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (open) {
+      const d = localDayStart(start);
+      const inRange = days.includes(d);
+      const nextDay = inRange ? d : localDayStart(now);
+      setDay(nextDay);
+      setAt(inRange ? start : atWallTime(nextDay, wallMinutes(start)));
+    }
+  }
 
   const slots = useMemo(() => daySlots(day), [day]);
   const options = useMemo(() => slotOptions(slots, lang), [slots, lang]);
@@ -154,6 +159,8 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
                   role="radio"
                   aria-checked={selected}
                   tabIndex={i === selectedIndex ? 0 : -1}
+                  // The dialog opens on the roving tab stop (the selected day), not the first chip.
+                  data-autofocus={i === selectedIndex ? '' : undefined}
                   onClick={() => pickDay(d)}
                   onKeyDown={(e) => onChipKey(e, i)}
                   data-testid="guide-jump-day"

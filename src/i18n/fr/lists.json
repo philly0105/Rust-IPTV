@@ -48,7 +48,6 @@
   "deleteLabel": "Supprimer {{list}}",
   "deleted": "Liste supprimée : {{list}}",
   "deleteFailed": "Impossible de supprimer {{list}}",
-  "undoFailed": "Impossible de restaurer {{list}}",
   "editChannels": "Modifier les chaînes",
   "editChannelsOf": "Modifier les chaînes de {{list}}",
   "editTitle": "Modifier {{list}}",
@@ -64,6 +63,7 @@
   "unavailableCount_one": "{{formatted}} chaîne indisponible",
   "unavailableCount_many": "{{formatted}} chaînes indisponibles",
   "unavailableCount_other": "{{formatted}} chaînes indisponibles",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Aucune de ces chaînes n'est proposée actuellement",
   "listEmptyTitle": "Cette liste est vide",
   "listEmptyHint": "Dans TV en direct, appuyez sur L sur une chaîne ou faites un clic droit dessus, puis choisissez Ajouter à une liste.",
@@ -78,11 +78,10 @@
   "stageIdleHint": "Choisissez une chaîne dans la liste.",
   "errorNameEmpty": "Saisissez un nom.",
   "errorNameLong": "{{max}} caractères maximum.",
+  "errorNameControl": "Le nom ne peut pas contenir de tabulations ni de retours à la ligne.",
   "errorDuplicate": "Une liste porte déjà ce nom.",
   "errorTooMany": "Vous pouvez avoir jusqu'à {{max}} listes. Supprimez-en une d'abord.",
   "errorListFull": "Une liste contient au maximum {{max}} chaînes.",
   "errorGone": "Cette liste a été supprimée.",
-  "shortcutAddToList": "Ajouter la chaîne sélectionnée à une liste",
-  "shortcutMoveUp": "Monter la liste ou la chaîne sélectionnée",
-  "shortcutMoveDown": "Descendre la liste ou la chaîne sélectionnée"
+  "shortcutAddToList": "Ajouter la chaîne sélectionnée à une liste"
 }

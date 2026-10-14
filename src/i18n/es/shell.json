@@ -183,6 +183,8 @@
   "scNextItem": "Reproducir el siguiente episodio de la cola",
   "scChannelFavorite": "Añadir o quitar de favoritos el canal enfocado",
   "scItemMenu": "Abrir el menú del canal enfocado",
+  "scListsDialogMoveUp": "Subir la lista o el canal seleccionado (Gestionar listas, Editar canales)",
+  "scListsDialogMoveDown": "Bajar la lista o el canal seleccionado (Gestionar listas, Editar canales)",
   "scListJump": "Ir al primer o al último elemento",
   "scListPage": "Subir o bajar una página",
   "scListRemove": "Quitar el elemento enfocado (favoritos, vistos recientemente, mis videos)",

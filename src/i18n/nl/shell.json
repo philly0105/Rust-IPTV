@@ -178,6 +178,8 @@
   "scNextItem": "Volgende aflevering in de wachtrij afspelen",
   "scChannelFavorite": "Zender met focus toevoegen aan of verwijderen uit favorieten",
   "scItemMenu": "Menu openen voor de zender met focus",
+  "scListsDialogMoveUp": "Geselecteerde lijst of kanaal omhoog verplaatsen (Lijsten beheren, Kanalen bewerken)",
+  "scListsDialogMoveDown": "Geselecteerde lijst of kanaal omlaag verplaatsen (Lijsten beheren, Kanalen bewerken)",
   "scListJump": "Naar het eerste of laatste item springen",
   "scListPage": "Eén pagina omhoog of omlaag",
   "scListRemove": "Item met focus verwijderen (favorieten, recent bekeken, mijn video's)",

@@ -24,6 +24,7 @@ import type {
 } from '@/api/types';
 import { itemKey } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
+import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
 import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
@@ -355,6 +356,11 @@ function clearResume(): void {
 
 /** Last position we pushed to the backend, so ticks without progress do not write. */
 let lastSavedPosition = -1;
+/**
+ * The source whose last landed save finished it (Run 2 C4), so the watched queries are refetched
+ * once per transition to finished, not on every later save past the end.
+ */
+let finishedSavedFor: PlayerSource | undefined;
 
 /** Sends the VOD position; the promise settles when the core has it (or the send failed). */
 function savePosition(): Promise<void> {
@@ -373,7 +379,17 @@ function savePosition(): Promise<void> {
   const snap = snapshotOf(source);
   if (snap) args.snapshot = snap;
   return rpc('positions.set', args).then(
-    () => undefined,
+    () => {
+      // The save that finishes a title makes it watched in the core (handleEnded, or a stop
+      // past 95 %): refresh grid ticks, Hide watched pages and Continue Watching, which may
+      // stay mounted under the mini player.
+      if (!finishesTitle(pos, args.durationSeconds)) {
+        finishedSavedFor = undefined; // played again from earlier: the next finish is a new transition
+      } else if (finishedSavedFor !== source) {
+        finishedSavedFor = source;
+        void invalidateWatched();
+      }
+    },
     () => {
       lastSavedPosition = -1; // retry on next tick
     },
@@ -657,8 +673,10 @@ export function handleEnded(): void {
   const patch: Partial<PlayerState> = { status: 'paused' };
   if (s.durationSeconds && Number.isFinite(s.durationSeconds)) patch.positionSeconds = s.durationSeconds;
   usePlayerStore.setState(patch);
-  // Mark as finished: at >= 95 % the core deletes a movie's row (unless marked watched) and keeps an
-  // episode's as a watched row at its end (C13); `withSavedPosition` never resumes from either.
+  // Mark as finished: at >= 95 % the core keeps a movie as a watched row at position = duration
+  // (since Run 2; a partial replay of a watched movie keeps the flag too) and an episode as a
+  // watched row at its end (C13); `withSavedPosition` never resumes from a finished row. The save's
+  // success refreshes the watched queries (see `savePosition`).
   if (tracksPosition(s.source) && s.durationSeconds) void savePosition();
   clearResume();
   offerUpNext();
@@ -1035,12 +1053,30 @@ function isPastEnd(seconds: number, duration: number | undefined): boolean {
   return !!duration && seconds >= duration * FINISHED_RATIO;
 }
 
-/** A saved row for an item that was finished or marked watched: not a resume point. */
+/** Share of the duration a watched movie's replay must reach before it is a resume point again. */
+const REPLAY_RESUME_RATIO = 0.05;
+
+/**
+ * A watched movie replayed part-way (Run 2): the core keeps its watched flag on a partial save of
+ * an item-level row and stores the replay position. That position is a resume point when the
+ * duration is known and it lies between 5 % and 95 % of it; the watched tick stays. Episodes
+ * lose the flag on a partial save instead, so a watched episode row is always finished.
+ */
+export function isWatchedReplay(
+  pos: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>,
+): boolean {
+  if (pos.watched !== true || pos.episodeId || pos.ref?.contentType === 'series') return false;
+  const d = pos.durationSeconds;
+  return !!d && d > 0 && pos.positionSeconds >= d * REPLAY_RESUME_RATIO && !isPastEnd(pos.positionSeconds, d);
+}
+
+/** A saved row for an item that was finished or marked watched: not a resume point (but see {@link isWatchedReplay}). */
 function isFinished(pos: PlaybackPosition): boolean {
+  if (isWatchedReplay(pos)) return false;
   return pos.watched || isPastEnd(pos.positionSeconds, pos.durationSeconds);
 }
 
-/** The one resume rule: more than MIN_RESUME_SECONDS in, and not finished or watched. */
+/** The one resume rule: more than MIN_RESUME_SECONDS in, and not finished or watched (a watched movie's replay excepted). */
 function withSavedPosition(source: PlayerSource, pos: PlaybackPosition | null | undefined): PlayerSource {
   if (pos && pos.positionSeconds > MIN_RESUME_SECONDS && !isFinished(pos)) {
     return { ...source, resumeSeconds: pos.positionSeconds };
@@ -1074,12 +1110,22 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
 export type StartOutcome = 'started' | 'refused' | 'superseded';
 
 /**
+ * A play that does not walk a channel list ends list zapping: the next zap follows the playing
+ * channel's own source, since a channel picked elsewhere may not be in the list (lists.neighbors
+ * would answer not_found). Playing from a list sets the list again afterwards (lists/lib/play.ts).
+ */
+function leaveListZap(ref: ItemRef): void {
+  if (usePlayerStore.getState().zapContext?.listId) usePlayerStore.setState({ zapContext: { sourceId: ref.sourceId } });
+}
+
+/**
  * `playItem` with its outcome. `onAllowed` runs once the gate let the item through and before
  * anything else, so a zap's tuner readout never shows a channel the PIN prompt then refuses.
+ * `keepList`: the play steps through the current channel list (a zap, the channel panel).
  */
 export async function startItem(
   args: PlayItemArgs,
-  opts?: { queue?: PlayerSource[]; onAllowed?: () => void },
+  opts?: { queue?: PlayerSource[]; onAllowed?: () => void; keepList?: boolean },
 ): Promise<StartOutcome> {
   const seq = ++requestSeq;
   // The user picked something: a countdown firing during the lookup must not override it.
@@ -1089,6 +1135,7 @@ export async function startItem(
   if (!(await passGate(gate))) return seq === requestSeq ? 'refused' : 'superseded';
   if (seq !== requestSeq) return 'superseded';
   opts?.onAllowed?.();
+  if (!opts?.keepList) leaveListZap(args.ref);
   const queueOpts = opts?.queue ? { queue: opts.queue } : undefined;
   usePlayerStore.setState({
     status: 'loading',
@@ -1163,12 +1210,12 @@ export async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined):
  * live views show (`settings.stripCountryPrefix`) and subtitles it with the airing programme,
  * like the list click path.
  */
-export async function playChannel(channel: Channel, sourceKind?: SourceKind): Promise<void> {
-  await tuneChannel(channel, sourceKind);
+export async function playChannel(channel: Channel, sourceKind?: SourceKind, opts?: { keepList?: boolean }): Promise<void> {
+  await tuneChannel(channel, sourceKind, opts?.keepList);
 }
 
 /** `playChannel` with its outcome: a zap steps past a channel the parental gate refused. */
-async function tuneChannel(channel: Channel, sourceKind?: SourceKind): Promise<StartOutcome> {
+async function tuneChannel(channel: Channel, sourceKind?: SourceKind, keepList = false): Promise<StartOutcome> {
   const settings = await getSettings();
   const name = displayChannelName(channel.name, settings?.stripCountryPrefix) || channel.name;
   const [kind, subtitle] = await Promise.all([
@@ -1189,6 +1236,7 @@ async function tuneChannel(channel: Channel, sourceKind?: SourceKind): Promise<S
   // cancelled PIN prompt leaves no locked channel's name on screen.
   return startItem(args, {
     onAllowed: () => showOsd(channel.number !== undefined ? String(channel.number) : name, channel.number !== undefined ? name : undefined),
+    keepList,
   });
 }
 
@@ -1212,17 +1260,26 @@ export const ZAP_SKIP_LIMIT = 50;
 export async function zap(direction: 'up' | 'down'): Promise<Channel | undefined> {
   const start = currentLiveRef();
   if (!start) return undefined;
-  const ctx = usePlayerStore.getState().zapContext;
+  let ctx = usePlayerStore.getState().zapContext;
   const seen = new Set<string>([itemKey(start)]);
   let from = start;
   let refused = false;
   for (let step = 0; step < ZAP_SKIP_LIMIT; step++) {
     const seq = requestSeq;
-    let res: { prev?: Channel; next?: Channel };
+    let res: { prev?: Channel; next?: Channel } | undefined;
     if (ctx?.listId) {
       // Played from a channel list: step through the list's order, across sources.
-      res = await rpc('lists.neighbors', { id: ctx.listId, ref: from });
-    } else {
+      try {
+        res = await rpc('lists.neighbors', { id: ctx.listId, ref: from });
+      } catch (err) {
+        if (rpcErrorCode(err) !== 'not_found') throw err;
+        // The list was deleted, or no longer holds this channel: zap through its source instead.
+        const gone = ctx.listId;
+        ctx = { sourceId: start.sourceId };
+        if (usePlayerStore.getState().zapContext?.listId === gone) usePlayerStore.setState({ zapContext: ctx });
+      }
+    }
+    if (!res) {
       const args: { ref: ItemRef; categoryId?: string } = { ref: from };
       if (ctx?.categoryId && ctx.sourceId === from.sourceId) args.categoryId = ctx.categoryId;
       res = await rpc('catalog.neighbors', args);
@@ -1239,7 +1296,8 @@ export async function zap(direction: 'up' | 'down'): Promise<Channel | undefined
       if (seq !== requestSeq) return undefined;
       if (locked) continue;
     }
-    const outcome = await tuneChannel(target);
+    // A zap walks the list it is in, so it keeps the list.
+    const outcome = await tuneChannel(target, undefined, true);
     if (outcome === 'started') return target;
     if (outcome === 'superseded') return undefined;
     refused = true;
@@ -1268,6 +1326,7 @@ export function __resetPlayerForTests(): void {
   settingsCache = null;
   settingsPromise = null;
   lastSavedPosition = -1;
+  finishedSavedFor = undefined;
   failedResolve = null;
   allowedRefKey = null;
   sourceKindCache.clear();

@@ -189,6 +189,7 @@
   "decade": "{{decade}} yılları",
   "yearFrom": "Başlangıç",
   "yearTo": "Bitiş",
+  "yearRange": "Yıl aralığı",
   "yearEmptyTitle": "Bu yıllardan yapım yok",
   "hideWatched": "İzlenenleri gizle",
   "watchedEmptyTitle": "Buradaki her şeyi izlediniz",

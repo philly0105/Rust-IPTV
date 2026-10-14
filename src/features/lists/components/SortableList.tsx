@@ -23,6 +23,7 @@ export interface SortableListProps<T> {
   label: string;
   /** Rows that cannot move (still saving, renaming). */
   locked?: (item: T) => boolean;
+  /** Extra classes for a row (a flex row: the grip, `renderRow`'s content, then the move arrows below md). */
   rowClassName?: (item: T) => string | undefined;
   testId?: string;
 }
@@ -150,8 +151,9 @@ export function SortableList<T>(props: SortableListProps<T>) {
                 <GripVertical className="size-4" aria-hidden />
               </button>
               {renderRow(item, index)}
-              {/* Touch screens have no drag and drop: arrows instead, below tablet width. */}
-              <span className="flex shrink-0 md:hidden">
+              {/* Touch screens have no drag and drop: arrows instead, below tablet width.
+                  At the row's end, also when a row wraps onto a second line. */}
+              <span className="ms-auto flex shrink-0 md:hidden">
                 <IconButton
                   size="sm"
                   variant="ghost"

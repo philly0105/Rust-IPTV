@@ -16,10 +16,15 @@ vi.mock('@/api/transport', () => ({
 }));
 // The parental gate has its own tests (parentalHook.test.ts); here everything may play.
 vi.mock('./parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
+const invalidateWatched = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('@/features/vod/lib/watchedQueries', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/vod/lib/watchedQueries')>()),
+  invalidateWatched: () => invalidateWatched(),
+}));
 
 const store = await import('./store');
 const media = await import('./media');
-const { usePlayerStore, playItem, playSource, restorePlayback, zap, zapToNumber, handleEnded, registerStage, RESUME_KEY, SAVE_INTERVAL_MS } =
+const { usePlayerStore, playItem, playChannel, playSource, restorePlayback, zap, zapToNumber, handleEnded, registerStage, RESUME_KEY, SAVE_INTERVAL_MS } =
   store;
 
 const liveRef: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '101' };
@@ -583,6 +588,52 @@ describe('zap', () => {
     expect(calls('catalog.neighbors')).toHaveLength(0);
   });
 
+  it('a list that no longer holds the channel (or is gone) zaps through the channel source', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', listId: 'list-7' } });
+    // What the core answers when the list was deleted or the playing channel was taken out of it.
+    handlers['lists.neighbors'] = () => {
+      throw Object.assign(new Error('list list-7 not found'), { code: 'not_found' });
+    };
+    handlers['catalog.neighbors'] = () => ({ next: channel(2) });
+    const played = await zap('down');
+    expect(calls('lists.neighbors')).toEqual([{ id: 'list-7', ref: channel(1).ref }]);
+    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref }]);
+    expect(played?.ref.itemId).toBe('102');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
+    // The stale list is dropped: the next press goes straight to the source.
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
+    await zap('down');
+    expect(calls('lists.neighbors')).toHaveLength(1);
+    expect(calls('catalog.neighbors')).toHaveLength(2);
+
+    // Other failures still reach the caller.
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', listId: 'list-8' } });
+    handlers['lists.neighbors'] = () => {
+      throw Object.assign(new Error('core down'), { code: 'internal' });
+    };
+    await expect(zap('down')).rejects.toThrow('core down');
+  });
+
+  it('a channel played outside the list ends list zapping; a zap and the list keep it', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', listId: 'list-7' } });
+    handlers['lists.neighbors'] = () => ({ next: channel(3) });
+    await zap('down');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1', listId: 'list-7' });
+    // The panel steps through the list too.
+    await playChannel(channel(4), 'xtream', { keepList: true });
+    expect(usePlayerStore.getState().zapContext?.listId).toBe('list-7');
+
+    // Search, history, digits, another page: the next zap must not ask the list about it.
+    await playChannel(channel(5, { ref: { sourceId: 's2', contentType: 'live', itemId: '777' } }), 'xtream');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's2' });
+    handlers['catalog.neighbors'] = () => ({ next: channel(6) });
+    await zap('down');
+    expect(calls('lists.neighbors')).toHaveLength(1);
+    expect(calls('catalog.neighbors')).toEqual([{ ref: { sourceId: 's2', contentType: 'live', itemId: '777' } }]);
+  });
+
   it('zapToNumber resolves catalog.channelByNumber', async () => {
     await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
     handlers['catalog.channelByNumber'] = () => channel(42);
@@ -664,5 +715,110 @@ describe('ended (derived: paused at the end of a VOD item)', () => {
     await flush();
     expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
     expect(usePlayerStore.getState().positionSeconds).toBe(0);
+  });
+});
+
+describe('watched movies (Run 2 C4)', () => {
+  beforeEach(() => invalidateWatched.mockClear());
+
+  it('the save that finishes a title refreshes the watched queries, once per source', async () => {
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportProgress(50, 100);
+    store.flushProgress();
+    await flush();
+    expect(calls('positions.set')).toHaveLength(1);
+    expect(invalidateWatched).not.toHaveBeenCalled();
+
+    // A stop past 95 %.
+    store.reportProgress(96, 100);
+    store.flushProgress();
+    await flush();
+    expect(invalidateWatched).toHaveBeenCalledTimes(1);
+
+    // The end saves again (position = duration): still the same transition.
+    handleEnded();
+    await flush();
+    expect(calls('positions.set').at(-1)).toMatchObject({ positionSeconds: 100, durationSeconds: 100 });
+    expect(invalidateWatched).toHaveBeenCalledTimes(1);
+
+    // Played again from earlier and finished again: a new transition.
+    store.reportProgress(10, 100);
+    store.flushProgress();
+    await flush();
+    expect(invalidateWatched).toHaveBeenCalledTimes(1);
+    store.reportProgress(100, 100);
+    handleEnded();
+    await flush();
+    expect(invalidateWatched).toHaveBeenCalledTimes(2);
+
+    // Another title finishing is its own transition.
+    await usePlayerStore.getState().play(vod('2'));
+    store.reportProgress(1000, 1000);
+    handleEnded();
+    await flush();
+    expect(invalidateWatched).toHaveBeenCalledTimes(3);
+  });
+
+  it('a failed finishing save does not refresh, and the retry that lands does', async () => {
+    let fail = true;
+    handlers['positions.set'] = () => {
+      if (fail) throw new Error('db busy');
+      return undefined;
+    };
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportProgress(99, 100);
+    store.flushProgress();
+    await flush();
+    expect(invalidateWatched).not.toHaveBeenCalled();
+    fail = false;
+    store.flushProgress();
+    await flush();
+    expect(invalidateWatched).toHaveBeenCalledTimes(1);
+  });
+
+  it('live channels and episodes before the end never refresh', async () => {
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'xtream' });
+    await usePlayerStore.getState().play(vod('3', { ref: { sourceId: 's1', contentType: 'series', itemId: '9' }, episodeId: 'e1' }));
+    store.reportProgress(500, 1000);
+    store.flushProgress();
+    await flush();
+    expect(invalidateWatched).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['replayed to half', 600, 1200, 600],
+    ['replayed to exactly 5 %', 60, 1200, 60],
+  ])('a watched movie %s resumes there', async (_name, positionSeconds, durationSeconds, resume) => {
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds, durationSeconds, updatedAt: '', watched: true });
+    await playSource(vod('201'));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(resume);
+  });
+
+  it.each([
+    ['finished (at its end)', 1200, 1200],
+    ['past 95 %', 1150, 1200],
+    ['under 5 % into the replay', 50, 1200],
+    ['with no known duration', 600, undefined],
+  ])('a watched movie %s starts at 0', async (_name, positionSeconds, durationSeconds) => {
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds, durationSeconds, updatedAt: '', watched: true });
+    await playSource(vod('201'));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+  });
+
+  it('a core resume on a watched movie is kept between 5 % and 95 %, dropped past the end', async () => {
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 600, durationSeconds: 1200, updatedAt: '', watched: true });
+    await playSource(vod('201', { resumeSeconds: 600 }));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(600);
+    handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 1200, durationSeconds: 1200, updatedAt: '', watched: true });
+    await playSource(vod('201', { resumeSeconds: 1200 }));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+  });
+
+  it('isWatchedReplay holds for item-level movie rows only', () => {
+    const row = { positionSeconds: 600, durationSeconds: 1200, watched: true };
+    expect(store.isWatchedReplay({ ...row, ref: movieRef })).toBe(true);
+    expect(store.isWatchedReplay({ ...row, ref: movieRef, watched: false })).toBe(false);
+    expect(store.isWatchedReplay({ ...row, ref: { sourceId: 's1', contentType: 'series', itemId: '9' }, episodeId: 'e1' })).toBe(false);
+    expect(store.isWatchedReplay({ ...row, ref: { sourceId: 's1', contentType: 'series', itemId: '9' } })).toBe(false);
   });
 });

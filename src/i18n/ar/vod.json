@@ -225,6 +225,7 @@
   "decade": "عقد {{decade}}",
   "yearFrom": "من",
   "yearTo": "إلى",
+  "yearRange": "نطاق السنوات",
   "yearEmptyTitle": "لا توجد عناوين من هذه السنوات",
   "hideWatched": "إخفاء ما تمت مشاهدته",
   "watchedEmptyTitle": "شاهدت كل ما هنا",

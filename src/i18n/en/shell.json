@@ -178,6 +178,8 @@
   "scNextItem": "Play the next episode in the queue",
   "scChannelFavorite": "Add or remove the focused channel from favorites",
   "scItemMenu": "Open the menu for the focused channel",
+  "scListsDialogMoveUp": "Move the focused list or channel up (Manage lists, Edit channels)",
+  "scListsDialogMoveDown": "Move the focused list or channel down (Manage lists, Edit channels)",
   "scListJump": "Jump to the first or last item",
   "scListPage": "Move one page up or down",
   "scListRemove": "Remove the focused item (favorites, recently watched, my videos)",

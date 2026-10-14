@@ -15,6 +15,13 @@ import { useSettings } from '@/shell/useSettings';
 const EDITS_STALE_MS = 30_000;
 
 /**
+ * How long a `catalog.item` answer for a hidden channel stays fresh: the
+ * hidden-channels rows read it for the logo and to tell whether the provider
+ * still lists the channel, and the unhide toasts reuse those answers.
+ */
+export const ITEM_STALE_MS = 5 * 60_000;
+
+/**
  * Query prefixes a channel edit changes: the same list `channels.changed`
  * invalidates (C10). Writes from this window refresh them at once instead of
  * waiting for the event to come back.

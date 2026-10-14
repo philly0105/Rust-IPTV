@@ -3,11 +3,12 @@
  * days back to 13 ahead labelled with formatDay, a 30-minute time select that lists the
  * repeated hour twice, wall time kept when the day changes, the keyboard, and Now.
  */
-import { cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { useState } from 'react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { defaultStart } from '../../components/EpgGridPage';
-import { formatClock, formatDay, jumpDays, MINUTE } from '../../lib/epgTime';
+import { addLocalDays, formatClock, formatDay, jumpDays, MINUTE } from '../../lib/epgTime';
 import { JumpToDialog, slotOptions } from '../JumpToDialog';
 import { installDomStubs, renderGuide } from './harness';
 
@@ -127,5 +128,38 @@ describe('JumpToDialog', () => {
     const { chips, time } = setup({ now, start: new Date(2026, 10, 30, 18, 0).getTime() });
     expect(chips()[2]!.getAttribute('aria-checked')).toBe('true');
     expect(Number(time().value)).toBe(new Date(2026, 9, 21, 18, 0).getTime());
+  });
+  // Review round 1: the chips are a roving radio group, so the dialog must open on the checked
+  // chip. The kit's fallback (first tabbable) also matched the tabindex=-1 chips, so focus landed
+  // on the chip two days back and Space selected it.
+  it('opens with focus on the selected day, not on the first chip', () => {
+    const { chips } = setup();
+    expect(document.activeElement).toBe(chips()[2]);
+    expect(chips()[2]!.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(document.activeElement!);
+    expect(chips()[2]!.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('each opening focuses that opening’s day, even when the window moved while it was closed', () => {
+    const now = new Date(2026, 9, 21, 10, 10).getTime();
+    const control: { show?(start: number): void; hide?(): void } = {};
+    function Host() {
+      const [state, setState] = useState({ open: false, start: defaultStart(now) });
+      control.show = (start) => setState({ open: true, start });
+      control.hide = () => setState((s) => ({ ...s, open: false }));
+      return <JumpToDialog open={state.open} onClose={() => control.hide!()} start={state.start} now={now} onJump={() => undefined} onNow={() => undefined} />;
+    }
+    renderGuide(<Host />);
+    expect(screen.queryByTestId('guide-jump')).toBeNull();
+
+    act(() => control.show!(addLocalDays(defaultStart(now), 3)));
+    const chips = () => within(screen.getByTestId('guide-jump')).getAllByTestId('guide-jump-day');
+    expect(chips()[5]!.getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(chips()[5]);
+
+    act(() => control.hide!());
+    act(() => control.show!(addLocalDays(defaultStart(now), -1)));
+    expect(chips()[1]!.getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(chips()[1]);
   });
 });

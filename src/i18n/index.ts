@@ -83,6 +83,36 @@ export function i18nextLng(code: string): string {
   return LANGUAGES.find((l) => l.code === code)?.bcp47 ?? code;
 }
 
+/**
+ * Language keys whose tag has no CLDR plural rules of its own, mapped to the
+ * locale whose rules they use. `Intl.PluralRules('ary')` resolves to the
+ * machine's default locale, so without this pin Moroccan Arabic would pick
+ * English forms on one machine and Arabic forms on another. Its files carry
+ * all six Arabic forms (`_zero/_one/_two/_few/_many/_other`).
+ */
+const PLURAL_RULE_LOCALES: Readonly<Record<string, string>> = { ary: 'ar' };
+
+/** The locale whose plural rules an i18next language key uses (`ary` -> `ar`, else itself). */
+export function pluralLocale(lng: string): string {
+  return PLURAL_RULE_LOCALES[lng] ?? lng;
+}
+
+type RuleGetter = (code: string, options?: { ordinal?: boolean }) => Intl.PluralRules | undefined;
+const pinnedResolvers = new WeakSet<object>();
+
+/**
+ * Routes i18next's plural rule lookup through `pluralLocale`, so every
+ * plural suffix (`getSuffix`, `getSuffixes`, `needsPlural`) of `ary` follows
+ * Arabic rules on every machine. Idempotent per resolver instance.
+ */
+function pinPluralRules(): void {
+  const resolver = i18next.services.pluralResolver as { getRule?: RuleGetter } | undefined;
+  if (!resolver || typeof resolver.getRule !== 'function' || pinnedResolvers.has(resolver)) return;
+  const getRule = resolver.getRule.bind(resolver);
+  resolver.getRule = (code, options) => getRule(pluralLocale(code), options);
+  pinnedResolvers.add(resolver);
+}
+
 /** Builds `{ [bcp47]: { [ns]: json } }` from glob results keyed `./<folder>/<ns>.json`. */
 export function buildResources(modules: Record<string, unknown>): Resource {
   const out: Resource = {};
@@ -208,6 +238,8 @@ if (!i18next.isInitialized) {
   syncDocument(DEFAULT_LANGUAGE);
   ready = activate(storedLanguage());
 }
+// Also when another import initialised i18next first (tests, HMR).
+pinPluralRules();
 
 /**
  * Resolves when i18next is ready to render: the remembered language (or

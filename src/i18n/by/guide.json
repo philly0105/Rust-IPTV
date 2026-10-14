@@ -13,6 +13,7 @@
   "resultsCount": "Вынікаў: {{n}}",
   "closeSearch": "Закрыць пошук",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "Зараз у эфіры",
   "watchNow": "Глядзець {{channel}}",
   "hitNotFound": "{{channel}} няма ў гэтым спісе",

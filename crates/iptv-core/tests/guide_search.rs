@@ -487,6 +487,195 @@ async fn scans_before_the_index_is_built_with_the_same_results() {
     }
 }
 
+/// Greek (tonos, final sigma) and Vietnamese (two marks on one letter): the
+/// index holds titles folded the way the scan folds them, so both paths
+/// return the same hits. An index of raw titles from before the fold
+/// (marker `ready`) counts as missing and is rebuilt.
+#[tokio::test]
+async fn index_and_scan_fold_greek_and_vietnamese_alike() {
+    let e = env().await;
+    let b = base();
+    const TITLES: [&str; 4] = ["Ελληνικά νέα", "Thời sự", "ΕΙΔΗΣΕΙΣ", "Café Society"];
+    e.state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO epg_sources(url, enabled, origin, status) VALUES ('direct', 1, 'settings', 'ok')",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES ('direct', 'one.uk', 'Channel One')",
+                [],
+            )?;
+            for (h, title) in TITLES.iter().enumerate() {
+                let s = b + h as i64 * HOUR;
+                c.execute(
+                    "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title, description, category)
+                     VALUES ('direct', 'one.uk', ?1, ?2, ?3, 'About', 'Talk')",
+                    rusqlite::params![s, s + HOUR, title],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    epg::runtime(&e.state).bump();
+    // (query, hour of the programme it finds); c1 and c5 both carry one.uk.
+    let cases: [(&str, i64); 14] = [
+        ("Ελληνικά", 0),
+        ("ελληνικα", 0),
+        ("ΕΛΛΗΝΙΚΆ", 0),
+        ("Ελλ", 0),
+        ("Ελληνικά νέα", 0),
+        ("νεα", 0),
+        ("thoi su", 1),
+        ("Thời sự", 1),
+        ("THỜI", 1),
+        ("ειδησεις", 2),
+        ("Ειδήσεις", 2),
+        ("ειδησ", 2),
+        ("ΕΙΔΉΣΕΙΣ", 2),
+        ("cafe", 3),
+    ];
+    let check = |hits: &[Value], q: &str, h: i64, path: &str| {
+        assert_eq!(
+            keys(hits),
+            vec![k("c1", b + h * HOUR), k("c5", b + h * HOUR)],
+            "{path}: {q}"
+        );
+    };
+    assert!(!e.index_ready().await);
+    for (q, h) in cases {
+        check(
+            &e.search(window(q, b - HOUR, b + 86_400)).await,
+            q,
+            h,
+            "scan",
+        );
+    }
+
+    // A raw-title index with the old marker: not trusted, search still scans.
+    e.state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('rebuild')",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO app_state(key, value, updated_at) VALUES (?1, 'ready', CURRENT_TIMESTAMP)",
+                [search::INDEX_MARKER],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(!e.index_ready().await);
+    check(
+        &e.search(window("ελληνικα", b - HOUR, b + 86_400)).await,
+        "ελληνικα",
+        0,
+        "stale index",
+    );
+
+    // The startup build replaces it; the index finds what the scan found.
+    assert!(e
+        .state
+        .db_call(|c| search::ensure_index(c, true))
+        .await
+        .unwrap());
+    assert!(e.index_ready().await);
+    for (q, h) in cases {
+        check(
+            &e.search(window(q, b - HOUR, b + 86_400)).await,
+            q,
+            h,
+            "index",
+        );
+    }
+}
+
+/// Hide mode drops locked channels in the channel query: 2,250 earlier hits
+/// on three locked channels must not crowd out a later visible one.
+#[tokio::test]
+async fn locked_channels_do_not_starve_visible_hits() {
+    const SLOTS: i64 = 750;
+    const VISIBLE_SLOT: i64 = 700;
+    let e = bare_env().await;
+    let b = base();
+    let half = HOUR / 2;
+    e.state
+        .db_call(move |c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "INSERT INTO sources(id, kind, name, position, config_json, epg_json) VALUES (?1, 'm3u', ?1, 0, ?2, ?3)",
+                [SRC, CONFIG, EPG_JSON],
+            )?;
+            tx.execute(
+                "INSERT INTO epg_sources(url, enabled, origin, status) VALUES ('direct', 1, 'settings', 'ok')",
+                [],
+            )?;
+            for (n, id) in ["l0", "l1", "l2", "v1"].iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO items(source_id, content_type, item_id, category_id, title, number, epg_channel_id, position)
+                     VALUES (?1, 'live', ?2, 'news', ?2, ?3, ?4, ?3)",
+                    rusqlite::params![SRC, id, n as i64 + 1, format!("{id}.tv")],
+                )?;
+                tx.execute(
+                    "INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES ('direct', ?1, ?2)",
+                    [format!("{id}.tv"), id.to_string()],
+                )?;
+            }
+            {
+                let mut prog = tx.prepare(
+                    "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('direct', ?1, ?2, ?3, ?4)",
+                )?;
+                for id in ["l0.tv", "l1.tv", "l2.tv"] {
+                    for n in 0..SLOTS {
+                        let s = b + n * half;
+                        prog.execute(rusqlite::params![id, s, s + half, "News Hour"])?;
+                    }
+                }
+                let s = b + VISIBLE_SLOT * half;
+                prog.execute(rusqlite::params!["v1.tv", s, s + half, "News Special"])?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    epg::runtime(&e.state).bump();
+    iptv_core::parental::set_pin(&e.state, None, "2468")
+        .await
+        .unwrap();
+    for id in ["l0", "l1", "l2"] {
+        let target = ParentalLockTarget {
+            source_id: SRC.into(),
+            content_type: ContentType::Live,
+            kind: ParentalLockKind::Item,
+            target_id: id.into(),
+            name: id.into(),
+        };
+        iptv_core::parental::set_locked(&e.state, &target, true, Some("2468"))
+            .await
+            .unwrap();
+    }
+    let mut args = window("news", b - HOUR, b + 383 * HOUR);
+    args["limit"] = json!(5);
+    let want = vec![k("v1", b + VISIBLE_SLOT * half)];
+    assert!(!e.index_ready().await);
+    assert_eq!(keys(&e.search(args.clone()).await), want, "scan");
+    assert!(e
+        .state
+        .db_call(|c| search::ensure_index(c, true))
+        .await
+        .unwrap());
+    assert_eq!(keys(&e.search(args.clone()).await), want, "index");
+    // Unlocked, the locked channels' earlier hits come first again.
+    iptv_core::parental::unlock(&e.state, "2468").await.unwrap();
+    let hits = e.search(args).await;
+    assert_eq!(hits.len(), 5);
+    assert_eq!(hits[0]["ref"]["itemId"], "l0");
+}
+
 #[tokio::test]
 async fn index_follows_refresh_clear_and_staging() {
     let e = env().await;
@@ -587,12 +776,16 @@ async fn search_statements_use_indexes() {
     }
 }
 
-/// 1,000 channels x 200 half-hour programmes. Release builds must answer a
-/// common and a rare query in under 150 ms each.
+/// 1,000 guide channels x 200 half-hour programmes, searched from a source
+/// of 50,000 channels: the 1,000 with those guide ids and 49,000 whose ids
+/// and names the guide does not know (each needs a programme probe and a
+/// name lookup, which the search memo keeps across searches). Release
+/// builds must answer a common and a rare query in under 150 ms each.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn searches_200k_programmes_quickly() {
     const CHANNELS: i64 = 1_000;
     const PER_CHANNEL: i64 = 200;
+    const SOURCE_CHANNELS: i64 = 50_000;
     const WORDS: [&str; 24] = [
         "news", "world", "sport", "kitchen", "garden", "travel", "music", "movie", "comedy",
         "drama", "history", "science", "nature", "football", "tennis", "weather", "market",
@@ -645,6 +838,15 @@ async fn searches_200k_programmes_quickly() {
                         prog.execute(rusqlite::params![id, s, s + 1800, title])?;
                     }
                 }
+                for ch in CHANNELS..SOURCE_CHANNELS {
+                    item.execute(rusqlite::params![
+                        SRC,
+                        format!("i{ch}"),
+                        format!("Unknown Feed {ch}"),
+                        ch + 1,
+                        format!("unknown{ch}.tv")
+                    ])?;
+                }
             }
             tx.commit()?;
             Ok(())
@@ -668,7 +870,7 @@ async fn searches_200k_programmes_quickly() {
         ("Évening quiz", 50),
     ] {
         let args = json!({"sourceId": SRC, "query": query, "from": ts(start), "to": ts(start + 5 * 86_400)});
-        // Warm the channel directory and the statement cache once.
+        // Warm the channel directory, the search memo and the statement cache once.
         e.search(args.clone()).await;
         let t = Instant::now();
         let hits = e.search(args).await;
@@ -696,7 +898,7 @@ async fn searches_200k_programmes_quickly() {
     let scan_ms = t.elapsed().as_secs_f64() * 1000.0;
     assert_eq!(scanned.len(), 50);
     println!(
-        "guide_search perf: {} programmes inserted in {insert_ms} ms, index built in {build_ms} ms; searches {timings:?} ms; scan {scan_ms:.1} ms",
+        "guide_search perf: {} programmes and {SOURCE_CHANNELS} channels inserted in {insert_ms} ms, index built in {build_ms} ms; searches {timings:?} ms; scan {scan_ms:.1} ms",
         CHANNELS * PER_CHANNEL
     );
     #[cfg(not(debug_assertions))]

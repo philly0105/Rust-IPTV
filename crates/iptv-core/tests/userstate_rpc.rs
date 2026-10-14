@@ -297,6 +297,22 @@ async fn positions_complete_series_and_continue_watching() {
     let cw = call(&r, &s, "positions.continueWatching", Value::Null).await;
     assert!(ids(&cw).is_empty(), "{cw}");
 
+    // Replaying part of it keeps the watched mark (unlike an episode, which
+    // a partial save puts back into Continue Watching): the replay position
+    // is stored, the movie stays out of Continue Watching.
+    call(
+        &r,
+        &s,
+        "positions.set",
+        json!({"ref": movie, "positionSeconds": 600, "durationSeconds": 6000}),
+    )
+    .await;
+    let again = call(&r, &s, "positions.get", json!({"ref": movie})).await;
+    assert_eq!(again["watched"], true, "{again}");
+    assert_eq!(again["positionSeconds"], 600);
+    let cw = call(&r, &s, "positions.continueWatching", Value::Null).await;
+    assert!(ids(&cw).is_empty(), "{cw}");
+
     // Series: one row per episode.
     let show = rf("s1", "series", "301");
     call(
@@ -542,6 +558,73 @@ async fn completion_uses_the_stored_duration_and_positions_are_bounded() {
             .unwrap_err();
         assert_eq!(e.code, RpcErrorCode::Invalid, "{e:?}");
     }
+}
+
+/// A favorite `favorites.list` does not show (a channel hidden by a channel
+/// edit) keeps its slot when the shown ones are reordered, so it comes back
+/// in place on unhide; shown favorites left out still follow the listed ones.
+#[tokio::test]
+async fn reorder_keeps_hidden_favorites_in_their_slots() {
+    let (_d, s) = app().await;
+    let r = router();
+    for id in ["a", "b", "c", "d"] {
+        call(
+            &r,
+            &s,
+            "favorites.toggle",
+            json!({"ref": rf("s1", "live", id), "snapshot": snap(id, "live")}),
+        )
+        .await;
+    }
+    let set_hidden = |hidden: bool| {
+        let s = s.clone();
+        async move {
+            s.db_call(move |c| {
+                if hidden {
+                    c.execute(
+                        "INSERT INTO channel_edits(source_id, content_type, item_id, hidden, name, original_name, updated_at)
+                         VALUES ('s1', 'live', 'b', 1, NULL, 'b', '2026-10-14T00:00:00.000Z')",
+                        [],
+                    )?;
+                } else {
+                    c.execute("DELETE FROM channel_edits", [])?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+    };
+    set_hidden(true).await;
+    let shown = call(&r, &s, "favorites.list", json!({"sourceId": "s1"})).await;
+    assert_eq!(ids(&shown), ["a", "c", "d"]);
+
+    // The page sends every favorite it shows, in the new order.
+    call(
+        &r,
+        &s,
+        "favorites.reorder",
+        json!({"sourceId": "s1", "refs": [rf("s1", "live", "d"), rf("s1", "live", "c"), rf("s1", "live", "a")]}),
+    )
+    .await;
+    let shown = call(&r, &s, "favorites.list", json!({"sourceId": "s1"})).await;
+    assert_eq!(ids(&shown), ["d", "c", "a"]);
+    set_hidden(false).await;
+    let all = call(&r, &s, "favorites.list", json!({"sourceId": "s1"})).await;
+    assert_eq!(ids(&all), ["d", "b", "c", "a"], "b keeps its second slot");
+
+    // A partial list: shown favorites left out follow the listed ones.
+    set_hidden(true).await;
+    call(
+        &r,
+        &s,
+        "favorites.reorder",
+        json!({"sourceId": "s1", "refs": [rf("s1", "live", "a")]}),
+    )
+    .await;
+    set_hidden(false).await;
+    let all = call(&r, &s, "favorites.list", json!({"sourceId": "s1"})).await;
+    assert_eq!(ids(&all), ["a", "b", "d", "c"]);
 }
 
 /// B9: a ref listed twice keeps its first place; concurrent toggles of one

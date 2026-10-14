@@ -261,7 +261,7 @@
   "subtitleStyle.background": "Achtergrond",
   "subtitleStyle.backgroundHint": "Wat achter de tekst staat zodat die leesbaar blijft.",
   "subtitleStyle.backgroundShadow": "Schaduw",
-  "subtitleStyle.backgroundBox": "Kader",
+  "subtitleStyle.backgroundBox": "Doorschijnend",
   "subtitleStyle.backgroundSolid": "Dekkend",
   "subtitleStyle.position": "Positie",
   "subtitleStyle.positionHint": "Zet ondertitels hoger dan de onderrand, bijvoorbeeld boven tekst die in het beeld is ingebrand.",

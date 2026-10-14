@@ -8,7 +8,8 @@ use iptv_core::error::RpcErrorCode;
 use iptv_core::model::ContentType;
 use iptv_core::rpc::{build_router, RpcRouter};
 use iptv_core::stats::{
-    export_log, fmt_day, import_log, utc_today, WatchLogBackup, MAX_DAY_SECONDS, TOP_MAX,
+    export_log, fmt_day, import_log, utc_today, LogImport, WatchLogBackup, DAY_SLACK,
+    MAX_DAY_SECONDS, TOP_MAX,
 };
 use iptv_core::{AppState, BroadcastSink};
 use rusqlite::params;
@@ -525,14 +526,24 @@ async fn backup_round_trip_is_idempotent_and_keeps_the_larger_count() {
         .db_call(move |c| import_log(c, "s2", &rows))
         .await
         .unwrap();
-    assert_eq!(n, 2);
+    assert_eq!(
+        n,
+        LogImport {
+            written: 2,
+            skipped: 0
+        }
+    );
     let rows = exported.clone();
     let again = b
         .state
         .db_call(move |c| import_log(c, "s2", &rows))
         .await
         .unwrap();
-    assert_eq!(again, 0, "a re-import changes nothing");
+    assert_eq!(
+        again,
+        LogImport::default(),
+        "a re-import changes nothing and skips nothing"
+    );
     let back = b.state.db_call(|c| export_log(c, "s2")).await.unwrap();
     assert_eq!(back, exported);
     let s = b.summary(7).await;
@@ -557,7 +568,7 @@ async fn backup_round_trip_is_idempotent_and_keeps_the_larger_count() {
         .db_call(move |c| import_log(c, "s2", &rows))
         .await
         .unwrap();
-    assert_eq!(n, 2);
+    assert_eq!(n.written, 2);
     let back = b.state.db_call(|c| export_log(c, "s2")).await.unwrap();
     assert_eq!(
         (back[0].seconds, back[0].title.as_str()),
@@ -604,7 +615,13 @@ async fn import_skips_rows_it_cannot_store() {
         .db_call(move |c| import_log(c, "s1", &rows))
         .await
         .unwrap();
-    assert_eq!(n, 2);
+    assert_eq!(
+        n,
+        LogImport {
+            written: 2,
+            skipped: 5
+        }
+    );
     let back = a.state.db_call(|c| export_log(c, "s1")).await.unwrap();
     assert_eq!(back[0].title.chars().count(), 300, "titles are cut");
     assert_eq!(back[1].seconds, MAX_DAY_SECONDS, "seconds are capped");
@@ -612,6 +629,42 @@ async fn import_skips_rows_it_cannot_store() {
         back[1].last_at.starts_with('2'),
         "an unreadable lastAt becomes now"
     );
+
+    // A day past the live record's slack is skipped; an item id is stored
+    // trimmed, so it merges with the row a live record writes.
+    let rows = vec![
+        backup_row(
+            &day(DAY_SLACK + 1),
+            ContentType::Live,
+            "7",
+            "Future",
+            10,
+            ts,
+        ),
+        backup_row(&day(DAY_SLACK), ContentType::Live, "7", "Soon", 10, ts),
+        backup_row(&day(0), ContentType::Live, " 8 ", "Padded", 10, ts),
+    ];
+    let n = a
+        .state
+        .db_call(move |c| import_log(c, "s1", &rows))
+        .await
+        .unwrap();
+    assert_eq!(
+        n,
+        LogImport {
+            written: 2,
+            skipped: 1
+        }
+    );
+    let back = a.state.db_call(|c| export_log(c, "s1")).await.unwrap();
+    assert!(back.iter().all(|r| r.title != "Future"), "{back:?}");
+    assert!(back.iter().any(|r| r.title == "Soon"), "{back:?}");
+    let padded: Vec<&str> = back
+        .iter()
+        .filter(|r| r.title == "Padded")
+        .map(|r| r.item_id.as_str())
+        .collect();
+    assert_eq!(padded, ["8"]);
 
     let rows = vec![backup_row(&day(0), ContentType::Live, "7", "BBC", 10, ts)];
     let err = a
@@ -625,5 +678,9 @@ async fn import_skips_rows_it_cannot_store() {
         .db_call(|c| import_log(c, "missing", &[]))
         .await
         .unwrap();
-    assert_eq!(none, 0, "nothing to import is not an error");
+    assert_eq!(
+        none,
+        LogImport::default(),
+        "nothing to import is not an error"
+    );
 }

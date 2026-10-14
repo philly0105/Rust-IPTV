@@ -45,6 +45,24 @@ describe('i18n language keys', () => {
     expect(t('recentCount', { count: 5 })).toBe(many!.replace('{{count}}', '5'));
   });
 
+  it('pins Moroccan Arabic to Arabic plural rules whatever the runtime resolves `ary` to', async () => {
+    await loadLanguage('ary');
+    const resolver = i18n.services.pluralResolver as unknown as { getSuffix(lng: string, count: number): string };
+    expect([0, 1, 2, 5, 11, 100].map((n) => resolver.getSuffix('ary', n))).toEqual([
+      '_zero',
+      '_one',
+      '_two',
+      '_few',
+      '_many',
+      '_other',
+    ]);
+
+    const lists = i18n.getResourceBundle('ary', 'lists') as Record<string, string>;
+    const t = i18n.getFixedT('ary', 'lists');
+    expect(t('channelCount', { count: 2, formatted: '2' })).toBe(lists['channelCount_two']!.replace('{{formatted}}', '2'));
+    expect(t('channelCount', { count: 11, formatted: '11' })).toBe(lists['channelCount_many']!.replace('{{formatted}}', '11'));
+  });
+
   it.each([
     ['zhtw', 'zh-TW'],
     ['zh', 'zh-CN'],

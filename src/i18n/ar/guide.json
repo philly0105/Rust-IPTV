@@ -13,6 +13,7 @@
   "resultsCount": "النتائج: {{n}}",
   "closeSearch": "إغلاق البحث",
   "hitLabel": "{{title}}، {{channel}}، {{time}}",
+  "dayHeading": "{{rel}}، {{date}}",
   "airingNow": "يُعرض الآن",
   "watchNow": "شاهد {{channel}}",
   "hitNotFound": "{{channel}} غير موجودة في هذه القائمة",

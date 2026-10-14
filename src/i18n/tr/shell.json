@@ -178,6 +178,8 @@
   "scNextItem": "Kuyruktaki sonraki bölümü oynat",
   "scChannelFavorite": "Odaktaki kanalı favorilere ekle veya favorilerden kaldır",
   "scItemMenu": "Odaktaki kanalın menüsünü aç",
+  "scListsDialogMoveUp": "Seçili listeyi veya kanalı yukarı taşı (Listeleri yönet, Kanalları düzenle)",
+  "scListsDialogMoveDown": "Seçili listeyi veya kanalı aşağı taşı (Listeleri yönet, Kanalları düzenle)",
   "scListJump": "İlk veya son öğeye atla",
   "scListPage": "Bir sayfa yukarı veya aşağı git",
   "scListRemove": "Odaktaki öğeyi kaldır (favoriler, son izlenenler, videolarım)",

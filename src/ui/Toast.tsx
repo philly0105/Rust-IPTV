@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
 import { cn } from './cn';
-import { useCenteredDialogOpen } from './Dialog';
+import { reportToastStackBottom, useCenteredDialogOpen } from './Dialog';
 import { ProgressBar } from './Misc';
 
 export type ToastVariant = 'info' | 'success' | 'error';
@@ -304,7 +304,29 @@ export function ToastViewport() {
   const seen = useRef(new Map<string, ReactNode>());
   const seq = useRef(0);
   const listRef = useRef<HTMLOListElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const overDialog = useCenteredDialogOpen();
+  // Over a centred dialog the stack's bottom edge is reported, so below sm (stack at the top)
+  // the dialog layer starts under it instead of being covered (Dialog.tsx, toastReserveFor).
+  // Wider windows keep the stack at the bottom and the layer ignores the value.
+  const reserving = overDialog && toasts.length > 0;
+  useLayoutEffect(() => {
+    const el = sectionRef.current;
+    if (!reserving || !el) {
+      reportToastStackBottom(0);
+      return;
+    }
+    const measure = () => reportToastStackBottom(el.getBoundingClientRect().bottom);
+    measure();
+    window.addEventListener('resize', measure);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => {
+      window.removeEventListener('resize', measure);
+      ro?.disconnect();
+    };
+  }, [reserving, toasts]);
+  useEffect(() => () => reportToastStackBottom(0), []);
   // The last toast leaving while hovered never fires mouseleave; reset so the next stack starts unpaused.
   useEffect(() => {
     if (toasts.length === 0) setHovered(false);
@@ -340,6 +362,7 @@ export function ToastViewport() {
     );
   return createPortal(
     <section
+      ref={sectionRef}
       aria-label={t('notifications')}
       aria-keyshortcuts="F8"
       data-toast-viewport=""
@@ -347,8 +370,9 @@ export function ToastViewport() {
       className={cn(
         'pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]',
         // Below sm a centred dialog spans the window and its footer (Save, Cancel) sits at
-        // the bottom, where the toasts are: while one is open they move to the top edge,
-        // into the gap above the dialog (its pt-[8vh]), and stay readable without hiding its actions.
+        // the bottom, where the toasts are: while one is open they move to the top edge, and
+        // the dialog moves down below them (the reserve above), so neither its actions nor
+        // its title and close button are covered.
         'max-sm:data-[over-dialog]:top-4 max-sm:data-[over-dialog]:bottom-auto',
       )}>
       <div aria-live="polite" aria-atomic="true" className="sr-only" data-toast-live="polite">

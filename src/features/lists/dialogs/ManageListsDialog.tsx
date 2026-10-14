@@ -2,12 +2,16 @@
  * "Manage lists": every list in order, with rename (inline), Show on Home,
  * Edit channels and Delete (with Undo in the toast). Rows reorder by drag or
  * with Alt+ArrowUp / Alt+ArrowDown on a focused row.
+ *
+ * Below 640 px a row takes two lines: the name gets the first one to itself
+ * (a phone otherwise leaves it a few letters between seven buttons), and the
+ * actions plus the move arrows sit under it.
  */
 
 import { LayoutDashboard, ListOrdered, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 import type { CustomList } from '@/api/types';
 
@@ -20,13 +24,16 @@ import { MAX_LISTS, MAX_NAME, errorText, move, nameProblem } from '../lib/cache'
 import { listPath } from '../paths';
 import { openEditListItems } from '../store';
 
+/** Below sm the row wraps (see the module docs)... */
+const TWO_LINES_ON_PHONE = 'max-sm:flex-wrap max-sm:gap-y-0.5';
+/** ...after the grip (size-8 plus the row's gap-1) and the name, which fill the first line. */
+const FIRST_LINE = 'max-sm:basis-[calc(100%-2.25rem)]';
+
 export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onClose(): void }) {
   const { t, i18n } = useTranslation('lists');
   const { t: tc } = useTranslation('common');
   const lists = useLists();
   const actions = useListActions();
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
   const [renaming, setRenaming] = useState<{ id: string; value: string; error: string | null; busy: boolean } | null>(null);
   const fmt = new Intl.NumberFormat(i18n.language);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -77,11 +84,7 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
   const remove = (list: CustomList, index: number) => {
     const next = items[index + 1] ?? items[index - 1];
     focusAfter.current = { id: next?.id, part: 'delete' };
-    const viewing = pathname === listPath(list.id);
-    actions.remove(list, (restored) => {
-      // Undo gives the list a new id: follow it when its page was open.
-      if (viewing) void navigate(listPath(restored.id), { replace: true });
-    });
+    actions.remove(list);
   };
 
   let body;
@@ -106,10 +109,11 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
         getKey={(l) => l.id}
         getLabel={(l) => l.name}
         locked={(l) => renaming?.id === l.id}
+        rowClassName={() => TWO_LINES_ON_PHONE}
         onMove={(from, to) => actions.reorder(move(items, from, to))}
         renderRow={(list, index) =>
           renaming?.id === list.id ? (
-            <form className="flex min-w-0 flex-1 flex-col gap-1" onSubmit={(e) => void submitRename(e, list)} noValidate>
+            <form className={cn('flex min-w-0 flex-1 flex-col gap-1', FIRST_LINE)} onSubmit={(e) => void submitRename(e, list)} noValidate>
               <div className="flex items-center gap-2">
                 <input
                   autoFocus
@@ -148,48 +152,54 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
                 to={listPath(list.id)}
                 onClick={onClose}
                 data-sort-part="name"
-                className="flex min-w-0 flex-1 flex-col rounded-md px-1.5 py-1 outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent"
+                className={cn(
+                  'flex min-w-0 flex-1 flex-col rounded-md px-1.5 py-1 outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent',
+                  FIRST_LINE,
+                )}
               >
-                <span dir="auto" className="truncate text-sm font-medium text-fg">
+                {/* Up to two lines on a phone, where a 60-character name does not fit one. */}
+                <span dir="auto" className="truncate text-sm font-medium text-fg max-sm:line-clamp-2 max-sm:whitespace-normal max-sm:break-words">
                   {list.name}
                 </span>
                 <span className="text-xs tabular-nums text-fg-subtle">{t('channelCount', { count: list.itemCount, formatted: fmt.format(list.itemCount) })}</span>
               </Link>
-              <IconButton
-                size="sm"
-                variant="ghost"
-                data-sort-part="home"
-                pressed={list.onDashboard}
-                label={t('showOnHome', { list: list.name })}
-                title={list.onDashboard ? t('onHome') : t('notOnHome')}
-                icon={<LayoutDashboard className={cn('size-4', list.onDashboard && 'text-accent')} />}
-                onClick={() => actions.setOnDashboard(list, !list.onDashboard)}
-              />
-              <IconButton
-                size="sm"
-                variant="ghost"
-                data-sort-part="items"
-                label={t('editChannelsOf', { list: list.name })}
-                icon={<ListOrdered className="size-4" />}
-                onClick={() => openEditListItems(list.id, { fromManage: true })}
-              />
-              <IconButton
-                size="sm"
-                variant="ghost"
-                data-sort-part="rename"
-                label={t('renameLabel', { list: list.name })}
-                icon={<Pencil className="size-4" />}
-                onClick={() => setRenaming({ id: list.id, value: list.name, error: null, busy: false })}
-              />
-              <IconButton
-                size="sm"
-                variant="ghost"
-                data-sort-part="delete"
-                label={t('deleteLabel', { list: list.name })}
-                icon={<Trash2 className="size-4" />}
-                className="hover:text-danger"
-                onClick={() => remove(list, index)}
-              />
+              <span className="flex shrink-0 items-center gap-1 max-sm:ms-9">
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  data-sort-part="home"
+                  pressed={list.onDashboard}
+                  label={t('showOnHome', { list: list.name })}
+                  title={list.onDashboard ? t('onHome') : t('notOnHome')}
+                  icon={<LayoutDashboard className={cn('size-4', list.onDashboard && 'text-accent')} />}
+                  onClick={() => actions.setOnDashboard(list, !list.onDashboard)}
+                />
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  data-sort-part="items"
+                  label={t('editChannelsOf', { list: list.name })}
+                  icon={<ListOrdered className="size-4" />}
+                  onClick={() => openEditListItems(list.id, { fromManage: true })}
+                />
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  data-sort-part="rename"
+                  label={t('renameLabel', { list: list.name })}
+                  icon={<Pencil className="size-4" />}
+                  onClick={() => setRenaming({ id: list.id, value: list.name, error: null, busy: false })}
+                />
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  data-sort-part="delete"
+                  label={t('deleteLabel', { list: list.name })}
+                  icon={<Trash2 className="size-4" />}
+                  className="hover:text-danger"
+                  onClick={() => remove(list, index)}
+                />
+              </span>
             </>
           )
         }

@@ -13,6 +13,7 @@
   "resultsCount": "Találatok: {{n}}",
   "closeSearch": "Keresés bezárása",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "Most műsoron",
   "watchNow": "{{channel}} megtekintése",
   "hitNotFound": "{{channel}} nincs ebben a listában",

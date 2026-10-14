@@ -77,12 +77,13 @@ describe('Controls options menu', () => {
   it.each(['dock', 'overlay'] as const)('%s: the close button closes the menu from any view', (variant) => {
     render(<Controls variant={variant} visible />);
     openMenu();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    // A menu holds only menu items: Close is one too.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
     expect(menu()).toBeNull();
 
     openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
     expect(menu()).toBeNull();
     expect(commands.setRate).not.toHaveBeenCalled();
   });

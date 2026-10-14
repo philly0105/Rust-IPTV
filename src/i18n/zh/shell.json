@@ -178,6 +178,8 @@
   "scNextItem": "播放队列中的下一集",
   "scChannelFavorite": "将当前频道加入或移出收藏",
   "scItemMenu": "打开当前频道的菜单",
+  "scListsDialogMoveUp": "上移选中的列表或频道（管理列表、编辑频道）",
+  "scListsDialogMoveDown": "下移选中的列表或频道（管理列表、编辑频道）",
   "scListJump": "跳到第一项或最后一项",
   "scListPage": "向上或向下翻一页",
   "scListRemove": "移除当前项目(收藏、最近观看、我的视频)",

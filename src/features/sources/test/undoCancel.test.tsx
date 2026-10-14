@@ -767,6 +767,26 @@ describe('review round 2', () => {
     expect(decodeText(latin1('\xe2\x82 x'))).toBe('â‚ x');
   });
 
+  it('reads BOM-less UTF-16 subtitle files by where the NULs fall (wiring-r1 F5)', async () => {
+    const utf16 = (s: string, le: boolean) =>
+      Uint8Array.from([...s].flatMap((c) => {
+        const u = c.charCodeAt(0);
+        return le ? [u & 0xff, u >> 8] : [u >> 8, u & 0xff];
+      }));
+    const srt = '1\r\n00:00:01,000 --> 00:00:02,500\r\nGrüß Gott\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nこんにちは\r\n';
+    expect(decodeText(utf16(srt, true))).toBe(srt);
+    expect(decodeText(utf16(srt, false))).toBe(srt);
+    expect(await readFileText(new File([utf16(srt, true)], 'movie.srt'))).toBe(srt);
+    // Mostly non-ASCII lines still have ASCII timecodes and arrows to go on.
+    const vtt = 'WEBVTT\n\n00:01.000 --> 00:02.000\n日本語の字幕です。日本語の字幕です。\n';
+    expect(decodeText(utf16(vtt, true))).toBe(vtt);
+    // Text without NULs is untouched: UTF-8 and cp1252 decode as before.
+    expect(decodeText(new TextEncoder().encode(srt))).toBe(srt);
+    expect(decodeText(bytes(0x31, 0x0d, 0x0a, 0x43, 0x61, 0x66, 0xe9))).toBe('1\r\nCafé');
+    // A stray NUL or two in 8-bit text is not enough to switch to UTF-16.
+    expect(decodeText(bytes(0x41, 0x00, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49))).toBe('A\0BCDEFGHI');
+  });
+
   it('sign-in advice in dialogs and toasts names what each kind signs in with (R2-2)', async () => {
     const auth = { code: 'auth' as const, message: 'rejected the username or password' };
     expect(nextStepKey(auth, 'stalker')).toBe('sourceErrorAuth_stalker');

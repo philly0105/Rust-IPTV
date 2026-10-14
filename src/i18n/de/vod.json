@@ -189,6 +189,7 @@
   "decade": "{{decade}}er",
   "yearFrom": "Von",
   "yearTo": "Bis",
+  "yearRange": "Jahresbereich",
   "yearEmptyTitle": "Keine Titel aus diesen Jahren",
   "hideWatched": "Angesehene ausblenden",
   "watchedEmptyTitle": "Hier haben Sie alles angesehen",

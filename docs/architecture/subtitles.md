@@ -9,7 +9,7 @@ Subtitle files and the subtitle look, for the built-in player and embedded mpv (
 | Parser | `src/features/player/subtitles/parse.ts` |
 | Style mapping | `src/features/player/subtitles/style.ts` |
 | File tracks on the media element | `src/features/player/subtitles/tracks.ts` |
-| Cue placement (lazy) | `src/features/player/subtitles/inline.ts` |
+| Subtitle overlay: draws every track (lazy) | `src/features/player/subtitles/inline.ts` |
 | Loading a file (lazy) | `src/features/player/subtitles/load.ts` |
 | Menu and compact style view (lazy) | `src/features/player/components/SubtitleMenu.tsx` |
 | Controls shared with the settings page | `src/features/player/components/SubtitleStyleFields.tsx` |
@@ -28,7 +28,18 @@ All markup is stripped on purpose. Every format then takes the user's subtitle l
 
 ## Built-in player
 
-"Load subtitle file…" in the Subtitles menu opens a hidden `<input type="file" accept=".srt,.vtt,.ass,.ssa">` (`data-testid="subtitle-file-input"`). The file is checked against `MAX_SUBTITLE_BYTES` (5 MB), read with `readFileText` (which detects the encoding), then detected and parsed. The cues go into `el.addTextTrack('subtitles', fileName)` as `VTTCue`s, with the text escaped as WebVTT markup, and that track is shown.
+"Load subtitle file…" in the Subtitles menu opens a hidden `<input type="file" accept=".srt,.vtt,.ass,.ssa">` (`data-testid="subtitle-file-input"`). The file is checked against `MAX_SUBTITLE_BYTES` (5 MB), read with `readFileText` (which detects the encoding), then detected and parsed. The cues go into `el.addTextTrack('subtitles', fileName)` as `VTTCue`s, with the text escaped as WebVTT markup, and that track is turned on.
+
+### Drawn by the player
+
+The player draws every subtitle track itself (engine tracks and files). Edge and WebView2 (the desktop app's runtime) paint native cues with the Windows caption theme through a browser default rule, `video::cue { background-color: rgba(0,0,0,0.75) !important; color: #fff !important; font-size: 100% !important }`. A browser `!important` rule beats any page CSS, so a `video::cue` rule cannot set the user's colour, size or background there (only the position works). Chrome and Playwright's Chromium do not mark that rule `!important`, so a check of `::cue` styles passes there and proves nothing.
+
+- `inline.ts` (`bindSubtitleOverlay(el, box)`, loaded lazily for video) takes over every subtitle or captions track that turns `showing`: it adds the track to the drawn set (`tracks.ts` `drawTrack`) and sets it to `hidden`. A hidden track keeps its cues, `activeCues` and `cuechange` events, but the browser draws nothing.
+- On `cuechange`, on a track change, added or removed, and on a settings change, the overlay draws the active cues of the drawn hidden tracks into `box`: one block per cue, a `span.player-sub-cue` with `dir="auto"` (right-to-left lines read right to left) and the browser's own parse of the cue (`getCueAsHTML()`, which builds nodes and never parses HTML). Without it, the cue text with its WebVTT tags removed is set as plain text. `white-space: pre-line` keeps the line breaks.
+- A drawn track that turns `disabled` leaves the set (`releaseTrack`). Any other `hidden` track (hls.js and shaka keep the selected track hidden while subtitles are off) is not drawn.
+- "On" for the menu is `isShownTrack`: `showing`, or `hidden` and drawn. The native engine and `withExternal` use it. hls.js reads its hidden track as "subtitles off" (`subtitleDisplay` turns false), so the hls engine keeps its own `textOn`. shaka does the same; its engine keeps `textOn`, sets `streaming.alwaysStreamText` so cues keep coming while its track is hidden, and turns Off with `hideDrawnTracks(el)`, because its Off only hides the track.
+- InlinePlayer renders the empty overlay (`div.player-subs[data-subtitle-overlay]`, `aria-hidden`) right after the `<video>`, so it sits above the picture and below the controls, and `pointer-events: none` keeps it out of the way of clicks.
+- The browser's picture-in-picture window shows the video, not the page's overlay. While the video is in it (`enterpictureinpicture`, or `document.pictureInPictureElement` is the video when the overlay binds), the drawn tracks go back to `showing` (`showDrawnTracks`) and the browser draws them in that window, in the system caption style, and the overlay is hidden. They stay in the drawn set, so the menu still shows them as on. A track turned on there stays `showing`; one turned `disabled` or `hidden` (hls.js hides its track on Off) leaves the set, so Off in picture-in-picture stays off. On `leavepictureinpicture` the overlay takes the `showing` tracks over again. The embedded mpv player's PiP (`pip.ts`) shrinks the app window instead and mpv draws its own subtitles, so the overlay is not involved there.
 
 - `tracks.ts` remembers the file tracks of each element. A loaded file is listed as `ext:<n>` after the engine's own tracks. `withExternal()` builds the list the media store publishes. While a file shows, no engine track is marked selected.
 - `selectText(el, engine, id)` serves `MediaCommands.setText` in InlinePlayer. Picking a file turns the engine's subtitles off (`engine.setText(null)`) and disables the other files. Picking an engine track, or Off, disables every file.
@@ -58,12 +69,12 @@ Four settings: `subtitleSize` (small, medium, large, xlarge), `subtitleColor` (w
 | Shadow | `--sub-bg: transparent`, `--sub-shadow` halo | `sub-border-style=outline-and-shadow`, `sub-back-color=#C0000000`, border 2, shadow offset 1 |
 | Box | `--sub-bg: rgb(0 0 0 / .72)` | `sub-border-style=background-box`, `sub-back-color=#B8000000`, border 3, shadow 0 |
 | Solid | `--sub-bg: rgb(0 0 0)` | `background-box`, `sub-back-color=#FF000000`, border 3, shadow 0 |
-| Position p | each cue of a showing track: `snapToLines=false`, `line = cueLine(p) = 90 - p`, `lineAlign='end'` | `sub-pos = 100 - p` |
+| Position p | the overlay's line container: `bottom` at `100 - cueLine(p)` percent, that is `10 + p` (`cueLine(p) = 90 - p`) | `sub-pos = 100 - p` |
 
 mpv also gets `sub-ass-override=scale`, so ASS files keep their own styling except for the size.
 
-- PlayerDock sets the CSS variables on the persistent `[data-player-host]` node, and `player.css` reads them in `[data-player-host] video::cue`. The font size is `clamp(14px, 2.4vw, 28px) * var(--sub-scale)`.
-- `inline.ts` (`bindCuePosition`, loaded lazily for video) places cues as they become active (`cuechange`), when a track is turned on or added, and on every showing track when the position setting changes. File cues are created at the current line.
+- PlayerDock sets the CSS variables on the persistent `[data-player-host]` node, and `player.css` reads them in `.player-sub-cue`, the overlay's cue. The overlay is a size container, so the font size follows the player, not the window: `clamp(14px, 2.4cqw, 28px) * var(--sub-scale)`. A `video::cue` rule with the same variables stays as a fallback for the moment before the overlay takes a track over.
+- File cues are still created at `line = cueLine(p)` (`snapToLines=false`, `lineAlign='end'`), so a track that is ever drawn natively sits at the same height.
 - MpvSurface calls `sendSubtitleStyle()` after each successful `mpv.load`. `bindMpvExtras` sends the style once mpv is attached and again whenever the style settings change. Each property is sent separately, so an mpv that lacks one property still takes the others.
 - The core checks each style property in `mpv.setProperty` and in property commands:
   - `sub-scale` 0.5..=3;
@@ -79,6 +90,10 @@ mpv also gets `sub-ass-override=scale`, so ASS files keep their own styling exce
 
 - The Subtitles row in the options menu (Controls) and in embedded mpv's context menu (VideoContextMenu) is always shown. Its submenu lists Off, the stream's tracks and loaded files, then "Load subtitle file…" and "Subtitle style…". With no tracks, a line says the stream has none.
 - "Subtitle style…" is a compact view of the same four settings: radio groups with roving focus (Left/Right mirror in right-to-left text, Home/End) and the position slider. A choice is shown at once through the player's settings cache and written with `settings.update`. A failed write puts the old value back and shows a toast. The slider previews while it moves and saves once when the drag or key press ends. Escape or Back returns to the track list.
+- A menu may hold only menu items, so the style view (radio groups, a slider and its live readout) is not a menu: in the same frame, its container turns into a dialog labelled "Subtitle style" (`role="dialog"`), and its Back and Close are plain buttons. In the menu views, Back and Close are `menuitem`s. The same goes for VideoContextMenu's style view.
+- Up and Down move between rows in both views (the frame takes them). In the menu's style view the slider lets them through and keeps Left/Right, Home/End and Page keys; on the settings page the slider keeps every arrow.
+- The options menu floats over the picture and grows up from the control bar. Its height is capped at the room between its bottom edge and the app header (the top of the screen in fullscreen), measured when a view opens, on resize and on fullscreen changes (`roomAbove` in Controls), so every view stays below the header and scrolls inside the frame. In the 390 px inline player that is about 90 to 115 px. The dock variant (embedded mpv) grows the dock instead and is not capped this way.
+- A file over the limit is named by its size in the limit's unit, rounded up to hundredths (`oversizeText`): a 5,243,018-byte file reads "5.01 MB", never "5 MB".
 - Settings, Playback, "Subtitles" group: the same controls with labels and hints, above a 16:9 preview. The preview's sample line uses the same variables, scale and position as the player, and follows the slider before it is saved.
 - `Shift+C` (Playback area, video only) opens the options menu at the Subtitles submenu. `usePlaybackShortcuts` sets `media.subtitleMenuAt`, and Controls consumes it.
 - The menu, the style view, the loader and the cue placement load lazily (lazyParts and dynamic imports). Only `style.ts`, `tracks.ts` and the wiring are in the entry chunk.
@@ -88,17 +103,21 @@ mpv also gets `sub-ass-override=scale`, so ASS files keep their own styling exce
 
 - `src/features/player/subtitles/parse.test.ts`: timestamps, detection, SRT/WebVTT/ASS parsing, markup stripping, bad input, and the e2e fixtures.
 - `style.test.ts`: every option through `cueCssVars` and `mpvSubtitleProperties`, `cueLine`, and the fallbacks.
+- `inline.test.ts`: the overlay takes a showing track over, draws active cues as safe text with `dir="auto"` or from `getCueAsHTML`, follows `cuechange`, lets a disabled track go, ignores an engine's own hidden track, and moves with the position setting; in picture-in-picture the track that is on shows natively with the overlay hidden, is drawn again after leaving, a track turned on there is drawn after leaving, Off there (disabled, hidden by hls.js, or `hideDrawnTracks`) stays off, and binding while already in picture-in-picture shows the drawn track natively.
+- `engines.test.ts`: the native engine reports a drawn (hidden) track as on and an engine-hidden one as off, and keeps reporting the track as on across picture-in-picture, while Off there stays off after leaving.
+- `components/menuFit.test.ts`: `roomAbove` below the header, at the window top, never negative.
 - `external.test.tsx`:
   - file tracks, selection and clearing;
   - the file listed in the Subtitles menu;
-  - the compact style view;
+  - the compact style view as a labelled dialog, Up/Down leaving the slider, Back and Close as menu items;
   - Shift+C;
-  - file errors;
+  - file errors and the size of a file over the limit;
   - the mpv path flow.
 - `crates/iptv-core/tests/player_args.rs` and `player_rpc.rs`: the property value checks, `sub-add` refused as a raw command, path checks, and `mpv.addSubtitle` registered and refusing bad files before the session.
 - `e2e/subtitles.spec.ts` with `e2e/fixtures/subtitles/`:
   - the settings preview and saved values;
-  - SRT, WebVTT and ASS loads in the built-in player;
+  - SRT, WebVTT and ASS loads in the built-in player, with the drawn cue's computed colour, background, font size and position checked (not the host variables);
   - Off and Shift+C;
   - a broken file;
-  - the menu's style view.
+  - the menu's style view;
+  - at 390 and 1280 px, the inline player's menu views (root, Subtitles, style) stay below the header and scroll, and Off takes a click.

@@ -74,15 +74,21 @@ export function decadeOf(year: number): number {
   return Math.floor(year / 10) * 10;
 }
 
+/**
+ * A decade chip's range. The last decade the core accepts is cut at
+ * {@link MAX_YEAR} (the 2100s are `2100..2100`): a bound past it would be
+ * dropped when the URL is read back, and the chip could never show as
+ * pressed or be cleared by a second click.
+ */
 export function decadeRange(decade: number): Required<YearRange> {
-  return { from: decade, to: decade + 9 };
+  return { from: decade, to: Math.min(decade + 9, MAX_YEAR) };
 }
 
-/** The decade a range covers exactly (`1990..1999` -> 1990), else undefined. */
+/** The decade a range covers exactly (`1990..1999` -> 1990, `2100..2100` -> 2100), else undefined. */
 export function rangeDecade(range: YearRange): number | undefined {
   const { from, to } = range;
   if (from === undefined || to === undefined) return undefined;
-  return from % 10 === 0 && to === from + 9 ? from : undefined;
+  return from % 10 === 0 && to === decadeRange(from).to ? from : undefined;
 }
 
 /** Decade chips from `catalog.yearFacets` (newest year first), newest decade first. */

@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { WatchStatsDay } from '@/api/types';
 
-import { barPercent, chartScale, rangeTotals, showDayLabel } from '../lib/chart';
-import { formatAxisHours, formatAxisMinutes, formatWatchTime, intlLocale, longDayLabel, parseDay, weekdayLabel } from '../lib/format';
+import { barPercent, chartScale, labelsFit, rangeTotals, showDayLabel } from '../lib/chart';
+import { formatAxisHours, formatAxisMinutes, formatWatchTime, intlLocale, longDayLabel, narrowWeekdayLabel, parseDay, weekdayLabel } from '../lib/format';
 import { readRange } from '../paths';
 
 const day = (seconds: number, live = seconds): WatchStatsDay => ({ day: '2026-10-13', seconds, liveSeconds: live, vodSeconds: seconds - live });
@@ -56,6 +56,15 @@ describe('dates', () => {
     expect(weekdayLabel('2026-10-13', 'en')).toBe('Tue');
     expect(longDayLabel('2026-10-13', 'en')).toBe('Tuesday, October 13');
   });
+
+  it('has a narrow weekday for tight axes, also for Arabic, whose short names are words', () => {
+    expect(narrowWeekdayLabel('2026-10-13', 'en')).toBe('T');
+    const ar = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('ar', o).format(parseDay('2026-10-14'));
+    expect(weekdayLabel('2026-10-14', 'ar')).toBe(ar({ weekday: 'short' }));
+    expect(narrowWeekdayLabel('2026-10-14', 'ar')).toBe(ar({ weekday: 'narrow' }));
+    expect(narrowWeekdayLabel('2026-10-14', 'ary')).toBe(narrowWeekdayLabel('2026-10-14', intlLocale('ary')));
+    expect(Array.from(narrowWeekdayLabel('2026-10-14', 'ar')).length).toBeLessThan(Array.from(weekdayLabel('2026-10-14', 'ar')).length);
+  });
 });
 
 describe('chart', () => {
@@ -82,6 +91,16 @@ describe('chart', () => {
     expect(Array.from({ length: 7 }, (_, i) => showDayLabel(i, 7)).every(Boolean)).toBe(true);
     const shown = Array.from({ length: 30 }, (_, i) => i).filter((i) => showDayLabel(i, 30));
     expect(shown).toEqual([1, 8, 15, 22, 29]);
+  });
+
+  it('checks whether the widest label fits a column, gaps taken out', () => {
+    // 7 columns in 264 px with 2 px gaps: (264 - 12) / 7 = 36 px each.
+    expect(labelsFit(264, 2, 7, 36)).toBe(true);
+    expect(labelsFit(264, 2, 7, 36.5)).toBe(false);
+    expect(labelsFit(264, 0, 7, 37)).toBe(true);
+    // Not laid out yet: keep the short names.
+    expect(labelsFit(0, 2, 7, 80)).toBe(true);
+    expect(labelsFit(264, 2, 0, 80)).toBe(true);
   });
 
   it('sums the live and VOD split', () => {

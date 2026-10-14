@@ -30,6 +30,7 @@ import { useSettings } from '../useSettings';
 // account:
 import { AccountAlerts } from './AccountAlerts';
 import { ChannelCard, PosterCard, SourceCard, itemPath, joinList } from './cards';
+import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail } from './DashboardRail';
 import { HeroCarousel } from './HeroCarousel';
 import { HeroSkeleton } from './HeroSkeleton';
@@ -104,14 +105,17 @@ function programmeProgress(start?: string, end?: string, offsetMinutes = 0): num
   return Math.max(0, Math.min(1, (Date.now() - offsetMinutes * 60_000 - s) / (e - s)));
 }
 
-/** The page's single <h1> (sr-only; the header shows the visible title) in every state. */
+/**
+ * The page's single <h1> (sr-only; the header shows the visible title) in every state, and the
+ * channel card menu (Run 2 C2) for every live and radio card below, custom list rails included.
+ */
 export function DashboardPage() {
   const { t } = useTranslation('shell');
   return (
-    <>
+    <ChannelMenuHost>
       <h1 className="sr-only">{t('navDashboard')}</h1>
       <DashboardBody />
-    </>
+    </ChannelMenuHost>
   );
 }
 
@@ -409,6 +413,7 @@ function DashboardBody() {
                 isRadio={f.ref.contentType === 'radio'}
                 ariaLabel={t('playTitle', { title: f.snapshot.title })}
                 onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
+                channel={snapshotChannel(f.ref, f.snapshot)}
               />
             );
           }}
@@ -438,6 +443,7 @@ function DashboardBody() {
               isRadio={r.ref.contentType === 'radio'}
               ariaLabel={t('playTitle', { title: r.snapshot.title })}
               onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
+              channel={snapshotChannel(r.ref, r.snapshot)}
             />
           )}
         />

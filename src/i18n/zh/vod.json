@@ -189,6 +189,7 @@
   "decade": "{{decade}}年代",
   "yearFrom": "起始年",
   "yearTo": "结束年",
+  "yearRange": "年份范围",
   "yearEmptyTitle": "这些年份没有影片",
   "hideWatched": "隐藏已观看",
   "watchedEmptyTitle": "这里的影片已全部看完",

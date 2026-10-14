@@ -18,8 +18,9 @@
 //! returns, unavailable channels included. Custom names apply on read.
 //!
 //! Limits: [`MAX_LISTS`] lists, [`MAX_ITEMS`] channels per list, names of
-//! 1..=[`MAX_NAME_CHARS`] characters, unique without regard to case
-//! (Unicode lower case, which is stricter than the index's ASCII `NOCASE`).
+//! 1..=[`MAX_NAME_CHARS`] characters with at least one visible, unique
+//! without regard to case (Unicode upper then lower case, which is stricter
+//! than the index's ASCII `NOCASE`).
 //!
 //! Removing a list or a source removes its items through the cascades;
 //! [`forget_source`] then announces the change.
@@ -204,16 +205,18 @@ fn check_ref_count(n: usize, field: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// A list name as stored: trimmed, 1..=[`MAX_NAME_CHARS`] characters, no
-/// control characters. `invalid` otherwise.
+/// A list name as stored: trimmed, 1..=[`MAX_NAME_CHARS`] characters, at
+/// least one of them visible (a name of only zero-width or other invisible
+/// characters is blank), no control character and no line or paragraph
+/// separator. `invalid` otherwise.
 pub fn clean_name(name: &str) -> CoreResult<String> {
     let name = name.trim();
-    if name.is_empty() {
+    if name.chars().all(channeledit::is_invisible) {
         return Err(CoreError::invalid("name is required"));
     }
-    if name.chars().any(char::is_control) {
+    if name.chars().any(channeledit::is_line_break) {
         return Err(CoreError::invalid(
-            "name must not contain control characters",
+            "name must not contain control characters or line breaks",
         ));
     }
     if name.chars().count() > MAX_NAME_CHARS {
@@ -224,9 +227,11 @@ pub fn clean_name(name: &str) -> CoreResult<String> {
     Ok(name.to_string())
 }
 
-/// The case-insensitive identity of a name (Unicode lower case).
+/// The case-insensitive identity of a name. Upper then lower case folds
+/// more pairs than lower case alone ("Straße" and "STRASSE", final and
+/// medial sigma).
 fn name_key(name: &str) -> String {
-    name.to_lowercase()
+    name.to_uppercase().to_lowercase()
 }
 
 fn cut(s: &str, max: usize) -> String {
@@ -899,7 +904,19 @@ pub fn export_lists(conn: &Connection) -> CoreResult<Vec<CustomListBackup>> {
     Ok(out)
 }
 
-/// Restores lists from a backup. Returns (lists written, items dropped).
+/// What [`import_lists`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ListImport {
+    /// Lists created or merged into.
+    pub written: usize,
+    /// Items dropped (see [`import_lists`]).
+    pub items_dropped: usize,
+    /// Backup lists not restored at all: a blank name, or [`MAX_LISTS`]
+    /// reached. Counted whether or not they had items.
+    pub lists_dropped: usize,
+}
+
+/// Restores lists from a backup and says what it wrote and dropped.
 ///
 /// - `replace` deletes every list first; otherwise a backup list merges into
 ///   the list with the same name (without regard to case), which keeps its
@@ -925,7 +942,7 @@ pub fn import_lists(
     lists: &[CustomListBackup],
     source_map: &HashMap<String, String>,
     replace: bool,
-) -> CoreResult<(usize, usize)> {
+) -> CoreResult<ListImport> {
     conn.execute_batch("SAVEPOINT custom_lists_import")?;
     match import_inner(conn, lists, source_map, replace) {
         Ok(n) => {
@@ -940,15 +957,22 @@ pub fn import_lists(
     }
 }
 
-/// A backup list name made storable: control characters become spaces, then
-/// trimmed and cut to [`MAX_NAME_CHARS`]. `None` when nothing is left.
+/// A backup list name made storable: control characters and line or
+/// paragraph separators become spaces, then trimmed and cut to
+/// [`MAX_NAME_CHARS`]. `None` when nothing visible is left.
 fn backup_name(name: &str) -> Option<String> {
     let spaced: String = name
         .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| {
+            if channeledit::is_line_break(c) {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
-    let t = spaced.trim();
-    (!t.is_empty()).then(|| cut(t, MAX_NAME_CHARS))
+    let t = cut(spaced.trim(), MAX_NAME_CHARS);
+    (!t.chars().all(channeledit::is_invisible)).then_some(t)
 }
 
 fn usable_backup_id(conn: &Connection, id: &str) -> CoreResult<bool> {
@@ -965,7 +989,7 @@ fn import_inner(
     lists: &[CustomListBackup],
     source_map: &HashMap<String, String>,
     replace: bool,
-) -> CoreResult<(usize, usize)> {
+) -> CoreResult<ListImport> {
     if replace {
         conn.execute("DELETE FROM custom_lists", [])?;
     }
@@ -977,9 +1001,11 @@ fn import_inner(
     order.sort_by_key(|l| l.position);
     let mut written: HashSet<String> = HashSet::new();
     let mut dropped = 0usize;
+    let mut lists_dropped = 0usize;
     for l in order {
         let Some(name) = backup_name(&l.name) else {
             dropped += l.items.len();
+            lists_dropped += 1;
             continue;
         };
         let (target, created) = match find_by_name(conn, &name, None)? {
@@ -987,6 +1013,7 @@ fn import_inner(
             None => {
                 if list_count(conn)? >= MAX_LISTS {
                     dropped += l.items.len();
+                    lists_dropped += 1;
                     continue;
                 }
                 let id = if usable_backup_id(conn, &l.id)? {
@@ -1042,7 +1069,11 @@ fn import_inner(
         }
         written.insert(target);
     }
-    Ok((written.len(), dropped))
+    Ok(ListImport {
+        written: written.len(),
+        items_dropped: dropped,
+        lists_dropped,
+    })
 }
 
 #[cfg(test)]
@@ -1126,6 +1157,34 @@ mod tests {
     }
 
     #[test]
+    fn names_need_a_visible_character_and_fold_case() {
+        let mut c = conn();
+        for blank in ["\u{200B}", " \u{200F}\u{FEFF} ", "\u{2028}", "\u{3164}"] {
+            assert_eq!(
+                code(create(&mut c, blank, &[], None).unwrap_err()),
+                "invalid",
+                "{blank:?}"
+            );
+        }
+        for broken in ["a\u{2028}b", "a\u{2029}b"] {
+            assert_eq!(
+                code(create(&mut c, broken, &[], None).unwrap_err()),
+                "invalid",
+                "{broken:?}"
+            );
+        }
+        let kept = "\u{1F468}\u{200D}\u{1F373} Cooking";
+        assert_eq!(create(&mut c, kept, &[], None).unwrap().name, kept);
+        create(&mut c, "Straße", &[], None).unwrap();
+        assert_eq!(
+            code(create(&mut c, "STRASSE", &[], None).unwrap_err()),
+            "conflict"
+        );
+        assert_eq!(backup_name("\u{200B}\u{200D}"), None);
+        assert_eq!(backup_name("a\u{2028}b").as_deref(), Some("a b"));
+    }
+
+    #[test]
     fn items_append_dedupe_and_respect_the_limit() {
         let mut c = conn();
         let l = create(&mut c, "Mix", &[item("s1", "1"), item("s1", "1")], None).unwrap();
@@ -1192,8 +1251,11 @@ mod tests {
             )
             .unwrap();
         let map = HashMap::from([("s1".to_string(), "n1".to_string())]);
-        let (written, dropped) = import_lists(&fresh, &backup, &map, true).unwrap();
-        assert_eq!((written, dropped), (2, 1));
+        let out = import_lists(&fresh, &backup, &map, true).unwrap();
+        assert_eq!(
+            (out.written, out.items_dropped, out.lists_dropped),
+            (2, 1, 0)
+        );
         let lists = list(&fresh, None).unwrap();
         assert_eq!(lists[0].id, a.id, "the backup id is kept when free");
         assert!(!lists[0].on_dashboard);
@@ -1202,8 +1264,11 @@ mod tests {
             vec![ItemRef::new("n1", ContentType::Live, "1")]
         );
         // Merging the same file again adds nothing and drops the same item.
-        let (written, dropped) = import_lists(&fresh, &backup, &map, false).unwrap();
-        assert_eq!((written, dropped), (2, 1));
+        let out = import_lists(&fresh, &backup, &map, false).unwrap();
+        assert_eq!(
+            (out.written, out.items_dropped, out.lists_dropped),
+            (2, 1, 0)
+        );
         assert_eq!(list(&fresh, None).unwrap().len(), 2);
         // A same-name list (other case) merges instead of failing.
         let mut renamed = backup.clone();

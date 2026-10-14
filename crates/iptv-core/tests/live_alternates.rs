@@ -262,6 +262,89 @@ async fn skips_channels_in_hidden_categories() {
     assert!(names(&lookup(cnn).await).is_empty());
 }
 
+/// Run 2 C2: a channel hidden with a channel edit is never an alternate,
+/// whichever way it matches (name or guide id), and a renamed alternate
+/// shows its custom name but still matches by its provider name.
+#[tokio::test]
+async fn skips_hidden_channels_and_shows_custom_names() {
+    let env = env().await;
+    let mut r = live_router();
+    iptv_core::channeledit::rpc::register(&mut r);
+    let a = add_text(&env.state, "Alpha", ALPHA).await;
+    let b = add_text(&env.state, "Beta", BETA).await;
+
+    let sky1 = channel_ref(&r, &env.state, &a.id, "UK: Sky Sports 1 HD").await;
+    let cnn = channel_ref(&r, &env.state, &a.id, "US | CNN").await;
+    let beta_hd = channel_ref(&r, &env.state, &b.id, "Sky Sports 1 HD").await;
+    let beta_fhd = channel_ref(&r, &env.state, &b.id, "Sky Sports 1 FHD").await;
+    let beta_cnn = channel_ref(&r, &env.state, &b.id, "CNN HD").await;
+    let lookup = |reference: Value| {
+        let (r, state) = (&r, env.state.clone());
+        async move {
+            r.dispatch(state, "live.alternates", json!({"ref": reference}))
+                .await
+                .unwrap()
+        }
+    };
+    let call = |method: &'static str, args: Value| {
+        let (r, state) = (&r, env.state.clone());
+        async move {
+            r.dispatch(state, method, args)
+                .await
+                .unwrap_or_else(|e| panic!("{method}: {e:?}"));
+        }
+    };
+    assert_eq!(
+        names(&lookup(sky1.clone()).await),
+        vec![
+            ("Beta".into(), "Sky Sports 1 HD".into()),
+            ("Alpha".into(), "Sky Sports 1 (backup)".into()),
+            ("Beta".into(), "Sky Sports 1 FHD".into()),
+        ]
+    );
+    assert_eq!(
+        names(&lookup(cnn.clone()).await),
+        vec![("Beta".into(), "CNN HD".into())]
+    );
+
+    // Beta's HD copy (a name match) and its CNN (a guide-id match) hidden;
+    // its FHD copy renamed.
+    call(
+        "channels.setHidden",
+        json!({"refs": [beta_hd.clone(), beta_cnn.clone()], "hidden": true}),
+    )
+    .await;
+    call(
+        "channels.rename",
+        json!({"ref": beta_fhd.clone(), "name": "My Sky Sports"}),
+    )
+    .await;
+    let v = lookup(sky1.clone()).await;
+    assert_eq!(
+        names(&v),
+        vec![
+            ("Alpha".into(), "Sky Sports 1 (backup)".into()),
+            ("Beta".into(), "My Sky Sports".into()),
+        ]
+    );
+    assert_eq!(v["alternates"][1]["channel"]["ref"], beta_fhd);
+    // The match key is still the provider name's.
+    assert_eq!(v["key"], "sky sports 1");
+    assert!(names(&lookup(cnn.clone()).await).is_empty());
+
+    // Unhidden, they come back.
+    call(
+        "channels.setHidden",
+        json!({"refs": [beta_hd, beta_cnn], "hidden": false}),
+    )
+    .await;
+    assert_eq!(names(&lookup(sky1).await).len(), 3);
+    assert_eq!(
+        names(&lookup(cnn).await),
+        vec![("Beta".into(), "CNN HD".into())]
+    );
+}
+
 const CHANNELS: usize = 50_000;
 const BRANDS: [&str; 25] = [
     "Sky Sports",

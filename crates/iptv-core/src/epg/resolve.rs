@@ -185,6 +185,11 @@ impl ChannelDirectory {
         self.names.get(&key).map(String::as_str)
     }
 
+    /// The runtime generation this snapshot was loaded at.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }

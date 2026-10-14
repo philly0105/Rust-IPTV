@@ -155,6 +155,24 @@ impl Rig {
             .collect()
     }
 
+    /// The recordings titled `title`, by start.
+    async fn titled(&self, title: &str) -> Vec<Recording> {
+        self.recordings()
+            .await
+            .into_iter()
+            .filter(|r| r.title.as_deref() == Some(title))
+            .collect()
+    }
+
+    /// `(start offset from base, status, made by a rule)` of every recording.
+    async fn all(&self) -> Vec<(i64, RecordingStatus, bool)> {
+        self.recordings()
+            .await
+            .into_iter()
+            .map(|r| (self.offset(&r.start), r.status, r.rule_id.is_some()))
+            .collect()
+    }
+
     async fn scheduled(&self, rule: &Value) -> Vec<i64> {
         self.of_rule(rule)
             .await
@@ -305,6 +323,164 @@ async fn an_epg_refresh_adds_new_airings() {
     assert_eq!(r.recordings().await.len(), 3);
 }
 
+/// Review fix: the re-match never moves a recording onto an airing another
+/// recording of the channel already holds (one airing, two recordings).
+#[tokio::test]
+async fn a_retitled_airing_never_doubles_up_with_the_next_one() {
+    let r = rig().await;
+    let (first, second) = (HOUR, HOUR + HOUR / 2);
+    r.guide(&[(first, SHOW), (second, SHOW)]).await;
+    let rule = r.add_rule(SHOW).await;
+    assert_eq!(r.scheduled(&rule).await, vec![first, second]);
+
+    // The first airing becomes something else: its recording does not jump
+    // onto the second airing; the rule no longer wants it, so it goes.
+    r.guide(&[(first, "Weather"), (second, SHOW)]).await;
+    recording::tick(&r.env.state).await.unwrap();
+    assert_eq!(
+        r.all().await,
+        vec![(second, RecordingStatus::Scheduled, true)]
+    );
+
+    // The title comes back: the rule schedules it again.
+    r.guide(&[(first, SHOW), (second, SHOW)]).await;
+    recording::tick(&r.env.state).await.unwrap();
+    assert_eq!(r.scheduled(&rule).await, vec![first, second]);
+
+    // Both airings move half an hour later: each recording follows one of
+    // them, and none lands on the other's slot.
+    let third = second + HOUR / 2;
+    r.guide(&[(second, SHOW), (third, SHOW)]).await;
+    recording::tick(&r.env.state).await.unwrap();
+    assert_eq!(r.scheduled(&rule).await, vec![second, third]);
+    assert_eq!(r.recordings().await.len(), 2);
+}
+
+/// Review fix: a one-off recording whose airing changes title stays where
+/// the user put it, instead of moving onto the rule's recording.
+#[tokio::test]
+async fn a_one_off_recording_of_a_retitled_airing_stays_put() {
+    let r = rig().await;
+    let (first, second) = (HOUR, HOUR + HOUR / 2);
+    r.guide(&[(first, SHOW), (second, SHOW)]).await;
+    recording::schedule(
+        &r.env.state,
+        ScheduleRequest {
+            item_ref: r.item.clone(),
+            channel_name: "Alpha".into(),
+            title: Some(SHOW.into()),
+            start: Some(rfc(r.base + first)),
+            end: Some(rfc(r.base + second)),
+            duration_minutes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let rule = r.add_rule(SHOW).await;
+    assert_eq!(r.scheduled(&rule).await, vec![second]);
+
+    r.guide(&[(first, "Weather"), (second, SHOW)]).await;
+    recording::tick(&r.env.state).await.unwrap();
+    assert_eq!(
+        r.all().await,
+        vec![
+            (first, RecordingStatus::Scheduled, false),
+            (second, RecordingStatus::Scheduled, true)
+        ]
+    );
+}
+
+/// Review fix (C5): a cancelled airing the guide moves stays cancelled at
+/// its new time, with or without its cancelled row in the library.
+#[tokio::test]
+async fn a_cancelled_airing_the_guide_moves_is_not_recreated() {
+    let r = rig().await;
+    r.guide(&[(HOUR, SHOW), (25 * HOUR, SHOW), (49 * HOUR, SHOW)])
+        .await;
+    let rule = r.add_rule(SHOW).await;
+    let second = r
+        .recordings()
+        .await
+        .into_iter()
+        .find(|x| r.offset(&x.start) == 25 * HOUR)
+        .unwrap();
+    recording::cancel(&r.env.state, &second.id).await.unwrap();
+
+    // Five minutes later in the refreshed guide.
+    let moved = 25 * HOUR + 300;
+    r.guide(&[(HOUR, SHOW), (moved, SHOW), (49 * HOUR, SHOW)])
+        .await;
+    recording::tick(&r.env.state).await.unwrap();
+    assert_eq!(
+        r.of_rule(&rule).await,
+        vec![
+            (HOUR, RecordingStatus::Scheduled),
+            (moved, RecordingStatus::Cancelled),
+            (49 * HOUR, RecordingStatus::Scheduled),
+        ]
+    );
+    let row = r
+        .recordings()
+        .await
+        .into_iter()
+        .find(|x| x.id == second.id)
+        .unwrap();
+    assert_eq!(r.offset(&row.end) - r.offset(&row.start), HOUR / 2);
+
+    // Removed from the library, the cancellation still follows the airing.
+    recording::remove(&r.env.state, &second.id).await.unwrap();
+    let later = 25 * HOUR + HOUR / 2;
+    r.guide(&[(HOUR, SHOW), (later, SHOW), (49 * HOUR, SHOW)])
+        .await;
+    recording::tick(&r.env.state).await.unwrap();
+    r.tick_later().await;
+    assert_eq!(r.scheduled(&rule).await, vec![HOUR, 49 * HOUR]);
+    assert_eq!(r.recordings().await.len(), 2);
+}
+
+/// Review fix: a manual Record and a series rule handling the same airing
+/// at the same moment record it once (the check and the insert are one
+/// write transaction).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_manual_record_racing_a_rule_records_the_airing_once() {
+    let r = rig().await;
+    let shows: Vec<(i64, String)> = (1..=40).map(|k| (k * HOUR, format!("Show {k}"))).collect();
+    let guide: Vec<(i64, &str)> = shows.iter().map(|(o, t)| (*o, t.as_str())).collect();
+    r.guide(&guide).await;
+    for (n, (offset, title)) in shows.iter().enumerate() {
+        let state = r.env.state.clone();
+        let req = ScheduleRequest {
+            item_ref: r.item.clone(),
+            channel_name: "Alpha".into(),
+            title: Some(title.clone()),
+            start: Some(rfc(r.base + offset)),
+            end: Some(rfc(r.base + offset + HOUR / 2)),
+            duration_minutes: None,
+        };
+        let delay = std::time::Duration::from_micros(150 * (n as u64 % 10));
+        let manual = tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            recording::schedule(&state, req).await
+        });
+        let state = r.env.state.clone();
+        let add =
+            serde_json::from_value(json!({"ref": r.item, "channelName": "Alpha", "title": title}))
+                .unwrap();
+        let rule = tokio::spawn(async move { recording::rules::add(&state, add).await });
+        rule.await.unwrap().unwrap();
+        if let Err(e) = manual.await.unwrap() {
+            assert_eq!(e.code(), RpcErrorCode::Conflict, "{title}: {e}");
+        }
+        let at: Vec<_> = r
+            .all()
+            .await
+            .into_iter()
+            .filter(|(o, s, _)| o == offset && *s == RecordingStatus::Scheduled)
+            .collect();
+        assert_eq!(at.len(), 1, "{title}: {at:?}");
+    }
+}
+
 #[tokio::test]
 async fn duplicate_and_invalid_rules_are_refused() {
     let r = rig().await;
@@ -414,34 +590,54 @@ async fn removing_a_rule_cancels_its_scheduled_recordings() {
         json!({"id": news["id"], "keepScheduled": true}),
     )
     .await;
-    assert_eq!(r.scheduled(&news).await, vec![2 * HOUR, 26 * HOUR]);
+    // The kept recordings stay scheduled as one-off recordings: they no
+    // longer name the deleted rule.
+    assert!(r.of_rule(&news).await.is_empty());
+    let kept = r.titled("News at Ten").await;
+    assert_eq!(
+        kept.iter()
+            .map(|x| (r.offset(&x.start), x.status, x.rule_id.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (2 * HOUR, RecordingStatus::Scheduled, None),
+            (26 * HOUR, RecordingStatus::Scheduled, None)
+        ]
+    );
     assert!(r.rules().await.is_empty());
-    let film = r
-        .recordings()
-        .await
-        .into_iter()
-        .find(|x| x.rule_id.is_none())
-        .unwrap();
-    assert_eq!(film.status, RecordingStatus::Scheduled);
+    let film = r.titled("Film").await;
+    assert_eq!(film.len(), 1);
+    assert_eq!(film[0].status, RecordingStatus::Scheduled);
+    assert_eq!(film[0].rule_id, None);
 
     // A kept recording outlives its rule: it can still be cancelled, and
     // nothing comes back.
-    let kept = r
-        .recordings()
-        .await
-        .into_iter()
-        .find(|x| x.rule_id.as_ref() == news["id"].as_str().map(str::to_string).as_ref())
-        .unwrap();
-    recording::cancel(&r.env.state, &kept.id).await.unwrap();
+    recording::cancel(&r.env.state, &kept[0].id).await.unwrap();
     r.tick_later().await;
+    let scheduled = |rows: Vec<Recording>| {
+        rows.iter()
+            .filter(|x| x.status == RecordingStatus::Scheduled)
+            .count()
+    };
+    assert_eq!(scheduled(r.recordings().await), 2);
+
+    // The same rule added again does not take them over, so removing it
+    // with "also cancel scheduled" leaves them alone.
+    let again = r.add_rule("News at Ten").await;
+    assert_eq!(again["upcoming"], 0, "the airings already have recordings");
+    r.call("recordings.removeRule", json!({"id": again["id"]}))
+        .await;
     assert_eq!(
-        r.recordings()
+        r.titled("News at Ten")
             .await
             .iter()
-            .filter(|x| x.status == RecordingStatus::Scheduled)
-            .count(),
-        2
+            .map(|x| (r.offset(&x.start), x.status))
+            .collect::<Vec<_>>(),
+        vec![
+            (2 * HOUR, RecordingStatus::Cancelled),
+            (26 * HOUR, RecordingStatus::Scheduled)
+        ]
     );
+    assert_eq!(scheduled(r.recordings().await), 2);
 }
 
 #[tokio::test]

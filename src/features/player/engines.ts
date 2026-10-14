@@ -7,7 +7,7 @@
 
 import type { MpvStats, PlayerSource } from '@/api/types';
 
-import { isExternalTrack } from './subtitles/tracks';
+import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
 
 export interface TrackOption {
   id: string;
@@ -282,7 +282,8 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
       const t = el.textTracks[i];
       // Loaded subtitle files are listed by the player as `ext:<n>` (subtitles/tracks.ts).
       if (t && !isExternalTrack(t) && (t.kind === 'subtitles' || t.kind === 'captions')) {
-        text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: t.mode === 'showing' });
+        // A track the player draws itself is `hidden` while on screen (subtitles/inline.ts).
+        text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: isShownTrack(t) });
       }
     }
     cb.onTracks({ qualities: [], qualityAuto: true, audio, text });
@@ -304,7 +305,13 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
     setText(id) {
       for (let i = 0; i < el.textTracks.length; i++) {
         const t = el.textTracks[i];
-        if (t) t.mode = String(i) === id ? 'showing' : 'disabled';
+        if (!t) continue;
+        if (String(i) === id) {
+          t.mode = 'showing';
+        } else {
+          releaseTrack(t);
+          t.mode = 'disabled';
+        }
       }
       emitTracks();
     },
@@ -372,6 +379,8 @@ async function hlsEngine(
   });
 
   let manualLevel = -1;
+  // Subtitles on: hls.subtitleDisplay turns false when the overlay hides the track it draws.
+  let textOn = wantCaptions;
   let mediaRecoveries = 0;
   let destroyed = false;
   const emit = (): void => {
@@ -392,7 +401,7 @@ async function hlsEngine(
     const text: TrackOption[] = hls.subtitleTracks.map((t, i) => ({
       id: String(i),
       label: langLabel(t.lang, t.name, `Subtitle ${i + 1}`),
-      selected: hls.subtitleDisplay && hls.subtitleTrack === i,
+      selected: textOn && hls.subtitleTrack === i,
     }));
     cb.onTracks({ qualities, qualityAuto: manualLevel < 0, audio, text });
   };
@@ -402,7 +411,12 @@ async function hlsEngine(
   hls.on(Hls.Events.LEVEL_SWITCHED, emit);
   hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, emit);
   hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, emit);
-  hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, emit);
+  hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+    // A new track group starts hidden once the overlay has hidden the last one (subtitleDisplay
+    // false): turn subtitles back on so the overlay takes the new track over.
+    if (textOn && !hls.subtitleDisplay) hls.subtitleDisplay = true;
+    emit();
+  });
   hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, emit);
   hls.on(Hls.Events.ERROR, (_evt, data) => {
     if (!data.fatal) return;
@@ -448,6 +462,7 @@ async function hlsEngine(
       hls.audioTrack = Number(id);
     },
     setText(id) {
+      textOn = id !== null;
       if (id === null) {
         hls.subtitleDisplay = false;
         hls.subtitleTrack = -1;
@@ -524,8 +539,14 @@ async function shakaEngine(
   const player = new shaka.Player();
   let destroyed = false;
   let manual = false;
+  // Subtitles on. The overlay hides the track it draws, which shaka reads as "text not visible";
+  // alwaysStreamText keeps the cues coming anyway (subtitles/inline.ts).
+  let textOn = false;
   player.configure({
-    streaming: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
+    streaming: {
+      alwaysStreamText: true,
+      retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 },
+    },
     manifest: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
   });
   const route = proxyRoute(url);
@@ -562,7 +583,7 @@ async function shakaEngine(
             selected: active?.language === l.language && (!l.role || active?.roles.includes(l.role)),
           }))
         : [];
-    const visible = player.isTextTrackVisible();
+    const visible = textOn;
     const text: TrackOption[] = player.getTextTracks().map((t) => ({
       id: String(t.id),
       label: langLabel(t.language, t.label ?? undefined, t.language),
@@ -587,7 +608,10 @@ async function shakaEngine(
   await player.attach(el as HTMLMediaElement);
   try {
     await player.load(url, !source.isLive && source.resumeSeconds ? source.resumeSeconds : null);
-    if (wantCaptions) await player.setTextTrackVisibility(true);
+    if (wantCaptions) {
+      textOn = true;
+      await player.setTextTrackVisibility(true);
+    }
     emit();
   } catch (err) {
     if (!destroyed) {
@@ -618,13 +642,17 @@ async function shakaEngine(
       player.selectAudioLanguage(lang, role || undefined);
     },
     setText(id) {
+      textOn = id !== null;
       if (id === null) {
         void player.setTextTrackVisibility(false);
+        // Off only hides shaka's track, and a hidden track is the one the overlay draws.
+        hideDrawnTracks(el);
       } else {
         const t = player.getTextTracks().find((x) => String(x.id) === id);
         if (t) player.selectTextTrack(t);
         void player.setTextTrackVisibility(true);
       }
+      emit();
     },
     recover() {
       void player.retryStreaming();

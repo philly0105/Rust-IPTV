@@ -13,6 +13,7 @@
   "resultsCount": "Αποτελέσματα: {{n}}",
   "closeSearch": "Κλείσιμο αναζήτησης",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "Προβάλλεται τώρα",
   "watchNow": "Παρακολούθηση: {{channel}}",
   "hitNotFound": "Το {{channel}} δεν υπάρχει σε αυτή τη λίστα",

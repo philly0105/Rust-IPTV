@@ -199,6 +199,80 @@ pub fn rematch(start: i64, end: i64, title: &str, candidates: &[Slot<'_>]) -> Op
     ((best.0, best.1) != (start, end)).then_some((best.0, best.1))
 }
 
+/// A stored airing of one channel that [`follow`] looks for again in the
+/// guide: a scheduled programme recording, or a series rule's cancelled
+/// airing. Display-time unix seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Claim<'a> {
+    pub start: i64,
+    pub end: i64,
+    pub title: &'a str,
+}
+
+/// Where the guide puts a [`Claim`] now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Follow {
+    /// The airing is at these times (the stored ones when it did not move).
+    At(i64, i64),
+    /// The guide shows something else over the stored slot and no free
+    /// airing of the title within [`REMATCH_WINDOW`]: the airing is gone.
+    Gone,
+    /// The guide has nothing over the stored slot (not loaded that far, a
+    /// gap): leave the airing where it is.
+    Unknown,
+}
+
+/// Finds the stored airings of one channel again after a guide refresh.
+/// Each claim gets the same-title slot closest to its stored start within
+/// [`REMATCH_WINDOW`], closest pairs first (ties to the earlier claim), and
+/// no two claims get one start: two recordings of one airing would record
+/// it twice. A slot starting at a time in `fixed` (held by a recording that
+/// is not followed, such as one already running) is never handed out.
+/// Returns one [`Follow`] per claim, in order.
+pub fn follow(claims: &[Claim<'_>], slots: &[Slot<'_>], fixed: &HashSet<i64>) -> Vec<Follow> {
+    let slot_keys: Vec<String> = slots.iter().map(|(_, _, t)| title_key(t)).collect();
+    let mut pairs: Vec<(i64, usize, usize)> = Vec::new();
+    for (i, c) in claims.iter().enumerate() {
+        let key = title_key(c.title);
+        if key.is_empty() {
+            continue;
+        }
+        for (j, (s, e, _)) in slots.iter().enumerate() {
+            let near = (s - c.start).abs();
+            if e > s && near <= REMATCH_WINDOW && !fixed.contains(s) && slot_keys[j] == key {
+                pairs.push((near, i, j));
+            }
+        }
+    }
+    pairs.sort_unstable();
+    let mut found: Vec<Option<(i64, i64)>> = vec![None; claims.len()];
+    let mut used: HashSet<i64> = HashSet::new();
+    for (_, i, j) in pairs {
+        let (s, e, _) = slots[j];
+        if found[i].is_none() && used.insert(s) {
+            found[i] = Some((s, e));
+        }
+    }
+    found
+        .into_iter()
+        .zip(claims)
+        .map(|(hit, c)| match hit {
+            Some((s, e)) => Follow::At(s, e),
+            None => {
+                let end = c.end.max(c.start + 1);
+                let covered = slots
+                    .iter()
+                    .any(|(s, e, _)| e > s && *s < end && *e > c.start);
+                if covered && !title_key(c.title).is_empty() {
+                    Follow::Gone
+                } else {
+                    Follow::Unknown
+                }
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,6 +505,98 @@ mod tests {
             None
         );
         assert_eq!(rematch(T0, T0 + 1800, "   ", &guide), None);
+    }
+
+    fn claim(start: i64, title: &str) -> Claim<'_> {
+        Claim {
+            start,
+            end: start + 1800,
+            title,
+        }
+    }
+
+    /// R2 core-recording 1: two airings of a title on one channel, the first
+    /// retitled by a refresh. The first claim must not take the second's
+    /// slot: one airing, one recording.
+    #[test]
+    fn follow_never_hands_one_slot_to_two_claims() {
+        let guide = [
+            (T0 + 3600, T0 + 5400, "Panel Show"),
+            (T0 + 5400, T0 + 7200, "World News"),
+        ];
+        let claims = [
+            claim(T0 + 3600, "World News"),
+            claim(T0 + 5400, "World News"),
+        ];
+        assert_eq!(
+            follow(&claims, &guide, &HashSet::new()),
+            vec![Follow::Gone, Follow::At(T0 + 5400, T0 + 7200)]
+        );
+        // Order of the claims does not matter: the closer one wins.
+        let swapped = [claims[1], claims[0]];
+        assert_eq!(
+            follow(&swapped, &guide, &HashSet::new()),
+            vec![Follow::At(T0 + 5400, T0 + 7200), Follow::Gone]
+        );
+    }
+
+    #[test]
+    fn follow_moves_every_airing_of_a_shifted_guide() {
+        let shift = 600;
+        let guide = [
+            (T0 + shift, T0 + 1800 + shift, "News"),
+            (T0 + 5400 + shift, T0 + 7200 + shift, "News"),
+            (T0 + 9000 + shift, T0 + 10_800 + shift, "News"),
+        ];
+        let claims = [
+            claim(T0, "News"),
+            claim(T0 + 5400, "news!"),
+            claim(T0 + 9000, "NEWS"),
+        ];
+        assert_eq!(
+            follow(&claims, &guide, &HashSet::new()),
+            guide
+                .iter()
+                .map(|(s, e, _)| Follow::At(*s, *e))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn follow_keeps_clear_of_fixed_starts_and_reports_unknown_slots() {
+        let guide = [
+            (T0, T0 + 1800, "Film"),
+            (T0 + 1800, T0 + 3600, "News"),
+            (T0 + 3600, T0 + 5400, "News"),
+        ];
+        // The nearest airing is held by a running recording: the next one.
+        let fixed: HashSet<i64> = [T0 + 1800].into();
+        assert_eq!(
+            follow(&[claim(T0 + 1700, "News")], &guide, &fixed),
+            vec![Follow::At(T0 + 3600, T0 + 5400)]
+        );
+        // Unchanged: found where it was.
+        assert_eq!(
+            follow(&[claim(T0 + 1800, "News")], &guide, &HashSet::new()),
+            vec![Follow::At(T0 + 1800, T0 + 3600)]
+        );
+        // Past the end of the guide or no title: unknown.
+        for c in [
+            claim(T0 + 6 * 3600, "News"),
+            claim(T0 + 6 * 3600, "Film"),
+            claim(T0, "  "),
+        ] {
+            assert_eq!(follow(&[c], &guide, &HashSet::new()), vec![Follow::Unknown]);
+        }
+        assert_eq!(
+            follow(&[claim(T0, "News")], &[], &HashSet::new()),
+            vec![Follow::Unknown]
+        );
+        // The guide shows another title over the slot and none nearby: gone.
+        assert_eq!(
+            follow(&[claim(T0, "Sport")], &guide, &HashSet::new()),
+            vec![Follow::Gone]
+        );
     }
 
     #[test]

@@ -416,6 +416,68 @@ describe('fullscreen channel panel focus', () => {
   });
 });
 
+describe('fullscreen channel panel from a channel list', () => {
+  const ch = (id: string, name: string, sourceId = 's1') => ({ ref: { sourceId, contentType: 'live', itemId: id }, name, isRadio: false });
+  const entry = (c: ReturnType<typeof ch>, position: number, available = true) => ({
+    ref: c.ref,
+    snapshot: { title: c.name },
+    channel: available ? c : undefined,
+    available,
+    position,
+    addedAt: '',
+  });
+
+  it('lists the list (not the whole source) in its order and plays without leaving the list', async () => {
+    const { rpc } = await import('@/api/transport');
+    const items = [entry(ch('9', 'Zulu News', 's2'), 0), entry(ch('3', 'Alpha Sport'), 1), entry(ch('5', 'Gone TV'), 2, false)];
+    vi.mocked(rpc).mockClear();
+    vi.mocked(rpc).mockImplementation((async (name: string) => {
+      if (name === 'lists.items') return items;
+      if (name === 'settings.get') return { player: 'html5' };
+      if (name === 'sources.get') return { id: 's1', kind: 'xtream' };
+      if (name === 'epg.nowNext') return {};
+      return undefined;
+    }) as unknown as typeof rpc);
+    const { FullscreenChannelPanel } = await import('./FullscreenChannelPanel');
+    act(() =>
+      usePlayerStore.setState({
+        source: { ...live, ref: { sourceId: 's1', contentType: 'live', itemId: '3' } } as never,
+        mode: 'inline',
+        status: 'playing',
+        zapContext: { sourceId: 's1', listId: 'list-7' },
+      }),
+    );
+    // A real height for the virtual list.
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 0, left: 0, right: 360, bottom: 600, width: 360, height: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
+    try {
+      render(<FullscreenChannelPanel available />);
+      await act(async () => {
+        useMediaStore.setState({ channelPanelOpen: true });
+        await Promise.resolve();
+      });
+      const names = await vi.waitFor(() => {
+        const rows = screen.getAllByRole('option').map((o) => o.textContent ?? '');
+        expect(rows.length).toBe(2);
+        return rows;
+      });
+      // List order, across sources; the dropped channel is left out.
+      expect(names[0]).toContain('Zulu News');
+      expect(names[1]).toContain('Alpha Sport');
+      const calls = vi.mocked(rpc).mock.calls.map((c) => c[0]);
+      expect(calls).toContain('lists.items');
+      expect(calls).not.toContain('catalog.channels');
+
+      fireEvent.click(screen.getByRole('option', { name: /Zulu News/ }));
+      await vi.waitFor(() => expect(usePlayerStore.getState().source?.ref?.itemId).toBe('9'));
+      expect(usePlayerStore.getState().zapContext?.listId).toBe('list-7');
+    } finally {
+      rect.mockRestore();
+      height.mockRestore();
+    }
+  });
+});
+
 describe('focus across host moves', () => {
   it('moveKeepingFocus puts focus back on the control that was focused', () => {
     const host = document.createElement('div');

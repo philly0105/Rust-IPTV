@@ -100,6 +100,14 @@ export function weekdayLabel(day: string, language: string | undefined): string 
   return dateFormat(intlLocale(language), { weekday: 'short' }, 'wd').format(parseDay(day));
 }
 
+/**
+ * Narrow weekday ("T"), for the 7-day axis when the short names do not fit
+ * their columns (Arabic short names are whole words, "الأربعاء").
+ */
+export function narrowWeekdayLabel(day: string, language: string | undefined): string {
+  return dateFormat(intlLocale(language), { weekday: 'narrow' }, 'wdn').format(parseDay(day));
+}
+
 /** Day of month ("13"), for the 30-day axis. */
 export function dayOfMonthLabel(day: string, language: string | undefined): string {
   return dateFormat(intlLocale(language), { day: 'numeric' }, 'dm').format(parseDay(day));

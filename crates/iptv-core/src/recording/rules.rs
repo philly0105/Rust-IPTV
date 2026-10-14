@@ -25,7 +25,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, ItemRef};
 use crate::state::AppState;
 use chrono::DateTime;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -183,6 +183,68 @@ fn skips(c: &Connection, rule_id: &str) -> CoreResult<HashSet<i64>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// A cancelled airing of a rule (a skip) that the guide re-match follows
+/// like a scheduled recording, so a cancelled airing the guide moves stays
+/// cancelled at its new time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SkipClaim {
+    pub rule_id: String,
+    pub item_ref: ItemRef,
+    pub title: String,
+    /// Display time.
+    pub start: i64,
+    /// The cancelled recording's end, or `start` when it was removed.
+    pub end: i64,
+}
+
+/// Skips starting after `after`, with their rule's channel and title. Skips
+/// of slots over long ago are pruned first: [`materialise`] only looks
+/// ahead, so they can no longer hold anything back.
+pub(super) fn skip_claims(c: &Connection, after: i64) -> CoreResult<Vec<SkipClaim>> {
+    c.execute(
+        "DELETE FROM recording_rule_skips WHERE start_at < ?1",
+        [after - super::scheduler::REMATCH_WINDOW - 86_400],
+    )?;
+    let mut s = c.prepare(
+        "SELECT s.rule_id, r.source_id, r.content_type, r.item_id, r.title, s.start_at,
+                (SELECT max(x.end_at) FROM recordings x
+                  WHERE x.rule_id = s.rule_id AND x.start_at = s.start_at AND x.status = 'cancelled')
+         FROM recording_rule_skips s JOIN recording_rules r ON r.id = s.rule_id
+         WHERE s.start_at > ?1
+         ORDER BY s.start_at",
+    )?;
+    let rows = s.query_map([after], |r| {
+        let ct: String = r.get(2)?;
+        let content_type = ct.parse::<ContentType>().map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
+        })?;
+        let start: i64 = r.get(5)?;
+        Ok(SkipClaim {
+            rule_id: r.get(0)?,
+            item_ref: ItemRef::new(r.get::<_, String>(1)?, content_type, r.get::<_, String>(3)?),
+            title: r.get(4)?,
+            start,
+            end: r.get::<_, Option<i64>>(6)?.unwrap_or(start),
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Moves a skip, and the cancelled recording it stands for, to the time the
+/// guide moved the airing to.
+pub(super) fn move_skip(c: &Connection, skip: &SkipClaim, start: i64, end: i64) -> CoreResult<()> {
+    c.execute(
+        "UPDATE OR REPLACE recording_rule_skips SET start_at = ?3 WHERE rule_id = ?1 AND start_at = ?2",
+        params![skip.rule_id, skip.start, start],
+    )?;
+    c.execute(
+        "UPDATE recordings SET start_at = ?3, end_at = ?4
+         WHERE rule_id = ?1 AND start_at = ?2 AND status = 'cancelled'",
+        params![skip.rule_id, skip.start, start, end],
+    )?;
+    Ok(())
+}
+
 /// Starts of every recording of `r`, whatever its status.
 fn recorded_starts(c: &Connection, r: &ItemRef) -> CoreResult<HashSet<i64>> {
     let mut s = c.prepare_cached(
@@ -312,7 +374,10 @@ pub async fn add(state: &Arc<AppState>, req: AddRuleRequest) -> CoreResult<Recor
     let id = row.id.clone();
     let rule = state
         .db_call(move |c| {
-            let exists = c
+            // The count and the insert in one write transaction: two adds
+            // at once cannot both pass the cap check.
+            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let exists = tx
                 .query_row(
                     "SELECT 1 FROM sources WHERE id = ?1",
                     [&row.item_ref.source_id],
@@ -326,17 +391,19 @@ pub async fn add(state: &Arc<AppState>, req: AddRuleRequest) -> CoreResult<Recor
                     row.item_ref.source_id
                 )));
             }
-            if count_rules(c)? >= MAX_RULES {
+            if count_rules(&tx)? >= MAX_RULES {
                 return Err(CoreError::invalid(format!(
                     "You can keep up to {MAX_RULES} series rules. Remove one first."
                 )));
             }
-            if !insert_rule(c, &row)? {
+            if !insert_rule(&tx, &row)? {
                 return Err(CoreError::Conflict(
                     "This series is already recorded on this channel.".into(),
                 ));
             }
-            one(c, &row.id)
+            let rule = one(&tx, &row.id)?;
+            tx.commit()?;
+            Ok(rule)
         })
         .await?;
     changed(state, EVENT_RECORDINGS_UPDATE);
@@ -376,20 +443,26 @@ pub async fn set_enabled(
 
 /// `recordings.removeRule`: deletes the rule (and its skips) and cancels
 /// its scheduled recordings unless `keep_scheduled`; running ones go on.
+/// Recordings that stay (kept, or running) lose their `rule_id`: they are
+/// one-off recordings from then on, so a rule added later for the same
+/// title neither counts them nor cancels them when it is removed.
 pub async fn remove(state: &Arc<AppState>, id: &str, keep_scheduled: bool) -> CoreResult<()> {
     let rt = runtime(state);
     let now = rt.now();
     let key = id.to_string();
     state
         .db_call(move |c| {
-            if c.execute("DELETE FROM recording_rules WHERE id = ?1", [&key])? == 0 {
+            // One write transaction, and [`materialise`] re-reads the rule
+            // inside its own: no recording is added for a rule half removed.
+            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if tx.execute("DELETE FROM recording_rules WHERE id = ?1", [&key])? == 0 {
                 return Err(CoreError::NotFound(format!(
                     "recording rule {key} not found"
                 )));
             }
             if !keep_scheduled {
                 let ids: Vec<String> = {
-                    let mut s = c.prepare(
+                    let mut s = tx.prepare(
                         "SELECT id FROM recordings WHERE rule_id = ?1 AND status = 'scheduled'",
                     )?;
                     let rows = s.query_map([&key], |r| r.get(0))?;
@@ -397,7 +470,7 @@ pub async fn remove(state: &Arc<AppState>, id: &str, keep_scheduled: bool) -> Co
                 };
                 for rec in ids {
                     store::transition(
-                        c,
+                        &tx,
                         &rec,
                         &[RecordingStatus::Scheduled],
                         RecordingStatus::Cancelled,
@@ -406,6 +479,12 @@ pub async fn remove(state: &Arc<AppState>, id: &str, keep_scheduled: bool) -> Co
                     )?;
                 }
             }
+            tx.execute(
+                "UPDATE recordings SET rule_id = NULL
+                 WHERE rule_id = ?1 AND status IN ('scheduled', 'recording')",
+                [&key],
+            )?;
+            tx.commit()?;
             Ok(())
         })
         .await?;
@@ -487,9 +566,23 @@ pub(super) async fn materialise(
         let rule = rule.clone();
         added += state
             .db_call(move |c| {
-                let taken = recorded_starts(c, &rule.item_ref)?;
-                let skipped = skips(c, &rule.id)?;
-                let mut room = MAX_UPCOMING.saturating_sub(scheduled_count(c, &rule.id)?);
+                // Checks and inserts in one write transaction: a manual
+                // `recordings.schedule` of the same airing, a removal or a
+                // switch-off of the rule land wholly before or after it.
+                let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let live = tx
+                    .query_row(
+                        "SELECT enabled FROM recording_rules WHERE id = ?1",
+                        [&rule.id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .optional()?;
+                if live != Some(1) {
+                    return Ok(0);
+                }
+                let taken = recorded_starts(&tx, &rule.item_ref)?;
+                let skipped = skips(&tx, &rule.id)?;
+                let mut room = MAX_UPCOMING.saturating_sub(scheduled_count(&tx, &rule.id)?);
                 let mut added = 0usize;
                 for (start, end, title) in found {
                     if room == 0 {
@@ -518,7 +611,7 @@ pub(super) async fn materialise(
                         created_at: now,
                         rule_id: Some(rule.id.clone()),
                     };
-                    match insert_scheduled(c, &row) {
+                    match insert_scheduled(&tx, &row) {
                         Ok(_) => {
                             added += 1;
                             room -= 1;
@@ -528,6 +621,7 @@ pub(super) async fn materialise(
                         Err(e) => return Err(e),
                     }
                 }
+                tx.commit()?;
                 Ok(added)
             })
             .await?;
@@ -569,12 +663,29 @@ pub fn export(c: &Connection, source_id: &str) -> CoreResult<Vec<RecordingRuleBa
 /// empty or over-long title, a duplicate (same channel and title key), and
 /// anything past [`MAX_RULES`]. Returns rows written.
 pub fn import(c: &Connection, source_id: &str, rules: &[RecordingRuleBackup]) -> CoreResult<usize> {
+    Ok(import_counted(c, source_id, rules)?.written)
+}
+
+/// What [`import_counted`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuleImport {
+    /// Rules written.
+    pub written: usize,
+    /// Valid, new rules left out because [`MAX_RULES`] was reached.
+    pub over_cap: usize,
+}
+
+/// [`import`], also counting the rules the cap left out, so a restore can
+/// say so instead of dropping them silently.
+pub fn import_counted(
+    c: &Connection,
+    source_id: &str,
+    rules: &[RecordingRuleBackup],
+) -> CoreResult<RuleImport> {
     let mut total = count_rules(c)?;
-    let mut written = 0usize;
+    let mut out = RuleImport::default();
+    let mut left_out: HashSet<(ItemRef, String)> = HashSet::new();
     for r in rules {
-        if total >= MAX_RULES {
-            break;
-        }
         if !matches!(r.content_type, ContentType::Live | ContentType::Radio) {
             continue;
         }
@@ -601,12 +712,33 @@ pub fn import(c: &Connection, source_id: &str, rules: &[RecordingRuleBackup]) ->
             enabled: r.enabled,
             created_at,
         };
+        if total >= MAX_RULES {
+            let first = left_out.insert((row.item_ref.clone(), row.title_key.clone()));
+            if first && !rule_exists(c, &row.item_ref, &row.title_key)? {
+                out.over_cap += 1;
+            }
+            continue;
+        }
         if insert_rule(c, &row)? {
-            written += 1;
+            out.written += 1;
             total += 1;
         }
     }
-    Ok(written)
+    Ok(out)
+}
+
+/// Whether the channel already has a rule for the title key.
+fn rule_exists(c: &Connection, r: &ItemRef, title_key: &str) -> CoreResult<bool> {
+    Ok(c.prepare_cached(
+        "SELECT 1 FROM recording_rules
+         WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND title_key = ?4",
+    )?
+    .exists(params![
+        r.source_id,
+        r.content_type.as_str(),
+        r.item_id,
+        title_key
+    ])?)
 }
 
 #[cfg(test)]

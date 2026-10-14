@@ -13,6 +13,7 @@
   "resultsCount": "Resultaten: {{n}}",
   "closeSearch": "Zoeken sluiten",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "Nu bezig",
   "watchNow": "{{channel}} kijken",
   "hitNotFound": "{{channel}} staat niet in deze lijst",

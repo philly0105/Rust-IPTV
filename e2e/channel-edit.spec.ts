@@ -126,4 +126,27 @@ test.describe.serial('channel edits', () => {
     await expect(dialog).toBeHidden();
     await expect(channelButton(page, 'BBC One')).toBeVisible();
   });
+
+  test('Unhide all, then Undo hides the same channels again', async ({ page }) => {
+    await gotoLive(page, xtream.id);
+    await menuItem(page, 'BBC One', 'Hide channel');
+    await expect(channelButton(page, 'BBC One')).toHaveCount(0);
+    await menuItem(page, 'BBC News', 'Hide channel');
+    await expect(channelButton(page, 'BBC News')).toHaveCount(0);
+
+    await page.getByRole('button', { name: /^Hidden channels/ }).click();
+    const dialog = page.getByTestId('hidden-channels-dialog');
+    await expect(dialog.getByTestId('hidden-channels-summary')).toHaveText('2 hidden channels');
+    await dialog.getByTestId('hidden-channels-unhide-all').click();
+
+    const back = toast(page, '2 channels are back');
+    await expect(back).toBeVisible();
+    await expect(dialog).toContainText('No hidden channels');
+    await expect.poll(async () => (await edits(page.request, xtream.id)).filter((e) => e.hidden).length).toBe(0);
+
+    await back.getByRole('button', { name: 'Undo' }).click();
+    await expect.poll(async () => (await edits(page.request, xtream.id)).filter((e) => e.hidden).length).toBe(2);
+    await expect(dialog.getByTestId('hidden-channels-summary')).toHaveText('2 hidden channels');
+    await expect(page.locator('[data-toast-id]').filter({ hasText: 'could not be hidden again' })).toHaveCount(0);
+  });
 });

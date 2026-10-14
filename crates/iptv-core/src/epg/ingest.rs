@@ -39,6 +39,8 @@ pub struct EpgRuntime {
     last_attempt: Mutex<HashMap<String, Instant>>,
     generation: AtomicU64,
     pub(crate) names: Mutex<Option<Arc<super::resolve::ChannelDirectory>>>,
+    /// Guide search: channel resolutions reused until the generation moves.
+    pub(crate) search_memo: Mutex<super::search::SearchMemo>,
 }
 
 impl Default for EpgRuntime {
@@ -49,6 +51,7 @@ impl Default for EpgRuntime {
             last_attempt: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(1),
             names: Mutex::new(None),
+            search_memo: Mutex::new(Default::default()),
         }
     }
 }

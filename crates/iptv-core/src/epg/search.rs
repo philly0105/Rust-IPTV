@@ -11,25 +11,33 @@
 //! - every statement that deletes or swaps programmes removes the marker in
 //!   the same transaction (`store::commit_staging`, `clear_all`, `prune`,
 //!   and the staging cleanups when they deleted rows);
-//! - [`rebuild_index`] runs `'rebuild'` and sets the marker in one
+//! - [`rebuild_index`] empties the index, indexes every title as [`fold`]
+//!   folds it, and sets the marker to [`INDEX_VERSION`] in one
 //!   transaction: after each refresh, after `epg.clearAll`, after a prune,
-//!   and once in the background at startup when the marker is missing and
-//!   programmes exist (an upgraded database, or a crash between a swap and
-//!   its rebuild);
-//! - [`search`] reads the index only while the marker is present and falls
-//!   back to a scan of the time window otherwise, so results are never
-//!   stale and rowids reused by later inserts never point a hit at the
-//!   wrong programme.
+//!   and once in the background at startup when the marker is missing or
+//!   from an older version and programmes exist (an upgraded database, or
+//!   a crash between a swap and its rebuild);
+//! - [`search`] reads the index only while the marker holds the current
+//!   version and falls back to a scan of the time window otherwise, so
+//!   results are never stale and rowids reused by later inserts never
+//!   point a hit at the wrong programme.
 //!
 //! Both paths match the same way: every word of the query (letters and
 //! digits, case and diacritics folded) must start a word of the title.
+//! The index holds Rust-folded titles because the FTS5 tokenizer's own
+//! diacritic removal covers Latin letters only: it keeps the Greek tonos,
+//! so "Ελληνικά" would not find "ελληνικα" through the index while the scan
+//! found it.
 
+use super::ingest::EpgRuntime;
 use super::resolve::{self, ChannelDirectory};
 use super::store::STAGING_ORIGIN;
 use super::{query, runtime};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgProgram, ItemRef};
+use crate::parental::Hide;
 use crate::state::AppState;
+use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -37,6 +45,11 @@ use std::sync::Arc;
 
 /// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
 pub const INDEX_MARKER: &str = "epg_search_index";
+/// Marker value of an index of [`fold`]ed titles. A marker with any other
+/// value (`ready`: raw titles, before the fold) counts as missing.
+pub const INDEX_VERSION: &str = "folded-1";
+/// SQL function [`rebuild_index`] registers to fold titles while indexing.
+const FOLD_SQL_FUNCTION: &str = "epg_search_fold";
 /// Query length bounds, in characters after trimming.
 pub const MIN_QUERY_CHARS: usize = 2;
 pub const MAX_QUERY_CHARS: usize = 100;
@@ -47,9 +60,9 @@ pub const MAX_LIMIT: i64 = 200;
 pub const DEFAULT_SPAN_SECS: i64 = 14 * 86_400;
 /// Longest window accepted.
 pub const MAX_SPAN_SECS: i64 = 16 * 86_400;
-/// Candidates gathered before parental filtering while hide mode is on (it
-/// can drop any number of channels, so the first `limit` are not enough).
-pub const MAX_CANDIDATES: usize = 2_000;
+/// Memoized channel resolutions above this count are dropped (bounds the
+/// memory of a guide with very many unknown ids).
+const MEMO_CAP: usize = 500_000;
 
 /// `epg.search` arguments.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -90,12 +103,12 @@ pub fn invalidate_index(conn: &Connection) -> CoreResult<()> {
     Ok(())
 }
 
-/// True when the index matches the programme table.
+/// True when the index matches the programme table and holds folded titles.
 pub fn index_ready(conn: &Connection) -> CoreResult<bool> {
     Ok(conn
         .query_row(
-            "SELECT 1 FROM app_state WHERE key = ?1",
-            [INDEX_MARKER],
+            "SELECT 1 FROM app_state WHERE key = ?1 AND value = ?2",
+            [INDEX_MARKER, INDEX_VERSION],
             |_| Ok(()),
         )
         .optional()?
@@ -103,18 +116,39 @@ pub fn index_ready(conn: &Connection) -> CoreResult<bool> {
 }
 
 /// Rebuilds the whole index from `epg_programs` and marks it ready, in one
-/// write transaction.
+/// write transaction. Titles are indexed as [`fold`] folds them (not with
+/// `'rebuild'`, which would index the raw titles of the content table), so
+/// the index and the scan agree on every script; queries are folded the
+/// same way before they reach the tokenizer.
 pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
     let started = std::time::Instant::now();
+    conn.create_scalar_function(
+        FOLD_SQL_FUNCTION,
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let title = ctx
+                .get_raw(0)
+                .as_str_or_null()
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
+            Ok(title.map(fold))
+        },
+    )?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
-        "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('rebuild')",
+        "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('delete-all')",
         [],
     )?;
     tx.execute(
-        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, 'ready', CURRENT_TIMESTAMP)
+        &format!(
+            "INSERT INTO epg_programs_fts(rowid, title) SELECT rowid, {FOLD_SQL_FUNCTION}(title) FROM epg_programs"
+        ),
+        [],
+    )?;
+    tx.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        [INDEX_MARKER],
+        [INDEX_MARKER, INDEX_VERSION],
     )?;
     tx.commit()?;
     tracing::debug!(
@@ -171,9 +205,19 @@ pub fn spawn_startup_build(state: &Arc<AppState>) {
 // Matching
 // ---------------------------------------------------------------------------
 
-/// Lowercase without diacritics ("Café" -> "cafe").
+/// Lowercase without diacritics ("Café" -> "cafe", "Ελληνικά" ->
+/// "ελληνικα", "Thời sự" -> "thoi su"), final sigma as sigma.
 pub fn fold(s: &str) -> String {
-    crate::tmdb::normalize::strip_diacritics(&s.to_lowercase())
+    // Most guide titles: one pass, one allocation (the index rebuild folds
+    // every title).
+    if s.is_ascii() {
+        return s.to_ascii_lowercase();
+    }
+    let mut out = crate::tmdb::normalize::strip_diacritics(&s.to_lowercase());
+    if out.contains('ς') {
+        out = out.replace('ς', "σ");
+    }
+    out
 }
 
 /// Words of `s` after [`fold`]: runs of letters and digits.
@@ -275,92 +319,173 @@ struct SourceChannel {
 
 type ChannelMap = HashMap<String, Vec<Arc<SourceChannel>>>;
 
+/// Channel resolutions that depend only on the guide, kept on the EPG
+/// runtime and reused by every search until its generation moves (a
+/// refresh, a clear, a prune, a url enabled or disabled). Without it each
+/// search probed `epg_programs` once per unknown `epg_channel_id` and
+/// normalized every unmatched channel name: about 140 ms at 50k channels.
+/// The channels themselves are read on every search, so catalog changes,
+/// channel edits and parental locks apply at once.
+#[derive(Default)]
+pub(crate) struct SearchMemo {
+    generation: u64,
+    /// Trimmed `items.epg_channel_id` -> the guide channel it names (known
+    /// to the guide, case-insensitive, or with programmes), else `None`.
+    ids: HashMap<String, Option<String>>,
+    /// Channel title -> the guide channel with that exact normalized name.
+    names: HashMap<String, Option<String>>,
+}
+
+impl SearchMemo {
+    /// Takes the runtime's memo, or a fresh one when `generation` moved on.
+    /// Concurrent searches each work on their own (one starts empty).
+    fn take(rt: &EpgRuntime, generation: u64) -> Self {
+        let memo = std::mem::take(&mut *rt.search_memo.lock());
+        if memo.generation == generation {
+            memo
+        } else {
+            Self {
+                generation,
+                ..Self::default()
+            }
+        }
+    }
+
+    fn put_back(mut self, rt: &EpgRuntime) {
+        if self.ids.len() + self.names.len() > MEMO_CAP {
+            self.ids.clear();
+            self.names.clear();
+        }
+        *rt.search_memo.lock() = self;
+    }
+
+    fn by_id(
+        &mut self,
+        conn: &Connection,
+        dir: &ChannelDirectory,
+        id: &str,
+    ) -> CoreResult<Option<String>> {
+        if let Some(found) = self.ids.get(id) {
+            return Ok(found.clone());
+        }
+        let found = match dir.find_id(id) {
+            Some(canonical) => Some(canonical.to_string()),
+            None if resolve::has_programmes(conn, id)? => Some(id.to_string()),
+            None => None,
+        };
+        self.ids.insert(id.to_string(), found.clone());
+        Ok(found)
+    }
+
+    fn by_name(&mut self, dir: &ChannelDirectory, title: &str) -> Option<String> {
+        if let Some(found) = self.names.get(title) {
+            return found.clone();
+        }
+        let found = dir.find_name_exact(title).map(str::to_owned);
+        self.names.insert(title.to_string(), found.clone());
+        found
+    }
+}
+
 /// The source's visible channels by the guide channel id each resolves to:
 /// manual mapping (`NULL` = none), then `items.epg_channel_id` (known to
 /// the guide, case-insensitive, or with programmes), then the exact
-/// normalized name. Channels hidden by a channel edit are left out.
+/// normalized name. Channels hidden by a channel edit are left out, and so,
+/// while hide mode is on, are locked and adult channels: in SQL, so they
+/// never take a candidate slot from a visible channel.
 fn source_channels(
     conn: &Connection,
+    rt: &EpgRuntime,
     dir: &ChannelDirectory,
     source_id: &str,
+    hide: Option<Hide>,
 ) -> CoreResult<ChannelMap> {
-    let hidden = crate::channeledit::hidden_set(conn, source_id)?;
-    let manual: HashMap<(String, String), Option<String>> = {
-        let mut stmt = conn.prepare(
+    let manual: HashMap<(ContentType, String), Option<String>> = {
+        let mut stmt = conn.prepare_cached(
             "SELECT content_type, item_id, epg_channel_id FROM epg_channel_map WHERE source_id = ?1",
         )?;
         let rows = stmt.query_map([source_id], |r| {
             Ok((
-                (r.get::<_, String>(0)?, r.get::<_, String>(1)?),
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
                 r.get::<_, Option<String>>(2)?,
             ))
         })?;
-        rows.collect::<Result<_, _>>()?
-    };
-    let mut stmt = conn.prepare(
-        "SELECT content_type, item_id, title, number, logo_url, category_id, epg_channel_id
-         FROM items WHERE source_id = ?1 AND content_type IN ('live', 'radio')",
-    )?;
-    let rows = stmt.query_map([source_id], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, Option<i64>>(3)?,
-            r.get::<_, Option<String>>(4)?,
-            r.get::<_, String>(5)?,
-            r.get::<_, Option<String>>(6)?,
-        ))
-    })?;
-    let mut with_programmes: HashMap<String, bool> = HashMap::new();
-    let mut out = ChannelMap::new();
-    for row in rows {
-        let (ct_raw, item_id, title, number, logo_url, category_id, item_epg) = row?;
-        let Ok(content_type) = ct_raw.parse::<ContentType>() else {
-            continue;
-        };
-        if hidden.contains(&(content_type, item_id.clone())) {
-            continue;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (ct, item_id, epg) = row?;
+            if let Ok(ct) = ct.parse::<ContentType>() {
+                out.insert((ct, item_id), epg);
+            }
         }
-        let channel: Option<String> = match manual.get(&(ct_raw, item_id.clone())) {
-            Some(m) => m
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned),
-            None => {
-                let mut found = None;
-                if let Some(id) = item_epg.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                    if let Some(canonical) = dir.find_id(id) {
-                        found = Some(canonical.to_string());
-                    } else {
-                        let has = match with_programmes.get(id) {
-                            Some(h) => *h,
-                            None => {
-                                let h = resolve::has_programmes(conn, id)?;
-                                with_programmes.insert(id.to_string(), h);
-                                h
-                            }
-                        };
-                        if has {
-                            found = Some(id.to_string());
-                        }
+        out
+    };
+    let mut memo = SearchMemo::take(rt, dir.generation());
+    let mut out = ChannelMap::new();
+    for content_type in [ContentType::Live, ContentType::Radio] {
+        let mut sql = String::from(
+            "SELECT i.item_id, i.title, i.number, i.logo_url, i.category_id, i.epg_channel_id
+             FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2",
+        );
+        sql.push_str(&crate::channeledit::scoped(
+            conn,
+            source_id,
+            content_type,
+            "?1",
+            "?2",
+        )?);
+        if let Some(h) = hide {
+            sql.push_str(&crate::parental::filter::scoped(
+                conn,
+                source_id,
+                content_type,
+                h,
+                "?1",
+                "?2",
+            )?);
+        }
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
+        while let Some(r) = rows.next()? {
+            let item_id: String = r.get(0)?;
+            let title: String = r.get(1)?;
+            let item_epg: Option<String> = r.get(5)?;
+            let mapped = if manual.is_empty() {
+                None
+            } else {
+                manual.get(&(content_type, item_id.clone()))
+            };
+            let channel: Option<String> = match mapped {
+                Some(m) => m
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned),
+                None => {
+                    let by_id = match item_epg.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                        Some(id) => memo.by_id(conn, dir, id)?,
+                        None => None,
+                    };
+                    match by_id {
+                        Some(found) => Some(found),
+                        None => memo.by_name(dir, &title),
                     }
                 }
-                found.or_else(|| dir.find_name_exact(&title).map(str::to_owned))
-            }
-        };
-        let Some(channel) = channel else { continue };
-        out.entry(channel)
-            .or_default()
-            .push(Arc::new(SourceChannel {
-                item_ref: ItemRef::new(source_id, content_type, item_id),
-                name: title,
-                number,
-                logo_url: logo_url.filter(|s| !s.trim().is_empty()),
-                category_id,
-            }));
+            };
+            let Some(channel) = channel else { continue };
+            let logo_url: Option<String> = r.get(3)?;
+            out.entry(channel)
+                .or_default()
+                .push(Arc::new(SourceChannel {
+                    item_ref: ItemRef::new(source_id, content_type, item_id),
+                    name: title,
+                    number: r.get(2)?,
+                    logo_url: logo_url.filter(|s| !s.trim().is_empty()),
+                    category_id: r.get(4)?,
+                }));
+        }
     }
+    memo.put_back(rt);
     Ok(out)
 }
 
@@ -429,17 +554,19 @@ fn hit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
         .then_with(|| a.channel.item_ref.cmp(&b.channel.item_ref))
 }
 
-/// Collects candidates in (start, channel number) order: at least `want`
+/// Collects candidates in (start, channel number) order: at least the limit
 /// of them when there are, plus every other one starting at the same time
 /// as the last (so the tie order by channel number is complete). Returns
 /// whether the index was used.
 fn candidates(
     conn: &Connection,
+    rt: &EpgRuntime,
     dir: &ChannelDirectory,
     q: &Query,
-    want: usize,
+    hide: Option<Hide>,
 ) -> CoreResult<(Vec<Candidate>, bool)> {
-    let channels = source_channels(conn, dir, &q.source_id)?;
+    let want = q.limit;
+    let channels = source_channels(conn, rt, dir, &q.source_id, hide)?;
     if channels.is_empty() || q.words.is_empty() {
         return Ok((Vec::new(), false));
     }
@@ -569,40 +696,18 @@ fn ensure_source(conn: &Connection, source_id: &str) -> CoreResult<()> {
 /// channel number.
 pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<GuideSearchHit>> {
     let q = validate(req, chrono::Utc::now().timestamp())?;
-    let hide = crate::parental::hide_filter(state).await?.is_some();
+    // Hide mode drops locked and adult channels in the channel query itself.
+    let hide = crate::parental::hide_filter(state).await?;
     let limit = q.limit;
-    let want = if hide {
-        MAX_CANDIDATES.max(limit)
-    } else {
-        limit
-    };
     let rt = runtime(state);
     let started = std::time::Instant::now();
     let (mut found, used_index) = state
         .db_call(move |c| {
             ensure_source(c, &q.source_id)?;
             let dir = resolve::directory(c, &rt)?;
-            candidates(c, &dir, &q, want)
+            candidates(c, &rt, &dir, &q, hide)
         })
         .await?;
-    if hide && !found.is_empty() {
-        let mut seen = HashSet::new();
-        let items: Vec<(ItemRef, Option<String>)> = found
-            .iter()
-            .filter(|c| seen.insert(c.channel.item_ref.clone()))
-            .map(|c| {
-                (
-                    c.channel.item_ref.clone(),
-                    Some(c.channel.category_id.clone()).filter(|s| !s.is_empty()),
-                )
-            })
-            .collect();
-        let hidden: HashSet<ItemRef> = crate::parental::hidden(state, items)
-            .await?
-            .into_iter()
-            .collect();
-        found.retain(|c| !hidden.contains(&c.channel.item_ref));
-    }
     found.truncate(limit);
     let hits = state.db_call(move |c| finish(c, found)).await?;
     tracing::debug!(
@@ -625,6 +730,10 @@ mod tests {
     #[test]
     fn folds_case_and_diacritics() {
         assert_eq!(fold("Café Über"), "cafe uber");
+        // Greek tonos and final sigma, Vietnamese (Latin Extended Additional).
+        assert_eq!(fold("Ελληνικά ΕΙΔΗΣΕΙΣ"), "ελληνικα ειδησεισ");
+        assert_eq!(fold("Thời sự"), "thoi su");
+        assert_eq!(w("Ας"), w("ασ"));
         assert_eq!(
             w("  Le Journal-de 20h! "),
             vec!["le", "journal", "de", "20h"]
@@ -643,6 +752,7 @@ mod tests {
     #[test]
     fn fts_expression_uses_prefix_terms() {
         assert_eq!(fts_expression(&w("Café news")), "\"cafe\"* \"news\"*");
+        assert_eq!(fts_expression(&w("Ελλ")), "\"ελλ\"*");
     }
 
     #[test]

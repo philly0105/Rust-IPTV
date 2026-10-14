@@ -27,6 +27,12 @@ export interface ListChannels extends PagedChannels {
   unavailable: CustomListEntry[];
   /** The rows: available channels in list order. */
   channels: Channel[];
+  /**
+   * The list the rows belong to. Right after switching lists the previous
+   * list's rows stay up (dimmed) until the new ones land; during that time
+   * this is undefined, so nothing mistakes them for the new list's.
+   */
+  rowsListId: string | undefined;
 }
 
 export interface ListChannelsOptions {
@@ -134,6 +140,7 @@ export function useListChannels(listId: string, opts: ListChannelsOptions = {}):
     entries,
     unavailable,
     channels,
+    rowsListId: entries && !items.isPlaceholderData ? listId : undefined,
   };
 }
 

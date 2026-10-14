@@ -46,7 +46,6 @@
   "deleteLabel": "删除 {{list}}",
   "deleted": "已删除 {{list}}",
   "deleteFailed": "无法删除 {{list}}",
-  "undoFailed": "无法恢复 {{list}}",
   "editChannels": "编辑频道",
   "editChannelsOf": "编辑 {{list}} 中的频道",
   "editTitle": "编辑 {{list}}",
@@ -60,6 +59,7 @@
   "unavailableHeading": "已不再提供",
   "unavailableHint": "提供商已下架这些频道。如果重新提供，它们会回来。",
   "unavailableCount_other": "{{formatted}} 个不可用频道",
+  "countWithUnavailable": "{{channels}}，{{unavailable}}",
   "allUnavailableTitle": "这些频道目前都不再提供",
   "listEmptyTitle": "此列表为空",
   "listEmptyHint": "在直播电视中，选中频道后按 L 或右键单击它，然后选择“添加到列表”。",
@@ -74,11 +74,10 @@
   "stageIdleHint": "从列表中选择一个频道。",
   "errorNameEmpty": "请输入名称。",
   "errorNameLong": "最多 {{max}} 个字符。",
+  "errorNameControl": "名称不能包含制表符或换行符。",
   "errorDuplicate": "已存在同名列表。",
   "errorTooMany": "最多可以有 {{max}} 个列表。请先删除一个。",
   "errorListFull": "一个列表最多可容纳 {{max}} 个频道。",
   "errorGone": "此列表已被删除。",
-  "shortcutAddToList": "将选中的频道添加到列表",
-  "shortcutMoveUp": "上移选中的列表或频道",
-  "shortcutMoveDown": "下移选中的列表或频道"
+  "shortcutAddToList": "将选中的频道添加到列表"
 }

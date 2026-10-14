@@ -13,8 +13,10 @@
 //!    a handful of rows even with 50k channels per source; each candidate is
 //!    then compared by its full signature.
 //!
-//! Channels in categories the user hid are never candidates, like every
-//! other catalog read.
+//! Channels in categories the user hid, and channels hidden with a channel
+//! edit (Run 2 C2), are never candidates, like every other catalog read.
+//! Matching uses provider names; the RPC shows custom names
+//! ([`rpc::alternates`]).
 //!
 //! Order: same quality tier as the channel first, then source order
 //! (`sources.position`), then playlist order.
@@ -89,12 +91,19 @@ pub fn alternates(conn: &Connection, r: &ItemRef) -> CoreResult<Alternates> {
     };
     let sig = signature(&original.title);
     let ct = r.content_type.as_str();
+    // C2: a channel the user hid is never offered as a fallback. One PK probe
+    // per candidate, and none at all while no channel is hidden anywhere.
+    let visible = if crate::channeledit::any_hidden(conn)? {
+        format!(" AND {}", crate::channeledit::VISIBLE_PREDICATE)
+    } else {
+        String::new()
+    };
 
     // (row, matched_by), keyed by (source, item) so a channel found both ways is listed once.
     let mut found: HashMap<(String, String), (NamedRow, Signature, MatchKind)> = HashMap::new();
 
     if let Some(epg) = effective_epg_id(conn, r, original.epg_channel_id.as_deref())? {
-        let rows = epg_candidates(conn, ct, &epg)?;
+        let rows = epg_candidates(conn, ct, &epg, &visible)?;
         if rows.len() <= EPG_CANDIDATE_CAP {
             for row in rows {
                 let cand = signature(&row.row.title);
@@ -108,7 +117,7 @@ pub fn alternates(conn: &Connection, r: &ItemRef) -> CoreResult<Alternates> {
 
     if let Some(phrase) = sig.fts_phrase() {
         let sql = format!(
-            "{SELECT_NAMED} WHERE i.content_type = ?2 AND i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?1) AND COALESCE(c.hidden, 0) = 0 LIMIT {NAME_CANDIDATE_CAP}"
+            "{SELECT_NAMED} WHERE i.content_type = ?2 AND i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?1) AND COALESCE(c.hidden, 0) = 0{visible} LIMIT {NAME_CANDIDATE_CAP}"
         );
         let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(params![phrase, ct], read_named)?;
@@ -212,11 +221,17 @@ fn effective_epg_id(
 
 /// Channels whose effective EPG id is `epg`: their own id without a manual
 /// mapping, or a manual mapping to it. Reads at most one row over the cap.
-fn epg_candidates(conn: &Connection, ct: &str, epg: &str) -> CoreResult<Vec<NamedRow>> {
+/// `visible` is the channel-edit clause of [`alternates`] (or empty).
+fn epg_candidates(
+    conn: &Connection,
+    ct: &str,
+    epg: &str,
+    visible: &str,
+) -> CoreResult<Vec<NamedRow>> {
     let cap = EPG_CANDIDATE_CAP + 1;
     let own = format!(
         "{SELECT_NAMED} LEFT JOIN epg_channel_map m ON m.source_id = i.source_id AND m.content_type = i.content_type AND m.item_id = i.item_id \
-         WHERE i.epg_channel_id = ?1 AND i.content_type = ?2 AND m.item_id IS NULL AND COALESCE(c.hidden, 0) = 0 LIMIT {cap}"
+         WHERE i.epg_channel_id = ?1 AND i.content_type = ?2 AND m.item_id IS NULL AND COALESCE(c.hidden, 0) = 0{visible} LIMIT {cap}"
     );
     let mut out = Vec::new();
     let mut stmt = conn.prepare_cached(&own)?;
@@ -238,7 +253,7 @@ fn epg_candidates(conn: &Connection, ct: &str, epg: &str) -> CoreResult<Vec<Name
         .query_map(params![epg, ct], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
     let one = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.item_id = ?3 AND COALESCE(c.hidden, 0) = 0"
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.item_id = ?3 AND COALESCE(c.hidden, 0) = 0{visible}"
     );
     let mut stmt = conn.prepare_cached(&one)?;
     for (source_id, item_id) in keys {

@@ -13,6 +13,7 @@
   "resultsCount": "Résultats : {{n}}",
   "closeSearch": "Fermer la recherche",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "En cours",
   "watchNow": "Regarder {{channel}}",
   "hitNotFound": "{{channel}} ne figure pas dans cette liste",

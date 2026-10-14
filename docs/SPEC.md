@@ -505,6 +505,19 @@ C12 proxy: `/api/proxy` also accepts `ua`, `referer` and `origin` query paramete
   - C7 routes: `/my-list` (My List), `/multiview` (the wall; frontend only, state in localStorage `tsrust.multiview`, see `docs/architecture/multiview.md`), and the settings sections `recording` and `parental` (`/settings/:section` is now general | playback | players | epg | recording | metadata | appearance | parental | remote | backup | shortcuts | about).
   - C8 player: sleep timer and zap banner (`docs/architecture/players.md`, "Sleep timer, zap banner and glass"); every playback start passes the parental gate (`ensurePlaybackAllowed`).
   - C10 tokens: accent blocks per `data-accent`, the OLED block on `data-oled`, density and scale on `data-density` and `--ui-scale`, and the glass tokens (`--color-glass*`, `--color-on-glass*`, `--blur-glass`).
+- round two, run 2 (organise and find): channel edits, custom lists, VOD filters, guide search and series recording, subtitles, and watch stats.
+  - C3 schema: migrations `0013_catalog_edits.sql` (`channel_edits`; an `items` year index), `0014_custom_lists.sql` (`custom_lists`, `custom_list_items`), `0015_guide.sql` (the `epg_programs_fts` FTS5 index, `recording_rules`, `recording_rule_skips`) and `0016_watch_log.sql` (`watch_log`).
+  - C2 Settings: `subtitleSize: 'small' | 'medium' | 'large' | 'xlarge'` (`medium`), `subtitleColor: 'white' | 'yellow' | 'cyan' | 'green'` (`white`), `subtitleBackground: 'shadow' | 'box' | 'solid'` (`box`), `subtitlePosition` (0, a whole number 0..40) and `vodHideWatched` (false). All five are in the backup manifest's `settings`. See `docs/architecture/settings.md`.
+  - channel edits (`docs/architecture/channel-edits.md`): `channels.edits|setHidden|rename|reset`; every write emits `channels.changed {sourceId}`. Channel readers leave hidden channels out and show renamed ones under their new name (which readers, in the doc).
+  - custom lists (`docs/architecture/lists.md`): `lists.list|create|update|remove|reorder|items|addItems|removeItems|reorderItems|containing|neighbors`; every write emits `lists.changed {}`. `lists.items` leaves out hidden and parentally hidden channels; `lists.reorderItems` takes any subset of the list's refs (unlisted refs keep their slots).
+  - VOD browsing (`docs/architecture/vod-browsing.md`): `catalog.movies` / `catalog.series` args gain `yearFrom?`, `yearTo?` and `hideWatched?`; new `catalog.yearFacets` (its `hideWatched?` counts only what Hide watched keeps) and `positions.watchedContains`.
+  - guide search and series recording (`guide-search.md`, `recording.md`): `epg.search {sourceId; query; from?; to?; limit?}` and `recordings.rules|addRule|setRuleEnabled|removeRule`; rule changes emit `recordings.update`.
+  - subtitles (`subtitles.md`): `mpv.addSubtitle {path}` (desktop only) loads an external subtitle file into embedded mpv; the built-in player parses SRT, VTT and ASS in the UI.
+  - watch stats (`stats.md`): `stats.record|summary|clear`, no event; Hide mode leaves locked items out of `stats.summary`.
+  - C1 invalidation (`src/api/query.ts`): `lists.changed` refreshes `lists.`; `channels.changed` refreshes `catalog.`, `channels.`, `lists.`, `favorites.`, `recent.` and `epg.search`; `sources.changed` and `import.progress` also refresh `lists.`. `parental.changed` refreshes `lists.`, `epg.search` and `stats.` along with the Run 1 prefixes when Hide mode's filter changes (`src/features/parental/status.ts`).
+  - C7 routes: `/lists` (all lists), `/lists/:listId` (one list) and `/stats` (watch stats), all lazy.
+  - C9 i18n: new namespaces `lists`, `channels`, `guide` and `stats`, in all 19 languages.
+  - Backups (`backup.md`): per playlist `tsrustChannelEdits`, `tsrustRecordingRules` and `tsrustWatchLog`; custom lists at the top level as `tsrustCustomLists`.
 
 ## 5. Run commands and ports
 

@@ -1,8 +1,9 @@
 import type { PlaybackPosition } from '@/api/types';
-import { MIN_RESUME_SECONDS } from '@/features/player/store';
+import { isWatchedReplay, MIN_RESUME_SECONDS } from '@/features/player/store';
 import { formatDurationParts, resetDurationFormatCache, type DurationFormatOptions } from '@/lib/duration';
 
-type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched'>>;
+type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> &
+  Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>;
 
 /** True when the row was marked watched (`userstate.setWatched`). */
 export function isWatched(pos: Partial<Pick<PlaybackPosition, 'watched'>> | undefined | null): boolean {
@@ -46,10 +47,13 @@ export function progressFraction(pos: ProgressInput | undefined | null): number 
 /**
  * A saved position worth offering "Resume" for: past the player's own resume
  * threshold (`MIN_RESUME_SECONDS`, so the label matches what playback does)
- * and before 95 %.
+ * and before 95 %. A watched row is not, except a watched movie replayed
+ * part-way to between 5 % and 95 % (`isWatchedReplay`, the player's rule):
+ * it resumes there and keeps its watched tick.
  */
 export function isResumable(pos: ProgressInput | undefined | null): boolean {
-  if (!pos || isWatched(pos) || !(pos.positionSeconds > MIN_RESUME_SECONDS)) return false;
+  if (!pos || !(pos.positionSeconds > MIN_RESUME_SECONDS)) return false;
+  if (isWatched(pos)) return isWatchedReplay(pos);
   if (!pos.durationSeconds) return true;
   return pos.positionSeconds < pos.durationSeconds * 0.95;
 }

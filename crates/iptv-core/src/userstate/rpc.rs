@@ -146,8 +146,9 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<Vec<ItemRef>, RpcError>(v)
     });
     r.add("favorites.reorder", |state, a: ReorderArgs| async move {
+        let hide = crate::parental::hide_filter(&state).await?;
         state
-            .db_call(move |c| super::favorites_reorder(c, a.source_id.as_deref(), &a.refs))
+            .db_call(move |c| super::favorites_reorder(c, a.source_id.as_deref(), &a.refs, hide))
             .await?;
         Ok::<(), RpcError>(())
     });

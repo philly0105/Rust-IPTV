@@ -1,6 +1,6 @@
 /**
  * The user's subtitle look (settings.subtitle*) mapped once for both players (C6): CSS
- * variables for the built-in player's `video::cue`, and mpv properties for embedded mpv.
+ * variables for the built-in player's subtitle overlay, and mpv properties for embedded mpv.
  */
 
 import {
@@ -54,7 +54,7 @@ export function styleFromSettings(s: Settings): SubtitleStyle {
   };
 }
 
-/** The variables `player.css` reads in `video::cue`, set on `[data-player-host]`. */
+/** The variables `player.css` reads for the subtitle overlay, set on `[data-player-host]`. */
 export function cueCssVars(st: SubtitleStyle): Record<'--sub-scale' | '--sub-color' | '--sub-bg' | '--sub-shadow', string> {
   return {
     '--sub-scale': String(SUBTITLE_SCALE[st.size]),

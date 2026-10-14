@@ -151,13 +151,15 @@ test.describe('Custom lists', () => {
     await expect(dialog.getByRole('button', { name: 'Move Football', exact: true })).toBeFocused();
     await expect.poll(async () => (await allLists(request)).map((l) => l.name)).toEqual(['Kids', 'Football', 'News']);
 
-    // Delete, then Undo: same name, channels, Home rail and place.
+    // Delete, then Undo. The delete waits for its toast, so the core still has
+    // the list and Undo brings it back untouched: same id, channels, Home rail and place.
     await dialog.getByRole('button', { name: 'Delete Kids' }).click();
     await expect.poll(() => manageNames(page)).toEqual(['Football', 'News']);
+    expect((await allLists(request)).map((l) => l.id)).toContain(kids.id);
     await toastWith(page, 'Deleted Kids').getByRole('button', { name: 'Undo' }).click();
     await expect.poll(() => manageNames(page)).toEqual(['Kids', 'Football', 'News']);
     const restored = (await allLists(request))[0]!;
-    expect(restored.id).not.toBe(kids.id);
+    expect(restored.id).toBe(kids.id);
     expect(restored.onDashboard).toBe(true);
     expect((await itemsOf(request, restored.id)).map((e) => e.ref.itemId)).toEqual([c.ref.itemId]);
 

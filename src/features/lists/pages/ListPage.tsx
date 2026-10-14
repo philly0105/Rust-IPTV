@@ -99,13 +99,17 @@ export function ListPage() {
   );
 
   // The player keeps zapping within this list while its channel plays from here.
+  // Only once the rows are this list's own: right after a switch they are still
+  // the previous list's, and its playing channel may not be in this one.
+  const rowsAreThisList = paged.rowsListId === listId;
   useEffect(() => {
+    if (!rowsAreThisList) return;
     const ctx = usePlayerStore.getState().zapContext;
     const src = usePlayerStore.getState().source?.ref;
     if (src && listId && inList.has(itemKey(src)) && ctx?.listId !== listId) {
       usePlayerStore.setState({ zapContext: { sourceId: src.sourceId, listId } });
     }
-  }, [listId, inList]);
+  }, [listId, inList, rowsAreThisList]);
 
   // `l` on a focused row: the picker for that row's channel.
   useAddToListShortcut(activeChannel, paged.getChannel);
@@ -249,7 +253,18 @@ export function ListPage() {
     for (const c of paged.channels) counts.set(c.ref.sourceId, (counts.get(c.ref.sourceId) ?? 0) + 1);
     return [...counts.entries()].map(([id, count]) => ({ id, count, name: sourceById.get(id)?.name ?? t('unknownSource') }));
   }, [paged.channels, sourceById, t]);
-  const subtitle = list ? t('channelCount', { count: paged.total ?? list.itemCount, formatted: fmt.format(paged.total ?? list.itemCount) }) : undefined;
+  // The sidebar counts every channel in the list; once this list's rows are in,
+  // the header splits off the dropped ones so the two always add up.
+  const playable = rowsAreThisList ? paged.total : undefined;
+  const dropped = rowsAreThisList ? paged.unavailable.length : 0;
+  const countText = (n: number) => t('channelCount', { count: n, formatted: fmt.format(n) });
+  const subtitle = !list
+    ? undefined
+    : playable === undefined
+      ? countText(list.itemCount)
+      : dropped > 0
+        ? t('countWithUnavailable', { channels: countText(playable), unavailable: t('unavailableCount', { count: dropped, formatted: fmt.format(dropped) }) })
+        : countText(playable);
   useEffect(() => {
     shell.setHeader({
       title,
@@ -431,15 +446,19 @@ export function ListPage() {
             </div>
           </PlayerStage>
         </div>
-        <EpgRibbon
-          channel={ribbonChannel}
-          sourceKind={ribbonKind}
-          watchingLive={watchingLive}
-          watchingArchive={watchingArchive}
-          onPlayLive={(c) => play(c)}
-          onMapEpg={setMapping}
-          guideHref={ribbonChannel ? `/epg?source=${encodeURIComponent(ribbonChannel.ref.sourceId)}` : undefined}
-        />
+        {/* With no channel to show the ribbon is only an empty state; on a phone
+            it would push the list's own empty state and dropped channels below the fold. */}
+        <div className={cn('contents', !ribbonChannel && 'max-md:hidden')} data-testid="list-ribbon">
+          <EpgRibbon
+            channel={ribbonChannel}
+            sourceKind={ribbonKind}
+            watchingLive={watchingLive}
+            watchingArchive={watchingArchive}
+            onPlayLive={(c) => play(c)}
+            onMapEpg={setMapping}
+            guideHref={ribbonChannel ? `/epg?source=${encodeURIComponent(ribbonChannel.ref.sourceId)}` : undefined}
+          />
+        </div>
       </section>
 
       <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />

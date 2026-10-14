@@ -224,7 +224,7 @@ test('main flow (Run 2): rename and hide, a two-source list, guide search and a 
   const hide = page.getByRole('switch', { name: 'Hide watched' });
   await hide.click();
   await expect(hide).toHaveAttribute('aria-checked', 'true');
-  await page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year' }).getByRole('button', { name: /^2020s, \d+ titles$/ }).click();
+  await page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year', exact: true }).getByRole('button', { name: /^2020s, \d+ titles$/ }).click();
   await expect(page).toHaveURL(/[?&]yf=2020&yt=2029/);
   await expect(options.first()).toBeVisible();
   await expect(options.filter({ hasText: MOCK_FACTS.firstMovie.title })).toHaveCount(0);

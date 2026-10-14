@@ -27,6 +27,7 @@
 pub mod rpc;
 
 use crate::error::{CoreError, CoreResult};
+use crate::lists::MAX_ID_CHARS;
 use crate::model::{Channel, ContentType, ItemRef, ItemSnapshot};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -402,6 +403,11 @@ fn validate_ref(r: &ItemRef) -> CoreResult<()> {
             "ref.sourceId and ref.itemId are required",
         ));
     }
+    if r.source_id.chars().count() > MAX_ID_CHARS || r.item_id.chars().count() > MAX_ID_CHARS {
+        return Err(CoreError::invalid(format!(
+            "ref.sourceId and ref.itemId must be at most {MAX_ID_CHARS} characters"
+        )));
+    }
     if !is_channel_type(r.content_type) {
         return Err(CoreError::invalid(format!(
             "only live and radio channels can be edited, not '{}'",
@@ -527,9 +533,9 @@ fn recount(conn: &Connection, source_id: &str, types: &BTreeSet<ContentType>) ->
 /// nothing is written. Unhiding never answers `NotFound` (a change to C2
 /// asked for by the channel-edit UI): it clears the hidden flag whether or
 /// not the provider still lists the channel, so a dropped channel can leave
-/// the hidden-channels list, and a ref with no hidden row is a no-op. A row
-/// left with nothing to edit is deleted. Only sources with a real change are
-/// returned.
+/// the hidden-channels list, and a ref with no hidden row is a no-op, as is
+/// hiding a channel that is already hidden. A row left with nothing to edit
+/// is deleted. Only sources with a real change are returned.
 pub fn set_hidden(
     conn: &mut Connection,
     refs: &[ItemRef],
@@ -552,18 +558,22 @@ pub fn set_hidden(
         let title = provider_name(&tx, r)?;
         if hidden {
             let Some(title) = title else {
-                return Err(CoreError::not_found(format!(
-                    "channel {} not found in source {}; refresh the source",
-                    r.item_id, r.source_id
-                )));
+                return Err(not_in_catalog(r));
             };
-            tx.prepare_cached(
-                "INSERT INTO channel_edits (source_id, content_type, item_id, hidden, name, original_name, updated_at)
-                 VALUES (?1, ?2, ?3, 1, NULL, ?4, ?5)
-                 ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET
-                   hidden = 1, original_name = excluded.original_name, updated_at = excluded.updated_at",
-            )?
-            .execute(params![r.source_id, r.content_type.as_str(), r.item_id, title, now])?;
+            // A channel that is already hidden is a no-op (no write, no
+            // event), as unhiding one that is not.
+            let n = tx
+                .prepare_cached(
+                    "INSERT INTO channel_edits (source_id, content_type, item_id, hidden, name, original_name, updated_at)
+                     VALUES (?1, ?2, ?3, 1, NULL, ?4, ?5)
+                     ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET
+                       hidden = 1, original_name = excluded.original_name, updated_at = excluded.updated_at
+                     WHERE channel_edits.hidden = 0",
+                )?
+                .execute(params![r.source_id, r.content_type.as_str(), r.item_id, title, now])?;
+            if n == 0 {
+                continue;
+            }
         } else {
             // Unhiding never needs the channel in the catalog: a channel
             // the provider has dropped can leave the hidden list, and a ref
@@ -608,7 +618,8 @@ fn recount_touched(
 
 /// Trims and checks a custom name: `Ok(None)` resets to the provider name
 /// (`None` or `""`), otherwise 1..=[`MAX_NAME_CHARS`] characters after
-/// trimming with no control characters, else `Invalid`.
+/// trimming, at least one of them visible (see [`is_invisible`]), with no
+/// control character and no line or paragraph separator, else `Invalid`.
 pub fn normalize_name(name: Option<&str>) -> CoreResult<Option<String>> {
     let Some(raw) = name else {
         return Ok(None);
@@ -617,7 +628,7 @@ pub fn normalize_name(name: Option<&str>) -> CoreResult<Option<String>> {
         return Ok(None);
     }
     let name = raw.trim();
-    if name.is_empty() {
+    if name.chars().all(is_invisible) {
         return Err(CoreError::invalid("name must not be blank"));
     }
     if name.chars().count() > MAX_NAME_CHARS {
@@ -625,41 +636,97 @@ pub fn normalize_name(name: Option<&str>) -> CoreResult<Option<String>> {
             "name must be at most {MAX_NAME_CHARS} characters"
         )));
     }
-    if name.chars().any(char::is_control) {
+    if name.chars().any(is_line_break) {
         return Err(CoreError::invalid(
-            "name must not contain control characters",
+            "name must not contain control characters or line breaks",
         ));
     }
     Ok(Some(name.to_string()))
 }
 
+/// True for a character that shows nothing on its own: white space, the
+/// format characters (Unicode category Cf, such as U+200B ZERO WIDTH SPACE
+/// or U+200F RIGHT-TO-LEFT MARK) and the other default-ignorable code
+/// points, and the Hangul and Braille blanks. A name made only of these is
+/// an empty label, so it counts as blank. Inside a name they are kept:
+/// U+200D and the variation selectors join and style emoji.
+pub(crate) fn is_invisible(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c as u32,
+            0x00AD
+                | 0x034F
+                | 0x061C
+                | 0x115F..=0x1160
+                | 0x17B4..=0x17B5
+                | 0x180B..=0x180F
+                | 0x200B..=0x200F
+                | 0x202A..=0x202E
+                | 0x2060..=0x206F
+                | 0x2800
+                | 0x3164
+                | 0xFE00..=0xFE0F
+                | 0xFEFF
+                | 0xFFA0
+                | 0xFFF0..=0xFFF8
+                | 0x1BCA0..=0x1BCA3
+                | 0x1D173..=0x1D17A
+                | 0xE0000..=0xE0FFF
+        )
+}
+
+/// True for a control character (Cc) or U+2028 LINE SEPARATOR / U+2029
+/// PARAGRAPH SEPARATOR (Zl, Zp), which break a one-line label.
+pub(crate) fn is_line_break(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}')
+}
+
+/// `NotFound` for a channel missing from the catalog. Long ids are
+/// shortened, so a bad request does not echo kilobytes back.
+fn not_in_catalog(r: &ItemRef) -> CoreError {
+    CoreError::not_found(format!(
+        "channel {} not found in source {}; refresh the source",
+        short_id(&r.item_id),
+        short_id(&r.source_id)
+    ))
+}
+
+/// `id` cut to 64 characters with an ellipsis, for error messages.
+fn short_id(id: &str) -> String {
+    const MAX: usize = 64;
+    match id.char_indices().nth(MAX) {
+        Some((end, _)) => format!("{}...", &id[..end]),
+        None => id.to_string(),
+    }
+}
+
 /// `channels.rename`: sets or clears the custom name of one channel and
-/// returns its edit row, or `None` when the row was removed.
+/// returns its edit row (`None` when no edit is left) and whether anything
+/// changed.
 ///
 /// A name equal to the provider name clears the custom name (the channel
 /// then shows the provider name, and follows it if the provider renames
 /// it). Setting a name needs the channel in the catalog; clearing also works
-/// for a dropped channel whose row exists. `NotFound` otherwise.
+/// for a dropped channel whose row exists. `NotFound` otherwise. When the
+/// custom name already is the requested one nothing is written (the row
+/// keeps its `updatedAt`) and the flag is false, so no event goes out.
 pub fn rename(
     conn: &mut Connection,
     r: &ItemRef,
     name: Option<&str>,
-) -> CoreResult<Option<ChannelEdit>> {
+) -> CoreResult<(Option<ChannelEdit>, bool)> {
     validate_ref(r)?;
     let name = normalize_name(name)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let title = provider_name(&tx, r)?;
-    let missing = || {
-        CoreError::not_found(format!(
-            "channel {} not found in source {}; refresh the source",
-            r.item_id, r.source_id
-        ))
-    };
     let now = crate::userstate::now_ts();
     if title.is_none() && (name.is_some() || !has_row(&tx, r)?) {
-        return Err(missing());
+        return Err(not_in_catalog(r));
     }
     let name = name.filter(|n| title.as_deref() != Some(n.as_str()));
+    if stored_name(&tx, r)? == name {
+        return Ok((edit_of(&tx, r)?, false));
+    }
     match &title {
         Some(t) => {
             tx.prepare_cached(
@@ -680,11 +747,26 @@ pub fn rename(
     drop_if_empty(&tx, r)?;
     let out = edit_of(&tx, r)?;
     tx.commit()?;
-    Ok(out)
+    Ok((out, true))
+}
+
+/// The custom name stored for `r` (`None` without a row or a name).
+fn stored_name(conn: &Connection, r: &ItemRef) -> CoreResult<Option<String>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT name FROM channel_edits WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
+            params![r.source_id, r.content_type.as_str(), r.item_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 /// `channels.reset`: drops every edit of the source and recounts it.
-/// Returns the number of rows removed.
+/// Returns the number of rows removed; 0 changes nothing (no recount, and
+/// the command sends no event).
 pub fn reset(conn: &mut Connection, source_id: &str) -> CoreResult<usize> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     require_source(&tx, source_id)?;
@@ -692,6 +774,9 @@ pub fn reset(conn: &mut Connection, source_id: &str) -> CoreResult<usize> {
         "DELETE FROM channel_edits WHERE source_id = ?1",
         [source_id],
     )?;
+    if n == 0 {
+        return Ok(0);
+    }
     recount(
         &tx,
         source_id,
@@ -780,7 +865,10 @@ pub fn import_edits(
     )?;
     for e in edits {
         let item_id = e.item_id.trim();
-        if !is_channel_type(e.content_type) || item_id.is_empty() {
+        if !is_channel_type(e.content_type)
+            || item_id.is_empty()
+            || item_id.chars().count() > MAX_ID_CHARS
+        {
             continue;
         }
         let name = normalize_name(e.name.as_deref()).ok().flatten();
@@ -832,6 +920,40 @@ mod tests {
         let max = "é".repeat(MAX_NAME_CHARS);
         assert_eq!(normalize_name(Some(&max)).unwrap(), Some(max.clone()));
         assert!(normalize_name(Some(&format!("{max}x"))).is_err());
+    }
+
+    #[test]
+    fn names_need_a_visible_character_and_one_line() {
+        for blank in [
+            "\u{200B}",
+            "\u{200F}",
+            " \u{200B}\u{200D}\u{FEFF} ",
+            "\u{3164}",
+            "\u{2800}",
+            "\u{2028}",
+        ] {
+            assert!(normalize_name(Some(blank)).is_err(), "{blank:?}");
+        }
+        for broken in ["BBC\u{2028}One", "BBC\u{2029}One", "BBC\u{7}One"] {
+            assert!(normalize_name(Some(broken)).is_err(), "{broken:?}");
+        }
+        // Joiners and variation selectors inside a visible name are kept.
+        for kept in [
+            "\u{1F468}\u{200D}\u{1F373} Chef",
+            "\u{2764}\u{FE0F} Love",
+            "x\u{200B}y",
+        ] {
+            assert_eq!(normalize_name(Some(kept)).unwrap().as_deref(), Some(kept));
+        }
+    }
+
+    #[test]
+    fn long_ids_are_shortened_in_messages() {
+        assert_eq!(short_id("abc"), "abc");
+        let long = "x".repeat(MAX_ID_CHARS);
+        let short = short_id(&long);
+        assert_eq!(short.chars().count(), 67, "{short}");
+        assert!(short.ends_with("..."));
     }
 
     #[test]

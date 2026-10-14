@@ -198,6 +198,7 @@
   "decade": "Anos {{decade}}",
   "yearFrom": "De",
   "yearTo": "Até",
+  "yearRange": "Intervalo de anos",
   "yearEmptyTitle": "Nenhum título destes anos",
   "hideWatched": "Ocultar assistidos",
   "watchedEmptyTitle": "Já assistiu a tudo aqui",

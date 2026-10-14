@@ -13,6 +13,7 @@
   "resultsCount": "Результатов: {{n}}",
   "closeSearch": "Закрыть поиск",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "Сейчас в эфире",
   "watchNow": "Смотреть {{channel}}",
   "hitNotFound": "{{channel}} нет в этом списке",

@@ -207,6 +207,7 @@
   "decade": "Lata {{decade}}",
   "yearFrom": "Od",
   "yearTo": "Do",
+  "yearRange": "Zakres lat",
   "yearEmptyTitle": "Brak tytułów z tych lat",
   "hideWatched": "Ukryj obejrzane",
   "watchedEmptyTitle": "Wszystko tutaj jest obejrzane",

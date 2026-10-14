@@ -32,7 +32,10 @@ const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider 
 const base: ParentalStatus = { enabled: true, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 };
 const s = (patch: Partial<ParentalStatus> = {}): ParentalStatus => ({ ...base, ...patch });
 
-/** Seeds one cached query per prefix the core filters, plus the lock list, and returns their keys. */
+/**
+ * Seeds one cached query per read the core filters, plus the lock list, and
+ * returns their keys; `unrelated` are queries Hide mode does not change.
+ */
 function seedLists() {
   const keys = [
     ['catalog.channels', { sourceId: 'src1' }],
@@ -40,12 +43,16 @@ function seedLists() {
     ['recent.list', null],
     ['positions.continueWatching', null],
     ['watchlist.list', null],
+    ['lists.list', null],
+    ['lists.items', { id: 'l1' }],
+    ['epg.search', { sourceId: 'src1', query: 'news' }],
+    ['stats.summary', { days: 7, today: '2026-10-14' }],
     ['parental.locks', {}],
-    ['epg.nowNext', null],
   ] as const;
-  for (const k of keys) queryClient.setQueryData(k, []);
+  const unrelated = [['epg.nowNext', null]] as const;
+  for (const k of [...keys, ...unrelated]) queryClient.setQueryData(k, []);
   const invalidated = (k: readonly unknown[]) => queryClient.getQueryState(k)?.isInvalidated ?? false;
-  return { keys, invalidated };
+  return { keys, unrelated, invalidated };
 }
 
 beforeEach(() => {
@@ -67,16 +74,16 @@ describe('useParentalEvents', () => {
       { wrapper },
     );
     await vi.waitFor(() => expect(result.current.data).toBeDefined());
-    const { keys, invalidated } = seedLists();
+    const { keys, unrelated, invalidated } = seedLists();
 
     // Hide mode switches off (an unlock): every list the core filters refetches.
     act(() => emitEvent('parental.changed', s({ unlocked: true, unlockedUntil: new Date(Date.now() + 60_000).toISOString() })));
     expect(queryClient.getQueryData(STATUS_KEY)).toMatchObject({ unlocked: true });
     // Observers hear about cache writes on the next tick.
     await vi.waitFor(() => expect(result.current.data?.unlocked).toBe(true));
-    for (const k of keys.slice(0, 6)) expect(invalidated(k), String(k[0])).toBe(true);
-    // Unrelated queries are left alone.
-    expect(invalidated(keys[6])).toBe(false);
+    for (const k of keys) expect(invalidated(k), String(k[0])).toBe(true);
+    // Unrelated queries (the rest of the guide) are left alone.
+    for (const k of unrelated) expect(invalidated(k), String(k[0])).toBe(false);
   });
 
   it('does not reload the catalog for a wrong PIN while Hide mode keeps filtering', () => {
@@ -99,6 +106,7 @@ describe('useParentalEvents', () => {
       const key = queryClient.getQueryCache().findAll().find((q) => String(q.queryKey[0]).startsWith(p))!.queryKey;
       expect(invalidated(key), p).toBe(true);
     }
+    expect(invalidated(['epg.nowNext', null])).toBe(false);
   });
 
   it('stops listening on unmount', () => {

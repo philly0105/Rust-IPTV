@@ -51,7 +51,6 @@
   "deleteLabel": "مسح {{list}}",
   "deleted": "{{list}} تمسحات",
   "deleteFailed": "ما قدرناش نمسحو {{list}}",
-  "undoFailed": "ما قدرناش نرجعو {{list}}",
   "editChannels": "بدّل القنوات",
   "editChannelsOf": "بدّل القنوات ف {{list}}",
   "editTitle": "بدّل {{list}}",
@@ -70,6 +69,7 @@
   "unavailableCount_few": "{{formatted}} قنوات ما متوفراش",
   "unavailableCount_many": "{{formatted}} قناة ما متوفراش",
   "unavailableCount_other": "قنوات ما متوفراش: {{formatted}}",
+  "countWithUnavailable": "{{channels}}، {{unavailable}}",
   "allUnavailableTitle": "حتى وحدة من هاد القنوات ما متوفرة دابا",
   "listEmptyTitle": "هاد الليستة خاوية",
   "listEmptyHint": "فالبث المباشر، ورك على L فوق شي قناة ولا كليكي عليها بالكليك اليمين، ومن بعد ختار زيد لشي ليستة.",
@@ -84,11 +84,10 @@
   "stageIdleHint": "ختار قناة من الليستة.",
   "errorNameEmpty": "كتب شي سمية.",
   "errorNameLong": "ماشي كثر من {{max}} حرف.",
+  "errorNameControl": "السمية ما خاصهاش يكون فيها تاب ولا رجوع للسطر.",
   "errorDuplicate": "كاينة ديجا ليستة بهاد السمية.",
   "errorTooMany": "تقدر يكون عندك حتى لـ {{max}} ليستة. مسح وحدة قبل.",
   "errorListFull": "الليستة كتشد حتى لـ {{max}} قناة.",
   "errorGone": "هاد الليستة تمسحات.",
-  "shortcutAddToList": "زيد القناة المختارة لشي ليستة",
-  "shortcutMoveUp": "طلّع الليستة ولا القناة المختارة",
-  "shortcutMoveDown": "هبّط الليستة ولا القناة المختارة"
+  "shortcutAddToList": "زيد القناة المختارة لشي ليستة"
 }

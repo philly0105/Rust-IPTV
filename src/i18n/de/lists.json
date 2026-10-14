@@ -47,7 +47,6 @@
   "deleteLabel": "{{list}} löschen",
   "deleted": "{{list}} gelöscht",
   "deleteFailed": "{{list}} konnte nicht gelöscht werden",
-  "undoFailed": "{{list}} konnte nicht wiederhergestellt werden",
   "editChannels": "Sender bearbeiten",
   "editChannelsOf": "Sender in {{list}} bearbeiten",
   "editTitle": "{{list}} bearbeiten",
@@ -62,6 +61,7 @@
   "unavailableHint": "Der Anbieter hat diese Sender entfernt. Sie kehren zurück, wenn er sie wieder anbietet.",
   "unavailableCount_one": "{{formatted}} nicht verfügbarer Sender",
   "unavailableCount_other": "{{formatted}} nicht verfügbare Sender",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Keiner dieser Sender wird derzeit angeboten",
   "listEmptyTitle": "Diese Liste ist leer",
   "listEmptyHint": "Drücken Sie in Live-TV auf einem Sender L oder klicken Sie ihn mit der rechten Maustaste an und wählen Sie dann „Zu einer Liste hinzufügen“.",
@@ -76,11 +76,10 @@
   "stageIdleHint": "Wählen Sie einen Sender aus der Liste.",
   "errorNameEmpty": "Geben Sie einen Namen ein.",
   "errorNameLong": "Verwenden Sie höchstens {{max}} Zeichen.",
+  "errorNameControl": "Der Name darf keine Tabulatoren oder Zeilenumbrüche enthalten.",
   "errorDuplicate": "Eine Liste mit diesem Namen gibt es bereits.",
   "errorTooMany": "Sie können bis zu {{max}} Listen anlegen. Löschen Sie zuerst eine.",
   "errorListFull": "Eine Liste fasst bis zu {{max}} Sender.",
   "errorGone": "Diese Liste wurde gelöscht.",
-  "shortcutAddToList": "Ausgewählten Sender zu einer Liste hinzufügen",
-  "shortcutMoveUp": "Ausgewählte Liste oder ausgewählten Sender nach oben verschieben",
-  "shortcutMoveDown": "Ausgewählte Liste oder ausgewählten Sender nach unten verschieben"
+  "shortcutAddToList": "Ausgewählten Sender zu einer Liste hinzufügen"
 }

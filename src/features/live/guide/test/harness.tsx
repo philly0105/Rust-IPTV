@@ -1,6 +1,7 @@
 /**
  * Test harness for the guide's Run 2 C5 UI: an i18n instance with the live,
- * guide and common namespaces (the kit's own strings come from common), a
+ * guide and common namespaces (the kit's own strings come from common) plus
+ * the channel row menu's (channels, lists, multiview, parental), a
  * render helper with a fresh query client and a router whose location and
  * navigate are exposed, and an RPC double shared by the test files.
  */
@@ -12,9 +13,13 @@ import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type Location, type NavigateFunction } from 'react-router';
 
 import type { EpgProgram, GuideSearchHit, ItemRef, RecordingRule } from '@/api/types';
+import channels from '@/i18n/en/channels.json';
 import common from '@/i18n/en/common.json';
 import guide from '@/i18n/en/guide.json';
+import lists from '@/i18n/en/lists.json';
 import live from '@/i18n/en/live.json';
+import multiview from '@/i18n/en/multiview.json';
+import parental from '@/i18n/en/parental.json';
 
 export { installDomStubs, makeChannel, program, settings } from '../../test/harness';
 
@@ -22,9 +27,10 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['live', 'guide', 'common'],
+  // The channel row menu (C2) also speaks channels, lists, multiview and parental.
+  ns: ['live', 'guide', 'common', 'channels', 'lists', 'multiview', 'parental'],
   defaultNS: 'live',
-  resources: { en: { live, guide, common } },
+  resources: { en: { live, guide, common, channels, lists, multiview, parental } },
   interpolation: { escapeValue: false },
 });
 

@@ -491,16 +491,29 @@ pub fn export_log(conn: &Connection, source_id: &str) -> CoreResult<Vec<WatchLog
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// What [`import_log`] did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LogImport {
+    /// Rows inserted or changed.
+    pub written: usize,
+    /// Rows refused by the checks listed on [`import_log`].
+    pub skipped: usize,
+}
+
 /// Stores backup rows for `source_id` (the entry's source on this install)
-/// and returns how many rows were inserted or changed.
+/// and returns how many rows were inserted or changed and how many were
+/// skipped.
 ///
 /// - Per `(day, ref)` the larger `seconds` wins, so importing the same file
-///   twice changes nothing the second time (and returns 0).
+///   twice changes nothing the second time (and writes 0; that is not a
+///   skip).
 /// - The title and poster follow whichever side has the later `lastAt`; a
 ///   missing poster is filled from the other side.
-/// - Skipped without failing the import: a day that is not `YYYY-MM-DD` or
-///   is older than the retention window, a blank item id or title, and
-///   `seconds <= 0`. Seconds above a day's worth are capped; titles are cut
+/// - Skipped without failing the import: a day that is not `YYYY-MM-DD`, is
+///   older than the retention window or later than [`DAY_SLACK`] days after
+///   today (a live record could not have it either), a blank or over-long
+///   item id, a blank title, and `seconds <= 0`. The item id is stored
+///   trimmed, as it was checked. Seconds above a day's worth are capped; titles are cut
 ///   to [`MAX_TITLE_CHARS`]; an unreadable `lastAt` becomes the import time.
 /// - An unknown `source_id` is `not_found`.
 ///
@@ -510,7 +523,7 @@ pub fn import_log(
     conn: &Connection,
     source_id: &str,
     rows: &[WatchLogBackup],
-) -> CoreResult<usize> {
+) -> CoreResult<LogImport> {
     conn.execute_batch("SAVEPOINT stats_import")?;
     match import_inner(conn, source_id, rows) {
         Ok(n) => {
@@ -524,9 +537,14 @@ pub fn import_log(
     }
 }
 
-fn import_inner(conn: &Connection, source_id: &str, rows: &[WatchLogBackup]) -> CoreResult<usize> {
+fn import_inner(
+    conn: &Connection,
+    source_id: &str,
+    rows: &[WatchLogBackup],
+) -> CoreResult<LogImport> {
+    let mut out = LogImport::default();
     if rows.is_empty() {
-        return Ok(0);
+        return Ok(out);
     }
     if !conn
         .prepare_cached("SELECT 1 FROM sources WHERE id = ?1")?
@@ -536,7 +554,11 @@ fn import_inner(conn: &Connection, source_id: &str, rows: &[WatchLogBackup]) -> 
             "source {source_id} does not exist"
         )));
     }
-    let oldest = oldest_kept(utc_today());
+    let today = utc_today();
+    let oldest = oldest_kept(today);
+    let newest = today
+        .checked_add_days(Days::new(DAY_SLACK as u64))
+        .unwrap_or(NaiveDate::MAX);
     let mut upsert = conn.prepare_cached(
         "INSERT INTO watch_log(day, source_id, content_type, item_id, title, poster_url, seconds, last_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -551,35 +573,38 @@ fn import_inner(conn: &Connection, source_id: &str, rows: &[WatchLogBackup]) -> 
             OR excluded.last_at > watch_log.last_at
             OR (watch_log.poster_url IS NULL AND excluded.poster_url IS NOT NULL)",
     )?;
-    let mut written = 0usize;
     for row in rows {
         let Ok(day) = parse_day("day", &row.day) else {
+            out.skipped += 1;
             continue;
         };
-        if day < oldest || row.seconds <= 0 {
+        if day < oldest || day > newest || row.seconds <= 0 {
+            out.skipped += 1;
             continue;
         }
         let item_id = row.item_id.trim();
         if item_id.is_empty() || item_id.chars().count() > MAX_ID_CHARS {
+            out.skipped += 1;
             continue;
         }
         let title = row.title.trim();
         if title.is_empty() {
+            out.skipped += 1;
             continue;
         }
         let last_at = normalize_ts_str(&row.last_at).unwrap_or_else(now_ts);
-        written += upsert.execute(params![
+        out.written += upsert.execute(params![
             fmt_day(day),
             source_id,
             row.content_type.as_str(),
-            row.item_id,
+            item_id,
             cut(title, MAX_TITLE_CHARS),
             clean_poster(row.poster_url.as_deref()),
             row.seconds.min(MAX_DAY_SECONDS),
             last_at
         ])?;
     }
-    Ok(written)
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -762,7 +787,10 @@ mod tests {
         let tx = c.transaction().unwrap();
         assert_eq!(
             import_log(&tx, "s1", std::slice::from_ref(&row)).unwrap(),
-            1
+            LogImport {
+                written: 1,
+                skipped: 0
+            }
         );
         tx.rollback().unwrap();
         assert!(export_log(&c, "s1").unwrap().is_empty());

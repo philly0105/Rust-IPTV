@@ -1,11 +1,21 @@
 /** The shared lists queries: every part of the slice reads these keys, so a change anywhere shows everywhere. */
 
+import { useMemo } from 'react';
+
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 
-/** Every list, by position. */
+import { useDeletingLists } from '../store';
+
+/** Every list, by position, without the ones whose delete waits on its Undo toast. */
 export function useLists() {
-  return useRpcQuery('lists.list', undefined, { staleTime: 60_000 });
+  const query = useRpcQuery('lists.list', undefined, { staleTime: 60_000 });
+  const deleting = useDeletingLists((s) => s.ids);
+  const data = useMemo(
+    () => (query.data && deleting.size > 0 ? query.data.filter((l) => !deleting.has(l.id)) : query.data),
+    [query.data, deleting],
+  );
+  return data === query.data ? query : ({ ...query, data } as typeof query);
 }
 
 /** One list's channels in the user's order (`available: false` for dropped ones). */

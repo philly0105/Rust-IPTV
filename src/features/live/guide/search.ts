@@ -18,10 +18,14 @@ export const SEARCH_DAYS = 14;
 /** The search window's start moves in steps this long, so the query key holds still between keystrokes. */
 const FROM_STEP = 5 * MINUTE;
 
-/** The trimmed query to send, or null while it is too short. */
+/**
+ * The trimmed query to send, or null while it is too short. Lengths count code points, as the
+ * core does (Rust `chars()`), so an emoji is one character and a cut never splits a surrogate pair.
+ */
 export function searchQuery(raw: string): string | null {
-  const q = raw.trim();
-  return q.length >= SEARCH_MIN_CHARS ? q.slice(0, SEARCH_MAX_CHARS) : null;
+  // The cut can end on a space, which the core would trim away: trim again before counting.
+  const q = Array.from(raw.trim()).slice(0, SEARCH_MAX_CHARS).join('').trimEnd();
+  return Array.from(q).length >= SEARCH_MIN_CHARS ? q : null;
 }
 
 /**

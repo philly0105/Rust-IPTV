@@ -70,6 +70,45 @@ function useChannelPages(sourceId: string | undefined, categoryId: string | unde
 }
 
 /**
+ * The channels of the channel list being zapped (lists.items), in list order, in the same page
+ * shape as the source pages. A list holds at most 2000 channels, so it is read whole and
+ * searched here. `failed`: the list cannot be read (deleted meanwhile): use the source instead.
+ */
+function useListPages(listId: string | undefined, search: string, enabled: boolean): { cache: PageCache; failed: boolean } {
+  const [channels, setChannels] = useState<Channel[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setChannels(null);
+    setFailed(false);
+    if (!enabled || !listId) return;
+    let live = true;
+    rpc('lists.items', { id: listId })
+      .then((rows) => {
+        // Channels the provider dropped cannot play: the panel leaves them out, as zapping does.
+        if (live) setChannels(rows.flatMap((r) => (r.available && r.channel ? [r.channel] : [])));
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [listId, enabled]);
+
+  const cache = useMemo<PageCache>(() => {
+    if (!channels) return { total: null, pages: new Map() };
+    const q = search.toLocaleLowerCase();
+    const rows = q ? channels.filter((c) => c.name.toLocaleLowerCase().includes(q)) : channels;
+    const pages = new Map<number, Channel[]>();
+    for (let p = 0; p * PAGE < rows.length; p++) pages.set(p, rows.slice(p * PAGE, (p + 1) * PAGE));
+    return { total: rows.length, pages };
+  }, [channels, search]);
+
+  return { cache, failed };
+}
+
+/**
  * Slide-in channel list inside the fullscreen player. Opens with C, a dwell on the left
  * edge, or a tap there; closes on pointer leave (with grace), Escape, C, or a click on the video.
  */
@@ -82,7 +121,13 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
   const categoryId = zap && zap.sourceId === sourceId ? zap.categoryId : undefined;
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
-  const { cache, error, ensure } = useChannelPages(sourceId, categoryId, debounced, available && open);
+  // Played from a channel list: the panel shows that list, in its order, like zapping walks it.
+  const listId = zap?.listId;
+  const list = useListPages(listId, debounced, available && open);
+  const inList = !!listId && !list.failed;
+  const pages = useChannelPages(sourceId, categoryId, debounced, available && open && !inList);
+  const { cache, error } = inList ? { cache: list.cache, error: null } : pages;
+  const ensure = pages.ensure;
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const dwell = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -264,7 +309,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         type="button"
                         role="option"
                         aria-selected={isCurrent(c)}
-                        onClick={() => void playChannel(c).catch(() => undefined)}
+                        onClick={() => void playChannel(c, undefined, inList ? { keepList: true } : undefined).catch(() => undefined)}
                         className={cn(
                           'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-start hover:bg-white/10',
                           isCurrent(c) && 'bg-white/10 text-white dark:text-accent-hover',

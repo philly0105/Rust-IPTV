@@ -47,7 +47,6 @@
   "deleteLabel": "Sil: {{list}}",
   "deleted": "Silindi: {{list}}",
   "deleteFailed": "Silinemedi: {{list}}",
-  "undoFailed": "Geri yüklenemedi: {{list}}",
   "editChannels": "Kanalları düzenle",
   "editChannelsOf": "Kanalları düzenle: {{list}}",
   "editTitle": "Düzenle: {{list}}",
@@ -62,6 +61,7 @@
   "unavailableHint": "Sağlayıcı bu kanalları kaldırdı. Yeniden sunarsa geri gelirler.",
   "unavailableCount_one": "{{formatted}} kullanılamayan kanal",
   "unavailableCount_other": "{{formatted}} kullanılamayan kanal",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Bu kanalların hiçbiri şu anda sunulmuyor",
   "listEmptyTitle": "Bu liste boş",
   "listEmptyHint": "Canlı TV'de bir kanalın üzerindeyken L tuşuna basın veya kanala sağ tıklayın, ardından Listeye ekle'yi seçin.",
@@ -76,11 +76,10 @@
   "stageIdleHint": "Listeden bir kanal seçin.",
   "errorNameEmpty": "Bir ad girin.",
   "errorNameLong": "En fazla {{max}} karakter kullanın.",
+  "errorNameControl": "Ad sekme veya satır sonu içeremez.",
   "errorDuplicate": "Bu adda bir liste zaten var.",
   "errorTooMany": "En fazla {{max}} listeniz olabilir. Önce birini silin.",
   "errorListFull": "Bir listede en fazla {{max}} kanal olabilir.",
   "errorGone": "Bu liste silindi.",
-  "shortcutAddToList": "Seçili kanalı bir listeye ekle",
-  "shortcutMoveUp": "Seçili listeyi veya kanalı yukarı taşı",
-  "shortcutMoveDown": "Seçili listeyi veya kanalı aşağı taşı"
+  "shortcutAddToList": "Seçili kanalı bir listeye ekle"
 }

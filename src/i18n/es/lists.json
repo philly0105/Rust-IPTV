@@ -48,7 +48,6 @@
   "deleteLabel": "Eliminar {{list}}",
   "deleted": "Se eliminó {{list}}",
   "deleteFailed": "No se pudo eliminar {{list}}",
-  "undoFailed": "No se pudo restaurar {{list}}",
   "editChannels": "Editar canales",
   "editChannelsOf": "Editar canales de {{list}}",
   "editTitle": "Editar {{list}}",
@@ -64,6 +63,7 @@
   "unavailableCount_one": "{{formatted}} canal no disponible",
   "unavailableCount_many": "{{formatted}} canales no disponibles",
   "unavailableCount_other": "{{formatted}} canales no disponibles",
+  "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Ninguno de estos canales está disponible ahora",
   "listEmptyTitle": "Esta lista está vacía",
   "listEmptyHint": "En TV en vivo, pulsa L sobre un canal o haz clic derecho en él y elige Añadir a una lista.",
@@ -78,11 +78,10 @@
   "stageIdleHint": "Elige un canal de la lista.",
   "errorNameEmpty": "Escribe un nombre.",
   "errorNameLong": "Usa {{max}} caracteres como máximo.",
+  "errorNameControl": "El nombre no puede contener tabulaciones ni saltos de línea.",
   "errorDuplicate": "Ya existe una lista con este nombre.",
   "errorTooMany": "Puedes tener hasta {{max}} listas. Elimina una primero.",
   "errorListFull": "Una lista admite hasta {{max}} canales.",
   "errorGone": "Esta lista se eliminó.",
-  "shortcutAddToList": "Añadir el canal seleccionado a una lista",
-  "shortcutMoveUp": "Subir la lista o el canal seleccionado",
-  "shortcutMoveDown": "Bajar la lista o el canal seleccionado"
+  "shortcutAddToList": "Añadir el canal seleccionado a una lista"
 }

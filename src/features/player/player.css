@@ -45,10 +45,44 @@
 }
 
 /*
- * Every text track (engine tracks and loaded files) in the user's subtitle style (C6): PlayerDock
- * sets the variables on the host from settings.subtitle* (subtitles/style.ts cueCssVars). The
- * fallbacks are the defaults: medium white text on a translucent box.
+ * Subtitles (engine tracks and loaded files) in the user's style (C6). The player draws them in
+ * this overlay (subtitles/inline.ts), because Edge and WebView2 force the Windows caption theme
+ * on native cues with a browser !important rule. PlayerDock sets the variables on the host from
+ * settings.subtitle* (subtitles/style.ts cueCssVars). The fallbacks are the defaults: medium white
+ * text on a translucent box. Above the video, below the controls, never in the way of a click.
  */
+.player-subs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  container-type: inline-size;
+}
+.player-subs-line {
+  position: absolute;
+  inset-inline: 4%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  text-align: center;
+}
+.player-sub-cue {
+  display: inline;
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+  background: var(--sub-bg, rgb(0 0 0 / 0.72));
+  color: var(--sub-color, #fff);
+  text-shadow: var(--sub-shadow, none);
+  font-family: var(--font-sans);
+  font-size: calc(clamp(14px, 2.4cqw, 28px) * var(--sub-scale, 1));
+  line-height: 1.35;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* Before the overlay takes a track over (or if it cannot), native cues get what CSS can set. */
 [data-player-host] video::cue {
   background: var(--sub-bg, rgb(0 0 0 / 0.72));
   color: var(--sub-color, #fff);

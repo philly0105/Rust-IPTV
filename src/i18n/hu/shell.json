@@ -178,6 +178,8 @@
   "scNextItem": "A sor következő epizódjának lejátszása",
   "scChannelFavorite": "A kijelölt csatorna hozzáadása a kedvencekhez vagy eltávolítása onnan",
   "scItemMenu": "A kijelölt csatorna menüjének megnyitása",
+  "scListsDialogMoveUp": "A kijelölt lista vagy csatorna mozgatása feljebb (Listák kezelése, Csatornák szerkesztése)",
+  "scListsDialogMoveDown": "A kijelölt lista vagy csatorna mozgatása lejjebb (Listák kezelése, Csatornák szerkesztése)",
   "scListJump": "Ugrás az első vagy az utolsó elemre",
   "scListPage": "Lapozás egy oldallal fel vagy le",
   "scListRemove": "A kijelölt elem eltávolítása (kedvencek, legutóbb megtekintett, saját videók)",

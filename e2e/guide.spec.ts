@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import type { GuideSearchHit, RecordingCapabilities, RecordingRule, Source } from '../src/api/types';
+import type { ChannelEdit, GuideSearchHit, RecordingCapabilities, RecordingRule, Source } from '../src/api/types';
 import { ensureSource, resetApp, rpc } from './helpers/api';
 import { expect, test } from './helpers/fixtures';
 import { blurFocus } from './helpers/ui';
@@ -161,5 +161,71 @@ test.describe.serial('guide: window, jump, search, series', () => {
     await expect(hit.getByTestId('program-record-series')).toHaveAttribute('aria-pressed', 'true');
 
     for (const r of rules) await rpc(request, 'recordings.removeRule', { id: r.id, keepScheduled: false });
+  });
+
+  // Review round 1: at 390 px the time controls ran off screen (Now at x 387-437), the window
+  // label overflowed its h-8 box, and the search panel ran under the rail and past the edge.
+  test('on a phone the time controls, the label and the search panel stay on screen', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoGuide(page);
+    const inside = async (loc: ReturnType<Page['getByTestId']>, left: number) => {
+      const box = (await loc.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(left - 0.5);
+      expect(box.x + box.width).toBeLessThanOrEqual(390.5);
+    };
+    const pageBox = (await page.getByTestId('epg-grid-page').boundingBox())!;
+    const time = page.getByTestId('guide-time');
+    await inside(time.getByRole('button', { name: 'Now' }), pageBox.x);
+    await inside(time.getByRole('button', { name: '3 hours later' }), pageBox.x);
+    await inside(windowLabel(page), pageBox.x);
+    const overflow = await windowLabel(page).evaluate((el) => ({
+      y: el.scrollHeight - el.clientHeight,
+      x: el.scrollWidth - el.clientWidth,
+    }));
+    expect(overflow.y).toBeLessThanOrEqual(1);
+    expect(overflow.x).toBeLessThanOrEqual(1);
+
+    const field = page.getByRole('searchbox', { name: 'Search the guide' });
+    await field.fill('news');
+    const panel = page.getByTestId('guide-search-panel');
+    await expect(panel).toHaveAttribute('data-state', 'results');
+    await inside(panel, pageBox.x);
+  });
+
+  // Review round 1 (C2): the guide's channel rows had no menu, so rename and hide were missing there.
+  test('a channel row’s menu renames the channel, by right click and from the keyboard', async ({ page, request }) => {
+    await rpc(request, 'channels.reset', { sourceId: source.id });
+    await gotoGuide(page);
+    const cell = page.locator('[data-channel-row="0"]');
+    // The cell also holds the number and the logo's initials; the name is its truncating span.
+    const name = ((await cell.locator('span.truncate').textContent()) ?? '').trim();
+    expect(name).not.toBe('');
+
+    await cell.click({ button: 'right' });
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu).toHaveAttribute('aria-label', name);
+    for (const item of ['Play', 'Add to list…', 'Rename…', 'Hide channel']) await expect(menu.getByRole('menuitem', { name: item, exact: true })).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Rename…', exact: true }).click();
+    const dialog = page.getByTestId('channel-rename-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('channel-rename-input')).toHaveValue(name);
+    await dialog.getByTestId('channel-rename-input').fill('Guide Desk');
+    await page.getByTestId('channel-rename-save').click();
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(async () => (await rpc<ChannelEdit[]>(request, 'channels.edits', { sourceId: source.id })).find((e) => e.originalName === name)?.name)
+      .toBe('Guide Desk');
+    await expect(cell.locator('span.truncate')).toHaveText('Guide Desk');
+
+    // The keyboard's way in: the context-menu key in the grid opens the cursor row's menu.
+    await cell.focus();
+    await page.keyboard.press('Shift+F10');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Rename…', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+
+    await rpc(request, 'channels.reset', { sourceId: source.id });
   });
 });

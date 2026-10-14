@@ -13,6 +13,7 @@
   "resultsCount": "النتائج: {{n}}",
   "closeSearch": "سدّ البحث",
   "hitLabel": "{{title}}، {{channel}}، {{time}}",
+  "dayHeading": "{{rel}}، {{date}}",
   "airingNow": "دابا كيتعرض",
   "watchNow": "تفرج ف {{channel}}",
   "hitNotFound": "{{channel}} ماشي فهاد اللائحة",

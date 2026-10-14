@@ -1616,7 +1616,14 @@ async fn hide_mode_keeps_locked_items_out_of_single_item_reads() {
         let e = a.err("catalog.item", json!({ "ref": r })).await;
         assert_eq!(e.code, RpcErrorCode::NotFound, "{r}");
         assert!(e.message.contains("parental"), "{}", e.message);
+        // A locked item says so in its details; a dropped one does not.
+        assert_eq!(e.details, Some(json!({ "parentalLocked": true })), "{r}");
     }
+    let gone = a
+        .err("catalog.item", json!({"ref": rf("s1", "live", "no-such")}))
+        .await;
+    assert_eq!(gone.code, RpcErrorCode::NotFound);
+    assert_eq!(gone.details, None);
     let v = a
         .call("catalog.item", json!({"ref": rf("s1", "live", "a1")}))
         .await;

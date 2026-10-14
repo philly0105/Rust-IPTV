@@ -207,6 +207,7 @@
   "decade": "{{decade}}-е",
   "yearFrom": "С",
   "yearTo": "По",
+  "yearRange": "Диапазон лет",
   "yearEmptyTitle": "Нет названий за эти годы",
   "hideWatched": "Скрыть просмотренное",
   "watchedEmptyTitle": "Вы посмотрели здесь всё",

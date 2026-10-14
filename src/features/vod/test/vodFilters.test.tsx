@@ -1,16 +1,21 @@
+import { QueryClient } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { queryClient as appQueryClient } from '@/api/query';
 import type { ItemRef, Page, PageQuery, SeriesDetail, VodItem } from '@/api/types';
 
 import { PosterCard, posterCardLabel } from '../components/PosterCard';
+import { fadeMask, hiddenEdges, wheelShift } from '../hooks/useEdgeFades';
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { buildPageRequest, readGridParams, type GridQueryInput } from '../lib/paging';
+import { COMPLETE_RATIO, finishesTitle, invalidateWatched } from '../lib/watchedQueries';
 import {
   STALKER_DECADES,
   decadeChips,
+  decadeRange,
   decadesFromFacets,
   filterByYear,
   rangeDecade,
@@ -70,9 +75,11 @@ function handlers(kind: 'xtream' | 'stalker' = 'xtream', patch: Parameters<typeo
   h['catalog.categories'] = () => [];
   h['positions.continueWatching'] = () => [];
   h['watchlist.list'] = () => [];
-  h['catalog.yearFacets'] = () => {
+  // Like the core, hideWatched counts only the titles the grid keeps.
+  h['catalog.yearFacets'] = (a) => {
+    const { hideWatched } = a as { hideWatched?: boolean };
     const counts = new Map<number, number>();
-    for (const f of ALL) if (f.year) counts.set(f.year, (counts.get(f.year) ?? 0) + 1);
+    for (const f of ALL) if (f.year && !(hideWatched && watchedIds.has(f.ref.itemId))) counts.set(f.year, (counts.get(f.year) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[0] - a[0]).map(([year, count]) => ({ year, count }));
   };
   // Mirrors the core: year bounds and hideWatched filter in SQLite and `total` counts the filtered set.
@@ -182,7 +189,7 @@ describe('decade chips', () => {
     expect(callsOf('catalog.movies').at(-1)!.args).toMatchObject({ yearFrom: 1990, yearTo: 1999 });
     expect(within(screen.getByTestId('vod-grid-movie')).getByText('8')).toBeTruthy();
     expect(within(group).getByRole('button', { name: '1990s, 8 titles' }).getAttribute('aria-pressed')).toBe('true');
-    expect((within(group).getByRole('combobox', { name: 'From' }) as HTMLSelectElement).value).toBe('1990');
+    expect((within(screen.getByRole('group', { name: 'Year range' })).getByRole('combobox', { name: 'From' }) as HTMLSelectElement).value).toBe('1990');
 
     // The active chip toggles the filter off.
     fireEvent.click(within(group).getByRole('button', { name: '1990s, 8 titles' }));
@@ -191,7 +198,7 @@ describe('decade chips', () => {
 
   it('the From/To selects set an exact range and a reversed pick is swapped', async () => {
     renderAt('/s/src1/movies/c/all?yf=2000', gridRoute);
-    const group = await screen.findByRole('group', { name: 'Year' });
+    const group = await screen.findByRole('group', { name: 'Year range' });
     await waitFor(() => expect((within(group).getByRole('combobox', { name: 'From' }) as HTMLSelectElement).value).toBe('2000'));
     fireEvent.change(within(group).getByRole('combobox', { name: 'To' }), { target: { value: '1995' } });
     await waitFor(() => expect(currentLocation).toBe('/s/src1/movies/c/all?yf=1995&yt=2000'));
@@ -356,5 +363,144 @@ describe('Mark series watched', () => {
     await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
     expect(callsOf('userstate.setWatched')[0]!.args).toEqual({ ref: sref, watched: true });
     await screen.findByRole('button', { name: 'Mark series unwatched' });
+  });
+});
+
+describe('review fixes (Run 2 R1)', () => {
+  it('the 2100s chip stops at 2100, so it reads back as pressed and a second click clears it', async () => {
+    expect(decadeRange(2100)).toEqual({ from: 2100, to: 2100 });
+    expect(decadeRange(1990)).toEqual({ from: 1990, to: 1999 });
+    expect(rangeDecade({ from: 2100, to: 2100 })).toBe(2100);
+    expect(rangeDecade({ from: 2090, to: 2099 })).toBe(2090);
+    expect(rangeDecade({ from: 2100 })).toBeUndefined();
+    // The URL round trip a chip click makes.
+    expect(rangeDecade(readYearRange(writeYearRange(new URLSearchParams(), decadeRange(2100))))).toBe(2100);
+
+    rpcMock.handlers['catalog.yearFacets'] = () => [
+      { year: 2100, count: 1 },
+      { year: 1999, count: 2 },
+    ];
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    const group = await screen.findByRole('group', { name: 'Year' });
+    fireEvent.click(await within(group).findByRole('button', { name: '2100s, 1 title' }));
+    await waitFor(() => expect(currentLocation).toBe('/s/src1/movies/c/all?yf=2100&yt=2100'));
+    await waitFor(() => expect(within(group).getByRole('button', { name: '2100s, 1 title' }).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(within(group).getByRole('button', { name: '2100s, 1 title' }));
+    await waitFor(() => expect(currentLocation).toBe('/s/src1/movies/c/all'));
+  });
+
+  it('with Hide watched on, the facets are asked with hideWatched and the counts and meters match the grid', async () => {
+    // f5 and f6 are 1990 and 1991: the 1990s hold 8 titles, 6 of them unwatched.
+    watchedIds = new Set(['f5', 'f6']);
+    handlers('xtream', { vodHideWatched: true });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    const group = await screen.findByRole('group', { name: 'Year' });
+    await waitFor(() => expect(within(group).getByRole('button', { name: '1990s, 6 titles' })).toBeTruthy());
+    expect(callsOf('catalog.yearFacets').at(-1)!.args).toEqual({ sourceId: 'src1', contentType: 'movie', hideWatched: true });
+    expect(within(group).getByRole('button', { name: '2000s, 8 titles' })).toBeTruthy();
+    expect(within(group).getAllByTestId('decade-meter')).toHaveLength(5);
+  });
+
+  it('flipping Hide watched asks the facets again and the counts follow', async () => {
+    watchedIds = new Set(['f5', 'f6']);
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    const group = await screen.findByRole('group', { name: 'Year' });
+    await waitFor(() => expect(within(group).getByRole('button', { name: '1990s, 8 titles' })).toBeTruthy());
+    expect(callsOf('catalog.yearFacets').every((c) => !('hideWatched' in (c.args as object)))).toBe(true);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide watched' }));
+    await waitFor(() => expect(within(group).getByRole('button', { name: '1990s, 6 titles' })).toBeTruthy());
+    expect(callsOf('catalog.yearFacets').at(-1)!.args).toEqual({ sourceId: 'src1', contentType: 'movie', hideWatched: true });
+    expect(within(group).getAllByTestId('decade-meter')).toHaveLength(5);
+  });
+
+  it('only the chips scroll: From/To and Hide watched sit outside the chip row', async () => {
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    const chipRow = await screen.findByRole('group', { name: 'Year' });
+    await waitFor(() => expect(within(chipRow).getByRole('button', { name: '1990s, 8 titles' })).toBeTruthy());
+    expect(chipRow.className).toContain('overflow-x-auto');
+    expect(within(chipRow).queryByRole('combobox')).toBeNull();
+    const range = screen.getByRole('group', { name: 'Year range' });
+    expect(chipRow.contains(range)).toBe(false);
+    expect(within(range).getAllByRole('combobox').map((c) => c.getAttribute('aria-label'))).toEqual(['From', 'To']);
+    expect(chipRow.contains(screen.getByRole('switch', { name: 'Hide watched' }))).toBe(false);
+  });
+
+  describe('chip row edge fades', () => {
+    const box = (scrollLeft: number, rtl = false) => ({ scrollLeft, scrollWidth: 900, clientWidth: 300, rtl });
+    const fits = { scrollLeft: 0, scrollWidth: 300, clientWidth: 300, rtl: false };
+    const wheel = (deltaY: number, extra: Partial<{ deltaX: number; deltaMode: number; ctrlKey: boolean }> = {}) => ({
+      deltaX: 0,
+      deltaY,
+      deltaMode: 0,
+      ctrlKey: false,
+      ...extra,
+    });
+
+    it('fades the edges that hide chips, in LTR and RTL', () => {
+      expect(hiddenEdges(fits)).toEqual({ left: false, right: false });
+      expect(hiddenEdges(box(0))).toEqual({ left: false, right: true });
+      expect(hiddenEdges(box(300))).toEqual({ left: true, right: true });
+      expect(hiddenEdges(box(600))).toEqual({ left: true, right: false });
+      expect(hiddenEdges(box(599.5))).toEqual({ left: true, right: false });
+      // RTL rows start at the right: scrollLeft 0, going negative toward the end.
+      expect(hiddenEdges(box(0, true))).toEqual({ left: true, right: false });
+      expect(hiddenEdges(box(-600, true))).toEqual({ left: false, right: true });
+      expect(fadeMask({ left: false, right: false })).toBeUndefined();
+      expect(fadeMask({ left: false, right: true })).toBe('linear-gradient(to right, #000 0, #000 calc(100% - 2rem), transparent 100%)');
+      expect(fadeMask({ left: true, right: true })).toBe(
+        'linear-gradient(to right, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)',
+      );
+    });
+
+    it('a vertical wheel moves the row toward its end and leaves the page alone at the ends', () => {
+      expect(wheelShift(box(0), wheel(100))).toBe(100);
+      expect(wheelShift(box(0), wheel(-100))).toBe(0);
+      expect(wheelShift(box(600), wheel(100))).toBe(0);
+      expect(wheelShift(box(300), wheel(3, { deltaMode: 1 }))).toBe(48);
+      expect(wheelShift(box(300), wheel(100, { ctrlKey: true }))).toBe(0);
+      expect(wheelShift(box(300), wheel(10, { deltaX: 80 }))).toBe(0);
+      expect(wheelShift(fits, wheel(100))).toBe(0);
+      // RTL: down moves left, toward the end, which is a negative scrollLeft step.
+      expect(wheelShift(box(0, true), wheel(100))).toBe(-100);
+      expect(wheelShift(box(-600, true), wheel(100))).toBe(0);
+    });
+  });
+
+  describe('watched refresh after a finishing save', () => {
+    it('finishesTitle follows the core ratio', () => {
+      expect(COMPLETE_RATIO).toBe(0.95);
+      expect(finishesTitle(95, 100)).toBe(true);
+      expect(finishesTitle(94, 100)).toBe(false);
+      expect(finishesTitle(10, undefined)).toBe(false);
+      expect(finishesTitle(10, 0)).toBe(false);
+    });
+
+    it('invalidateWatched marks ticks, user state, My List and Hide watched pages and facets stale, nothing else', async () => {
+      const qc = new QueryClient();
+      const keys: unknown[][] = [
+        ['positions.watchedContains', { refs: [] }],
+        ['positions.continueWatching', null],
+        ['userstate.positions', null],
+        ['watchlist.list', {}],
+        ['catalog.movies', { sourceId: 's', hideWatched: true }],
+        ['catalog.series', { sourceId: 's', hideWatched: true }],
+        ['catalog.movies', { sourceId: 's' }],
+        ['catalog.yearFacets', { sourceId: 's' }],
+        ['catalog.yearFacets', { sourceId: 's', contentType: 'movie', hideWatched: true }],
+        ['favorites.list', null],
+      ];
+      for (const k of keys) qc.setQueryData(k, 1);
+      await invalidateWatched(qc);
+      expect(keys.map((k) => qc.getQueryState(k)!.isInvalidated)).toEqual([true, true, true, true, true, true, false, false, true, false]);
+    });
+
+    it('without a client it reaches the app client, the one the player store can use', async () => {
+      const key = ['positions.watchedContains', { refs: [film(0).ref] }];
+      appQueryClient.setQueryData(key, []);
+      await invalidateWatched();
+      expect(appQueryClient.getQueryState(key)!.isInvalidated).toBe(true);
+      appQueryClient.removeQueries({ queryKey: key });
+    });
   });
 });

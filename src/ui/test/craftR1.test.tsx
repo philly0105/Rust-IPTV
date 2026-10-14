@@ -1,11 +1,12 @@
 /** Run 1 craft fixes in the primitives: toasts over phone-width dialogs, density-aware list rows. */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
 
-import { Dialog, ToastViewport, VirtualList, scaleRowPx, toast, useToastStore } from '..';
+import { Dialog, ToastViewport, VirtualList, focusableIn, scaleRowPx, toast, useToastStore } from '..';
+import { TOAST_DIALOG_GAP, toastReserveFor } from '../Dialog';
 import { setUiScaleState } from '../scale';
 
 beforeAll(() => {
@@ -77,6 +78,99 @@ describe('toasts and centred dialogs', () => {
     expect(viewport().hasAttribute('data-over-dialog')).toBe(true);
     rerender(<Two a={false} b={false} />);
     expect(viewport().hasAttribute('data-over-dialog')).toBe(false);
+  });
+
+  describe('below sm the dialog starts under the toast stack', () => {
+    const layer = () => document.querySelector<HTMLElement>('[data-dialog-layer]')!;
+    const reserve = () => layer().style.getPropertyValue('--toast-reserve');
+    afterEach(() => vi.restoreAllMocks());
+
+    it('toastReserveFor: the stack bottom plus a gap, nothing without toasts', () => {
+      expect(toastReserveFor(0)).toBe(0);
+      expect(toastReserveFor(112)).toBe(112 + TOAST_DIALOG_GAP);
+      expect(toastReserveFor(99.2)).toBe(100 + TOAST_DIALOG_GAP);
+    });
+
+    it('pads the layer by the reserve while a toast shows over it, and drops it when it goes', () => {
+      // A toast at top-4 with a description, on an 844 px phone: taller than the 8vh (67 px) gap.
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const bottom = this.hasAttribute('data-toast-viewport') ? 112 : 0;
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, width: 0, height: bottom, bottom, toJSON: () => ({}) } as DOMRect;
+      });
+      render(<Harness open />);
+      expect(reserve()).toBe('0px');
+      // The rule only applies below sm; wider windows keep the plain 8vh gap.
+      expect(layer().className).toContain('pt-[8vh]');
+      expect(layer().className).toContain('max-sm:pt-[max(8vh,var(--toast-reserve,0px))]');
+      expect(screen.getByRole('dialog').className).toContain('max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)]');
+
+      act(() => void toast({ title: 'Locks saved', description: 'Two groups are locked now.', variant: 'success' }));
+      expect(reserve()).toBe(`${112 + TOAST_DIALOG_GAP}px`);
+
+      act(() => useToastStore.setState({ toasts: [] }));
+      expect(reserve()).toBe('0px');
+    });
+
+    it('a toast already up when a dialog opens is reserved for, again when it reopens', () => {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const bottom = this.hasAttribute('data-toast-viewport') ? 90 : 0;
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, width: 0, height: bottom, bottom, toJSON: () => ({}) } as DOMRect;
+      });
+      const { rerender } = render(<Harness open={false} />);
+      act(() => void toast({ title: 'Imported', variant: 'success' }));
+      rerender(<Harness open />);
+      expect(reserve()).toBe(`${90 + TOAST_DIALOG_GAP}px`);
+      rerender(<Harness open={false} />);
+      rerender(<Harness open />);
+      expect(reserve()).toBe(`${90 + TOAST_DIALOG_GAP}px`);
+    });
+
+    it('a drawer takes no reserve', () => {
+      render(<Harness open placement="end" />);
+      act(() => void toast({ title: 'Saved', variant: 'success' }));
+      expect(reserve()).toBe('');
+      expect(layer().className).not.toContain('--toast-reserve');
+    });
+  });
+});
+
+describe('focusableIn skips a roving group\'s inactive items', () => {
+  it('leaves out tabindex="-1" buttons and inputs, keeps the active item', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div role="radiogroup">
+        <button type="button" tabindex="-1">Mon</button>
+        <button type="button" tabindex="0">Tue</button>
+        <button type="button" tabindex="-1">Wed</button>
+      </div>
+      <input type="file" tabindex="-1" />
+      <a href="#x" tabindex="-1">skipped link</a>
+      <button type="button">Go</button>
+      <div tabindex="0">panel</div>`;
+    document.body.append(root);
+    expect(focusableIn(root).map((el) => el.textContent || el.tagName)).toEqual(['Tue', 'Go', 'panel']);
+    root.remove();
+  });
+
+  it("a dialog's first-focus fallback and Tab trap ignore them", () => {
+    render(
+      <Dialog open onClose={() => {}} title="Jump to" hideClose>
+        <div role="radiogroup" aria-label="Day">
+          <button type="button" tabIndex={-1}>
+            Yesterday
+          </button>
+          <button type="button" tabIndex={0}>
+            Today
+          </button>
+        </div>
+        <button type="button">Go</button>
+      </Dialog>,
+    );
+    expect(document.activeElement?.textContent).toBe('Today');
+    const go = screen.getByRole('button', { name: 'Go' });
+    go.focus();
+    act(() => void go.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+    expect(document.activeElement?.textContent).toBe('Today');
   });
 });
 

@@ -336,10 +336,32 @@ pub fn set_error(c: &Connection, id: &str, error: Option<&str>) -> CoreResult<()
     Ok(())
 }
 
-pub fn set_recording_times(c: &Connection, id: &str, start_at: i64, end_at: i64) -> CoreResult<()> {
-    c.execute(
-        "UPDATE recordings SET start_at = ?2, end_at = ?3 WHERE id = ?1",
+/// Moves a scheduled programme recording to new times (the guide moved its
+/// programme). Refused (false, nothing changed) when the row is no longer
+/// scheduled, or when another scheduled or running programme recording of
+/// the same channel already starts there: one airing is recorded once.
+pub fn move_scheduled(c: &Connection, id: &str, start_at: i64, end_at: i64) -> CoreResult<bool> {
+    let n = c.execute(
+        "UPDATE recordings SET start_at = ?2, end_at = ?3
+         WHERE id = ?1 AND status = 'scheduled'
+           AND NOT EXISTS (
+             SELECT 1 FROM recordings o
+             WHERE o.id <> recordings.id
+               AND o.source_id = recordings.source_id
+               AND o.content_type = recordings.content_type
+               AND o.item_id = recordings.item_id
+               AND o.kind = 'programme' AND o.start_at = ?2
+               AND o.status IN ('scheduled', 'recording'))",
         params![id, start_at, end_at],
     )?;
-    Ok(())
+    Ok(n > 0)
+}
+
+/// Deletes a recording that is still only scheduled (never started, no
+/// files). False when it is gone or has moved on meanwhile.
+pub fn delete_scheduled(c: &Connection, id: &str) -> CoreResult<bool> {
+    Ok(c.execute(
+        "DELETE FROM recordings WHERE id = ?1 AND status = 'scheduled'",
+        [id],
+    )? > 0)
 }

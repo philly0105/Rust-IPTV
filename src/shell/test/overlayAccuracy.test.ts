@@ -55,6 +55,21 @@ describe('shortcut overlay accuracy', () => {
     expect(has('n', 'Playback')).toBe(true);
   });
 
+  it('says list reordering keys work in the dialogs that bind them (wiring-r1 F3)', () => {
+    // SortableList (the Alt+arrow handler) is only used by these two dialogs, not by the list page.
+    const users = ['ManageListsDialog.tsx', 'EditItemsDialog.tsx'];
+    for (const f of users) expect(read(`src/features/lists/dialogs/${f}`), f).toContain('<SortableList');
+    expect(read('src/features/lists/pages/ListPage.tsx')).not.toContain('<SortableList');
+    const shell = JSON.parse(read('src/i18n/en/shell.json')) as Record<string, string>;
+    const lists = JSON.parse(read('src/i18n/en/lists.json')) as Record<string, string>;
+    const rows = DOCUMENTED_SHORTCUTS.filter((d) => d.area === 'Lists' && d.combo.startsWith('alt+'));
+    expect(rows.map((d) => d.combo)).toEqual(['alt+arrowup', 'alt+arrowdown']);
+    for (const d of rows) {
+      expect(shell[d.descKey], d.descKey).toContain(lists.manageLists);
+      expect(shell[d.descKey], d.descKey).toContain(lists.editChannels);
+    }
+  });
+
   it('every documented description key exists in English', () => {
     for (const d of DOCUMENTED_SHORTCUTS) {
       const [ns, key] = d.descKey.includes(':') ? d.descKey.split(':') : ['shell', d.descKey];

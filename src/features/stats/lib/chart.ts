@@ -39,6 +39,16 @@ export function showDayLabel(index: number, count: number): boolean {
   return (count - 1 - index) % 7 === 0;
 }
 
+/**
+ * Whether a label `widest` px wide fits one of `count` equal columns that
+ * share a row `rowWidth` px wide with `gap` px between them. A row that has
+ * not been laid out (width 0) counts as fitting.
+ */
+export function labelsFit(rowWidth: number, gap: number, count: number, widest: number): boolean {
+  if (rowWidth <= 0 || count <= 0) return true;
+  return widest <= (rowWidth - gap * (count - 1)) / count;
+}
+
 /** Sums a range into live and VOD totals. */
 export function rangeTotals(days: readonly WatchStatsDay[]): { live: number; vod: number } {
   return days.reduce((acc, d) => ({ live: acc.live + d.liveSeconds, vod: acc.vod + d.vodSeconds }), { live: 0, vod: 0 });

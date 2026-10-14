@@ -31,6 +31,7 @@ Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `download
 - `sourceRefreshIntervalHours` 0..=168, `accountExpiryWarnDays` 0..=60.
 - `recordingPaddingBeforeMinutes` 0..=60, `recordingPaddingAfterMinutes` 0..=120, `reminderLeadMinutes` 0..=60.
 - `uiScale` is rounded to 4 decimal places first (slider noise such as `1.2500000000000002`), then must be finite and in 0.9..=1.25 (`UI_SCALE_RANGE`).
+- `subtitlePosition` must be a whole number in 0..=40 (`SUBTITLE_POSITION_RANGE`); a fraction or a negative number fails deserialization.
 - Unknown enum values or wrong types fail deserialization.
 - Window state: width and height 1..=32768 px, and |x|, |y| <= 100000.
 
@@ -68,10 +69,15 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `uiScale` | `1` | Interface size, 0.9..1.25 (the root font size is 15 px times it). |
 | `zapBanner` | `true` | The player shows the channel's logo, number and now/next for 5 s after each live channel change. Settings > Playback. |
 | `dashboardRails.myList` | `true` | The dashboard's My List rail (Settings > General, dashboard rails). |
+| `subtitleSize` | `"medium"` | Subtitle text size in mpv and the built-in player: `small`, `medium`, `large` or `xlarge` (0.8, 1.0, 1.25 and 1.5 times the base size; mpv `sub-scale`, the built-in player's `::cue`). Settings > Playback. |
+| `subtitleColor` | `"white"` | Subtitle text colour: `white`, `yellow`, `cyan` or `green`. |
+| `subtitleBackground` | `"box"` | Behind subtitle text: `shadow` (a text shadow only), `box` (a translucent box) or `solid` (an opaque black box). |
+| `subtitlePosition` | `0` | Percent of the picture height subtitles are raised from the bottom, a whole number 0..40 (`SUBTITLE_POSITION_RANGE`), else `Invalid`. |
+| `vodHideWatched` | `false` | The movie and series grids' Hide watched toggle (Shift+W): `catalog.movies` / `catalog.series` are asked with `hideWatched`. See vod-browsing.md. |
 
 Parental controls are not part of `Settings`: their options and PIN live in the `parental_config` table and change only through the `parental.*` commands (see parental.md); Settings > Parental controls is their page.
 
-`englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields, and the five appearance and playback fields above (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`) are in `backup::APP_SETTING_KEYS`, so they round-trip through `backup.export` / `backup.import`. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
+`backup::APP_SETTING_KEYS` lists the fields that round-trip through `backup.export` / `backup.import`: `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields (`recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`), the five appearance and playback fields (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`), and Run 2's four subtitle fields and `vodHideWatched` (`subtitleSize`, `subtitleColor`, `subtitleBackground`, `subtitlePosition`, `vodHideWatched`): 24 keys. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
 
 Stored JSON from older builds reads with these defaults (struct-level `#[serde(default)]`).
 

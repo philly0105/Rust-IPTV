@@ -339,9 +339,12 @@ pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError>
         })
         .await?;
     if hidden {
+        // The code stays not_found for older callers; `details.parentalLocked`
+        // lets the UI tell a locked item from one the provider dropped.
         return Err(RpcError::not_found(format!(
             "catalog item {id} is locked by parental controls; unlock them to open it"
-        )));
+        ))
+        .with_details(serde_json::json!({ "parentalLocked": true })));
     }
     row.ok_or_else(|| {
         RpcError::not_found(format!("catalog item {id} not found; refresh the source"))

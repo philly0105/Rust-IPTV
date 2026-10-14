@@ -13,6 +13,7 @@
   "resultsCount": "Sonuçlar: {{n}}",
   "closeSearch": "Aramayı kapat",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "Şimdi yayında",
   "watchNow": "İzle: {{channel}}",
   "hitNotFound": "{{channel}} bu listede yok",

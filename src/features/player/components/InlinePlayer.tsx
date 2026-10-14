@@ -66,6 +66,8 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
   const error = usePlayerStore((s) => s.error);
   const settings = usePlayerSettings();
   const elRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  /** Subtitles drawn by the player over the video (subtitles/inline.ts). */
+  const subsRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [errorKind, setErrorKind] = useState<EngineError['kind'] | null>(null);
@@ -280,17 +282,21 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     });
     // Subtitle delay (Sync menu) and the stream info overlay.
     const unExtras = bindInlineExtras(el, () => engineRef.current);
-    // Subtitle files load into this element; cue placement follows the settings (C6). Video only.
+    // Subtitle files load into this element; the player draws every subtitle track itself, in
+    // the user's style and position (C6). Video only.
     let unTarget: () => void = () => undefined;
     let unCues: () => void = () => undefined;
     let unmounted = false;
+    const subs = subsRef.current;
     if (as === 'video') {
       unTarget = setInlineSubtitleTarget({ el, engine: () => engineRef.current, publish: () => publishTracks() });
-      void import('../subtitles/inline')
-        .then((m) => {
-          if (!unmounted) unCues = m.bindCuePosition(el);
-        })
-        .catch(() => undefined);
+      if (subs) {
+        void import('../subtitles/inline')
+          .then((m) => {
+            if (!unmounted) unCues = m.bindSubtitleOverlay(el, subs);
+          })
+          .catch(() => undefined);
+      }
     }
 
     return () => {
@@ -343,6 +349,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
         className={cn('relative h-full w-full object-contain', as === 'audio' && 'hidden')}
         poster={as === 'video' && source && !source.isLive ? safeImageUrl(source.posterUrl) : undefined}
       />
+      {as === 'video' && <div ref={subsRef} data-subtitle-overlay aria-hidden className="player-subs" />}
       {status === 'error' && (
         <ErrorOverlay
           message={error}

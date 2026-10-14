@@ -12,10 +12,15 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
-/** Tabbable descendants in DOM order, skipping hidden ones. */
+/**
+ * Tabbable descendants in DOM order, skipping hidden ones. A negative tabindex takes an element
+ * out of the Tab order even when it is natively focusable (the inactive items of a roving group),
+ * so a dialog's first-focus fallback and Tab trap never land on one.
+ */
 export function focusableIn(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => {
     if (el.hasAttribute('disabled') || el.getAttribute('aria-hidden') === 'true') return false;
+    if (Number(el.getAttribute('tabindex')) < 0) return false;
     if (el.closest('[inert]')) return false;
     // jsdom has no layout; treat everything as visible there.
     const rects = el.getClientRects();

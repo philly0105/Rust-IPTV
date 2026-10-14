@@ -4,7 +4,7 @@
  * reaches them.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { onAppEvent } from '@/api/events';
@@ -26,6 +26,7 @@ import type {
 import { DEFAULT_SETTINGS } from '@/api/types';
 
 import { buildPageRequest, type GridQueryInput } from '../lib/paging';
+import { invalidateWatched } from '../lib/watchedQueries';
 
 /** Grid pages stay cached for a minute after their cells scroll away. */
 const PAGE_CACHE_MS = 60_000;
@@ -325,17 +326,8 @@ export function useSetWatched() {
 }
 
 /**
- * Refreshes what a watched mark changes: positions and user state, and the
- * grid pages that "Hide watched" filters in the core (C4).
+ * Refreshes what a watched mark changes: positions, user state, My List, and
+ * the grid pages that "Hide watched" filters in the core (C4). Lives in
+ * `lib/watchedQueries` so the player store can use it after a finishing save.
  */
-export function invalidateWatched(qc: QueryClient): Promise<void> {
-  return qc.invalidateQueries({
-    predicate: (q) => {
-      const head = q.queryKey[0];
-      if (typeof head !== 'string') return false;
-      if (head.startsWith('positions.') || head.startsWith('userstate.')) return true;
-      const args = q.queryKey[1] as { hideWatched?: boolean } | null | undefined;
-      return (head === 'catalog.movies' || head === 'catalog.series') && args?.hideWatched === true;
-    },
-  });
-}
+export { invalidateWatched };

@@ -131,6 +131,41 @@ describe('HiddenChannelsDialog', () => {
     expect((screen.getByTestId('hidden-channels-unhide-all') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('treats a channel parental Hide mode locks as still in the playlist', async () => {
+    hide(bbc, cnn, tve);
+    core.lock(cnn.ref);
+    core.drop(tve.ref);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    const [tveRow, cnnRow] = rows();
+    await waitFor(() => expect(tveRow!.textContent).toContain('No longer in the playlist'));
+    await waitFor(() => expect(core.callsOf('catalog.item')).toHaveLength(3));
+    expect(cnnRow!.textContent).not.toContain('No longer in the playlist');
+
+    fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
+    // The locked channel is back (not removed); only the dropped one is counted apart.
+    await waitFor(() => expect(toastTitles()).toContain('2 channels are back'));
+    const back = useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!;
+    expect(back.description).toBe('1 channel the provider no longer lists was removed.');
+
+    act(() => back.action!.onClick());
+    await waitFor(() => expect(core.isHidden(bbc.ref) && core.isHidden(cnn.ref)).toBe(true));
+    expect(core.callsOf('channels.setHidden').slice(1)[0]).toEqual({ refs: [cnn.ref, bbc.ref], hidden: true });
+  });
+
+  it('unhides a locked channel from its row as back, with Undo', async () => {
+    hide(cnn);
+    core.lock(cnn.ref);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await waitFor(() => expect(core.callsOf('catalog.item')).toHaveLength(1));
+    fireEvent.click(within(rows()[0]!).getByTestId('hidden-channel-unhide'));
+    await waitFor(() => expect(lastToast()?.title).toBe('CNN International is back'));
+    expect(lastToast()?.action?.label).toBe('Undo');
+    act(() => lastToast()!.action!.onClick());
+    await waitFor(() => expect(core.isHidden(cnn.ref)).toBe(true));
+  });
+
   it('unhides a row at once, with Undo that hides it again', async () => {
     hide(bbc, cnn);
     open();
@@ -160,7 +195,106 @@ describe('HiddenChannelsDialog', () => {
     expect(rowNames()).toEqual(['BBC One']);
   });
 
-  it('unhides all, one by one where the provider dropped a channel, with Undo', async () => {
+  it('unhides all, counting a channel the provider dropped apart, and Undo hides the rest again', async () => {
+    hide(bbc, tve, cnn);
+    core.drop(tve.ref);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
+    await waitFor(() => expect(toastTitles()).toContain('2 channels are back'));
+    // One batch: the core unhides a dropped channel too.
+    expect(core.callsOf('channels.setHidden')).toEqual([{ refs: [cnn.ref, tve.ref, bbc.ref], hidden: false }]);
+    expect(core.edits.size).toBe(0);
+    const back = useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!;
+    expect(back.description).toBe('1 channel the provider no longer lists was removed.');
+    expect(back.action?.label).toBe('Undo');
+    expect(useToastStore.getState().toasts.filter((t) => t.variant === 'error')).toEqual([]);
+    expect(await screen.findByText('No hidden channels')).toBeTruthy();
+
+    act(() => back.action!.onClick());
+    await waitFor(() => expect(core.isHidden(bbc.ref) && core.isHidden(cnn.ref)).toBe(true));
+    // The channels still listed go back in one batch; the dropped one is offered
+    // alone and its refusal stays quiet (the toast already called it removed).
+    await waitFor(() => expect(core.callsOf('channels.setHidden').slice(1)).toHaveLength(2));
+    expect(core.callsOf('channels.setHidden').slice(1)).toEqual([
+      { refs: [cnn.ref, bbc.ref], hidden: true },
+      { refs: [tve.ref], hidden: true },
+    ]);
+    expect(core.isHidden(tve.ref)).toBe(false);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(useToastStore.getState().toasts.filter((t) => t.variant === 'error')).toEqual([]);
+  });
+
+  it('says how many could not be hidden again when the provider drops one before Undo', async () => {
+    hide(bbc, cnn);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
+    await waitFor(() => expect(toastTitles()).toContain('2 channels are back'));
+    const back = useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!;
+    expect(back.description).toBeUndefined();
+
+    core.drop(cnn.ref);
+    act(() => back.action!.onClick());
+    await waitFor(() => expect(lastToast()?.variant).toBe('error'));
+    expect(lastToast()?.title).toBe('1 channel could not be hidden again');
+    expect(lastToast()?.description).toBe('The provider no longer lists this channel.');
+    // The batch was refused for the dropped ref, so each ref went alone.
+    expect(core.isHidden(bbc.ref)).toBe(true);
+    expect(core.isHidden(cnn.ref)).toBe(false);
+  });
+
+  it('says Undo failed when nothing could be hidden again', async () => {
+    hide(bbc, cnn);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
+    await waitFor(() => expect(toastTitles()).toContain('2 channels are back'));
+    core.override('channels.setHidden', () => fail('internal', 'Database is locked.'));
+    act(() => useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!.action!.onClick());
+    await waitFor(() => expect(lastToast()?.variant).toBe('error'));
+    expect(lastToast()?.title).toBe('Could not undo');
+    expect(lastToast()?.description).toBe('Database is locked.');
+  });
+
+  it('says channels the provider dropped were removed, without Undo, when none of them came back', async () => {
+    hide(tve, cnn);
+    core.drop(tve.ref);
+    core.drop(cnn.ref);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
+    await waitFor(() => expect(lastToast()?.title).toBe('2 channels removed from Hidden channels'));
+    expect(lastToast()?.description).toBe('The provider no longer lists these channels.');
+    expect(lastToast()?.action).toBeUndefined();
+    expect(toastTitles().some((t) => t.includes('back'))).toBe(false);
+    expect(core.edits.size).toBe(0);
+  });
+
+  it('unhides a dropped channel from its row with its own toast and no Undo', async () => {
+    hide(bbc, cnn);
+    core.drop(cnn.ref);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    await waitFor(() => expect(rows()[0]!.textContent).toContain('No longer in the playlist'));
+    // The row has asked catalog.item already; the toast reuses that answer
+    // (asking again now would fail differently and count as listed).
+    core.override('catalog.item', () => fail('internal', 'Database is locked.'));
+    fireEvent.click(within(rows()[0]!).getByTestId('hidden-channel-unhide'));
+    await waitFor(() => expect(lastToast()?.title).toBe('CNN International removed from Hidden channels'));
+    expect(lastToast()?.description).toBe('The provider no longer lists this channel.');
+    expect(lastToast()?.action).toBeUndefined();
+    expect(core.isHidden(cnn.ref)).toBe(false);
+    expect(rowNames()).toEqual(['BBC One']);
+  });
+
+  it('retries one ref at a time when an older core refuses a batch for a dropped channel', async () => {
+    const strict = (raw: unknown) => {
+      const a = raw as { refs: import('@/api/types').ItemRef[]; hidden: boolean };
+      if (!a.hidden && a.refs.some((r) => r.itemId === tve.ref.itemId)) fail('not_found', 'Channel c2 is not in the catalog.');
+      return core.base('channels.setHidden')(raw);
+    };
+    core.override('channels.setHidden', strict);
     hide(bbc, tve, cnn);
     core.drop(tve.ref);
     open();
@@ -177,10 +311,15 @@ describe('HiddenChannelsDialog', () => {
     expect(core.isHidden(bbc.ref)).toBe(false);
     expect(core.isHidden(cnn.ref)).toBe(false);
     await waitFor(() => expect(rowNames()).toEqual(['TVE España']));
+  });
 
-    const done = useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!;
-    act(() => done.action!.onClick());
-    await waitFor(() => expect(core.isHidden(bbc.ref) && core.isHidden(cnn.ref)).toBe(true));
+  it('sizes the list to its rows, up to a cap', async () => {
+    hide(bbc, cnn);
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const list = screen.getByTestId('hidden-channels-list');
+    expect(list.className).toMatch(/(^|\s)max-h-\[/);
+    expect(list.className).not.toMatch(/(^|\s)h-\[/);
   });
 
   it('unhides only the filtered rows with Unhide shown', async () => {

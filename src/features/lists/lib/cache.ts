@@ -12,6 +12,7 @@ import { invalidate, queryClient, rpcKey } from '@/api/query';
 import { RpcError } from '@/api/transport';
 import type { Channel, CustomList, CustomListEntry, ItemRef, ItemSnapshot } from '@/api/types';
 import type { RefWithSnapshot } from '@/api/rpc';
+import { hasLineBreak, isBlankName, trimName } from '@/lib/names';
 
 /** The contract's limits (crates/iptv-core/src/lists). */
 export const MAX_LISTS = 50;
@@ -106,30 +107,53 @@ export function reinsert<T>(list: readonly T[], item: T, index: number, same: (a
   return out;
 }
 
-/** Trims and checks a list name the way the core does; returns an i18n key for the problem, or null. */
+/** Whether two list names are the same to the core (trimmed, without regard to case). */
+export function sameName(a: string, b: string): boolean {
+  return a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+}
+
+/**
+ * Trims and checks a list name the way the core does (`lists::clean_name`):
+ * something visible (a name of only zero-width or other invisible characters
+ * is empty), no control character or line break, at most {@link MAX_NAME}
+ * characters, in that order. Returns an i18n key for the problem, or null.
+ */
 export function nameProblem(raw: string, lists: readonly CustomList[] | undefined, exceptId?: string): string | null {
-  const name = raw.trim();
-  if (!name) return 'errorNameEmpty';
+  const name = trimName(raw);
+  if (isBlankName(name)) return 'errorNameEmpty';
+  if (hasLineBreak(name)) return 'errorNameControl';
   if ([...name].length > MAX_NAME) return 'errorNameLong';
-  const folded = name.toLocaleLowerCase();
-  if (lists?.some((l) => l.id !== exceptId && l.name.toLocaleLowerCase() === folded)) return 'errorDuplicate';
+  if (lists?.some((l) => l.id !== exceptId && sameName(l.name, name))) return 'errorDuplicate';
   return null;
 }
 
 /**
- * A message the user can act on. The core answers `conflict` for a taken name,
- * `not_found` for a list deleted elsewhere and `invalid` for the limits; each
- * gets its own wording, anything else shows the core's message.
+ * The core's `invalid` messages that have wording of their own
+ * (crates/iptv-core/src/lists/mod.rs), matched exactly so that one problem is
+ * never reported as another.
  */
-export function errorText(err: unknown, t: (key: string, opts?: Record<string, unknown>) => string, ctx: 'list' | 'items' = 'list'): string {
+const INVALID_MESSAGES: { pattern: RegExp; key: string; opts?: Record<string, unknown> }[] = [
+  { pattern: /^name is required/, key: 'errorNameEmpty' },
+  { pattern: /^name must not contain control characters/, key: 'errorNameControl' },
+  { pattern: /^name must be at most \d+ characters/, key: 'errorNameLong', opts: { max: MAX_NAME } },
+  { pattern: /^there can be at most \d+ lists/, key: 'errorTooMany', opts: { max: MAX_LISTS } },
+  { pattern: /^a list holds at most \d+ channels|^items must hold at most \d+ entries/, key: 'errorListFull', opts: { max: MAX_ITEMS } },
+];
+
+/**
+ * A message the user can act on. The core answers `conflict` for a taken name,
+ * `not_found` for a list deleted elsewhere and `invalid` for the limits and a
+ * bad name; each of those gets its own wording, anything else shows the
+ * core's message.
+ */
+export function errorText(err: unknown, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const e = RpcError.from(err);
   if (e.code === 'conflict') return t('errorDuplicate');
-  if (e.code === 'not_found') return t('errorGone');
+  // `not_found` also covers a source removed meanwhile; only a missing list has its own wording.
+  if (e.code === 'not_found' && /^list /.test(e.message)) return t('errorGone');
   if (e.code === 'invalid') {
-    const m = e.message.toLowerCase();
-    if (ctx === 'items' || /2000|2,000/.test(m)) return t('errorListFull', { max: MAX_ITEMS });
-    if (/name/.test(m)) return t('errorNameLong', { max: MAX_NAME });
-    if (/50|lists|limit|many/.test(m)) return t('errorTooMany', { max: MAX_LISTS });
+    const known = INVALID_MESSAGES.find((x) => x.pattern.test(e.message));
+    if (known) return t(known.key, known.opts);
   }
   return e.message;
 }

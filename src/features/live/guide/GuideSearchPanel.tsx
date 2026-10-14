@@ -6,8 +6,9 @@
  * hit also offers Watch (while it airs), Remind, Record and Record series.
  */
 
+import type { TFunction } from 'i18next';
 import { CalendarOff, Radio, SearchX, X } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -24,6 +25,36 @@ import { displayHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchW
 
 /** Debounce before a query is sent. */
 export const SEARCH_DEBOUNCE_MS = 250;
+
+/** The panel's widest, in rem (it follows the UI scale). */
+const PANEL_MAX_REM = 30;
+const PANEL_MAX_HEIGHT_REM = 34;
+/** Room the panel keeps from the bounds' edges and the window's bottom, px. */
+const PANEL_MARGIN = 8;
+/** The gap between the field and the panel (`mt-1.5`), px. */
+const PANEL_GAP = 6;
+/** Marks the element the panel must stay inside (the guide page, beside the rail). */
+export const SEARCH_BOUNDS_ATTR = 'data-guide-search-bounds';
+
+interface Span {
+  left: number;
+  right: number;
+}
+
+/**
+ * Where the results panel goes, horizontally: its inline end lined up with the field's, then slid
+ * back inside `bounds` (the guide page) so that a field near the page's other edge (a phone, or a
+ * toolbar that wrapped the field to the start of a row) never pushes it off screen or under the
+ * rail. `left` is relative to the field's left edge; null when there is no room to measure.
+ */
+export function panelPlacement(field: Span, bounds: Span, maxWidth: number, rtl: boolean, margin = PANEL_MARGIN): { left: number; width: number } | null {
+  const room = bounds.right - bounds.left - 2 * margin;
+  if (!(room > 0)) return null;
+  const width = Math.min(maxWidth, room);
+  const want = rtl ? field.left : field.right - width;
+  const left = Math.max(bounds.left + margin, Math.min(want, bounds.right - margin - width));
+  return { left: left - field.left, width };
+}
 
 interface SharedProps {
   /** The grid's source: hits map to its channels. */
@@ -65,6 +96,30 @@ export function GuideSearch({ inputRef, className, onSelect, onWatch, ...rest }:
     return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
 
+  // The panel is placed against the guide page, not just under the field: see panelPlacement.
+  const [place, setPlace] = useState<CSSProperties | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const field = wrap.getBoundingClientRect();
+      const bounds = (wrap.closest<HTMLElement>(`[${SEARCH_BOUNDS_ATTR}]`) ?? document.documentElement).getBoundingClientRect();
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 15;
+      const spot = panelPlacement(field, bounds, PANEL_MAX_REM * rem, getComputedStyle(wrap).direction === 'rtl');
+      // No layout (jsdom, a hidden page): the classes' end-anchored fallback stays.
+      if (!spot || field.width === 0) {
+        setPlace(null);
+        return;
+      }
+      const below = window.innerHeight - field.bottom - PANEL_GAP - PANEL_MARGIN;
+      setPlace({ left: spot.left, width: spot.width, maxHeight: Math.max(160, Math.min(PANEL_MAX_HEIGHT_REM * rem, below)) });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open]);
+
   const close = (refocus: boolean) => {
     setOpen(false);
     if (refocus) inputRef.current?.focus();
@@ -101,7 +156,7 @@ export function GuideSearch({ inputRef, className, onSelect, onWatch, ...rest }:
         placeholder={t('searchPlaceholder')}
         label={t('searchLabel')}
         aria-controls={open ? panelId : undefined}
-        className="w-44 sm:w-60"
+        className="w-full"
         data-testid="guide-search-input"
       />
       {open ? (
@@ -118,7 +173,10 @@ export function GuideSearch({ inputRef, className, onSelect, onWatch, ...rest }:
             setOpen(false);
             onWatch(hit);
           }}
-          className="absolute end-0 top-full z-30 mt-1.5"
+          // Physical `left` from the measurement wins over the logical end anchor, which would
+          // over-constrain the box in RTL; the anchor is only the fallback before a layout exists.
+          className={cn('absolute top-full z-30 mt-1.5', !place && 'end-0')}
+          style={place ?? undefined}
         />
       ) : null}
     </div>
@@ -132,18 +190,20 @@ export interface GuideSearchPanelProps extends SharedProps {
   /** `refocus`: hand focus back to the field. */
   onClose(refocus: boolean): void;
   className?: string;
+  /** Measured placement (left, width, max height), from GuideSearch. */
+  style?: CSSProperties;
 }
 
-/** "Today", "Tomorrow" in the UI language, else the date. */
-function dayHeading(day: number, now: number, locale: string): string {
+/** "Today", "Tomorrow" in the UI language, else the date. The join is the language's own (`dayHeading`). */
+function dayHeading(day: number, now: number, locale: string, t: TFunction<'guide'>): string {
   const diff = localDayDiff(day, now);
   const date = formatDay(day, locale);
   if (diff < 0 || diff > 1) return date;
   const rel = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(diff, 'day');
-  return `${rel.charAt(0).toLocaleUpperCase(locale)}${rel.slice(1)}, ${date}`;
+  return t('dayHeading', { rel: `${rel.charAt(0).toLocaleUpperCase(locale)}${rel.slice(1)}`, date });
 }
 
-export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stripCountryPrefix, onSelect, onWatch, onClose, className }: GuideSearchPanelProps) {
+export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stripCountryPrefix, onSelect, onWatch, onClose, className, style }: GuideSearchPanelProps) {
   const { t, i18n } = useTranslation('guide');
   const lang = i18n.language;
   const debounced = useDebounced(query, SEARCH_DEBOUNCE_MS);
@@ -231,7 +291,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
       <div className="flex flex-col gap-3 px-4 py-3" aria-hidden data-testid="guide-search-loading">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex items-center gap-3">
-            <Skeleton className="h-4 w-11" />
+            <Skeleton className="h-4 w-[4.5rem]" />
             <Skeleton className="size-7" />
             <div className="flex flex-1 flex-col gap-1.5">
               <Skeleton className="h-3.5 w-3/4" />
@@ -249,9 +309,9 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     body = (
       <div ref={listRef} className={cn('flex flex-col', pending && 'opacity-70 motion-safe:transition-opacity')}>
         {days.map((d) => (
-          <section key={d.day} aria-label={dayHeading(d.day, now, lang)}>
+          <section key={d.day} aria-label={dayHeading(d.day, now, lang, t)}>
             <h3 className="sticky top-0 z-10 border-b border-divider bg-surface-2 px-4 py-1.5 text-xs font-medium text-fg-muted" data-testid="guide-search-day">
-              {dayHeading(d.day, now, lang)}
+              {dayHeading(d.day, now, lang, t)}
             </h3>
             <ul className="flex flex-col divide-y divide-divider">
               {d.hits.map((h) => (
@@ -274,6 +334,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
       onKeyDown={onKeyDown}
       data-testid="guide-search-panel"
       data-state={state}
+      style={style}
       className={cn(
         'flex max-h-[min(34rem,calc(100dvh-9rem))] w-[min(30rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-border bg-surface text-fg shadow-2',
         'motion-safe:animate-fade-in',
@@ -325,8 +386,9 @@ function HitRow({
         aria-label={t('hitLabel', { title: program.title, channel: name, time })}
         className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-1 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       >
-        <span className="flex w-12 shrink-0 flex-col items-start">
-          <span className={cn('font-display text-[calc(14rem/15)] leading-tight font-semibold tabular-nums', airing ? 'text-live' : 'text-fg')}>{time}</span>
+        {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
+        <span className="flex min-w-[4.5rem] shrink-0 flex-col items-start">
+          <span className={cn('font-display text-[calc(14rem/15)] leading-tight font-semibold whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg')}>{time}</span>
           {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
         </span>
         <ChannelLogo src={hit.logoUrl} name={name} size={28} />

@@ -69,6 +69,8 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
             sourceName={sourceName.get(c.ref.sourceId)}
             isRadio={c.ref.contentType === 'radio'}
             ariaLabel={ts('playTitle', { title: name })}
+            // Right click, the context-menu key and Shift+F10: Home's channel menu (its Play plays from the list too).
+            channel={c}
             onPlay={() =>
               void playFromList(c, list.id, nn?.now?.title, name).catch((err: unknown) =>
                 toast({ title: tl('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),

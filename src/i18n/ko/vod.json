@@ -189,6 +189,7 @@
   "decade": "{{decade}}년대",
   "yearFrom": "시작 연도",
   "yearTo": "끝 연도",
+  "yearRange": "연도 범위",
   "yearEmptyTitle": "이 연도의 작품이 없습니다",
   "hideWatched": "시청 완료 숨기기",
   "watchedEmptyTitle": "여기 있는 작품을 모두 시청했습니다",

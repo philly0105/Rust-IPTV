@@ -359,48 +359,59 @@ pub fn favorites_contains(conn: &Connection, refs: &[ItemRef]) -> CoreResult<Vec
 }
 
 /// Rewrites `position` so `refs` appear in the given order. With `source_id`,
-/// refs from other sources are ignored. Favorites not listed keep their
-/// relative order after the listed ones.
+/// refs from other sources are ignored. Favorites `favorites.list` shows
+/// (under `hide`) but `refs` leaves out follow the listed ones in their
+/// previous order. Favorites it does not show (parental hide mode, a channel
+/// hidden by a channel edit) and `refs` leaves out keep their slots, as
+/// `lists.reorderItems` does, so they come back in place when shown again.
 pub fn favorites_reorder(
     conn: &mut Connection,
     source_id: Option<&str>,
     refs: &[ItemRef],
+    hide: Option<Hide>,
 ) -> CoreResult<()> {
+    use std::collections::HashSet;
     let tx = conn.transaction()?;
     {
-        // A ref listed twice keeps its first place.
-        let mut seen = std::collections::HashSet::new();
+        let stored: Vec<ItemRef> = favorites_list(&tx, source_id)?
+            .into_iter()
+            .map(|f| f.item_ref)
+            .collect();
+        let shown: HashSet<ItemRef> = favorites_list_filtered(&tx, source_id, hide)?
+            .into_iter()
+            .map(|f| f.item_ref)
+            .collect();
+        let present: HashSet<&ItemRef> = stored.iter().collect();
+        // A ref listed twice keeps its first place; refs that are not
+        // favorites (or of another source) are ignored.
+        let mut seen = HashSet::new();
         let listed: Vec<&ItemRef> = refs
             .iter()
-            .filter(|r| source_id.is_none_or(|s| r.source_id == s))
+            .filter(|r| present.contains(r))
             .filter(|r| seen.insert(*r))
             .collect();
+        // The order the caller sees: the listed refs, then the other shown
+        // favorites in their previous order.
+        let moves = |r: &ItemRef| seen.contains(r) || shown.contains(r);
+        let mut order = listed.iter().copied().chain(
+            stored
+                .iter()
+                .filter(|r| !seen.contains(*r) && shown.contains(*r)),
+        );
         let mut set = tx.prepare_cached(
             "UPDATE favorites SET position = ?4 WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
         )?;
-        for (i, r) in listed.iter().enumerate() {
+        for (i, slot) in stored.iter().enumerate() {
+            let r = if moves(slot) {
+                order.next().unwrap_or(slot)
+            } else {
+                slot
+            };
             set.execute(params![
                 r.source_id,
                 r.content_type.as_str(),
                 r.item_id,
                 i as i64
-            ])?;
-        }
-        // Push the unlisted ones of the same scope behind the listed block,
-        // keeping their previous relative order.
-        let listed_set: std::collections::HashSet<&ItemRef> = listed.iter().copied().collect();
-        let rest: Vec<ItemRef> = favorites_list(&tx, source_id)?
-            .into_iter()
-            .map(|f| f.item_ref)
-            .filter(|r| !listed_set.contains(r))
-            .collect();
-        let base = listed.len() as i64;
-        for (i, r) in rest.iter().enumerate() {
-            set.execute(params![
-                r.source_id,
-                r.content_type.as_str(),
-                r.item_id,
-                base + i as i64
             ])?;
         }
     }
@@ -684,9 +695,13 @@ pub fn is_complete(position_seconds: i64, duration_seconds: Option<i64>) -> bool
 ///   watched for the poster tick, "Hide watched" and My List). Continue
 ///   Watching skips watched rows and the player does not resume from them.
 /// - Below that, a live save (no `updated_at`) above [`MIN_RESUME_SECONDS`]
-///   clears a watched flag: the episode is being rewatched, so it is the
-///   series' place to resume. A save at or below it (the player's first tick)
-///   keeps the flag, because nothing would be resumed from there yet.
+///   clears an episode's watched flag: the episode is being rewatched, so it
+///   is the series' place to resume. A save at or below it (the player's
+///   first tick) keeps the flag, because nothing would be resumed from there
+///   yet. An item-level row (a movie, empty episode id) always keeps its
+///   flag: replaying part of a watched film must not drop the poster tick or
+///   bring it back into a "Hide watched" grid. Only `setWatched(false)`
+///   clears it; the replay position is stored but not resumed.
 /// - With `updated_at` (backup import, C14 undo) an existing row is only
 ///   overwritten, or deleted, when that time is newer than the stored one,
 ///   so an older backup never rolls back newer progress. Such writes keep a
@@ -759,7 +774,7 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
                duration_seconds = COALESCE(excluded.duration_seconds, playback_positions.duration_seconds),
                updated_at = excluded.updated_at,
                snapshot_json = COALESCE(excluded.snapshot_json, playback_positions.snapshot_json),
-               watched = CASE WHEN ?9 OR excluded.position_seconds <= ?11
+               watched = CASE WHEN ?9 OR ?12 OR excluded.position_seconds <= ?11
                  THEN MAX(playback_positions.watched, excluded.watched)
                  ELSE excluded.watched END
              WHERE {NEWER_ONLY}"
@@ -775,7 +790,8 @@ pub fn position_set(conn: &Connection, p: &PositionInput) -> CoreResult<bool> {
             p.snapshot_json,
             dated,
             p.watched as i64,
-            MIN_RESUME_SECONDS
+            MIN_RESUME_SECONDS,
+            ep.is_empty()
         ],
     )
     .map_err(|e| map_fk(e, &r.source_id))?;
@@ -987,7 +1003,7 @@ mod tests {
             .map(|f| f.item_ref.item_id)
             .collect();
         assert_eq!(ids, ["a", "b", "c"]);
-        favorites_reorder(&mut c, Some("s1"), &[r("s1", "c"), r("s1", "a")]).unwrap();
+        favorites_reorder(&mut c, Some("s1"), &[r("s1", "c"), r("s1", "a")], None).unwrap();
         let ids: Vec<_> = favorites_list(&c, Some("s1"))
             .unwrap()
             .into_iter()

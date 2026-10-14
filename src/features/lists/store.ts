@@ -48,3 +48,10 @@ export function openEditListItems(listId: string, opts: { fromManage?: boolean }
 export function closeListsDialog(): void {
   useListsDialogs.setState({ dialog: null });
 }
+
+/**
+ * Lists whose delete waits on its Undo toast (see `lib/pendingDeletes`).
+ * `useLists` leaves them out of every view. Here rather than there so the
+ * entry chunk (Home's rails read `useLists`) only pays for this store.
+ */
+export const useDeletingLists = create<{ ids: ReadonlySet<string> }>(() => ({ ids: new Set<string>() }));

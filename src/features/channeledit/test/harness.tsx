@@ -81,8 +81,8 @@ export const eventsMock = {
 // Fake core
 // ---------------------------------------------------------------------------
 
-export const fail = (code: RpcErrorCode, message: string): never => {
-  throw { code, message };
+export const fail = (code: RpcErrorCode, message: string, details?: unknown): never => {
+  throw details === undefined ? { code, message } : { code, message, details };
 };
 
 export const refKey = (r: ItemRef) => `${r.sourceId}|${r.contentType}|${r.itemId}`;
@@ -104,6 +104,8 @@ type Handler = (args: unknown) => unknown;
 function createFakeCore() {
   /** Provider catalog by ref key: what `catalog.item` answers (hidden or not). */
   const catalog = new Map<string, Channel>();
+  /** Ref keys parental Hide mode locks: still in the catalog, but `catalog.item` refuses them. */
+  const locked = new Set<string>();
   const edits = new Map<string, ChannelEdit>();
   const calls: { cmd: string; args: unknown }[] = [];
   const overrides: Record<string, Handler> = {};
@@ -132,16 +134,30 @@ function createFakeCore() {
         .sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))
         .map((e) => ({ ...e }));
     },
+    // As crates/iptv-core/src/channeledit/mod.rs `set_hidden`: hiding needs every
+    // ref in the catalog (one missing ref and nothing is written); unhiding never
+    // answers not_found, so a channel the provider dropped can leave the hidden
+    // list, and a ref with no hidden row is a no-op.
     'channels.setHidden': (raw) => {
       const a = raw as { refs: ItemRef[]; hidden: boolean };
       if (a.refs.length < 1 || a.refs.length > 500) fail('invalid', 'refs must hold 1 to 500 items.');
-      const missing = a.refs.find((r) => !catalog.has(refKey(r)));
-      if (missing) fail('not_found', `Channel ${missing.itemId} is not in the catalog.`);
+      if (a.hidden) {
+        const missing = a.refs.find((r) => !catalog.has(refKey(r)));
+        if (missing) fail('not_found', `channel ${missing.itemId} not found in source ${missing.sourceId}; refresh the source`);
+        for (const r of a.refs) {
+          const row = edit(r);
+          row.hidden = true;
+          row.updatedAt = stamp();
+        }
+        return null;
+      }
       for (const r of a.refs) {
-        const row = edit(r);
-        row.hidden = a.hidden;
+        const k = refKey(r);
+        const row = edits.get(k);
+        if (!row?.hidden) continue;
+        row.hidden = false;
         row.updatedAt = stamp();
-        tidy(refKey(r));
+        tidy(k);
       }
       return null;
     },
@@ -158,10 +174,15 @@ function createFakeCore() {
       tidy(k);
       return edits.has(k) ? { ...edits.get(k)! } : null;
     },
+    // As crates/iptv-core/src/catalog/rpc.rs `item`: a parental-locked item is
+    // not_found with details.parentalLocked, a dropped one plain not_found.
     'catalog.item': (raw) => {
       const a = raw as { ref: ItemRef };
       const ch = catalog.get(refKey(a.ref));
       if (!ch) fail('not_found', 'Not in the catalog.');
+      if (locked.has(refKey(a.ref))) {
+        fail('not_found', `catalog item ${a.ref.itemId} is locked by parental controls; unlock them to open it`, { parentalLocked: true });
+      }
       return { ...ch };
     },
   };
@@ -172,6 +193,7 @@ function createFakeCore() {
     edits,
     reset() {
       catalog.clear();
+      locked.clear();
       edits.clear();
       calls.length = 0;
       clock = 0;
@@ -184,6 +206,10 @@ function createFakeCore() {
     /** The provider drops a channel (its edit row stays). */
     drop(r: ItemRef) {
       catalog.delete(refKey(r));
+    },
+    /** Parental Hide mode locks a channel: it stays in the catalog. */
+    lock(r: ItemRef) {
+      locked.add(refKey(r));
     },
     /** Seeds an edit row as the core would have stored it. */
     seed(r: ItemRef, patch: { hidden?: boolean; name?: string; originalName?: string }) {

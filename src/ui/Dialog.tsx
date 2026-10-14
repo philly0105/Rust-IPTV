@@ -1,5 +1,14 @@
 import { X } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
@@ -61,6 +70,32 @@ export function useCenteredDialogOpen(): boolean {
 }
 
 /**
+ * Below sm the toast viewport moves to the top edge while a centred dialog is open (see
+ * Toast.tsx), and a toast is taller than the dialog layer's 8vh top gap (about 67 px on an
+ * 844 px phone). The viewport reports where its stack ends; the layer then starts the dialog
+ * below it, so a toast never covers the dialog's title or close button.
+ */
+const useToastReserve = create<{ px: number }>(() => ({ px: 0 }));
+
+/** Space between the bottom of the toast stack and a dialog moved below it. */
+export const TOAST_DIALOG_GAP = 8;
+
+/**
+ * The placement rule: the least top offset of a centred dialog, below sm, for a toast stack
+ * whose bottom edge is at `stackBottom` px from the top of the window (0: no toasts). The layer
+ * pads by the larger of this and its usual 8vh.
+ */
+export function toastReserveFor(stackBottom: number): number {
+  return stackBottom > 0 ? Math.ceil(stackBottom) + TOAST_DIALOG_GAP : 0;
+}
+
+/** The toast viewport reports its stack's bottom edge (0 when no toast shows over a dialog). */
+export function reportToastStackBottom(stackBottom: number): void {
+  const px = toastReserveFor(stackBottom);
+  if (useToastReserve.getState().px !== px) useToastReserve.setState({ px });
+}
+
+/**
  * Modal dialog: portal to body, focus trap, Escape and backdrop close,
  * focus restore, scroll lock, aria-modal with labelled title.
  */
@@ -83,6 +118,7 @@ export function Dialog({
 }: DialogProps) {
   const drawer = placement === 'end';
   const { t } = useTranslation('common');
+  const toastReserve = useToastReserve((s) => s.px);
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const descId = useId();
@@ -184,8 +220,12 @@ export function Dialog({
       data-dialog-layer=""
       className={cn(
         'fixed inset-0 z-50 flex',
-        drawer ? 'items-stretch justify-end' : 'items-start justify-center overflow-y-auto p-6 pt-[8vh]',
+        drawer
+          ? 'items-stretch justify-end'
+          : // Below sm, start under the toast stack when it is taller than the 8vh gap (toastReserveFor).
+            'items-start justify-center overflow-y-auto p-6 pt-[8vh] max-sm:pt-[max(8vh,var(--toast-reserve,0px))] motion-safe:transition-[padding-top] motion-safe:duration-150',
       )}
+      style={drawer ? undefined : ({ '--toast-reserve': `${toastReserve}px` } as CSSProperties)}
       onKeyDown={onKeyDown}
     >
       <div
@@ -207,7 +247,7 @@ export function Dialog({
           'relative flex flex-col border-border bg-surface text-fg shadow-2 focus-visible:shadow-2 focus-visible:outline-none',
           drawer
             ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-fade-in'
-            : 'w-full max-h-[calc(100vh-12vh-24px)] rounded-lg border motion-safe:animate-pop-in',
+            : 'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-lg border motion-safe:animate-pop-in',
           !drawer && sizes[size],
           className,
         )}

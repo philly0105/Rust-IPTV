@@ -126,6 +126,29 @@ describe('ScheduledPage', () => {
     await waitFor(() => expect(within(screen.getByTestId('scheduled-upcoming')).queryByText('News')).toBeNull());
   });
 
+  it('puts series rules above Upcoming when there are any, and last when there are none (wiring-r1 F4)', async () => {
+    const before = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.list'] = () => [rec({ id: 'next' }), rec({ id: 'old', status: 'completed', end: at(-100) })];
+    rpc.handlers['recordings.rules'] = () => [
+      { id: 'rule1', ref, channelName: 'Alpha', title: 'Film', enabled: true, createdAt: at(-1000), upcoming: 1, nextStart: at(60) },
+    ];
+    const view = renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const upcomingList = await screen.findByTestId('scheduled-upcoming');
+    const panel = screen.getByTestId('recording-rules');
+    expect(within(panel).getByText('Film')).toBeTruthy();
+    expect(before(panel, upcomingList)).toBe(true);
+    expect(before(panel, screen.getByTestId('scheduled-finished'))).toBe(true);
+    expect(screen.getAllByTestId('recording-rules')).toHaveLength(1);
+    view.unmount();
+
+    rpc.handlers['recordings.rules'] = () => [];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const upcomingAgain = await screen.findByTestId('scheduled-upcoming');
+    expect(before(upcomingAgain, screen.getByTestId('recording-rules'))).toBe(true);
+    expect(before(screen.getByTestId('scheduled-finished'), screen.getByTestId('recording-rules'))).toBe(true);
+  });
+
   it('shows a finished recording note in the UI language', async () => {
     rpc.handlers['reminders.list'] = () => [];
     rpc.handlers['recordings.list'] = () => [

@@ -165,6 +165,31 @@ describe('stats page', () => {
     expect(slider.getAttribute('aria-valuenow')).toBe('2');
   });
 
+  it.each([
+    { widest: 30, names: 'short', options: { weekday: 'short' } as const },
+    { widest: 44, names: 'narrow', options: { weekday: 'narrow' } as const },
+  ])('prints $names weekday names when the widest short one is $widest px in 36 px columns', async ({ widest, options }) => {
+    // jsdom has no layout (and no stylesheet, so no gap): a 252 px label row gives seven 36 px columns.
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
+      return this.getAttribute('data-testid') === 'stats-day-labels' ? 252 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset['testid'] === 'stats-day-probe' ? widest : 0;
+    });
+    await loaded();
+    const format = new Intl.DateTimeFormat('en', options);
+    const expected = h.lastDays(7).map((d) => format.format(new Date(`${d}T12:00:00`)));
+    const labels = Array.from(screen.getByTestId('stats-day-labels').children).filter((el) => el.getAttribute('data-testid') !== 'stats-day-probe');
+    expect(labels.map((el) => el.textContent)).toEqual(expected);
+  });
+
+  it('keeps day numbers on the 30-day axis', async () => {
+    await loaded(FULL(30), '/stats?range=30');
+    expect(screen.queryByTestId('stats-day-probe')).toBeNull();
+    const labels = Array.from(screen.getByTestId('stats-day-labels').children).map((el) => el.textContent);
+    expect(labels.filter(Boolean)).toEqual(h.lastDays(30).filter((_, i) => (29 - i) % 7 === 0).map((d) => String(Number(d.slice(8)))));
+  });
+
   it('mirrors the arrow keys in RTL', async () => {
     await loaded();
     const slider = screen.getByRole('slider');

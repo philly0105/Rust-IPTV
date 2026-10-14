@@ -34,7 +34,9 @@ const { ListsDialogHost } = await import('../host');
 // Load the lazy dialogs up front so a busy run doesn't outlast findBy's timeout.
 await Promise.all([import('../dialogs/CreateListDialog'), import('../dialogs/EditItemsDialog')]);
 const { CustomListRails } = await import('../rails');
+const { ChannelMenuHost } = await import('@/shell/dashboard/ChannelCardMenu');
 const { usePlayerStore } = await import('../deps');
+const { useShellStore } = await import('@/shell/store');
 
 const BBC = h.channel('1', 'BBC One');
 const CNN = h.channel('2', 'CNN', { sourceId: 'src2' });
@@ -61,7 +63,7 @@ beforeEach(() => {
   h.resetShared();
   played.length = 0;
   localStorage.clear();
-  usePlayerStore.setState({ zapContext: undefined });
+  usePlayerStore.setState({ zapContext: undefined, source: undefined });
 });
 afterEach(cleanup);
 
@@ -88,6 +90,58 @@ describe('list page', () => {
     fireEvent.click(rows()[1]!);
     await waitFor(() => expect(played.map((p) => [p.channel.name, p.kind, p.name])).toEqual([['CNN', 'm3u', 'CNN']]));
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
+  });
+
+  describe('switching lists while a channel plays', () => {
+    /** Holds `lists.items` of `id` until `release()`, so the page sits on the previous list's rows. */
+    function holdItems(id: string) {
+      const real = rpc.handlers['lists.items']!;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      rpc.handlers['lists.items'] = async (args) => {
+        if ((args as { id: string }).id === id) await gate;
+        return real(args);
+      };
+      return () => act(() => release());
+    }
+    const playing = (ref: Channel['ref']) =>
+      usePlayerStore.setState({
+        source: { url: 'http://x/1.ts', kind: 'direct', title: 'BBC One', ref, isLive: true, isRadio: false },
+        zapContext: { sourceId: ref.sourceId, listId: 'L2' },
+      });
+
+    it('keeps zapping in the old list when the new one does not hold the channel', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Zap one', [CNN]), h.coreList('L2', 'Zap two', [BBC, ARTE])]);
+      stubLiveExtras();
+      h.renderAt('/lists/L2', routes);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      playing(BBC.ref);
+      const release = holdItems('L1');
+      const sidebar = await screen.findByTestId('lists-sidebar');
+      fireEvent.click(within(sidebar).getByRole('link', { name: /Zap one/ }));
+      await waitFor(() => expect(h.location.current).toBe('/lists/L1'));
+      // The previous list's rows are still up (they hold BBC One): no switch.
+      await waitFor(() => expect(rpc.callsOf('lists.items')).toContainEqual({ id: 'L1' }));
+      expect(rows().map((r) => r.textContent)).toEqual([expect.stringContaining('BBC One'), expect.stringContaining('Arte')]);
+      expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src1', listId: 'L2' });
+      release();
+      await waitFor(() => expect(rows().map((r) => r.textContent)).toEqual([expect.stringContaining('CNN')]));
+      expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src1', listId: 'L2' });
+    });
+
+    it('moves zapping to the new list once its own rows show the channel', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Zap one', [CNN, BBC]), h.coreList('L2', 'Zap two', [BBC, ARTE])]);
+      stubLiveExtras();
+      h.renderAt('/lists/L2', routes);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      playing(BBC.ref);
+      const release = holdItems('L1');
+      fireEvent.click(within(await screen.findByTestId('lists-sidebar')).getByRole('link', { name: /Zap one/ }));
+      await waitFor(() => expect(rpc.callsOf('lists.items')).toContainEqual({ id: 'L1' }));
+      expect(usePlayerStore.getState().zapContext?.listId).toBe('L2');
+      release();
+      await waitFor(() => expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src1', listId: 'L1' }));
+    });
   });
 
   it('dropped channels wait in a tray with Remove each and Remove all', async () => {
@@ -118,6 +172,31 @@ describe('list page', () => {
     stubLiveExtras();
     h.renderAt('/lists/L1', routes);
     expect(await screen.findByText('None of these channels are offered now')).toBeTruthy();
+    // No channel for the guide ribbon: below md its empty state gives the room to the list.
+    expect(screen.getByTestId('list-ribbon').className).toContain('max-md:hidden');
+  });
+
+  it('the header count adds up to the sidebar one, naming the dropped channels', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC], { dropped: [GONE, GONE2] }), h.coreList('L2', 'Kids', [], { dropped: [GONE] })]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    const sidebar = await screen.findByTestId('lists-sidebar');
+    await waitFor(() => expect(within(sidebar).getByRole('link', { name: /Sports/ }).textContent).toContain('3'));
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('1 channel, 2 unavailable channels'));
+    fireEvent.click(within(sidebar).getByRole('link', { name: /Kids/ }));
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('0 channels, 1 unavailable channel'));
+  });
+
+  it('a list without dropped channels counts them plainly; a channel to show brings the ribbon back on a phone', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('2 channels'));
+    act(() =>
+      usePlayerStore.setState({ source: { url: 'http://x/1.ts', kind: 'direct', title: 'BBC One', ref: BBC.ref, isLive: true, isRadio: false } }),
+    );
+    await waitFor(() => expect(screen.getByTestId('list-ribbon').className).not.toContain('max-md:hidden'));
   });
 
   it('an unknown list id is not found, with a way back', async () => {
@@ -176,6 +255,29 @@ describe('Home rails', () => {
     expect(within(sports).getByText('2 channels')).toBeTruthy();
     expect(within(sports).getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/lists/L1');
     fireEvent.click(await within(sports).findByRole('button', { name: /CNN/ }));
+    await waitFor(() => expect(played.map((p) => p.channel.name)).toEqual(['CNN']));
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
+  });
+
+  it("a card's right click opens Home's channel menu, whose Play still zaps within the list", async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN], { onDashboard: true })]);
+    rpc.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    rpc.handlers['channels.edits'] = () => [];
+    h.renderAt('/dashboard', [
+      {
+        path: '/dashboard',
+        element: (
+          <ChannelMenuHost>
+            <CustomListRails />
+          </ChannelMenuHost>
+        ),
+      },
+    ]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    fireEvent.contextMenu(await within(sports).findByRole('button', { name: /CNN/ }), { clientX: 40, clientY: 40 });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /Add to list/ })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^Play/ }));
     await waitFor(() => expect(played.map((p) => p.channel.name)).toEqual(['CNN']));
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
   });

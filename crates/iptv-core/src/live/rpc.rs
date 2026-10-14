@@ -26,10 +26,12 @@ pub async fn alternates(state: Arc<AppState>, a: RefArgs) -> Result<Alternates, 
                 }
                 alt.alternates = kept;
             }
-            // guide: the M3U catch-up override applies here as on every channel read.
-            // One pass, so each source's override is read once.
+            // guide: the M3U catch-up override applies here as on every channel read,
+            // and so do custom channel names (C2; matching used the provider names).
+            // One pass, so each source's override and names are read once.
             let mut chans: Vec<_> = alt.alternates.iter().map(|x| x.channel.clone()).collect();
             crate::catchup::m3u::apply_overrides(c, &mut chans)?;
+            crate::channeledit::apply_names(c, &mut chans)?;
             for (x, ch) in alt.alternates.iter_mut().zip(chans) {
                 x.channel = ch;
             }

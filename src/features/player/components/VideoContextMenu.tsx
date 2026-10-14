@@ -67,8 +67,13 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   }, [at.x, at.y, view]);
 
   useEffect(() => {
-    // Sync rows may all be disabled: the first enabled item, so focus stays in the menu.
-    ref.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus({ preventScroll: true });
+    // Sync rows may all be disabled and the style view has no items: the first enabled item, else
+    // Back, so focus stays in the menu.
+    const menu = ref.current;
+    (
+      menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back])') ??
+      menu?.querySelector<HTMLElement>('[data-menu-back]')
+    )?.focus({ preventScroll: true });
   }, [view]);
 
   useEffect(() => {
@@ -114,9 +119,14 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   };
 
   const playing = status === 'playing' || status === 'loading';
+  // The style view holds form fields (radio groups, a slider), which a menu may not contain: it is
+  // a small dialog in the same frame instead.
+  const styleView = view === 'style';
   const back = (
     <button
       type="button"
+      role={styleView ? undefined : 'menuitem'}
+      data-menu-back
       onClick={() => setView(view === 'style' ? 'text' : 'root')}
       className="mb-1 flex w-full items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
     >
@@ -137,8 +147,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   return (
     <div
       ref={ref}
-      role="menu"
-      aria-label={t('settingsMenu')}
+      role={styleView ? 'dialog' : 'menu'}
+      aria-label={styleView ? t('subtitleStyle.menuTitle') : t('settingsMenu')}
       data-mpv-overlay=""
       data-testid="video-context-menu"
       style={{ left: pos.x, top: pos.y }}

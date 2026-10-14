@@ -8,9 +8,15 @@ import { useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, EmptyState, ErrorState, Select, Skeleton, useToast, type SelectOption } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useToast, type MenuAction, type SelectOption } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
+// Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
+import { useChannelEditMenuItems } from '@/features/channeledit';
+import { useAddToListMenuItem } from '@/features/lists';
+import { channelInput } from '@/features/multiview/addChannel';
+import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
+import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
@@ -43,6 +49,7 @@ import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 import { GuideUnavailableNotice } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 // recording:
 import { ProgramActions, ScheduleMark } from '@/features/recording';
 // guide (Run 2 C5): jump to a date and time, guide search.
@@ -124,6 +131,21 @@ function useElementWidth(): [(el: HTMLElement | null) => void, number] {
     observer.current.observe(el);
   }, []);
   return [ref, width];
+}
+
+/** Below this page width the time controls take a row of their own and the window label stacks its day over its times. */
+export const GUIDE_BAR_STACK_PX = 640;
+/** Below this page width the day buttons give way; the window label's Jump dialog (and `t`) has every day. */
+export const GUIDE_BAR_DAYS_PX = 440;
+
+/**
+ * The toolbar's layout for a page `width` px wide (0 before the first measurement): `full` keeps
+ * everything on the toolbar's rows as space allows; `stacked` gives the time controls a full row
+ * of their own; `phone` also drops the day buttons, so Now and the times fit beside the chevrons.
+ */
+export function guideBarLayout(width: number): 'full' | 'stacked' | 'phone' {
+  if (!(width > 0) || width >= GUIDE_BAR_STACK_PX) return 'full';
+  return width >= GUIDE_BAR_DAYS_PX ? 'stacked' : 'phone';
 }
 
 /** Half an hour before the current local :00/:30 slot (local, so +5:45 zones get :00/:30 columns too). */
@@ -404,8 +426,26 @@ export function EpgGridPage() {
     }
   };
 
+  // ---- channel row menu (C2: rename and hide from the guide, plus the Live page's other entries) ----
+  const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel } | null>(null);
+  const closeRowMenu = useCallback(() => setRowMenu(null), []);
+  /** The keyboard's way in: the menu of the cursor row's channel, anchored at its channel cell. */
+  const openRowMenuAt = (row: number) => {
+    const ch = paged.getChannel(row);
+    const cell = scroller.current?.querySelector<HTMLElement>(`[data-channel-row="${row}"]`);
+    if (!ch || !cell) return;
+    const r = cell.getBoundingClientRect();
+    // Near the cell's inline start, which is its right edge in RTL.
+    setRowMenu({ pos: { x: rtl ? r.right - 48 : r.left + 48, y: r.bottom - 8 }, channel: ch });
+  };
+
   const onGridKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (count === 0 || selection) return;
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      openRowMenuAt(cursorRef.current.row);
+      return;
+    }
     let { row, time } = cursorRef.current;
     const cur = cursorProgram(row, time);
     // Arrow keys follow the screen, so in RTL ArrowLeft moves later in time.
@@ -624,8 +664,13 @@ export function EpgGridPage() {
     ...(categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
   ];
 
+  const bar = guideBarLayout(pageWidth);
+  const stacked = bar !== 'full';
+  const range = `${formatClock(start, i18n.language)}–${formatClock(end, i18n.language)}`;
+
   return (
-    <div ref={measurePage} className="flex h-full min-h-0 w-full min-w-0 flex-col bg-bg" data-testid="epg-grid-page">
+    // data-guide-search-bounds (SEARCH_BOUNDS_ATTR): the search panel stays inside the page, clear of the rail.
+    <div ref={measurePage} className="flex h-full min-h-0 w-full min-w-0 flex-col bg-bg" data-testid="epg-grid-page" data-guide-bar={bar} data-guide-search-bounds="">
       {heading}
       <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
         <Select
@@ -653,29 +698,41 @@ export function EpgGridPage() {
             stripCountryPrefix={prefs.stripCountryPrefix}
             onSelect={selectHit}
             onWatch={watchHit}
+            // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
+            className={stacked ? 'min-w-48 flex-1' : 'w-60'}
           />
         ) : null}
-        <div className="ms-auto flex items-center gap-1" role="group" aria-label={t('guideTime')}>
-          <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(-1)} aria-label={t('previousDay')} title={t('previousDay')} />
+        {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
+        <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
+          {bar !== 'phone' ? (
+            <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(-1)} aria-label={t('previousDay')} title={t('previousDay')} />
+          ) : null}
           <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => shift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
-          {/* The window's span; pressing it opens Jump to date and time (`t`). */}
+          {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
+              both layouts (day, space, times); stacked, the day sits small over the times. */}
           <button
             type="button"
             aria-haspopup="dialog"
             title={tg('jumpTitle')}
             onClick={() => setJumpOpen(true)}
             data-testid="guide-window"
-            className="inline-flex h-8 min-w-36 items-center justify-center gap-1.5 rounded-md px-2 text-sm tabular-nums text-fg outline-none hover:bg-surface-2 active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent motion-safe:transition-colors"
+            className={cn(
+              'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent motion-safe:transition-colors',
+              stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+            )}
           >
-            <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />
-            <span aria-live="polite">
-              {formatDay(start, i18n.language)} {formatClock(start, i18n.language)}–{formatClock(end, i18n.language)}
+            {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
+            <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
+              <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, i18n.language)}</span>{' '}
+              <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
             </span>
             <span className="sr-only">, {tg('jumpTitle')}</span>
           </button>
           <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => shift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
-          <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(1)} aria-label={t('nextDay')} title={t('nextDay')} />
-          <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} onClick={toNow}>
+          {bar !== 'phone' ? (
+            <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(1)} aria-label={t('nextDay')} title={t('nextDay')} />
+          ) : null}
+          <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} className="shrink-0" onClick={toNow}>
             {t('jumpToNow')}
           </Button>
         </div>
@@ -764,6 +821,12 @@ export function EpgGridPage() {
                   aria-rowindex={v.index + 2}
                   className="absolute start-0 flex border-b border-divider"
                   style={{ top: HEADER_H + v.start, height: GRID_ROW, width: channelCol + trackWidth }}
+                  // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
+                  onContextMenu={(e) => {
+                    if (!ch) return;
+                    e.preventDefault();
+                    setRowMenu({ pos: { x: e.clientX, y: e.clientY }, channel: ch });
+                  }}
                 >
                   <div
                     role="rowheader"
@@ -861,6 +924,8 @@ export function EpgGridPage() {
         </div>
       )}
 
+      {rowMenu ? <GuideRowMenu menu={rowMenu} kind={ownKind(rowMenu.channel)} onPlay={playLive} onClose={closeRowMenu} /> : null}
+
       {selection ? (
         <ProgramPopover
           selection={selection}
@@ -880,6 +945,46 @@ export function EpgGridPage() {
       ) : null}
     </div>
   );
+}
+
+/**
+ * A channel row's menu (right click on the row, or the context-menu key / Shift+F10 in the grid):
+ * play, the archive, multi-view, lists, rename / hide (C2) and the parental lock, as on the Live
+ * page. Mounted only while open, so the guide asks for list, edit and lock state on demand.
+ */
+function GuideRowMenu({
+  menu,
+  kind,
+  onPlay,
+  onClose,
+}: {
+  menu: { pos: { x: number; y: number }; channel: Channel };
+  kind?: SourceKind;
+  onPlay(channel: Channel): void;
+  onClose(): void;
+}) {
+  const { t } = useTranslation('live');
+  const navigate = useNavigate();
+  const { stripCountryPrefix } = useDisplayPrefs();
+  const ch = menu.channel;
+  const name = displayChannelName(ch.name, stripCountryPrefix);
+  // C4: radio has no picture, so a station gets no multi-view entry.
+  const live = ch.ref.contentType === 'live';
+  const multiviewItem = useMultiviewMenuItem(live ? channelInput(ch) : null);
+  const addToListItem = useAddToListMenuItem(ch);
+  const editItems = useChannelEditMenuItems(ch);
+  const lockItems = useLockMenuItems({ sourceId: ch.ref.sourceId, contentType: ch.ref.contentType, kind: 'item', targetId: ch.ref.itemId, name });
+  // F2 and Shift+Delete belong to the Live list; the guide does not bind them, so no key hints here.
+  const plain = ({ id, label, icon, disabled, onSelect }: MenuAction): MenuItem => ({ id, label, icon, disabled, onSelect });
+  const items: MenuItem[] = [
+    { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
+    ...(canBrowseArchive(ch, kind) ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref)) }] : []),
+    ...(live ? [plain(multiviewItem)] : []),
+    ...(addToListItem ? [plain(addToListItem)] : []),
+    ...editItems.map(plain),
+    ...lockItems.map(plain),
+  ];
+  return <ContextMenu pos={menu.pos} items={items} label={name} onClose={onClose} />;
 }
 
 function ProgramPopover({

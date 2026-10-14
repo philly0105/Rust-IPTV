@@ -8,17 +8,22 @@
  * to the first and last day, and the value text reads the picked day aloud.
  * The same numbers are in a table, always in the accessibility tree and
  * shown on screen with the table toggle.
+ *
+ * The 7-day axis prints short weekday names, which are whole words in some
+ * locales (Arabic "الأربعاء"). A hidden probe holds them in the label font;
+ * when the widest is wider than a column (a phone, a long locale) the axis
+ * switches to narrow names ("ر", "T") and back when the row widens.
  */
 
 import { Table2 } from 'lucide-react';
-import { useId, useMemo, useState, type KeyboardEvent } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { WatchStatsDay } from '@/api/types';
 
 import { Button, cn } from '../deps';
-import { barPercent, chartScale, showDayLabel } from '../lib/chart';
-import { dayOfMonthLabel, formatAxisHours, formatAxisMinutes, formatWatchTime, longDayLabel, weekdayLabel } from '../lib/format';
+import { barPercent, chartScale, labelsFit, showDayLabel } from '../lib/chart';
+import { dayOfMonthLabel, formatAxisHours, formatAxisMinutes, formatWatchTime, longDayLabel, narrowWeekdayLabel, weekdayLabel } from '../lib/format';
 
 /** Movies and series: accent hatching inside an accent outline. */
 export const VOD_FILL = 'border border-accent bg-[repeating-linear-gradient(135deg,var(--color-accent)_0_1.5px,transparent_1.5px_5px)]';
@@ -42,6 +47,28 @@ export function DayChart({ days, today }: DayChartProps) {
   const index = found >= 0 ? found : days.length - 1;
   const current = days[index];
   const short = days.length <= 7;
+
+  const labelsRef = useRef<HTMLDivElement>(null);
+  const probeRef = useRef<HTMLSpanElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const weekdays = useMemo(() => (short ? days.map((d) => weekdayLabel(d.day, lang)) : []), [short, days, lang]);
+
+  useLayoutEffect(() => {
+    const row = labelsRef.current;
+    const probe = probeRef.current;
+    if (!row || !probe) {
+      setNarrow(false);
+      return;
+    }
+    const check = () => setNarrow(!labelsFit(row.clientWidth, parseFloat(getComputedStyle(row).columnGap) || 0, weekdays.length, probe.offsetWidth));
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    // The probe too: its width changes when the web font arrives.
+    const ro = new ResizeObserver(check);
+    ro.observe(row);
+    ro.observe(probe);
+    return () => ro.disconnect();
+  }, [weekdays]);
 
   const time = (s: number) => formatWatchTime(s, lang);
   const readout = (d: WatchStatsDay) =>
@@ -147,7 +174,19 @@ export function DayChart({ days, today }: DayChartProps) {
       </div>
 
       {/* Day labels under the bars, in the same columns. */}
-      <div aria-hidden className="ms-12 mt-1.5 flex gap-0.5 sm:gap-1">
+      <div ref={labelsRef} aria-hidden className="relative ms-12 mt-1.5 flex gap-0.5 sm:gap-1" data-testid="stats-day-labels">
+        {short && (
+          // Measures the short names at the selected (semibold) weight; no height, so it never adds scroll.
+          <span
+            ref={probeRef}
+            className="pointer-events-none invisible absolute start-0 top-0 flex h-0 w-max flex-col overflow-hidden whitespace-nowrap text-[11px] font-semibold tabular-nums"
+            data-testid="stats-day-probe"
+          >
+            {weekdays.map((w, i) => (
+              <span key={i}>{w}</span>
+            ))}
+          </span>
+        )}
         {days.map((d, i) => (
           <span
             key={d.day}
@@ -156,7 +195,7 @@ export function DayChart({ days, today }: DayChartProps) {
               i === index || d.day === today ? 'font-semibold text-fg' : 'text-fg-subtle',
             )}
           >
-            {showDayLabel(i, days.length) ? (short ? weekdayLabel(d.day, lang) : dayOfMonthLabel(d.day, lang)) : ''}
+            {showDayLabel(i, days.length) ? (short ? (narrow ? narrowWeekdayLabel(d.day, lang) : weekdays[i]) : dayOfMonthLabel(d.day, lang)) : ''}
           </span>
         ))}
       </div>

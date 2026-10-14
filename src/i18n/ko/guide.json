@@ -13,6 +13,7 @@
   "resultsCount": "결과: {{n}}개",
   "closeSearch": "검색 닫기",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
+  "dayHeading": "{{rel}}, {{date}}",
   "airingNow": "방송 중",
   "watchNow": "{{channel}} 시청",
   "hitNotFound": "{{channel}} 채널이 이 목록에 없습니다",

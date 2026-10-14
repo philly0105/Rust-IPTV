@@ -189,6 +189,7 @@
   "decade": "Évtized: {{decade}}",
   "yearFrom": "Ettől",
   "yearTo": "Eddig",
+  "yearRange": "Évtartomány",
   "yearEmptyTitle": "Nincs cím ezekből az évekből",
   "hideWatched": "Megtekintettek elrejtése",
   "watchedEmptyTitle": "Itt már mindent megnézett",

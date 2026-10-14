@@ -21,7 +21,59 @@ export interface InlineSubtitleTarget {
 
 const marked = new WeakSet<TextTrack>();
 const files = new WeakMap<HTMLMediaElement, TextTrack[]>();
+/**
+ * Tracks the player draws itself (subtitles/inline.ts). The browser's own cue rendering cannot be
+ * styled where the Windows caption theme applies (Edge, WebView2), so a track turned on is set to
+ * `hidden` and its cues are drawn in the player's overlay instead. A `hidden` track in this set is
+ * on; any other `hidden` track is an engine's off-screen track. While the video is in the
+ * browser's picture-in-picture window, the tracks in this set are `showing` (the browser draws
+ * them there).
+ */
+const drawn = new WeakSet<TextTrack>();
 let target: InlineSubtitleTarget | null = null;
+
+/** True while `track` is on screen: showing natively, or hidden and drawn by the player. */
+export function isShownTrack(track: TextTrack): boolean {
+  return track.mode === 'showing' || (track.mode === 'hidden' && drawn.has(track));
+}
+
+/** True for a track the overlay draws now. */
+export function isDrawnTrack(track: TextTrack): boolean {
+  return track.mode === 'hidden' && drawn.has(track);
+}
+
+/**
+ * The overlay takes a showing track over: the browser stops drawing it, the player draws it.
+ * `native` (picture-in-picture) leaves it showing, for the browser to draw in its window.
+ */
+export function drawTrack(track: TextTrack, native = false): void {
+  drawn.add(track);
+  if (!native && track.mode !== 'hidden') track.mode = 'hidden';
+}
+
+/** Picture-in-picture: the tracks the overlay draws turn `showing`, so the browser draws them. */
+export function showDrawnTracks(el: HTMLMediaElement): void {
+  for (let i = 0; i < el.textTracks.length; i++) {
+    const t = el.textTracks[i];
+    if (t && isDrawnTrack(t)) t.mode = 'showing';
+  }
+}
+
+/** A track that went dark is no longer drawn. */
+export function releaseTrack(track: TextTrack): void {
+  drawn.delete(track);
+}
+
+/** Turns every drawn track of `el` off (an engine whose Off only hides its track). */
+export function hideDrawnTracks(el: HTMLMediaElement): void {
+  for (let i = 0; i < el.textTracks.length; i++) {
+    const t = el.textTracks[i];
+    if (t && drawn.has(t)) {
+      drawn.delete(t);
+      t.mode = 'disabled';
+    }
+  }
+}
 
 /** True for a track made from a loaded file (engines leave these out of their own lists). */
 export function isExternalTrack(track: TextTrack): boolean {
@@ -50,7 +102,11 @@ export function addExternalTrack(el: HTMLMediaElement, label: string): { id: str
 export function selectText(el: HTMLMediaElement, engine: Engine | null, id: string | null): void {
   const isFile = !!id?.startsWith(EXT_PREFIX);
   const pick = isFile ? files.get(el)?.[Number(id!.slice(EXT_PREFIX.length))] : undefined;
-  for (const t of files.get(el) ?? []) if (t !== pick) t.mode = 'disabled';
+  for (const t of files.get(el) ?? []) {
+    if (t === pick) continue;
+    drawn.delete(t);
+    t.mode = 'disabled';
+  }
   engine?.setText(isFile ? null : id);
   if (pick) pick.mode = 'showing';
 }
@@ -59,12 +115,12 @@ export function selectText(el: HTMLMediaElement, engine: Engine | null, id: stri
 export function withExternal(el: HTMLMediaElement, tracks: EngineTracks): EngineTracks {
   const list = files.get(el);
   if (!list?.length) return tracks;
-  const fileOn = list.some((t) => t.mode === 'showing');
+  const fileOn = list.some(isShownTrack);
   return {
     ...tracks,
     text: [
       ...(fileOn ? tracks.text.map((x) => (x.selected ? { ...x, selected: false } : x)) : tracks.text),
-      ...list.map((t, i) => ({ id: `${EXT_PREFIX}${i}`, label: t.label, selected: t.mode === 'showing' })),
+      ...list.map((t, i) => ({ id: `${EXT_PREFIX}${i}`, label: t.label, selected: isShownTrack(t) })),
     ],
   };
 }
@@ -73,6 +129,7 @@ export function withExternal(el: HTMLMediaElement, tracks: EngineTracks): Engine
 export function clearExternal(el: HTMLMediaElement): void {
   for (const t of files.get(el) ?? []) {
     // A disabled track hides its cue list, so it is hidden while the cues go.
+    drawn.delete(t);
     t.mode = 'hidden';
     for (const cue of Array.from(t.cues ?? [])) t.removeCue(cue);
     t.mode = 'disabled';

@@ -19,7 +19,8 @@ Limits:
 
 - 50 lists (`MAX_LISTS`). Creating a 51st is `invalid`.
 - 2000 channels per list (`MAX_ITEMS`). An add that would pass it is `invalid` and writes nothing.
-- Names are trimmed and must be 1 to 60 characters (`MAX_NAME_CHARS`) with no control characters. They are unique without regard to case. The check uses Unicode lower case, which is stricter than the index's ASCII `NOCASE`, so "ÉTÉ" and "été" conflict.
+- Names are trimmed and must be 1 to 60 characters (`MAX_NAME_CHARS`), with no control characters and no U+2028 or U+2029 line or paragraph separator. At least one character must be visible: a name made only of white space, format characters (category Cf, such as U+200B ZERO WIDTH SPACE or U+200F RIGHT-TO-LEFT MARK), other default-ignorable code points, or the Hangul and Braille blanks is blank (`channeledit::is_invisible`). Inside a name these characters are kept, since U+200D and the variation selectors build emoji. Names are not normalised to NFC; that would need a Unicode normalisation crate.
+- Names are unique without regard to case. The check maps both names to Unicode upper case and then to lower case, which is stricter than the index's ASCII `NOCASE`, so "ÉTÉ" and "été" conflict, and so do "Straße" and "STRASSE".
 - `sourceId` and `itemId` up to 2048 characters. Titles are cut to 500 characters, and a blank title is `invalid`. A logo URL over 4096 characters is dropped, because a cut URL never loads.
 
 Order: `position` ascending, with `rowid` breaking ties. New lists and new items go at the end, and every write keeps positions distinct.
@@ -68,11 +69,23 @@ Nothing is written on any error.
 
 `lists.neighbors` walks outward from `ref` in list order. It skips channels that are unavailable or that `lists.items` leaves out, and wraps around at both ends like `catalog.neighbors`. `ref` itself may be hidden or unavailable. A list with one other playable channel returns it as both `prev` and `next`. A list with none returns `{}`.
 
+## Zapping a list in the player
+
+A channel played from a list page sets the player's `zapContext` to `{ sourceId, listId }`. While `listId` is set:
+
+- Channel up and down call `lists.neighbors` with the list id, so a zap walks the list's order across sources. Digit entry still uses the channel's own source numbering.
+- The fullscreen channel panel shows the list's available channels from `lists.items`, in list order, instead of the source's channels.
+
+The player recovers when the list stops matching what plays:
+
+- If `lists.neighbors` returns `not_found` (the channel left the list, or the list was deleted), the player drops `listId` and zaps through `catalog.neighbors` on the channel's own source. The fullscreen panel falls back to the source the same way when `lists.items` fails.
+- A play from outside the list (`playChannel` or `tuneChannel` without `keepList`: a Live row, a guide row, search, a dashboard card) clears `listId`. Zaps and picks in the channel panel pass `keepList`, so they stay in the list.
+
 ## Events
 
 `lists.changed` (payload `{}`) is emitted after a write that changed something. `create`, `reorder` and `reorderItems` always emit. `update`, `remove`, `addItems` and `removeItems` emit only when they changed a row.
 
-Removing a source deletes its list items through the cascade. `lists::forget_source(state, id)` emits `lists.changed` when any list exists, so counts and rails refresh. It must be called from `sources::remove` after the source row is gone, and it never fails the removal. The call is wired by integration; until then the UI only refreshes on `sources.changed`.
+Removing a source deletes its list items through the cascade. `sources::remove` then calls `lists::forget_source(state, id)`, after the source row is gone. It emits `lists.changed` when any list exists, so counts and rails refresh, and it never fails the removal.
 
 ## Backup
 

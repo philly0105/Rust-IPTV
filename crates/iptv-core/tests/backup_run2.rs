@@ -424,7 +424,7 @@ async fn the_watch_log_survives_replace_under_the_new_source_id() {
         .db_call(move |c| iptv_core::stats::import_log(c, "src-a", &rows))
         .await
         .unwrap();
-    assert_eq!(n, 1);
+    assert_eq!(n.written, 1);
 
     let (out, dst, _rep, alpha) = replace_into_fresh(&src).await;
     let exported = playlist(&out, "Alpha")["userState"]["tsrustWatchLog"]
@@ -651,4 +651,228 @@ async fn unreadable_list_entries_are_skipped_with_a_warning() {
     let items = a.items("Kept").await;
     assert_eq!(items[0]["available"], false);
     assert_eq!(items[0]["snapshot"]["title"], "Gone");
+}
+
+/// Seeds `n` series rules titled `"{prefix} {i}"` on Alpha's channels.
+async fn seed_rules(a: &App, ch: &Channels, prefix: &str, n: usize) {
+    let rules: Vec<Value> = (0..n)
+        .map(|i| {
+            let item = if i % 2 == 0 { &ch.a_news } else { &ch.a_sport };
+            json!({
+                "contentType": "live", "itemId": item, "channelName": "Alpha",
+                "title": format!("{prefix} {i}"), "enabled": i % 3 != 0,
+                "createdAt": "2026-10-01T00:00:00.000Z"
+            })
+        })
+        .collect();
+    let rules: Vec<iptv_core::recording::RecordingRuleBackup> =
+        serde_json::from_value(Value::Array(rules)).unwrap();
+    let written = a
+        .state
+        .db_call(move |c| iptv_core::recording::import_rules(c, "src-a", &rules))
+        .await
+        .unwrap();
+    assert_eq!(written, n);
+}
+
+fn rule_warnings(rep: &Value) -> Vec<String> {
+    warnings(rep)
+        .into_iter()
+        .filter(|w| w.contains("recording rule"))
+        .collect()
+}
+
+/// Review fix: Replace restoring an install's own backup keeps every series
+/// rule, even past half the limit of 100: the rules of the sources Replace
+/// removes do not count toward it.
+#[tokio::test]
+async fn replace_onto_an_install_with_many_rules_keeps_them_all() {
+    let (a, ch) = seeded().await;
+    seed_rules(&a, &ch, "Show", 60).await;
+    let out = a.export().await;
+    let exported = &playlist(&out, "Alpha")["userState"]["tsrustRecordingRules"];
+    assert_eq!(exported.as_array().map(Vec::len), Some(60));
+
+    let rep = a.import(&out.to_string(), "replace").await;
+    assert_eq!(rep["imported"], 2, "{rep}");
+    assert!(rule_warnings(&rep).is_empty(), "{rep}");
+    let alpha = a.source("Alpha").await.expect("Alpha imported");
+    assert_ne!(alpha, "src-a", "imported next to the old source, then kept");
+    assert_eq!(
+        a.rows("SELECT count(*), count(DISTINCT source_id), sum(enabled) FROM recording_rules")
+            .await,
+        [vec!["60".to_string(), "1".to_string(), "40".to_string()]]
+    );
+    assert_eq!(
+        a.rows("SELECT source_id FROM recording_rules LIMIT 1")
+            .await,
+        [vec![alpha]]
+    );
+}
+
+/// Review fix: rules the limit of 100 leaves out of a restore are reported;
+/// rules already there are not counted again.
+#[tokio::test]
+async fn rules_over_the_limit_are_reported() {
+    let (a, ch) = seeded().await;
+    seed_rules(&a, &ch, "Show", 60).await;
+    let out = a.export().await;
+    let mut more = out.clone();
+    for p in more["playlists"].as_array_mut().unwrap() {
+        if let Some(rules) = p["userState"]["tsrustRecordingRules"].as_array_mut() {
+            for r in rules {
+                let t = r["title"].as_str().unwrap().replace("Show", "Other");
+                r["title"] = json!(t);
+            }
+        }
+    }
+    let rep = a.import(&more.to_string(), "merge").await;
+    assert_eq!(
+        rule_warnings(&rep),
+        ["20 series recording rules in the backup were not restored: you can keep up to 100 series rules"],
+        "{rep}"
+    );
+    assert_eq!(
+        a.rows("SELECT count(*) FROM recording_rules").await,
+        [vec!["100".to_string()]]
+    );
+
+    let rep = a.import(&out.to_string(), "merge").await;
+    assert!(rule_warnings(&rep).is_empty(), "{rep}");
+    assert_eq!(
+        a.rows("SELECT count(*) FROM recording_rules").await,
+        [vec!["100".to_string()]]
+    );
+}
+
+fn list_warnings(rep: &Value) -> Vec<String> {
+    warnings(rep)
+        .into_iter()
+        .filter(|w| w.starts_with("Custom lists"))
+        .collect()
+}
+
+fn log_warnings(rep: &Value) -> Vec<String> {
+    warnings(rep)
+        .into_iter()
+        .filter(|w| w.contains("watch history"))
+        .collect()
+}
+
+/// Review fix: lists the import cannot create (a blank name, or past the
+/// limit of 50) are counted in one warning, even when they hold no items.
+#[tokio::test]
+async fn lists_that_cannot_be_created_are_reported() {
+    let a = app().await;
+    let mut m: Value = serde_json::from_str(&alpha_and_beta()).unwrap();
+    // A zero-width space survives the reader's trim but is no visible name.
+    let mut lists = vec![json!({"name": "\u{200B}", "position": 0, "items": []})];
+    lists.extend((0..51).map(|i| json!({"name": format!("L{i}"), "position": i + 1, "items": []})));
+    m["tsrustCustomLists"] = Value::Array(lists);
+    let rep = a.import(&m.to_string(), "merge").await;
+    assert_eq!(rep["imported"], 2, "{rep}");
+    assert_eq!(
+        list_warnings(&rep),
+        ["Custom lists: 2 lists in the backup were not restored (a blank name, or you can keep up to 50 lists)"],
+        "{rep}"
+    );
+    let names: Vec<String> = a
+        .list_summary()
+        .await
+        .into_iter()
+        .map(|(n, _, _)| n)
+        .collect();
+    assert_eq!(names.len(), 50);
+    assert_eq!(names.last().map(String::as_str), Some("L49"));
+
+    let b = app().await;
+    let mut m: Value = serde_json::from_str(&alpha_and_beta()).unwrap();
+    m["tsrustCustomLists"] = json!([{"name": "\u{200B}\u{2060}", "items": []}]);
+    let rep = b.import(&m.to_string(), "merge").await;
+    assert_eq!(
+        list_warnings(&rep),
+        ["Custom lists: 1 list in the backup was not restored (a blank name, or you can keep up to 50 lists)"],
+        "{rep}"
+    );
+    assert!(b.lists().await.is_empty());
+}
+
+/// Review fix: watch log rows the import refuses (an unreadable or too old
+/// day, a blank title, no seconds) are counted in one warning per entry.
+#[tokio::test]
+async fn skipped_watch_log_rows_are_reported() {
+    let a = app().await;
+    let day = yesterday();
+    let row = |day: &str, title: &str, seconds: i64| {
+        json!({
+            "day": day, "contentType": "live", "itemId": "x1", "title": title,
+            "seconds": seconds, "lastAt": "2026-10-01T00:00:00.000Z"
+        })
+    };
+    let mut m: Value = serde_json::from_str(&alpha_and_beta()).unwrap();
+    m["playlists"][0]["userState"]["tsrustWatchLog"] = json!([
+        row(&day, "Kept", 600),
+        row("2026-13-40", "Bad day", 600),
+        row("2000-01-01", "Too old", 600),
+        row(&day, "   ", 600),
+        row(&day, "Zero", 0),
+    ]);
+    m["playlists"][1]["userState"]["tsrustWatchLog"] = json!([row(&day, "Negative", -5)]);
+    let rep = a.import(&m.to_string(), "merge").await;
+    assert_eq!(rep["imported"], 2, "{rep}");
+    assert_eq!(
+        log_warnings(&rep),
+        [
+            "\"Alpha\": 4 watch history entries in the backup were not restored (an unreadable date or one outside the last 90 days, no title or item id, or no time watched)",
+            "\"Beta\": 1 watch history entry in the backup was not restored (an unreadable date or one outside the last 90 days, no title or item id, or no time watched)",
+        ],
+        "{rep}"
+    );
+    assert_eq!(
+        a.rows("SELECT source_id, title, seconds FROM watch_log")
+            .await,
+        [vec![
+            "src-a".to_string(),
+            "Kept".to_string(),
+            "600".to_string()
+        ]]
+    );
+}
+
+/// Review fix: a clean round trip (Replace into a fresh data folder, then
+/// Merge of the same file onto the install it came from) reports neither
+/// dropped lists nor skipped watch log rows. Rows a re-import leaves as they
+/// are do not count as skipped.
+#[tokio::test]
+async fn a_clean_round_trip_reports_no_dropped_lists_or_skipped_watch_rows() {
+    let (src, ch) = seeded().await;
+    let day = yesterday();
+    let rows: Vec<iptv_core::stats::WatchLogBackup> = serde_json::from_value(json!([
+        {"day": day, "contentType": "live", "itemId": ch.a_sport, "title": "Alpha Sport",
+         "seconds": 1800, "lastAt": format!("{day}T20:00:00.000Z")},
+        {"day": day, "contentType": "live", "itemId": ch.b_one, "title": "Beta One",
+         "seconds": 60, "lastAt": format!("{day}T21:00:00.000Z")}
+    ]))
+    .unwrap();
+    let (a_rows, b_rows) = (rows[..1].to_vec(), rows[1..].to_vec());
+    src.state
+        .db_call(move |c| {
+            iptv_core::stats::import_log(c, "src-a", &a_rows)?;
+            iptv_core::stats::import_log(c, "src-b", &b_rows)
+        })
+        .await
+        .unwrap();
+
+    let (out, dst, rep, _alpha) = replace_into_fresh(&src).await;
+    assert!(list_warnings(&rep).is_empty(), "{rep}");
+    assert!(log_warnings(&rep).is_empty(), "{rep}");
+    assert_eq!(dst.lists().await.len(), 3);
+    assert_eq!(
+        dst.rows("SELECT count(*) FROM watch_log").await,
+        [vec!["2".to_string()]]
+    );
+
+    let rep = src.import(&out.to_string(), "merge").await;
+    assert!(list_warnings(&rep).is_empty(), "{rep}");
+    assert!(log_warnings(&rep).is_empty(), "{rep}");
 }

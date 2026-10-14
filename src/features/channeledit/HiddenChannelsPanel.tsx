@@ -8,8 +8,8 @@ import { itemKey, type Channel, type ChannelEdit } from '@/api/types';
 import { ChannelLogo } from '@/features/live/components/ChannelLogo';
 import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonList, cn, useRowHeight } from '@/ui';
 
-import { reportUnhideMany, unhideChannel, unhideMany } from './actions';
-import { useDisplayName, useHiddenEdits } from './edits';
+import { isGoneAnswer, reportUnhideMany, unhideChannel, unhideMany } from './actions';
+import { ITEM_STALE_MS, useDisplayName, useHiddenEdits } from './edits';
 
 export interface HiddenChannelsPanelProps {
   sourceId: string;
@@ -27,8 +27,6 @@ interface Row {
 
 /** Case- and accent-insensitive form for the filter: "espana" finds "España". */
 const fold = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
-
-const ITEM_STALE_MS = 5 * 60_000;
 
 /**
  * The hidden-channels dialog body. Rows are virtualised and keyboard-driven
@@ -190,13 +188,15 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
         {shown.length === 0 ? (
           <p className="py-8 text-center text-sm text-fg-muted">{t('noMatch')}</p>
         ) : (
+          // Sized to its rows up to the cap, so two or three hidden channels leave no empty well.
           <div
             ref={scrollRef}
             id={listId}
             role="list"
             aria-label={t('hiddenTitle')}
             onKeyDown={onListKey}
-            className="h-[min(380px,48vh)] overflow-y-auto overscroll-contain rounded-md border border-border bg-surface"
+            className="max-h-[min(380px,48vh)] overflow-y-auto overscroll-contain rounded-md border border-border bg-surface"
+            data-testid="hidden-channels-list"
           >
             <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
               {virtualizer.getVirtualItems().map((v) => {
@@ -230,6 +230,8 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
       title={t('hiddenTitle')}
       description={t('hiddenText')}
       size="md"
+      // The body scrolls, so it clips: room above the filter for its focus outline (2px + 2px offset).
+      bodyClassName="pt-1"
       testId="hidden-channels-dialog"
       footer={
         <>
@@ -279,10 +281,11 @@ function HiddenRow({
   onUnhide: () => void;
 }) {
   const { t } = useTranslation('channels');
-  // The logo, and whether the provider still lists the channel. catalog.item still answers for hidden channels (C2).
+  // The logo, and whether the provider still lists the channel. catalog.item still answers for hidden channels (C2);
+  // a channel parental Hide mode locks answers not_found with details.parentalLocked and is still listed.
   const item = useRpcQuery('catalog.item', { ref: row.edit.ref }, { staleTime: ITEM_STALE_MS });
   const logo = item.data && 'logoUrl' in item.data ? (item.data as Channel).logoUrl : undefined;
-  const gone = item.error?.code === 'not_found';
+  const gone = item.error != null && isGoneAnswer(item.error);
   const radio = row.edit.ref.contentType === 'radio';
   const detailId = `${row.key}-detail`;
 

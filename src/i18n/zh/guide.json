@@ -13,6 +13,7 @@
   "resultsCount": "结果：{{n}}",
   "closeSearch": "关闭搜索",
   "hitLabel": "{{title}}，{{channel}}，{{time}}",
+  "dayHeading": "{{rel}}，{{date}}",
   "airingNow": "正在播出",
   "watchNow": "观看 {{channel}}",
   "hitNotFound": "{{channel}} 不在此列表中",

@@ -12,7 +12,7 @@ import type { EpgSourceStatus, GuideSearchHit } from '@/api/types';
 import { DAY, HOUR, MINUTE } from '../../lib/epgTime';
 import { GuideSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
 import { SEARCH_LIMIT } from '../search';
-import { createRpcMock, hit, installDomStubs, renderGuide, settings } from './harness';
+import { createRpcMock, hit, i18n, installDomStubs, renderGuide, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
 vi.mock('@/api/transport', async (orig) => ({
@@ -210,6 +210,39 @@ describe('GuideSearchPanel results', () => {
     panel();
     await waitFor(() => expect(state()).toBe('results'));
     expect(screen.getByText(`First ${SEARCH_LIMIT} shown. Refine the search.`)).toBeTruthy();
+  });
+
+  // Review round 1: the heading's join came from code (`${rel}, ${date}`), so ja, zh and ar showed
+  // an ASCII comma. It is now the locale's `dayHeading` string.
+  it('day headings are joined by the locale string, not a hardcoded comma', async () => {
+    const original = i18n.getResource('en', 'guide', 'dayHeading') as string;
+    expect(original).toBe('{{rel}}, {{date}}');
+    i18n.addResource('en', 'guide', 'dayHeading', '{{rel}} · {{date}}');
+    try {
+      rpc.handlers['epg.search'] = () => HITS;
+      panel();
+      await waitFor(() => expect(state()).toBe('results'));
+      const days = screen.getAllByTestId('guide-search-day').map((h) => h.textContent);
+      expect(days[0]).toMatch(/^Today · /);
+      expect(days[1]).toMatch(/^Tomorrow · /);
+      // A day with no relative name is the date alone, with no joiner.
+      expect(days[2]).not.toContain('·');
+    } finally {
+      i18n.addResource('en', 'guide', 'dayHeading', original);
+    }
+  });
+
+  // Review round 1: "05:00 AM" wrapped in the old w-12 column. The time never wraps now and the
+  // column is wide enough for a 12-hour clock.
+  it('the time column keeps a 12-hour time on one line', async () => {
+    rpc.handlers['epg.search'] = () => HITS;
+    panel();
+    await waitFor(() => expect(state()).toBe('results'));
+    const row = screen.getAllByTestId('guide-search-hit')[1]!;
+    const time = within(row).getByText(/6:00\s?PM|18:00/);
+    expect(time.className).toContain('whitespace-nowrap');
+    expect(time.parentElement!.className).toContain('min-w-[4.5rem]');
+    expect(time.parentElement!.className).not.toMatch(/(^|\s)w-12(\s|$)/);
   });
 });
 

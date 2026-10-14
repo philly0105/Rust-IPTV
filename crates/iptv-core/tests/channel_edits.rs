@@ -18,18 +18,27 @@ mod stub;
 mod support;
 
 use iptv_core::channeledit::{self, ChannelEditBackup, MAX_NAME_CHARS, MAX_REFS};
+use iptv_core::lists;
 use iptv_core::model::{ContentType, ItemRef};
 use iptv_core::rpc::{build_router, RpcRouter};
 use iptv_core::{AppEvent, AppState, BroadcastSink, RpcErrorCode};
 use rusqlite::params;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::Receiver;
+use tokio::sync::{RwLock, RwLockReadGuard};
+
+/// The perf case times single calls, so it runs alone: it takes the write
+/// guard, and every other test holds a read guard for its whole run (`App`
+/// keeps one). Run in parallel with the rest of the file, the deep page took
+/// 346 ms in a debug build against 52 ms alone.
+static SERIAL: LazyLock<RwLock<()>> = LazyLock::new(|| RwLock::new(()));
 
 const EPG_URL: &str = "http://guide.example/epg.xml";
 
 struct App {
+    _serial: RwLockReadGuard<'static, ()>,
     _dir: tempfile::TempDir,
     state: Arc<AppState>,
     router: RpcRouter,
@@ -56,6 +65,7 @@ type Fixture = (
 /// by the item's tvg-id), CNN (`cnn.us`) and Sky News (`sky.uk`, matched by
 /// name only).
 async fn app() -> App {
+    let serial = SERIAL.read().await;
     let dir = tempfile::tempdir().unwrap();
     let (sink, events) = BroadcastSink::channel(4096);
     let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
@@ -143,6 +153,7 @@ async fn app() -> App {
         .await
         .unwrap();
     App {
+        _serial: serial,
         _dir: dir,
         state,
         router: build_router(),
@@ -803,6 +814,14 @@ async fn bad_requests_are_refused_and_write_nothing() {
             json!({"refs": [live("nope", "101")], "hidden": true}),
             RpcErrorCode::NotFound,
         ),
+        (
+            json!({"refs": [live("s1", &"9".repeat(lists::MAX_ID_CHARS + 1))], "hidden": true}),
+            RpcErrorCode::Invalid,
+        ),
+        (
+            json!({"refs": [live(&"s".repeat(lists::MAX_ID_CHARS + 1), "101")], "hidden": false}),
+            RpcErrorCode::Invalid,
+        ),
     ] {
         assert_eq!(
             a.fail("channels.setHidden", args.clone()).await,
@@ -810,6 +829,19 @@ async fn bad_requests_are_refused_and_write_nothing() {
             "{args}"
         );
     }
+    // An unknown id at the cap is NotFound, with the id shortened in the
+    // message.
+    let err = a
+        .router
+        .dispatch(
+            a.state.clone(),
+            "channels.setHidden",
+            json!({"refs": [live("s1", &"9".repeat(lists::MAX_ID_CHARS))], "hidden": true}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::NotFound);
+    assert!(err.message.len() < 200, "{}", err.message);
     assert_eq!(a.edit_rows("s1").await, 0, "nothing written");
     let page = a.call("catalog.channels", json!({"sourceId": "s1"})).await;
     assert_eq!(page["total"], 5);
@@ -835,6 +867,9 @@ async fn bad_requests_are_refused_and_write_nothing() {
         json!("a".repeat(MAX_NAME_CHARS + 1)),
         json!("line\nbreak"),
         json!("tab\there"),
+        json!("\u{200B}"),
+        json!(" \u{200F}\u{FEFF} "),
+        json!("line\u{2028}separator"),
     ] {
         assert_eq!(
             a.fail(
@@ -1036,6 +1071,69 @@ async fn reset_drops_every_edit_of_one_source() {
 }
 
 #[tokio::test]
+async fn writes_that_change_nothing_send_no_event() {
+    let mut a = app().await;
+    let one = json!({"sourceId": "s1"});
+
+    // Reset of a source with no edits.
+    a.call("channels.reset", json!({"sourceId": "s1"})).await;
+    assert!(a.changed().is_empty());
+
+    // Rename to the provider name, or clearing a name that is not set.
+    for name in [json!("BBC One"), json!(null), json!("")] {
+        let row = a
+            .call(
+                "channels.rename",
+                json!({"ref": live("s1", "101"), "name": name}),
+            )
+            .await;
+        assert!(row.is_null(), "{row}");
+        assert!(a.changed().is_empty(), "rename to {name}");
+    }
+
+    // Renaming to the current custom name writes nothing and keeps updatedAt.
+    let first = a
+        .call(
+            "channels.rename",
+            json!({"ref": live("s1", "101"), "name": "Mine"}),
+        )
+        .await;
+    assert_eq!(a.changed(), vec![one.clone()]);
+    let again = a
+        .call(
+            "channels.rename",
+            json!({"ref": live("s1", "101"), "name": "  Mine "}),
+        )
+        .await;
+    assert_eq!(again, first, "same row, same updatedAt");
+    assert!(a.changed().is_empty());
+
+    // Hiding a hidden channel.
+    let hide = json!({"refs": [live("s1", "102")], "hidden": true});
+    a.call("channels.setHidden", hide.clone()).await;
+    assert_eq!(a.changed(), vec![one.clone()]);
+    let before = a
+        .call(
+            "channels.edits",
+            json!({"sourceId": "s1", "hiddenOnly": true}),
+        )
+        .await;
+    a.call("channels.setHidden", hide).await;
+    assert!(a.changed().is_empty());
+    let after = a
+        .call(
+            "channels.edits",
+            json!({"sourceId": "s1", "hiddenOnly": true}),
+        )
+        .await;
+    assert_eq!(after, before, "updatedAt is kept");
+
+    // A real change still sends one event.
+    a.call("channels.reset", json!({"sourceId": "s1"})).await;
+    assert_eq!(a.changed(), vec![one]);
+}
+
+#[tokio::test]
 async fn backup_export_and_import_keep_the_newer_edit() {
     let a = app().await;
     a.call(
@@ -1221,6 +1319,7 @@ async fn edit_count(state: &Arc<AppState>, source: &str) -> i64 {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn edits_survive_m3u_reimports_and_go_with_the_source() {
+    let _serial = SERIAL.read().await;
     let env = support::env().await;
     let router = build_router();
     let call = |cmd: &'static str, args: Value| {
@@ -1302,6 +1401,7 @@ async fn edits_survive_m3u_reimports_and_go_with_the_source() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn edits_survive_a_refresh_of_the_mock_xtream_source() {
+    let _serial = SERIAL.read().await;
     let server = stub::server().await;
     let (_dir, state, _rx) = stub::state().await;
     let router = build_router();
@@ -1385,6 +1485,19 @@ const GROUPS: usize = 250;
 const QUERY_BUDGET: Duration = Duration::from_millis(300);
 #[cfg(not(debug_assertions))]
 const QUERY_BUDGET: Duration = Duration::from_millis(100);
+/// The 1001-row search (the UI's "show up to 1000" step) has its own
+/// budget, recorded in docs/architecture/channel-edits.md. "channel"
+/// matches 49k titles here (34k left after English-only), and ranking every
+/// match costs nearly the same at limit 30 as at 1001: about 90 ms in
+/// release on a quiet
+/// machine (85 to 94 ms; bm25 ranking about 30 ms, the category join for
+/// the hidden-category and English-only filters about 18 ms, the empty
+/// movie and series passes about 9 ms each). The hidden set adds about 9 %.
+/// At 100 ms about one run in four failed.
+#[cfg(debug_assertions)]
+const WIDE_SEARCH_BUDGET: Duration = Duration::from_millis(450);
+#[cfg(not(debug_assertions))]
+const WIDE_SEARCH_BUDGET: Duration = Duration::from_millis(150);
 
 /// Group `g` of the mixed playlist (as in `catalog_perf`, without the adult
 /// groups): French (hidden by English-only), British (kept) or untagged.
@@ -1433,6 +1546,7 @@ fn gen_mixed_m3u(n: usize, groups: usize) -> String {
 async fn edits_keep_lists_and_search_fast_on_50k_channels_with_english_only() {
     use iptv_core::catalog::language::is_non_english;
 
+    let _serial = SERIAL.write().await;
     let env = support::env().await;
     let r = build_router();
     let src = support::add_text(&env.state, "mixed", &gen_mixed_m3u(CHANNELS, GROUPS)).await;
@@ -1636,12 +1750,12 @@ async fn edits_keep_lists_and_search_fast_on_50k_channels_with_english_only() {
         let took = started.elapsed();
         check(&v);
         eprintln!("channel_edits perf: {label} in {took:?}");
-        // The capped 20k-row zap list has four budgets, as in catalog_perf.
-        // So does the 1001-row search: ranking ~45k FTS matches took about
-        // 90 ms in release, and a debug comparison of the same statement
-        // with and without the hidden set showed no added cost.
-        let budget = if method == "catalog.allLiveChannels" || label == "global search, wide" {
+        // The capped 20k-row zap list has four budgets, as in catalog_perf;
+        // the 1001-row search has its own (see WIDE_SEARCH_BUDGET).
+        let budget = if method == "catalog.allLiveChannels" {
             QUERY_BUDGET * 4
+        } else if label == "global search, wide" {
+            WIDE_SEARCH_BUDGET
         } else {
             QUERY_BUDGET
         };

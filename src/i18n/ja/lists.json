@@ -46,7 +46,6 @@
   "deleteLabel": "{{list}}を削除",
   "deleted": "{{list}}を削除しました",
   "deleteFailed": "{{list}}を削除できませんでした",
-  "undoFailed": "{{list}}を復元できませんでした",
   "editChannels": "チャンネルを編集",
   "editChannelsOf": "{{list}}のチャンネルを編集",
   "editTitle": "{{list}}を編集",
@@ -60,6 +59,7 @@
   "unavailableHeading": "提供終了",
   "unavailableHint": "プロバイダーがこれらのチャンネルの提供をやめました。再び提供されると戻ります。",
   "unavailableCount_other": "利用できないチャンネル{{formatted}}件",
+  "countWithUnavailable": "{{channels}}、{{unavailable}}",
   "allUnavailableTitle": "これらのチャンネルは現在どれも提供されていません",
   "listEmptyTitle": "このリストは空です",
   "listEmptyHint": "ライブTVでチャンネル上で L を押すか右クリックし、「リストに追加」を選んでください。",
@@ -74,11 +74,10 @@
   "stageIdleHint": "リストからチャンネルを選んでください。",
   "errorNameEmpty": "名前を入力してください。",
   "errorNameLong": "{{max}}文字以内で入力してください。",
+  "errorNameControl": "名前にタブや改行は使用できません。",
   "errorDuplicate": "同じ名前のリストがすでにあります。",
   "errorTooMany": "リストは{{max}}個まで作成できます。先に1つ削除してください。",
   "errorListFull": "1つのリストに入れられるチャンネルは{{max}}個までです。",
   "errorGone": "このリストは削除されました。",
-  "shortcutAddToList": "選択中のチャンネルをリストに追加",
-  "shortcutMoveUp": "選択中のリストまたはチャンネルを上へ移動",
-  "shortcutMoveDown": "選択中のリストまたはチャンネルを下へ移動"
+  "shortcutAddToList": "選択中のチャンネルをリストに追加"
 }

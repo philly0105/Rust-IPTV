@@ -13,6 +13,7 @@
   "resultsCount": "結果: {{n}}件",
   "closeSearch": "検索を閉じる",
   "hitLabel": "{{title}}、{{channel}}、{{time}}",
+  "dayHeading": "{{rel}}、{{date}}",
   "airingNow": "放送中",
   "watchNow": "{{channel}}を視聴",
   "hitNotFound": "{{channel}}はこのリストにありません",

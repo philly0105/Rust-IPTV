@@ -178,6 +178,8 @@
   "scNextItem": "대기열의 다음 에피소드 재생",
   "scChannelFavorite": "포커스된 채널을 즐겨찾기에 추가하거나 삭제",
   "scItemMenu": "포커스된 채널의 메뉴 열기",
+  "scListsDialogMoveUp": "선택한 목록 또는 채널 위로 이동 (목록 관리, 채널 편집)",
+  "scListsDialogMoveDown": "선택한 목록 또는 채널 아래로 이동 (목록 관리, 채널 편집)",
   "scListJump": "첫 번째 또는 마지막 항목으로 이동",
   "scListPage": "한 페이지 위나 아래로 이동",
   "scListRemove": "포커스된 항목 삭제(즐겨찾기, 최근에 시청한 항목, 내 동영상)",

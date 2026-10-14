@@ -189,6 +189,7 @@
   "decade": "{{decade}}年代",
   "yearFrom": "開始年",
   "yearTo": "終了年",
+  "yearRange": "年の範囲",
   "yearEmptyTitle": "この年代の作品はありません",
   "hideWatched": "視聴済みを隠す",
   "watchedEmptyTitle": "ここはすべて視聴済みです",

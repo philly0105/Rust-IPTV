@@ -1,6 +1,6 @@
 // "Manage lists" and "Edit channels" (contract C3): inline rename, reorder
 // with Alt+Arrow keys (focus stays on the moved row), Show on Home, delete
-// with Undo that brings the list back with its channels, Home rail and place.
+// that waits for its Undo toast, so Undo brings the list back untouched.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +22,10 @@ const { ListsDialogHost } = await import('../host');
 // Load the lazy dialogs up front so a busy run doesn't outlast findBy's timeout.
 await Promise.all([import('../dialogs/ManageListsDialog'), import('../dialogs/EditItemsDialog')]);
 const { openEditListItems, openManageLists } = await import('../store');
+const { useToastStore } = await import('@/ui');
+const { RpcError } = await import('@/api/transport');
+const { errorText } = await import('../lib/cache');
+const { QUIT_FLUSH_EVENT } = await import('@/api/window');
 
 const BBC = h.channel('1', 'BBC One');
 const CNN = h.channel('2', 'CNN', { sourceId: 'src2' });
@@ -114,6 +118,17 @@ describe('manage lists', () => {
       expect(rpc.callsOf('lists.update')).toEqual([]);
     });
 
+    it('refuses a tab in the name as such, without asking the core', async () => {
+      seed();
+      const dialog = await openManage();
+      fireEvent.click(within(row(dialog, 'L1')).getByRole('button', { name: 'Rename Sports' }));
+      const input = within(row(dialog, 'L1')).getByRole('textbox', { name: 'Rename Sports' });
+      fireEvent.change(input, { target: { value: 'Foot\tball' } });
+      fireEvent.submit(input.closest('form')!);
+      expect(within(row(dialog, 'L1')).getByRole('alert').textContent).toBe("Names can't contain tabs or line breaks.");
+      expect(rpc.callsOf('lists.update')).toEqual([]);
+    });
+
     it('Escape cancels the rename only, not the dialog', async () => {
       seed();
       const dialog = await openManage();
@@ -203,65 +218,124 @@ describe('manage lists', () => {
   });
 
   describe('delete with Undo', () => {
-    it('deletes at once; Undo brings the list back with its channels, Home rail and place', async () => {
+    const dismissLastToast = () => act(() => useToastStore.getState().dismiss(h.lastToast()!.id));
+
+    it('hides the list at once and deletes it only once the Undo toast goes', async () => {
       const core = seed();
       const dialog = await openManage();
       fireEvent.click(within(row(dialog, 'L2')).getByRole('button', { name: 'Delete Kids' }));
 
-      await waitFor(() => expect(rpc.callsOf('lists.remove')).toEqual([{ id: 'L2' }]));
       await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'News']));
-      expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']);
       // Focus moves to the next row's Delete, not out of the dialog.
       await waitFor(() => expect(document.activeElement).toBe(within(row(dialog, 'L3')).getByRole('button', { name: 'Delete News' })));
+      expect(within(dialog).getByText('2 of 50 lists')).toBeTruthy();
       const toast = h.lastToast()!;
       expect(toast.title).toBe('Deleted Kids');
       expect(toast.action?.label).toBe('Undo');
+      expect(rpc.callsOf('lists.remove')).toEqual([]);
+      expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L2', 'L3']);
 
-      act(() => toast.action!.onClick());
-      await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'Kids', 'News']));
-      const created = rpc.callsOf('lists.create') as { name: string; items: { ref: ItemRef }[] }[];
-      expect(created.map((c) => c.name)).toEqual(['Kids']);
-      expect(refIds(created[0]!.items.map((i) => i.ref))).toEqual(['3', '2']);
-      expect(rpc.callsOf('lists.update')).toEqual([{ id: 'new1', onDashboard: true }]);
-      expect(rpc.callsOf('lists.reorder')).toEqual([{ ids: ['L1', 'new1', 'L3'] }]);
-      expect(core.lists.map((l) => [l.name, l.onDashboard, l.items.map((i) => i.ref.itemId)])).toEqual([
-        ['Sports', false, ['1', '2']],
-        ['Kids', true, ['3', '2']],
-        ['News', false, ['1']],
-      ]);
+      dismissLastToast();
+      await waitFor(() => expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']));
+      expect(rpc.callsOf('lists.remove')).toEqual([{ id: 'L2' }]);
+      await waitFor(() => expect(rpc.callsOf('lists.list').length).toBeGreaterThan(1));
+      expect(rowNames(dialog)).toEqual(['Sports', 'News']);
     });
 
-    it('Undo of the last list needs no reorder', async () => {
+    it('Undo brings the list back untouched: same id, every channel (hidden ones too), Home rail and place', async () => {
       const core = seed();
+      // A channel the user hid: the core keeps it in the list, `lists.items` never returns it.
+      core.lists[1]!.items.push({ ref: GONE.ref, title: GONE.name, available: true, channel: GONE, hidden: true });
+      const before = structuredClone(core.lists);
       const dialog = await openManage();
-      fireEvent.click(within(row(dialog, 'L3')).getByRole('button', { name: 'Delete News' }));
-      await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'Kids']));
+      fireEvent.click(within(row(dialog, 'L2')).getByRole('button', { name: 'Delete Kids' }));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'News']));
+
       act(() => h.lastToast()!.action!.onClick());
       await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'Kids', 'News']));
-      expect(rpc.callsOf('lists.update')).toEqual([]);
-      expect(rpc.callsOf('lists.reorder')).toEqual([]);
-      expect(core.lists.map((l) => l.name)).toEqual(['Sports', 'Kids', 'News']);
+      expect(within(row(dialog, 'L2')).getByRole('button', { name: 'Show Kids on Home' }).getAttribute('aria-pressed')).toBe('true');
+      // The toast leaving afterwards sends nothing either.
+      dismissLastToast();
+      await act(() => new Promise((r) => setTimeout(r, 20)));
+      for (const cmd of ['lists.remove', 'lists.create', 'lists.update', 'lists.reorder', 'lists.addItems']) expect(rpc.callsOf(cmd)).toEqual([]);
+      expect(core.lists).toEqual(before);
     });
 
-    it('keeps the list and says so when the core refuses', async () => {
+    it('a list kept off Home stays off Home after Undo', async () => {
+      const core = seed();
+      const dialog = await openManage();
+      fireEvent.click(within(row(dialog, 'L1')).getByRole('button', { name: 'Delete Sports' }));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Kids', 'News']));
+      act(() => h.lastToast()!.action!.onClick());
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'Kids', 'News']));
+      expect(within(row(dialog, 'L1')).getByRole('button', { name: 'Show Sports on Home' }).getAttribute('aria-pressed')).toBe('false');
+      expect(core.lists[0]).toMatchObject({ id: 'L1', onDashboard: false });
+      expect(rpc.callsOf('lists.update')).toEqual([]);
+    });
+
+    it('brings the list back and says so when the core refuses the delete', async () => {
       const core = seed();
       const dialog = await openManage();
       core.fail['lists.remove'] = 'db';
       fireEvent.click(within(row(dialog, 'L1')).getByRole('button', { name: 'Delete Sports' }));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Kids', 'News']));
+      dismissLastToast();
       await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't delete Sports"));
       await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'Kids', 'News']));
+      expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L2', 'L3']);
     });
 
-    it('reports an Undo the core refuses (name taken meanwhile)', async () => {
+    it('a new list with the deleted name sends the delete first', async () => {
       const core = seed();
       const dialog = await openManage();
       fireEvent.click(within(row(dialog, 'L1')).getByRole('button', { name: 'Delete Sports' }));
-      await waitFor(() => expect(h.lastToast()?.title).toBe('Deleted Sports'));
-      core.lists.push(h.coreList('L7', 'Sports', []));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Kids', 'News']));
+      fireEvent.change(within(dialog).getByLabelText('New list name'), { target: { value: 'sports' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Kids', 'News', 'sports']));
+      expect(rpc.calls.map((c) => c.cmd).filter((c) => c === 'lists.remove' || c === 'lists.create')).toEqual(['lists.remove', 'lists.create']);
+      expect(core.lists.map((l) => l.name)).toEqual(['Kids', 'News', 'sports']);
+      // Its Undo went with it.
+      expect(useToastStore.getState().toasts.some((t) => t.title === 'Deleted Sports')).toBe(false);
+    });
+
+    it("quitting the desktop app sends a pending delete and the quit waits for it; with none pending it waits for nothing", async () => {
+      const core = seed();
+      const dialog = await openManage();
+      const quit = () => {
+        const waitUntil = vi.fn();
+        window.dispatchEvent(new CustomEvent(QUIT_FLUSH_EVENT, { detail: { waitUntil } }));
+        return waitUntil;
+      };
+      expect(quit()).not.toHaveBeenCalled();
+
+      fireEvent.click(within(row(dialog, 'L2')).getByRole('button', { name: 'Delete Kids' }));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'News']));
+      const waitUntil = quit();
+      expect(waitUntil).toHaveBeenCalledTimes(1);
+      const work = waitUntil.mock.calls[0]![0] as Promise<unknown>;
+      expect(work).toBeInstanceOf(Promise);
+      expect(rpc.callsOf('lists.remove')).toEqual([{ id: 'L2' }]);
+      await act(() => work);
+      expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']);
+      // Settled: its Undo is gone and a second quit has nothing to wait for.
+      expect(useToastStore.getState().toasts.some((t) => t.title === 'Deleted Kids')).toBe(false);
+      expect(quit()).not.toHaveBeenCalled();
+    });
+
+    it('a reorder while a delete waits keeps the pending list in its place', async () => {
+      const core = seed();
+      const dialog = await openManage();
+      fireEvent.click(within(row(dialog, 'L2')).getByRole('button', { name: 'Delete Kids' }));
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'News']));
+      fireEvent.keyDown(within(row(dialog, 'L3')).getByRole('button', { name: 'Move News' }), { key: 'ArrowUp', altKey: true });
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['News', 'Sports']));
+      await waitFor(() => expect(rpc.callsOf('lists.reorder')).toEqual([{ ids: ['L3', 'L2', 'L1'] }]));
+      await waitFor(() => expect(core.lists.map((l) => l.id)).toEqual(['L3', 'L2', 'L1']));
+      expect(h.lastToast()?.variant).not.toBe('error');
+
       act(() => h.lastToast()!.action!.onClick());
-      await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't restore Sports"));
-      expect(h.lastToast()?.description).toBe('A list with this name already exists.');
-      void dialog;
+      await waitFor(() => expect(rowNames(dialog)).toEqual(['News', 'Kids', 'Sports']));
     });
   });
 
@@ -289,6 +363,25 @@ describe('manage lists', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(rpc.callsOf('lists.create')).toEqual([{ name: 'Sports' }]));
     await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports']));
+  });
+});
+
+describe("the core's refusals in words", () => {
+  const t = (key: string, opts?: Record<string, unknown>) => h.i18n.t(key, { ns: 'lists', ...opts });
+  // Each core message (crates/iptv-core/src/lists) gets its own wording; one problem is never shown as another.
+  it.each([
+    ['invalid', 'name is required', 'Enter a name.'],
+    ['invalid', 'name must not contain control characters', "Names can't contain tabs or line breaks."],
+    ['invalid', 'name must be at most 60 characters', 'Use 60 characters or fewer.'],
+    ['invalid', 'there can be at most 50 lists; remove one before creating another', 'You can have up to 50 lists. Delete one first.'],
+    ['invalid', 'a list holds at most 2000 channels; this one has 1999 and 2 more do not fit', 'A list holds up to 2000 channels.'],
+    ['invalid', 'items must hold at most 2000 entries', 'A list holds up to 2000 channels.'],
+    ['invalid', 'items[0].snapshot.title is required', 'items[0].snapshot.title is required'],
+    ['conflict', 'a list named "Sports" already exists', 'A list with this name already exists.'],
+    ['not_found', 'list L9 does not exist', 'This list was deleted.'],
+    ['not_found', 'source src9 does not exist', 'source src9 does not exist'],
+  ] as const)('%s: %s', (code, message, shown) => {
+    expect(errorText(new RpcError(code, message), t)).toBe(shown);
   });
 });
 

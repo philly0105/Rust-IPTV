@@ -261,7 +261,7 @@
   "subtitleStyle.background": "Tło",
   "subtitleStyle.backgroundHint": "To, co jest za tekstem, aby pozostał czytelny.",
   "subtitleStyle.backgroundShadow": "Cień",
-  "subtitleStyle.backgroundBox": "Ramka",
+  "subtitleStyle.backgroundBox": "Półprzezroczyste",
   "subtitleStyle.backgroundSolid": "Nieprzezroczyste",
   "subtitleStyle.position": "Położenie",
   "subtitleStyle.positionHint": "Podnosi napisy nad dolną krawędź, na przykład ponad tekst wtopiony w obraz.",

@@ -31,7 +31,7 @@
   "goHome": "前往首页",
   "localNote": "仅在此设备上统计。",
   "clear": "清除统计",
-  "clearTitle": "要清除观看统计吗?",
+  "clearTitle": "要清除观看统计吗？",
   "clearBody": "所有已统计的观看时长都会被删除。观看进度和“最近观看”会保留。",
   "cleared": "已清除观看统计",
   "clearFailed": "无法清除统计"

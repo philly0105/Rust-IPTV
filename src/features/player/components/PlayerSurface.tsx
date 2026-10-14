@@ -23,9 +23,8 @@ import { useStreamInfoStore } from '../streamInfo';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { BarReadout, Controls, CtlButton, InlineSpinner } from './Controls';
 import { InlinePlayer } from './InlinePlayer';
-import { FullscreenChannelPanel, SleepPrompt, StreamInfoPanel, ZapBanner } from './lazyParts';
+import { FullscreenChannelPanel, RadioPlayer, SleepPrompt, StreamInfoPanel, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
-import { RadioPlayer } from './RadioPlayer';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
 import { useZapBannerShown, useZapHover } from './zapHooks';
 

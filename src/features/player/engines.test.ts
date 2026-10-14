@@ -362,3 +362,67 @@ describe('server refusal reasons', () => {
     );
   });
 });
+
+describe('subtitles drawn by the player (subtitles/inline.ts)', () => {
+  it('native: a track the overlay draws (hidden) still counts as on, an engine-hidden one does not', async () => {
+    const { drawTrack, isShownTrack } = await import('./subtitles/tracks');
+    const el = video();
+    const en = { kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' as TextTrackMode };
+    const fr = { kind: 'subtitles', label: 'French', language: 'fr', mode: 'hidden' as TextTrackMode };
+    Object.defineProperty(el, 'textTracks', { value: Object.assign([en, fr], { addEventListener() {}, removeEventListener() {} }) });
+    const callbacks = cb();
+    const engine = await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', callbacks, { captions: false });
+    const selected = (): boolean[] => {
+      el.dispatchEvent(new Event('loadedmetadata'));
+      const last = callbacks.onTracks.mock.calls.at(-1)?.[0] as { text: { selected: boolean }[] };
+      return last.text.map((x) => x.selected);
+    };
+
+    engine.setText('0');
+    expect([en.mode, fr.mode]).toEqual(['showing', 'disabled']);
+    // The overlay takes it over: hidden for the browser, still on for the menu.
+    drawTrack(en as unknown as TextTrack);
+    expect(en.mode).toBe('hidden');
+    expect(selected()).toEqual([true, false]);
+
+    engine.setText(null);
+    expect(en.mode).toBe('disabled');
+    // Hidden again later by someone else: not drawn, not on.
+    en.mode = 'hidden';
+    expect(isShownTrack(en as unknown as TextTrack)).toBe(false);
+    expect(selected()).toEqual([false, false]);
+  });
+  it('native: across picture-in-picture the track that is on stays on, and Off there stays off', async () => {
+    const { bindSubtitleOverlay } = await import('./subtitles/inline');
+    const el = video();
+    const en = Object.assign(new EventTarget(), { kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' as TextTrackMode, activeCues: [] });
+    const list = Object.assign(new EventTarget(), { 0: en, length: 1 });
+    Object.defineProperty(el, 'textTracks', { value: list });
+    const callbacks = cb();
+    const engine = await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', callbacks, { captions: false });
+    const box = document.createElement('div');
+    const stop = bindSubtitleOverlay(el, box);
+    const selected = (): boolean => {
+      el.dispatchEvent(new Event('loadedmetadata'));
+      const last = callbacks.onTracks.mock.calls.at(-1)?.[0] as { text: { selected: boolean }[] };
+      return last.text[0]!.selected;
+    };
+    const change = (): boolean => list.dispatchEvent(new Event('change'));
+
+    engine.setText('0');
+    change();
+    expect([en.mode, selected()]).toEqual(['hidden', true]);
+    el.dispatchEvent(new Event('enterpictureinpicture'));
+    expect([en.mode, selected(), box.hidden]).toEqual(['showing', true, true]);
+    el.dispatchEvent(new Event('leavepictureinpicture'));
+    expect([en.mode, selected(), box.hidden]).toEqual(['hidden', true, false]);
+
+    el.dispatchEvent(new Event('enterpictureinpicture'));
+    engine.setText(null);
+    change();
+    expect([en.mode, selected()]).toEqual(['disabled', false]);
+    el.dispatchEvent(new Event('leavepictureinpicture'));
+    expect([en.mode, selected()]).toEqual(['disabled', false]);
+    stop();
+  });
+});

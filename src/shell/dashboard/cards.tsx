@@ -1,9 +1,9 @@
 import { BookmarkCheck, Play } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { createContext, useContext, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { itemKey, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
+import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { CARD_ART, CARD_ROOT, LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
@@ -222,6 +222,26 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
   );
 }
 
+/** A channel card asking for its menu (Run 2 C2): where to draw it, the channel, and the card's Play. */
+export interface ChannelMenuRequest {
+  pos: { x: number; y: number };
+  channel: Channel;
+  onPlay(): void;
+}
+
+/**
+ * Opens the dashboard's channel menu. `ChannelMenuHost` (ChannelCardMenu.tsx) provides it; with no
+ * provider, or no `channel` on the card, a channel card has no menu.
+ */
+export const ChannelMenuContext = createContext<((request: ChannelMenuRequest) => void) | null>(null);
+
+/** Anchor for a menu opened from the keyboard: near the card's inline start, low on its artwork. */
+function menuAnchor(el: HTMLElement): { x: number; y: number } {
+  const r = el.getBoundingClientRect();
+  const rtl = getComputedStyle(el).direction === 'rtl';
+  return { x: rtl ? r.right - 48 : r.left + 48, y: r.top + Math.min(r.height - 8, 96) };
+}
+
 export interface ChannelCardProps {
   rail: RailCardProps;
   name: string;
@@ -234,14 +254,38 @@ export interface ChannelCardProps {
   isRadio?: boolean;
   onPlay: () => void;
   ariaLabel?: string;
+  /**
+   * The channel behind the card. With it, right click, the context-menu key and Shift+F10 open the
+   * channel menu (Play, Add to multi-view, Add to list, Rename, Hide, locks) where a host provides one.
+   */
+  channel?: Channel;
 }
 
 /** 16:9 channel tile with the logo centered on a per-channel tint. */
-export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName, isRadio, onPlay, ariaLabel }: ChannelCardProps) {
+export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName, isRadio, onPlay, ariaLabel, channel }: ChannelCardProps) {
   const { t } = useTranslation('shell');
+  const openMenu = useContext(ChannelMenuContext);
   const hue = hueOf(name);
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
+  const onContextMenu = menu
+    ? (e: MouseEvent<HTMLButtonElement>) => {
+        e.preventDefault();
+        // Focused, so closing the menu hands focus back to this card.
+        e.currentTarget.focus({ preventScroll: true });
+        // A keyboard-made contextmenu event (no keydown seen) has no pointer position.
+        menu(e.clientX === 0 && e.clientY === 0 ? menuAnchor(e.currentTarget) : { x: e.clientX, y: e.clientY });
+      }
+    : undefined;
+  const onKeyDown = menu
+    ? (e: KeyboardEvent<HTMLButtonElement>) => {
+        if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        menu(menuAnchor(e.currentTarget));
+      }
+    : undefined;
   return (
-    <button type="button" {...rail} onClick={onPlay} aria-label={ariaLabel} className={cardRoot}>
+    <button type="button" {...rail} onClick={onPlay} onContextMenu={onContextMenu} onKeyDown={onKeyDown} aria-label={ariaLabel} className={cardRoot}>
       <div
         className={cn(CARD_ART, 'aspect-video w-full')}
         style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}

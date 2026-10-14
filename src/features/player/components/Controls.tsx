@@ -22,7 +22,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop, rpc } from '@/api/transport';
@@ -326,7 +326,33 @@ export function MenuChoice({ label, selected, onClick }: { label: string; select
  * inline above the bar. Picking a choice closes the menu; the header X closes it too, since
  * Escape may never reach the webview while the native mpv window has focus.
  */
-function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: MenuView | null): void; isVod: boolean }) {
+/** Space kept between a floating menu and the top of what is visible (the app header, the screen). */
+const MENU_EDGE = 8;
+
+/**
+ * The height a menu that grows up from its bottom edge may take: up to the app header, or the top
+ * of the screen in fullscreen. Null when it cannot be measured.
+ */
+export function roomAbove(menu: HTMLElement): number | null {
+  const bottom = menu.getBoundingClientRect().bottom;
+  const header = document.fullscreenElement ? null : document.querySelector<HTMLElement>('[data-testid="shell-header"]');
+  const top = Math.max(0, header?.getBoundingClientRect().bottom ?? 0) + MENU_EDGE;
+  const room = Math.floor(bottom - top);
+  return Number.isFinite(room) && bottom > 0 ? Math.max(room, 0) : null;
+}
+
+function OptionsMenu({
+  view,
+  setView,
+  isVod,
+  fitAbove = false,
+}: {
+  view: MenuView;
+  setView(v: MenuView | null): void;
+  isVod: boolean;
+  /** Floating over the picture, growing upward: never taller than the room above its bottom edge. */
+  fitAbove?: boolean;
+}) {
   const { t } = useTranslation('player');
   const { t: tc } = useTranslation('common');
   const tracks = useMediaStore((s) => s.tracks);
@@ -335,12 +361,29 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
   const statsOpen = useStreamInfoStore((s) => s.open);
   const syncSummary = useSyncSummary();
   const ref = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
+  // The style view holds form fields (radio groups, a slider), which a menu may not contain: it
+  // is a small dialog in the same frame instead.
+  const styleView = view === 'subStyle';
+
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!fitAbove || !menu) return;
+    const fit = (): void => setRoom(roomAbove(menu));
+    fit();
+    window.addEventListener('resize', fit);
+    document.addEventListener('fullscreenchange', fit);
+    return () => {
+      window.removeEventListener('resize', fit);
+      document.removeEventListener('fullscreenchange', fit);
+    };
+  }, [fitAbove, view]);
 
   useEffect(() => {
     // The first item that can take focus (Sync rows may all be disabled, Sources may still be
     // loading), else the header's Back: focus must stay in the menu for its arrow keys and Escape.
     const menu = ref.current;
-    (menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back])') ?? menu?.querySelector<HTMLElement>('[data-menu-back]'))?.focus();
+    (menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back]):not([data-menu-close])') ?? menu?.querySelector<HTMLElement>('[data-menu-back]'))?.focus();
   }, [view]);
 
   const qualityValue = tracks.qualityAuto ? t('qualityAuto') : (tracks.qualities.find((q) => q.selected)?.label ?? t('qualityAuto'));
@@ -359,7 +402,7 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
       ) : (
         <button
           type="button"
-          role="menuitem"
+          role={styleView ? undefined : 'menuitem'}
           data-menu-back
           onClick={() => setView(view === 'subStyle' ? 'text' : 'root')}
           className="flex flex-1 items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
@@ -384,6 +427,8 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
       )}
       <button
         type="button"
+        role={styleView ? undefined : 'menuitem'}
+        data-menu-close
         aria-label={tc('close')}
         title={tc('close')}
         onClick={() => setView(null)}
@@ -397,8 +442,10 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
   return (
     <div
       ref={ref}
-      role="menu"
-      aria-label={t('settingsMenu')}
+      role={styleView ? 'dialog' : 'menu'}
+      aria-label={styleView ? t('subtitleStyle.menuTitle') : t('settingsMenu')}
+      data-testid="player-options-menu"
+      data-view={view}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
@@ -413,7 +460,8 @@ function OptionsMenu({ view, setView, isVod }: { view: MenuView; setView(v: Menu
           next?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge max-h-[min(60vh,360px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      style={room !== null ? { maxHeight: `min(60vh, 360px, ${room}px)` } : undefined}
+      className="player-glass-strong player-glass-edge max-h-[min(60vh,360px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -617,7 +665,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       {menu && variant === 'overlay' && (
         // Floating: just above the glass pane, inside the scrim. Compact: over the picture.
         <div className={cn('absolute z-10', floating ? 'end-2 bottom-[calc(100%-2.5rem)] sm:end-3' : 'end-1.5 bottom-full mb-1')}>
-          <OptionsMenu view={menu} setView={setMenu} isVod={isVod} />
+          <OptionsMenu view={menu} setView={setMenu} isVod={isVod} fitAbove />
         </div>
       )}
 

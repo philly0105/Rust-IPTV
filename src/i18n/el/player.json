@@ -261,7 +261,7 @@
   "subtitleStyle.background": "Φόντο",
   "subtitleStyle.backgroundHint": "Ό,τι βρίσκεται πίσω από το κείμενο ώστε να διαβάζεται εύκολα.",
   "subtitleStyle.backgroundShadow": "Σκιά",
-  "subtitleStyle.backgroundBox": "Πλαίσιο",
+  "subtitleStyle.backgroundBox": "Ημιδιαφανές",
   "subtitleStyle.backgroundSolid": "Συμπαγές",
   "subtitleStyle.position": "Θέση",
   "subtitleStyle.positionHint": "Ανεβάζει τους υπότιτλους από το κάτω άκρο, για παράδειγμα πάνω από κείμενο τυπωμένο πάνω στην εικόνα.",

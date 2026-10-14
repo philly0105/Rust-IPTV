@@ -207,9 +207,28 @@ describe('loaded subtitle files in the built-in player', () => {
     expect(rpcMock).toHaveBeenCalledWith('settings.update', { patch: { subtitleColor: 'yellow' } });
     expect(screen.getByTestId('subtitle-color').querySelector('[aria-checked="true"]')?.getAttribute('data-value')).toBe('yellow');
 
+    // Form fields may not sit in a menu (axe aria-required-children): the style view is a
+    // labelled dialog in the same frame, and its Back and Close are plain buttons.
+    const dialog = screen.getByRole('dialog', { name: i18n.t('player:subtitleStyle.menuTitle') });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(dialog.querySelector('[role^="menuitem"]')).toBeNull();
+
+    // Up/Down leave the slider for the next row; the slider keeps Left/Right.
+    const slider = screen.getByTestId('subtitle-position');
+    slider.focus();
+    fireEvent.keyDown(slider, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(slider);
+    fireEvent.keyDown(slider, { key: 'ArrowUp' });
+    expect(document.activeElement).not.toBe(slider);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
     // Escape steps back to the track list, not out of the menu.
-    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.getByTestId('subtitle-menu')).toBeTruthy();
+    const menu = screen.getByRole('menu', { name: i18n.t('player:settingsMenu') });
+    // Every focusable row of a menu is a menu item, Close too.
+    expect(menu.querySelector('[data-menu-close]')?.getAttribute('role')).toBe('menuitem');
+    expect(menu.querySelector('[data-menu-back]')?.getAttribute('role')).toBe('menuitem');
   });
 
   it('Shift+C asks the controls to open the Subtitles menu', () => {
@@ -229,6 +248,14 @@ describe('reading subtitle files', () => {
     await expect(load.readSubtitleFile(big)).rejects.toMatchObject({ problem: 'tooLarge' });
     await expect(load.readSubtitleFile(file('hello', 'notes.txt'))).rejects.toMatchObject({ problem: 'unknownFormat' });
     await expect(load.readSubtitleFile(file('nothing here', 'empty.srt'))).rejects.toMatchObject({ problem: 'noCues' });
+  });
+
+  it('says how big a refused file is without rounding it down to the limit', () => {
+    // over5mb.srt: 5,243,018 bytes read "5 MB" next to "can be up to 5 MB".
+    expect(load.oversizeText(5_243_018, 'en')).toBe('5.01 MB');
+    expect(load.oversizeText(5 * 1024 * 1024 + 1, 'en')).toBe('5.01 MB');
+    expect(load.oversizeText(12 * 1024 * 1024 + 300 * 1024, 'en')).toBe('12.3 MB');
+    expect(load.oversizeText(5_243_018, 'de')).toBe('5,01 MB');
   });
 
   it('loads into the showing player and ignores a file that arrives after the item changed', async () => {

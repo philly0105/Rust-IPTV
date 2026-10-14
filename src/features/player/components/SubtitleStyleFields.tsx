@@ -286,7 +286,10 @@ export function PositionSlider({
         }}
         onPointerUp={commit}
         onKeyDown={(e) => {
-          // The slider owns its arrows: neither the menu nor the player's shortcuts take them.
+          // In the player's menus Up/Down move between rows (the menu takes them, as it does for
+          // the radio groups); the slider keeps Left/Right, Home/End and Page keys. On the page
+          // it owns every arrow. Neither the menu nor the player's shortcuts take the keys it keeps.
+          if (tone === 'glass' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;
           if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key.startsWith('Page')) e.stopPropagation();
         }}
         onKeyUp={(e) => {

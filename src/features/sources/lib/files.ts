@@ -104,22 +104,50 @@ function lineText(line: Uint8Array, utf8: TextDecoder): string {
   return out + utf8.decode(line.subarray(start));
 }
 
+/** Bytes looked at for BOM-less UTF-16 (even, so the pairs line up). */
+const UTF16_SNIFF_BYTES = 512;
+
+/**
+ * BOM-less UTF-16 by where the NUL bytes fall: ASCII in UTF-16LE is `x\0` pairs, in UTF-16BE `\0x`
+ * pairs, and UTF-8 or cp1252 text has no NULs. Needs at least two such pairs making up a third of
+ * the pairs looked at, and almost none the other way round. `true` is LE, `false` BE.
+ */
+function sniffUtf16(bytes: Uint8Array): boolean | null {
+  const end = Math.min(bytes.length, UTF16_SNIFF_BYTES) & ~1;
+  let le = 0;
+  let be = 0;
+  for (let i = 0; i < end; i += 2) {
+    if (bytes[i] !== 0 && bytes[i + 1] === 0) le += 1;
+    else if (bytes[i] === 0 && bytes[i + 1] !== 0) be += 1;
+  }
+  const pairs = end / 2;
+  const enough = (n: number) => n >= 2 && n * 3 >= pairs;
+  if (enough(le) && be * 10 <= le) return true;
+  if (enough(be) && le * 10 <= be) return false;
+  return null;
+}
+
 /**
  * Decodes a playlist file as the core's `m3u::parser::decode_playlist_text` (the desktop file import)
  * does, so the web build's text import reads the same channels:
  * - UTF-16 from a byte-order mark (FF FE / FE FF) or a BOM-less `#` interleaved with NUL (`#\0` LE,
  *   `\0#` BE); a trailing odd byte is ignored, unpaired surrogates become U+FFFD.
+ * - Beyond the core, other BOM-less UTF-16 is picked by where NULs fall in the first 512 bytes
+ *   ({@link sniffUtf16}), for subtitle and backup files some Windows tools write that way. A
+ *   playlist starts with `#`, which the rule above already covers.
  * - Otherwise a UTF-8 BOM is dropped; valid UTF-8 decodes as is. If any byte is invalid, each line
  *   decodes in runs: valid UTF-8 runs stay UTF-8, and only the invalid bytes are Windows-1252, so a
  *   file that mixes UTF-8 and cp1252 lines (or bytes) keeps both.
  */
 export function decodeText(bytes: Uint8Array): string {
   const [a, b] = bytes;
+  const sniffed = sniffUtf16(bytes);
   const utf16 =
     a === 0xff && b === 0xfe ? { le: true, skip: 2 }
     : a === 0xfe && b === 0xff ? { le: false, skip: 2 }
     : a === 0x23 && b === 0x00 ? { le: true, skip: 0 }
     : a === 0x00 && b === 0x23 ? { le: false, skip: 0 }
+    : sniffed !== null ? { le: sniffed, skip: 0 }
     : null;
   if (utf16) {
     const body = bytes.subarray(utf16.skip, utf16.skip + ((bytes.length - utf16.skip) & ~1));

@@ -39,9 +39,10 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   // Guide (EpgGridPage.tsx): search and jump to a date and time.
   { combo: '/', descKey: 'guide:searchLabel', area: 'Guide' },
   { combo: 't', descKey: 'guide:jumpTitle', area: 'Guide' },
-  // A custom list's rows and the Lists sidebar (SortableList.tsx onKeyDown).
-  { combo: 'alt+arrowup', descKey: 'lists:shortcutMoveUp', area: 'Lists' },
-  { combo: 'alt+arrowdown', descKey: 'lists:shortcutMoveDown', area: 'Lists' },
+  // Only inside the Manage lists and Edit channels dialogs (SortableList.tsx onKeyDown); the list
+  // page and the Lists sidebar reorder through those dialogs, so the text names them.
+  { combo: 'alt+arrowup', descKey: 'scListsDialogMoveUp', area: 'Lists' },
+  { combo: 'alt+arrowdown', descKey: 'scListsDialogMoveDown', area: 'Lists' },
   // Multi-view page (MultiviewPage.tsx); the focused-slot keys are bound by the wall (useWallKeyboard.ts).
   { combo: 'digit', descKey: 'multiview:shortcutSound', area: 'Multi-view' },
   { combo: 'f', descKey: 'multiview:shortcutFullscreen', area: 'Multi-view' },

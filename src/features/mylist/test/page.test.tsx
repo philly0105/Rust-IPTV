@@ -431,6 +431,28 @@ describe('MyListPage: remove and watched', () => {
     await waitFor(() => expect(rowOf('Heat').querySelector('[data-action="watched"]')!.getAttribute('aria-pressed')).toBe('false'));
   });
 
+  it('a watched change and its Undo refresh the VOD grid pages Hide watched filters', async () => {
+    const { queryClient } = await import('@/api/query');
+    const core = await loaded();
+    rpc.handlers['userstate.setWatched'] = (raw) => {
+      const a = raw as { ref: ItemRef; watched: boolean };
+      core.entries = core.entries.map((e) => (e.ref.itemId === a.ref.itemId ? { ...e, watched: a.watched } : e));
+    };
+    rpc.handlers['positions.remove'] = () => undefined;
+    rpc.handlers['positions.set'] = () => undefined;
+    const grid = ['catalog.movies', { sourceId: 'src1', query: { offset: 0, limit: 60 }, hideWatched: true }] as const;
+    const stale = () => queryClient.getQueryState(grid)?.isInvalidated ?? false;
+
+    queryClient.setQueryData(grid, []);
+    fireEvent.click(rowOf('Arrival').querySelector<HTMLButtonElement>('[data-action="watched"]')!);
+    await waitFor(() => expect(h.lastToast()?.action?.label).toBe('Undo'));
+    await waitFor(() => expect(stale()).toBe(true));
+
+    queryClient.setQueryData(grid, []);
+    act(() => h.lastToast()!.action!.onClick());
+    await waitFor(() => expect(stale()).toBe(true));
+  });
+
   it('ignores page keys typed into the search box', async () => {
     await loaded();
     const input = screen.getByRole('searchbox', { name: 'Search My List' });

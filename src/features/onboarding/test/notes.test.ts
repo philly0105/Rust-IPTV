@@ -3,6 +3,8 @@
 // carries the same keys into the other 18 languages.
 import { describe, expect, it } from 'vitest';
 
+import ar from '@/i18n/ar/onboarding.json';
+import ary from '@/i18n/ary/onboarding.json';
 import en from '@/i18n/en/onboarding.json';
 import pkg from '../../../../package.json';
 
@@ -50,5 +52,17 @@ describe('RELEASE_NOTES', () => {
     for (const k of used) expect(strings[k], k).toBeTruthy();
     // And nothing unused lingers in the file.
     expect(Object.keys(strings).sort()).toEqual([...new Set(used)].sort());
+  });
+
+  // Under the Unicode bidi algorithm a full stop, comma or colon between Arabic and Latin text takes
+  // the right-to-left direction and shows on the far side of the word: ".srt" read as "srt."
+  // (review R1). Write the name without it, or wrap the Latin run in U+2066/U+2069 isolates.
+  it('never puts a full stop, comma or colon in front of Latin text in the right-to-left locales', () => {
+    const LEADING_PUNCT_BEFORE_LATIN = /(^|[^⁦A-Za-z0-9])[.,:][A-Za-z]/;
+    for (const [locale, file] of Object.entries({ ar, ary })) {
+      for (const [key, value] of Object.entries(file as Record<string, string>)) {
+        expect(value, `${locale}.${key}`).not.toMatch(LEADING_PUNCT_BEFORE_LATIN);
+      }
+    }
   });
 });

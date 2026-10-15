@@ -4,15 +4,16 @@
  * is missing or off screen.
  *
  * It is modal: a full-window layer catches pointer input, focus stays in the
- * card (Tab wraps, a focus that escapes is pulled back) and returns to where
- * it was when the tour closes, and no key reaches the app's shortcuts while
- * it is open. Next / Back / Skip, Escape skips, and the arrow keys step
- * forward and back (mirrored in right-to-left layouts). Under reduced motion
- * nothing moves: the spotlight and card jump between anchors.
+ * card (Tab wraps, a click on the card's text focuses the card, a focus that
+ * escapes is pulled back) and returns to where it was when the tour closes.
+ * The tour owns the keyboard while it is open, wherever focus is, and no key
+ * reaches the app's shortcuts. Next / Back / Skip, Escape skips, and the
+ * arrow keys step forward and back (mirrored in right-to-left layouts). Under
+ * reduced motion nothing moves: the spotlight and card jump between anchors.
  */
 
 import { Check } from 'lucide-react';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Button, cn, focusableIn, Kbd } from '@/ui';
@@ -31,6 +32,10 @@ export interface TourProps {
 const CARD_ESTIMATE = { width: 352, height: 232 };
 /** How often a missing or moving anchor is looked up again (rail sources load late, layouts shift). */
 export const ANCHOR_POLL_MS = 300;
+
+/** True for a node inside a modal layer other than the tour's own (a Dialog opened above it). The caller rules out the tour's layer first. */
+const inOtherModal = (node: Node) =>
+  node instanceof Element && node.closest('[aria-modal="true"], [data-dialog-layer]') !== null;
 
 const sameBox = (a: Box | null, b: Box | null) =>
   a === b || (!!a && !!b && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height);
@@ -151,11 +156,14 @@ export function Tour({ onClose }: TourProps) {
   }, [step]);
 
   // Focus that leaves the tour (a click on the page behind, a script) comes back to the card.
+  // Focus inside another modal layer stays there, like the shared Dialog allows stacked modals:
+  // pulling it back would fight that layer's own focus trap.
   useEffect(() => {
     if (!ready) return;
     const onFocusIn = (e: FocusEvent) => {
       if (closingRef.current || !(e.target instanceof Node)) return;
       if (layerRef.current?.contains(e.target)) return;
+      if (inOtherModal(e.target)) return;
       primaryRef.current?.focus({ preventScroll: true });
     };
     document.addEventListener('focusin', onFocusIn);
@@ -178,18 +186,19 @@ export function Tour({ onClose }: TourProps) {
     return () => ro?.disconnect();
   }, [ready]);
 
-  if (!ready) return null;
-
-  const rtl = document.documentElement.dir === 'rtl';
-  const spot = box ? spotlightBox(box, vp.width, vp.height) : null;
-  const place = spot ? placeCard(spot, cardSize, vp.width, vp.height, rtl) : centred(cardSize, vp.width, vp.height);
-  const Icon = current.icon;
-
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    // Nothing typed inside the tour reaches the app's shortcut registry (it listens on window).
+  // Keys. The tour owns the keyboard while it is open, so the handler sits on window in the
+  // capture phase: it sees every key first, wherever focus is (on the card after a click on its
+  // text, on <body> after a script blurred the focused button), instead of only keys typed on the
+  // layer. It stops every key, so the app's shortcut registry (window, bubble phase) and the page
+  // behind see none. Stopping propagation leaves default actions alone: Enter and Space still
+  // press the focused button.
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  onKeyRef.current = (e) => {
+    // A modal that opened above the tour (it should not happen, but a PIN prompt could) keeps its keys.
+    if (e.target instanceof Node && !layerRef.current?.contains(e.target) && inOtherModal(e.target)) return;
     e.stopPropagation();
-    e.nativeEvent.stopImmediatePropagation();
-    if (e.nativeEvent.isComposing) return;
+    e.stopImmediatePropagation();
+    if (e.isComposing) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       close('skipped');
@@ -197,29 +206,37 @@ export function Tour({ onClose }: TourProps) {
     }
     if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault();
-      const forward = (e.key === 'ArrowRight') !== rtl;
-      go(forward ? 1 : -1);
+      const rtl = document.documentElement.dir === 'rtl';
+      go((e.key === 'ArrowRight') !== rtl ? 1 : -1);
       return;
     }
     if (e.key !== 'Tab') return;
     const card = cardRef.current;
-    if (!card) return;
-    const items = focusableIn(card);
+    const items = card ? focusableIn(card) : [];
     if (items.length === 0) return;
-    const first = items[0]!;
-    const lastItem = items[items.length - 1]!;
-    const active = document.activeElement;
-    if (e.shiftKey && (active === first || !card.contains(active))) {
-      e.preventDefault();
-      lastItem.focus();
-    } else if (!e.shiftKey && (active === lastItem || !card.contains(active))) {
-      e.preventDefault();
-      first.focus();
-    }
+    // Tab and Shift+Tab cycle through the card's buttons; from anywhere else (the card itself,
+    // <body>) Tab starts at the first and Shift+Tab at the last.
+    e.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next = at === -1 ? (e.shiftKey ? items.length - 1 : 0) : (at + (e.shiftKey ? -1 : 1) + items.length) % items.length;
+    items[next]!.focus();
   };
+  useEffect(() => {
+    if (!ready) return;
+    const onKey = (e: KeyboardEvent) => onKeyRef.current(e);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [ready]);
+
+  if (!ready) return null;
+
+  const rtl = document.documentElement.dir === 'rtl';
+  const spot = box ? spotlightBox(box, vp.width, vp.height) : null;
+  const place = spot ? placeCard(spot, cardSize, vp.width, vp.height, rtl) : centred(cardSize, vp.width, vp.height);
+  const Icon = current.icon;
 
   return createPortal(
-    <div ref={layerRef} className="fixed inset-0 z-50" data-testid="tour" data-tour-step={current.anchor} onKeyDown={onKeyDown}>
+    <div ref={layerRef} className="fixed inset-0 z-50" data-testid="tour" data-tour-step={current.anchor}>
       {spot ? (
         // The scrim is the spotlight's own enormous shadow, so the anchor shows through a ring-edged hole.
         <div
@@ -243,10 +260,13 @@ export function Tour({ onClose }: TourProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={textId}
+        // Focusable but not a Tab stop: a click on the card's text focuses the card instead of
+        // dropping focus to <body>, outside the dialog (the shared Dialog panel does the same).
+        tabIndex={-1}
         data-testid="tour-card"
         data-side={place.side}
         className={cn(
-          'fixed flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-border bg-surface text-fg shadow-2',
+          'fixed flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-border bg-surface text-fg shadow-2 focus-visible:outline-none',
           'motion-safe:transition-[top,left] motion-safe:duration-200 motion-safe:ease-out',
         )}
         style={{ top: place.top, left: place.left }}
@@ -268,7 +288,9 @@ export function Tour({ onClose }: TourProps) {
             {t(current.textKey)}
           </p>
           {current.anchor === 'search' && (
-            <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-fg-muted">
+            // Keyboard hints mean nothing on a phone or tablet: hidden when the main pointer is a
+            // finger (the same coarse-pointer rule as the hover prefetch).
+            <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-fg-muted pointer-coarse:hidden" data-testid="tour-hints">
               <li className="flex items-center gap-1.5">
                 <Kbd combo="mod+f" />
                 {t('tourHintSearch')}

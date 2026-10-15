@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "直播電視",
   "tourLiveText": "頻道依群組排列，可查看目前和下一個節目，以及完整的節目表。",
-  "tourVodTitle": "電影和影集",
-  "tourVodText": "瀏覽海報、依年代篩選，並將作品加入我的片單以便稍後觀看。",
+  "tourVodTitle": "電影、影集和我的片單",
+  "tourVodText": "瀏覽每個來源的電影和影集海報、依年代篩選，並將作品加入我的片單，集中在一處。",
   "tourSearchTitle": "搜尋全部內容",
   "tourSearchText": "在所有播放來源中尋找頻道、電影和影集。",
   "tourStep": "第 {{current}} 步，共 {{total}} 步",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "全新外觀",
   "noteLooksText": "七種強調色、OLED 純黑主題、緊湊密度和介面大小。",
   "noteScreenshotTitle": "螢幕截圖",
-  "noteScreenshotText": "播放時按 S，即可將目前畫面儲存到「圖片」資料夾。",
+  "noteScreenshotText": "播放時按 S，即可將目前畫面儲存為圖片。",
   "noteSpeedTitle": "海報載入更快",
   "noteSpeedText": "海報和台標會儲存在磁碟上，下次開啟時網格就能立即顯示。"
 }

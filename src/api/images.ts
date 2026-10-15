@@ -15,6 +15,13 @@
  * The cache route can fail where the provider would not (an old server
  * without the route, a guard refusal), so callers fall back to the original
  * URL once before giving up: `imageCandidates` lists both, in that order.
+ * A URL that failed is remembered for a few minutes (`markImageFailed`), so a
+ * remounted row skips it instead of asking the cache and the provider again.
+ *
+ * Cache responses are kept by the browser for a week. Clearing the cache bumps
+ * a generation (`bumpImageCacheGeneration`) that every later cache URL
+ * carries as `gen=<n>`, so this browser asks the emptied cache again instead
+ * of reusing its own copies. The route ignores the parameter.
  *
  * This module deliberately does not import `./transport`: dozens of tests mock
  * that module with partial factories, and every poster on screen goes through
@@ -40,10 +47,98 @@ export function setDesktopImageBase(proxyBase: string | null | undefined): void 
   desktopImageBase = typeof proxyBase === 'string' && /\/proxy\/?$/.test(proxyBase) ? proxyBase.replace(/\/proxy\/?$/, '/img') : null;
 }
 
-if (isDesktopWindow) {
-  invoke('rpc', { cmd: 'app.info', args: null })
-    .then((info) => setDesktopImageBase((info as { proxyBase?: unknown } | null)?.proxyBase as string | null | undefined))
-    .catch(() => undefined);
+/** Settles once the desktop base request answered or failed; already settled on the web. */
+const baseSettled: Promise<void> = isDesktopWindow
+  ? invoke('rpc', { cmd: 'app.info', args: null })
+      .then((info) => setDesktopImageBase((info as { proxyBase?: unknown } | null)?.proxyBase as string | null | undefined))
+      .catch(() => undefined)
+  : Promise.resolve();
+
+/**
+ * Resolves once the desktop cache base is known (or its request failed), and
+ * at the latest after `timeoutMs`; at once on the web. Bootstrap awaits it
+ * next to the locale, so the first artwork on screen already loads through
+ * the cache. A picture keeps the URL it started with (`useImageChain`), so
+ * one that mounted earlier loads directly until it remounts.
+ */
+export function imageBaseReady(timeoutMs = 1500): Promise<void> {
+  if (!isDesktopWindow) return Promise.resolve();
+  return Promise.race([baseSettled, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
+}
+
+const GENERATION_KEY = 'tsrust.imageCacheGen';
+
+function storedGeneration(): number {
+  try {
+    const n = Number(globalThis.localStorage?.getItem(GENERATION_KEY));
+    return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Bumped by Clear; 0 (no `gen` parameter) until the cache was first cleared in this browser. */
+let generation = storedGeneration();
+
+/** The cache generation cache URLs carry right now (0: none). */
+export function imageCacheGeneration(): number {
+  return generation;
+}
+
+/**
+ * Called after the image cache was cleared: later cache URLs carry a new
+ * `gen`, so this browser fetches each picture from the emptied cache again
+ * (which downloads it anew) instead of showing its own week-old copy.
+ * Persisted, and picked up by the app's other tabs.
+ */
+export function bumpImageCacheGeneration(): number {
+  generation = Math.max(generation, storedGeneration()) + 1;
+  try {
+    globalThis.localStorage?.setItem(GENERATION_KEY, String(generation));
+  } catch {
+    // Private mode or a full quota: the bump still holds for this session.
+  }
+  warmed.clear();
+  forgetImageFailures();
+  return generation;
+}
+
+/** How long a failed picture URL is skipped (the core remembers an upstream failure for 10 min). */
+export const IMAGE_FAILURE_TTL_MS = 5 * 60_000;
+const FAILURES_MAX = 1000;
+/** URL -> when it last failed; insertion order is age order, so the oldest entry goes first when full. */
+const failedAt = new Map<string, number>();
+
+/** Remembers that `url` failed to load, so a remounted picture skips it for a while. */
+export function markImageFailed(url: string): void {
+  failedAt.delete(url);
+  if (failedAt.size >= FAILURES_MAX) {
+    const oldest = failedAt.keys().next().value;
+    if (oldest !== undefined) failedAt.delete(oldest);
+  }
+  failedAt.set(url, Date.now());
+}
+
+/** True when `url` failed within the last `IMAGE_FAILURE_TTL_MS`. */
+export function imageFailedRecently(url: string): boolean {
+  const at = failedAt.get(url);
+  if (at === undefined) return false;
+  if (Date.now() - at < IMAGE_FAILURE_TTL_MS) return true;
+  failedAt.delete(url);
+  return false;
+}
+
+/** Forgets every remembered failure (back online, cache cleared, tests). */
+export function forgetImageFailures(): void {
+  failedAt.clear();
+}
+
+if (typeof window !== 'undefined') {
+  // A failure while offline says nothing about the picture.
+  window.addEventListener('online', forgetImageFailures);
+  window.addEventListener('storage', (e) => {
+    if (e.key === GENERATION_KEY) generation = Math.max(generation, storedGeneration());
+  });
 }
 
 /** The base the rewrite uses right now: '/api/img' on the web, the loopback route on desktop (null until known). */
@@ -86,6 +181,7 @@ export function imageUrl(src: string | null | undefined, sourceId?: string): str
   if (!base || !cacheable(trimmed)) return src;
   const params = new URLSearchParams({ url: trimmed });
   if (sourceId) params.set('sourceId', sourceId);
+  if (generation > 0) params.set('gen', String(generation));
   return `${base}?${params.toString()}`;
 }
 
@@ -142,6 +238,8 @@ export function preloadImage(src: string | null | undefined, sourceId?: string):
   img.decoding = 'async';
   img.referrerPolicy = 'no-referrer';
   (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'low';
+  // The visible picture then starts at its next attempt instead of asking again.
+  img.onerror = () => markImageFailed(url);
   img.src = url;
   // Decode off the main thread now; a failure only means the visible <img> tries again.
   img.decode?.().catch(() => undefined);

@@ -10,12 +10,19 @@ vi.mock('@/api/transport', () => ({
 }));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
+const { useMediaStore, resetMedia } = await import('../media');
 const { RadioPlayer } = await import('./RadioPlayer');
 
-beforeEach(() => __resetPlayerForTests());
+const radio = { url: 'http://r/1.mp3', kind: 'direct' as const, title: 'Jazz FM', isLive: true, isRadio: true };
+
+beforeEach(() => {
+  __resetPlayerForTests();
+  resetMedia();
+});
 afterEach(() => {
   cleanup();
   __resetPlayerForTests();
+  resetMedia();
 });
 
 describe('RadioPlayer', () => {
@@ -42,5 +49,30 @@ describe('RadioPlayer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^mute$/i }));
     expect(usePlayerStore.getState().muted).toBe(true);
+  });
+
+  it('keeps the camera on the stage, disabled with the reason, and says it when pressed (C6)', async () => {
+    act(() => usePlayerStore.setState({ source: radio, mode: 'radio', status: 'playing' }));
+    render(<RadioPlayer variant="stage" />);
+    const camera = await screen.findByRole('button', { name: 'Take screenshot' });
+    expect(camera.getAttribute('aria-disabled')).toBe('true');
+    expect(camera.getAttribute('aria-keyshortcuts')).toBeNull();
+    const describedBy = camera.getAttribute('aria-describedby');
+    expect(describedBy && document.getElementById(describedBy)?.textContent).toBe('Radio has no picture to capture.');
+    // Disabled but focusable: the keyboard reaches it and hears why.
+    camera.focus();
+    expect(document.activeElement).toBe(camera);
+    fireEvent.click(camera);
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Take screenshot', secondary: 'Radio has no picture to capture.' });
+  });
+
+  it('leaves the camera off the compact strip, like the mini player bar', async () => {
+    act(() => usePlayerStore.setState({ source: radio, mode: 'radio', status: 'playing' }));
+    render(<RadioPlayer variant="bar" />);
+    // Let the lazy part settle before asserting it is absent.
+    await act(async () => {
+      await import('./ScreenshotButton');
+    });
+    expect(screen.queryByRole('button', { name: 'Take screenshot' })).toBeNull();
   });
 });

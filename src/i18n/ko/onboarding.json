@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "라이브 TV",
   "tourLiveText": "그룹별로 정리된 채널과 지금·다음 프로그램, 전체 TV 가이드를 볼 수 있습니다.",
-  "tourVodTitle": "영화 및 시리즈",
-  "tourVodText": "포스터를 둘러보고, 연대별로 필터링하고, 나중에 볼 작품을 내 목록에 저장하세요.",
+  "tourVodTitle": "영화, 시리즈 및 내 목록",
+  "tourVodText": "소스별 영화와 시리즈 포스터를 둘러보고, 연대별로 필터링하고, 작품을 내 목록에 저장해 한곳에 모아 두세요.",
   "tourSearchTitle": "전체 검색",
   "tourSearchText": "모든 소스에서 채널, 영화, 시리즈를 찾아보세요.",
   "tourStep": "{{total}}단계 중 {{current}}단계",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "새로운 디자인",
   "noteLooksText": "7가지 강조 색상, OLED 블랙 테마, 컴팩트 밀도, 인터페이스 크기.",
   "noteScreenshotTitle": "스크린샷",
-  "noteScreenshotText": "재생 중 S를 누르면 현재 화면이 사진 폴더에 저장됩니다.",
+  "noteScreenshotText": "재생 중 S를 누르면 현재 화면이 이미지로 저장됩니다.",
   "noteSpeedTitle": "더 빠른 포스터",
   "noteSpeedText": "포스터와 로고를 디스크에 저장해 다음부터는 그리드가 바로 표시됩니다."
 }

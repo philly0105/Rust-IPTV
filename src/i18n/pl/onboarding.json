@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "Telewizja na żywo",
   "tourLiveText": "Kanały w grupach, bieżący i następny program oraz pełny przewodnik TV.",
-  "tourVodTitle": "Filmy i seriale",
-  "tourVodText": "Przeglądaj plakaty, filtruj według dekad i zapisuj tytuły na później na Mojej liście.",
+  "tourVodTitle": "Filmy, seriale i Moja lista",
+  "tourVodText": "Przeglądaj plakaty filmów i seriali z każdego źródła, filtruj według dekad i zapisuj tytuły na Mojej liście, aby mieć je w jednym miejscu.",
   "tourSearchTitle": "Szukaj wszędzie",
   "tourSearchText": "Znajdź kanały, filmy i seriale we wszystkich swoich źródłach.",
   "tourStep": "Krok {{current}} z {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Nowy wygląd",
   "noteLooksText": "Siedem kolorów akcentu, motyw z czernią OLED, tryb kompaktowy i rozmiar interfejsu.",
   "noteScreenshotTitle": "Zrzuty ekranu",
-  "noteScreenshotText": "Naciśnij S podczas odtwarzania, aby zapisać bieżącą klatkę w folderze Obrazy.",
+  "noteScreenshotText": "Naciśnij S podczas odtwarzania, aby zapisać bieżącą klatkę jako obraz.",
   "noteSpeedTitle": "Szybsze plakaty",
   "noteSpeedText": "Plakaty i logo zostają na dysku, więc następnym razem siatki wczytują się od razu."
 }

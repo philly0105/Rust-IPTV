@@ -138,6 +138,26 @@ describe('Mark watched / unwatched Undo (D33)', () => {
     expect(rows.some((r) => r.episodeId === 'e3')).toBe(false);
   });
 
+  it('Undo refreshes My List and the grid pages Hide watched filters, not only positions', async () => {
+    rows = [{ ref: movie, positionSeconds: 600, durationSeconds: 6000, watched: false, updatedAt: '2026-10-01T10:00:00.000Z' }];
+    renderButton({ itemRef: movie, watched: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as watched' }));
+    await waitFor(() => expect(lastToast()?.action?.label).toBe('Undo'));
+
+    // Fresh copies after the mark: only the Undo can make them stale now.
+    const grid = ['catalog.movies', { sourceId: 'src1', query: { offset: 0, limit: 60 }, hideWatched: true }] as const;
+    const plainGrid = ['catalog.movies', { sourceId: 'src1', query: { offset: 0, limit: 60 } }] as const;
+    const myList = ['watchlist.list', {}] as const;
+    for (const k of [grid, plainGrid, myList]) queryClient.setQueryData(k, []);
+    const stale = (k: readonly unknown[]) => queryClient.getQueryState(k)?.isInvalidated ?? false;
+
+    lastToast()!.action!.onClick();
+    await waitFor(() => expect(stale(grid)).toBe(true));
+    expect(stale(myList)).toBe(true);
+    // A grid without Hide watched shows the same titles either way.
+    expect(stale(plainGrid)).toBe(false);
+  });
+
   it('a failed snapshot still marks, just without Undo', async () => {
     rpc.handlers['positions.get'] = () => {
       throw new Error('offline');

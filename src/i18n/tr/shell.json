@@ -206,5 +206,9 @@
   "accountAlertDismiss": "{{name}} uyarısını kapat",
   "navScheduled": "Planlananlar",
   "navMultiview": "Çoklu izleme",
-  "navMyList": "Listem"
+  "navMyList": "Listem",
+  "areaTour": "Tur",
+  "scTourSkip": "Turu atla",
+  "scTourStep": "Sonraki veya önceki adım",
+  "scTourReplay": "Turu yeniden izle (komut paleti, Turu başlat)"
 }

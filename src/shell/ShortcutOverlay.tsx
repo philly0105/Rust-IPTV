@@ -133,6 +133,13 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'arrowright', descKey: 'scGridMove', area: 'Dialogs and lists' },
   // Favorites, Recent and My videos rows (onRowKeyDown); Downloads registers its own.
   { combo: 'delete', descKey: 'scListRemove', area: 'Dialogs and lists' },
+  // Run 3 first-run tour (onboarding/tour/Tour.tsx): its own capture-phase key handler while it is
+  // open. The arrows follow the reading direction (mirrored in RTL), so one text covers both.
+  { combo: 'escape', descKey: 'scTourSkip', area: 'Tour' },
+  { combo: 'arrowleft', descKey: 'scTourStep', area: 'Tour' },
+  { combo: 'arrowright', descKey: 'scTourStep', area: 'Tour' },
+  // Replaying it: the palette's "Take the tour" command (CommandPalette.tsx, help.tour).
+  { combo: 'mod+k', descKey: 'scTourReplay', area: 'Tour' },
 ];
 
 const AREA_ORDER = [
@@ -153,6 +160,7 @@ const AREA_ORDER = [
   'Playback',
   'Seek bar',
   'Dialogs and lists',
+  'Tour',
 ];
 /**
  * Area id -> fully namespaced i18n key of its display label. Feature areas
@@ -178,6 +186,7 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Playback: 'shell:areaPlayback',
   'Seek bar': 'shell:areaSeekBar',
   'Dialogs and lists': 'shell:areaDialogs',
+  Tour: 'shell:areaTour',
 };
 
 /**

@@ -64,7 +64,7 @@ Tour anchors (`[data-tour]`, read by the onboarding tour's `findAnchor`, which t
 
 - `live`: the first source's rail row, collapsed or expanded. It is always rendered, unlike a source's Live TV sub-link, which only shows while the source is open.
 - `vod`: the My List rail link (always shown), the closest primary entry to movies and series.
-- `search`: the header's search field when the page has one, otherwise its "Search everything" button (1024px and wider), and the palette button wherever neither is laid out.
+- `search`: from 1024px up, the header's search field when the page has one, otherwise its "Search everything" button. Below 1024px, where the button folds away and the rail is auto-collapsed, the rail's Search link carries it instead and the header's field does not, so exactly one element on screen has the anchor at every width. The palette button never does: it opens commands, not search.
 
 The palette's Settings group has "Take the tour" (`help.tour`) and "What's new" (`help.whatsNew`); Settings > About has the same two buttons. All four import `openTour` / `openWhatsNew` from `@/features/onboarding/store`, which has no UI imports.
 

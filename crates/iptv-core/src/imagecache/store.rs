@@ -5,6 +5,14 @@
 //! is queued (up to [`MAX_BATCH`] operations) into one IMMEDIATE transaction.
 //! Files are deleted only after the transaction commits, so a crash leaves
 //! at worst a file without a row, which the next reconcile removes.
+//!
+//! The running byte total covers this process's writes only. Another process
+//! on the same data dir (the desktop app plus an `iptv-server --data-dir`
+//! pointed at it, or two servers) adds rows it never sees, so the writer
+//! re-reads `SUM(bytes)` inside its transaction on every `images.stats`
+//! barrier and, while inserting, at least every [`RESYNC_INTERVAL`]. Their
+//! combined total therefore goes over the cap by at most what they insert
+//! between two resyncs, instead of by a whole cap per process.
 
 use super::{file_path, is_key, max_bytes, Flights, EVICT_TARGET_PERCENT, MAX_IMAGE_BYTES};
 use crate::db::{self, DbPool};
@@ -16,11 +24,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, oneshot};
 
 /// Operations applied in one transaction at most.
 const MAX_BATCH: usize = 256;
+/// Longest time an inserting writer trusts its running total before it
+/// re-reads `SUM(bytes)` (rows other processes added are not in it).
+pub(super) const RESYNC_INTERVAL: Duration = Duration::from_secs(60);
 /// Files younger than this are left alone by the reconcile: a fetch may be
 /// between its rename and its row's commit.
 const RECONCILE_GRACE: Duration = Duration::from_secs(10 * 60);
@@ -99,6 +110,14 @@ pub(super) fn totals(conn: &mut Connection) -> CoreResult<(u64, u64)> {
     Ok((to_u64(bytes), to_u64(files)))
 }
 
+/// `SUM(bytes)` of the index, every process's rows included.
+fn byte_total(conn: &Connection) -> CoreResult<u64> {
+    let sum: i64 = conn.query_row("SELECT COALESCE(SUM(bytes), 0) FROM image_cache", [], |r| {
+        r.get(0)
+    })?;
+    Ok(to_u64(sum))
+}
+
 /// The row of `key`, checked against its file.
 pub(super) fn lookup(conn: &mut Connection, dir: &Path, key: &str) -> CoreResult<Lookup> {
     let row = conn
@@ -167,8 +186,11 @@ pub(super) struct Writer {
     pub dir: PathBuf,
     pub settings: Arc<RwLock<Settings>>,
     pub flights: Flights,
-    /// Running `SUM(bytes)`, kept by this task alone.
+    /// Running `SUM(bytes)`, kept by this task alone: its own writes, plus
+    /// whatever other processes had written at the last resync.
     pub total: u64,
+    /// When `total` was last read from the table.
+    pub synced_at: Instant,
 }
 
 /// The writer loop: one batch at a time until every sender is gone and the
@@ -182,6 +204,9 @@ pub(super) async fn run(mut w: Writer, mut rx: mpsc::UnboundedReceiver<Op>) {
                 Err(_) => break,
             }
         }
+        let barrier = ops.iter().any(|o| matches!(o, Op::Evict { .. }));
+        let inserting = ops.iter().any(|o| matches!(o, Op::Insert { .. }));
+        let resync = barrier || (inserting && w.synced_at.elapsed() >= RESYNC_INTERVAL);
         let cap = max_bytes(&w.settings.read());
         // Files of running fetches survive a clear or an eviction of their
         // key: the fetch may have renamed a fresh copy into place already.
@@ -199,9 +224,15 @@ pub(super) async fn run(mut w: Writer, mut rx: mpsc::UnboundedReceiver<Op>) {
             total: w.total,
             cap,
             protected,
+            resync,
         };
         match tokio::task::spawn_blocking(move || batch.apply(ops)).await {
-            Ok(total) => w.total = total,
+            Ok(applied) => {
+                w.total = applied.total;
+                if applied.synced {
+                    w.synced_at = Instant::now();
+                }
+            }
             Err(err) => tracing::error!(%err, "image cache write batch panicked"),
         }
     }
@@ -216,6 +247,18 @@ struct Batch {
     cap: u64,
     /// Keys with a fetch still running (until its row is acknowledged).
     protected: HashSet<String>,
+    /// Start from `SUM(bytes)` read inside the transaction instead of
+    /// `total`, so rows other processes wrote count against the cap.
+    resync: bool,
+}
+
+/// What [`Batch::apply`] leaves for the writer.
+#[derive(Debug, PartialEq, Eq)]
+struct Applied {
+    /// The new running total (unchanged when the transaction failed).
+    total: u64,
+    /// True when `total` was read from the table.
+    synced: bool,
 }
 
 /// What a committed batch leaves to do on disk.
@@ -229,17 +272,30 @@ struct Effects {
 }
 
 impl Batch {
-    /// Applies `ops`, answers their acks and returns the new running total
-    /// (unchanged when the transaction failed).
-    fn apply(self, ops: Vec<Op>) -> u64 {
+    /// Applies `ops`, answers their acks and returns the new running total.
+    fn apply(self, ops: Vec<Op>) -> Applied {
         let only_barriers = ops.iter().all(|o| matches!(o, Op::Evict { .. }));
-        if only_barriers && self.total <= self.cap {
-            for op in ops {
-                if let Op::Evict { ack } = op {
-                    let _ = ack.send(Ok(()));
+        if only_barriers {
+            // The table's own total, read without taking the write lock: a
+            // barrier under the cap (the usual `images.stats`) writes nothing.
+            // Over it, or when the read fails, the write path below re-reads
+            // it inside its transaction and evicts (or reports the error).
+            let sum = self
+                .pool
+                .get()
+                .map_err(CoreError::from)
+                .and_then(|conn| byte_total(&conn));
+            if let Some(sum) = sum.ok().filter(|s| *s <= self.cap) {
+                for op in ops {
+                    if let Op::Evict { ack } = op {
+                        let _ = ack.send(Ok(()));
+                    }
                 }
+                return Applied {
+                    total: sum,
+                    synced: true,
+                };
             }
-            return self.total;
         }
         let mut inserted = Vec::new();
         let mut waiting = Vec::new();
@@ -281,7 +337,10 @@ impl Batch {
                 for ack in inserted {
                     let _ = ack.send(());
                 }
-                total
+                Applied {
+                    total,
+                    synced: self.resync,
+                }
             }
             Err(err) => {
                 db::note_error(&self.db_path, &err);
@@ -293,14 +352,23 @@ impl Batch {
                     ))));
                 }
                 // Dropping the insert acks tells their flights the batch is done.
-                self.total
+                Applied {
+                    total: self.total,
+                    synced: false,
+                }
             }
         }
     }
 
     fn write(&self, conn: &mut Connection, work: Vec<Work>) -> CoreResult<(u64, Effects)> {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut total = self.total;
+        // Under the write lock nobody else changes the table, so the total
+        // read here stays exact through this batch's own deltas.
+        let mut total = if self.resync {
+            byte_total(&tx)?
+        } else {
+            self.total
+        };
         let mut fx = Effects::default();
         let mut inserted_keys: Vec<String> = Vec::new();
         for item in work {
@@ -384,12 +452,9 @@ impl Batch {
     /// Deletes the least recently accessed rows until the total is at most
     /// [`EVICT_TARGET_PERCENT`] of the cap; returns the new total.
     fn evict(&self, tx: &rusqlite::Transaction<'_>, fx: &mut Effects) -> CoreResult<u64> {
-        let (sum, _): (i64, i64) = tx.query_row(
-            "SELECT COALESCE(SUM(bytes), 0), COUNT(*) FROM image_cache",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        let mut total = to_u64(sum);
+        // Re-read: without a resync, `total` may still count rows another
+        // process has evicted or cleared since.
+        let mut total = byte_total(tx)?;
         if total <= self.cap {
             return Ok(total);
         }
@@ -619,6 +684,7 @@ mod tests {
             total: 800,
             cap: 500,
             protected: [b.clone()].into_iter().collect(),
+            resync: false,
         };
         let (ack, _rx) = oneshot::channel();
         let row = Row {
@@ -629,8 +695,8 @@ mod tests {
             at: 3,
         };
         // 1,200 bytes against a 500 cap: a and b go (down to 450).
-        let total = batch.apply(vec![Op::Insert { row, ack }]);
-        assert_eq!(total, 400);
+        let applied = batch.apply(vec![Op::Insert { row, ack }]);
+        assert_eq!(applied.total, 400);
         let mut conn = pool.get().unwrap();
         assert_eq!(totals(&mut conn).unwrap(), (400, 1));
         assert!(!file_path(&dir, &a).exists(), "a's file is evicted");
@@ -639,5 +705,121 @@ mod tests {
             "the running fetch keeps b's file"
         );
         assert!(file_path(&dir, &c).exists());
+    }
+
+    /// A migrated index holding rows another process wrote, as
+    /// `(key char, bytes, last_access)`, with their files.
+    fn other_process_rows(rows: &[(char, u64, i64)]) -> (tempfile::TempDir, DbPool, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = db::open_and_migrate(&tmp.path().join("db.sqlite")).unwrap();
+        let dir = tmp.path().join(super::super::DIR_NAME);
+        let conn = pool.get().unwrap();
+        for &(c, bytes, at) in rows {
+            let k = c.to_string().repeat(64);
+            let p = file_path(&dir, &k);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, vec![1u8; bytes as usize]).unwrap();
+            conn.execute(
+                "INSERT INTO image_cache (key, url, content_type, bytes, created_at, last_access)
+                 VALUES (?1, ?1, 'image/png', ?2, ?3, ?3)",
+                params![k, bytes as i64, at],
+            )
+            .unwrap();
+        }
+        (tmp, pool, dir)
+    }
+
+    /// A batch of this process, whose running total is `total`.
+    fn batch(tmp: &tempfile::TempDir, pool: &DbPool, total: u64, resync: bool) -> Batch {
+        Batch {
+            pool: pool.clone(),
+            db_path: tmp.path().join("db.sqlite"),
+            dir: tmp.path().join(super::super::DIR_NAME),
+            total,
+            cap: 1000,
+            protected: HashSet::new(),
+            resync,
+        }
+    }
+
+    fn row(c: char, bytes: u64, at: i64) -> Row {
+        let key = c.to_string().repeat(64);
+        Row {
+            url: key.clone(),
+            key,
+            content_type: "image/png".into(),
+            bytes,
+            at,
+        }
+    }
+
+    #[test]
+    fn a_barrier_counts_the_rows_another_process_wrote() {
+        // Another process on the data dir stored 1,200 bytes against the
+        // 1,000 cap; this one has stored nothing.
+        let (tmp, pool, dir) = other_process_rows(&[('a', 400, 1), ('b', 400, 2), ('c', 400, 3)]);
+        let (ack, mut done) = oneshot::channel();
+        let applied = batch(&tmp, &pool, 0, true).apply(vec![Op::Evict { ack }]);
+        // Down to 90 % of the cap: the least recently accessed row goes.
+        assert_eq!(
+            applied,
+            Applied {
+                total: 800,
+                synced: true
+            }
+        );
+        assert!(matches!(done.try_recv(), Ok(Ok(()))));
+        assert_eq!(totals(&mut pool.get().unwrap()).unwrap(), (800, 2));
+        assert!(!file_path(&dir, &"a".repeat(64)).exists());
+        assert!(file_path(&dir, &"b".repeat(64)).exists());
+
+        // Under the cap a barrier only reads the table's total.
+        let (ack, mut done) = oneshot::channel();
+        let applied = batch(&tmp, &pool, 5, true).apply(vec![Op::Evict { ack }]);
+        assert_eq!(
+            applied,
+            Applied {
+                total: 800,
+                synced: true
+            }
+        );
+        assert!(matches!(done.try_recv(), Ok(Ok(()))));
+    }
+
+    #[test]
+    fn an_insert_with_a_resync_counts_the_rows_another_process_wrote() {
+        let (tmp, pool, dir) = other_process_rows(&[('a', 400, 1), ('b', 400, 2)]);
+        // Between resyncs this process counts its own 300 bytes only, so the
+        // table may go over the cap (1,100 against 1,000).
+        let (ack, _rx) = oneshot::channel();
+        let applied = batch(&tmp, &pool, 0, false).apply(vec![Op::Insert {
+            row: row('c', 300, 3),
+            ack,
+        }]);
+        assert_eq!(
+            applied,
+            Applied {
+                total: 300,
+                synced: false
+            }
+        );
+        assert_eq!(totals(&mut pool.get().unwrap()).unwrap(), (1100, 3));
+
+        // A resync reads 1,100, adds 300 and evicts a and b (down to 600).
+        let (ack, _rx) = oneshot::channel();
+        let applied = batch(&tmp, &pool, 300, true).apply(vec![Op::Insert {
+            row: row('d', 300, 4),
+            ack,
+        }]);
+        assert_eq!(
+            applied,
+            Applied {
+                total: 600,
+                synced: true
+            }
+        );
+        assert_eq!(totals(&mut pool.get().unwrap()).unwrap(), (600, 2));
+        assert!(!file_path(&dir, &"a".repeat(64)).exists());
+        assert!(!file_path(&dir, &"b".repeat(64)).exists());
     }
 }

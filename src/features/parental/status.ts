@@ -30,6 +30,10 @@ export const STATUS_STALE_MS = 30_000;
  * changes: the catalog and user state (My List follows them), custom lists
  * (`lists.list` counts, `lists.items`), guide search and watch stats.
  * `epg.search` is exact so the other `epg.` queries are left alone.
+ * Portal reads too: Stalker VOD pages and search are not in SQLite, so the
+ * core drops hidden titles from them itself, and the Xtream and Stalker
+ * detail commands refuse a hidden title. Their stream and catch-up URLs are
+ * never cached.
  */
 export const FILTERED_PREFIXES = [
   'catalog.',
@@ -40,10 +44,41 @@ export const FILTERED_PREFIXES = [
   'lists.',
   'epg.search',
   'stats.',
+  'stalker.movies',
+  'stalker.series',
+  'stalker.search',
+  'stalker.vodDetail',
+  'stalker.seriesDetail',
+  'xtream.vodDetail',
+  'xtream.seriesDetail',
 ] as const;
 
 /** Parental queries that follow every change (the lock list and lock checks). */
 const PARENTAL_PREFIXES = ['parental.locks', 'parental.check'] as const;
+
+/**
+ * Parental queries a source import or removal can change: adult categories
+ * follow category names, and lock checks look up an item's category.
+ */
+const SOURCE_PREFIXES = ['parental.adultCategories', ...PARENTAL_PREFIXES] as const;
+
+function isFiltered(key: readonly unknown[]): boolean {
+  const head = key[0];
+  return typeof head === 'string' && FILTERED_PREFIXES.some((p) => head.startsWith(p));
+}
+
+/**
+ * Refreshes every {@link FILTERED_PREFIXES} query. When Hide mode filters
+ * after the change (a lock, an unlock running out, a lock added), data cached
+ * before it may hold what is now hidden, and a later visit would draw it from
+ * the cache before refetching. So the queries nothing shows right now are
+ * dropped; the ones on screen refetch in place, and a detail the core now
+ * refuses turns into its error state.
+ */
+function refreshFiltered(hiding: boolean): void {
+  if (hiding) queryClient.removeQueries({ predicate: (q) => q.getObserversCount() === 0 && isFiltered(q.queryKey) });
+  for (const p of FILTERED_PREFIXES) void invalidate(p);
+}
 
 /** `parental.status`, kept current by {@link useParentalEvents}. */
 export function useParentalStatus(): UseQueryResult<ParentalStatus, RpcError> {
@@ -80,7 +115,7 @@ export function applyStatus(next: ParentalStatus): void {
   const prev = queryClient.getQueryData<ParentalStatus>(STATUS_KEY);
   queryClient.setQueryData(STATUS_KEY, next);
   for (const p of PARENTAL_PREFIXES) void invalidate(p);
-  if (catalogAffected(prev, next)) for (const p of FILTERED_PREFIXES) void invalidate(p);
+  if (catalogAffected(prev, next)) refreshFiltered(hidesContent(next));
 }
 
 /**
@@ -91,7 +126,7 @@ export function applyStatus(next: ParentalStatus): void {
 export function afterLockChange(): void {
   for (const p of PARENTAL_PREFIXES) void invalidate(p);
   const s = queryClient.getQueryData<ParentalStatus>(STATUS_KEY);
-  if (s && hidesContent(s)) for (const p of FILTERED_PREFIXES) void invalidate(p);
+  if (s && hidesContent(s)) refreshFiltered(true);
 }
 
 /** Fetches the status from the core and applies it. */
@@ -163,13 +198,26 @@ const EXPIRY_GRACE_MS = 750;
 /**
  * Subscribes to `parental.changed` (C2/C7): the payload becomes the cached
  * status, and the lock list, lock checks, and (when Hide mode's filter
- * changed) every query in {@link FILTERED_PREFIXES} refetch.
+ * changed) every query in {@link FILTERED_PREFIXES} refetch. A finished
+ * import or a source change refreshes the adult categories and lock checks.
  * Also asks the core again when a timed unlock runs out, in case the event
  * stream is down at that moment, and binds the lock-now shortcut. Mount once,
  * in the shell's effects.
  */
 export function useParentalEvents(): void {
   useEffect(() => onAppEvent('parental.changed', (status) => applyStatus(status)), []);
+  useEffect(() => {
+    const refresh = () => {
+      for (const p of SOURCE_PREFIXES) void invalidate(p);
+    };
+    const offs = [
+      onAppEvent('sources.changed', refresh),
+      onAppEvent('import.progress', (p) => {
+        if (p.phase === 'done') refresh();
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, []);
 
   const { data } = useParentalStatus();
   useLockNowShortcut(data);

@@ -206,5 +206,9 @@
   "accountAlertDismiss": "Figyelmeztetés elvetése: {{name}}",
   "navScheduled": "Ütemezett",
   "navMultiview": "Többképes nézet",
-  "navMyList": "Saját lista"
+  "navMyList": "Saját lista",
+  "areaTour": "Bemutató",
+  "scTourSkip": "Bemutató kihagyása",
+  "scTourStep": "Következő vagy előző lépés",
+  "scTourReplay": "Bemutató újbóli megtekintése (parancspaletta, Bemutató indítása)"
 }

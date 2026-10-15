@@ -206,5 +206,9 @@
   "accountAlertDismiss": "{{name}} 알림 닫기",
   "navScheduled": "예약",
   "navMultiview": "멀티뷰",
-  "navMyList": "내 목록"
+  "navMyList": "내 목록",
+  "areaTour": "둘러보기",
+  "scTourSkip": "둘러보기 건너뛰기",
+  "scTourStep": "다음 또는 이전 단계",
+  "scTourReplay": "둘러보기 다시 보기 (명령어 팔레트, 둘러보기 시작)"
 }

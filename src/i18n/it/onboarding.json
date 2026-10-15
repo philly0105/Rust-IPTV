@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "TV in diretta",
   "tourLiveText": "Canali ordinati in gruppi, con cosa va in onda ora e dopo e una guida TV completa.",
-  "tourVodTitle": "Film e serie",
-  "tourVodText": "Sfoglia le locandine, filtra per decennio e salva i titoli nella mia lista per dopo.",
+  "tourVodTitle": "Film, serie e La mia lista",
+  "tourVodText": "Sfoglia le locandine di film e serie di ogni sorgente, filtra per decennio e salva i titoli nella mia lista per averli in un unico posto.",
   "tourSearchTitle": "Cerca ovunque",
   "tourSearchText": "Trova canali, film e serie in tutte le tue sorgenti.",
   "tourStep": "Passo {{current}} di {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Nuovo aspetto",
   "noteLooksText": "Sette colori di accento, un tema nero OLED, densità compatta e dimensione dell'interfaccia.",
   "noteScreenshotTitle": "Screenshot",
-  "noteScreenshotText": "Premi S durante la riproduzione per salvare il fotogramma corrente nella cartella Immagini.",
+  "noteScreenshotText": "Premi S durante la riproduzione per salvare il fotogramma corrente come immagine.",
   "noteSpeedTitle": "Locandine più veloci",
   "noteSpeedText": "Locandine e loghi restano sul disco, così le griglie si caricano subito la volta successiva."
 }

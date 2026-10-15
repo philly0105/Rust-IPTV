@@ -236,7 +236,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                     'motion-safe:transition-colors motion-safe:duration-100',
                   )}
                 >
-                  <ChannelMark src={ch.logoUrl} name={ch.name} className="size-9 rounded-md" />
+                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={ch.name} className="size-9 rounded-md" />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span dir="auto" className={cn('truncate text-start text-sm font-medium', disabled && !onWall ? 'text-fg-muted' : 'text-fg')}>
                       {ch.number !== undefined ? <span className="me-2 font-display tabular-nums text-fg-muted">{ch.number}</span> : null}

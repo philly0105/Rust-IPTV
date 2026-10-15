@@ -226,5 +226,9 @@
   "accountAlertDismiss": "تجاهل تنبيه {{name}}",
   "navScheduled": "المجدول",
   "navMultiview": "العرض المتعدد",
-  "navMyList": "قائمتي"
+  "navMyList": "قائمتي",
+  "areaTour": "الجولة",
+  "scTourSkip": "تخطي الجولة",
+  "scTourStep": "الخطوة التالية أو السابقة",
+  "scTourReplay": "مشاهدة الجولة مرة أخرى (لوحة الأوامر، ابدأ الجولة)"
 }

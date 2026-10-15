@@ -1,6 +1,6 @@
 # Data and bundle performance
 
-Owner: B3-data-perf (Run 3, contract C4). Code: `src/api/query.ts`, `src/features/vod/hooks/prefetch.ts`, `src/features/vod/hooks/queries.ts`, `src/shell/ShellLayout.tsx`, `src/shell/effects.ts`, `vite.config.ts` and `tools/check-bundle.mjs`. Tests: `src/api/query.test.ts`, `src/features/vod/test/prefetch.test.tsx`, `src/features/vod/test/imageUrl.test.ts` and the focus test in `src/features/vod/test/pages.test.tsx`.
+Owner: B3-data-perf (Run 3, contract C4). Code: `src/api/query.ts`, `src/features/vod/hooks/prefetch.ts`, `src/features/vod/hooks/queries.ts`, `src/shell/ShellLayout.tsx`, `src/shell/effects.ts`, `vite.config.ts` and `tools/check-bundle.mjs`. Tests: `src/api/query.test.ts`, `src/features/vod/test/prefetch.test.tsx`, `src/features/vod/test/imageUrl.test.ts`, `src/features/vod/test/tmdbCache.test.ts`, `src/features/vod/test/playerDefer.test.ts`, and the focus and TMDB-off tests in `src/features/vod/test/pages.test.tsx`.
 
 This page covers three things: how long query results stay cached, how the VOD pages start loading a detail page before it is clicked, and how the main JavaScript chunk is kept under its size budget. Image caching itself is in [image-cache.md](image-cache.md).
 
@@ -31,13 +31,16 @@ Event invalidation does not change. `EVENT_INVALIDATION` in `src/shell/effects.t
 
 Memory: `gcTime` counts from the moment the last component reading a result unmounts. Catalog pages, guide windows and TMDB results are the large ones. Guide windows get 2 minutes because a window holds every programme of its channels and hours. TMDB results get 30 minutes because they never change and are slow to fetch again.
 
+TMDB results do change with the settings, though. A disabled query still returns what it cached, so the movie and series pages merge TMDB data (and the season's TMDB episodes) only while `settings.tmdb.enabled` is on. `bindTmdbCacheSync` in `src/shell/effects.ts` (mounted by `useShellEvents`) also watches the `settings.get` cache: turning TMDB off removes every `tmdb.` query, and a new effective TMDB language (`tmdb.language`, or the app language when that is blank, as in `iptv-core` `tmdb/config.rs`) resets them, so open pages refetch in the new language. The blank-key check `tmdb.testKey` keeps its answer on a language change.
+
 The VOD hooks in `src/features/vod/hooks/queries.ts` no longer set their own stale times where the table covers them. The grid pages spread `queryDefaultsFor('catalog.movies')`. The detail queries are built by `movieDetailQuery(sourceKind, ref)` and `seriesDetailQuery(sourceKind, ref)` (staleTime `DETAIL_STALE_MS`, 5 min). The detail pages and the prefetch use these same builders, so a prefetched result is exactly the cache entry the page reads.
 
 ## Hover and focus prefetch
 
 `src/features/vod/hooks/prefetch.ts` starts loading a detail page as soon as the user shows intent:
 
-- `usePrefetchIntent(target)` returns `onPointerEnter`, `onPointerLeave` and `onFocus` handlers. A pointer that rests on a card for `PREFETCH_REST_MS` (120 ms) counts as intent, and leaving earlier cancels it. Focus counts at once. A new target on a recycled virtual card, or unmounting, cancels a pending rest.
+- `usePrefetchIntent(target)` returns `onPointerEnter`, `onPointerLeave`, `onFocus` and `onBlur` handlers. A pointer that rests on a card for `PREFETCH_REST_MS` (120 ms) counts as intent, and leaving earlier cancels it. Focus needs the same 120 ms rest, so Tab or a held arrow key passing along a rail warms only the card where focus stops. Only one focus rest is pending at a time, blur cancels it, and when it ends it fires only if focus is still inside the card (callers that wire no `onBlur`, such as the dashboard cards, rely on that check). A new target on a recycled virtual card, or unmounting, cancels a pending rest.
+- Content that scrolls under a still pointer is not intent. Chromium sends `pointerenter` to each card that scrolls under the pointer, so a pointer rest starts only after the pointer has really moved: a window `pointermove` at new coordinates (a move event at the same spot, as Chromium sends after a scroll, is ignored). A `wheel` or `scroll` anywhere cancels pending pointer rests, and a card entered before the pointer moves again is parked until it does; leaving the card drops it. The grid's keyboard cursor rest and focus rests are not affected by scrolling, because the grid scrolls its cursor into view itself.
 - `prefetchVodDetail(queryClient, target)` warms three things:
   - the detail query, with `retry: false`; a failed prefetch costs nothing, and the page asks again with retries when it opens;
   - the movie or series route chunk (`loadMovieDetailPage` and `loadSeriesDetailPage` in `src/features/vod/routes.tsx`);
@@ -75,9 +78,13 @@ pnpm build && pnpm size:check
 
 After Run 2 the entry was 267,003 bytes, under 1 kB from the cap. Most of it was the player: the shell imported `PlayerDock`, `ExternalPlaybackFooter` and `restorePlayback` from the `@/features/player` barrel. The watch-stats reporter and the window-state effect pulled the player store, the engines, subtitles and track handling in too. Run 3 cuts each of those static paths:
 
-- `ShellLayout` imports `@/features/player` dynamically when the module first runs, not on first render, so the chunk is usually in before the shell paints. `usePlayerModule()` renders the dock and footer on the first render when the chunk is already loaded, so there is no Suspense round. A failed chunk load leaves the shell usable without the dock. `restorePlayback` runs from the same promise.
-- The watch-stats reporter (Run 2 C7) starts from an effect that imports `@/features/stats/reporter`. It still runs for as long as the shell is mounted, including under the language skeleton.
+- `ShellLayout` imports `@/features/player` dynamically, and not before the first route is in. The router renders the shell only after the first route's lazy chunks have loaded (initial hydration), and `usePlayerModule()` then waits for the first idle moment (`requestIdleCallback`, at most `PLAYER_IDLE_TIMEOUT_MS`, 2 s; a macrotask where the browser has no `requestIdleCallback`) or the first `pointerdown` or `keydown`, whichever comes first (`schedulePlayerLoad`). It loads at once when `sessionStorage` holds a resume record (`player.resume`), and `restorePlayback` runs only then. Run 3 first started the import when the module ran; under 50 ms of latency the player chunk and its dependencies then competed with the route chunks for the browser's connections and delayed the first paint by about 100 ms. A page that plays imports the player itself, so after a click the shell's import usually resolves at once. A failed chunk load leaves the shell usable without the dock.
+- The watch-stats reporter (Run 2 C7) starts from an effect that imports `@/features/stats/reporter`, once the player module is in. It reads the player store's state when it starts, so nothing that played before is lost. `RecordingWatcher` imports the player too, so it also mounts with the player module; it picks up reminders that fired before it listened.
 - `useWindowStatePersistence` (desktop only) imports `@/features/player/pip` inside its async start-up, next to the Tauri window API it already loaded lazily.
+
+### First render
+
+`src/main.tsx` renders once `Promise.all([initI18n(), imageBaseReady()])` settles. The two run in parallel. On the web `imageBaseReady()` is settled at once, so the web path waits only for the locale, as before. On desktop it waits for the image cache base (`app.info.proxyBase`, asked when `src/api/images.ts` loads), so the first artwork on screen already loads through the cache. The worst case is a desktop core that does not answer `app.info`: the first render then waits 1.5 s (the `imageBaseReady` cap) instead of only for the locale, and pictures load directly until the base arrives.
 
 | Build | Entry chunk |
 | --- | --- |

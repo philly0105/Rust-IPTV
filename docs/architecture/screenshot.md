@@ -4,7 +4,7 @@ Code: `crates/iptv-core/src/screenshot/` (core and RPCs), `crates/iptv-core/src/
 
 A screenshot saves the frame of the playing video as a picture file (contract C6). There are three ways to take one:
 
-- the camera button in the player's control bar, and on the external player's stage
+- the camera button in the player's control bar (the external player's and the radio's stages show it disabled, with the reason)
 - "Take screenshot" in the embedded mpv context menu
 - the `S` key while a video plays
 
@@ -72,13 +72,15 @@ Tests use `screenshot::set_folder_override` so nothing is written to the real Pi
 
 A second press while a capture is running is ignored.
 
+The built-in player's OSD stays within the player. It is at most `min(40rem, 100% - 3rem)` wide, so a docked player does not clip it, and a long file name or reason wraps onto at most two lines. While the zap banner covers its column (always in a narrow player, where the banner spans the width), the OSD moves to just below the banner.
+
 | Player | Path |
 | --- | --- |
 | Embedded mpv | `screenshot.mpv` with subtitles. The toast says "Screenshot saved" with the file name and an Open action (`screenshot.open`). |
 | Built-in player, desktop | `<video data-player-video>` (InlinePlayer marks it) is drawn on a canvas at the stream's own size and encoded as PNG. A PNG over 25 MB is sent as JPEG (quality 0.92) instead. The base64 goes to `screenshot.save`; the toast is the same as for mpv. |
 | Built-in player, server mode | The same canvas capture, downloaded under the name above. The toast says "Saved to your downloads" with the file name. |
 | External player | The camera stays on the stage, `aria-disabled`, with the reason: "This plays in an external player. Use its own screenshot key." The `S` shortcut is off. |
-| Radio | The camera is `aria-disabled` with "Radio has no picture to capture." The `S` shortcut is off. |
+| Radio | The camera sits on the radio stage beside the volume, `aria-disabled`, with "Radio has no picture to capture." The compact radio strip (mini player) has none, like the mini video bar. The `S` shortcut is off. |
 
 A disabled camera stays focusable. Its tooltip and `aria-describedby` give the reason, and pressing it shows the reason as an info toast and on the OSD.
 
@@ -86,9 +88,10 @@ Built-in player failures, each a toast titled "Screenshot not saved" that names 
 
 - No frame decoded yet (`readyState < 2` or no video size): "There is no picture yet. Try again once the video plays."
 - A frame from another origin without CORS taints the canvas, and encoding it throws a `SecurityError`. The toast says the stream's server does not allow its picture to be copied. On the desktop it adds that embedded MPV can capture it, because mpv reads the stream itself.
-  - Streams played through hls.js (MSE) are never tainted.
+  - Streams played through hls.js, shaka or mpegts.js (MSE, so raw MPEG-TS too) are never tainted.
   - In server mode the app's own proxy (`/api/proxy`) is the page's origin, so a proxied stream is not tainted either.
-  - A direct MP4 or TS file from another origin is, because the `<video>` has no `crossorigin` attribute. On the desktop that includes the loopback media proxy.
+  - On the desktop, local files (downloads and MP4 recordings, played through the Tauri asset protocol) and the loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`) load with `crossorigin="anonymous"` (`mediaCrossOrigin` in `engines.ts`, set before `src`). Both answer the web view with CORS headers, so their frames can be copied.
+  - A direct MP4 from any other origin is tainted. It loads without a `crossorigin` attribute so that it still plays from servers that send no CORS headers.
 - An RPC error shows the core's message.
 
 The canvas capture contains what the `<video>` decodes. Subtitles the app draws in the DOM are not part of it; mpv screenshots include subtitles.
@@ -96,6 +99,8 @@ The canvas capture contains what the `<video>` decodes. Subtitles the app draws 
 ## Keyboard
 
 `S` is registered in `usePlaybackShortcuts` (area Playback) with `guard('letter')`. It is enabled only while a video plays in the app, so not for radio, external players or when nothing plays.
+
+A held `S` takes one screenshot. Its handler is wrapped in `once`, which ignores key repeats (`KeyboardEvent.repeat`). The other one-press actions (play/pause, fullscreen, mute, captions, next and previous item, the sleep timer and the like) are wrapped too; seek, volume, subtitle sync and channel steps keep repeating while held.
 
 Some focused elements keep their own `S`, and the shell registry skips events they already handled:
 
@@ -117,5 +122,5 @@ Text fields and modified keys (Ctrl, Alt, Meta) never take a screenshot.
 ## Limits
 
 - The built-in player has no custom context menu, so "Take screenshot" in a menu exists only over embedded mpv. The button and `S` work in both.
-- The compact (mini) bar has no camera. `S` still works there.
+- The compact (mini) bar has no camera, nor does the compact radio strip. `S` still works in the mini bar.
 - A server-mode screenshot of a tainted stream cannot be taken: there is no core path to fall back to.

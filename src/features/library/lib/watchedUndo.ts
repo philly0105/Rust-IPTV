@@ -1,6 +1,6 @@
-import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { ItemRef, PlaybackPosition } from '@/api/types';
+import { invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
 import { restorePositions } from './recent';
 
@@ -33,7 +33,8 @@ export async function undoWatched({ ref, episodeIds }: WatchedTarget, before: re
 
 /**
  * The Undo action for the Mark watched / unwatched toast (`before` from
- * {@link captureWatched}). Refreshes positions afterwards; `onFailed` reports
+ * {@link captureWatched}). Refreshes what a watched change touches afterwards
+ * (positions, My List's ticks, "Hide watched" grid pages); `onFailed` reports
  * rows that did not come back.
  */
 export function watchedUndoAction(
@@ -48,7 +49,7 @@ export function watchedUndoAction(
         .then((ok) => {
           if (!ok) onFailed();
         }, onFailed)
-        .finally(() => Promise.all([invalidate('positions.'), invalidate('userstate.')]));
+        .finally(() => invalidateWatched());
     },
   };
 }

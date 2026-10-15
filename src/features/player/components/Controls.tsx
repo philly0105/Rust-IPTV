@@ -807,7 +807,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
 
           <div className="flex-1" />
           {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
-          {/* Screenshot (C6): disabled with its reason for radio. */}
+          {/* Screenshot (C6). Radio and external players have no bar: their stages show it, disabled with the reason. */}
           {!compact && <ScreenshotButton />}
 
           {tracks.text.length > 0 && !compact && (

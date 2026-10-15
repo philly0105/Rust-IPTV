@@ -206,5 +206,9 @@
   "accountAlertDismiss": "{{name}} の通知を閉じる",
   "navScheduled": "予定",
   "navMultiview": "マルチビュー",
-  "navMyList": "マイリスト"
+  "navMyList": "マイリスト",
+  "areaTour": "ツアー",
+  "scTourSkip": "ツアーをスキップ",
+  "scTourStep": "次または前のステップ",
+  "scTourReplay": "ツアーをもう一度見る（コマンドパレット、ツアーを開始）"
 }

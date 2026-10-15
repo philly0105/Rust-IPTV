@@ -88,9 +88,14 @@ export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg
           'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border shadow-1',
           'focus-visible:outline-2 focus-visible:outline-offset-2',
           'motion-safe:transition-[background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
+          // C5: blur only while the corner is up on one card (its `group/poster` hovered, or the
+          // button focused). Without hover it shows on every card at once, so it is opaque there.
           inList
             ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover active:bg-accent-pressed'
-            : 'border-glass-border bg-glass text-on-glass glass-blur hover:bg-glass-strong',
+            : cn(
+                'border-glass-border bg-glass text-on-glass hover:bg-glass-strong',
+                'group-hover/poster:glass-blur focus-visible:glass-blur [@media(hover:none)]:bg-glass-strong',
+              ),
           (pending || loading) && 'cursor-progress',
           loading && 'opacity-70',
           className,

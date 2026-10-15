@@ -206,5 +206,9 @@
   "accountAlertDismiss": "Melding voor {{name}} sluiten",
   "navScheduled": "Gepland",
   "navMultiview": "Multiview",
-  "navMyList": "Mijn lijst"
+  "navMyList": "Mijn lijst",
+  "areaTour": "Rondleiding",
+  "scTourSkip": "Rondleiding overslaan",
+  "scTourStep": "Volgende of vorige stap",
+  "scTourReplay": "Rondleiding opnieuw bekijken (opdrachtenpalet, Rondleiding starten)"
 }

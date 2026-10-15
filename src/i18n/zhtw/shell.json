@@ -206,5 +206,9 @@
   "accountAlertDismiss": "關閉 {{name}} 的提醒",
   "navScheduled": "預約",
   "navMultiview": "多畫面",
-  "navMyList": "我的片單"
+  "navMyList": "我的片單",
+  "areaTour": "導覽",
+  "scTourSkip": "略過導覽",
+  "scTourStep": "下一步或上一步",
+  "scTourReplay": "再次檢視導覽（命令選擇區、開始導覽）"
 }

@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "Live TV",
   "tourLiveText": "Channels sorted into groups, with what's on now and next and a full TV guide.",
-  "tourVodTitle": "Movies and series",
-  "tourVodText": "Browse posters, filter by decade, and save titles to My List for later.",
+  "tourVodTitle": "Movies, series and My List",
+  "tourVodText": "Browse each source's movie and series posters, filter by decade, and save titles to My List to keep them in one place.",
   "tourSearchTitle": "Search everything",
   "tourSearchText": "Find channels, movies and series across all your sources.",
   "tourStep": "Step {{current}} of {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "New looks",
   "noteLooksText": "Seven accent colors, an OLED black theme, compact density and interface size.",
   "noteScreenshotTitle": "Screenshots",
-  "noteScreenshotText": "Press S during playback to save the current frame to your Pictures folder.",
+  "noteScreenshotText": "Press S during playback to save the current frame as an image.",
   "noteSpeedTitle": "Faster posters",
   "noteSpeedText": "Posters and logos are kept on disk, so grids load at once the next time."
 }

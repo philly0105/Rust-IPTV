@@ -206,5 +206,9 @@
   "accountAlertDismiss": "Hinweis für {{name}} ausblenden",
   "navScheduled": "Geplant",
   "navMultiview": "Multi-View",
-  "navMyList": "Meine Liste"
+  "navMyList": "Meine Liste",
+  "areaTour": "Rundgang",
+  "scTourSkip": "Rundgang überspringen",
+  "scTourStep": "Nächster oder vorheriger Schritt",
+  "scTourReplay": "Rundgang erneut ansehen (Befehlspalette, Rundgang starten)"
 }

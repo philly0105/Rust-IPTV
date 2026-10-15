@@ -71,6 +71,18 @@ describe('the s shortcut', () => {
     await vi.waitFor(() => expect(takeScreenshot).toHaveBeenCalledTimes(2));
   });
 
+  it('takes one screenshot for a held S, not one per key repeat', async () => {
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing' }));
+    render(<Shortcuts />);
+    await press('s');
+    // The OS repeats a held key about 30 times a second; the repeats stay claimed but do nothing.
+    for (let i = 0; i < 30; i++) expect(await press('s', { repeat: true })).toBe(true);
+    expect(takeScreenshot).toHaveBeenCalledTimes(1);
+    // The next press is a new screenshot.
+    await press('s');
+    await vi.waitFor(() => expect(takeScreenshot).toHaveBeenCalledTimes(2));
+  });
+
   it('is off for radio, external players and when nothing plays', async () => {
     render(<Shortcuts />);
     await press('s');

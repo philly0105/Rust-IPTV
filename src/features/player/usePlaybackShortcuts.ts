@@ -86,6 +86,16 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
       e.preventDefault();
       fn();
     };
+  /**
+   * One press, one action: a held key's auto-repeat (about 30 keydowns a second) is ignored.
+   * For toggles, jumps and captures (a held S would save a file per repeat). Steps (seek,
+   * volume, sync, channel up/down) keep the repeat, so holding them keeps stepping.
+   */
+  const once =
+    (handler: (e: KeyboardEvent) => void) =>
+    (e: KeyboardEvent): void => {
+      if (!e.repeat) handler(e);
+    };
   const s = (): ReturnType<typeof usePlayerStore.getState> => usePlayerStore.getState();
   const volumeOsd = (): void => {
     const { volume, muted } = s();
@@ -112,10 +122,13 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   };
 
   const base = { area: AREA, enabled: active };
-  useShortcut('space', guard('space', () => s().togglePlay()), { ...base, description: t('shortcutPlayPause') });
-  useShortcut('k', guard('letter', () => s().togglePlay()), { ...base, description: t('shortcutPlayPauseK') });
+  useShortcut('space', once(guard('space', () => s().togglePlay())), { ...base, description: t('shortcutPlayPause') });
+  useShortcut('k', once(guard('letter', () => s().togglePlay())), { ...base, description: t('shortcutPlayPauseK') });
   // In picture-in-picture, f returns to the full app window instead.
-  useShortcut('f', guard('letter', () => (usePipStore.getState().active ? void exitPip() : s().toggleFullscreen())), { ...base, description: t('shortcutFullscreen') });
+  useShortcut('f', once(guard('letter', () => (usePipStore.getState().active ? void exitPip() : s().toggleFullscreen()))), {
+    ...base,
+    description: t('shortcutFullscreen'),
+  });
   const seek = (delta: number) => () => {
     if (!seekWindow()) return;
     s().seekBy(delta);
@@ -128,12 +141,14 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   // Next episode (or the next item of whatever queue is playing), like the bar's Next button.
   useShortcut(
     'n',
-    guard('letter', () => {
-      const next = nextInQueue();
-      if (!next) return;
-      showOsd(t('next'), next.subtitle ? `${next.subtitle} ${next.title}` : next.title);
-      s().next();
-    }),
+    once(
+      guard('letter', () => {
+        const next = nextInQueue();
+        if (!next) return;
+        showOsd(t('next'), next.subtitle ? `${next.subtitle} ${next.title}` : next.title);
+        s().next();
+      }),
+    ),
     { ...base, enabled: active && hasNext, description: t('shortcutNextItem') },
   );
   useShortcut(
@@ -152,30 +167,34 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   );
   useShortcut(
     'm',
-    guard('letter', () => {
-      s().toggleMute();
-      volumeOsd();
-    }),
+    once(
+      guard('letter', () => {
+        s().toggleMute();
+        volumeOsd();
+      }),
+    ),
     { ...base, description: t('shortcutMute') },
   );
   useShortcut(
     'c',
-    guard('letter', () => {
-      const media = useMediaStore.getState();
-      if (opts.channelPanelAvailable && s().isFullscreen) {
-        useMediaStore.setState({ channelPanelOpen: !media.channelPanelOpen });
-        return;
-      }
-      const on = media.tracks.text.some((x) => x.selected);
-      const first = media.tracks.text[0];
-      if (!first) return;
-      media.commands?.setText(on ? null : first.id);
-      showOsd(on ? t('captionsOff') : t('captionsOn'));
-    }),
+    once(
+      guard('letter', () => {
+        const media = useMediaStore.getState();
+        if (opts.channelPanelAvailable && s().isFullscreen) {
+          useMediaStore.setState({ channelPanelOpen: !media.channelPanelOpen });
+          return;
+        }
+        const on = media.tracks.text.some((x) => x.selected);
+        const first = media.tracks.text[0];
+        if (!first) return;
+        media.commands?.setText(on ? null : first.id);
+        showOsd(on ? t('captionsOff') : t('captionsOn'));
+      }),
+    ),
     { ...base, description: opts.channelPanelAvailable ? t('shortcutChannelPanel') : t('shortcutCaptions') },
   );
   // Subtitles (C6): Shift+C opens the control bar's Subtitles submenu (tracks, loading a file, style).
-  useShortcut('shift+c', guard('letter', () => useMediaStore.setState({ subtitleMenuAt: Date.now() })), {
+  useShortcut('shift+c', once(guard('letter', () => useMediaStore.setState({ subtitleMenuAt: Date.now() }))), {
     ...base,
     enabled: active && video,
     description: t('shortcutSubtitleMenu'),
@@ -194,12 +213,14 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   // Previous episode (or item), mirroring N.
   useShortcut(
     'shift+p',
-    guard('letter', () => {
-      const prev = prevInQueue();
-      if (!prev) return;
-      showOsd(t('previous'), prev.subtitle ? `${prev.subtitle} ${prev.title}` : prev.title);
-      s().prev();
-    }),
+    once(
+      guard('letter', () => {
+        const prev = prevInQueue();
+        if (!prev) return;
+        showOsd(t('previous'), prev.subtitle ? `${prev.subtitle} ${prev.title}` : prev.title);
+        s().prev();
+      }),
+    ),
     { ...base, enabled: active && hasPrev, description: t('shortcutPrevItem') },
   );
   // Sync: G/H move the subtitles, Shift+G/H the sound, 100 ms per press (VLC's keys).
@@ -211,29 +232,33 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   // Sleep timer (C5): Z steps off, 15, 30, 45, 60, 90 minutes, then off again.
   useShortcut(
     'z',
-    guard('letter', () => {
-      cycleSleepTimer();
-      announceSleep(t, locale);
-    }),
+    once(
+      guard('letter', () => {
+        cycleSleepTimer();
+        announceSleep(t, locale);
+      }),
+    ),
     { ...base, description: t('shortcutSleepTimer') },
   );
-  useShortcut('i', guard('letter', () => void toggleStreamInfo()), { ...base, enabled: active && video, description: t('shortcutStreamInfo') });
-  // Screenshot (C6): video only. A focused Live list row or multi-view tile keeps its own S.
-  useShortcut('s', guard('letter', () => void screenshot().catch(() => showOsd(t('screenshotFailed')))), {
+  useShortcut('i', once(guard('letter', () => void toggleStreamInfo())), { ...base, enabled: active && video, description: t('shortcutStreamInfo') });
+  // Screenshot (C6): video only, one per press. A focused Live list row or multi-view tile keeps its own S.
+  useShortcut('s', once(guard('letter', () => void screenshot().catch(() => showOsd(t('screenshotFailed'))))), {
     ...base,
     enabled: active && video,
     description: t('screenshot'),
   });
   useShortcut(
     'b',
-    guard('letter', () => {
-      if (!playPreviousChannel()) showOsd(t('lastChannel'), t('noPreviousChannel'));
-    }),
+    once(
+      guard('letter', () => {
+        if (!playPreviousChannel()) showOsd(t('lastChannel'), t('noPreviousChannel'));
+      }),
+    ),
     { ...base, description: t('shortcutPrevChannel') },
   );
   useShortcut(
     'shift+b',
-    guard('letter', () => setHistoryOpen(!useHistoryStore.getState().open)),
+    once(guard('letter', () => setHistoryOpen(!useHistoryStore.getState().open))),
     { ...base, enabled: active && live && video, description: t('shortcutChannelHistory') },
   );
   useShortcut('pageup', guard('arrow', () => void zap('up').catch(() => undefined)), {

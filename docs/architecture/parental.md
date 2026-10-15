@@ -43,6 +43,8 @@ Every PIN check (`unlock`, `disable`, `configure`, `setLocked` removal, `setPin`
 
 `parental.changed`, payload `ParentalStatus`, after every change: PIN set or changed, disable, configure, unlock, lock now, an expired unlock, a wrong PIN (new counter or lockout; a try refused during a lockout re-sends the same status), a lock added or removed (only when the table changed: adding an existing lock with the same name emits nothing), and a backup import that added locks or applied options. A read emits only when it is the first to notice an expired unlock. The payload never carries PIN material.
 
+In the UI, `src/features/parental/status.ts` handles the event. When Hide mode's filter changes, or a lock is added or removed while it filters, every filtered reader is refetched (`FILTERED_PREFIXES`): `catalog.`, `favorites.`, `recent.`, `positions.`, `watchlist.`, `lists.`, `epg.search` and `stats.`, plus the provider pages and details cached under `stalker.movies`, `stalker.series`, `stalker.search`, `stalker.vodDetail`, `stalker.seriesDetail`, `xtream.vodDetail` and `xtream.seriesDetail`. When filtering starts, cached copies that nothing on screen reads are removed, so a just-locked title cannot come back from the cache; copies on screen refetch in place. `sources.changed` and a finished `import.progress` refresh `parental.adultCategories` and `parental.check`, because an import can add adult categories.
+
 ## Modes
 
 - `hide` (default): the core drops locked content from the readers below. Nothing to gate in the UI because nothing locked is listed.

@@ -141,7 +141,7 @@ export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
                       'motion-safe:transition-colors motion-safe:duration-150',
                     )}
                   >
-                    <ChannelMark src={p.logo} name={p.title} className="size-8" />
+                    <ChannelMark src={p.logo} sourceId={p.ref.sourceId} name={p.title} className="size-8" />
                     <span dir="auto" className="truncate">
                       {p.title}
                     </span>

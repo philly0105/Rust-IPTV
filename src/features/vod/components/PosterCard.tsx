@@ -161,7 +161,7 @@ function PosterCardView({
 }: PosterCardViewProps) {
   const { t, i18n } = useTranslation('vod');
   const ownIntent = usePrefetchIntent(intent ? null : (prefetch ?? null));
-  const { onPointerEnter, onPointerLeave, onFocus } = intent ?? ownIntent;
+  const { onPointerEnter, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
   const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
   const r = formatRating(rating, i18n.language);
   const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
@@ -267,6 +267,7 @@ function PosterCardView({
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onFocus={onFocus}
+      onBlur={onBlur}
       data-grid-index={index}
       tabIndex={tabIndex}
       // The focus ring is drawn on the artwork (group-focus-visible below), not around the caption.
@@ -371,9 +372,15 @@ function GridMyListToggle({
       className={cn(
         'absolute end-1.5 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border shadow-1',
         'motion-safe:transition-[opacity,background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
+        // C5: blur only while the corner is up on one card (hover, or the keyboard cursor). Without
+        // hover it shows on every card at once, so it is opaque there instead of blurred.
         saved
           ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover'
-          : 'border-glass-border bg-glass text-on-glass opacity-0 glass-blur group-hover/card:opacity-100 hover:bg-glass-strong [@media(hover:none)]:opacity-100',
+          : cn(
+              'border-glass-border bg-glass text-on-glass opacity-0 group-hover/card:opacity-100 group-hover/card:glass-blur hover:bg-glass-strong',
+              '[@media(hover:none)]:bg-glass-strong [@media(hover:none)]:opacity-100',
+              shown && 'glass-blur',
+            ),
         shown && 'opacity-100',
         (pending || loading) && 'cursor-progress',
         raised ? 'bottom-5' : 'bottom-1.5',

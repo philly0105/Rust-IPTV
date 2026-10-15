@@ -211,5 +211,9 @@
   "accountAlertDismiss": "Descartar el aviso de {{name}}",
   "navScheduled": "Programado",
   "navMultiview": "Multivista",
-  "navMyList": "Mi lista"
+  "navMyList": "Mi lista",
+  "areaTour": "Recorrido",
+  "scTourSkip": "Omitir el recorrido",
+  "scTourStep": "Paso siguiente o anterior",
+  "scTourReplay": "Ver el recorrido de nuevo (paleta de comandos, Hacer el recorrido)"
 }

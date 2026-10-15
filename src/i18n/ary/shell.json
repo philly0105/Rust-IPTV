@@ -226,5 +226,9 @@
   "accountAlertDismiss": "سدّ التنبيه ديال {{name}}",
   "navScheduled": "المبرمج",
   "navMultiview": "العرض المتعدد",
-  "navMyList": "الليستة ديالي"
+  "navMyList": "الليستة ديالي",
+  "areaTour": "الجولة",
+  "scTourSkip": "دوّز الجولة",
+  "scTourStep": "الخطوة الجاية ولا اللي قبل",
+  "scTourReplay": "شوف الجولة عاوتاني (لوحة الأوامر، بدا الجولة)"
 }

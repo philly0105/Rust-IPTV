@@ -222,6 +222,7 @@ function PosterCardView({
       onPointerEnter={opens ? intent.onPointerEnter : undefined}
       onPointerLeave={opens ? intent.onPointerLeave : undefined}
       onFocus={opens ? intent.onFocus : undefined}
+      onBlur={opens ? intent.onBlur : undefined}
     >
       {body}
     </Link>

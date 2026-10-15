@@ -5,6 +5,7 @@
  * tauri-plugin-window-state).
  */
 
+import type { QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
@@ -152,6 +153,42 @@ function sourceName(sourceId: string): string | undefined {
   return name?.trim() || undefined;
 }
 
+/**
+ * What cached TMDB data depends on: null while TMDB is off, else the language the
+ * core asks TMDB for (`tmdb.language`, falling back to the app language, as in
+ * iptv-core tmdb/config.rs).
+ */
+export function tmdbCacheScope(s: Settings): string | null {
+  return s.tmdb.enabled ? s.tmdb.language?.trim() || s.language || '' : null;
+}
+
+const isTmdbQuery = (q: { queryKey: readonly unknown[] }) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('tmdb.');
+
+/**
+ * Drops cached TMDB answers when they stop applying. A disabled query still
+ * returns its cached data, so turning TMDB off removes every `tmdb.` query; a
+ * new effective TMDB language (its own setting or the app language it follows)
+ * resets them, so pages refetch instead of showing text in the old language.
+ */
+export function bindTmdbCacheSync(client: QueryClient): () => void {
+  const read = () => {
+    const s = client.getQueryData<Settings>(rpcKey('settings.get'));
+    return s ? tmdbCacheScope(s) : undefined;
+  };
+  let scope = read();
+  return client.getQueryCache().subscribe((event) => {
+    if (event.type !== 'updated' || event.query.queryKey[0] !== 'settings.get') return;
+    const next = read();
+    if (next === undefined || next === scope) return;
+    const known = scope !== undefined;
+    scope = next;
+    if (!known) return;
+    if (next === null) client.removeQueries({ predicate: isTmdbQuery });
+    // The blank-key check does not depend on the language.
+    else void client.resetQueries({ predicate: (q) => isTmdbQuery(q) && q.queryKey[0] !== 'tmdb.testKey' });
+  });
+}
+
 /** Wires app events to the query cache, toasts, and navigation. Mount once. */
 export function useShellEvents(): void {
   const { t } = useTranslation('shell');
@@ -170,6 +207,7 @@ export function useShellEvents(): void {
     // A dashboard rail that was empty and gains content (first favorite, a resume
     // position, a recent channel) drops its "skip the skeleton" flag right away.
     offs.push(bindRailEmptySync(queryClient));
+    offs.push(bindTmdbCacheSync(queryClient));
 
     // englishOnly filters in the core, so catalog lists refetch when it flips.
     // Tracked here because the settings cache is already updated optimistically.

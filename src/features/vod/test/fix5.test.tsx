@@ -66,7 +66,7 @@ describe('F1: poster fallback tiles differ per title', () => {
       title: 'Heat',
       missing: false,
       completedAt: '2026-10-01T00:00:00Z',
-      download: { positionSeconds: 0, bytesDownloaded: 0 },
+      download: { ref: { sourceId: 's1', contentType: 'movie', itemId: 'm1' }, positionSeconds: 0, bytesDownloaded: 0 },
     } as unknown as MovieEntry;
     render(<LibraryCard entry={entry} />);
     expect(screen.getByText('HE')).toBeTruthy();

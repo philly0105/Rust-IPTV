@@ -86,6 +86,31 @@ describe('arrow-key seek readout', () => {
   });
 });
 
+describe('held keys', () => {
+  /** A press, then `repeats` auto-repeat keydowns, as the OS sends for a held key. */
+  const hold = (k: string, repeats: number): void => {
+    key(k);
+    for (let i = 0; i < repeats; i++) {
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: k, repeat: true, bubbles: true }));
+      });
+    }
+  };
+
+  it('a held toggle acts once, a held step keeps stepping', () => {
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 100, durationSeconds: 600 }));
+    render(<Shortcuts />);
+    hold('m', 5);
+    expect(usePlayerStore.getState().muted).toBe(true);
+    hold('k', 5);
+    expect(usePlayerStore.getState().status).toBe('paused');
+    hold('f', 4);
+    expect(usePlayerStore.getState().isFullscreen).toBe(true);
+    hold('ArrowRight', 3);
+    expect(usePlayerStore.getState().positionSeconds).toBe(100 + 4 * SEEK_STEP);
+  });
+});
+
 describe('large seek and next-item keys', () => {
   it('Shift+arrows seek 30 s', () => {
     act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 100, durationSeconds: 600 }));

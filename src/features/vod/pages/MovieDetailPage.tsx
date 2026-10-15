@@ -70,7 +70,11 @@ export function MovieDetailPage() {
     waitForCategory: source.isPending || (stalkerSource && detail.isPending),
   });
   const tmdb = useTmdbMovie(item, tmdbOn);
-  const model = useMemo(() => (detail.data ? mergeMovieDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
+  // A disabled query still returns what it cached while TMDB was on: merge it only while TMDB is on.
+  const model = useMemo(
+    () => (detail.data ? mergeMovieDetail(detail.data, tmdbOn ? tmdb.data : undefined) : undefined),
+    [detail.data, tmdb.data, tmdbOn],
+  );
   const similarFallback = useTmdbSimilar('movie', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 

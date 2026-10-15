@@ -216,5 +216,9 @@
   "accountAlertDismiss": "Закрыць апавяшчэнне для {{name}}",
   "navScheduled": "Запланаванае",
   "navMultiview": "Мультыэкран",
-  "navMyList": "Мой спіс"
+  "navMyList": "Мой спіс",
+  "areaTour": "Агляд",
+  "scTourSkip": "Прапусціць агляд",
+  "scTourStep": "Наступны або папярэдні крок",
+  "scTourReplay": "Паглядзець агляд яшчэ раз (палітра каманд, Паглядзець агляд)"
 }

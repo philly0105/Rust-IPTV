@@ -168,6 +168,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             static_dir: static_dir.clone(),
             allow_private_targets: args.allow_private_targets,
             allowed_hosts,
+            allow_cross_site: false,
         },
     );
 

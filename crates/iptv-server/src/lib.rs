@@ -66,6 +66,13 @@ pub struct ServerOptions {
     /// `Host` names accepted on `/api` besides loopback names and IP
     /// literals (blocks DNS rebinding whatever the bind address).
     pub allowed_hosts: guard::AllowedHosts,
+    /// Skip [`guard::api_guard`]'s `Sec-Fetch-Site: cross-site` refusal. Only
+    /// the desktop loopback proxy sets it: its webview (`http://tauri.localhost`)
+    /// is cross-site to `127.0.0.1`, so Chromium labels every request it makes
+    /// there `cross-site`, and the proxy authenticates requests with its
+    /// per-launch path token and webview-origin check instead. Server mode
+    /// keeps the refusal (off by default).
+    pub allow_cross_site: bool,
 }
 
 impl ServerOptions {
@@ -75,6 +82,7 @@ impl ServerOptions {
             static_dir: static_dir.into(),
             allow_private_targets: false,
             allowed_hosts: guard::AllowedHosts::default(),
+            allow_cross_site: false,
         }
     }
 }

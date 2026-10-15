@@ -58,7 +58,14 @@ export function UpNextRail({
                 className="group flex w-full items-center gap-3 rounded-md p-1.5 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-28 shrink-0">
-                  <Poster src={ep.posterUrl} alt="" label={ep.title.trim() || episodeCode(ep.season, ep.episode)} aspect="wide" rounded="sm" />
+                  <Poster
+                    src={ep.posterUrl}
+                    sourceId={ep.seriesRef.sourceId}
+                    alt=""
+                    label={ep.title.trim() || episodeCode(ep.season, ep.episode)}
+                    aspect="wide"
+                    rounded="sm"
+                  />
                   {fraction > 0 && (
                     <div className="pointer-events-none absolute inset-x-1 bottom-1">
                       <ProgressBar value={fraction} max={1} size="xs" />

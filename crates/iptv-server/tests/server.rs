@@ -737,6 +737,7 @@ async fn cross_origin_writes_are_refused() {
     for path in [
         "/api/files/1",
         "/api/proxy?url=http%3A%2F%2Fexample.com%2F",
+        "/api/img?url=http%3A%2F%2Fexample.com%2Fposter.png",
         "/api/health",
     ] {
         let r = h
@@ -1396,6 +1397,13 @@ async fn img_serves_svg_posters_from_the_cache_with_sandbox_headers() {
     assert_eq!(bodies[0], bodies[1]);
     assert_eq!(mock_hits(&mock, path).await, 1);
 
+    // The client's `gen=<n>` (added after Clear) is ignored: same stored file.
+    let r = h.http.get(format!("{url}&gen=2")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["x-image-cache"], "hit");
+    assert_eq!(r.bytes().await.unwrap(), bodies[0]);
+    assert_eq!(mock_hits(&mock, path).await, 1);
+
     // HEAD answers the same headers without a body.
     let r = h.http.head(&url).send().await.unwrap();
     assert_eq!(r.status(), 200);
@@ -1477,6 +1485,13 @@ async fn img_answers_400_404_415_and_502_with_json_errors() {
             h.img_url(&mock.url("/fail/status/500"), None),
             502,
             "network",
+        ),
+        // 20 MiB of octet-stream: over the 10 MB limit, the upstream's fault
+        // (502) but mapped onto C2's `invalid`.
+        (
+            h.img_url(&mock.url("/files/video.bin"), None),
+            502,
+            "invalid",
         ),
     ];
     for (url, status, code) in &cases {

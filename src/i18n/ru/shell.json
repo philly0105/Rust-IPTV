@@ -216,5 +216,9 @@
   "accountAlertDismiss": "Скрыть уведомление для {{name}}",
   "navScheduled": "Запланированное",
   "navMultiview": "Мультиэкран",
-  "navMyList": "Мой список"
+  "navMyList": "Мой список",
+  "areaTour": "Обзор",
+  "scTourSkip": "Пропустить обзор",
+  "scTourStep": "Следующий или предыдущий шаг",
+  "scTourReplay": "Посмотреть обзор ещё раз (палитра команд, Посмотреть обзор)"
 }

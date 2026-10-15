@@ -276,7 +276,7 @@ export const Tile = memo(function Tile({
   } else if (phase === 'resolving' || phase === 'loading') {
     centre = (
       <div className="flex flex-col items-center gap-2" role="status" data-testid="multiview-tile-tuning">
-        <ChannelMark src={tile.logo} name={name} className="size-12 rounded-md text-sm @[20rem]/tile:size-16" />
+        <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} className="size-12 rounded-md text-sm @[20rem]/tile:size-16" />
         <span className={cn(GLASS, 'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs')}>
           <Spinner className="size-3.5" />
           {t('tuning')}
@@ -456,7 +456,7 @@ export const Tile = memo(function Tile({
             {hasSound && audible ? <Volume2 className="size-3.5" /> : null}
             {number}
           </span>
-          <ChannelMark src={tile.logo} name={name} className="hidden size-6 @[14rem]/tile:inline-flex" />
+          <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} className="hidden size-6 @[14rem]/tile:inline-flex" />
           <span className="flex min-w-0 flex-col leading-tight">
             <span dir="auto" className="truncate text-start text-sm font-medium">
               {tile.number !== undefined ? <span className="me-1.5 font-display tabular-nums opacity-80">{tile.number}</span> : null}

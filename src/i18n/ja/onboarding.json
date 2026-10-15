@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "ライブTV",
   "tourLiveText": "チャンネルをグループ別に表示。放送中と次の番組、番組表も確認できます。",
-  "tourVodTitle": "映画とシリーズ",
-  "tourVodText": "ポスターを眺めて年代で絞り込み、作品をマイリストに保存して後で見られます。",
+  "tourVodTitle": "映画、シリーズ、マイリスト",
+  "tourVodText": "各ソースの映画やシリーズをポスターで眺めて年代で絞り込み、作品をマイリストに保存して一か所にまとめられます。",
   "tourSearchTitle": "すべてを検索",
   "tourSearchText": "すべてのソースからチャンネル、映画、シリーズを探せます。",
   "tourStep": "ステップ {{current}}/{{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "新しい外観",
   "noteLooksText": "7色のアクセントカラー、OLED ブラックテーマ、コンパクト表示、インターフェースのサイズ。",
   "noteScreenshotTitle": "スクリーンショット",
-  "noteScreenshotText": "再生中に S を押すと、現在のフレームをピクチャフォルダーに保存します。",
+  "noteScreenshotText": "再生中に S を押すと、現在のフレームを画像として保存します。",
   "noteSpeedTitle": "ポスターを高速表示",
   "noteSpeedText": "ポスターとロゴをディスクに保存するため、次回からグリッドがすぐに表示されます。"
 }

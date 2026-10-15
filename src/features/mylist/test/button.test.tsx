@@ -171,6 +171,20 @@ describe('MyListButton', () => {
     await waitFor(() => expect(h.lastToast()).toBeDefined());
   });
 
+  it('the icon variant blurs only on its hovered card or with focus, and is opaque without hover (C5)', async () => {
+    h.installCore(rpc, []);
+    render(
+      <Wrap>
+        <MyListButton itemRef={arrival} snapshot={snap('Arrival', arrival)} variant="icon" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(button().dataset['state']).toBe('ready'));
+    const classes = button().className.split(/\s+/);
+    // Both placements (PosterCard and the dashboard cards) wrap it in `group/poster`.
+    expect(classes).not.toContain('glass-blur');
+    expect(classes).toEqual(expect.arrayContaining(['group-hover/poster:glass-blur', 'focus-visible:glass-blur', '[@media(hover:none)]:bg-glass-strong']));
+  });
+
   it('renders nothing for live and radio refs', async () => {
     h.installCore(rpc, []);
     const { container } = render(

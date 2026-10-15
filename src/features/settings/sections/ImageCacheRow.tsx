@@ -7,25 +7,32 @@
  * (`imagecache::max_bytes`), and the select calls 1000 of them "1 GB", so the
  * usage line and the select always agree ("120 MB of 1 GB"). Units come from
  * `Intl.NumberFormat`'s unit style, so every locale gets its own symbols.
+ *
+ * The row draws its own heading instead of using `SettingsRow`: that row's
+ * `<label for>` needs one labelable control, and this row has a meter, a
+ * select with its own label and a button. The meter takes its name from the
+ * heading through `aria-labelledby`, and the row is a named group.
  */
 
 import { useQueryClient } from '@tanstack/react-query';
 import { ImageOff, Trash2 } from 'lucide-react';
-import { useId, useState, type JSX } from 'react';
+import { useEffect, useId, useState, type JSX } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { onAppEvent } from '@/api/events';
+import { bumpImageCacheGeneration } from '@/api/images';
 import { rpcKey, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
-import { IMAGE_CACHE_MAX_MB_MAX, IMAGE_CACHE_MAX_MB_MIN, type ImageCacheStats } from '@/api/types';
+import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { IMAGE_CACHE_MAX_MB_MAX, IMAGE_CACHE_MAX_MB_MIN, type ImageCacheStats, type Settings } from '@/api/types';
 import { Button, Dialog, Select, Skeleton, cn, useToast } from '@/ui';
 
-import { SettingsRow } from '../components';
 import { useSettingsQuery, useUpdateSettings } from '../lib/useUpdateSettings';
 
 /** The cap select's choices, in `settings.imageCacheMaxMb` units. */
 export const IMAGE_CACHE_CAPS_MB = [250, 500, 1000, 2000, 5000] as const;
 
 const MIB = 1024 * 1024;
+const STATS_KEY = rpcKey('images.stats');
 
 function unitFormat(locale: string, unit: 'kilobyte' | 'megabyte' | 'gigabyte', digits: number): Intl.NumberFormat {
   try {
@@ -70,12 +77,34 @@ export function ImageCacheRow(): JSX.Element {
   const stats = useRpcQuery('images.stats', undefined, { staleTime: 0 });
   const [confirming, setConfirming] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const capId = useId();
+  const rowId = useId();
+  const labelId = `${rowId}-label`;
+  const hintId = `${rowId}-hint`;
+  const capId = `${rowId}-cap`;
 
   const capMb = settings.data?.imageCacheMaxMb;
   const data = stats.data;
   const unsupported = stats.isError && RpcError.from(stats.error).code === 'unsupported';
   const empty = !!data && data.bytes === 0 && data.files === 0;
+  const heldMax = data?.maxBytes;
+
+  // The cap also changes outside this row: Reset, its Undo, another window or browser. The meter's maximum is the
+  // core's figure, and a lower cap only evicts when images.stats runs (C9), so refetch whenever the cap the settings
+  // hold and the one the stats were measured against differ...
+  useEffect(() => {
+    if (capMb === undefined || heldMax === undefined || capMb * MIB === heldMax) return;
+    void qc.invalidateQueries({ queryKey: STATS_KEY });
+  }, [capMb, heldMax, qc]);
+  // ...and once more when the core says it holds a new cap. An optimistic edit (Undo) changes the cached settings
+  // before the core does, so the refetch above can still read the old cap; settings.changed comes after the write.
+  useEffect(
+    () =>
+      onAppEvent('settings.changed', (s: Settings) => {
+        const held = qc.getQueryData<ImageCacheStats>(STATS_KEY);
+        if (held && s.imageCacheMaxMb * MIB !== held.maxBytes) void qc.invalidateQueries({ queryKey: STATS_KEY });
+      }),
+    [qc],
+  );
 
   const setCap = async (value: string) => {
     const mb = Number(value);
@@ -88,7 +117,9 @@ export function ImageCacheRow(): JSX.Element {
     setClearing(true);
     try {
       const next = await rpc('images.clear');
-      qc.setQueryData<ImageCacheStats>(rpcKey('images.stats'), next);
+      // This browser holds its own copies for a week; new cache URLs make it fetch each picture again.
+      bumpImageCacheGeneration();
+      qc.setQueryData<ImageCacheStats>(STATS_KEY, next);
       setConfirming(false);
       toast({ variant: 'success', title: t('imageCacheCleared') });
     } catch (e) {
@@ -104,55 +135,64 @@ export function ImageCacheRow(): JSX.Element {
     }
   };
 
+  // Desktop keeps the files in its own data folder; a server keeps one cache for every browser that uses it.
+  const hint = t(isDesktop ? 'imageCacheHint' : 'imageCacheHintServer');
+
   return (
-    <div data-testid="image-cache-row">
-      <SettingsRow label={t('imageCache')} description={t('imageCacheHint')} stack>
-        {({ id, describedBy }) =>
-          stats.isPending ? (
-            <div className="flex w-full flex-col gap-3" aria-busy="true" data-testid="image-cache-loading">
-              <Skeleton className="h-2 w-full rounded-full" />
-              <div className="flex items-center justify-between gap-4">
-                <Skeleton className="h-4 w-36" />
-                <Skeleton className="h-4 w-20" />
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <Skeleton className="h-10 w-40 rounded-md" />
-                <Skeleton className="h-10 w-32 rounded-md" />
-              </div>
+    <div role="group" aria-labelledby={labelId} className="flex flex-col gap-3 px-4 py-4" data-testid="image-cache-row">
+      <div className="flex min-w-0 flex-col gap-0.5 @2xl:max-w-[60%]">
+        <p id={labelId} className="font-medium text-fg">
+          {t('imageCache')}
+        </p>
+        <p id={hintId} className="text-sm text-fg-muted">
+          {hint}
+        </p>
+      </div>
+      <div className="flex w-full min-w-0 flex-col gap-1.5">
+        {stats.isPending ? (
+          <div className="flex w-full flex-col gap-3" aria-busy="true" data-testid="image-cache-loading">
+            <Skeleton className="h-2 w-full rounded-full" />
+            <div className="flex items-center justify-between gap-4">
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="h-4 w-20" />
             </div>
-          ) : unsupported ? (
-            <p id={id} className="flex items-start gap-2 text-sm text-fg-muted" data-testid="image-cache-unavailable">
-              <ImageOff aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
-              {t('imageCacheUnavailable')}
-            </p>
-          ) : stats.isError ? (
-            <div role="alert" className="flex w-full flex-wrap items-center gap-3 text-sm" data-testid="image-cache-error">
-              <span className="min-w-0 flex-1 text-danger">{t('imageCacheLoadFailed', { message: stats.error.message })}</span>
-              <Button size="sm" variant="secondary" onClick={() => void stats.refetch()}>
-                {t('retry')}
-              </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Skeleton className="h-10 w-40 rounded-md" />
+              <Skeleton className="h-10 w-32 rounded-md" />
             </div>
-          ) : (
-            <UsageAndControls
-              id={id}
-              describedBy={describedBy}
-              stats={data!}
-              capMb={capMb}
-              capId={capId}
-              locale={locale}
-              empty={empty}
-              refreshing={stats.isFetching}
-              onCap={(v) => void setCap(v)}
-              onClear={() => setConfirming(true)}
-            />
-          )
-        }
-      </SettingsRow>
+          </div>
+        ) : unsupported ? (
+          <p className="flex items-start gap-2 text-sm text-fg-muted" data-testid="image-cache-unavailable">
+            <ImageOff aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
+            {t('imageCacheUnavailable')}
+          </p>
+        ) : stats.isError ? (
+          <div role="alert" className="flex w-full flex-wrap items-center gap-3 text-sm" data-testid="image-cache-error">
+            <span className="min-w-0 flex-1 text-danger">{t('imageCacheLoadFailed', { message: stats.error.message })}</span>
+            <Button size="sm" variant="secondary" onClick={() => void stats.refetch()}>
+              {t('retry')}
+            </Button>
+          </div>
+        ) : (
+          <UsageAndControls
+            labelId={labelId}
+            hintId={hintId}
+            stats={data!}
+            capMb={capMb}
+            capId={capId}
+            locale={locale}
+            empty={empty}
+            refreshing={stats.isFetching}
+            onCap={(v) => void setCap(v)}
+            onClear={() => setConfirming(true)}
+          />
+        )}
+      </div>
       <Dialog
         open={confirming}
         onClose={() => !clearing && setConfirming(false)}
         title={t('imageCacheClearTitle')}
-        description={t('imageCacheClearBody', { size: formatCacheBytes(data?.bytes ?? 0, locale) })}
+        description={t(isDesktop ? 'imageCacheClearBody' : 'imageCacheClearBodyServer', { size: formatCacheBytes(data?.bytes ?? 0, locale) })}
         size="sm"
         testId="image-cache-clear-dialog"
         footer={
@@ -160,7 +200,7 @@ export function ImageCacheRow(): JSX.Element {
             <Button variant="ghost" disabled={clearing} onClick={() => setConfirming(false)}>
               {t('cancel')}
             </Button>
-            <Button variant="primary" loading={clearing} onClick={() => void clear()} data-testid="image-cache-clear-confirm">
+            <Button variant="danger" loading={clearing} onClick={() => void clear()} data-testid="image-cache-clear-confirm">
               {t('imageCacheClear')}
             </Button>
           </>
@@ -171,8 +211,8 @@ export function ImageCacheRow(): JSX.Element {
 }
 
 function UsageAndControls({
-  id,
-  describedBy,
+  labelId,
+  hintId,
   stats,
   capMb,
   capId,
@@ -182,8 +222,8 @@ function UsageAndControls({
   onCap,
   onClear,
 }: {
-  id: string;
-  describedBy: string | undefined;
+  labelId: string;
+  hintId: string;
   stats: ImageCacheStats;
   capMb: number | undefined;
   capId: string;
@@ -202,10 +242,9 @@ function UsageAndControls({
   return (
     <div className="flex w-full flex-col gap-3">
       <div
-        id={id}
         role="meter"
-        aria-label={t('imageCache')}
-        aria-describedby={describedBy}
+        aria-labelledby={labelId}
+        aria-describedby={hintId}
         aria-valuemin={0}
         aria-valuemax={stats.maxBytes}
         aria-valuenow={Math.min(stats.bytes, stats.maxBytes)}
@@ -241,7 +280,17 @@ function UsageAndControls({
             data-testid="image-cache-cap"
           />
         </div>
-        <Button variant="secondary" icon={<Trash2 aria-hidden className="size-4" />} disabled={empty} onClick={onClear} data-testid="image-cache-clear">
+        {/* aria-disabled, not disabled: after a clear the confirm dialog hands focus back here, and a disabled
+            button cannot take it (focus would fall to the page). */}
+        <Button
+          variant="secondary"
+          icon={<Trash2 aria-hidden className="size-4" />}
+          aria-disabled={empty || undefined}
+          onClick={() => {
+            if (!empty) onClear();
+          }}
+          data-testid="image-cache-clear"
+        >
           {t('imageCacheClear')}
         </Button>
       </div>

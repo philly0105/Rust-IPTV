@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "TV en direct",
   "tourLiveText": "Des chaînes classées par groupe, avec le programme en cours et à suivre, et un guide TV complet.",
-  "tourVodTitle": "Films et séries",
-  "tourVodText": "Parcourez les affiches, filtrez par décennie et gardez des titres dans Ma liste.",
+  "tourVodTitle": "Films, séries et Ma liste",
+  "tourVodText": "Parcourez les affiches des films et séries de chaque source, filtrez par décennie et gardez des titres dans Ma liste pour les retrouver au même endroit.",
   "tourSearchTitle": "Tout rechercher",
   "tourSearchText": "Trouvez chaînes, films et séries dans toutes vos sources.",
   "tourStep": "Étape {{current}} sur {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Nouvelle apparence",
   "noteLooksText": "Sept couleurs d'accent, un thème noir OLED, une densité compacte et la taille de l'interface.",
   "noteScreenshotTitle": "Captures d'écran",
-  "noteScreenshotText": "Appuyez sur S pendant la lecture pour enregistrer l'image actuelle dans votre dossier Images.",
+  "noteScreenshotText": "Appuyez sur S pendant la lecture pour faire une capture de l'image en cours.",
   "noteSpeedTitle": "Affiches plus rapides",
   "noteSpeedText": "Affiches et logos restent sur le disque, et les grilles s'affichent aussitôt la fois suivante."
 }

@@ -3,9 +3,14 @@
  * anchor that the shell puts on the Rail items and the search button; when
  * the anchor is missing or not on screen (phone layout, a collapsed source),
  * the step shows as a centred card instead.
+ *
+ * The `vod` anchor is the rail's My List entry, the one movie and series
+ * entry on screen at every width (a source's Movies and Series links only
+ * show while that source is expanded). The step's title, text and icon name
+ * My List so the card matches what the spotlight shows.
  */
 
-import { Clapperboard, Search, Tv, type LucideIcon } from 'lucide-react';
+import { Bookmark, Search, Tv, type LucideIcon } from 'lucide-react';
 
 export type TourAnchor = 'live' | 'vod' | 'search';
 
@@ -19,7 +24,7 @@ export interface TourStep {
 
 export const TOUR_STEPS: readonly TourStep[] = [
   { anchor: 'live', icon: Tv, titleKey: 'tourLiveTitle', textKey: 'tourLiveText' },
-  { anchor: 'vod', icon: Clapperboard, titleKey: 'tourVodTitle', textKey: 'tourVodText' },
+  { anchor: 'vod', icon: Bookmark, titleKey: 'tourVodTitle', textKey: 'tourVodText' },
   { anchor: 'search', icon: Search, titleKey: 'tourSearchTitle', textKey: 'tourSearchText' },
 ];
 

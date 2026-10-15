@@ -62,7 +62,11 @@ export function SeriesDetailPage() {
     waitForCategory: source.isPending || (stalkerSource && detail.isPending),
   });
   const tmdb = useTmdbTv(item, tmdbOn);
-  const model = useMemo(() => (detail.data ? mergeSeriesDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
+  // A disabled query still returns what it cached while TMDB was on: merge it only while TMDB is on.
+  const model = useMemo(
+    () => (detail.data ? mergeSeriesDetail(detail.data, tmdbOn ? tmdb.data : undefined) : undefined),
+    [detail.data, tmdb.data, tmdbOn],
+  );
   const similarFallback = useTmdbSimilar('tv', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 
@@ -133,7 +137,10 @@ export function SeriesDetailPage() {
     { tmdbId: model?.tmdbId ?? 0, season: selectedSeason ?? 0 },
     { enabled: tmdbOn && !!model?.tmdbId && selectedSeason !== undefined && selectedSeason > 0, staleTime: Infinity },
   );
-  const episodes = useMemo(() => (seasonObj ? mergeSeasonEpisodes(seasonObj, tmdbSeason.data) : []), [seasonObj, tmdbSeason.data]);
+  const episodes = useMemo(
+    () => (seasonObj ? mergeSeasonEpisodes(seasonObj, tmdbOn ? tmdbSeason.data : undefined) : []),
+    [seasonObj, tmdbSeason.data, tmdbOn],
+  );
 
   const isFavorite = useIsFavorite(ref);
   const [trailerOpen, setTrailerOpen] = useState(false);

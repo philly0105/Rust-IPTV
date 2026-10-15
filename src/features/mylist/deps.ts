@@ -19,3 +19,4 @@ export { PosterCard, itemPath, joinList } from '@/shell/dashboard/cards';
 export { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 export { VirtualRows } from '@/features/library/components/VirtualRows';
 export { captureWatched, undoWatched } from '@/features/library/lib/watchedUndo';
+export { invalidateWatched } from '@/features/vod/lib/watchedQueries';

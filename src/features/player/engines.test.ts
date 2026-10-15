@@ -162,6 +162,52 @@ describe('engine selection', () => {
   });
 });
 
+describe('CORS mode of the element (screenshots of local files and proxied streams, C6)', () => {
+  const { mediaCrossOrigin } = engines;
+  const PROXY = 'http://127.0.0.1:51234/0123456789abcdef0123456789abcdef01234567/api/proxy?url=http%3A%2F%2Fh%2Fm.mp4';
+
+  it('loads the asset protocol and the desktop loopback proxy as anonymous', () => {
+    expect(mediaCrossOrigin(`http://asset.localhost/${encodeURIComponent('C:\\Downloads\\Film.mp4')}`)).toBe('anonymous');
+    expect(mediaCrossOrigin('https://asset.localhost/%2Fhome%2Fa%2Ffilm.mkv')).toBe('anonymous');
+    expect(mediaCrossOrigin('asset://localhost/%2FUsers%2Fa%2Ffilm.mp4')).toBe('anonymous');
+    expect(mediaCrossOrigin(PROXY)).toBe('anonymous');
+  });
+
+  it('leaves third-party and same-origin URLs alone', () => {
+    // A provider without CORS would refuse a CORS load: the stream must still play.
+    expect(mediaCrossOrigin('http://h/m.mp4')).toBeNull();
+    expect(mediaCrossOrigin('http://127.0.0.1:7290/movie/u/p/1.mp4')).toBeNull();
+    expect(mediaCrossOrigin('http://evil.example/x/api/proxy?url=y')).toBeNull();
+    expect(mediaCrossOrigin('/api/proxy?url=http%3A%2F%2Fh%2Fm.mp4')).toBeNull();
+    expect(mediaCrossOrigin('/api/files/abc')).toBeNull();
+    expect(mediaCrossOrigin('blob:http://localhost/1')).toBeNull();
+  });
+
+  it('sets the mode before the load, and drops it for the next direct stream and on destroy', async () => {
+    const el = video();
+    const seen: (string | null)[] = [];
+    const set = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')!.set!;
+    Object.defineProperty(el, 'src', {
+      configurable: true,
+      set(v: string) {
+        seen.push(el.getAttribute('crossorigin'));
+        set.call(el, v);
+      },
+    });
+    const file = 'http://asset.localhost/C%3A%5Cv%5Ca.mp4';
+    const local = await createEngine(el, src('C:\\v\\a.mp4', { kind: 'file', isLive: false }), file, cb(), { captions: false });
+    expect(local.kind).toBe('native');
+    expect(el.crossOrigin).toBe('anonymous');
+    await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', cb(), { captions: false });
+    expect(el.hasAttribute('crossorigin')).toBe(false);
+    const proxied = await createEngine(el, src('http://h/n.mp4', { isLive: false }), PROXY, cb(), { captions: false });
+    proxied.destroy();
+    expect(el.hasAttribute('crossorigin')).toBe(false);
+    // The attribute was in place when each `src` was set.
+    expect(seen).toEqual(['anonymous', null, 'anonymous']);
+  });
+});
+
 describe('mpegts.js engine recovery', () => {
   it('reconnects a live stream that closed, then reports after the restart budget', async () => {
     vi.useFakeTimers();

@@ -206,5 +206,9 @@
   "accountAlertDismiss": "Dismiss the alert for {{name}}",
   "navScheduled": "Scheduled",
   "navMultiview": "Multi-view",
-  "navMyList": "My List"
+  "navMyList": "My List",
+  "areaTour": "Tour",
+  "scTourSkip": "Skip the tour",
+  "scTourStep": "Next or previous step",
+  "scTourReplay": "See the tour again (command palette, Take the tour)"
 }

@@ -12,6 +12,7 @@ import { invalidate, queryClient, rpcKey } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import { sameRef, type WatchlistEntry } from '@/api/types';
 
+import { invalidateWatched } from '../deps';
 import { reinsertRef } from './list';
 
 /** Arguments of the shared query: the whole list, every source and type. */
@@ -47,9 +48,12 @@ export function refreshMyList(): Promise<void> {
   return invalidate('watchlist.');
 }
 
-/** Refetches what a watched change touches: positions, user state and My List's watched ticks. */
+/**
+ * Refetches what a watched change touches: positions, user state, My List's
+ * watched ticks, and the VOD grid pages and year counts "Hide watched" filters.
+ */
 export function refreshWatched(): Promise<void> {
-  return Promise.all([invalidate('positions.'), invalidate('userstate.'), invalidate('watchlist.')]).then(() => undefined);
+  return invalidateWatched();
 }
 
 /**

@@ -103,9 +103,17 @@ test.describe.serial('first-run tour and What\'s new', () => {
 
     await card.getByRole('button', { name: 'Next' }).click();
     await expectStep(page, 2);
-    await expect(card.getByRole('heading', { name: 'Movies and series' })).toBeVisible();
+    await expect(card.getByRole('heading', { name: 'Movies, series and My List' })).toBeVisible();
     await card.getByRole('button', { name: 'Back' }).click();
     await expectStep(page, 1);
+    await page.keyboard.press('ArrowRight');
+    await expectStep(page, 2);
+    await page.keyboard.press('ArrowLeft');
+    await expectStep(page, 1);
+
+    // A click on the card's text keeps focus in the dialog (the card is focusable), so the keys keep working.
+    await card.getByRole('heading').click();
+    expect(await card.evaluate((el) => el.contains(document.activeElement))).toBe(true);
     await page.keyboard.press('ArrowRight');
     await expectStep(page, 2);
     await page.keyboard.press('ArrowLeft');
@@ -119,7 +127,12 @@ test.describe.serial('first-run tour and What\'s new', () => {
     // The app's shortcuts stay quiet: `?` would open the shortcuts overlay.
     await page.keyboard.press('Shift+Slash');
     await expect(page.getByRole('dialog')).toHaveCount(1);
+    // Nor does the command palette (Ctrl+K), with focus on the card after a click on its text.
+    await card.getByTestId('tour-body').locator('p').first().click();
+    await page.keyboard.press('Control+k');
+    await expect(page.getByRole('dialog')).toHaveCount(1);
 
+    // Escape skips, also right after a click on the card's text.
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('tour')).toHaveCount(0);
     await expect.poll(async () => (await markers(request)).tourCompleted, { timeout: 10_000 }).toBe(true);

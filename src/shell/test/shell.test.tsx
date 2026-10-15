@@ -8,7 +8,38 @@ import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, s
 /** Matches toast text in the visible stack, not its copy in the screen-reader live region. */
 const VISIBLE_TOAST = { ignore: 'script, style, [data-toast-live] *' };
 
-const events = vi.hoisted(() => ({ handlers: new Map<string, (p: unknown) => void>() }));
+/**
+ * The event bus: `handlers.get(type)` emits to every subscriber of that type, like the real
+ * bus (the shell and the parental hook both listen to `import.progress` and `sources.changed`).
+ */
+const events = vi.hoisted(() => {
+  const listeners = new Map<string, Set<(p: unknown) => void>>();
+  const handlers = new Map<string, (p: unknown) => void>();
+  const open = (type: string) => {
+    const subs = new Set<(p: unknown) => void>();
+    listeners.set(type, subs);
+    handlers.set(type, (p) => [...subs].forEach((fn) => fn(p)));
+    return subs;
+  };
+  return {
+    handlers,
+    subscribe(type: string, h: (p: unknown) => void): () => void {
+      const subs = listeners.get(type) ?? open(type);
+      subs.add(h);
+      return () => {
+        subs.delete(h);
+        if (subs.size === 0 && listeners.get(type) === subs) {
+          listeners.delete(type);
+          handlers.delete(type);
+        }
+      };
+    },
+    clear(): void {
+      listeners.clear();
+      handlers.clear();
+    },
+  };
+});
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -17,10 +48,7 @@ vi.mock('@/api/transport', async (orig) => ({
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({
-  onAppEvent: (type: string, h: (p: unknown) => void) => {
-    events.handlers.set(type, h);
-    return () => events.handlers.delete(type);
-  },
+  onAppEvent: (type: string, h: (p: unknown) => void) => events.subscribe(type, h),
   onAnyAppEvent: () => () => undefined,
   onConnectionState: () => () => undefined,
 }));
@@ -105,7 +133,7 @@ beforeAll(installDomStubs);
 beforeEach(() => {
   baseHandlers();
   playerMock.playItem.mockClear();
-  events.handlers.clear();
+  events.clear();
   useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false });
   useThemeStore.setState({ theme: 'dark' });
   useToastStore.setState({ toasts: [] });
@@ -1098,7 +1126,58 @@ describe('Run 3 onboarding wiring', () => {
     expect(live).toHaveLength(1);
     expect(live[0]!.textContent).toContain('Night Portal');
     expect(within(nav).getByRole('link', { name: /My List/ }).getAttribute('data-tour')).toBe('vod');
-    expect(document.querySelector('[data-tour="search"]')).not.toBeNull();
+    // From lg up the header's "Search everything" button is the one search anchor: not the rail's
+    // Search link, and never the palette button (it opens commands, not search).
+    const search = document.querySelectorAll('[data-tour="search"]');
+    expect(search).toHaveLength(1);
+    expect(screen.getByTestId('shell-header').contains(search[0]!)).toBe(true);
+    expect(search[0]!.textContent).toContain('Search everything');
+    expect(screen.getByTestId('open-palette').hasAttribute('data-tour')).toBe(false);
+  });
+
+  describe('the search anchor follows the layout', () => {
+    /** A page with a header search field, like Live or Search. */
+    function SearchFieldPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({ title: 'Find', search: { value: '', onChange: () => {}, placeholder: 'Filter here' } });
+      }, [shell]);
+      return <Page>search field page</Page>;
+    }
+    // The harness stub (installed in beforeAll) matches nothing; this one matches the rail's auto-collapse query.
+    let stubbed: typeof window.matchMedia;
+    beforeEach(() => {
+      stubbed = window.matchMedia;
+    });
+    afterEach(() => {
+      window.matchMedia = stubbed;
+    });
+    const setNarrow = (narrow: boolean) => {
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: narrow && query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+    };
+
+    it('from lg up the page search field holds it', async () => {
+      setNarrow(false);
+      renderRoutes(routes(<SearchFieldPage />), '/search');
+      const field = await screen.findByPlaceholderText('Filter here');
+      const search = document.querySelectorAll('[data-tour="search"]');
+      expect(search).toHaveLength(1);
+      expect(search[0]!.contains(field) || search[0] === field).toBe(true);
+    });
+
+    it.each([
+      ['/favorites', 'favorites page'],
+      ['/search', 'search field page'],
+    ])('below lg the rail Search link holds it on %s', async (path, text) => {
+      setNarrow(true);
+      renderRoutes(routes(<SearchFieldPage />), path);
+      await screen.findByText(text);
+      const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+      const search = document.querySelectorAll('[data-tour="search"]');
+      expect(search).toHaveLength(1);
+      expect(search[0]).toBe(within(nav).getByRole('link', { name: 'Search' }));
+      expect(screen.getByTestId('open-palette').hasAttribute('data-tour')).toBe(false);
+    });
   });
 
   it('the palette starts the tour and opens What\'s new', async () => {

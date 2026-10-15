@@ -311,6 +311,7 @@ function SlideBody({
               onPointerEnter={details.onPointerEnter}
               onPointerLeave={details.onPointerLeave}
               onFocus={details.onFocus}
+              onBlur={details.onBlur}
               className={cn(
                 'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-glass-border bg-on-glass/10 px-5 text-base font-medium text-on-glass select-none',
                 'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',

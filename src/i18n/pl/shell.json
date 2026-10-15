@@ -216,5 +216,9 @@
   "accountAlertDismiss": "Odrzuć alert dla {{name}}",
   "navScheduled": "Zaplanowane",
   "navMultiview": "Multiwidok",
-  "navMyList": "Moja lista"
+  "navMyList": "Moja lista",
+  "areaTour": "Wprowadzenie",
+  "scTourSkip": "Pomiń wprowadzenie",
+  "scTourStep": "Następny lub poprzedni krok",
+  "scTourReplay": "Obejrzyj wprowadzenie ponownie (paleta poleceń, Pokaż wprowadzenie)"
 }

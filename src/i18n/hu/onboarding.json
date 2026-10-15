@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "Élő tévéadás",
   "tourLiveText": "Csoportokba rendezett csatornák, az aktuális és a következő műsor, teljes műsorújság.",
-  "tourVodTitle": "Filmek és sorozatok",
-  "tourVodText": "Böngésszen a borítók között, szűrjön évtizedre, és mentse a címeket a Saját listába.",
+  "tourVodTitle": "Filmek, sorozatok és Saját lista",
+  "tourVodText": "Böngésszen az egyes források film- és sorozatborítói között, szűrjön évtizedre, és mentse a címeket a Saját listába, hogy egy helyen legyenek.",
   "tourSearchTitle": "Keresés mindenben",
   "tourSearchText": "Keressen csatornákat, filmeket és sorozatokat az összes forrásában.",
   "tourStep": "{{current}}/{{total}}. lépés",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Új megjelenés",
   "noteLooksText": "Hét kiemelőszín, OLED-fekete téma, tömör mód és állítható felületméret.",
   "noteScreenshotTitle": "Képernyőképek",
-  "noteScreenshotText": "Lejátszás közben az S billentyűvel az aktuális képkockát a Képek mappába mentheti.",
+  "noteScreenshotText": "Lejátszás közben az S billentyűvel képként mentheti az aktuális képkockát.",
   "noteSpeedTitle": "Gyorsabb borítók",
   "noteSpeedText": "A borítók és logók a lemezen maradnak, így a rácsok legközelebb azonnal betöltődnek."
 }

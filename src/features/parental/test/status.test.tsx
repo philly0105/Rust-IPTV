@@ -2,7 +2,7 @@
 // status and refreshes what Hide mode filters; timed unlocks are re-checked
 // when they run out.
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +10,7 @@ import { queryClient } from '@/api/query';
 import type { ParentalStatus } from '@/api/types';
 
 import { lockNow, useParentalEvents, useParentalStatus } from '..';
-import { catalogAffected, FILTERED_PREFIXES, hidesContent, STATUS_KEY, unlockRemainingMs } from '../status';
+import { afterLockChange, catalogAffected, FILTERED_PREFIXES, hidesContent, STATUS_KEY, unlockRemainingMs } from '../status';
 import { core, emitEvent, listenerCount } from './harness';
 
 vi.mock('@/api/transport', async (orig) => {
@@ -47,6 +47,11 @@ function seedLists() {
     ['lists.items', { id: 'l1' }],
     ['epg.search', { sourceId: 'src1', query: 'news' }],
     ['stats.summary', { days: 7, today: '2026-10-14' }],
+    // Portal pages and details: the core filters or refuses them in Hide mode too.
+    ['stalker.movies', { sourceId: 'portal', query: { offset: 0, limit: 56 } }],
+    ['stalker.search', { sourceId: 'portal', query: 'night', contentType: 'movie' }],
+    ['stalker.seriesDetail', { ref: { sourceId: 'portal', contentType: 'series', itemId: 's1' } }],
+    ['xtream.vodDetail', { ref: { sourceId: 'src1', contentType: 'movie', itemId: 'm1' } }],
     ['parental.locks', {}],
   ] as const;
   const unrelated = [['epg.nowNext', null]] as const;
@@ -99,14 +104,83 @@ describe('useParentalEvents', () => {
   it('reloads the catalog when a lock is added or removed in Hide mode', () => {
     renderHook(() => useParentalEvents(), { wrapper });
     queryClient.setQueryData(STATUS_KEY, s());
-    const { invalidated } = seedLists();
+    const seeded = FILTERED_PREFIXES.map((p) => [p.endsWith('.') ? `${p}list` : p, { seed: p }] as const);
+    for (const k of seeded) queryClient.setQueryData(k, []);
+    queryClient.setQueryData(['epg.nowNext', null], []);
     // The core sends the same status after a lock-list change.
     act(() => emitEvent('parental.changed', s()));
-    for (const p of FILTERED_PREFIXES) {
-      const key = queryClient.getQueryCache().findAll().find((q) => String(q.queryKey[0]).startsWith(p))!.queryKey;
-      expect(invalidated(key), p).toBe(true);
+    // Nothing shows them, so the next visit loads fresh instead of drawing the old data first.
+    for (const k of seeded) expect(queryClient.getQueryState(k), String(k[0])).toBeUndefined();
+    expect(queryClient.getQueryState(['epg.nowNext', null])?.isInvalidated).toBe(false);
+  });
+
+  it('drops cached portal pages and details when Hide mode filters again, and refetches the ones on screen', async () => {
+    queryClient.setQueryData(STATUS_KEY, s({ unlocked: true }));
+    renderHook(() => useParentalEvents(), { wrapper });
+    // A Stalker grid page on screen, served by the core (which drops hidden titles once locked).
+    let locked = false;
+    const pageKey = ['stalker.movies', { sourceId: 'portal', categoryId: 'c1' }];
+    const page = renderHook(
+      () => useQuery({ queryKey: pageKey, queryFn: async () => (locked ? ['Safe'] : ['Safe', 'Locked']) }),
+      { wrapper },
+    );
+    await vi.waitFor(() => expect(page.result.current.data).toEqual(['Safe', 'Locked']));
+    // Browsed while unlocked: other pages, a search, a hover-prefetched detail.
+    const { keys, invalidated } = seedLists();
+
+    locked = true;
+    act(() => emitEvent('parental.changed', s()));
+    for (const k of keys.filter(([cmd]) => !cmd.startsWith('parental.'))) {
+      expect(queryClient.getQueryState(k), String(k[0])).toBeUndefined();
     }
-    expect(invalidated(['epg.nowNext', null])).toBe(false);
+    // Not something Hide mode filters: refreshed, kept.
+    expect(invalidated(['parental.locks', {}])).toBe(true);
+    expect(queryClient.getQueryState(['epg.nowNext', null])).toBeDefined();
+    // The page on screen stays mounted and refetches in place.
+    await vi.waitFor(() => expect(page.result.current.data).toEqual(['Safe']));
+  });
+
+  it('keeps cached data when Hide mode stops filtering (an unlock only shows more)', () => {
+    queryClient.setQueryData(STATUS_KEY, s());
+    renderHook(() => useParentalEvents(), { wrapper });
+    const { keys, invalidated } = seedLists();
+    act(() => emitEvent('parental.changed', s({ enabled: false })));
+    for (const k of keys) expect(invalidated(k), String(k[0])).toBe(true);
+  });
+
+  it('afterLockChange drops cached portal details only while Hide mode filters', () => {
+    const detail = ['stalker.vodDetail', { ref: { sourceId: 'portal', contentType: 'movie', itemId: 'm9' } }] as const;
+    queryClient.setQueryData(STATUS_KEY, s({ unlocked: true }));
+    queryClient.setQueryData(detail, { item: { title: 'Locked' } });
+    afterLockChange();
+    expect(queryClient.getQueryData(detail)).toBeDefined();
+
+    queryClient.setQueryData(STATUS_KEY, s());
+    afterLockChange();
+    expect(queryClient.getQueryState(detail)).toBeUndefined();
+  });
+
+  it('refreshes adult categories and lock checks after an import or a source change', () => {
+    renderHook(() => useParentalEvents(), { wrapper });
+    const adult = ['parental.adultCategories', { sourceId: 'src1', contentType: 'live' }] as const;
+    const check = ['parental.check', { items: [] }] as const;
+    const stale = (k: readonly unknown[]) => queryClient.getQueryState(k)?.isInvalidated ?? false;
+    const seed = () => {
+      queryClient.setQueryData(adult, ['c1']);
+      queryClient.setQueryData(check, []);
+    };
+
+    seed();
+    act(() => emitEvent('import.progress', { sourceId: 'src1', phase: 'parsing', done: 10 }));
+    expect(stale(adult)).toBe(false);
+    act(() => emitEvent('import.progress', { sourceId: 'src1', phase: 'done', done: 100 }));
+    expect(stale(adult)).toBe(true);
+    expect(stale(check)).toBe(true);
+
+    seed();
+    act(() => emitEvent('sources.changed', {}));
+    expect(stale(adult)).toBe(true);
+    expect(stale(check)).toBe(true);
   });
 
   it('stops listening on unmount', () => {

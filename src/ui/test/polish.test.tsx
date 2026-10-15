@@ -248,6 +248,73 @@ describe('Dialog focus restore', () => {
     rerender(<Harness open={false} />);
     expect(document.activeElement?.textContent).toBe('opener');
   });
+
+  it('lands on #main when the opener is still there but became disabled', () => {
+    function Harness({ open, disabled }: { open: boolean; disabled: boolean }) {
+      return (
+        <main id="main" tabIndex={-1}>
+          <button type="button" disabled={disabled}>
+            opener
+          </button>
+          <Dialog open={open} onClose={() => {}} title="Clear">
+            <button type="button">inside</button>
+          </Dialog>
+        </main>
+      );
+    }
+    const { rerender } = render(<Harness open={false} disabled={false} />);
+    screen.getByText('opener').focus();
+    rerender(<Harness open disabled={false} />);
+    // Clearing empties the list, so the opener turns disabled as the dialog closes.
+    rerender(<Harness open={false} disabled />);
+    expect(document.activeElement?.id).toBe('main');
+  });
+
+  it('leaves focus on <body> when the dialog opened from it (startup dialogs)', () => {
+    function Harness({ open }: { open: boolean }) {
+      return (
+        <main id="main" tabIndex={-1}>
+          <Dialog open={open} onClose={() => {}} title="Welcome">
+            <button type="button">inside</button>
+          </Dialog>
+        </main>
+      );
+    }
+    (document.activeElement as HTMLElement | null)?.blur();
+    const { rerender } = render(<Harness open={false} />);
+    expect(document.activeElement).toBe(document.body);
+    rerender(<Harness open />);
+    rerender(<Harness open={false} />);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe('Dialog body', () => {
+  it('draws no body band for a confirm with only a description and a footer', () => {
+    render(
+      <Dialog open onClose={() => {}} title="Clear?" description="This removes everything." footer={<button type="button">Clear</button>} testId="d" />,
+    );
+    const panel = screen.getByTestId('d');
+    expect(panel.children).toHaveLength(2);
+    expect(panel.querySelector('.pb-6')).toBeNull();
+    expect(panel.lastElementChild!.textContent).toBe('Clear');
+  });
+
+  it('keeps the body for content, including a 0', () => {
+    const { rerender } = render(
+      <Dialog open onClose={() => {}} title="Edit" footer={<button type="button">Save</button>} testId="d">
+        <p>Fields</p>
+      </Dialog>,
+    );
+    expect(screen.getByTestId('d').children).toHaveLength(3);
+    rerender(
+      <Dialog open onClose={() => {}} title="Count" testId="d">
+        {0}
+      </Dialog>,
+    );
+    expect(screen.getByTestId('d').children).toHaveLength(2);
+    expect(screen.getByTestId('d').lastElementChild!.textContent).toBe('0');
+  });
 });
 
 describe('Menu focus', () => {

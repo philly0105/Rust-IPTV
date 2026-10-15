@@ -149,6 +149,47 @@ describe("What's new", () => {
     expect(useOnboardingStore.getState().overlay).toEqual({ kind: 'tour', auto: false });
   });
 
+  // At 1280x800 the English notes overflow by about 28 px; the last row used to end at the
+  // footer with no cue that more lay below (review R1).
+  it('fades the edges that have more notes past them, and makes the list a Tab stop while it scrolls', async () => {
+    open();
+    await screen.findAllByTestId('whats-new-item');
+    const list = screen.getByTestId('whats-new-list');
+    const top = screen.getByTestId('whats-new-fade-top');
+    const bottom = screen.getByTestId('whats-new-fade-bottom');
+    // jsdom has no layout: everything fits, so no fade and no Tab stop.
+    expect(top.getAttribute('aria-hidden')).toBe('true');
+    expect(bottom.dataset['shown']).toBeUndefined();
+    expect(list.hasAttribute('tabindex')).toBe(false);
+
+    let scrollTop = 0;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 555 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 527 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => scrollTop, set: (v: number) => (scrollTop = v) });
+    fireEvent.scroll(list);
+    await waitFor(() => expect(bottom.dataset['shown']).toBe('true'));
+    expect(bottom.className).toContain('opacity-100');
+    expect(top.dataset['shown']).toBeUndefined();
+    expect(top.className).toContain('opacity-0');
+    expect(list.getAttribute('tabindex')).toBe('0');
+
+    scrollTop = 14;
+    fireEvent.scroll(list);
+    await waitFor(() => expect(top.dataset['shown']).toBe('true'));
+    expect(bottom.dataset['shown']).toBe('true');
+
+    scrollTop = 28;
+    fireEvent.scroll(list);
+    await waitFor(() => expect(bottom.dataset['shown']).toBeUndefined());
+    expect(top.dataset['shown']).toBe('true');
+    // The fades only ever fade, and only when motion is allowed.
+    for (const el of [top, bottom]) {
+      for (const token of el.className.split(/\s+/).filter((c) => /(^|:)(transition|duration-)/.test(c))) {
+        expect(token.startsWith('motion-safe:')).toBe(true);
+      }
+    }
+  });
+
   it('does not offer the tour without a source', async () => {
     open();
     await screen.findAllByTestId('whats-new-item');

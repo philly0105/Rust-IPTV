@@ -211,5 +211,9 @@
   "accountAlertDismiss": "Dispensar o alerta de {{name}}",
   "navScheduled": "Agendados",
   "navMultiview": "Multitela",
-  "navMyList": "Minha lista"
+  "navMyList": "Minha lista",
+  "areaTour": "Tour guiado",
+  "scTourSkip": "Pular o tour",
+  "scTourStep": "Etapa seguinte ou anterior",
+  "scTourReplay": "Ver o tour de novo (paleta de comandos, Fazer o tour)"
 }

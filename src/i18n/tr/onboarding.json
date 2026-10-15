@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "Canlı TV",
   "tourLiveText": "Gruplara ayrılmış kanallar, şimdiki ve sonraki programlar ve eksiksiz TV rehberi.",
-  "tourVodTitle": "Filmler ve diziler",
-  "tourVodText": "Afişlere göz atın, on yıllara göre filtreleyin, içerikleri sonra izlemek için Listeme kaydedin.",
+  "tourVodTitle": "Filmler, diziler ve Listem",
+  "tourVodText": "Her kaynağın film ve dizi afişlerine göz atın, on yıllara göre filtreleyin ve içerikleri tek bir yerde toplamak için Listeme kaydedin.",
   "tourSearchTitle": "Her şeyi arayın",
   "tourSearchText": "Tüm kaynaklarınızdaki kanalları, filmleri ve dizileri bulun.",
   "tourStep": "Adım {{current}}/{{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Yeni görünüm",
   "noteLooksText": "Yedi vurgu rengi, OLED siyahı tema, sıkı yoğunluk ve arayüz boyutu.",
   "noteScreenshotTitle": "Ekran görüntüleri",
-  "noteScreenshotText": "Oynatma sırasında S tuşuna basarak geçerli kareyi Resimler klasörüne kaydedin.",
+  "noteScreenshotText": "Oynatma sırasında S tuşuna basarak geçerli kareyi görüntü olarak kaydedin.",
   "noteSpeedTitle": "Daha hızlı afişler",
   "noteSpeedText": "Afişler ve logolar diskte tutulur, böylece ızgaralar bir dahaki sefere hemen yüklenir."
 }

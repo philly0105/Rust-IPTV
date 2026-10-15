@@ -87,6 +87,8 @@ test.describe.serial('image cache', () => {
   });
 
   test('settings show what the cache holds, and Clear empties it', async ({ page, request }) => {
+    // This browser now holds the grid's posters in its own HTTP cache (max-age a week).
+    await openGridPosters(page, source.id);
     const before = await rpc<ImageCacheStats>(request, 'images.stats');
     expect(before.files).toBeGreaterThan(0);
     expect(before.bytes).toBeGreaterThan(0);
@@ -111,10 +113,21 @@ test.describe.serial('image cache', () => {
     await expect(size).toHaveAttribute('data-bytes', '0');
     await expect(size).toHaveText(/^0 MB of 500 MB$/);
     await expect(row.getByTestId('image-cache-files')).toHaveText('Empty. Pictures are saved as you browse.');
-    await expect(row.getByTestId('image-cache-clear')).toBeDisabled();
+    // Unavailable, but it keeps the focus the dialog handed back (a disabled button would drop it to <body>).
+    const clear = row.getByTestId('image-cache-clear');
+    await expect(clear).toHaveAttribute('aria-disabled', 'true');
+    await expect(clear).toBeFocused();
 
     const after = await rpc<ImageCacheStats>(request, 'images.stats');
     expect(after).toMatchObject({ bytes: 0, files: 0 });
+
+    // The browser's own copies are not reused: the grid asks the emptied cache again under new URLs, and it refills.
+    const refill = watchImages(page);
+    await openGridPosters(page, source.id);
+    const srcs = await page.getByTestId('vod-grid-movie').locator('img[src^="/api/img?"]').evaluateAll((imgs) => imgs.map((i) => i.getAttribute('src')!));
+    for (const src of srcs.slice(0, 4)) expect(new URL(src, 'http://app.test').searchParams.get('gen')).toMatch(/^[1-9]\d*$/);
+    expect(refill.filter((r) => r.status() === 200).map((r) => r.headers()['x-image-cache'])).toContain('miss');
+    await expect.poll(async () => (await rpc<ImageCacheStats>(request, 'images.stats')).files).toBeGreaterThan(0);
   });
 
   test('a new cap is saved', async ({ page, request }) => {

@@ -328,6 +328,77 @@ describe('in the player', () => {
   });
 });
 
+describe('the readout (OSD) beside it', () => {
+  const mount = (): void => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+  };
+  const readout = (): HTMLElement => document.querySelector<HTMLElement>('.player-osd')!;
+
+  /** jsdom has no layout: a docked player about 407 px wide, the banner `bannerWidth` wide in its start corner. */
+  function layout(bannerWidth: number): () => void {
+    const boxes = (el: HTMLElement): Record<'left' | 'top' | 'width' | 'height', number> | undefined => {
+      if (el.hasAttribute('data-zap-banner')) return { left: 12, top: 12, width: bannerWidth, height: 72 };
+      if (el.classList.contains('player-osd')) return { left: 180, top: 20, width: 203, height: 70 };
+      return undefined;
+    };
+    const props = { offsetLeft: 'left', offsetTop: 'top', offsetWidth: 'width', offsetHeight: 'height' } as const;
+    const spies = (Object.keys(props) as (keyof typeof props)[]).map((prop) =>
+      vi.spyOn(HTMLElement.prototype, prop, 'get').mockImplementation(function (this: HTMLElement) {
+        return boxes(this)?.[props[prop]] ?? 0;
+      }),
+    );
+    return () => spies.forEach((s) => s.mockRestore());
+  }
+
+  it('stays within the player and wraps a long line rather than clipping it (C6)', () => {
+    tune(movie);
+    mount();
+    act(() => media.showOsd('Screenshot saved', 'The Long Night 2026-10-14 21-07-33 with-a-very-long-file-name.png'));
+    // Against the player's width, not the window's: a docked player is far narrower than 50vw.
+    expect(readout().className).toContain('max-w-[min(40rem,calc(100%-3rem))]');
+    expect(readout().className).toContain('[overflow-wrap:anywhere]');
+    const line = screen.getByText(/with-a-very-long-file-name/);
+    expect(line.className).toContain('line-clamp-2');
+    expect(line.className).not.toMatch(/truncate|vw/);
+    expect(readout().style.top).toBe('');
+  });
+
+  it('moves below the zap banner while the banner covers its column, and back when it goes', async () => {
+    const restore = layout(383);
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      expect(screen.getByTestId('zap-banner')).toBeTruthy();
+      act(() => media.showOsd('Screenshot saved', 'News 24 2026-10-14 21-07-33.png'));
+      expect(readout().style.top).toBe(`${12 + 72 + 8}px`);
+      act(() => zap.hideZapBanner());
+      expect(screen.queryByTestId('zap-banner')).toBeNull();
+      expect(readout().style.top).toBe('');
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps its place when the banner leaves its column free', async () => {
+    const restore = layout(150);
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      expect(screen.getByTestId('zap-banner')).toBeTruthy();
+      act(() => media.showOsd('Screenshot saved', 'News 24.png'));
+      expect(readout().style.top).toBe('');
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('hover holds', () => {
   function Spot() {
     const hover = useZapHover();

@@ -409,12 +409,63 @@ async fn server_mode_answers_unsupported_for_every_command() {
         ),
         ("screenshot.open", json!({"path": missing})),
         ("screenshot.reveal", json!({"path": outside})),
+        // Malformed or missing args: the desktop check comes first, so they
+        // are unsupported too, never invalid.
+        ("screenshot.save", json!({})),
+        ("screenshot.save", Value::Null),
+        (
+            "screenshot.save",
+            json!({"dataBase64": PNG_B64, "format": "gif"}),
+        ),
+        ("screenshot.save", json!("not an object")),
+        ("screenshot.mpv", json!({"withSubtitles": "yes"})),
+        ("screenshot.open", json!({})),
+        ("screenshot.open", Value::Null),
+        ("screenshot.reveal", json!({"path": 5})),
+        ("screenshot.reveal", json!([1, 2])),
     ] {
-        let err = c.err(cmd, args).await;
-        assert_eq!(err.code, RpcErrorCode::Unsupported, "{cmd}: {err:?}");
+        let err = c.err(cmd, args.clone()).await;
+        assert_eq!(err.code, RpcErrorCode::Unsupported, "{cmd} {args}: {err:?}");
         assert!(
             err.message.contains("desktop app"),
-            "{cmd}: {}",
+            "{cmd} {args}: {}",
+            err.message
+        );
+    }
+    c.assert_nothing_written();
+}
+
+#[tokio::test]
+async fn desktop_args_are_still_checked() {
+    let c = Ctx::new(true).await;
+    for (cmd, args, needle) in [
+        ("screenshot.save", json!({}), "dataBase64"),
+        ("screenshot.save", Value::Null, "dataBase64"),
+        (
+            "screenshot.save",
+            json!("not an object"),
+            "invalid arguments",
+        ),
+        (
+            "screenshot.mpv",
+            json!({"withSubtitles": "yes"}),
+            "invalid type",
+        ),
+        ("screenshot.open", json!({}), "path"),
+        ("screenshot.open", Value::Null, "path"),
+        ("screenshot.reveal", json!({"path": 5}), "invalid type"),
+    ] {
+        let err = c.err(cmd, args.clone()).await;
+        assert_eq!(err.code, RpcErrorCode::Invalid, "{cmd} {args}: {err:?}");
+        assert!(
+            err.message
+                .starts_with(&format!("invalid arguments for {cmd}: ")),
+            "{cmd} {args}: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains(needle),
+            "{cmd} {args}: {}",
             err.message
         );
     }

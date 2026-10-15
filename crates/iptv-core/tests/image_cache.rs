@@ -27,6 +27,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+/// The User-Agent the stub's `/gated/*` images require.
+const GATE_AGENT: &str = "SourceAgent/2.0";
 
 async fn new_state(dir: &Path) -> Arc<AppState> {
     AppState::new(dir.to_path_buf(), Arc::new(NoopSink), false)
@@ -185,6 +187,22 @@ async fn spawn_stub() -> Stub {
             "/status/{code}",
             get(|AxPath(code): AxPath<u16>| async move {
                 StatusCode::from_u16(code).unwrap().into_response()
+            }),
+        )
+        .route(
+            // An image host that wants the provider's User-Agent; slow, so
+            // a second caller arrives while the first fetch is running.
+            "/gated/{name}",
+            get(|headers: axum::http::HeaderMap| async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                if headers
+                    .get(header::USER_AGENT)
+                    .is_some_and(|v| v == GATE_AGENT)
+                {
+                    typed("image/png", png(1800))
+                } else {
+                    StatusCode::FORBIDDEN.into_response()
+                }
             }),
         )
         .layer(axum::middleware::from_fn_with_state(st.clone(), count));
@@ -602,6 +620,89 @@ async fn a_source_contributes_its_headers() {
         .await
         .unwrap();
     assert_ne!(stub.agents.lock().last().unwrap(), "SourceAgent/2.0");
+}
+
+#[tokio::test]
+async fn callers_with_other_source_headers_share_no_fetch_and_no_failure() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    let config = serde_json::json!({
+        "url": stub.url("/list.m3u"),
+        "headers": {"userAgent": GATE_AGENT}
+    })
+    .to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources(id, kind, name, config_json) VALUES ('s1', 'm3u', 'S', ?1)",
+                [config],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // A surface without the source starts first and is refused; the
+    // source's request arrives while that fetch runs and must not join it.
+    let gated = stub.url("/gated/a.png");
+    let (bare, with) = tokio::join!(imagecache::fetch(&state, &gated, None), async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        imagecache::fetch(&state, &gated, Some("s1")).await
+    });
+    assert_eq!(bare.unwrap_err().kind, ImageErrorKind::Upstream);
+    let with = with.unwrap();
+    assert!(!with.hit);
+    assert_eq!(with.bytes, 1800);
+    assert_eq!(stub.hits("/gated/a.png"), 2);
+
+    // A remembered refusal of the bare request does not block the source.
+    let other = stub.url("/gated/b.png");
+    let err = imagecache::fetch(&state, &other, None).await.unwrap_err();
+    assert_eq!(err.kind, ImageErrorKind::Upstream);
+    assert!(
+        !imagecache::fetch(&state, &other, Some("s1"))
+            .await
+            .unwrap()
+            .hit
+    );
+    // Once stored, the image is a disk hit for every caller.
+    assert!(imagecache::fetch(&state, &other, None).await.unwrap().hit);
+    assert_eq!(stub.hits("/gated/b.png"), 2);
+}
+
+#[tokio::test]
+async fn two_processes_on_one_data_dir_stay_under_the_cap_together() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    // The desktop app and an `iptv-server --data-dir` on its data dir: each
+    // has its own writer, and each running total counts its own inserts.
+    let desktop = new_state(dir.path()).await;
+    let server = new_state(dir.path()).await;
+    for s in [&desktop, &server] {
+        s.settings.write().image_cache_max_mb = 1;
+    }
+    let cap = 1024 * 1024;
+    // Both start before either inserts (each process loads the table's
+    // total at boot): a writer started later would count the other's rows.
+    for s in [&desktop, &server] {
+        imagecache::stats(s).await.unwrap();
+    }
+    let url = |n: &str| stub.url(&format!("/png/{n}?size=300000"));
+    for n in ["d1", "d2"] {
+        imagecache::get(&desktop, &url(n), None).await.unwrap();
+    }
+    for n in ["s1", "s2"] {
+        imagecache::get(&server, &url(n), None).await.unwrap();
+    }
+    // 1.2 MB in the table, 600 kB in either running total: no insert
+    // evicted. images.stats reads the table's own total and evicts.
+    let stats = imagecache::stats(&desktop).await.unwrap();
+    assert!(stats.bytes <= cap / 100 * 90, "{stats:?}");
+    assert_eq!((stats.files, stats.bytes), (3, 900_000));
+    assert_eq!(cache_files(dir.path()).len(), 3);
+    let seen = imagecache::stats(&server).await.unwrap();
+    assert_eq!((seen.files, seen.bytes), (3, 900_000));
 }
 
 // (f) ------------------------------------------------------------------------

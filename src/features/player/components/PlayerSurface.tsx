@@ -1,5 +1,5 @@
 import { AlertTriangle, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type FocusEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
@@ -55,20 +55,73 @@ function useKeyboardFocusPin(): {
   };
 }
 
+/** Space between the zap banner and a readout moved below it, px. */
+const OSD_BANNER_GAP = 8;
+
+/**
+ * The readout's top (px in the surface) while the zap banner sits over its column, else
+ * undefined (its usual place). Both use the surface's top corners, and in a small player the
+ * banner spans the width. Follows the banner as it mounts (a lazy part) and as it or the
+ * surface resizes. Layout boxes, not client rects: both pop in with a transform.
+ */
+function useTopClearOfZapBanner(ref: RefObject<HTMLElement | null>): number | undefined {
+  const shown = useZapBannerShown();
+  const [top, setTop] = useState<number>();
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const host = el?.parentElement;
+    if (!shown || !el || !host) {
+      setTop(undefined);
+      return;
+    }
+    let watched: HTMLElement | null = null;
+    const measure = (): void => {
+      const banner = host.querySelector<HTMLElement>('[data-zap-banner]');
+      if (banner !== watched) {
+        if (watched) resizes?.unobserve(watched);
+        if (banner) resizes?.observe(banner);
+        watched = banner;
+      }
+      // Only the readout's top moves, so its sides tell whether the two share a column.
+      const crosses =
+        !!banner && el.offsetLeft < banner.offsetLeft + banner.offsetWidth && banner.offsetLeft < el.offsetLeft + el.offsetWidth;
+      setTop(crosses ? banner.offsetTop + banner.offsetHeight + OSD_BANNER_GAP : undefined);
+    };
+    const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    resizes?.observe(host);
+    const mounts = new MutationObserver(measure);
+    mounts.observe(host, { childList: true });
+    measure();
+    return () => {
+      mounts.disconnect();
+      resizes?.disconnect();
+    };
+  }, [ref, shown]);
+  return top;
+}
+
 /** Big tuner readout after a zap or volume change. */
 function Osd() {
   const osd = useMediaStore((s) => s.osd);
   if (!osd) return null;
+  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} />;
+}
+
+function OsdReadout({ primary, secondary }: { primary: string; secondary?: string | undefined }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const top = useTopClearOfZapBanner(ref);
   return (
     <div
-      key={osd.key}
+      ref={ref}
       aria-live="polite"
-      className="player-osd pointer-events-none absolute top-5 end-6 z-20 text-end text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
+      // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
+      className="player-osd pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end text-white [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
+      style={top === undefined ? undefined : { top }}
     >
-      <div className={cn('font-display leading-none tabular-nums', /^\d+$/.test(osd.primary) ? 'text-6xl text-accent-hover' : 'text-2xl')}>
-        {osd.primary}
+      <div className={cn('font-display leading-none tabular-nums', /^\d+$/.test(primary) ? 'text-6xl text-accent-hover' : 'text-2xl')}>
+        {primary}
       </div>
-      {osd.secondary && <div className="mt-1 max-w-[50vw] truncate text-lg">{osd.secondary}</div>}
+      {secondary && <div className="mt-1 line-clamp-2 text-lg">{secondary}</div>}
     </div>
   );
 }

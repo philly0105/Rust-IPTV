@@ -3,9 +3,9 @@
  * detail pages (Run 3 C3 and C5).
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 
-import { imageAttempts } from '@/api/images';
+import { imageAttempts, imageFailedRecently, markImageFailed, type ImageAttempt } from '@/api/images';
 
 export interface ImageChain {
   /** The URL to put on the <img> now; undefined once every attempt failed or there is no picture. */
@@ -18,27 +18,58 @@ export interface ImageChain {
   onError: () => void;
 }
 
+/** One picture's attempts, fixed when the picture starts, and the one on screen. */
+interface Chain {
+  key: string;
+  attempts: readonly ImageAttempt[];
+  step: number;
+}
+
+/** The first attempt at or after `from` that has not failed lately (`attempts.length` when none is left). */
+function nextLive(attempts: readonly ImageAttempt[], from: number): number {
+  let i = from;
+  while (i < attempts.length && imageFailedRecently(attempts[i]!.url)) i++;
+  return i;
+}
+
+function startChain(key: string, sources: readonly (string | null | undefined)[], sourceId: string | undefined): Chain {
+  const attempts = imageAttempts(sources, sourceId);
+  return { key, attempts, step: nextLive(attempts, 0) };
+}
+
 /**
  * Walks the attempts for one picture: the cache URL of each source, then its
- * original URL once, then the next source (`imageAttempts`). State is keyed by
- * the attempt list, so a new picture (a virtual row reused for another item)
- * starts from the top and never inherits the previous one's failures.
+ * original URL once, then the next source (`imageAttempts`).
+ *
+ * - The attempts are fixed when the picture starts. When the desktop cache
+ *   base or the cache generation changes later, a picture already on screen
+ *   keeps its URL (no remount, no second fade-in); the next picture uses the
+ *   new one.
+ * - State is keyed by the sources, so a new picture (a virtual row reused for
+ *   another item) starts from the top and never inherits the previous one's
+ *   failures.
+ * - A failed URL is remembered for a few minutes (`markImageFailed`): a row
+ *   scrolled out and back in starts at the first attempt that has not failed,
+ *   or at the fallback, without asking the cache and the provider again.
  */
 export function useImageChain(sources: readonly (string | null | undefined)[], sourceId?: string): ImageChain {
-  const sourcesKey = sources.map((s) => s ?? '').join('\n');
-  const attempts = useMemo(() => imageAttempts(sourcesKey.split('\n'), sourceId), [sourcesKey, sourceId]);
-  const listKey = `${sourceId ?? ''}\n${attempts.map((a) => a.url).join('\n')}`;
-  const [state, setState] = useState<{ key: string; step: number }>({ key: listKey, step: 0 });
-  const step = state.key === listKey ? state.step : 0;
-  const current = attempts[step];
+  const key = `${sourceId ?? ''}\n${sources.map((s) => s?.trim() ?? '').join('\n')}`;
+  const [stored, setStored] = useState<Chain>(() => startChain(key, sources, sourceId));
+  let chain = stored;
+  if (stored.key !== key) {
+    // A new picture: start it during this render (React's derived-state pattern), so no frame shows the old one.
+    chain = startChain(key, sources, sourceId);
+    setStored(chain);
+  }
+  const { step } = chain;
+  const current = chain.attempts[step];
+  const currentUrl = current?.url;
   const onError = useCallback(() => {
+    if (currentUrl) markImageFailed(currentUrl);
     // Functional and keyed: a late error from an attempt already left behind is ignored.
-    setState((prev) => {
-      const at = prev.key === listKey ? prev.step : 0;
-      return at === step ? { key: listKey, step: step + 1 } : prev;
-    });
-  }, [listKey, step]);
-  return { url: current?.url, source: current?.source, failed: !current, onError };
+    setStored((prev) => (prev.key === key && prev.step === step ? { ...prev, step: nextLive(prev.attempts, step + 1) } : prev));
+  }, [key, step, currentUrl]);
+  return { url: currentUrl, source: current?.source, failed: !current, onError };
 }
 
 /**

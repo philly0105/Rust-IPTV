@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "Live tv",
   "tourLiveText": "Zenders per groep, met wat er nu en hierna op is en een volledige programmagids.",
-  "tourVodTitle": "Films en series",
-  "tourVodText": "Blader door posters, filter op decennium en bewaar titels in Mijn lijst voor later.",
+  "tourVodTitle": "Films, series en Mijn lijst",
+  "tourVodText": "Blader door de posters van films en series per bron, filter op decennium en bewaar titels in Mijn lijst om ze op één plek te hebben.",
   "tourSearchTitle": "Alles doorzoeken",
   "tourSearchText": "Vind zenders, films en series in al je bronnen.",
   "tourStep": "Stap {{current}} van {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Nieuw uiterlijk",
   "noteLooksText": "Zeven accentkleuren, een OLED-zwart thema, compacte dichtheid en de grootte van de interface.",
   "noteScreenshotTitle": "Schermafbeeldingen",
-  "noteScreenshotText": "Druk tijdens het afspelen op S om het huidige beeld in je map Afbeeldingen op te slaan.",
+  "noteScreenshotText": "Druk tijdens het afspelen op S om het huidige beeld als afbeelding op te slaan.",
   "noteSpeedTitle": "Snellere posters",
   "noteSpeedText": "Posters en logo's worden op schijf bewaard, zodat rasters de volgende keer meteen laden."
 }

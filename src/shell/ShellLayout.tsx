@@ -20,30 +20,83 @@ import { useMediaQuery } from './useMediaQuery';
 import { useSettings } from './useSettings';
 
 // player: the dock and the external-playback footer carry the whole playback UI (surfaces,
-// controls, engines, the store), about a third of the app's code. They load in their own chunk,
-// and the request starts as soon as this module runs, not on first render, so the dock is
-// usually there by the time the shell paints (C4 entry budget, docs/architecture/performance.md).
+// controls, engines, the store), about a third of the app's code, in their own chunk (C4 entry
+// budget, docs/architecture/performance.md). The shell renders only once the router has loaded
+// the first route's chunks, and the player request waits for that and then for the browser's
+// first idle moment, so it never competes with the page being opened. It starts at once when
+// there is playback to restore, and on the first pointer or key press (the start of any play
+// intent; a page that plays imports the player itself, so by then the chunk is usually in).
 type PlayerModule = typeof import('@/features/player');
 let loadedPlayer: PlayerModule | null = null;
-const playerModule = import('@/features/player').then((m) => (loadedPlayer = m));
+let playerModule: Promise<PlayerModule> | null = null;
+
+function loadPlayerModule(): Promise<PlayerModule> {
+  playerModule ??= import('@/features/player').then((m) => (loadedPlayer = m));
+  return playerModule;
+}
+
+/** The player's resume record in sessionStorage (RESUME_KEY in features/player/store.ts). */
+export const PLAYER_RESUME_KEY = 'player.resume';
+/** Longest the idle wait holds the player back after the shell's first paint. */
+export const PLAYER_IDLE_TIMEOUT_MS = 2000;
+
+function playbackToRestore(): boolean {
+  try {
+    return sessionStorage.getItem(PLAYER_RESUME_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
 
 /**
- * The player module: on the first render when its chunk is already in (the usual case, so the
- * dock mounts without a Suspense round), otherwise as soon as it arrives.
+ * Calls `load` once: at once when `now`, else on the first idle moment (at most
+ * PLAYER_IDLE_TIMEOUT_MS; a macrotask where requestIdleCallback is missing) or the first
+ * pointer or key press, whichever comes first. Returns the cancel function.
  */
+export function schedulePlayerLoad(load: () => void, now: boolean, win: Window = window): () => void {
+  const intents = ['pointerdown', 'keydown'] as const;
+  let idle: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => {
+    for (const type of intents) win.removeEventListener(type, fire, true);
+    if (idle !== undefined) win.cancelIdleCallback?.(idle);
+    if (timer !== undefined) clearTimeout(timer);
+    idle = timer = undefined;
+  };
+  function fire() {
+    cancel();
+    load();
+  }
+  if (now) {
+    load();
+    return () => undefined;
+  }
+  for (const type of intents) win.addEventListener(type, fire, { capture: true, passive: true });
+  if (typeof win.requestIdleCallback === 'function') idle = win.requestIdleCallback(fire, { timeout: PLAYER_IDLE_TIMEOUT_MS });
+  else timer = setTimeout(fire, 0);
+  return cancel;
+}
+
+/** The player module once loaded (on the first render when an earlier shell already loaded it). */
 function usePlayerModule(): PlayerModule | null {
   const [player, setPlayer] = useState(loadedPlayer);
   useEffect(() => {
     if (player) return;
     let live = true;
-    // A failed chunk load leaves the shell usable without the dock, like a missing engine.
-    void playerModule
-      .then((m) => {
-        if (live) setPlayer(m);
-      })
-      .catch(() => {});
+    const cancel = schedulePlayerLoad(
+      () => {
+        // A failed chunk load leaves the shell usable without the dock, like a missing engine.
+        void loadPlayerModule()
+          .then((m) => {
+            if (live) setPlayer(m);
+          })
+          .catch(() => {});
+      },
+      playerModule !== null || playbackToRestore(),
+    );
     return () => {
       live = false;
+      cancel();
     };
   }, [player]);
   return player;
@@ -51,10 +104,12 @@ function usePlayerModule(): PlayerModule | null {
 
 /**
  * Run 2 C7: counts watch time from the player store for as long as the shell is mounted. The
- * reporter loads with the player store in a lazy chunk instead of pulling it into the main one.
+ * reporter loads with the player store in a lazy chunk instead of pulling it into the main one,
+ * and starts with the player module (`enabled`); it reads the store's state when it starts.
  */
-function useWatchStats(): void {
+function useWatchStats(enabled: boolean): void {
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     let stop: (() => void) | null = null;
     void import('@/features/stats/reporter')
@@ -66,7 +121,7 @@ function useWatchStats(): void {
       live = false;
       stop?.();
     };
-  }, []);
+  }, [enabled]);
 }
 
 // recording: renders nothing; split out so the recording hooks and schedule logic stay out of the main chunk.
@@ -226,12 +281,12 @@ export function ShellLayout() {
 
   useShellEvents();
   useParentalEvents();
-  useWatchStats();
+  const player = usePlayerModule();
+  useWatchStats(!!player);
   // The layout counts as the parental gate's host from its first render, so a PIN request made
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
   useEffect(() => registerGateHost(), []);
-  const player = usePlayerModule();
   const languageSettled = useLanguageSync(settings.data?.language, settings.isError);
   useLastRoutePersistence(settings.isSuccess, settings.data?.lastRoute);
   useWindowStatePersistence();
@@ -239,7 +294,11 @@ export function ShellLayout() {
   useEffect(() => {
     if (playbackRestored) return;
     playbackRestored = true;
-    void playerModule.then((m) => m.restorePlayback()).catch(() => {});
+    // Nothing to restore: leave the player to its idle-time load.
+    if (!playbackToRestore()) return;
+    void loadPlayerModule()
+      .then((m) => m.restorePlayback())
+      .catch(() => {});
   }, []);
 
   if (!languageSettled) {
@@ -263,7 +322,7 @@ export function ShellLayout() {
       <GlobalShortcuts />
       <Rail collapsed={collapsed} autoCollapsed={narrow} />
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <Header panelInline={wide} />
+        <Header panelInline={wide} narrow={narrow} />
         <div className="flex min-h-0 flex-1">
           {/*
             The outlet is a bounded flex column at every width: the row above
@@ -293,10 +352,12 @@ export function ShellLayout() {
       <Suspense fallback={null}>
         <ParentalGateHost />
       </Suspense>
-      {/* recording: */}
-      <Suspense fallback={null}>
-        <RecordingWatcher />
-      </Suspense>
+      {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
+      {player && (
+        <Suspense fallback={null}>
+          <RecordingWatcher />
+        </Suspense>
+      )}
       {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
       <ListsDialogHost />
       <ChannelEditDialogHost />

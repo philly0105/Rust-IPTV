@@ -12,12 +12,16 @@
 //!   The file is served by `tower_http::services::ServeFile`, so HEAD,
 //!   `Last-Modified`/`If-Modified-Since` (304) and Range work too.
 //! - 400 bad URL, 403 refused by the SSRF guard, 404 upstream 404, 415 not an
-//!   image, 502 any other upstream failure (including a body over 10 MB),
-//!   500 a local disk or database failure. Errors are the usual JSON
-//!   `RpcError` with `Cache-Control: no-store`.
+//!   image, 502 a body over 10 MB (code `invalid`) or any other upstream
+//!   failure (`network`), 500 a local disk or database failure (`io`) or a
+//!   file that vanished twice while being read (`internal`). Errors are the
+//!   usual JSON `RpcError` with `Cache-Control: no-store`.
 //!
-//! Every response carries the sandbox CSP and `nosniff` ([`harden`]): an SVG
-//! is served from the app's own origin, so it must never run as a document.
+//! Every response of this handler carries the sandbox CSP and `nosniff`
+//! ([`harden`]): an SVG is served from the app's own origin, so it must never
+//! run as a document. Requests refused before the handler runs (server mode:
+//! `api_guard`'s host and cross-site checks; desktop: the token and Origin
+//! checks) get those layers' own answers and headers.
 
 use crate::api::error_response_with;
 use crate::proxy::harden;
@@ -199,5 +203,18 @@ mod tests {
         assert_eq!(q.source_id.as_deref(), Some("s1"));
         assert_eq!(parse_query(None), ImgQuery::default());
         assert_eq!(parse_query(Some("sourceId=")).source_id, None);
+    }
+
+    #[test]
+    fn unknown_parameters_such_as_the_clients_gen_are_ignored() {
+        // The client adds `gen=<n>` after Clear to skip the browser's copies;
+        // it must not change what the route reads.
+        let plain = parse_query(Some("url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1"));
+        for query in [
+            "url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1&gen=3",
+            "gen=3&url=http%3A%2F%2Fa.example%2Fp.png&x=&sourceId=s1",
+        ] {
+            assert_eq!(parse_query(Some(query)), plain, "{query}");
+        }
     }
 }

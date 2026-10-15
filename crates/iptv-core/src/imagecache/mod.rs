@@ -9,22 +9,30 @@
 //! 1. The URL is normalised (absolute http(s), no user info, no fragment) and
 //!    hashed into the cache key.
 //! 2. In server mode the SSRF guard checks it first, trusting only the
-//!    requesting source's own `host:port`, so a refused URL is refused even
-//!    when the cache holds it.
+//!    requesting source's own `host:port`. This check needs no DNS: it
+//!    refuses private and loopback IP literals and `localhost` names, and
+//!    those stay refused even when the cache holds the image. A host name
+//!    that resolves to a private address is refused by the guarded client's
+//!    resolver only when it is fetched, so a copy cached through a trusted
+//!    source is also served to a request that names no source. That reveals
+//!    nothing new: any caller may name any `sourceId`.
 //! 3. A row whose file is on disk with the recorded size is a hit (read-only;
 //!    `last_access` is written at most once a minute per key).
-//! 4. Otherwise one fetch per URL and trust scope runs as a detached task
-//!    (single flight); concurrent callers share its outcome. The body is
-//!    checked (image type, at most [`MAX_IMAGE_BYTES`]), written to a temp
-//!    name and renamed into place, then indexed. Failures are remembered for
-//!    [`FAILURE_TTL`] so a broken poster wall does not refetch on every
-//!    scroll.
+//! 4. Otherwise one fetch per URL and scope ([`flight_scope`]: the trusted
+//!    authority under the guard, and the source's request headers) runs as a
+//!    detached task (single flight); concurrent callers share its outcome.
+//!    The body is checked (image type, at most [`MAX_IMAGE_BYTES`]), written
+//!    to a temp name and renamed into place, then indexed. Failures are
+//!    remembered per URL and scope for [`FAILURE_TTL`], so a broken poster
+//!    wall does not refetch on every scroll.
 //!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
 //! import hold one pooled connection waiting on the write lock, not fifty.
 //! The writer owns the running byte total and evicts down to 90 % of the cap
-//! after an insert takes it over.
+//! after an insert takes it over. It re-reads the table's total on every
+//! `images.stats` and at least once a minute while inserting, so several
+//! processes sharing one data dir stay under the cap together.
 
 pub mod rpc;
 
@@ -56,7 +64,7 @@ use url::Url;
 pub const DIR_NAME: &str = "image-cache";
 /// Largest image body accepted (10 MB); a bigger one is refused as Invalid.
 pub const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
-/// How long a failed fetch is remembered per URL (and trust scope).
+/// How long a failed fetch is remembered per URL (and [`flight_scope`]).
 pub const FAILURE_TTL: Duration = Duration::from_secs(10 * 60);
 /// Minimum seconds between two `last_access` writes of one key.
 pub const TOUCH_INTERVAL_SECS: i64 = 60;
@@ -322,6 +330,34 @@ async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess,
     })
 }
 
+/// The scope of a fetch: callers in different scopes never share a flight or
+/// a remembered failure (the disk entry is shared: it is keyed by URL only).
+/// Two things split it:
+/// - with the server-mode guard active (`guarded`), the source's trusted
+///   authority, since it changes what may be fetched;
+/// - the source's request headers as [`http::apply_source_headers`] sends
+///   them (trimmed, blanks dropped), since an image host that wants the
+///   provider's User-Agent or Referer refuses a request without them, and
+///   that refusal must not reach the callers that send them.
+fn flight_scope(guarded: bool, trusted: Option<&Authority>, headers: &RequestHeaders) -> String {
+    let mut scope = match trusted {
+        Some(auth) if guarded => auth.to_string(),
+        _ => String::new(),
+    };
+    let sent = [&headers.user_agent, &headers.referrer, &headers.origin]
+        .map(|h| h.as_deref().map(str::trim).unwrap_or_default());
+    if sent.iter().any(|v| !v.is_empty()) {
+        let mut hash = Sha256::new();
+        for value in sent {
+            hash.update(value.as_bytes());
+            hash.update([0u8]);
+        }
+        scope.push_str("#h=");
+        scope.push_str(&hex::encode(&hash.finalize()[..8]));
+    }
+    scope
+}
+
 /// Outcome of one flight, shared by every caller that joined it.
 #[derive(Debug, Clone)]
 struct Done {
@@ -338,8 +374,9 @@ struct Flight {
     fut: Shared<BoxFuture<'static, FlightResult>>,
 }
 
-/// Flights by `"<key>|<trust scope>"`; shared with the writer, which must
-/// not delete the files of flights whose rows are not committed yet.
+/// Flights by `"<key>|<scope>"` ([`flight_scope`]); shared with the writer,
+/// which must not delete the files of flights whose rows are not committed
+/// yet.
 type Flights = Arc<Mutex<HashMap<String, Flight>>>;
 
 /// What one fetch needs.
@@ -427,6 +464,7 @@ impl ImageCache {
                         settings: self.settings.clone(),
                         flights: self.flights.clone(),
                         total,
+                        synced_at: Instant::now(),
                     };
                     tokio::spawn(store::run(writer, rx));
                 }
@@ -532,7 +570,7 @@ impl ImageCache {
         failures.insert(flight_key.to_owned(), (Instant::now(), err.clone()));
     }
 
-    /// Joins the flight for `job` (same URL and trust scope) or starts one.
+    /// Joins the flight for `job` (same URL and scope) or starts one.
     async fn join_or_start(
         self: &Arc<Self>,
         job: Job,
@@ -757,12 +795,11 @@ pub async fn fetch(
     if let Some(image) = cache.lookup(&key).await? {
         return Ok(image);
     }
-    // With the guard active a source's trust changes what may be fetched,
-    // so callers with different trust never share a flight or a failure.
-    let scope = match (&mode, &source.trusted) {
-        (Some(mode), Some(auth)) if !mode.guard.allow_private => auth.to_string(),
-        _ => String::new(),
-    };
+    let scope = flight_scope(
+        mode.as_ref().is_some_and(|m| !m.guard.allow_private),
+        source.trusted.as_ref(),
+        &source.headers,
+    );
     let client = http::guarded_client(state, source.trusted.as_ref());
     let job = Job {
         url,
@@ -908,6 +945,51 @@ mod tests {
             ImageError::from(TargetError::Invalid("no".into())).kind,
             ImageErrorKind::BadUrl
         );
+    }
+
+    #[test]
+    fn the_scope_splits_on_guarded_trust_and_on_the_headers_sent() {
+        let none = RequestHeaders::default();
+        let ua = |v: &str| RequestHeaders {
+            user_agent: Some(v.into()),
+            ..RequestHeaders::default()
+        };
+        let auth = Authority::of(&Url::parse("http://nas.lan:8080/list.m3u").unwrap()).unwrap();
+
+        // No guard, no headers: every caller shares one scope.
+        assert_eq!(flight_scope(false, None, &none), "");
+        assert_eq!(
+            flight_scope(false, Some(&auth), &none),
+            "",
+            "trust needs the guard"
+        );
+        assert_eq!(flight_scope(true, Some(&auth), &none), auth.to_string());
+        // Blank headers are not sent, so they do not split the scope.
+        let blank = RequestHeaders {
+            user_agent: Some("  ".into()),
+            referrer: Some(String::new()),
+            origin: None,
+        };
+        assert_eq!(flight_scope(false, None, &blank), "");
+
+        // A source that sends headers gets its own scope; the same headers
+        // (as sent: trimmed) share it, other headers do not.
+        let agent = flight_scope(false, None, &ua("SourceAgent/2.0"));
+        assert!(agent.starts_with("#h="), "{agent}");
+        assert!(!agent.contains('|'), "the writer splits flight keys on '|'");
+        assert_eq!(flight_scope(false, None, &ua(" SourceAgent/2.0 ")), agent);
+        assert_ne!(flight_scope(false, None, &ua("Other/1.0")), agent);
+        let referrer = RequestHeaders {
+            referrer: Some("SourceAgent/2.0".into()),
+            ..RequestHeaders::default()
+        };
+        assert_ne!(
+            flight_scope(false, None, &referrer),
+            agent,
+            "which header holds a value matters"
+        );
+        let guarded = flight_scope(true, Some(&auth), &ua("SourceAgent/2.0"));
+        assert_eq!(guarded, format!("{auth}{agent}"));
     }
 
     #[test]

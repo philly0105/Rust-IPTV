@@ -35,7 +35,7 @@ function LibraryCardImpl({ entry }: { entry: LibraryEntry }) {
           missing && 'opacity-60 grayscale',
         )}
       >
-        <Poster src={entry.posterUrl} alt="" label={entry.title} aspect="poster" />
+        <Poster src={entry.posterUrl} sourceId={(entry.kind === 'movie' ? entry.download : entry.latest).ref?.sourceId} alt="" label={entry.title} aspect="poster" />
         {entry.kind === 'series' && (
           <span className="absolute end-2 top-2 rounded-sm bg-bg/85 px-1.5 py-0.5 font-display text-xs font-semibold tabular-nums text-fg">
             {entry.episodes.length}

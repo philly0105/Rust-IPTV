@@ -1,6 +1,8 @@
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { rpcKey } from '@/api/query';
 import type { Category, Page, PageQuery, SeriesDetail, TmdbMovie, VodDetail, VodItem } from '@/api/types';
 
 import { ActorPage } from '../pages/ActorPage';
@@ -175,6 +177,11 @@ describe('CategoryGridPage', () => {
     const marker = (name: RegExp) => screen.getByRole('group', { name }).querySelector('[data-testid="mylist-grid-toggle"]');
     expect(marker(/^Movie 1 \(/)?.getAttribute('data-in-list')).toBe('true');
     expect(marker(/^Movie 0 \(/)?.hasAttribute('data-in-list')).toBe(false);
+    // C5 (data-perf r1 F5): an unsaved corner blurs only while it is up on one card (hover or the
+    // cursor). Without hover it shows on every card at once, so there it is opaque, not blurred.
+    const resting = marker(/^Movie 3 \(/)!.className.split(/\s+/);
+    expect(resting).not.toContain('glass-blur');
+    expect(resting).toEqual(expect.arrayContaining(['group-hover/card:glass-blur', '[@media(hover:none)]:bg-glass-strong', '[@media(hover:none)]:opacity-100']));
     // Nothing focusable inside an option (axe nested-interactive).
     expect(document.querySelectorAll('[role="option"] button, [role="option"] a, [role="option"] [tabindex]')).toHaveLength(0);
 
@@ -204,6 +211,12 @@ describe('CategoryGridPage', () => {
     grid.focus();
     // The cursor's card shows its toggle (S acts on it).
     expect(screen.getByRole('group', { name: /^Movie 1 \(/ }).querySelector('[data-testid="mylist-grid-toggle"]')!.className).toContain('opacity-100');
+    // An unsaved corner under the cursor is up on that one card, so it may blur.
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    await waitFor(() => expect(marker(/^Movie 3 \(/)!.className.split(/\s+/)).toEqual(expect.arrayContaining(['glass-blur', 'opacity-100'])));
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' });
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' });
     fireEvent.keyDown(grid, { key: 'F10', shiftKey: true });
     menu = await screen.findByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: 'Open details' })).toBeTruthy();
@@ -301,6 +314,35 @@ describe('MovieDetailPage', () => {
     expect(actor.getAttribute('href')).toBe(`/s/src1/actor/${ACTOR_ID}`);
     expect(await screen.findByRole('button', { name: '1 other source' })).toBeTruthy();
     expect(callsOf('tmdb.movie')[0]!.args).toMatchObject({ title: 'Dune: Part Two', year: 2007 });
+  });
+
+  it('stops showing cached TMDB details once TMDB is turned off (data-perf r1 F6)', async () => {
+    let client: QueryClient | undefined;
+    function GrabClient() {
+      client = useQueryClient();
+      return null;
+    }
+    renderAt('/s/src1/movie/m7', [
+      {
+        path: '/s/:sourceId/movie/:itemId',
+        element: (
+          <>
+            <GrabClient />
+            <MovieDetailPage />
+          </>
+        ),
+      },
+    ]);
+    await screen.findByText('Paul Atreides unites with the Fremen.');
+    const off = settings({ tmdb: { enabled: false } });
+    rpcMock.handlers['settings.get'] = () => off;
+    act(() => {
+      client!.setQueryData(rpcKey('settings.get'), off);
+    });
+    await waitFor(() => expect(screen.queryByText('Paul Atreides unites with the Fremen.')).toBeNull());
+    // The disabled query still holds its answer: the page, not a cache clear, keeps it off screen.
+    expect(client!.getQueriesData({ queryKey: ['tmdb.movie'] }).some(([, data]) => data)).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Dune: Part Two', level: 1 })).toBeTruthy();
   });
 
   it('plays inline and switches to the watch state; Escape closes it', async () => {
@@ -659,6 +701,21 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       const last = screen.getByTestId('vod-search-capped');
       expect(within(last).queryByRole('button')).toBeNull();
       expect(within(last).getByText(/Showing the first 1,?000 results of each type\. Refine your search to find the rest\./)).toBeTruthy();
+    });
+
+    it('fetches a channel hit logo through the image cache under its own source (data-perf r1 F7)', async () => {
+      // Without the source id a guarded server refuses a LAN logo (403) and never caches it.
+      rpcMock.handlers['catalog.search'] = () => ({
+        live: [{ ref: { sourceId: 'src1', contentType: 'live' as const, itemId: 'c1' }, name: 'News 1', categoryId: 'g', isRadio: false, logoUrl: 'http://192.168.1.5/logo.png' }],
+        movies: [],
+        series: [],
+      });
+      rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
+      renderAt('/search?q=news', [{ path: '/search', element: <SearchPage /> }]);
+      fireEvent.click(await screen.findByRole('tab', { name: /Channels/ }));
+      await screen.findByText('News 1');
+      const img = within(screen.getByTestId('vod-search-channels')).getByRole('img', { name: 'News 1' });
+      expect(img.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('http://192.168.1.5/logo.png')}&sourceId=src1`);
     });
 
     it('shows no cap notice when every type fits', async () => {

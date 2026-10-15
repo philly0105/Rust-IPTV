@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "直播电视",
   "tourLiveText": "频道按分组排列，可查看当前和下一个节目，以及完整的节目指南。",
-  "tourVodTitle": "电影和剧集",
-  "tourVodText": "浏览海报，按年代筛选，把作品加入我的片单以后再看。",
+  "tourVodTitle": "电影、剧集和我的片单",
+  "tourVodText": "浏览每个来源的电影和剧集海报，按年代筛选，并把作品加入我的片单，集中在一处。",
   "tourSearchTitle": "搜索全部内容",
   "tourSearchText": "在所有播放源中查找频道、电影和剧集。",
   "tourStep": "第 {{current}} 步，共 {{total}} 步",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "全新外观",
   "noteLooksText": "七种强调色、OLED 纯黑主题、紧凑密度和界面大小。",
   "noteScreenshotTitle": "截图",
-  "noteScreenshotText": "播放时按 S，即可将当前画面保存到“图片”文件夹。",
+  "noteScreenshotText": "播放时按 S，即可将当前画面保存为图片。",
   "noteSpeedTitle": "海报加载更快",
   "noteSpeedText": "海报和台标会保存在磁盘上，下次打开时网格会立即显示。"
 }

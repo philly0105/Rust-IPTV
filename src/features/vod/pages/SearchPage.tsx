@@ -609,7 +609,8 @@ function ChannelGrid({
             className="flex w-full items-center gap-3 rounded-md border border-border bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
           >
             <div className="w-12 shrink-0">
-              <Poster src={h.imageUrl} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+              {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
+              <Poster src={h.imageUrl} sourceId={c.ref.sourceId} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
             </div>
             <div className="min-w-0 flex-1">
               <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>

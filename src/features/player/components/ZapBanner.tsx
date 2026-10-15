@@ -232,6 +232,8 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
       aria-atomic="true"
       aria-label={t('zapBannerLabel')}
       data-testid="zap-banner"
+      // The surfaces' readout (OSD) moves below this while it shares the readout's column.
+      data-zap-banner=""
       data-mpv-overlay=""
       data-mpv-reserved=""
       className={cn(

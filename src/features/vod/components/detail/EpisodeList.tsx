@@ -120,7 +120,7 @@ export function EpisodeList({
                 className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-40 shrink-0">
-                  <Poster src={ep.posterUrl} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
+                  <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
                     <span
                       aria-hidden
                       className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 text-white opacity-0 group-hover:bg-scrim/50 group-hover:opacity-100 motion-safe:transition-opacity"

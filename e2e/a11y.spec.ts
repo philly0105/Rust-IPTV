@@ -175,6 +175,9 @@ test.describe('accessibility and layout', () => {
 
   for (const vp of VIEWPORTS) {
     test(`axe and layout at ${vp.width}x${vp.height}`, async ({ page }) => {
+      // One test walks every page above (about 2-3 s each with axe), like the sweeps in
+      // a11y-rtl.spec.ts, so it gets their budget rather than the 60 s default.
+      test.setTimeout(120_000);
       await page.setViewportSize(vp);
       const failures: string[] = [];
       for (const target of pages) {

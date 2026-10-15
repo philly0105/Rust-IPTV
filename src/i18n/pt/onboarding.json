@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "TV ao vivo",
   "tourLiveText": "Canais organizados em grupos, com o que passa agora e a seguir e um guia de TV completo.",
-  "tourVodTitle": "Filmes e séries",
-  "tourVodText": "Navegue pelos pôsteres, filtre por década e salve títulos na Minha lista para depois.",
+  "tourVodTitle": "Filmes, séries e Minha lista",
+  "tourVodText": "Navegue pelos pôsteres de filmes e séries de cada fonte, filtre por década e salve títulos na Minha lista para tê-los em um só lugar.",
   "tourSearchTitle": "Pesquisar em tudo",
   "tourSearchText": "Encontre canais, filmes e séries em todas as suas fontes.",
   "tourStep": "Passo {{current}} de {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Novo visual",
   "noteLooksText": "Sete cores de destaque, um tema preto OLED, densidade compacta e tamanho da interface.",
   "noteScreenshotTitle": "Capturas de tela",
-  "noteScreenshotText": "Pressione S durante a reprodução para salvar a imagem atual na sua pasta Imagens.",
+  "noteScreenshotText": "Pressione S durante a reprodução para salvar o quadro atual como imagem.",
   "noteSpeedTitle": "Pôsteres mais rápidos",
   "noteSpeedText": "Pôsteres e logos ficam salvos no disco, então as grades carregam na hora da próxima vez."
 }

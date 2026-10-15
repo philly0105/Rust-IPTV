@@ -23,6 +23,7 @@ export {
   SkeletonList,
   Tooltip,
   toast,
+  useImageChain,
 } from '@/ui';
 export type { MenuAction } from '@/ui';
 export { useShellHeader, useShortcut } from '@/shell';

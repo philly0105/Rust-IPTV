@@ -150,11 +150,11 @@ export function Dialog({
       closingRef.current = true;
       openCount -= 1;
       if (openCount === 0) html.style.overflow = prevOverflow;
-      if (previous && document.contains(previous)) {
-        previous.focus({ preventScroll: true });
-      } else if (previous && openCount === 0) {
-        // The opener is gone (a menu item, a row that re-rendered): land on the
-        // main region instead of <body>, so the next Tab starts somewhere sensible.
+      if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+      const landed = document.activeElement;
+      if (previous && previous !== document.body && openCount === 0 && (!landed || landed === document.body)) {
+        // The opener is gone (a menu item, a row that re-rendered) or can no longer take focus (it became
+        // disabled): land on the main region instead of <body>, so the next Tab starts somewhere sensible.
         document.getElementById('main')?.focus({ preventScroll: true });
       }
     };
@@ -184,6 +184,8 @@ export function Dialog({
   }, [open]);
 
   if (!open) return null;
+
+  const hasBody = children !== undefined && children !== null && children !== false && children !== '';
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -285,7 +287,8 @@ export function Dialog({
             </button>
           )}
         </div>
-        <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>
+        {/* No body, no empty band: a confirm with only a description sits straight on its footer. */}
+        {hasBody && <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>}
         {footer && (
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-divider px-6 py-4">
             {footer}

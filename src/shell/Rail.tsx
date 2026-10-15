@@ -40,19 +40,21 @@ interface PrimaryLink {
   icon: LucideIcon;
   end?: boolean;
   /** First-run tour anchor (Run 3 C7, `src/features/onboarding/tour/steps.ts`). */
-  tour?: 'vod';
+  tour?: 'vod' | 'search';
 }
 
 // Home is a house, not a layout glyph: collapsed, the rail is icons only, and a
 // tile-shaped Home would echo Multi-view's grid (LayoutGrid, as in its page and menus).
 const PRIMARY: PrimaryLink[] = [
   { to: '/dashboard', labelKey: 'navDashboard', icon: House },
-  { to: '/search', labelKey: 'navSearch', icon: Search },
+  // The tour's search step points here only while the rail is auto-collapsed (below lg), where
+  // the header's "Search everything" button folds away; from lg up the header keeps the anchor.
+  { to: '/search', labelKey: 'navSearch', icon: Search, tour: 'search' },
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
   { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
-  // The tour's "Movies and series" step points here: unlike a source's Movies link, it is always
-  // on screen, also in the collapsed rail.
+  // The tour's "Movies, series and My List" step points here: unlike a source's Movies link, it
+  // is always on screen, also in the collapsed rail.
   { to: '/my-list', labelKey: 'navMyList', icon: Bookmark, tour: 'vod' },
   // Run 2: custom channel lists and watch stats reuse their pages' titles.
   { to: '/lists', labelKey: 'lists:title', icon: ListOrdered },
@@ -241,7 +243,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
         <ul className="flex flex-col gap-0.5">
           {PRIMARY.map((l) => (
             <li key={l.to}>
-              <RailNavLink {...l} collapsed={collapsed} />
+              <RailNavLink {...l} collapsed={collapsed} tour={l.tour === 'search' && !autoCollapsed ? undefined : l.tour} />
             </li>
           ))}
         </ul>

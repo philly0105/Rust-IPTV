@@ -1,15 +1,15 @@
-import { useState } from 'react';
-
-import { cn, initialsOf } from '../deps';
+import { cn, initialsOf, useImageChain } from '../deps';
 
 /**
  * A channel's logo on a plate (transparent PNGs read on any frame), or its initials when it
  * has none or the image fails. Decorative: the channel's name is always spelled out beside it.
+ * Remote logos load through the image cache, then the original URL once, before the initials
+ * show (C3). Pass `sourceId` so the cache applies that source's network rules.
  */
-export function ChannelMark({ src, name, className }: { src?: string; name: string; className?: string }) {
+export function ChannelMark({ src, name, sourceId, className }: { src?: string; name: string; sourceId?: string; className?: string }) {
   // Keyed by address: a replaced tile must not inherit the old channel's broken-image state.
-  const [failedSrc, setFailedSrc] = useState<string | undefined>(undefined);
-  const showImage = !!src && failedSrc !== src;
+  const image = useImageChain([src], sourceId);
+  const showImage = !!image.url;
   return (
     <span
       aria-hidden
@@ -21,12 +21,13 @@ export function ChannelMark({ src, name, className }: { src?: string; name: stri
     >
       {showImage ? (
         <img
-          src={src}
+          key={image.url}
+          src={image.url}
           alt=""
           loading="lazy"
           decoding="async"
           draggable={false}
-          onError={() => setFailedSrc(src)}
+          onError={image.onError}
           className="max-h-full max-w-full object-contain p-0.5"
         />
       ) : (

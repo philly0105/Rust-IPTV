@@ -264,9 +264,38 @@ export async function fetchFailureReason(url: string): Promise<{ status: number;
 /** Which engine last attached to an element; a stale native engine must not reset it on destroy. */
 const nativeOwner = new WeakMap<HTMLMediaElement, object>();
 
+/**
+ * The CORS mode the element loads `url` in. Without one, a frame from another origin taints a
+ * canvas and a screenshot of it is refused (C6), so the app's own cross-origin routes, which
+ * answer with CORS for the app's window, load as `anonymous`:
+ * - Tauri's asset protocol (`http://asset.localhost/...`, `asset://localhost/...`): downloads
+ *   and recordings on the desktop;
+ * - the desktop loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`).
+ *
+ * Anything else gets null. A third-party server without CORS refuses a CORS request outright,
+ * so a direct stream keeps the plain load: it plays, and only a screenshot of it is refused.
+ * Same-origin URLs (server mode's `/api/proxy` and `/api/files`) are readable either way.
+ */
+export function mediaCrossOrigin(url: string): 'anonymous' | null {
+  let u: URL;
+  try {
+    u = new URL(url, window.location.href);
+  } catch {
+    return null;
+  }
+  if (u.origin === window.location.origin) return null;
+  if (u.protocol === 'asset:' || u.hostname === 'asset.localhost') return 'anonymous';
+  if (u.hostname === '127.0.0.1' && /^\/[^/]+\/api\/proxy$/.test(u.pathname)) return 'anonymous';
+  return null;
+}
+
 function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): Engine {
   const owner = {};
   nativeOwner.set(el, owner);
+  // Before `src`: the mode is fixed when the load starts.
+  const cors = mediaCrossOrigin(url);
+  if (cors) el.crossOrigin = cors;
+  else el.removeAttribute('crossorigin');
   el.src = url;
   const emitTracks = (): void => {
     const audio: TrackOption[] = [];
@@ -327,6 +356,7 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
       if (nativeOwner.get(el) !== owner) return;
       nativeOwner.delete(el);
       el.removeAttribute('src');
+      el.removeAttribute('crossorigin');
       el.load();
     },
   };

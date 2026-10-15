@@ -7,6 +7,7 @@ import { cn } from '../cn';
 import { safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { usePlayerStore, zap } from '../store';
+import { ScreenshotButton } from './lazyParts';
 
 export interface RadioPlayerProps {
   /** 'stage' fills a player slot; 'bar' is a compact strip (mini dock, sidebars). */
@@ -125,7 +126,7 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
         )}
       </div>
 
-      <div className={cn('flex items-center gap-1', stage ? 'w-56' : 'w-32')}>
+      <div className={cn('flex items-center gap-1', stage ? 'w-64 max-w-full' : 'w-32')}>
         <button
           type="button"
           aria-label={muted ? t('unmute') : t('mute')}
@@ -147,6 +148,11 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
           className="player-range min-w-0 flex-1"
           style={{ ['--fill' as string]: `${Math.round(shown * 100)}%` }}
         />
+        {/*
+          Screenshot (C6): in place, like the video bar's camera, but disabled with its reason (radio
+          has no picture). The strip has no room for it, as the video player's mini bar has none.
+        */}
+        {stage && <ScreenshotButton />}
       </div>
     </section>
   );

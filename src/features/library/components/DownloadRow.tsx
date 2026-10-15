@@ -121,7 +121,7 @@ function DownloadRowImpl({ download: d, progress, source, actions, busy, onActio
       data-status={d.status}
     >
       <div className="w-12 shrink-0">
-        <Poster src={d.posterUrl} alt="" label={d.title} aspect="poster" />
+        <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2">

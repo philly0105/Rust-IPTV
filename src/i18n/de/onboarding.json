@@ -1,8 +1,8 @@
 {
   "tourLiveTitle": "Live-TV",
   "tourLiveText": "Sender nach Gruppen sortiert, mit laufender und nächster Sendung und vollständigem Programmführer.",
-  "tourVodTitle": "Filme und Serien",
-  "tourVodText": "Poster durchstöbern, nach Jahrzehnt filtern und Titel für später in meiner Liste speichern.",
+  "tourVodTitle": "Filme, Serien und Meine Liste",
+  "tourVodText": "Poster der Filme und Serien jeder Quelle durchstöbern, nach Jahrzehnt filtern und Titel in Meine Liste speichern, um sie an einem Ort zu haben.",
   "tourSearchTitle": "Alles durchsuchen",
   "tourSearchText": "Sender, Filme und Serien in allen Ihren Quellen finden.",
   "tourStep": "Schritt {{current}} von {{total}}",
@@ -39,7 +39,7 @@
   "noteLooksTitle": "Neues Aussehen",
   "noteLooksText": "Sieben Akzentfarben, ein OLED-Schwarz-Design, kompakte Dichte und Oberflächengröße.",
   "noteScreenshotTitle": "Screenshots",
-  "noteScreenshotText": "Drücken Sie während der Wiedergabe S, um das aktuelle Bild im Ordner „Bilder“ zu speichern.",
+  "noteScreenshotText": "Drücken Sie während der Wiedergabe S, um das aktuelle Bild als Bilddatei zu speichern.",
   "noteSpeedTitle": "Schnellere Poster",
   "noteSpeedText": "Poster und Logos liegen auf dem Datenträger, damit Raster beim nächsten Mal sofort laden."
 }

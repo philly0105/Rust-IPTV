@@ -71,7 +71,7 @@ describe('Tour', () => {
     open();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(step()).toBe('vod');
-    expect(screen.getByRole('dialog', { name: 'Movies and series' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Movies, series and My List' })).toBeTruthy();
     expect(screen.getByTestId('tour-progress')?.textContent).toContain('Step 2 of 3');
     const back = screen.getByRole('button', { name: 'Back' });
     back.focus();
@@ -208,6 +208,75 @@ describe('Tour', () => {
     offB();
   });
 
+  // A click on the card's title or text focuses the nearest focusable ancestor. Without one the
+  // browser drops focus to <body>, and Escape and the arrows stopped working (review R1).
+  it('makes the card focusable but not a Tab stop, so a click on its text keeps focus in the dialog', () => {
+    open();
+    expect(card().tabIndex).toBe(-1);
+    expect(card().className).toContain('focus-visible:outline-none');
+    act(() => card().focus());
+    expect(document.activeElement).toBe(card());
+    key('ArrowRight');
+    expect(step()).toBe('vod');
+    expect(document.activeElement).toBe(card());
+  });
+
+  it('Tab from the card itself starts at the first button, Shift+Tab at the last', () => {
+    open();
+    key('ArrowRight');
+    act(() => card().focus());
+    key('Tab');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Skip tour' }));
+    act(() => card().focus());
+    key('Tab', { shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }));
+  });
+
+  it('keeps the keyboard when focus falls to the page body, and still hides it from the shortcuts', () => {
+    const onPalette = vi.fn();
+    const off = shortcutRegistry.register('mod+k', onPalette, { description: 'palette', area: 'test', global: true });
+    const { onClose } = open();
+    act(() => (document.activeElement as HTMLElement).blur());
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    expect(step()).toBe('vod');
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true, metaKey: true });
+    expect(onPalette).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Skip tour' }));
+    act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledWith('skipped');
+    off();
+  });
+
+  it('lets a modal that opened above it keep its own focus and keys', () => {
+    const layer = document.createElement('div');
+    layer.setAttribute('aria-modal', 'true');
+    const inside = document.createElement('button');
+    layer.append(inside);
+    document.body.append(layer);
+    const seen = vi.fn();
+    inside.addEventListener('keydown', seen);
+    const { onClose } = open();
+    // Not pulled back: that would fight the other layer's own focus trap.
+    act(() => inside.focus());
+    expect(document.activeElement).toBe(inside);
+    fireEvent.keyDown(inside, { key: 'Escape' });
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    layer.remove();
+  });
+
+  it('hides the key hints when the main pointer is a finger', () => {
+    open();
+    key('ArrowRight');
+    key('ArrowRight');
+    const hints = screen.getByTestId('tour-hints');
+    expect(hints.textContent).toContain('Commands');
+    expect(hints.className.split(/\s+/)).toContain('pointer-coarse:hidden');
+  });
+
   it('shows a centred card over a plain scrim when the anchor is missing', () => {
     open();
     expect(screen.getByTestId('tour-scrim')).toBeTruthy();
@@ -257,7 +326,7 @@ describe('Tour', () => {
     open();
     key('ArrowRight');
     const live = card().querySelector('[aria-live="polite"]');
-    expect(live?.textContent).toContain('Step 2 of 3. Movies and series');
+    expect(live?.textContent).toContain('Step 2 of 3. Movies, series and My List');
   });
 
   it('puts every transition and animation behind motion-safe (no motion under reduced motion)', () => {

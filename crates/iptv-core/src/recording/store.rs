@@ -328,6 +328,16 @@ pub fn set_progress(c: &Connection, id: &str, parts: &[String], bytes: i64) -> C
     Ok(())
 }
 
+/// Saves the bytes written so far of a running recording (its parts list
+/// is left as it is).
+pub fn set_bytes(c: &Connection, id: &str, bytes: i64) -> CoreResult<()> {
+    c.execute(
+        "UPDATE recordings SET bytes = ?2 WHERE id = ?1 AND status = 'recording'",
+        params![id, bytes],
+    )?;
+    Ok(())
+}
+
 pub fn set_error(c: &Connection, id: &str, error: Option<&str>) -> CoreResult<()> {
     c.execute(
         "UPDATE recordings SET error_message = ?2 WHERE id = ?1",

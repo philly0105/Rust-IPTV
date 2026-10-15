@@ -484,7 +484,7 @@ export function SourcesPage() {
               data-testid="sources-filter-status"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
               icon={<RefreshCw aria-hidden className="size-4" />}

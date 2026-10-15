@@ -197,5 +197,12 @@
   "markSeriesWatched": "Diziyi izlendi olarak işaretle",
   "markSeriesUnwatched": "Diziyi izlenmedi olarak işaretle",
   "shortcutWatched": "İzlendi veya izlenmedi olarak işaretle",
-  "shortcutHideWatched": "İzlenen yapımları gizle veya göster"
+  "shortcutHideWatched": "İzlenen yapımları gizle veya göster",
+  "sourceMissingTitle": "Bu kaynak kaldırıldı",
+  "sourceMissingBody": "Artık kaynaklarınızda değil. Başka bir kaynak seçin veya Kaynaklar'dan yeniden ekleyin.",
+  "goToDashboard": "Panoya git",
+  "categoryMissingTitle": "Kategori bulunamadı",
+  "categoryMissingBody": "Bu kaynakta bu bağlantıya sahip bir kategori yok. Sağlayıcı onu yeniden adlandırmış veya kaldırmış olabilir.",
+  "namedMarkedWatched": "{{name}} izlendi olarak işaretlendi",
+  "namedMarkedUnwatched": "{{name}} izlenmedi olarak işaretlendi"
 }

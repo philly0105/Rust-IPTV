@@ -1,11 +1,12 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { CalendarClock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, History, Play, Radio, Tv, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 
-import { useRpcQuery } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { rpcKey, useRpcQuery } from '@/api/query';
+import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
 import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useToast, type MenuAction, type SelectOption } from '@/ui';
@@ -64,6 +65,8 @@ export const GRID_WINDOW = 6 * HOUR;
 export const GRID_CHUNK = 40;
 const PX_PER_MIN = GRID_SLOT_PX / GRID_SLOT_MIN;
 const HEADER_H = 36;
+/** How long a window's guide answer counts as fresh (also for the windows prefetched beside it). */
+const GRID_STALE_MS = 5 * 60_000;
 /** Portal programmes per row: enough to fill the 6 h window from now. */
 const STALKER_GRID_LIMIT = 12;
 
@@ -84,6 +87,40 @@ export function stalkerArchiveQuery(start: number, end: number, now: number, lim
 export function gridWindowFor(width: number, channelCol: number): number {
   const slots = Math.ceil(Math.max(0, width - channelCol) / GRID_SLOT_PX);
   return Math.max(GRID_WINDOW, slots * GRID_SLOT_MIN * MINUTE);
+}
+
+/** How far the window moves when a horizontal scroll (or a key) runs into its edge. */
+export const GRID_EXTEND = 3 * HOUR;
+/** Scrolling within this many px of the window's edge, toward it, moves the window on. */
+export const GRID_EXTEND_EDGE_PX = GRID_SLOT_PX;
+/**
+ * Room the window keeps beyond the page width, so a scroll that moves the window by
+ * {@link GRID_EXTEND} can hold the view still (the scroll position moves by the same px)
+ * without landing in the other edge's zone, at any page width.
+ */
+export const GRID_SCROLL_ROOM_PX = (GRID_EXTEND / MINUTE) * PX_PER_MIN + 2 * GRID_EXTEND_EDGE_PX;
+
+/**
+ * Which way a horizontal scroll to `x` px from the inline start (moving `dx` px since the last
+ * one) should move the window: +1 later, -1 earlier, 0 not at all. `max` is the farthest the
+ * track scrolls.
+ */
+export function extendDirection(x: number, dx: number, max: number): 1 | -1 | 0 {
+  if (max <= 0) return 0;
+  if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX) return 1;
+  if (dx < 0 && x <= GRID_EXTEND_EDGE_PX) return -1;
+  return 0;
+}
+
+/** Channel column of a phone-width guide: the logo and number only, so the track gets the room. */
+export const GRID_CHANNEL_COMPACT = 72;
+
+/**
+ * How far into the visible track (`view` px wide) the now line sits when the guide opens: one
+ * slot of the past, but never more than a quarter of a narrow track (0: not measured yet).
+ */
+export function nowLead(view: number): number {
+  return view > 0 ? Math.min(GRID_SLOT_PX, Math.round(view / 4)) : GRID_SLOT_PX;
 }
 
 /** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
@@ -161,7 +198,8 @@ export function slotLabels(slots: readonly number[], locale: string): string[] {
 interface Selection {
   channel: Channel;
   program: EpgProgram;
-  rect: { left: number; right: number; top: number; bottom: number };
+  /** The programme cell that opened the popover; the popover follows it while the grid scrolls. */
+  anchor: HTMLElement;
 }
 
 /** How long a channel row stays highlighted after a guide search hit moved the grid to it. */
@@ -186,8 +224,11 @@ export function EpgGridPage() {
   const now = useNow(30_000);
   const prefs = useDisplayPrefs();
   const wide = useMediaQuery('(min-width: 1024px)');
-  const channelCol = wide ? 220 : 168;
+  // Phones: a logo-and-number column, so the track shows more than one slot beside it.
+  const compact = !useMediaQuery(`(min-width: ${GUIDE_BAR_STACK_PX}px)`);
+  const channelCol = compact ? GRID_CHANNEL_COMPACT : wide ? 220 : 168;
   const rtl = useIsRtl();
+  const queryClient = useQueryClient();
 
   const sources = useRpcQuery('sources.list', undefined);
   const sourceId = params.get('source') ?? sources.data?.[0]?.id ?? '';
@@ -203,7 +244,8 @@ export function EpgGridPage() {
   const [nowStart, setNowStart] = useState(() => defaultStart(Date.now()));
   const start = atParam ?? nowStart;
   const [measurePage, pageWidth] = useElementWidth();
-  const windowMs = gridWindowFor(pageWidth, channelCol);
+  // Measured pages get room to scroll past the page width, so horizontal scrolling can move the window on.
+  const windowMs = gridWindowFor(pageWidth > 0 ? pageWidth + GRID_SCROLL_ROOM_PX : 0, channelCol);
   const end = start + windowMs;
 
   const paged = usePagedChannels({ sourceId, categoryId, withExtras: false });
@@ -248,8 +290,13 @@ export function EpgGridPage() {
   };
   const refsA = chunkRefs(chunkA);
   const refsB = chunkB !== chunkA ? chunkRefs(chunkB) : [];
-  const gridA = useRpcQuery('epg.grid', { refs: refsA, from: fromIso, to: toIso }, { enabled: refsA.length > 0, staleTime: 5 * 60_000 });
-  const gridB = useRpcQuery('epg.grid', { refs: refsB, from: fromIso, to: toIso }, { enabled: refsB.length > 0, staleTime: 5 * 60_000 });
+  // The previous answer stays while the next chunk or window loads (keepPrevious): rows it
+  // covers keep their programmes and the no-guide notice does not blink. Rows it does not
+  // cover show as loading (see `programsFor`).
+  const gridA = useRpcQuery('epg.grid', { refs: refsA, from: fromIso, to: toIso }, { enabled: refsA.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
+  const gridB = useRpcQuery('epg.grid', { refs: refsB, from: fromIso, to: toIso }, { enabled: refsB.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
+  const keysA = new Set(refsA.map(itemKey));
+  const keysB = new Set(refsB.map(itemKey));
   // Stalker: the portal's own guide for the visible rows, laid over the XMLTV grid. Archive
   // channels also get the archived past of the window (`from`), so earlier rows and catch-up
   // work without XMLTV; the others keep the plain airing-onwards answer.
@@ -272,35 +319,49 @@ export function EpgGridPage() {
   // guide: Xtream short-EPG fallback for visible rows the XMLTV guide leaves empty, while the
   // window reaches now or later (the provider's short guide starts at the airing programme).
   const shortEpgOn = useShortEpgEnabled(kind) && end > now;
+  /**
+   * A row's XMLTV programmes: from an answer for this window, or (while that loads) the previous
+   * answer's programmes for the row; undefined while loading, [] when the answer has none.
+   */
+  const gridList = (k: ItemKey): EpgProgram[] | undefined => {
+    for (const [q, keys] of [
+      [gridA, keysA],
+      [gridB, keysB],
+    ] as const) {
+      const list = q.data?.[k];
+      if (q.isPlaceholderData) {
+        if (list && list.length > 0) return list;
+      } else if (q.data && (list || keys.has(k))) {
+        return list ?? [];
+      }
+    }
+    return undefined;
+  };
   const shortRefs = useMemo(() => {
     const out: ItemRef[] = [];
     if (!shortEpgOn) return out;
     for (let i = first; i <= last; i++) {
       const ch = getChannel(i);
       if (!ch) continue;
-      const k = itemKey(ch.ref);
-      const list = gridA.data?.[k] ?? gridB.data?.[k];
+      const list = gridList(itemKey(ch.ref));
       if (list && list.length === 0) out.push(ch.ref);
     }
     return out;
-  }, [shortEpgOn, first, last, getChannel, gridA.data, gridB.data]);
+    // gridList reads gridA/gridB, listed by their answers.
+  }, [shortEpgOn, first, last, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData]); // eslint-disable-line react-hooks/exhaustive-deps
   const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
   const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
-  const programsFor = useCallback(
-    (ch: Channel | undefined): EpgProgram[] | undefined => {
-      if (!ch) return undefined;
-      const k: ItemKey = itemKey(ch.ref);
-      const list = gridA.data?.[k] ?? gridB.data?.[k];
-      const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
-      if (portal && portal.length > 0) return shiftPrograms(mergePrograms(portal, list ?? []), prefs.epgOffsetMinutes);
-      // guide: an empty XMLTV row takes the provider's short guide.
-      const short = shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
-      if (short && short.length > 0) return shiftPrograms([...short], prefs.epgOffsetMinutes);
-      if (list) return shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), prefs.epgOffsetMinutes);
-      return gridA.data || gridB.data ? [] : undefined;
-    },
-    [gridA.data, gridB.data, isStalker, plainPortal, archivePortal, prefs.epgOffsetMinutes, shortEpgOn, shortFor],
-  );
+  const programsFor = (ch: Channel | undefined): EpgProgram[] | undefined => {
+    if (!ch) return undefined;
+    const list = gridList(itemKey(ch.ref));
+    const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
+    if (portal && portal.length > 0) return shiftPrograms(mergePrograms(portal, list ?? []), prefs.epgOffsetMinutes);
+    // guide: an empty XMLTV row takes the provider's short guide.
+    const short = shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
+    if (short && short.length > 0) return shiftPrograms([...short], prefs.epgOffsetMinutes);
+    if (list) return shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), prefs.epgOffsetMinutes);
+    return undefined;
+  };
   const gridError = gridA.error ?? gridB.error;
   const noEpgAnywhere =
     !isStalker &&
@@ -308,11 +369,32 @@ export function EpgGridPage() {
     !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
 
   // ---- navigation ---------------------------------------------------------
+  // A move writes the window start to the URL, which the router applies in a transition: a commit
+  // or more after the cursor moved. Until the window the move asked for is on screen (or the URL
+  // changes some other way), `pending` holds it: moves start from it, and the keyboard cursor
+  // waits for it before it takes focus (otherwise it lands on a cell of the old window).
+  const pending = useRef<{ start: number; params: URLSearchParams } | null>(null);
+  /** The router's params as last rendered (`paramsRef` runs ahead of them while a move is pending). */
+  const routerParams = useRef(params);
+  routerParams.current = params;
   // Clicks and key repeat can outrun renders: each move starts from here, not from a stale render.
   const startRef = useRef(start);
-  startRef.current = start;
+  startRef.current = pending.current?.start ?? start;
   const paramsRef = useRef(params);
-  paramsRef.current = params;
+  if (!pending.current) paramsRef.current = params;
+  useLayoutEffect(() => {
+    const p = pending.current;
+    if (p && (p.start === start || p.params !== params)) {
+      pending.current = null;
+      startRef.current = start;
+      paramsRef.current = params;
+    }
+  });
+  /** Records a move to `slot`; the URL it was made from tells when the router has moved on. */
+  const markPending = (slot: number) => {
+    pending.current = { start: slot, params: pending.current?.params ?? routerParams.current };
+    startRef.current = slot;
+  };
   /** Moves the window to `at` (floored to its slot): a new history entry, or `replace` for key-driven moves. */
   const goTo = useCallback(
     (at: number, opts: { replace?: boolean; category?: null } = {}) => {
@@ -320,11 +402,11 @@ export function EpgGridPage() {
       const slot = floorLocal(at, GRID_SLOT_MIN);
       next.set('at', String(slot));
       if (opts.category === null) next.delete('category');
-      startRef.current = slot;
+      markPending(slot);
       paramsRef.current = next;
       setParams(next, { replace: opts.replace });
     },
-    [setParams],
+    [setParams], // eslint-disable-line react-hooks/exhaustive-deps -- markPending only touches refs
   );
   const shift = useCallback((delta: number, replace = false) => goTo(startRef.current + delta, { replace }), [goTo]);
   // A calendar day, not 24 h: across a DST change the window keeps its wall-clock time.
@@ -332,13 +414,13 @@ export function EpgGridPage() {
   const toNow = useCallback(() => {
     const s = defaultStart(Date.now());
     setNowStart(s);
-    startRef.current = s;
+    markPending(s);
     if (!paramsRef.current.has('at')) return;
     const next = new URLSearchParams(paramsRef.current);
     next.delete('at');
     paramsRef.current = next;
     setParams(next);
-  }, [setParams]);
+  }, [setParams]); // eslint-disable-line react-hooks/exhaustive-deps -- markPending only touches refs
   // Back to an entry without `at` (or a link without it): the window follows now again.
   const followsNow = atParam === null;
   useEffect(() => {
@@ -373,6 +455,32 @@ export function EpgGridPage() {
     return scroller.current?.querySelector<HTMLElement>(sel) ?? null;
   };
 
+  // When the window moves (or the grid first mounts after loading), put the scroll at the track's
+  // inline-start edge, or just before now. A move that keeps the view (a scroll or a key that ran
+  // into the window's edge) moves the scroll by the same px instead, so the screen stays put.
+  // RTL scrollers count scrollLeft down from 0. Declared before the focus effect, which then only
+  // has to bring the cursor cell into view.
+  const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
+  const keepView = useRef(false);
+  const laidStart = useRef(start);
+  /** The scroll's distance from the inline start at the last scroll event, for its direction. */
+  const lastScrollX = useRef(0);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const moved = start - laidStart.current;
+    laidStart.current = start;
+    if (keepView.current) {
+      keepView.current = false;
+      el.scrollLeft = scrollLeftFor(Math.max(0, scrollStart(el) - (moved / MINUTE) * PX_PER_MIN), rtl);
+    } else {
+      const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
+      el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - nowLead(el.clientWidth - channelCol)) : 0, rtl);
+    }
+    lastScrollX.current = scrollStart(el);
+    syncGridScroll(el); // before first paint: cells already clipped by the edge show their text
+  }, [start, rtl, gridMounted]);
+
   // Focus never sits on a cell that is about to unmount: while the cursor's row is off screen or
   // still loading, the grid itself holds focus (and takes the keys); the cell gets it once rendered.
   useLayoutEffect(() => {
@@ -389,6 +497,9 @@ export function EpgGridPage() {
       focusPending.current = false; // focus went elsewhere meanwhile: leave it there
       return;
     }
+    // The window the move asked for is not on screen yet: its cell does not exist, and a cell
+    // of the old window would take focus by mistake. Stay pending until it renders.
+    if (pending.current) return;
     const el = cursorElement(cursor.row, cursor.time);
     if (el) {
       el.focus({ preventScroll: true });
@@ -408,9 +519,8 @@ export function EpgGridPage() {
   /** The cell that opened the popover; focus returns to it when the popover closes. */
   const invoker = useRef<HTMLElement | null>(null);
   const open = (channel: Channel, program: EpgProgram, el: HTMLElement) => {
-    const r = el.getBoundingClientRect();
     invoker.current = el;
-    setSelection({ channel, program, rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom } });
+    setSelection({ channel, program, anchor: el });
   };
   const closePopover = () => {
     setSelection(null);
@@ -464,16 +574,25 @@ export function EpgGridPage() {
       case 'PageUp':
         row = Math.max(0, row - 8);
         break;
+      // Past the window's edge the window moves on and the view stays put (keepView); the focus
+      // effect then brings the cell into view.
       case 'later': {
         const nextT = cur ? ms(cur.end) : time + GRID_SLOT_MIN * MINUTE;
-        if (nextT >= end) shift(3 * HOUR, true);
+        if (nextT >= startRef.current + windowMs) {
+          keepView.current = true;
+          shift(GRID_EXTEND, true);
+        }
         time = nextT;
         break;
       }
       case 'earlier': {
         const prevT = cur ? ms(cur.start) - 1 : time - GRID_SLOT_MIN * MINUTE;
-        if (prevT < start) shift(-3 * HOUR, true);
-        time = Math.max(prevT, start - 3 * HOUR);
+        const from = startRef.current;
+        if (prevT < from) {
+          keepView.current = true;
+          shift(-GRID_EXTEND, true);
+        }
+        time = Math.max(prevT, from - GRID_EXTEND);
         break;
       }
       case 'Home':
@@ -501,16 +620,37 @@ export function EpgGridPage() {
     setCursor({ row, time });
   };
 
-  // When the window moves (or the grid first mounts after loading), keep the scroll at the
-  // track's inline-start edge, or just before now. RTL scrollers count scrollLeft down from 0.
-  const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
-  useLayoutEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
-    el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - GRID_SLOT_PX) : 0, rtl);
-    syncGridScroll(el); // before first paint: cells already clipped by the edge show their text
-  }, [start, rtl, gridMounted]);
+  /** Fetches the visible chunks' guide for the window `delta` from this one, before a move needs it. */
+  const prefetchWindow = (delta: number) => {
+    const s = startRef.current + delta;
+    const from = new Date(s - offsetMs).toISOString();
+    const to = new Date(s + windowMs - offsetMs).toISOString();
+    for (const refs of [refsA, refsB]) {
+      if (refs.length === 0) continue;
+      const args = { refs, from, to };
+      void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS });
+    }
+  };
+  // Horizontal scrolling runs on past the window: near an edge, scrolling toward it moves the
+  // window by GRID_EXTEND (the layout effect above keeps the view still), and within a screen of
+  // the edge the next window's guide is fetched ahead, so it arrives drawn.
+  const onGridScroll = (el: HTMLDivElement) => {
+    syncGridScroll(el);
+    const x = scrollStart(el);
+    const dx = x - lastScrollX.current;
+    lastScrollX.current = x;
+    if (dx === 0 || pending.current) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const dir = extendDirection(x, dx, max);
+    if (dir !== 0) {
+      keepView.current = true;
+      shift(dir * GRID_EXTEND, true);
+    } else if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX - el.clientWidth) {
+      prefetchWindow(GRID_EXTEND);
+    } else if (dx < 0 && x <= GRID_EXTEND_EDGE_PX + el.clientWidth) {
+      prefetchWindow(-GRID_EXTEND);
+    }
+  };
 
   // ---- guide search and jump (Run 2 C5) ----------------------------------------
   const [jumpOpen, setJumpOpen] = useState(false);
@@ -753,13 +893,6 @@ export function EpgGridPage() {
             archivePortal.retry();
           }}
         />
-      ) : noEpgAnywhere ? (
-        <div className="flex items-center gap-2 border-b border-divider bg-surface-2 px-3 py-2 text-sm text-fg-muted">
-          {t('guideNoData')}
-          <Link to="/settings/epg" className="text-accent hover:underline">
-            {t('epgSettings')}
-          </Link>
-        </div>
       ) : null}
 
       {paged.error ? (
@@ -768,7 +901,7 @@ export function EpgGridPage() {
         <div className="flex flex-col gap-2 p-3" aria-busy="true" aria-label={t('loadingGuide')}>
           {Array.from({ length: 10 }, (_, i) => (
             <div key={i} className="flex gap-2">
-              <Skeleton className="h-12 w-40" />
+              <Skeleton className={compact ? 'h-12 w-16 shrink-0' : 'h-12 w-40 shrink-0'} />
               <Skeleton className="h-12 flex-1" />
             </div>
           ))}
@@ -776,151 +909,189 @@ export function EpgGridPage() {
       ) : count === 0 ? (
         <EmptyState icon={<Tv className="size-8" />} title={t('noChannels')} description={t('noChannelsHint')} />
       ) : (
-        <div
-          ref={scroller}
-          role="grid"
-          aria-label={t('guide')}
-          aria-rowcount={count + 1}
-          // Focusable from script only: it holds focus while the cursor's row is still loading.
-          tabIndex={-1}
-          onKeyDown={onGridKey}
-          onScroll={(e) => syncGridScroll(e.currentTarget)}
-          onFocus={(e) => {
-            lastFocused.current = e.target as HTMLElement;
-          }}
-          data-testid="epg-grid"
-          className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
-        >
-          <div style={{ width: channelCol + trackWidth, height: virtualizer.getTotalSize() + HEADER_H, position: 'relative' }}>
-            {/* time header */}
-            <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height: HEADER_H, width: channelCol + trackWidth }}>
-              <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
-                {t('channels')}
-              </div>
-              {slots.map((s, i) => (
-                <div
-                  role="columnheader"
-                  key={s}
-                  className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted"
-                  style={{ width: GRID_SLOT_PX }}
-                >
-                  {labels[i]}
+        // The grid with the no-guide notice floating over its foot: the notice comes and goes as
+        // chunks load without moving the grid (L1-perf-1).
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scroller}
+            role="grid"
+            aria-label={t('guide')}
+            aria-rowcount={count + 1}
+            // Focusable from script only: it holds focus while the cursor's row is still loading.
+            tabIndex={-1}
+            onKeyDown={onGridKey}
+            onScroll={(e) => onGridScroll(e.currentTarget)}
+            onFocus={(e) => {
+              lastFocused.current = e.target as HTMLElement;
+            }}
+            data-testid="epg-grid"
+            className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+          >
+            <div style={{ width: channelCol + trackWidth, height: virtualizer.getTotalSize() + HEADER_H, position: 'relative' }}>
+              {/* time header */}
+              <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height: HEADER_H, width: channelCol + trackWidth }}>
+                <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
+                  <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
                 </div>
-              ))}
-            </div>
-
-            {vItems.map((v) => {
-              const ch = paged.getChannel(v.index);
-              const programs = programsFor(ch);
-              const chName = displayChannelName(ch?.name, prefs.stripCountryPrefix);
-              const highlighted = !!ch && highlight === itemKey(ch.ref);
-              return (
-                <div
-                  key={v.key}
-                  role="row"
-                  aria-rowindex={v.index + 2}
-                  className="absolute start-0 flex border-b border-divider"
-                  style={{ top: HEADER_H + v.start, height: GRID_ROW, width: channelCol + trackWidth }}
-                  // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
-                  onContextMenu={(e) => {
-                    if (!ch) return;
-                    e.preventDefault();
-                    setRowMenu({ pos: { x: e.clientX, y: e.clientY }, channel: ch });
-                  }}
-                >
+                {slots.map((s, i) => (
                   <div
-                    role="rowheader"
-                    className={`sticky start-0 z-10 border-e border-divider motion-safe:transition-colors motion-safe:duration-500 ${highlighted ? 'bg-surface-3' : 'bg-surface'}`}
-                    style={{ width: channelCol }}
+                    role="columnheader"
+                    key={s}
+                    className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted"
+                    style={{ width: GRID_SLOT_PX }}
                   >
-                    {/* guide search: the row a hit moved to, marked for a moment. */}
-                    {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent" /> : null}
-                    {ch ? (
-                      <button
-                        type="button"
-                        data-channel-row={v.index}
-                        data-highlighted={highlighted ? '' : undefined}
-                        tabIndex={v.index === cursor.row && (!programs || programs.length === 0) ? 0 : -1}
-                        onClick={() => playLive(ch)}
-                        title={t('playChannel', { name: chName })}
-                        className="flex h-full w-full items-center gap-2 px-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
-                      >
-                        <span className="w-7 shrink-0 text-end text-[calc(11rem/15)] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
-                        <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
-                        <span className="min-w-0 flex-1 truncate text-sm text-fg">{chName}</span>
-                        {hasUsableArchive(ch, kind) ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
-                      </button>
-                    ) : (
-                      <div className="flex h-full items-center gap-2 px-2">
-                        <Skeleton className="size-7" />
-                        <Skeleton className="h-3 flex-1" />
-                      </div>
-                    )}
+                    {labels[i]}
                   </div>
-                  <div role="gridcell" className="relative" style={{ width: trackWidth }}>
-                    {programs === undefined ? (
-                      <div className="absolute inset-1.5 rounded bg-surface-2/60" aria-hidden />
-                    ) : programs.length === 0 ? (
-                      <div className="absolute inset-1.5 flex items-center rounded border border-dashed border-divider px-3 text-xs text-fg-subtle">
-                        {t('noGuideShort')}
-                      </div>
-                    ) : (
-                      layoutBlocks(programs, start, end, PX_PER_MIN, now).map((b) => {
-                        const isCursor = v.index === cursor.row && cursorProgram(cursor.row, cursor.time)?.start === b.program.start;
-                        const catchupOk = ch ? canCatchUp(b.program, ch, kind, now) : false;
-                        return (
-                          <button
-                            key={b.program.start}
-                            type="button"
-                            data-cell-row={v.index}
-                            data-start={b.program.start}
-                            tabIndex={isCursor ? 0 : -1}
-                            aria-label={`${b.program.title}, ${formatRange(b.program, i18n.language)}${b.when === 'now' ? `, ${t('onNow')}` : ''}`}
-                            onClick={(e) => {
-                              setCursor({ row: v.index, time: ms(b.program.start) });
-                              if (ch) open(ch, b.program, e.currentTarget);
-                            }}
-                            onFocus={() => setCursor((c) => (c.row === v.index && c.time >= ms(b.program.start) && c.time < ms(b.program.end) ? c : { row: v.index, time: Math.max(ms(b.program.start), start) }))}
-                            className={`absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                              b.when === 'now'
-                                ? 'border-accent/60 bg-accent/12 text-fg'
-                                : b.when === 'past'
-                                  ? 'border-border/60 bg-surface-2/60 text-fg-muted'
-                                  : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
-                            }`}
-                            style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
-                          >
-                            {/* A show that began before the visible edge keeps its title readable: the text is
-                                padded past the sticky channel column until the cell's end pushes it out. */}
-                            <span data-testid="cell-text" className="block" style={{ paddingInlineStart: cellTextPad(b.left, b.width) }}>
-                              <span className="flex items-center gap-1 truncate text-xs font-medium">
-                                {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
-                                <span dir="auto" className="truncate text-match-parent">{b.program.title}</span>
-                                {/* recording: */}
-                                <ScheduleMark channelRef={ch?.ref} program={b.program} />
-                              </span>
-                              <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{formatRange(b.program, i18n.language)}</span>
-                            </span>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {nowInWindow ? (
-              <div
-                aria-hidden
-                data-testid="epg-now-line"
-                className="pointer-events-none absolute z-10 w-0.5 bg-live"
-                style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: HEADER_H - 6, height: virtualizer.getTotalSize() + 6 }}
-              >
-                <span className="sticky top-[30px] -ms-[3px] block size-2 rounded-full bg-live" />
+                ))}
               </div>
-            ) : null}
+
+              {vItems.map((v) => {
+                const ch = paged.getChannel(v.index);
+                const programs = programsFor(ch);
+                const chName = displayChannelName(ch?.name, prefs.stripCountryPrefix);
+                const highlighted = !!ch && highlight === itemKey(ch.ref);
+                return (
+                  <div
+                    key={v.key}
+                    role="row"
+                    aria-rowindex={v.index + 2}
+                    className="absolute start-0 flex border-b border-divider"
+                    style={{ top: HEADER_H + v.start, height: GRID_ROW, width: channelCol + trackWidth }}
+                    // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
+                    onContextMenu={(e) => {
+                      if (!ch) return;
+                      e.preventDefault();
+                      setRowMenu({ pos: { x: e.clientX, y: e.clientY }, channel: ch });
+                    }}
+                  >
+                    <div
+                      role="rowheader"
+                      className={`sticky start-0 z-10 border-e border-divider motion-safe:transition-colors motion-safe:duration-500 ${highlighted ? 'bg-surface-3' : 'bg-surface'}`}
+                      style={{ width: channelCol }}
+                    >
+                      {/* guide search: the row a hit moved to, marked for a moment. */}
+                      {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent" /> : null}
+                      {ch ? (
+                        <button
+                          type="button"
+                          data-channel-row={v.index}
+                          data-highlighted={highlighted ? '' : undefined}
+                          tabIndex={v.index === cursor.row && (!programs || programs.length === 0) ? 0 : -1}
+                          onClick={() => playLive(ch)}
+                          title={t('playChannel', { name: chName })}
+                          data-compact={compact ? '' : undefined}
+                          className={cn(
+                            'relative flex h-full w-full outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+                            compact ? 'flex-col items-center justify-center gap-0.5 px-1' : 'items-center gap-2 px-2 text-start',
+                          )}
+                        >
+                          {compact ? (
+                            // Phones: the logo over the number; the name is the button's label and tooltip.
+                            <>
+                              <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
+                              <span className="max-w-full truncate text-[calc(11rem/15)] leading-none tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
+                              <span className="sr-only">{chName}</span>
+                              {hasUsableArchive(ch, kind) ? <History className="absolute end-1 top-1 size-3 text-fg-subtle" aria-label={t('archive')} /> : null}
+                            </>
+                          ) : (
+                            <>
+                              <span className="w-7 shrink-0 text-end text-[calc(11rem/15)] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
+                              <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
+                              <span className="min-w-0 flex-1 truncate text-sm text-fg">{chName}</span>
+                              {hasUsableArchive(ch, kind) ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="flex h-full items-center gap-2 px-2">
+                          <Skeleton className="size-7" />
+                          <Skeleton className="h-3 flex-1" />
+                        </div>
+                      )}
+                    </div>
+                    <div role="gridcell" className="relative" style={{ width: trackWidth }}>
+                      {programs === undefined ? (
+                        <div className="absolute inset-1.5 rounded bg-surface-2/60" aria-hidden />
+                      ) : programs.length === 0 ? (
+                        <div className="absolute inset-1.5 flex items-center rounded border border-dashed border-divider text-xs text-fg-subtle">
+                          {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}
+                          <span data-testid="no-guide-label" className="sticky px-3" style={{ insetInlineStart: channelCol }}>
+                            {t('noGuideShort')}
+                          </span>
+                        </div>
+                      ) : (
+                        layoutBlocks(programs, start, end, PX_PER_MIN, now).map((b) => {
+                          const isCursor = v.index === cursor.row && cursorProgram(cursor.row, cursor.time)?.start === b.program.start;
+                          const catchupOk = ch ? canCatchUp(b.program, ch, kind, now) : false;
+                          return (
+                            <button
+                              key={b.program.start}
+                              type="button"
+                              data-cell-row={v.index}
+                              data-start={b.program.start}
+                              tabIndex={isCursor ? 0 : -1}
+                              aria-label={`${b.program.title}, ${formatRange(b.program, i18n.language)}${b.when === 'now' ? `, ${t('onNow')}` : ''}`}
+                              onClick={(e) => {
+                                setCursor({ row: v.index, time: ms(b.program.start) });
+                                if (ch) open(ch, b.program, e.currentTarget);
+                              }}
+                              onFocus={() => setCursor((c) => (c.row === v.index && c.time >= ms(b.program.start) && c.time < ms(b.program.end) ? c : { row: v.index, time: Math.max(ms(b.program.start), start) }))}
+                              className={`absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                                b.when === 'now'
+                                  ? 'border-accent/60 bg-accent/12 text-fg'
+                                  : b.when === 'past'
+                                    ? 'border-border/60 bg-surface-2/60 text-fg-muted'
+                                    : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
+                              }`}
+                              style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
+                            >
+                              {/* A show that began before the visible edge keeps its title readable: the text is
+                                  padded past the sticky channel column until the cell's end pushes it out. */}
+                              <span data-testid="cell-text" className="block" style={{ paddingInlineStart: cellTextPad(b.left, b.width) }}>
+                                <span className="flex items-center gap-1 truncate text-xs font-medium">
+                                  {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
+                                  <span dir="auto" className="truncate text-match-parent">{b.program.title}</span>
+                                  {/* recording: */}
+                                  <ScheduleMark channelRef={ch?.ref} program={b.program} />
+                                </span>
+                                <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{formatRange(b.program, i18n.language)}</span>
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {nowInWindow ? (
+                <div
+                  aria-hidden
+                  data-testid="epg-now-line"
+                  className="pointer-events-none absolute z-10 w-0.5 bg-live"
+                  style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: HEADER_H - 6, height: virtualizer.getTotalSize() + 6 }}
+                >
+                  <span className="sticky top-[30px] -ms-[3px] block size-2 rounded-full bg-live" />
+                </div>
+              ) : null}
+            </div>
           </div>
+          {noEpgAnywhere ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-3">
+              <div
+                data-testid="guide-no-data"
+                className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-fg-muted shadow-2 motion-safe:animate-fade-in"
+              >
+                <span className="min-w-0 truncate" title={t('guideNoData')}>
+                  {t('guideNoData')}
+                </span>
+                <Link to="/settings/epg" className="shrink-0 text-accent hover:underline">
+                  {t('epgSettings')}
+                </Link>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -932,6 +1103,9 @@ export function EpgGridPage() {
           kind={kind}
           now={now}
           rtl={rtl}
+          scroller={scroller.current}
+          channelCol={channelCol}
+          sheet={compact}
           onClose={closePopover}
           onLive={() => {
             playLive(selection.channel);
@@ -973,7 +1147,10 @@ function GuideRowMenu({
   const multiviewItem = useMultiviewMenuItem(live ? channelInput(ch) : null);
   const addToListItem = useAddToListMenuItem(ch);
   const editItems = useChannelEditMenuItems(ch);
-  const lockItems = useLockMenuItems({ sourceId: ch.ref.sourceId, contentType: ch.ref.contentType, kind: 'item', targetId: ch.ref.itemId, name });
+  const lockItems = useLockMenuItems(
+    { sourceId: ch.ref.sourceId, contentType: ch.ref.contentType, kind: 'item', targetId: ch.ref.itemId, name },
+    { categoryId: ch.categoryId },
+  );
   // F2 and Shift+Delete belong to the Live list; the guide does not bind them, so no key hints here.
   const plain = ({ id, label, icon, disabled, onSelect }: MenuAction): MenuItem => ({ id, label, icon, disabled, onSelect });
   const items: MenuItem[] = [
@@ -992,6 +1169,9 @@ function ProgramPopover({
   kind,
   now,
   rtl,
+  scroller,
+  channelCol,
+  sheet,
   onClose,
   onLive,
   onCatchup,
@@ -1000,6 +1180,11 @@ function ProgramPopover({
   kind?: SourceKind;
   now: number;
   rtl: boolean;
+  /** The grid: the popover follows its cell while it scrolls, and closes once the cell is out of view. */
+  scroller: HTMLElement | null;
+  channelCol: number;
+  /** Phones: a bottom sheet over a scrim instead of a popover beside the cell. */
+  sheet: boolean;
   onClose(): void;
   onLive(): void;
   onCatchup(): void;
@@ -1007,24 +1192,43 @@ function ProgramPopover({
   const { t, i18n } = useTranslation('live');
   const navigate = useNavigate(); // guide: "Browse archive"
   const ref = useRef<HTMLDivElement>(null);
-  const { program, channel, rect } = selection;
+  const { program, channel, anchor } = selection;
   const when = programWhen(program, now);
   const catchupOk = canCatchUp(program, channel, kind, now);
   const { stripCountryPrefix } = useDisplayPrefs();
   const channelName = displayChannelName(channel.name, stripCountryPrefix);
-  const [pos, setPos] = useState({ left: rtl ? rect.right - 360 : rect.left, top: rect.bottom + 6 });
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
+  // Placed from the cell before paint, then kept on it while the grid scrolls (written straight to
+  // the element's style: a scroll frame does not re-render). Once the cell leaves the visible
+  // track (or unmounts), the popover closes rather than float over unrelated rows.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    // Align with the cell's inline-start edge: its left in LTR, its right in RTL.
-    const anchor = rtl ? rect.right - r.width : rect.left;
-    const left = Math.max(8, Math.min(anchor, window.innerWidth - r.width - 8));
-    const top = rect.bottom + 6 + r.height > window.innerHeight - 8 ? Math.max(8, rect.top - r.height - 6) : rect.bottom + 6;
-    setPos({ left, top });
     el.querySelector<HTMLElement>('button')?.focus();
-  }, [rect, rtl]);
+    if (sheet) return;
+    const place = () => {
+      const a = anchor.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      // Align with the cell's inline-start edge: its left in LTR, its right in RTL.
+      const x = rtl ? a.right - r.width : a.left;
+      el.style.left = `${Math.max(8, Math.min(x, window.innerWidth - r.width - 8))}px`;
+      el.style.top = `${a.bottom + 6 + r.height > window.innerHeight - 8 ? Math.max(8, a.top - r.height - 6) : a.bottom + 6}px`;
+    };
+    place();
+    if (!scroller) return;
+    const follow = () => {
+      if (!anchor.isConnected || !cellInView(anchor, scroller, channelCol, rtl)) closeRef.current();
+      else place();
+    };
+    scroller.addEventListener('scroll', follow, { passive: true });
+    window.addEventListener('resize', follow);
+    return () => {
+      scroller.removeEventListener('scroll', follow);
+      window.removeEventListener('resize', follow);
+    };
+  }, [anchor, rtl, sheet, scroller, channelCol]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -1037,80 +1241,99 @@ function ProgramPopover({
   }, [onClose]);
 
   return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-modal="true"
-      aria-label={program.title}
-      onKeyDown={(e) => {
-        // Keys from a portal dialog opened here bubble through React; they are the dialog's.
-        if (!(e.target instanceof Node) || !ref.current?.contains(e.target)) return;
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          onClose();
-          return;
-        }
-        if (e.key === 'Tab') {
-          // Tab cycles inside the popover; Escape or Close hands focus back to the cell.
-          const items = [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]') ?? [])];
-          const first = items[0];
-          const last = items[items.length - 1];
-          if (!first || !last) return;
-          const active = document.activeElement;
-          const inside = !!active && !!ref.current?.contains(active);
-          if (e.shiftKey && (active === first || !inside)) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && (active === last || !inside)) {
-            e.preventDefault();
-            first.focus();
+    <>
+      {/* The sheet's scrim: pressing it is a press outside, which closes the sheet. */}
+      {sheet ? <div aria-hidden className="fixed inset-0 z-40 bg-scrim motion-safe:animate-fade-in" /> : null}
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={program.title}
+        onKeyDown={(e) => {
+          // Keys from a portal dialog opened here bubble through React; they are the dialog's.
+          if (!(e.target instanceof Node) || !ref.current?.contains(e.target)) return;
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            onClose();
+            return;
           }
+          if (e.key === 'Tab') {
+            // Tab cycles inside the popover; Escape or Close hands focus back to the cell.
+            const items = [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]') ?? [])];
+            const first = items[0];
+            const last = items[items.length - 1];
+            if (!first || !last) return;
+            const active = document.activeElement;
+            const inside = !!active && !!ref.current?.contains(active);
+            if (e.shiftKey && (active === first || !inside)) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && (active === last || !inside)) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }}
+        className={
+          sheet
+            ? 'fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-xl border-t border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-fg shadow-2 motion-safe:animate-toast-in'
+            : 'fixed z-50 w-[min(360px,calc(100vw-16px))] rounded-lg border border-border bg-surface p-4 text-fg shadow-2'
         }
-      }}
-      style={{ left: pos.left, top: pos.top }}
-      className="fixed z-50 w-[min(360px,calc(100vw-16px))] rounded-lg border border-border bg-surface p-4 text-fg shadow-2"
-      data-testid="program-popover"
-    >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs tabular-nums text-fg-muted">{joinList([channelName, formatRange(program, i18n.language)], i18n.language)}</p>
-          <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
-          {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}
-          {/* guide: programmes from the provider's own guide, not XMLTV. */}
-          {program.fromProvider ? <p className="text-xs text-fg-subtle" data-testid="program-from-provider">{t('fromProvider')}</p> : null}
+        data-testid="program-popover"
+        data-sheet={sheet ? '' : undefined}
+      >
+        {sheet ? <span aria-hidden className="mx-auto -mt-1 mb-3 block h-1 w-10 rounded-full bg-border" /> : null}
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs tabular-nums text-fg-muted">{joinList([channelName, formatRange(program, i18n.language)], i18n.language)}</p>
+            <h3 dir="auto" className="mt-0.5 text-base font-semibold text-match-parent">{program.title}</h3>
+            {program.category ? <p className="text-xs text-fg-subtle">{program.category}</p> : null}
+            {/* guide: programmes from the provider's own guide, not XMLTV. */}
+            {program.fromProvider ? <p className="text-xs text-fg-subtle" data-testid="program-from-provider">{t('fromProvider')}</p> : null}
+          </div>
+          <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-surface-2">
+            <X className="size-4" />
+          </button>
         </div>
-        <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-surface-2">
-          <X className="size-4" />
-        </button>
+        {program.description ? <p dir="auto" className="mt-2 line-clamp-6 text-sm text-fg-muted text-match-parent">{program.description}</p> : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {when === 'now' ? (
+            <Button size="sm" variant="primary" icon={<Radio className="size-3.5" />} onClick={onLive}>
+              {t('watchLive')}
+            </Button>
+          ) : null}
+          {catchupOk ? (
+            <Button size="sm" variant={when === 'now' ? 'secondary' : 'primary'} icon={<History className="size-3.5" />} onClick={onCatchup}>
+              {when === 'now' ? t('startOver') : t('watchCatchup')}
+            </Button>
+          ) : null}
+          {when !== 'now' ? (
+            <Button size="sm" variant="ghost" icon={<Play className="size-3.5" />} onClick={onLive}>
+              {t('playChannel', { name: channelName })}
+            </Button>
+          ) : null}
+          {/* guide: K6, the one archive entry point of the programme dialog. */}
+          {canBrowseArchive(channel, kind) ? (
+            <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref))} data-testid="program-browse-archive">
+              {t('browseArchive')}
+            </Button>
+          ) : null}
+          {/* recording: */}
+          <ProgramActions channelRef={channel.ref} channelName={channelName} program={program} now={now} />
+          {when === 'past' && !catchupOk ? <p className="w-full text-xs text-fg-subtle">{t('noCatchup')}</p> : null}
+          {when === 'future' ? <p className="w-full text-xs text-fg-subtle">{t('startsAt', { time: formatClock(ms(program.start), i18n.language) })}</p> : null}
+        </div>
       </div>
-      {program.description ? <p dir="auto" className="mt-2 line-clamp-6 text-sm text-fg-muted text-match-parent">{program.description}</p> : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {when === 'now' ? (
-          <Button size="sm" variant="primary" icon={<Radio className="size-3.5" />} onClick={onLive}>
-            {t('watchLive')}
-          </Button>
-        ) : null}
-        {catchupOk ? (
-          <Button size="sm" variant={when === 'now' ? 'secondary' : 'primary'} icon={<History className="size-3.5" />} onClick={onCatchup}>
-            {when === 'now' ? t('startOver') : t('watchCatchup')}
-          </Button>
-        ) : null}
-        {when !== 'now' ? (
-          <Button size="sm" variant="ghost" icon={<Play className="size-3.5" />} onClick={onLive}>
-            {t('playChannel', { name: channelName })}
-          </Button>
-        ) : null}
-        {/* guide: K6, the one archive entry point of the programme dialog. */}
-        {canBrowseArchive(channel, kind) ? (
-          <Button size="sm" variant="ghost" icon={<CalendarClock className="size-3.5" />} onClick={() => navigate(archivePath(channel.ref))} data-testid="program-browse-archive">
-            {t('browseArchive')}
-          </Button>
-        ) : null}
-        {/* recording: */}
-        <ProgramActions channelRef={channel.ref} channelName={channelName} program={program} now={now} />
-        {when === 'past' && !catchupOk ? <p className="w-full text-xs text-fg-subtle">{t('noCatchup')}</p> : null}
-        {when === 'future' ? <p className="w-full text-xs text-fg-subtle">{t('startsAt', { time: formatClock(ms(program.start), i18n.language) })}</p> : null}
-      </div>
-    </div>
+    </>
   );
+}
+
+/** Whether `cell` still shows in the grid's track: below the time header and clear of the channel column. */
+function cellInView(cell: HTMLElement, grid: HTMLElement, channelCol: number, rtl: boolean): boolean {
+  const box = grid.getBoundingClientRect();
+  if (!(box.width > 0)) return true; // not laid out (tests): nothing to measure against
+  const a = cell.getBoundingClientRect();
+  const left = rtl ? box.left : box.left + channelCol;
+  const right = rtl ? box.right - channelCol : box.right;
+  return a.right > left && a.left < right && a.bottom > box.top + HEADER_H && a.top < box.bottom;
 }

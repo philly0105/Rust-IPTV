@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "모든 소스를 바꿀까요?",
   "backupReplaceConfirmBody": "먼저 백업의 소스를 가져옵니다. 하나라도 로드되면 현재 소스와 그 즐겨찾기, 시청 기록이 제거됩니다. 하나도 로드되지 않으면 아무것도 바뀌지 않습니다.",
   "backupReplaceConfirm": "바꾸기",
-  "backupImported_one": "소스 {{count}}개를 가져왔습니다",
-  "backupImported_other": "소스 {{count}}개를 가져왔습니다",
   "backupImportFailed": "백업을 가져올 수 없습니다",
-  "backupResult": "{{imported}}개 가져옴, {{skipped}}개 건너뜀",
+  "backupResult": "추가 또는 업데이트: {{imported}}. 건너뜀: {{skipped}}.",
   "backupWarnings_one": "경고 {{count}}개",
   "backupWarnings_other": "경고 {{count}}개",
   "backupNotJson": "올바른 JSON 파일이 아닙니다.",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "이미지 캐시를 지웠습니다",
   "imageCacheClearFailed": "이미지 캐시를 지우지 못했습니다",
   "imageCacheLoadFailed": "이미지 캐시를 읽지 못했습니다: {{message}}",
-  "imageCacheUnavailable": "이 서버에는 이미지 캐시가 없어 이미지를 각 제공업체에서 직접 불러옵니다."
+  "imageCacheUnavailable": "이 서버에는 이미지 캐시가 없어 이미지를 각 제공업체에서 직접 불러옵니다.",
+  "backupOldVersion": "이 백업은 읽을 수 없는 이전 형식입니다. 새 백업을 내보낸 후 가져오세요.",
+  "backupImportDone": "백업을 가져왔습니다",
+  "backupReplacePinTitle": "소스를 바꾸려면 PIN을 입력하세요",
+  "backupReplacePinText": "바꾸면 현재 소스와 그 자녀 보호 잠금이 삭제되므로 자녀 보호 PIN이 필요합니다."
 }

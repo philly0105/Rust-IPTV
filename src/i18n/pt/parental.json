@@ -174,5 +174,10 @@
   "turnOffTitle": "Desativar o controle parental?",
   "turnOffConfirmText": "Digite o PIN. O conteúdo bloqueado fica aberto para todos até um novo PIN ser definido.",
   "turnedOffToast": "O controle parental está desativado",
-  "turnedOffToastText": "Seus bloqueios foram mantidos. Defina um PIN para usá-los de novo."
+  "turnedOffToastText": "Seus bloqueios foram mantidos. Defina um PIN para usá-los de novo.",
+  "menuLockedWithGroup": "Bloqueado com o respetivo grupo",
+  "discardTitle": "Descartar as alterações?",
+  "discardText": "Os grupos que marcou ou desmarcou aqui não serão guardados.",
+  "keepEditing": "Continuar a editar",
+  "discard": "Descartar"
 }

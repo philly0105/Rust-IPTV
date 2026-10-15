@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "Hiba történt az importálás közben.",
   "errorSummaryWrongUrl": "Ez a cím nem csatornalistára mutat.",
   "technicalDetails": "Műszaki részletek",
-  "addRetryNote": "A(z) „{{name}}” forrás ezzel a hibával lett mentve. Javítsa az adatokat, és próbálja újra itt, vagy zárja be ezt az ablakot, és később használja a kártyáján az Újrapróbálkozás gombot.",
+  "addRetryNote": "Javítsd az adatokat, és próbáld újra itt. Az ablak bezárása eltávolítja ezt: „{{name}}” (visszavonható).",
   "retryImport": "Újrapróbálkozás",
   "retrying": "Újrapróbálkozás...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "Archívum napjai",
   "catchupDaysHint": "Milyen messzire nyúlik vissza az archívum. Hagyja üresen a lejátszási lista értékének megtartásához.",
   "errorCatchupTemplate": "Legfeljebb {{max}} karakter, vezérlőkarakterek nélkül.",
-  "errorCatchupDays": "Adjon meg egész számú napot egy és {{max}} között."
+  "errorCatchupDays": "Adjon meg egész számú napot egy és {{max}} között.",
+  "testExpired": "Bejelentkezve, de a fiók lejárt.",
+  "testExpiredNamed": "Bejelentkezve ide: {{name}}, de a fiók lejárt.",
+  "testAccountInactiveHint": "A csatornák addig nem játszhatók le, amíg a szolgáltató meg nem hosszabbítja vagy újra nem aktiválja a fiókot.",
+  "phaseConnectingTo": "Kapcsolódás: {{host}}…",
+  "phaseStarting": "Indítás…",
+  "discardedFailedHint": "Az első importálás nem sikerült. Válaszd a Visszavonás gombot, ha megtartanád, és a kártyájáról újra próbálnád.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

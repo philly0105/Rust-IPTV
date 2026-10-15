@@ -1,0 +1,269 @@
+/**
+ * Loop 1 guide fixes: the keyboard cursor waits for the window a move asked for (Home and
+ * crossing the window edge), horizontal scrolling runs on past the window, the phone layout
+ * (compact channel column, now line a quarter in, programme sheet), the popover follows its cell
+ * and closes once the cell scrolls away, the sticky "No guide data" label, and the no-guide
+ * notice that neither blinks nor moves the grid while the next window loads.
+ */
+import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
+import { useToastStore } from '@/ui';
+
+import { defaultStart, EpgGridPage, extendDirection, GRID_EXTEND_EDGE_PX, GRID_SLOT_PX, nowLead } from '../../components/EpgGridPage';
+import { HOUR } from '../../lib/epgTime';
+import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
+
+const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
+vi.mock('@/api/transport', async (orig) => ({
+  ...(await orig<object>()),
+  rpc: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
+  rpcRaw: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
+  isDesktop: true,
+}));
+vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+vi.mock('@/shell', async () => await import('../../test/fakes'));
+vi.mock('@/features/player', async () => await import('../../test/fakes'));
+vi.mock('@/features/player/remote', async () => await import('../../test/fakes'));
+
+rpcMock.current = createRpcMock();
+const rpc = rpcMock.current;
+
+const CHANNELS = Array.from({ length: 6 }, (_, i) => makeChannel(i));
+const key = (r: Channel['ref']) => `${r.sourceId}|${r.contentType}|${r.itemId}`;
+
+/** Hour-long programmes `<item> P<k>` from 12 h before `at` to 18 h after it. */
+function hourly(at: number) {
+  return (a: unknown) =>
+    Object.fromEntries(
+      (a as { refs: Channel['ref'][] }).refs.map((r) => {
+        const list: EpgProgram[] = [];
+        for (let k = -12; k < 18; k++) list.push(program(`${r.itemId} P${k}`, at + k * HOUR, at + (k + 1) * HOUR));
+        return [key(r), list];
+      }),
+    );
+}
+
+// jsdom keeps scrollLeft at 0: record what is written, so scroll moves can be driven and read.
+const scrollLefts = new WeakMap<Element, number>();
+const originalScrollLeft = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollLeft');
+
+beforeAll(() => {
+  installDomStubs();
+  configure({ asyncUtilTimeout: 4000 });
+  vi.setConfig({ testTimeout: 20_000 });
+  Object.defineProperty(Element.prototype, 'scrollLeft', {
+    configurable: true,
+    get(this: Element) {
+      return scrollLefts.get(this) ?? 0;
+    },
+    set(this: Element, v: number) {
+      scrollLefts.set(this, v);
+    },
+  });
+});
+afterAll(() => {
+  if (originalScrollLeft) Object.defineProperty(Element.prototype, 'scrollLeft', originalScrollLeft);
+});
+beforeEach(() => {
+  rpc.reset();
+  const h = rpc.handlers;
+  h['sources.list'] = () => [{ id: 'src1', kind: 'm3u', name: 'Demo', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } }];
+  h['settings.get'] = () => settings();
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+  h['catalog.categories'] = () => [];
+  h['catalog.channels'] = (a) => {
+    const { query: q } = a as { query: PageQuery };
+    return { items: CHANNELS.slice(q.offset, q.offset + q.limit), total: CHANNELS.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+  };
+  h['epg.grid'] = (a) => Object.fromEntries((a as { refs: Channel['ref'][] }).refs.map((r) => [key(r), []]));
+  h['epg.sources'] = () => [];
+  h['epg.search'] = () => [];
+  h['reminders.list'] = () => [];
+  h['recordings.list'] = () => [];
+  h['recordings.rules'] = () => [];
+  h['recordings.capabilities'] = () => ({ supported: true });
+  h['channels.edits'] = () => [];
+  useToastStore.setState({ toasts: [] });
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+const GRID = [{ path: '/epg', element: <EpgGridPage /> }];
+const focusedLabel = () => (document.activeElement as HTMLElement | null)?.getAttribute('aria-label') ?? document.activeElement?.textContent ?? '';
+const atParam = () => Number(new URLSearchParams(router.location?.search).get('at'));
+
+describe('helpers', () => {
+  it('nowLead keeps one slot of the past, at most a quarter of a narrow track', () => {
+    expect(nowLead(0)).toBe(GRID_SLOT_PX); // not measured yet
+    expect(nowLead(812)).toBe(GRID_SLOT_PX); // a laptop's track
+    expect(nowLead(318)).toBe(80); // a phone's track beside the compact column
+  });
+
+  it('extendDirection moves the window only when scrolling toward a near edge', () => {
+    const max = 1200;
+    expect(extendDirection(max - GRID_EXTEND_EDGE_PX, 10, max)).toBe(1);
+    expect(extendDirection(max - GRID_EXTEND_EDGE_PX, -10, max)).toBe(0);
+    expect(extendDirection(GRID_EXTEND_EDGE_PX, -10, max)).toBe(-1);
+    expect(extendDirection(GRID_EXTEND_EDGE_PX, 10, max)).toBe(0);
+    expect(extendDirection(600, 10, max)).toBe(0);
+    expect(extendDirection(0, -10, 0)).toBe(0); // nothing to scroll
+  });
+});
+
+describe('the keyboard cursor and window moves (L1-guide-library-1)', () => {
+  it('ArrowRight past the window end lands on the next programme, then the one after; Home lands on what is on now', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    act(() => cell.focus());
+
+    // The window is 6 h: End is its last programme, P5.
+    fireEvent.keyDown(cell, { key: 'End' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P5,/));
+    // Past the edge: the window moves on 3 h and the cursor takes P6, not the channel cell.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    await waitFor(() => expect(atParam()).toBe(at + 3 * HOUR));
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P6,/));
+    // ...and the next press goes to P7, without skipping a programme.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P7,/));
+
+    // Home: back to now, on the programme airing now (P0), not the first of the old window.
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    await waitFor(() => expect(router.location?.search).not.toContain('at='));
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P0,/));
+  });
+});
+
+describe('horizontal scrolling past the window (L1-guide-library-16)', () => {
+  it('fetches the next window ahead, moves the window on near the edge and keeps the view still', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const grid = screen.getByTestId('epg-grid');
+    Object.defineProperty(grid, 'scrollWidth', { configurable: true, value: 2000 });
+    Object.defineProperty(grid, 'clientWidth', { configurable: true, value: 800 });
+    const nextFrom = new Date(at + 3 * HOUR).toISOString();
+    const asked = () => (rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === nextFrom);
+
+    // Within a screen of the end: the next window is fetched, the window stays.
+    grid.scrollLeft = 400;
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(asked()).toBe(true));
+    expect(atParam()).toBe(at);
+
+    // Near the end, scrolling on: the window moves 3 h later and the scroll moves back by 3 h of px.
+    grid.scrollLeft = 1100;
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(atParam()).toBe(at + 3 * HOUR));
+    await waitFor(() => expect(grid.scrollLeft).toBe(1100 - 900));
+
+    // Near the start, scrolling back: the window moves 3 h earlier, the scroll forward by as much.
+    grid.scrollLeft = 100;
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(atParam()).toBe(at));
+    await waitFor(() => expect(grid.scrollLeft).toBe(100 + 900));
+  });
+});
+
+describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
+  function phone() {
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as unknown as MediaQueryList,
+    );
+  }
+
+  it('the channel column shows the logo and number, with the name for screen readers and as a tooltip', async () => {
+    phone();
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const channel = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
+    expect(channel.dataset.compact).toBe('');
+    expect(channel.title).toBe('Play Channel 0');
+    expect(screen.getByText('Channel 0').className).toContain('sr-only');
+    expect((channel.closest('[role="rowheader"]') as HTMLElement).style.width).toBe('72px');
+  });
+
+  it('a programme opens as a bottom sheet over a scrim; pressing the scrim closes it', async () => {
+    phone();
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c0 P0,/ });
+    fireEvent.click(cell);
+    const sheet = await screen.findByTestId('program-popover');
+    expect(sheet.dataset.sheet).toBe('');
+    expect(sheet.className).toContain('bottom-0');
+    const scrim = sheet.previousElementSibling as HTMLElement;
+    expect(scrim.className).toContain('bg-scrim');
+    fireEvent.mouseDown(scrim);
+    await waitFor(() => expect(screen.queryByTestId('program-popover')).toBeNull());
+  });
+});
+
+describe('the programme popover while the grid scrolls (L1-guide-library-10)', () => {
+  it('follows its cell, and closes once the cell leaves the visible track', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c2 P1,/ });
+    let cellRect = new DOMRect(400, 200, 300, 48);
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === cell) return cellRect;
+      if (this.dataset.testid === 'epg-grid') return new DOMRect(0, 100, 1000, 600);
+      return original.call(this);
+    });
+    fireEvent.click(cell);
+    const pop = await screen.findByTestId('program-popover');
+    expect(pop.style.top).toBe('254px'); // under the cell: 200 + 48 + 6
+
+    const grid = screen.getByTestId('epg-grid');
+    cellRect = new DOMRect(300, 150, 300, 48);
+    fireEvent.scroll(grid);
+    expect(pop.style.top).toBe('204px');
+    expect(pop.style.left).toBe('300px');
+
+    // Scrolled under the sticky channel column (220 px): the popover closes, focus back on the cell.
+    cellRect = new DOMRect(-200, 150, 300, 48);
+    fireEvent.scroll(grid);
+    await waitFor(() => expect(screen.queryByTestId('program-popover')).toBeNull());
+    expect(document.activeElement).toBe(cell);
+  });
+});
+
+describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)', () => {
+  it('the row label sticks just past the channel column', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const label = (await screen.findAllByTestId('no-guide-label'))[0]!;
+    expect(label.textContent).toBe('No guide data');
+    expect(label.className).toContain('sticky');
+    expect(label.style.insetInlineStart).toBe('220px');
+  });
+
+  it('the no-guide notice floats over the grid and stays while the next window loads', async () => {
+    const at = defaultStart(Date.now());
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const notice = await screen.findByTestId('guide-no-data');
+    // Over the grid, not above it: it never pushes the grid down.
+    expect(notice.parentElement?.className).toContain('absolute');
+    expect(notice.parentElement?.parentElement?.contains(screen.getByTestId('epg-grid'))).toBe(true);
+
+    // The next window's answer never comes: the previous one keeps the notice up.
+    rpc.handlers['epg.grid'] = () => new Promise(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: '3 hours later' }));
+    const laterFrom = new Date(at + 3 * HOUR).toISOString();
+    await waitFor(() => expect((rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === laterFrom)).toBe(true));
+    await waitFor(() => expect(atParam()).toBe(at + 3 * HOUR));
+    expect(screen.getByTestId('guide-no-data')).toBe(notice);
+  });
+});

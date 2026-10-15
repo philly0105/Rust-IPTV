@@ -428,8 +428,11 @@ describe('Guide ribbon and guide page states', () => {
     renderAt('/', [{ path: '/', element: ribbon(makeChannel(4)) }]);
     expect(await screen.findByText('Guide timed out')).toBeTruthy();
     fail = false;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('No guide data for Channel 4')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /try again|retry/i }));
+    // L1-live-3: one line that does not repeat the channel name already shown above it.
+    const note = await screen.findByTestId('ribbon-no-guide');
+    expect(note.textContent).toContain('No guide data');
+    expect(note.textContent).not.toContain('Channel 4');
     expect(screen.getByRole('button', { name: 'Match guide channel' })).toBeTruthy();
   });
 

@@ -17,11 +17,12 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { itemKey, sameRef, type ItemKey, type WatchlistEntry } from '@/api/types';
+import { itemPath } from '@/shell/dashboard/cards';
 
 import { MyListEmpty } from '../components/MyListEmpty';
 import { MyListRow, MyListSkeleton, ROW_HEIGHT, type RowReorder } from '../components/MyListRow';
 import { MyListToolbar } from '../components/MyListToolbar';
-import { Button, EmptyState, ErrorState, VirtualRows, itemPath, usePendingRemovals, useShell, useShortcut, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, VirtualRows, usePendingRemovals, useShell, useShortcut, useVisibleSources } from '../deps';
 import { useListParams } from '../hooks/useListParams';
 import { useMyList } from '../hooks/useMyList';
 import { useMyListActions } from '../hooks/useMyListActions';

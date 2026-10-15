@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 
+import { joinList } from '@/shell/dashboard/cards';
 import { buttonClass } from '@/ui/Button';
 
 import { Button, EmptyState, ErrorState, SkeletonGrid, Tabs } from '../deps';
@@ -17,7 +18,7 @@ import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes } from '../lib/format';
 import { buildLibrary, entryTargetId, filterLibrary, librarySize, type LibraryFilter } from '../lib/myvideos';
 // recording:
-import { RecordingsPanel } from '../components/RecordingsPanel';
+import { RecordingsPanel, useRecordingFiles } from '../components/RecordingsPanel';
 
 const FILTERS: readonly LibraryFilter[] = ['all', 'movies', 'series', 'missing'];
 
@@ -26,6 +27,31 @@ function isFilter(v: string | null): v is LibraryFilter {
 }
 
 export { entryTargetId };
+
+/**
+ * Header line: titles, recordings (when there are any) and their size on
+ * disk, joined with the locale's separator ("8 titles, 3 recordings, 94.6 MB"). With no
+ * downloads but some recordings, the titles part drops out.
+ */
+export function librarySubtitle({
+  titles,
+  recordings,
+  size,
+  lang,
+  t,
+}: {
+  titles: number;
+  recordings: number;
+  size: string;
+  lang: string;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+}): string {
+  const parts: string[] = [];
+  if (titles > 0 || recordings === 0) parts.push(t('libraryTitleCount', { count: titles }));
+  if (recordings > 0) parts.push(t('libraryRecordingCount', { count: recordings }));
+  parts.push(size);
+  return joinList(parts, lang);
+}
 
 export function MyVideosPage() {
   const { t, i18n } = useTranslation('library');
@@ -50,6 +76,12 @@ export function MyVideosPage() {
     [library],
   );
   const size = useMemo(() => librarySize(query.data ?? []), [query.data]);
+  // recording: files in the recordings folder count toward the header and get their own tab badge.
+  const recordingFiles = useRecordingFiles();
+  const recordings = useMemo(() => {
+    const files = recordingFiles.data ?? [];
+    return { count: files.length, bytes: files.reduce((n, f) => n + (f.fileAvailable ? f.sizeBytes : 0), 0) };
+  }, [recordingFiles.data]);
 
   const setFilter = (f: string) => {
     setParams(
@@ -79,7 +111,15 @@ export function MyVideosPage() {
     [setParams],
   );
 
-  const subtitle = query.data ? t('librarySummary', { count: library.length, size: formatBytes(size, i18n.language) || '0 B' }) : undefined;
+  const subtitle = query.data
+    ? librarySubtitle({
+        titles: library.length,
+        recordings: recordings.count,
+        size: formatBytes(size + recordings.bytes, i18n.language) || '0 B',
+        lang: i18n.language,
+        t,
+      })
+    : undefined;
   const headerActions = useMemo(
     () => (
       <Link to="/downloads" className={buttonClass('ghost', 'sm')}>
@@ -141,7 +181,11 @@ export function MyVideosPage() {
             ? `${e.title}${e.missing ? `, ${t('fileMissing')}` : ''}`
             : `${e.title}, ${t('episodeCount', { count: e.episodes.length })}${e.missingCount > 0 ? `, ${t('episodesMissingTitle', { count: e.missingCount })}` : ''}`
         }
-        onActivate={(e) => navigate(`/my-videos/${entryTargetId(e)}`)}
+        onActivate={(e) => {
+          // The detail page's Back returns here, on the same tab and search.
+          const qs = params.toString();
+          navigate(`/my-videos/${entryTargetId(e)}`, { state: { back: `/my-videos${qs ? `?${qs}` : ''}` } });
+        }}
         render={(e) => <LibraryCard entry={e} />}
         captionHeight={CARD_CAPTION_HEIGHT}
         testId="my-videos-grid"
@@ -164,7 +208,11 @@ export function MyVideosPage() {
             badge: <span className="font-display tabular-nums">{counts[f]}</span>,
           })),
           // recording:
-          { id: 'recordings', label: t('filterRecordings') },
+          {
+            id: 'recordings',
+            label: t('filterRecordings'),
+            ...(recordingFiles.data ? { badge: <span className="font-display tabular-nums">{recordings.count}</span> } : {}),
+          },
         ]}
       />
       {body}

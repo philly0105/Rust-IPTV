@@ -7,7 +7,7 @@
 import { ArrowLeft, FileWarning, FolderOpen, Play, RotateCcw, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { RpcError, isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
@@ -63,6 +63,15 @@ export function MyVideoDetailPage() {
   const { id: idParam } = useParams();
   const id = Number(idParam);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Opened from My Videos, Back steps back to it: same tab and search (?filter, ?q).
+  // Opened from anywhere else (a link, a reload), Back goes to the library.
+  const fromLibrary = (location.state as { back?: unknown } | null)?.back;
+  const back = typeof fromLibrary === 'string' && fromLibrary.startsWith('/my-videos') ? fromLibrary : '/my-videos';
+  const goBack = useCallback(() => {
+    if (typeof fromLibrary === 'string') navigate(-1);
+    else navigate(back);
+  }, [back, fromLibrary, navigate]);
   const { toast } = useToast();
   const query = useMyVideos();
   const { byId: sources } = useSourcesById();
@@ -94,9 +103,9 @@ export function MyVideoDetailPage() {
   useEffect(() => {
     if (!query.data || entry) return;
     const same = entryKey.current ? library.find((e) => e.key === entryKey.current) : undefined;
-    if (same) navigate(`/my-videos/${entryTargetId(same)}`, { replace: true });
-    else if (removedEntry.current) navigate('/my-videos', { replace: true });
-  }, [entry, library, navigate, query.data]);
+    if (same) navigate(`/my-videos/${entryTargetId(same)}`, { replace: true, state: location.state });
+    else if (removedEntry.current) navigate(back, { replace: true });
+  }, [back, entry, library, location.state, navigate, query.data]);
 
   const primary: Download | undefined = useMemo(() => {
     if (!entry) return undefined;
@@ -115,7 +124,7 @@ export function MyVideoDetailPage() {
       setStarting(true);
       setPlaying({ id: d.id });
       try {
-        await playDownload(fromStart ? { ...d, positionSeconds: 0 } : d);
+        await playDownload(d, { fromStart });
         setPlaying({ id: d.id, url: usePlayerStore.getState().source?.url ?? '' });
       } catch (err) {
         setPlaying(null);
@@ -160,17 +169,24 @@ export function MyVideoDetailPage() {
 
   const backAction = useMemo(
     () => (
-      <Link to="/my-videos" className={buttonClass('ghost', 'sm')}>
+      <Link
+        to={back}
+        className={buttonClass('ghost', 'sm')}
+        onClick={(ev) => {
+          ev.preventDefault();
+          goBack();
+        }}
+      >
         <ArrowLeft size={16} aria-hidden className="rtl:rotate-180" />
         {t('backToLibrary')}
       </Link>
     ),
-    [t],
+    [back, goBack, t],
   );
   const pageTitle = entry?.title ?? t('myVideosTitle');
   usePageHeader(pageTitle, entry ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
 
-  useShortcut('backspace', () => navigate('/my-videos'), { description: t('backToLibrary'), area: t('myVideosTitle') });
+  useShortcut('backspace', goBack, { description: t('backToLibrary'), area: t('myVideosTitle') });
 
   if (query.isLoading)
     return (
@@ -309,7 +325,7 @@ export function MyVideoDetailPage() {
       rowHeight={(r) => (r.kind === 'header' ? SEASON_HEADER_HEIGHT : EPISODE_ROW_HEIGHT)}
       isFocusable={(r) => r.kind === 'item'}
       testId="episode-list"
-      renderRow={(r) =>
+      renderRow={(r, info) =>
         r.kind === 'header' ? (
           <SectionHeading title={r.season !== undefined ? t('seasonN', { season: r.season }) : t('otherEpisodes')} count={r.count} />
         ) : (
@@ -317,6 +333,7 @@ export function MyVideoDetailPage() {
             episode={r.episode}
             playing={watching && playing?.id === r.episode.download.id}
             busy={pending.has(r.episode.download.id)}
+            tabbable={info.tabStop}
             onAction={onEpisodeAction}
           />
         )

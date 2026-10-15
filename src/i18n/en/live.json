@@ -180,5 +180,9 @@
   "reminderSwitched": "Switched to {{channel}}",
   "undoSwitch": "Undo",
   "reminderSwitchFailed": "Couldn't switch to the channel",
-  "recordNeedsMpv": "Recording this channel needs mpv. Install mpv or set its path in the player settings."
+  "recordNeedsMpv": "Recording this channel needs mpv. Install mpv or set its path in the player settings.",
+  "locked": "Locked",
+  "lockedGuide": "Locked. Enter the PIN to see what is on.",
+  "unlock": "Unlock",
+  "ribbonFailed": "Could not load this channel's guide"
 }

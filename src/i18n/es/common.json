@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Detalles técnicos",
   "errorHintTimeout": "Puede que el proveedor esté ocupado. Vuelve a intentarlo en un momento.",
   "errorHintAuth": "Revisa el usuario, la contraseña o la dirección MAC en los ajustes de la fuente.",
-  "errorHintNotFound": "Puede que el proveedor lo haya eliminado. Actualiza la fuente para refrescar la lista.",
+  "errorHintNotFound": "Puede que se haya eliminado o que este enlace esté desactualizado.",
   "errorHintInvalid": "Revisa los valores que introdujiste y vuelve a intentarlo.",
   "errorHintUnsupported": "Esta fuente o este tipo de stream no admite esa acción. Prueba con un reproductor externo.",
   "errorHintConflict": "Recarga para ver la versión más reciente y vuelve a intentarlo.",

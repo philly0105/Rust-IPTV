@@ -233,7 +233,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
 
       {/* Run 3 C3: the disk image cache (size against the cap, the cap, Clear). Server mode has one too. */}
       <SettingsGroup>
-        <ImageCacheRow />
+        <ImageCacheRow update={update} />
       </SettingsGroup>
 
       <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>

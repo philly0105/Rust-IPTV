@@ -63,6 +63,24 @@ core's broadcast channel (capacity 1024).
   memory; the UI reconnects with backoff.
 - Shutdown sends close 1001.
 
+The web UI (`startWeb` in `src/api/events.ts`) keeps one socket per page while
+anything is subscribed:
+
+- Reconnect backoff: 500 ms doubling, plus up to 30 % jitter, at most 4 s
+  between attempts, so a restarted server is noticed within about 5 s without
+  any nudge. An open resets it.
+- A waiting socket skips the rest of its wait and connects at once (backoff
+  reset) on window `focus`, `online`, the page becoming visible, or an RPC the
+  server answered. The transport reports an answer through
+  `notifyServerAnswered` (`src/api/reachability.ts`) on a success or on one of
+  the core's own error payloads, not on a proxy's 502.
+- Any open that follows a closed socket or a failed attempt dispatches a local
+  `events.lagged`, so every cached query is refetched: events sent while the
+  socket was down are lost, and RPCs made while the server was unreachable
+  failed. This includes the first successful open of a page whose first
+  attempt failed (a page opened during a server restart). The refetch goes
+  through the 50 ms event burst (performance.md).
+
 ### `GET /api/health`
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.

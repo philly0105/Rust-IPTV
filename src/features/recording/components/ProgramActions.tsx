@@ -11,10 +11,11 @@ import { useTranslation } from 'react-i18next';
 import type { EpgProgram, ItemRef } from '@/api/types';
 import { Button, IconButton } from '@/ui';
 
-import { useRecordingCapabilities, useRemindersEnabled, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
+import { useCancelPending, useRecordingCapabilities, useRemindersEnabled, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
 import { canHaveRule, ruleFor } from '../lib/rules';
 import { markFor, programOptions } from '../lib/schedule';
 import { RecordSeriesDialog, RemoveRuleDialog, type SeriesTarget } from './SeriesDialogs';
+import { StopRecordingDialog } from './StopRecordingDialog';
 
 export interface ProgramActionsProps {
   channelRef: ItemRef;
@@ -39,7 +40,10 @@ export function ProgramActions({ channelRef, channelName, program, now, variant 
   const remindersOn = useRemindersEnabled();
   const actions = useScheduleActions();
   const [busy, setBusy] = useState<'remind' | 'record' | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
   const { reminder, recording } = markFor(index, channelRef, program);
+  const stopping = useCancelPending(recording?.id);
+  const recordBusy = busy === 'record' || stopping;
   const options = programOptions(program, now);
   const target = { ref: channelRef, channelName, program };
   const canRecord = caps.data?.supported === true;
@@ -60,12 +64,15 @@ export function ProgramActions({ channelRef, channelName, program, now, variant 
   const showRecord = (options.record && canRecord) || !!recording;
   const showSeries = (canRecord && canHaveRule(channelRef, program.title)) || !!rule;
   const toggleRemind = () => void run('remind', () => actions.toggleReminder(target, reminder));
-  const toggleRecord = () => void run('record', () => (recording ? actions.cancelRecording(recording) : actions.record(target)));
+  // Stopping a recording that is writing now cannot be undone: it asks first.
+  const toggleRecord = () =>
+    recording?.status === 'recording' ? setConfirmStop(true) : void run('record', () => (recording ? actions.cancelRecording(recording) : actions.record(target)));
   const toggleSeries = () => (rule ? setRemoving(true) : setSeriesTarget({ ref: channelRef, channelName, title: program.title }));
   const dialogs = (
     <>
       <RecordSeriesDialog target={seriesTarget} onClose={() => setSeriesTarget(null)} />
       <RemoveRuleDialog rule={removing ? (rule ?? null) : null} onClose={() => setRemoving(false)} />
+      <StopRecordingDialog recording={confirmStop && recording?.status === 'recording' ? recording : null} onClose={() => setConfirmStop(false)} />
     </>
   );
 
@@ -89,7 +96,8 @@ export function ProgramActions({ channelRef, channelName, program, now, variant 
             size="sm"
             label={recordLabel}
             pressed={!!recording}
-            disabled={busy === 'record'}
+            disabled={recordBusy}
+            aria-busy={recordBusy || undefined}
             icon={recording ? <Square className="size-4" /> : <Circle className="size-4 fill-live text-live" />}
             onClick={toggleRecord}
             data-testid="program-record"
@@ -130,7 +138,7 @@ export function ProgramActions({ channelRef, channelName, program, now, variant 
           size="sm"
           variant={recording ? 'secondary' : 'ghost'}
           aria-pressed={!!recording}
-          loading={busy === 'record'}
+          loading={recordBusy}
           icon={recording ? <Square className="size-3.5" /> : <Circle className="size-3.5 fill-live text-live" />}
           onClick={toggleRecord}
           data-testid="program-record"

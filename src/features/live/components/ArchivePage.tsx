@@ -1,5 +1,5 @@
 import { CalendarX2, History, Play, Radio, SearchX } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 
@@ -70,7 +70,8 @@ export function ArchivePage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1100px] min-w-0 flex-col gap-4 px-6 pb-8 pt-4" data-testid="archive-page">
+    // Fills the shell's main area: the channel header and day tabs stay put while the programme list scrolls inside.
+    <div className="mx-auto flex min-h-0 w-full max-w-[1100px] min-w-0 flex-1 flex-col gap-4 px-4 pt-4 sm:px-6" data-testid="archive-page">
       <h1 className="sr-only">{name ? t('archiveOf', { name }) : t('archiveTitle')}</h1>
       {body}
     </div>
@@ -148,8 +149,16 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   useEffect(() => {
     setActive(-1);
   }, [day, query.data]);
-  useEffect(() => {
-    if (initial >= 0) rowRefs.current[initial]?.scrollIntoView({ block: 'center' });
+  // Opens on the airing (or latest playable) programme by scrolling the list alone. scrollIntoView
+  // scrolled every ancestor too, which pushed the channel header and day tabs out of view.
+  const panelRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const box = panelRef.current;
+    const row = initial >= 0 ? rowRefs.current[initial] : null;
+    if (!box || !row) return;
+    const b = box.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    box.scrollTop = Math.max(0, box.scrollTop + r.top - b.top - (b.height - r.height) / 2);
   }, [initial, query.data]);
 
   const moveRow = (i: number) => {
@@ -235,7 +244,14 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
         ))}
       </div>
 
-      <section id={panelId} role="tabpanel" aria-labelledby={tabId(selected)} className="flex min-w-0 flex-col gap-2">
+      <section
+        ref={panelRef}
+        id={panelId}
+        role="tabpanel"
+        aria-labelledby={tabId(selected)}
+        data-testid="archive-panel"
+        className="-mx-1 flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-1 pt-1 pb-8"
+      >
         {query.isPending ? (
           <div className="flex flex-col gap-1" aria-busy="true">
             <span className="sr-only">{t('archiveLoading')}</span>
@@ -306,13 +322,16 @@ function ProgramRow({ program, state, tabIndex, buttonRef, onFocus, onPlay }: Ro
         onClick={disabled ? undefined : onPlay}
         data-state={state}
         className={cn(
-          'group flex w-full items-start gap-4 rounded-md px-3 py-2.5 text-start transition-colors',
+          // A phone stacks it (time and action on top, the programme below); from sm it is one line.
+          'group flex w-full flex-wrap items-start gap-x-4 gap-y-1 rounded-md px-3 py-2.5 text-start transition-colors sm:flex-nowrap',
           onNow ? 'bg-accent/10' : '',
           disabled ? 'cursor-default text-fg-subtle' : 'text-fg hover:bg-surface-2',
         )}
       >
-        <span className={cn('w-28 shrink-0 pt-0.5 text-sm tabular-nums', disabled ? 'text-fg-subtle' : 'text-fg-muted')}>{formatRange(program, i18n.language)}</span>
-        <span className="min-w-0 flex-1">
+        <span className={cn('order-1 shrink-0 pt-0.5 text-sm whitespace-nowrap tabular-nums sm:min-w-36', disabled ? 'text-fg-subtle' : 'text-fg-muted')}>
+          {formatRange(program, i18n.language)}
+        </span>
+        <span className="order-3 min-w-0 basis-full sm:order-2 sm:basis-0 sm:flex-1">
           <span className="flex items-center gap-2">
             <span dir="auto" className={cn('truncate text-sm', disabled ? '' : 'font-medium')}>
               {program.title}
@@ -320,14 +339,17 @@ function ProgramRow({ program, state, tabIndex, buttonRef, onFocus, onPlay }: Ro
             {onNow ? <LiveBadge /> : null}
           </span>
           {program.description ? (
-            <span dir="auto" className="mt-0.5 line-clamp-1 block text-xs text-fg-muted">
+            <span dir="auto" className="mt-0.5 line-clamp-1 text-xs text-fg-muted">
               {program.description}
             </span>
           ) : null}
           {note ? <span className="mt-0.5 block text-xs">{note}</span> : null}
         </span>
         {action ? (
-          <Badge variant={state === 'playable' ? 'outline' : 'accent'} className="mt-0.5 opacity-80 group-hover:opacity-100 group-focus-visible:opacity-100">
+          <Badge
+            variant={state === 'playable' ? 'outline' : 'accent'}
+            className="order-2 ms-auto mt-0.5 shrink-0 opacity-80 group-hover:opacity-100 group-focus-visible:opacity-100 sm:order-3"
+          >
             {action.icon}
             {action.label}
           </Badge>

@@ -7,7 +7,10 @@ import i18n from '@/i18n';
 import { useShellStore } from '@/shell';
 import { startupTarget } from '@/shell/StartupRedirect';
 
-import { AppLoading, NotFoundPage, RouteErrorPage, routes } from './routes';
+import { RpcError } from '@/api/transport';
+import { ErrorState } from '@/ui';
+
+import { AppLoading, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes } from './routes';
 
 /** Every C7 path; each must resolve to a real page, never the `*` fallback. */
 const C7_PATHS = [
@@ -107,6 +110,26 @@ describe('route error page', () => {
     spy.mockRestore();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(i18n.t('common:errorTitleNetwork'));
+    expect(screen.getByRole('button', { name: i18n.t('common:retry') })).toBeTruthy();
+  });
+
+  it('marks a failed page chunk as the server being unreachable, and titles the header', () => {
+    const err = routeErrorAsRpc(new Error('Failed to fetch dynamically imported module: /assets/x.js'));
+    expect(err.code).toBe('network');
+    expect(err.details).toEqual({ transport: 'unreachable' });
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const router = createMemoryRouter([{ path: '/', element: <Boom />, errorElement: <RouteErrorPage /> }]);
+    render(<RouterProvider router={router} />);
+    spy.mockRestore();
+    expect(useShellStore.getState().header?.title).toBe(i18n.t('common:errorTitleNetwork'));
+    resetChunkFailureForTests();
+  });
+
+  it('offers no Retry for something that is not there', () => {
+    render(<ErrorState error={new RpcError('not_found', 'gone', false)} onRetry={() => {}} />);
+    expect(screen.queryByRole('button', { name: i18n.t('common:retry') })).toBeNull();
+    cleanup();
+    render(<ErrorState error={new RpcError('internal', 'boom', false)} onRetry={() => {}} />);
     expect(screen.getByRole('button', { name: i18n.t('common:retry') })).toBeTruthy();
   });
 

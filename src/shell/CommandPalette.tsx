@@ -122,7 +122,8 @@ export function usePaletteItems(): PaletteItem[] {
 
     const srcGroup = t('groupSources');
     for (const s of sources.data ?? []) {
-      for (const l of railLinks(s)) {
+      // An M3U source lists Radio only when it has stations, as in the rail.
+      for (const l of railLinks(s, { hasRadio: (s.radioCount ?? 0) > 0 })) {
         items.push({
           id: `source.${s.id}.${l.id}`,
           title: t('sourceSection', { source: s.name, section: t(l.labelKey) }),
@@ -185,6 +186,13 @@ export function CommandPalette() {
   const items = usePaletteItems();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  // Every way of closing (Esc, the scrim, Ctrl+K again, Back) leaves the next open empty: the
+  // query resets as the palette opens, during render, so no frame shows the old filter.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open && query !== '') setQuery('');
+  }
 
   const groups = useMemo(() => {
     const map = new Map<string, PaletteItem[]>();

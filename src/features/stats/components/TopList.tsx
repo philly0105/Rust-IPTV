@@ -18,7 +18,7 @@ import { formatWatchTime } from '../lib/format';
 function TopSection({ title, empty, testId, children }: { title: string; empty: string | null; testId: string; children: ReactNode }) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="min-w-0 border-t border-divider pt-4" data-testid={testId}>
+    <section aria-labelledby={headingId} className="@container min-w-0 border-t border-divider pt-4" data-testid={testId}>
       <h2 id={headingId} className="mb-2 font-display text-[calc(15rem/15)] font-semibold">
         {title}
       </h2>
@@ -61,13 +61,14 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
             rounded="sm"
             className="w-10 shrink-0"
           />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="truncate font-medium">{item.title}</p>
-              <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
-            </div>
-            {item.sourceName && <p className="truncate text-xs text-fg-subtle">{item.sourceName}</p>}
-            <div aria-hidden className="mt-1.5 h-1 rounded-full bg-surface-3">
+          {/* Narrow list: name (two lines at most), time, source. From @sm the time moves to the end of the name's line. */}
+          <div className="grid min-w-0 flex-1 grid-cols-1 items-baseline @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">
+            <p className="line-clamp-2 font-medium [overflow-wrap:anywhere]" title={item.title}>
+              {item.title}
+            </p>
+            <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
+            {item.sourceName && <p className="truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</p>}
+            <div aria-hidden className="mt-1.5 h-1 rounded-full bg-surface-3 @sm:col-span-2">
               <div className="h-full rounded-full bg-accent" style={{ width: `${most > 0 ? Math.max(2, (item.seconds / most) * 100) : 0}%` }} />
             </div>
           </div>
@@ -101,11 +102,16 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
             data-testid="stats-open"
           >
             <Poster src={item.posterUrl ?? null} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" rounded="sm" className="w-9 shrink-0" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{item.title}</span>
-              {item.sourceName && <span className="block truncate text-xs text-fg-subtle">{item.sourceName}</span>}
+            {/* Narrow list: title (two lines at most), time, source. From @sm the time sits at the end, centred on both lines. */}
+            <span className="grid min-w-0 flex-1 grid-cols-1 items-center @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">
+              <span className="line-clamp-2 font-medium [overflow-wrap:anywhere]" title={item.title}>
+                {item.title}
+              </span>
+              <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted @sm:col-start-2 @sm:row-span-2 @sm:row-start-1 @sm:pe-1">
+                {formatWatchTime(item.seconds, i18n.language)}
+              </span>
+              {item.sourceName && <span className="block truncate text-xs text-fg-subtle @sm:col-start-1">{item.sourceName}</span>}
             </span>
-            <span className="shrink-0 whitespace-nowrap pe-1 text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
           </Link>
         </li>
       ))}

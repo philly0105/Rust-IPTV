@@ -197,5 +197,12 @@
   "markSeriesWatched": "将剧集标记为已观看",
   "markSeriesUnwatched": "将剧集标记为未观看",
   "shortcutWatched": "标记为已观看或未观看",
-  "shortcutHideWatched": "隐藏或显示已观看的影片"
+  "shortcutHideWatched": "隐藏或显示已观看的影片",
+  "sourceMissingTitle": "此来源已被移除",
+  "sourceMissingBody": "它已不在你的来源列表中。请选择其他来源，或在“来源”中重新添加。",
+  "goToDashboard": "前往仪表板",
+  "categoryMissingTitle": "找不到该分类",
+  "categoryMissingBody": "此来源中没有对应该链接的分类。提供商可能已将其重命名或删除。",
+  "namedMarkedWatched": "已将{{name}}标记为已看",
+  "namedMarkedUnwatched": "已将{{name}}标记为未看"
 }

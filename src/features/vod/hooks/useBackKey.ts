@@ -46,14 +46,24 @@ export function useEscapeBack(enabled: boolean, onBack: () => void): void {
 }
 
 /**
+ * "Back" for a VOD page: pop the in-app history entry when there is one, so the
+ * page you came from restores its scroll and focus; when the page was opened
+ * cold (deep link, reload) go to `fallbackHref` instead, replacing this entry so
+ * Back does not ping-pong between the two.
+ */
+export function useGoBack(fallbackHref: string): () => void {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return () => {
+    if (location.key !== 'default') void navigate(-1);
+    else void navigate(fallbackHref, { replace: true });
+  };
+}
+
+/**
  * Escape on a detail page: back to where you came from (the grid restores its
  * place), or to the movies/series landing when the page was opened cold.
  */
 export function useDetailEscapeBack(enabled: boolean, fallbackHref: string): void {
-  const navigate = useNavigate();
-  const location = useLocation();
-  useEscapeBack(enabled, () => {
-    if (location.key !== 'default') void navigate(-1);
-    else void navigate(fallbackHref);
-  });
+  useEscapeBack(enabled, useGoBack(fallbackHref));
 }

@@ -32,7 +32,10 @@ export {
   groupByDay,
   recordingFraction,
   recordingNow,
+  recordingStartedAt,
+  stoppedEarly,
   upcoming,
+  useCancelPending,
   useRecordingCapabilities,
   useRecordingProgress,
   useRecordings,
@@ -41,5 +44,7 @@ export {
   // Run 2 C5: series recording rules, listed on the Scheduled page.
   RecordingRulesPanel,
   useRecordingRules,
+  // Loop 1: confirm before stopping a running recording.
+  StopRecordingDialog,
   type UpcomingEntry,
 } from '@/features/recording';

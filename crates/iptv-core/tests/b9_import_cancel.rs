@@ -220,6 +220,7 @@ impl Importer for CancelsWhileSaving {
             channels: n as i64,
             movies: 0,
             series: 0,
+            unchanged: false,
         })
     }
 }

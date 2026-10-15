@@ -14,7 +14,7 @@ import { Button, EmptyState, ErrorState, SkeletonList, Toggle, useShortcut } fro
 import { ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { DOWNLOAD_ROW_HEIGHT, DownloadRow } from '../components/DownloadRow';
 import { FolderBar } from '../components/FolderBar';
-import { VirtualRows } from '../components/VirtualRows';
+import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
 import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -25,9 +25,10 @@ const HEADER_HEIGHT = 52;
 
 type Pending = { action: 'cancel' | 'remove' | 'clear'; download?: Download };
 
-/** Finds the download row that currently holds keyboard focus. */
+/** Finds the download row that currently holds keyboard focus (the row itself or one of its buttons). */
 function focusedDownloadId(): number | undefined {
-  const el = document.activeElement?.querySelector<HTMLElement>('[data-download-id]');
+  const active = document.activeElement;
+  const el = active?.closest('[data-row-index]')?.querySelector<HTMLElement>('[data-download-id]');
   const raw = el?.dataset['downloadId'];
   return raw ? Number(raw) : undefined;
 }
@@ -88,6 +89,7 @@ export function DownloadsPage() {
   useShortcut('r', () => runFocused(() => 'retry'), { description: t('shortcutRetry'), area });
   useShortcut('x', () => runFocused(() => 'cancel'), { description: t('shortcutCancel'), area });
   useShortcut('delete', () => runFocused(() => 'remove'), { description: t('shortcutRemove'), area });
+  useShortcut('o', () => runFocused(() => 'reveal'), { description: t('shortcutReveal'), area, enabled: isDesktop });
 
   const headerActions = useMemo(
     () => (
@@ -101,6 +103,12 @@ export function DownloadsPage() {
   const title = t('title');
   usePageHeader(title, summary || undefined, headerActions);
 
+  // The download the dialog is about as the list shows it now: it may have
+  // finished since the dialog opened.
+  const opened = confirm?.download;
+  const confirmTarget = opened ? (all.find((x) => x.id === opened.id) ?? opened) : undefined;
+  const confirmUnfinished = confirmTarget !== undefined && confirmTarget.status !== 'completed';
+
   const confirmAction = async () => {
     if (!confirm) return;
     if (confirm.action === 'clear') {
@@ -112,15 +120,18 @@ export function DownloadsPage() {
       // row then leaves the list, the list moves focus to its neighbour instead
       // of dropping it to the page.
       const { action, download } = confirm;
+      // Only an unfinished download offers the partial-file toggle; a finished
+      // one keeps its file (deleting it is My Videos' choice, off by default).
+      const deleteFile = action === 'remove' && confirmUnfinished && deletePartial;
       setConfirm(null);
-      await perform(action, download, { deleteFile: action === 'remove' ? deletePartial : false });
+      await perform(action, download, { deleteFile });
       return;
     }
     setConfirm(null);
   };
 
   const renderRow = useCallback(
-    (row: QueueRow) => {
+    (row: QueueRow, info: RowRenderInfo) => {
       if (row.kind === 'header') {
         return (
           <SectionHeading
@@ -138,6 +149,7 @@ export function DownloadsPage() {
           source={sources.get(d.ref.sourceId)}
           actions={actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath })}
           busy={pending.has(d.id)}
+          tabbable={info.tabStop}
           onAction={onAction}
         />
       );
@@ -233,7 +245,7 @@ export function DownloadsPage() {
         confirmLabel={confirm?.action === 'cancel' ? t('actionCancel') : confirm?.action === 'clear' ? t('clearFinished') : t('actionRemove')}
         onConfirm={() => void confirmAction()}
       >
-        {confirm?.action === 'remove' && confirm.download && confirm.download.bytesDownloaded > 0 && (
+        {confirm?.action === 'remove' && confirmUnfinished && confirmTarget.bytesDownloaded > 0 && (
           <Toggle checked={deletePartial} onChange={setDeletePartial} label={t('deletePartial')} description={t('deletePartialHint')} />
         )}
       </ConfirmDialog>

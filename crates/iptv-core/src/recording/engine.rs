@@ -218,6 +218,114 @@ pub fn mpv_args(source: &PlayerSource, path: &Path, pipe: Option<&str>) -> Vec<S
     args
 }
 
+/// What a non-success answer to the stream request means, in words the
+/// user can act on.
+pub fn status_message(status: reqwest::StatusCode) -> &'static str {
+    match status.as_u16() {
+        404 | 410 => super::STREAM_NOT_FOUND_MESSAGE,
+        408 | 504 => super::STREAM_NO_ANSWER_MESSAGE,
+        429 | 500..=599 => super::STREAM_SERVER_ERROR_MESSAGE,
+        _ => super::STREAM_REJECTED_MESSAGE,
+    }
+}
+
+/// Free space below this on the recordings disk reads as a full disk.
+const LOW_DISK_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Free bytes on the disk holding `dir` (`None` when unknown).
+#[cfg(windows)]
+fn free_bytes(dir: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            dir: *const u16,
+            free_to_caller: *mut u64,
+            total: *mut u64,
+            total_free: *mut u64,
+        ) -> i32;
+    }
+    let mut wide: Vec<u16> = dir.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let mut free = 0u64;
+    // SAFETY: `wide` is NUL-terminated and outlives the call; `free` is a
+    // valid out pointer and the other two may be null.
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    (ok != 0).then_some(free)
+}
+
+#[cfg(not(windows))]
+fn free_bytes(_dir: &Path) -> Option<u64> {
+    None
+}
+
+/// True for a write error that means the disk is full.
+fn disk_full(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::StorageFull
+}
+
+/// Why a part that wrote nothing (or almost nothing) failed, when the disk,
+/// the address or the provider is the cause: checks the free space of
+/// `dir`, then asks for the stream once with the recording's client and
+/// headers. `None` keeps the engine's own message (the address answers
+/// with something that looks like a stream).
+pub async fn diagnose(
+    state: &Arc<AppState>,
+    source: &PlayerSource,
+    source_id: &str,
+    dir: &Path,
+) -> Option<&'static str> {
+    if free_bytes(dir).is_some_and(|f| f < LOW_DISK_BYTES) {
+        return Some(super::DISK_FULL_MESSAGE);
+    }
+    let url = source.url.trim();
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return None;
+    }
+    if crate::http::is_server_mode(state) {
+        let trusted = crate::http::source_authority(state, source_id)
+            .await
+            .ok()
+            .flatten();
+        crate::http::check_fetch(state, url, trusted.as_ref())
+            .await
+            .ok()?;
+    }
+    let client = crate::http::source_client(state, source_id).await;
+    let req = crate::http::apply_source_headers(
+        client.get(url),
+        &source.headers.clone().unwrap_or_default(),
+    );
+    match crate::http::send(req).await {
+        Ok(resp) if resp.status().is_success() => {
+            is_web_page(&resp).then_some(super::NOT_A_STREAM_MESSAGE)
+        }
+        Ok(resp) => Some(status_message(resp.status())),
+        Err(CoreError::Timeout(_) | CoreError::Network(_)) => Some(super::STREAM_NO_ANSWER_MESSAGE),
+        Err(_) => None,
+    }
+}
+
+fn content_type(resp: &reqwest::Response) -> String {
+    resp.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+fn is_web_page(resp: &reqwest::Response) -> bool {
+    content_type(resp).starts_with("text/html")
+}
+
 /// Waits for the stop signal (or for its sender to go away).
 async fn stop_signal(stop: &mut watch::Receiver<bool>) {
     loop {
@@ -308,8 +416,8 @@ async fn run_mpv(
             stopped: false,
             error: Some(match s.code() {
                 Some(0) => "the stream ended".to_string(),
-                Some(code) => format!("mpv stopped reading the stream (exit code {code})"),
-                None => "mpv stopped reading the stream".to_string(),
+                Some(code) => format!("The stream could not be read (mpv exit code {code})."),
+                None => "The stream could not be read.".to_string(),
             }),
         },
         Some(Err(e)) => PartEnd {
@@ -388,21 +496,24 @@ async fn run_http(
     let resp = tokio::select! {
         r = tokio::time::timeout(HTTP_IDLE, req.send()) => match r {
             Ok(Ok(r)) => r,
-            Ok(Err(e)) => return fail(crate::http::transport_error(&host, e).to_string()),
-            Err(_) => return fail(format!("{host} did not answer within {} s", HTTP_IDLE.as_secs())),
+            // A redirect the server-mode guard refused says so; anything
+            // else is a provider that cannot be reached.
+            Ok(Err(e)) => return fail(match crate::http::transport_error(&host, e) {
+                CoreError::Invalid(m) => m,
+                _ => super::STREAM_NO_ANSWER_MESSAGE.to_string(),
+            }),
+            Err(_) => return fail(super::STREAM_NO_ANSWER_MESSAGE.to_string()),
         },
         _ = tokio::time::sleep_until(until) => return stopped(),
         _ = stop_signal(stop) => return stopped(),
     };
     if !resp.status().is_success() {
-        return fail(crate::http::status_error(resp.status(), &host).to_string());
+        return fail(status_message(resp.status()).to_string());
     }
-    let ct = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    if is_web_page(&resp) {
+        return fail(super::NOT_A_STREAM_MESSAGE.to_string());
+    }
+    let ct = content_type(&resp);
     if ct.contains("mpegurl") || ct.starts_with("text/") || ct.contains("dash+xml") {
         return fail(ENGINE_MISSING_MESSAGE.to_string());
     }
@@ -413,6 +524,7 @@ async fn run_http(
         .await
     {
         Ok(f) => f,
+        Err(e) if disk_full(&e) => return fail(super::DISK_FULL_MESSAGE.to_string()),
         Err(e) => return fail(format!("could not write {}: {e}", path.display())),
     };
     let mut body = resp.bytes_stream();
@@ -426,11 +538,15 @@ async fn run_http(
         match chunk {
             Ok(Some(bytes)) => {
                 if let Err(e) = file.write_all(&bytes).await {
-                    break fail(format!("could not write {}: {e}", path.display()));
+                    break fail(if disk_full(&e) {
+                        super::DISK_FULL_MESSAGE.to_string()
+                    } else {
+                        format!("could not write {}: {e}", path.display())
+                    });
                 }
             }
             Ok(None) => break fail("the stream ended".to_string()),
-            Err(e) => break fail(e.to_string()),
+            Err(e) => break fail(crate::error::RpcError::from(e).message),
         }
     };
     let _ = file.flush().await;
@@ -490,6 +606,35 @@ mod tests {
             SourceKind::Xtream
         )
         .is_none());
+    }
+
+    #[test]
+    fn http_statuses_map_to_actionable_messages() {
+        use reqwest::StatusCode as S;
+        assert_eq!(
+            status_message(S::NOT_FOUND),
+            super::super::STREAM_NOT_FOUND_MESSAGE
+        );
+        assert_eq!(
+            status_message(S::GONE),
+            super::super::STREAM_NOT_FOUND_MESSAGE
+        );
+        for s in [S::UNAUTHORIZED, S::FORBIDDEN, S::BAD_REQUEST] {
+            assert_eq!(status_message(s), super::super::STREAM_REJECTED_MESSAGE);
+        }
+        for s in [S::TOO_MANY_REQUESTS, S::SERVICE_UNAVAILABLE, S::BAD_GATEWAY] {
+            assert_eq!(status_message(s), super::super::STREAM_SERVER_ERROR_MESSAGE);
+        }
+        assert_eq!(
+            status_message(S::GATEWAY_TIMEOUT),
+            super::super::STREAM_NO_ANSWER_MESSAGE
+        );
+        assert!(disk_full(&std::io::Error::from(
+            std::io::ErrorKind::StorageFull
+        )));
+        assert!(!disk_full(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
     }
 
     #[test]

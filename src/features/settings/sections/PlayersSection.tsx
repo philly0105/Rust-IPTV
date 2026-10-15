@@ -65,6 +65,8 @@ export function PlayersSection({ settings, update }: SectionProps) {
           <CommitInput
             id={id}
             describedBy={describedBy}
+            // Only a refused entry is invalid; the saved-path warning shares the row's message slot.
+            invalid={!!errors[key]}
             mono
             value={settings[key] ?? ''}
             placeholder={placeholder}
@@ -83,10 +85,11 @@ export function PlayersSection({ settings, update }: SectionProps) {
 
   const argsRow = (key: 'mpvArgs' | 'vlcArgs', label: string, placeholder: string) => (
     <SettingsRow label={label} description={t('extraArgsHint')} error={err(key)} stack>
-      {({ id, describedBy }) => (
+      {({ id, describedBy, invalid }) => (
         <CommitInput
           id={id}
           describedBy={describedBy}
+          invalid={invalid}
           mono
           value={settings[key]}
           placeholder={placeholder}

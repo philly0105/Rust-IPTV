@@ -109,7 +109,8 @@ export function MultiviewPage() {
   const chrome = useIdleChrome(fsActive);
   const { mainPlaying, stopMain } = useMainPlayerHandoff(count > 0);
   const sources = useSources();
-  const loads = useSourceLoads(tiles, sources.byId);
+  const parental = useParentalState();
+  const loads = useSourceLoads(tiles, sources.byId, parental.active);
   const over = useMemo(() => overLimit(loads), [loads]);
   const overSet = useMemo(() => new Set(over.map((l) => l.sourceId)), [over]);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
@@ -119,7 +120,6 @@ export function MultiviewPage() {
     [sources.loaded, sources.byId, tiles],
   );
   const programmes = useNowPlaying(tiles);
-  const parental = useParentalState();
   const soundSlot = tiles.findIndex((x) => x.key === audioKey);
   const silent = muted || mainPlaying;
 
@@ -135,6 +135,23 @@ export function MultiviewPage() {
   useEffect(() => {
     if (count === 0 && fsActive) void fsExit();
   }, [count, fsActive, fsExit]);
+  // Full screen moves the toolbar between the page and the overlay, so the button that was
+  // focused unmounts and focus falls to the body. Put it on the full screen button again; a
+  // focused tile stays mounted and keeps focus. In full screen that focus must not hold the
+  // overlay up for good (a mouse click focuses the button too): it still fades when idle,
+  // and any key brings it back.
+  const fsBefore = useRef(fsActive);
+  const { hold: holdChrome, poke: pokeChrome } = chrome;
+  useEffect(() => {
+    if (fsBefore.current === fsActive) return;
+    fsBefore.current = fsActive;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && focused.isConnected) return;
+    stageRef.current?.querySelector<HTMLElement>('[data-testid="multiview-fullscreen"]')?.focus({ preventScroll: true });
+    if (!fsActive) return;
+    holdChrome(false);
+    pokeChrome();
+  }, [fsActive, holdChrome, pokeChrome]);
   // Arriving from "Add to multi-view": focus lands on the tile just added, not on the page body.
   const location = useLocation();
   useEffect(() => {

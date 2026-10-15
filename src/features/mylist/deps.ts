@@ -15,7 +15,6 @@ export { useShortcut } from '@/shell/shortcuts';
 export { useSettings } from '@/shell/useSettings';
 export { useVisibleSources } from '@/shell/useVisibleSources';
 export { DashboardRail } from '@/shell/dashboard/DashboardRail';
-export { PosterCard, itemPath, joinList } from '@/shell/dashboard/cards';
 export { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 export { VirtualRows } from '@/features/library/components/VirtualRows';
 export { captureWatched, undoWatched } from '@/features/library/lib/watchedUndo';

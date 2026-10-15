@@ -76,7 +76,8 @@ async fn file_import_and_progress_events() {
         .await
         .map_err(|e| e.error)
         .unwrap();
-    assert_eq!(src.name, "big.m3u");
+    // L1-sources-home-6: default names drop the playlist extension, as the UI does.
+    assert_eq!(src.name, "big");
     assert_eq!(src.channel_count, 5_000);
     let events = drain(&mut env.events);
     let progress: Vec<_> = events
@@ -113,7 +114,7 @@ async fn url_import_sha_skip_and_failed_refresh_keeps_catalog() {
         .map_err(|e| e.error)
         .unwrap();
     assert_eq!(src.channel_count, 300);
-    assert_eq!(src.name, "list.m3u");
+    assert_eq!(src.name, "list");
     assert_eq!(
         stub.state.last_user_agent.lock().as_deref(),
         Some("B1Test/1.0")

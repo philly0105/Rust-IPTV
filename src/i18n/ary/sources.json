@@ -279,7 +279,7 @@
   "errorSummaryGeneric": "وقع شي مشكل وقت الاستيراد.",
   "errorSummaryWrongUrl": "هاد العنوان ما كيوصلش للائحة ديال القنوات.",
   "technicalDetails": "التفاصيل التقنية",
-  "addRetryNote": "«{{name}}» تحفظ مع هاد الخطأ. صلّح المعلومات وعاود جرّب هنا، ولا سد هاد النافذة واستعمل «عاود جرّب» فالكارطة ديالو من بعد.",
+  "addRetryNote": "صلّح المعلومات وعاود هنا. إلا سدّيتي هاد النافذة غادي يتحيّد «{{name}}» (تقدر ترجعو).",
   "retryImport": "عاود جرّب",
   "retrying": "كنعاودو نجرّبو...",
 
@@ -422,5 +422,14 @@
   "catchupDays": "أيام الأرشيف",
   "catchupDaysHint": "شحال كيرجع الأرشيف للور. خلّيه خاوي باش تبقى القيمة ديال اللائحة.",
   "errorCatchupTemplate": "استعمل {{max}} حرف على الأكثر وبلا حروف التحكم.",
-  "errorCatchupDays": "دخّل عدد صحيح ديال الأيام من واحد حتى {{max}}."
+  "errorCatchupDays": "دخّل عدد صحيح ديال الأيام من واحد حتى {{max}}.",
+  "testExpired": "دخلتي، ولكن الحساب سالات المدة ديالو.",
+  "testExpiredNamed": "دخلتي ل {{name}}، ولكن الحساب سالات المدة ديالو.",
+  "testAccountInactiveHint": "القنوات ما غاديش تخدم حتى يجدد المزوّد الحساب ولا يرجّع يفعّلو.",
+  "phaseConnectingTo": "كنتاصلو ب {{host}}…",
+  "phaseStarting": "كيبدا…",
+  "discardedFailedHint": "الاستيراد الأول فشل. ختار «رجّع» باش تخليه وتعاود من البطاقة ديالو.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

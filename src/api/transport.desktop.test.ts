@@ -82,3 +82,15 @@ describe('rpc errors (desktop)', () => {
     },
   );
 });
+
+describe('rpcRaw (desktop) with a signal', () => {
+  it('skips the invoke when the signal is already aborted', async () => {
+    invoke.mockClear();
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(rpcRaw('catalog.channels', { sourceId: 's1' }, { signal: ctl.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(invoke).not.toHaveBeenCalled();
+    await rpcRaw('app.ping', null, { signal: new AbortController().signal });
+    expect(invoke).toHaveBeenCalledWith('rpc', { cmd: 'app.ping', args: null });
+  });
+});

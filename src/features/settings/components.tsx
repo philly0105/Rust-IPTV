@@ -139,7 +139,8 @@ export function SwitchRow({
 
 /**
  * Text input that keeps a local draft and commits on blur or Enter after
- * validation. Escape restores the saved value.
+ * validation. Escape restores the saved value. `invalid` (from
+ * `SettingsRow`'s render prop) sets aria-invalid and the danger border.
  */
 export function CommitInput({
   value,
@@ -154,6 +155,7 @@ export function CommitInput({
   inputMode,
   onError,
   disabled,
+  invalid,
   testId,
 }: {
   value: string;
@@ -168,6 +170,7 @@ export function CommitInput({
   inputMode?: 'text' | 'url' | 'numeric';
   onError: (key: string | null) => void;
   disabled?: boolean;
+  invalid?: boolean;
   testId?: string;
 }) {
   const [draft, setDraft] = useState(value);
@@ -190,6 +193,7 @@ export function CommitInput({
       disabled={disabled}
       placeholder={placeholder}
       aria-describedby={describedBy}
+      aria-invalid={invalid || undefined}
       autoComplete="off"
       spellCheck={false}
       data-testid={testId}
@@ -207,7 +211,7 @@ export function CommitInput({
         }
       }}
       className={clsx(
-        'h-10 w-full rounded-md border border-border bg-surface-2 px-3 text-fg placeholder:text-fg-subtle disabled:opacity-50',
+        'h-10 w-full rounded-md border border-border bg-surface-2 px-3 text-fg placeholder:text-fg-subtle disabled:opacity-50 aria-[invalid=true]:border-danger motion-safe:transition-colors',
         mono && 'font-mono text-sm',
         className,
       )}
@@ -215,7 +219,11 @@ export function CommitInput({
   );
 }
 
-/** Segmented single choice (radio group) for 2..4 options. */
+/**
+ * Segmented single choice (radio group) for 2..4 options. In a narrow
+ * container (a phone) it spans the row with equal segments whose labels wrap
+ * inside them; from @2xl it shrinks to its content.
+ */
 export function Segmented<T extends string>({
   value,
   options,
@@ -230,7 +238,12 @@ export function Segmented<T extends string>({
   id?: string;
 }) {
   return (
-    <div id={id} role="radiogroup" aria-label={label} className="inline-flex flex-wrap gap-1 rounded-md border border-border bg-surface-2 p-1">
+    <div
+      id={id}
+      role="radiogroup"
+      aria-label={label}
+      className="flex w-full gap-1 rounded-md border border-border bg-surface-2 p-1 @2xl:inline-flex @2xl:w-fit"
+    >
       {options.map((o) => {
         const selected = o.value === value;
         return (
@@ -263,7 +276,7 @@ export function Segmented<T extends string>({
               }
             }}
             className={clsx(
-              'rounded-sm px-3 py-1.5 text-sm font-medium motion-safe:transition-colors',
+              'min-w-0 flex-1 rounded-sm px-3 py-1.5 text-center text-sm font-medium text-balance break-words motion-safe:transition-colors @2xl:flex-none',
               selected ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:bg-surface-3 hover:text-fg',
             )}
           >

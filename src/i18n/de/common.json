@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Technische Details",
   "errorHintTimeout": "Der Anbieter ist möglicherweise ausgelastet. Versuchen Sie es gleich noch einmal.",
   "errorHintAuth": "Prüfen Sie Benutzername, Passwort oder MAC-Adresse in den Einstellungen der Quelle.",
-  "errorHintNotFound": "Der Anbieter hat es möglicherweise entfernt. Aktualisieren Sie die Quelle, um die Liste neu zu laden.",
+  "errorHintNotFound": "Möglicherweise wurde es entfernt, oder dieser Link ist veraltet.",
   "errorHintInvalid": "Prüfen Sie Ihre Eingaben und versuchen Sie es erneut.",
   "errorHintUnsupported": "Diese Quelle oder dieser Stream-Typ unterstützt diese Aktion nicht. Versuchen Sie es mit einem externen Player.",
   "errorHintConflict": "Laden Sie neu, um den aktuellen Stand zu sehen, und versuchen Sie es dann erneut.",

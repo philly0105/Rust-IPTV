@@ -161,7 +161,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let server = Server::new(
-        app,
+        app.clone(),
         Arc::new(build_router()),
         tx,
         ServerOptions {
@@ -205,6 +205,9 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             tokio::time::sleep(SHUTDOWN_GRACE).await;
         } => tracing::warn!(grace_secs = SHUTDOWN_GRACE.as_secs(), "open streams did not finish in time; exiting"),
     }
+    // Running recordings close their files and rows ("stopped: shutdown")
+    // instead of being left as "recording" for the next start to repair.
+    iptv_core::recording::shutdown(&app).await;
     tracing::info!("iptv-server stopped");
     Ok(())
 }

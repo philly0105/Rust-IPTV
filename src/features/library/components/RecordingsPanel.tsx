@@ -65,7 +65,8 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
   const { t, i18n } = useTranslation('library');
   const { toast } = useToast();
   const lang = i18n.language;
-  const name = f.title ? `${f.channelName ?? ''} - ${f.title}` : (f.channelName ?? f.fileName);
+  // The programme title leads and the channel sits in the line under it, as on the Scheduled page.
+  const name = f.title ?? f.channelName ?? f.fileName;
   const writing = f.status === 'recording';
   const date = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
   const duration = f.durationSeconds ? formatDuration(f.durationSeconds, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) : '';
@@ -127,6 +128,11 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
           ) : null}
         </div>
         <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
+          {f.title && f.channelName ? (
+            <span dir="auto" className="min-w-0 truncate">
+              {f.channelName}
+            </span>
+          ) : null}
           <span className="shrink-0 tabular-nums">{date}</span>
           {duration ? <span className="shrink-0 tabular-nums">{duration}</span> : null}
           {f.fileAvailable ? <span className="shrink-0 font-display tabular-nums">{formatBytes(f.sizeBytes, lang)}</span> : null}

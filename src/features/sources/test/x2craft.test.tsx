@@ -50,8 +50,11 @@ describe('border contract (D23)', () => {
     // the modal category drawer's edge (a dialog surface), the EPG midnight marker and the
     // interface-size scale's ticks in Appearance (both carry meaning). Run 2: the track of the
     // decade chips' count meter in the movie filters (a bar, not a rule between regions).
+    // Loop 1: the phone guide's programme bottom sheet (a dialog surface) and its grab handle.
     const allowed = [
       /fixed inset-y-0 start-0 z-50 .*border-e border-border/,
+      /fixed inset-x-0 bottom-0 z-50 .*border-t border-border/,
+      /block h-1 w-10 rounded-full bg-border/,
       /midnight \? 'bg-border'/,
       /on \? 'bg-accent' : 'bg-border'/,
       /on \? 'bg-accent-fg\/25' : 'bg-border'/,

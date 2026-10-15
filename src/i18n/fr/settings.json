@@ -248,11 +248,8 @@
   "backupReplaceConfirmTitle": "Remplacer toutes les sources ?",
   "backupReplaceConfirmBody": "Les sources de la sauvegarde sont importées d’abord. Dès qu’au moins l’une d’elles se charge, vos sources actuelles, leurs favoris et leur historique sont retirés. Si aucune ne se charge, rien ne change.",
   "backupReplaceConfirm": "Remplacer",
-  "backupImported_one": "{{count}} source importée",
-  "backupImported_many": "{{count}} sources importées",
-  "backupImported_other": "{{count}} sources importées",
   "backupImportFailed": "Impossible d'importer la sauvegarde",
-  "backupResult": "{{imported}} importées, {{skipped}} ignorées",
+  "backupResult": "Ajoutées ou mises à jour : {{imported}}. Ignorées : {{skipped}}.",
   "backupWarnings_one": "{{count}} avertissement",
   "backupWarnings_many": "{{count}} avertissements",
   "backupWarnings_other": "{{count}} avertissements",
@@ -447,5 +444,9 @@
   "imageCacheCleared": "Cache d'images vidé",
   "imageCacheClearFailed": "Impossible de vider le cache d'images",
   "imageCacheLoadFailed": "Impossible de lire le cache d'images : {{message}}",
-  "imageCacheUnavailable": "Ce serveur n'a pas de cache d'images : les images se chargent directement depuis chaque fournisseur."
+  "imageCacheUnavailable": "Ce serveur n'a pas de cache d'images : les images se chargent directement depuis chaque fournisseur.",
+  "backupOldVersion": "Cette sauvegarde utilise un ancien format illisible. Exportez une nouvelle sauvegarde et importez-la.",
+  "backupImportDone": "Sauvegarde importée",
+  "backupReplacePinTitle": "Saisissez le code PIN pour remplacer les sources",
+  "backupReplacePinText": "Le remplacement supprime vos sources actuelles et leurs verrous parentaux ; il faut donc le code PIN du contrôle parental."
 }

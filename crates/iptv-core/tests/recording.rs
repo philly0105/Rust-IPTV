@@ -84,7 +84,7 @@ fn drain(env: &mut Env) -> Vec<AppEvent> {
 }
 
 #[tokio::test]
-async fn records_real_bytes_with_playlist_headers_and_retries_into_parts() {
+async fn records_real_bytes_with_playlist_headers_and_rejoins_after_a_drop() {
     let env = env().await;
     let mock = iptv_fixtures::spawn_mock().await;
     // Not the desktop app: the folder is `<data dir>/downloads/recordings` (inside the temp dir).
@@ -98,8 +98,9 @@ async fn records_real_bytes_with_playlist_headers_and_retries_into_parts() {
     .unwrap();
     force_engine(&env.state, Some(Engine::Http));
     // The stream ends after about 4 s (3 segments); the programme runs 12 s,
-    // so the recorder reconnects (after a short-part backoff) and appends a
-    // second part.
+    // so the recorder reconnects (after a short-part backoff). The short
+    // second part is joined onto the first, so the recording stays one
+    // playable file, noted as having gaps.
     let url = mock.url(&format!("/live/timed.ts?seconds=6&ua={UA}"));
     let item = channel(&env, &url).await;
     let t = now();
@@ -123,21 +124,22 @@ async fn records_real_bytes_with_playlist_headers_and_retries_into_parts() {
     let done = wait_status(&env, &id, RecordingStatus::Completed, 60).await;
 
     assert!(done.bytes > 0, "{done:?}");
-    assert!(done.error.is_none(), "{done:?}");
-    assert!(
-        done.file_names.len() >= 2,
-        "a dropped stream continues in a new part: {done:?}"
+    assert_eq!(
+        done.error.as_deref(),
+        Some(recording::STREAM_GAPS_MESSAGE),
+        "{done:?}"
+    );
+    assert_eq!(done.error_code.as_deref(), Some("streamGaps"), "{done:?}");
+    assert_eq!(
+        done.file_names.len(),
+        1,
+        "a short reconnect part joins the one before: {done:?}"
     );
     let first = &done.file_names[0];
     assert!(first.starts_with("Alpha - News_ at six_ - "), "{first}");
     assert!(
         first.ends_with(".ts") && !first.contains("(part"),
         "{first}"
-    );
-    assert!(
-        done.file_names[1].ends_with(" (part 2).ts"),
-        "{:?}",
-        done.file_names
     );
     let mut total = 0u64;
     for name in &done.file_names {
@@ -147,7 +149,7 @@ async fn records_real_bytes_with_playlist_headers_and_retries_into_parts() {
     }
     assert_eq!(total as i64, done.bytes);
 
-    // The library lists both parts, plays and deletes nothing while recording.
+    // The library lists the one file.
     let files = recording::library::list(&env.state).await.unwrap();
     assert_eq!(
         files

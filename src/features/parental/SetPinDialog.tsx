@@ -150,7 +150,7 @@ export function SetPinDialog({ open, mode, onDone, onCancel, testId = 'set-pin-d
               {t('cancel')}
             </Button>
           )}
-          <Button type="submit" form={formId} loading={busy} disabled={lockedHere} data-testid={`${testId}-submit`}>
+          <Button variant="primary" type="submit" form={formId} loading={busy} disabled={lockedHere} data-testid={`${testId}-submit`}>
             {last ? finalLabel : t('next')}
           </Button>
         </>

@@ -326,12 +326,16 @@ describe('U4-fix3: watched state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'More actions for S01E02' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark S01E02 as watched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
-    expect(callsOf('userstate.setWatched')[0]!.args).toEqual({ ref: sref, episodeId: 'e12', watched: true });
+    // L1-vod-1: e12 is the last unwatched episode, so the series row is marked too.
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
+    expect(callsOf('userstate.setWatched').map((c) => c.args)).toEqual([
+      { ref: sref, episodeId: 'e12', watched: true },
+      { ref: sref, watched: true },
+    ]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark season watched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(3));
-    expect(callsOf('userstate.setWatched').slice(1).map((c) => (c.args as { episodeId: string }).episodeId)).toEqual(['e11', 'e12']);
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(5));
+    expect(callsOf('userstate.setWatched').slice(2).map((c) => (c.args as { episodeId?: string }).episodeId)).toEqual(['e11', 'e12', undefined]);
   });
 });
 

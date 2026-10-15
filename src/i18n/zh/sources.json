@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "导入时出了点问题。",
   "errorSummaryWrongUrl": "该地址不是频道列表。",
   "technicalDetails": "技术详情",
-  "addRetryNote": "“{{name}}”已保存，但出现了此错误。请修正信息后在此重试，或关闭此窗口，稍后在其卡片上点击“重试”。",
+  "addRetryNote": "修改信息后在此重试。关闭此窗口会移除\"{{name}}\"（可以撤销）。",
   "retryImport": "重试",
   "retrying": "正在重试...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "回看天数",
   "catchupDaysHint": "回看可追溯的天数。留空则保留播放列表中的值。",
   "errorCatchupTemplate": "最多 {{max}} 个字符，且不能包含控制字符。",
-  "errorCatchupDays": "请输入一到 {{max}} 之间的整数天数。"
+  "errorCatchupDays": "请输入一到 {{max}} 之间的整数天数。",
+  "testExpired": "已登录，但账户已过期。",
+  "testExpiredNamed": "已登录 {{name}}，但账户已过期。",
+  "testAccountInactiveHint": "在提供商续订或重新激活账户之前，频道无法播放。",
+  "phaseConnectingTo": "正在连接 {{host}}…",
+  "phaseStarting": "正在开始…",
+  "discardedFailedHint": "首次导入失败。选择\"撤销\"可保留它，并从其卡片上重试。",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

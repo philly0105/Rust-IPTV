@@ -78,6 +78,7 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
   });
   const [saving, setSaving] = useState(false);
   const [askPin, setAskPin] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const changes = useMemo(() => {
     const add: ParentalLockTarget[] = [];
@@ -91,6 +92,8 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
     return { add, remove };
   }, [picks, initial, source.id]);
   const changeCount = changes.add.length + changes.remove.length;
+  /** Escape, the close button, the backdrop and Cancel: ticked groups are not dropped without asking. */
+  const requestClose = () => (changeCount > 0 && !saving ? setConfirmDiscard(true) : onClose());
 
   /** Removals first, so a refused PIN changes nothing. Throws the core's error. */
   const apply = async (pin?: string) => {
@@ -153,7 +156,7 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
     <>
       <Dialog
         open
-        onClose={onClose}
+        onClose={requestClose}
         title={t('lockGroupsTitle', { source: source.name })}
         description={t('lockGroupsText')}
         size="md"
@@ -163,10 +166,10 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
             <span className="me-auto text-[calc(13rem/15)] text-fg-subtle" aria-live="polite" data-testid="lock-groups-changes">
               {changeCount > 0 ? t('unsavedChanges', { count: changeCount }) : null}
             </span>
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={requestClose}>
               {t('cancel')}
             </Button>
-            <Button onClick={() => void save()} loading={saving} data-testid="lock-groups-save">
+            <Button variant="primary" onClick={() => void save()} loading={saving} data-testid="lock-groups-save">
               {t('saveLocks')}
             </Button>
           </>
@@ -199,6 +202,26 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
           />
         </div>
       </Dialog>
+      {confirmDiscard ? (
+        <Dialog
+          open
+          onClose={() => setConfirmDiscard(false)}
+          title={t('discardTitle')}
+          description={t('discardText')}
+          size="sm"
+          testId="lock-groups-discard"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmDiscard(false)} data-autofocus="" data-testid="lock-groups-keep">
+                {t('keepEditing')}
+              </Button>
+              <Button variant="danger" onClick={onClose} data-testid="lock-groups-discard-confirm">
+                {t('discard')}
+              </Button>
+            </>
+          }
+        />
+      ) : null}
       {askPin ? (
         <PinDialog
           open

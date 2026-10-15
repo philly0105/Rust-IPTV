@@ -114,6 +114,7 @@ function defaultHandlers(): Record<string, Handler> {
     'favorites.list': () => [],
     'catalog.channels': () => ({ items: [1, 2, 3, 4, 5, 6].map((i) => channel(i, 'm3u1')), total: 6 }),
     'catalog.search': () => ({ live: [], movies: [], series: [] }),
+    'recordings.list': () => [],
   };
 }
 
@@ -258,6 +259,56 @@ describe('failure isolation', () => {
     act(() => void videoOf(2).dispatchEvent(new Event('playing')));
     expect(tileEl(2).dataset['phase']).toBe('playing');
     expect(engineFor(1)[0]!.destroy).not.toHaveBeenCalled();
+  });
+
+  describe('retry after the muted fallback (L1-live-16)', () => {
+    const activation = { hasBeenActive: false };
+    beforeEach(() => {
+      activation.hasBeenActive = false;
+      Object.defineProperty(navigator, 'userActivation', { configurable: true, value: activation });
+      // Sound needs a gesture, like a browser's autoplay policy.
+      Object.defineProperty(HTMLMediaElement.prototype, 'play', {
+        configurable: true,
+        writable: true,
+        value: function play(this: HTMLMediaElement) {
+          if (!this.muted && !activation.hasBeenActive) return Promise.reject(new DOMException('No gesture', 'NotAllowedError'));
+          return Promise.resolve();
+        },
+      });
+    });
+    afterEach(() => {
+      delete (navigator as { userActivation?: unknown }).userActivation;
+      installMediaStubs();
+    });
+
+    async function blockedThenFailed(): Promise<void> {
+      seed([1]);
+      renderPage();
+      await playAll([1]);
+      expect(await within(tileEl(1)).findByText('Click for sound')).toBeTruthy();
+      expect(videoOf(1).muted).toBe(true);
+      act(() => engineFor(1)[0]!.cb.onError({ fatal: true, kind: 'network', message: 'HTTP 404 Not Found' }));
+      expect(await within(tileEl(1)).findByTestId('multiview-tile-retry')).toBeTruthy();
+    }
+
+    it('a Retry click brings the sound back instead of keeping the tile muted', async () => {
+      await blockedThenFailed();
+      activation.hasBeenActive = true;
+      fireEvent.click(within(tileEl(1)).getByTestId('multiview-tile-retry'));
+      await waitFor(() => expect(engineFor(1)).toHaveLength(2));
+      act(() => void videoOf(1).dispatchEvent(new Event('playing')));
+      await waitFor(() => expect(videoOf(1).muted).toBe(false));
+      expect(within(tileEl(1)).queryByText('Click for sound')).toBeNull();
+    });
+
+    it('a retry without a gesture plays muted and asks for a click again', async () => {
+      await blockedThenFailed();
+      fireEvent.click(within(tileEl(1)).getByTestId('multiview-tile-retry'));
+      await waitFor(() => expect(engineFor(1)).toHaveLength(2));
+      act(() => void videoOf(1).dispatchEvent(new Event('playing')));
+      expect(videoOf(1).muted).toBe(true);
+      expect(await within(tileEl(1)).findByText('Click for sound')).toBeTruthy();
+    });
   });
 
   it('a stream lookup that fails stops only that tile', async () => {
@@ -423,6 +474,31 @@ describe('connection limit', () => {
     expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
   });
 
+  it('counts only tiles that open a stream: a locked tile uses no connection (L1-live-10)', async () => {
+    handlers['parental.status'] = () => ({ enabled: true, mode: 'ask', autoAdult: false, unlockMinutes: 15, unlocked: false });
+    handlers['parental.check'] = (args) =>
+      (args['items'] as { ref: { itemId: string } }[]).filter((i) => i.ref.itemId === 'c3').map((i) => i.ref);
+    seed([1, 2, 3], 'src1');
+    renderPage();
+    expect(await within(tileEl(3)).findByTestId('multiview-tile-locked')).toBeTruthy();
+    await playAll([1, 2]);
+    await waitFor(() => expect(calls.some((c) => c.cmd === 'account.status')).toBe(true));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
+  });
+
+  it("adds this app's own recordings on the account to the wall's streams (L1-live-10)", async () => {
+    handlers['recordings.list'] = () => [
+      { status: 'recording', ref: input(9, 'src1').ref },
+      { status: 'scheduled', ref: input(8, 'src1').ref },
+    ];
+    seed([1, 2], 'src1');
+    renderPage();
+    const banner = await screen.findByTestId('multiview-limit-banner');
+    expect(banner.textContent).toContain('Demo TV allows 2 streams at a time and the wall uses 2');
+    expect(banner.textContent).toContain('Recordings or the main player also use streams from this account.');
+  });
+
   it('stays quiet within the limit, and asks only Xtream accounts', async () => {
     useMultiviewStore.setState({
       tiles: [
@@ -437,6 +513,60 @@ describe('connection limit', () => {
     await waitFor(() => expect(calls.some((c) => c.cmd === 'account.status')).toBe(true));
     expect(calls.filter((c) => c.cmd === 'account.status').map((c) => c.args)).toEqual([{ sourceId: 'src1' }]);
     expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
+  });
+});
+
+describe('full screen focus (L1-live-18)', () => {
+  let fsEl: Element | null = null;
+  const saved: [object, string, PropertyDescriptor | undefined][] = [];
+  const stub = (target: object, name: string, desc: PropertyDescriptor): void => {
+    saved.push([target, name, Object.getOwnPropertyDescriptor(target, name)]);
+    Object.defineProperty(target, name, { configurable: true, ...desc });
+  };
+  beforeEach(() => {
+    fsEl = null;
+    const change = (): Promise<void> => {
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    };
+    stub(document, 'fullscreenElement', { get: () => fsEl });
+    stub(Element.prototype, 'requestFullscreen', {
+      writable: true,
+      value: function requestFullscreen(this: Element) {
+        fsEl = this;
+        return change();
+      },
+    });
+    stub(document, 'exitFullscreen', {
+      writable: true,
+      value: () => {
+        fsEl = null;
+        return change();
+      },
+    });
+  });
+  afterEach(() => {
+    for (const [target, name, desc] of saved.splice(0).reverse()) {
+      if (desc) Object.defineProperty(target, name, desc);
+      else delete (target as Record<string, unknown>)[name];
+    }
+  });
+
+  it('puts focus back on the full screen button when entering and leaving', async () => {
+    seed([1, 2]);
+    renderPage();
+    await playAll([1, 2]);
+    const button = () => screen.getByTestId('multiview-fullscreen');
+    act(() => button().focus());
+    fireEvent.click(button());
+    await waitFor(() => expect(button().getAttribute('aria-pressed')).toBe('true'));
+    expect(document.activeElement).toBe(button());
+    // The restored focus does not hold the overlay up: it still fades when idle.
+    await waitFor(() => expect(screen.getByTestId('multiview-overlay').className).toContain('opacity-0'), { timeout: 4000 });
+    expect(document.activeElement).toBe(button());
+    fireEvent.click(button());
+    await waitFor(() => expect(button().getAttribute('aria-pressed')).toBe('false'));
+    expect(document.activeElement).toBe(button());
   });
 });
 

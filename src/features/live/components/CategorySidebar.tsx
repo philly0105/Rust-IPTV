@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { EyeOff, Search, SlidersHorizontal } from 'lucide-react';
+import { EyeOff, Lock, Search, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -33,6 +33,8 @@ export interface CategorySidebarProps {
   totalLabel: string;
   /** Opens a group's context menu (right click, the context-menu key, Shift+F10). */
   onGroupMenu?(pos: { x: number; y: number }, category: Category): void;
+  /** Parental Ask mode: the group asks for the PIN, so its row carries a lock. */
+  isLocked?(categoryId: string): boolean;
 }
 
 function linkClass(active: boolean): string {
@@ -257,6 +259,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
             {virtualizer.getVirtualItems().map((v) => {
               const c = visible[v.index]!;
               const active = props.activeId === c.id;
+              const locked = props.isLocked?.(c.id) ?? false;
               return (
                 <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}>
                   <Link
@@ -277,9 +280,12 @@ export function CategorySidebar(props: CategorySidebarProps) {
                         : undefined
                     }
                     className={linkClass(active)}
-                    title={c.name}
+                    title={locked ? `${c.name} (${t('locked')})` : c.name}
                   >
                     <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+                    {locked ? (
+                      <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} />
+                    ) : null}
                     <span className={countClass(active)}>{fmt.format(c.itemCount)}</span>
                   </Link>
                 </div>

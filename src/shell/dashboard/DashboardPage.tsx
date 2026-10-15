@@ -34,7 +34,7 @@ import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail } from './DashboardRail';
 import { HeroCarousel } from './HeroCarousel';
 import { HeroSkeleton } from './HeroSkeleton';
-import { buildHeroSlides, type HeroSlide } from './heroSlides';
+import { buildHeroSlides, titleEndsWithYear, type HeroSlide } from './heroSlides';
 import { minutesLeft, watchedFraction } from './progress';
 
 const RAIL_LIMIT = 24;
@@ -156,40 +156,43 @@ function DashboardBody() {
     staleTime: 60 * 60_000,
   });
 
+  // Sources in their delete-undo window are already gone from the rail and the palette
+  // (useVisibleSources); every rail and the hero drop their titles too, as My List does.
+  const removingSources = usePendingRemovals((s) => s.ids);
+  const keep = <T extends { ref: ItemRef }>(rows: readonly T[] | undefined): T[] =>
+    removingSources.size === 0 ? [...(rows ?? [])] : (rows ?? []).filter((r) => !removingSources.has(r.ref.sourceId));
+  const continueRows = useMemo(() => keep(continueWatching.data), [continueWatching.data, removingSources]);
+  const favoriteRows = useMemo(() => keep(favorites.data), [favorites.data, removingSources]);
+  const recentRows = useMemo(() => keep(recent.data), [recent.data, removingSources]);
+  const movieRows = useMemo(() => keep(addedMovies.data as VodItem[] | undefined), [addedMovies.data, removingSources]);
+  const seriesRows = useMemo(() => keep(addedSeries.data as SeriesItem[] | undefined), [addedSeries.data, removingSources]);
+
   const liveFavorites = useMemo(
     () =>
-      (favorites.data ?? [])
+      favoriteRows
         .filter((f) => f.ref.contentType === 'live' || f.ref.contentType === 'radio')
         .slice(0, RAIL_LIMIT),
-    [favorites.data],
+    [favoriteRows],
   );
   const vodFavorites = useMemo(
-    () =>
-      (favorites.data ?? [])
-        .filter((f) => f.ref.contentType === 'movie' || f.ref.contentType === 'series')
-        .slice(0, RAIL_LIMIT),
-    [favorites.data],
+    () => favoriteRows.filter((f) => f.ref.contentType === 'movie' || f.ref.contentType === 'series').slice(0, RAIL_LIMIT),
+    [favoriteRows],
   );
   const recentLive = useMemo(
-    () =>
-      (recent.data ?? [])
-        .filter((r) => r.ref.contentType === 'live' || r.ref.contentType === 'radio')
-        .slice(0, RAIL_LIMIT),
-    [recent.data],
+    () => recentRows.filter((r) => r.ref.contentType === 'live' || r.ref.contentType === 'radio').slice(0, RAIL_LIMIT),
+    [recentRows],
   );
   // Counted like MyListRail counts it: entries of sources in their delete-undo window are already gone.
-  const removingSources = usePendingRemovals((s) => s.ids);
   const myListCount = useMemo(
     () => (myList.data ?? []).filter((e) => !removingSources.has(e.ref.sourceId)).length,
     [myList.data, removingSources],
   );
-  const rankedSources = useMemo(() => rankSources(sources.data ?? [], recent.data ?? []), [sources.data, recent.data]);
-  const recentlyAdded = useMemo(
-    () => mergeRecentlyAdded((addedMovies.data ?? []) as VodItem[], (addedSeries.data ?? []) as SeriesItem[], RAIL_LIMIT),
-    [addedMovies.data, addedSeries.data],
-  );
+  const rankedSources = useMemo(() => rankSources(sources.data ?? [], recentRows), [sources.data, recentRows]);
+  const recentlyAdded = useMemo(() => mergeRecentlyAdded(movieRows, seriesRows, RAIL_LIMIT), [movieRows, seriesRows]);
 
-  const heroSlides = useMemo(() => buildHeroSlides(continueWatching.data ?? [], recentlyAdded), [continueWatching.data, recentlyAdded]);
+  const heroSlides = useMemo(() => buildHeroSlides(continueRows, recentlyAdded), [continueRows, recentlyAdded]);
+  // The live favourites tell same-named channels apart by source once there is more than one.
+  const manySources = (sources.data?.length ?? 0) > 1;
 
   const nowRefs = useMemo(() => liveFavorites.map((f) => f.ref), [liveFavorites]);
   const epgOffset = settings.data?.epgOffsetMinutes ?? 0;
@@ -268,7 +271,7 @@ function DashboardBody() {
   // but a slow catalog query must not hold back the rails underneath.
   const heroLayoutPending = sources.isPending || continueWatching.isPending;
   const heroLoading =
-    heroLayoutPending || ((continueWatching.data?.length ?? 0) === 0 && (addedMovies.isPending || addedSeries.isPending));
+    heroLayoutPending || (continueRows.length === 0 && (addedMovies.isPending || addedSeries.isPending));
   const playSlide = (s: HeroSlide) =>
     play({ ref: s.ref, episodeId: s.episodeId, title: s.title ?? '', subtitle: s.subtitle, posterUrl: s.posterUrl });
 
@@ -277,7 +280,7 @@ function DashboardBody() {
   // Only rails the user has switched on count: hidden rails with data must not suppress the quiet state.
   const anyRailVisible =
     (show('hero') && heroSlides.length > 0) ||
-    (show('continueWatching') && (continueWatching.data?.length ?? 0) > 0) ||
+    (show('continueWatching') && continueRows.length > 0) ||
     (myListOn && myListCount > 0) ||
     (show('liveFavorites') && liveFavorites.length > 0) ||
     (show('recentlyWatchedLive') && recentLive.length > 0) ||
@@ -353,7 +356,7 @@ function DashboardBody() {
           <DashboardRail<PlaybackPosition>
             id="continue-watching"
             title={t('railContinueWatching')}
-            items={continueWatching.data}
+            items={continueWatching.data ? continueRows : undefined}
             loading={continueWatching.isPending}
             loaded={continueWatching.isSuccess}
             error={railError(continueWatching.error)}
@@ -413,6 +416,7 @@ function DashboardBody() {
                   now={nn?.now?.title}
                   nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
                   sourceName={sourceById.get(f.ref.sourceId)?.name}
+                  showSourceWithNow={manySources}
                   isRadio={f.ref.contentType === 'radio'}
                   ariaLabel={t('playTitle', { title: f.snapshot.title })}
                   onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
@@ -468,7 +472,9 @@ function DashboardBody() {
             cardWidth={168}
             skeletonAspect={2 / 3}
             renderCard={(f, rail) => {
-              const subtitle = f.snapshot.subtitle ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
+              // A year the title already ends with ("Summer Static (2025)") is not repeated under it.
+              const own = f.snapshot.subtitle && !titleEndsWithYear(f.snapshot.title, f.snapshot.subtitle) ? f.snapshot.subtitle : undefined;
+              const subtitle = own ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
               return (
                 <PosterCard
                   rail={rail}
@@ -516,18 +522,20 @@ function DashboardBody() {
             skeletonAspect={2 / 3}
             renderCard={(v, rail) => {
               const rating = v.rating ? v.rating.toFixed(1) : undefined;
+              // The title the detail page and the hero show: no trailing year or provider tag.
+              const title = v.titleBase || v.title;
               return (
                 <PosterCard
                   rail={rail}
-                  title={v.title}
-                  subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, v.year], i18n.language)}
+                  title={title}
+                  subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, !titleEndsWithYear(title, v.year) && v.year], i18n.language)}
                   posterUrl={v.posterUrl}
                   backdropUrl={v.backdropUrl}
                   badge={rating ? <Badge variant="neutral">{rating}</Badge> : undefined}
                   to={itemPath(v.ref)}
                   // Name first: the rating badge sits before the caption in the DOM.
                   ariaLabel={joinList(
-                    [v.title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
+                    [title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
                     i18n.language,
                   )}
                   myList={myListTarget(v)}

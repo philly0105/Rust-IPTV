@@ -240,7 +240,7 @@
   "errorSummaryGeneric": "Algo deu errado durante a importação.",
   "errorSummaryWrongUrl": "Esse endereço não leva a uma lista de canais.",
   "technicalDetails": "Detalhes técnicos",
-  "addRetryNote": "\"{{name}}\" foi salva com este erro. Corrija os dados e tente novamente aqui, ou feche esta janela e use Tentar novamente no cartão dela depois.",
+  "addRetryNote": "Corrija os dados e tente de novo aqui. Fechar esta janela remove \"{{name}}\" (pode desfazer).",
   "retryImport": "Tentar novamente",
   "retrying": "Tentando novamente...",
 
@@ -365,5 +365,14 @@
   "catchupDays": "Dias de arquivo",
   "catchupDaysHint": "Até onde o arquivo recua. Deixe vazio para manter o valor da lista.",
   "errorCatchupTemplate": "Use no máximo {{max}} caracteres e nenhum carácter de controlo.",
-  "errorCatchupDays": "Introduza um número inteiro de dias entre um e {{max}}."
+  "errorCatchupDays": "Introduza um número inteiro de dias entre um e {{max}}.",
+  "testExpired": "Sessão iniciada, mas a conta expirou.",
+  "testExpiredNamed": "Sessão iniciada em {{name}}, mas a conta expirou.",
+  "testAccountInactiveHint": "Os canais não vão reproduzir até o seu fornecedor renovar ou reativar a conta.",
+  "phaseConnectingTo": "A ligar a {{host}}…",
+  "phaseStarting": "A iniciar…",
+  "discardedFailedHint": "A primeira importação falhou. Escolha Desfazer para a manter e tentar de novo a partir do cartão.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

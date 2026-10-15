@@ -35,7 +35,7 @@ import { Poster, ProgressBar, QUARTER_BLUR, cn, hueOf, useImageChain, whenIdle }
 import { useReducedMotion } from '../theme';
 import { itemPath, joinList, usePrefetchTarget } from './cards';
 import { HERO_BODY, HERO_FRAME } from './HeroSkeleton';
-import { HERO_DWELL_MS, wrapIndex, type HeroSlide } from './heroSlides';
+import { HERO_DWELL_MS, titleEndsWithYear, wrapIndex, type HeroSlide } from './heroSlides';
 
 export interface HeroCarouselProps {
   slides: readonly HeroSlide[];
@@ -158,7 +158,10 @@ function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean;
           ? 'z-[1] opacity-100 motion-safe:animate-hero-in'
           : 'z-0 opacity-0 motion-safe:transition-opacity motion-safe:delay-700 motion-safe:duration-0',
       )}
-      style={{ background: tint(title) }}
+      // The title's tint only once the artwork chain has run out. While a picture loads the
+      // layer stays clear (the frame's neutral glass, or the outgoing slide), so the colour
+      // never jumps from the tint's hue to the artwork's.
+      style={image.failed ? { background: tint(title) } : undefined}
     >
       {url && (
         <img
@@ -220,7 +223,9 @@ function SlideBody({
   const continuing = s.kind === 'continue';
   const playable = continuing || s.ref.contentType === 'movie';
   const rating = s.rating ? new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
-  const facts = joinList([s.year, s.genres?.slice(0, 2).join(' / ')], i18n.language);
+  // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
+  // continue-watching snapshot) does not get the year again below it.
+  const facts = joinList([!titleEndsWithYear(title, s.year) && s.year, s.genres?.slice(0, 2).join(' / ')], i18n.language);
   const eyebrow = continuing ? t('heroEyebrow') : sourceName ? t('heroNewIn', { source: sourceName }) : t('heroNew');
   const titleId = `${panelId}-title-${index}`;
   // Details warms the detail page (query, route chunk, artwork) on hover or focus (C4).
@@ -251,7 +256,8 @@ function SlideBody({
           <div className="aspect-[2/3] w-full" />
         )}
       </div>
-      <div className={cn('flex min-w-0 max-w-[28rem] flex-1 flex-col gap-2.5 text-on-glass', active && 'motion-safe:animate-hero-copy')}>
+      {/* The copy column grows with wide heroes, so a title is not wrapped into a corner of an empty frame. */}
+      <div className={cn('flex min-w-0 max-w-[28rem] flex-1 flex-col gap-2.5 text-on-glass min-[1440px]:max-w-[40rem]', active && 'motion-safe:animate-hero-copy')}>
         <p className="flex items-center gap-2 text-sm font-semibold text-on-glass-muted">
           <span aria-hidden className="h-3.5 w-[3px] shrink-0 rounded-full bg-glass-accent shadow-[0_0_10px_var(--color-glass-accent)]" />
           <span dir="auto" className="truncate">{eyebrow}</span>

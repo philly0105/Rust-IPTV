@@ -101,9 +101,9 @@ export function useVodPage(
   const req = input ? buildPageRequest(input, pageIndex) : undefined;
   return useQuery<Page<VodItem | SeriesItem>, RpcError>({
     queryKey: req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!req) throw new RpcError('invalid', 'No source');
-      return (await rpcRaw(req.cmd, req.args)) as Page<VodItem | SeriesItem>;
+      return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
     enabled: !!req,
     ...PAGE_TIMING,
@@ -121,10 +121,10 @@ export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: b
   return useInfiniteQuery<Page<VodItem | SeriesItem>, RpcError>({
     queryKey: first ? [first.cmd, { ...first.args, query: { ...first.args.query, offset: undefined }, inOrder: true }] : ['catalog.movies', 'disabled-in-order'],
     initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }) => {
       if (!input) throw new RpcError('invalid', 'No source');
       const req = buildPageRequest(input, pageParam as number);
-      return (await rpcRaw(req.cmd, req.args)) as Page<VodItem | SeriesItem>;
+      return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
     getNextPageParam: (last, pages) => {
       const loaded = pages.reduce((n, p) => n + p.items.length, 0);
@@ -145,16 +145,16 @@ export function useRecentlyAdded(
     queryKey: source?.kind === 'stalker'
       ? [kind === 'movie' ? 'stalker.movies' : 'stalker.series', { sourceId: source.id, query: { offset: 0, limit: 28, sort: 'added', dir: 'desc' } }]
       : ['catalog.recentlyAdded', { sourceId: source?.id ?? '', contentType: kind, limit }],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!source) return [];
       if (source.kind === 'stalker') {
         const page = (await rpcRaw(kind === 'movie' ? 'stalker.movies' : 'stalker.series', {
           sourceId: source.id,
           query: { offset: 0, limit: 28, sort: 'added', dir: 'desc' },
-        })) as Page<VodItem | SeriesItem>;
+        }, { signal })) as Page<VodItem | SeriesItem>;
         return page.items.slice(0, limit);
       }
-      return (await rpcRaw('catalog.recentlyAdded', { sourceId: source.id, contentType: kind, limit })) as (VodItem | SeriesItem)[];
+      return (await rpcRaw('catalog.recentlyAdded', { sourceId: source.id, contentType: kind, limit }, { signal })) as (VodItem | SeriesItem)[];
     },
     enabled: !!source,
     staleTime: 60_000,
@@ -181,8 +181,8 @@ export function movieDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRe
   const args = { ref: plainRef(ref) };
   return queryOptions<VodDetail, RpcError>({
     queryKey: [cmd, args],
-    queryFn: async () => {
-      const res = await rpcRaw(cmd, args);
+    queryFn: async ({ signal }) => {
+      const res = await rpcRaw(cmd, args, { signal });
       if (cmd === 'catalog.item') return { item: res as VodItem, cast: [], backdrops: [], providerDetailsUnavailable: false };
       return res as VodDetail;
     },
@@ -196,13 +196,13 @@ export function seriesDetailQuery(sourceKind: SourceKind | undefined, ref: ItemR
   const args = { ref: plainRef(ref) };
   return queryOptions<SeriesDetail, RpcError>({
     queryKey: [cmd, args],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (cmd === 'catalog.item') {
         // m3u playlists have no series metadata; show the row with no episodes.
-        const item = (await rpcRaw(cmd, args)) as SeriesItem;
+        const item = (await rpcRaw(cmd, args, { signal })) as SeriesItem;
         return { item, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
       }
-      return (await rpcRaw(cmd, args)) as SeriesDetail;
+      return (await rpcRaw(cmd, args, { signal })) as SeriesDetail;
     },
     staleTime: DETAIL_STALE_MS,
   });
@@ -290,11 +290,11 @@ export function useTwinProbe(source: Source | undefined, ref: ItemRef, enabled: 
   const twin: ItemRef = { ...ref, contentType: ref.contentType === 'movie' ? 'series' : 'movie' };
   return useQuery<ItemRef | null, RpcError>({
     queryKey: ['vod.twin', { ref: twin, kind: source?.kind }],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!source) return null;
       const cmd = source.kind === 'stalker' ? detailCommand('stalker', twin.contentType === 'movie' ? 'movie' : 'series') : 'catalog.item';
       try {
-        await rpcRaw(cmd, { ref: twin });
+        await rpcRaw(cmd, { ref: twin }, { signal });
         return twin;
       } catch {
         return null;
@@ -316,7 +316,7 @@ export function useTmdbKeyMissing(settings: Settings): boolean {
   const inSettings = !!settings.tmdb.apiKey?.trim();
   const q = useQuery<{ ok: boolean; message?: string }, RpcError>({
     queryKey: ['tmdb.testKey', { apiKey: '' }],
-    queryFn: async () => (await rpcRaw('tmdb.testKey', { apiKey: '' })) as { ok: boolean; message?: string },
+    queryFn: async ({ signal }) => (await rpcRaw('tmdb.testKey', { apiKey: '' }, { signal })) as { ok: boolean; message?: string },
     enabled: on && !inSettings,
     staleTime: Infinity,
     retry: false,
@@ -328,6 +328,8 @@ export interface SetWatchedArgs {
   ref: ItemRef;
   episodeIds?: string[];
   watched: boolean;
+  /** With `episodeIds`: also set the series-level row, after the episodes (L1-vod-1, `lib/seriesWatched`). */
+  series?: boolean;
 }
 
 /**
@@ -337,12 +339,13 @@ export interface SetWatchedArgs {
 export function useSetWatched() {
   const qc = useQueryClient();
   return useMutation<void, RpcError, SetWatchedArgs>({
-    mutationFn: async ({ ref, episodeIds, watched }) => {
+    mutationFn: async ({ ref, episodeIds, watched, series }) => {
       if (!episodeIds) {
         await rpcRaw('userstate.setWatched', { ref, watched });
         return;
       }
       await Promise.all(episodeIds.map((episodeId) => rpcRaw('userstate.setWatched', { ref, episodeId, watched })));
+      if (series) await rpcRaw('userstate.setWatched', { ref, watched });
     },
     onSettled: () => invalidateWatched(qc),
   });

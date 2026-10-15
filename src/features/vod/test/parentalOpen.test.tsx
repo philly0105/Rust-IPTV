@@ -189,4 +189,17 @@ describe('movie page parental gate (Ask mode)', () => {
     await screen.findByText('A film for grown-ups.');
     expect(rpcMock.calls.some((c) => c.cmd === 'parental.check')).toBe(false);
   });
+
+  it('says "Locked with its group" instead of offering a lock when its group is locked', async () => {
+    rpcMock.handlers['parental.status'] = () => status({ unlocked: true });
+    rpcMock.handlers['parental.check'] = () => [];
+    rpcMock.handlers['parental.adultCategories'] = () => [];
+    rpcMock.handlers['parental.locks'] = () => [
+      { sourceId: 'src1', contentType: 'movie', kind: 'category', targetId: 'c1', name: 'Late shows', createdAt: '2026-10-15T00:00:00Z' },
+    ];
+    renderMovie();
+    const entry = await screen.findByRole<HTMLButtonElement>('button', { name: 'Locked with its group' });
+    expect(entry.disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Lock movie' })).toBeNull();
+  });
 });

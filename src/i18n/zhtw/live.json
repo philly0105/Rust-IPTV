@@ -180,5 +180,9 @@
   "reminderSwitched": "已切換到 {{channel}}",
   "undoSwitch": "復原",
   "reminderSwitchFailed": "無法切換到該頻道",
-  "recordNeedsMpv": "錄製此頻道需要 mpv。請安裝 mpv，或在播放器設定中指定其路徑。"
+  "recordNeedsMpv": "錄製此頻道需要 mpv。請安裝 mpv，或在播放器設定中指定其路徑。",
+  "locked": "已鎖定",
+  "lockedGuide": "已鎖定。輸入 PIN 碼即可查看正在播出的節目。",
+  "unlock": "解鎖",
+  "ribbonFailed": "無法載入此頻道的節目表"
 }

@@ -34,5 +34,6 @@
   "clearTitle": "Wiedergabestatistik löschen?",
   "clearBody": "Die gesamte gezählte Sehzeit wird gelöscht. Wiedergabefortschritt und „Zuletzt angesehen“ bleiben erhalten.",
   "cleared": "Wiedergabestatistik gelöscht",
-  "clearFailed": "Statistik konnte nicht gelöscht werden"
+  "clearFailed": "Statistik konnte nicht gelöscht werden",
+  "watchLive": "Live-TV ansehen"
 }

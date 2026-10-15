@@ -248,11 +248,8 @@
   "backupReplaceConfirmTitle": "¿Reemplazar todas las fuentes?",
   "backupReplaceConfirmBody": "Primero se importan las fuentes de la copia. Cuando al menos una se carga, se quitan tus fuentes actuales con sus favoritos e historial. Si no se carga ninguna, no cambia nada.",
   "backupReplaceConfirm": "Reemplazar",
-  "backupImported_one": "Se importó {{count}} fuente",
-  "backupImported_many": "Se importaron {{count}} fuentes",
-  "backupImported_other": "Se importaron {{count}} fuentes",
   "backupImportFailed": "No se pudo importar la copia de seguridad",
-  "backupResult": "{{imported}} importadas, {{skipped}} omitidas",
+  "backupResult": "Añadidas o actualizadas: {{imported}}. Omitidas: {{skipped}}.",
   "backupWarnings_one": "{{count}} advertencia",
   "backupWarnings_many": "{{count}} advertencias",
   "backupWarnings_other": "{{count}} advertencias",
@@ -447,5 +444,9 @@
   "imageCacheCleared": "Caché de imágenes vaciada",
   "imageCacheClearFailed": "No se pudo vaciar la caché de imágenes",
   "imageCacheLoadFailed": "No se pudo leer la caché de imágenes: {{message}}",
-  "imageCacheUnavailable": "Este servidor no tiene caché de imágenes, así que las imágenes se cargan directamente desde cada proveedor."
+  "imageCacheUnavailable": "Este servidor no tiene caché de imágenes, así que las imágenes se cargan directamente desde cada proveedor.",
+  "backupOldVersion": "Esta copia de seguridad usa un formato antiguo que no se puede leer. Exporta una copia nueva e impórtala.",
+  "backupImportDone": "Copia de seguridad importada",
+  "backupReplacePinTitle": "Introduce el PIN para reemplazar las fuentes",
+  "backupReplacePinText": "Reemplazar elimina tus fuentes actuales y sus bloqueos parentales, así que necesita el PIN del control parental."
 }

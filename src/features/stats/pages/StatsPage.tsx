@@ -19,7 +19,7 @@ import { DayChart, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
 import { TopChannels, TopTitles } from '../components/TopList';
 import { Button, Dialog, EmptyState, ErrorState, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources } from '../deps';
-import { useClearStats, useWatchStats } from '../hooks/useWatchStats';
+import { useClearStats, useMonthHasData, useWatchStats } from '../hooks/useWatchStats';
 import { rangeTotals } from '../lib/chart';
 import { formatWatchTime } from '../lib/format';
 import { readRange, type StatsRange } from '../paths';
@@ -55,6 +55,9 @@ export function StatsPage() {
   const { query, today } = useWatchStats(range);
   const data = query.data;
   const sources = useVisibleSources();
+  const weekEmpty = range === 7 && data?.totalSeconds === 0;
+  const monthHasData = useMonthHasData(weekEmpty, today);
+  const firstSource = sources.data?.[0];
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
 
   const play = (item: WatchStatsTop) => {
@@ -87,21 +90,27 @@ export function StatsPage() {
 
   let headline = null;
   let body;
-  if (query.isPending) {
+  if (query.isPending || (weekEmpty && monthHasData === null)) {
     body = <StatsSkeleton label={t('loading')} />;
   } else if (!data) {
     body = <ErrorState error={query.error} hint={t('errorHint')} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   } else if (data.totalSeconds === 0) {
+    // "Show 30 days" only when that range has something; with nothing watched at all, point at something to watch.
+    const olderData = range === 7 && monthHasData === true;
     body = (
       <EmptyState
         icon={<ChartColumn size={28} aria-hidden />}
         title={t('emptyTitle')}
-        description={range === 7 ? t('emptyWeek') : t('emptyMonth')}
+        description={olderData ? t('emptyWeek') : t('emptyMonth')}
         action={
-          range === 7 ? (
+          olderData ? (
             <Button onClick={() => setRange(30)} data-testid="stats-show-month">
               {t('showMonth')}
             </Button>
+          ) : firstSource ? (
+            <Link to={`/s/${encodeURIComponent(firstSource.id)}/live`} className={buttonClass('primary')} data-testid="stats-watch-live">
+              {t('watchLive')}
+            </Link>
           ) : (
             <Link to="/" className={buttonClass('secondary')} data-testid="stats-go-home">
               {t('goHome')}

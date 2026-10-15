@@ -197,5 +197,12 @@
   "markSeriesWatched": "시리즈 시청함으로 표시",
   "markSeriesUnwatched": "시리즈 시청 안 함으로 표시",
   "shortcutWatched": "시청함 또는 시청 안 함으로 표시",
-  "shortcutHideWatched": "시청한 작품 숨기기 또는 표시"
+  "shortcutHideWatched": "시청한 작품 숨기기 또는 표시",
+  "sourceMissingTitle": "이 소스는 삭제되었습니다",
+  "sourceMissingBody": "더 이상 소스 목록에 없습니다. 다른 소스를 선택하거나 소스에서 다시 추가하세요.",
+  "goToDashboard": "대시보드로 이동",
+  "categoryMissingTitle": "카테고리를 찾을 수 없습니다",
+  "categoryMissingBody": "이 소스에는 해당 링크의 카테고리가 없습니다. 제공자가 이름을 바꾸었거나 삭제했을 수 있습니다.",
+  "namedMarkedWatched": "{{name}}을(를) 시청함으로 표시했습니다",
+  "namedMarkedUnwatched": "{{name}}을(를) 시청 안 함으로 표시했습니다"
 }

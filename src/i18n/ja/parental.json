@@ -152,5 +152,10 @@
   "turnOffTitle": "ペアレンタルコントロールをオフにしますか？",
   "turnOffConfirmText": "PINを入力してください。新しいPINを設定するまで、ロックされたコンテンツは誰でも開けるようになります。",
   "turnedOffToast": "ペアレンタルコントロールをオフにしました",
-  "turnedOffToastText": "ロックは保持されています。もう一度使うにはPINを設定してください。"
+  "turnedOffToastText": "ロックは保持されています。もう一度使うにはPINを設定してください。",
+  "menuLockedWithGroup": "グループごとロック中",
+  "discardTitle": "変更を破棄しますか?",
+  "discardText": "ここでチェックを付けたり外したりしたグループは保存されません。",
+  "keepEditing": "編集を続ける",
+  "discard": "破棄"
 }

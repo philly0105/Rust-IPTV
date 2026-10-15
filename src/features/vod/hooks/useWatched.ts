@@ -49,7 +49,7 @@ export function useWatchedPages(
   const results = useQueries({
     queries: refsPerPage.map((refs) => ({
       queryKey: rpcKey('positions.watchedContains', { refs }),
-      queryFn: async () => (await rpcRaw('positions.watchedContains', { refs })) as ItemRef[],
+      queryFn: async ({ signal }) => (await rpcRaw('positions.watchedContains', { refs }, { signal })) as ItemRef[],
       enabled: enabled && refs.length > 0,
       staleTime: WATCHED_STALE_MS,
     })),

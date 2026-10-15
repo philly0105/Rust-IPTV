@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useNavigate } from 'react-router';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
@@ -13,6 +13,7 @@ import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { Header } from './Header';
 import { Rail } from './Rail';
+import { useOutletScrollMemory } from './scrollMemory';
 import { useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
@@ -217,11 +218,40 @@ function GlobalShortcuts() {
       if (s.paletteOpen) return s.setPaletteOpen(false);
       if (s.helpOpen) return s.setHelpOpen(false);
       if (s.panelOpen) return s.setPanelOpen(false);
+      // Leaves a search or text field; a focused link, card or button keeps focus (and the Tab position).
       const active = document.activeElement;
-      if (active instanceof HTMLElement && active !== document.body) active.blur();
+      if (active instanceof HTMLElement && isTextEntry(active)) active.blur();
     },
     { description: t('scEscape'), area, allowInInput: true },
   );
+  return null;
+}
+
+const NON_TEXT_INPUTS = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color', 'file', 'image']);
+
+/** A field that takes typed text: Escape leaves it. */
+export function isTextEntry(el: HTMLElement): boolean {
+  if (el instanceof HTMLInputElement) return !NON_TEXT_INPUTS.has(el.type);
+  return el instanceof HTMLTextAreaElement || el.isContentEditable === true;
+}
+
+/**
+ * Navigation side effects of the shell: overlays that belong to the page being left (the
+ * palette, the `?` overlay, the context drawer) close when the location changes, Back or
+ * Forward included, and the outlet keeps its scroll position and focus per history entry.
+ */
+function ShellNavigationEffects() {
+  const { key } = useLocation();
+  const last = useRef(key);
+  useEffect(() => {
+    if (last.current === key) return;
+    last.current = key;
+    const s = useShellStore.getState();
+    if (s.paletteOpen) s.setPaletteOpen(false);
+    if (s.helpOpen) s.setHelpOpen(false);
+    if (s.panelOpen) s.setPanelOpen(false);
+  }, [key]);
+  useOutletScrollMemory();
   return null;
 }
 
@@ -339,6 +369,7 @@ export function ShellLayout() {
           >
             <Outlet />
           </main>
+          <ShellNavigationEffects />
           <ContextPanel inline={wide} />
         </div>
         {player && <player.ExternalPlaybackFooter />}

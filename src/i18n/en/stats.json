@@ -34,5 +34,6 @@
   "clearTitle": "Clear watch stats?",
   "clearBody": "This deletes all counted watch time. Watch progress and Recently watched stay.",
   "cleared": "Watch stats cleared",
-  "clearFailed": "Couldn't clear stats"
+  "clearFailed": "Couldn't clear stats",
+  "watchLive": "Watch live TV"
 }

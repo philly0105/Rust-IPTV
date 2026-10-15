@@ -3,12 +3,38 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_QUERY_TIMING, invalidationPrefixes, queryClient, queryDefaultsFor, rpcKey, useRpcQuery, type RpcCommand } from './query';
+import type { AppEvent } from './types';
+import {
+  DEFAULT_QUERY_TIMING,
+  EVENT_BURST_MS,
+  bindEventInvalidation,
+  invalidate,
+  invalidationPrefixes,
+  queryClient,
+  queryDefaultsFor,
+  rpcKey,
+  useRpcQuery,
+  type RpcCommand,
+} from './query';
+import { rpcRaw } from './transport';
+
+const bus = vi.hoisted(() => ({ handlers: new Set<(e: AppEvent) => void>() }));
+
+vi.mock('./events', () => ({
+  onAnyAppEvent: (h: (e: AppEvent) => void) => {
+    bus.handlers.add(h);
+    return () => bus.handlers.delete(h);
+  },
+}));
 
 vi.mock('./transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./transport')>()),
   rpcRaw: vi.fn(async () => ({})),
 }));
+
+function emit(type: string, payload?: unknown): void {
+  for (const h of bus.handlers) h({ type, payload } as AppEvent);
+}
 
 const MIN = 60_000;
 
@@ -108,6 +134,14 @@ describe('useRpcQuery (C4)', () => {
     expect(observed('tmdb.trending', null)?.gcTime).toBe(2000);
   });
 
+  it('hands the query signal to the transport, so a replaced refetch is aborted', async () => {
+    const { result } = renderHook(() => useRpcQuery('sources.list', null as never), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const call = vi.mocked(rpcRaw).mock.calls.at(-1)!;
+    expect(call.slice(0, 2)).toEqual(['sources.list', null]);
+    expect((call[2] as { signal?: unknown } | undefined)?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('does not fetch when disabled', () => {
     const { result } = renderHook(() => useRpcQuery('stats.summary', null as never, { enabled: false }), { wrapper });
     expect(result.current.fetchStatus).toBe('idle');
@@ -137,6 +171,17 @@ describe('event invalidation', () => {
     expect(invalidationPrefixes({ type: 'recordings.update' })).toEqual(['recordings.']);
   });
 
+  it('does not refetch settings when the event carries them', () => {
+    expect(invalidationPrefixes({ type: 'settings.changed', payload: { language: 'en' } })).toEqual([]);
+    expect(invalidationPrefixes({ type: 'settings.changed', payload: { language: 'en' } }, { 'settings.changed': ['sources.schedule'] })).toEqual([
+      'sources.schedule',
+    ]);
+  });
+
+  it('only touches source records after an unchanged import', () => {
+    expect(invalidationPrefixes({ type: 'import.progress', payload: { phase: 'done', message: 'unchanged' } })).toEqual(['sources.']);
+  });
+
   it('only invalidates on a finished import', () => {
     expect(invalidationPrefixes({ type: 'import.progress', payload: { phase: 'parsing' } })).toEqual([]);
     expect(invalidationPrefixes({ type: 'import.progress', payload: { phase: 'done' } })).toEqual(['catalog.', 'sources.', 'lists.']);
@@ -149,5 +194,71 @@ describe('event invalidation', () => {
       'lists.',
       'favorites.',
     ]);
+  });
+});
+
+describe('event bursts', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: queryClient }, children);
+  let unbind: () => void = () => undefined;
+
+  afterEach(() => {
+    unbind();
+    queryClient.clear();
+    vi.useRealTimers();
+  });
+
+  function callsOf(cmd: string): number {
+    return vi.mocked(rpcRaw).mock.calls.filter(([c]) => c === cmd).length;
+  }
+
+  it('refetches each mounted query once for an import done + sources.changed burst', async () => {
+    unbind = bindEventInvalidation({ 'sources.changed': ['sources.', 'catalog.', 'favorites.'] });
+    const a = renderHook(() => useRpcQuery('catalog.categories', { sourceId: 's1', contentType: 'live' }), { wrapper });
+    const b = renderHook(() => useRpcQuery('sources.list', null as never), { wrapper });
+    await waitFor(() => expect(a.result.current.isSuccess && b.result.current.isSuccess).toBe(true));
+    vi.mocked(rpcRaw).mockClear();
+
+    emit('import.progress', { sourceId: 's1', phase: 'done', done: 1 });
+    // A handler of the same event invalidating directly joins the burst.
+    void invalidate('catalog.');
+    void invalidate('sources.');
+    emit('sources.changed', {});
+    expect(callsOf('catalog.categories')).toBe(0); // nothing until the burst closes
+
+    await waitFor(() => expect(callsOf('catalog.categories')).toBe(1));
+    await waitFor(() => expect(callsOf('sources.list')).toBe(1));
+    await new Promise((r) => setTimeout(r, EVENT_BURST_MS * 2));
+    expect(callsOf('catalog.categories')).toBe(1);
+    expect(callsOf('sources.list')).toBe(1);
+  });
+
+  it('writes the settings payload into the cache without a settings.get refetch', async () => {
+    unbind = bindEventInvalidation();
+    const q = renderHook(() => useRpcQuery('settings.get', undefined as never), { wrapper });
+    await waitFor(() => expect(q.result.current.isSuccess).toBe(true));
+    vi.mocked(rpcRaw).mockClear();
+
+    emit('settings.changed', { language: 'de', lastRoute: '/live' });
+    expect(queryClient.getQueryData(rpcKey('settings.get'))).toEqual({ language: 'de', lastRoute: '/live' });
+    await new Promise((r) => setTimeout(r, EVENT_BURST_MS * 2));
+    expect(callsOf('settings.get')).toBe(0);
+  });
+
+  it('refetches everything after events.lagged', async () => {
+    unbind = bindEventInvalidation();
+    const q = renderHook(() => useRpcQuery('stats.summary', null as never), { wrapper });
+    await waitFor(() => expect(q.result.current.isSuccess).toBe(true));
+    vi.mocked(rpcRaw).mockClear();
+    emit('events.lagged', { skipped: 0 });
+    await waitFor(() => expect(callsOf('stats.summary')).toBe(1));
+  });
+
+  it('runs a direct invalidation at once when no burst is open', async () => {
+    const q = renderHook(() => useRpcQuery('stats.summary', null as never), { wrapper });
+    await waitFor(() => expect(q.result.current.isSuccess).toBe(true));
+    vi.mocked(rpcRaw).mockClear();
+    void invalidate('stats.');
+    expect(queryClient.getQueryState(rpcKey('stats.summary', null as never))?.isInvalidated).toBe(true);
+    await waitFor(() => expect(callsOf('stats.summary')).toBe(1));
   });
 });

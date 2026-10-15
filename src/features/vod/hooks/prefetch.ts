@@ -156,7 +156,7 @@ export function prefetchTitleSearch(qc: QueryClient, t: SearchPrefetchTarget): v
   const args = t.sourceId ? { query, sourceId: t.sourceId, limit } : { query, limit };
   void qc.prefetchQuery({
     queryKey: rpcKey('catalog.search', args),
-    queryFn: async () => (await rpcRaw('catalog.search', args)) as CatalogSearchResult,
+    queryFn: async ({ signal }) => (await rpcRaw('catalog.search', args, { signal })) as CatalogSearchResult,
     // SearchPage asks for 30 s; matching it means a click soon after the hover reads the cache.
     staleTime: 30_000,
     retry: false,

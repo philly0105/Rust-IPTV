@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import { Lock, LockOpen, ShieldAlert } from 'lucide-react';
+import { FolderLock, Lock, LockOpen, ShieldAlert } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -21,19 +21,24 @@ const sameTarget = (a: ParentalLockTarget, b: ParentalLock): boolean =>
  * group context menu (C2). Empty while parental controls are off (set a PIN
  * in Settings first) or when `target` is null.
  *
+ * For an item, pass its `categoryId`: when that group is locked (by a lock or
+ * the adult-content rule) the menu says "Locked with its group" instead of
+ * offering a lock that would change nothing.
+ *
  * Locking needs no PIN. Removing a lock goes straight through while the
  * session is unlocked, and asks for the PIN otherwise. A group that the
  * adult-content rule already locks shows that, without an action. The array
  * keeps its identity while nothing it shows changes, so callers can memoize
  * their menus on it.
  */
-export function useLockMenuItems(target: ParentalLockTarget | null): MenuAction[] {
+export function useLockMenuItems(target: ParentalLockTarget | null, opts?: { categoryId?: string }): MenuAction[] {
   const { t } = useTranslation('parental');
   const { data: status } = useParentalStatus();
   const on = target !== null && status?.enabled === true;
 
   const locks = useRpcQuery('parental.locks', { sourceId: target?.sourceId ?? '' }, { enabled: on, staleTime: LOCKS_STALE_MS });
-  const adultApplies = on && target?.kind === 'category' && status?.autoAdult === true;
+  const categoryId = target?.kind === 'item' ? opts?.categoryId : undefined;
+  const adultApplies = on && (target?.kind === 'category' || !!categoryId) && status?.autoAdult === true;
   const adult = useRpcQuery(
     'parental.adultCategories',
     { sourceId: target?.sourceId ?? '', contentType: target?.contentType ?? 'live' },
@@ -52,7 +57,7 @@ export function useLockMenuItems(target: ParentalLockTarget | null): MenuAction[
     if (!status?.enabled) return [];
     const tgt: ParentalLockTarget = { sourceId, contentType, kind, targetId, name };
 
-    if (adultApplies && adult.data?.includes(targetId)) {
+    if (kind === 'category' && adultApplies && adult.data?.includes(targetId)) {
       return [
         {
           id: 'parental-adult',
@@ -62,6 +67,24 @@ export function useLockMenuItems(target: ParentalLockTarget | null): MenuAction[
           onSelect: () => undefined,
         },
       ];
+    }
+
+    if (kind === 'item' && categoryId) {
+      const groupLocked =
+        locks.data?.some((l) => l.kind === 'category' && l.sourceId === sourceId && l.contentType === contentType && l.targetId === categoryId) ||
+        (adultApplies && adult.data?.includes(categoryId));
+      // An item lock of its own still offers "Remove lock" below.
+      if (groupLocked && !locks.data?.some((l) => sameTarget(tgt, l))) {
+        return [
+          {
+            id: 'parental-group-locked',
+            label: t('menuLockedWithGroup'),
+            icon: <FolderLock aria-hidden size={16} />,
+            disabled: true,
+            onSelect: () => undefined,
+          },
+        ];
+      }
     }
 
     if (locks.data?.some((l) => sameTarget(tgt, l))) {
@@ -85,7 +108,7 @@ export function useLockMenuItems(target: ParentalLockTarget | null): MenuAction[
         onSelect: () => void addLock(tgt, status, t),
       },
     ];
-  }, [sourceId, contentType, kind, targetId, name, status, adultApplies, adult.data, locks.data, locks.isPending, t]);
+  }, [sourceId, contentType, kind, targetId, name, categoryId, status, adultApplies, adult.data, locks.data, locks.isPending, t]);
 }
 
 type T = TFunction<'parental'>;

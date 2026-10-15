@@ -23,7 +23,7 @@ export interface PosterCardProps {
   posterUrl?: string;
   year?: number;
   rating?: number;
-  /** 0..1 watched fraction; shows a thin bar over the poster when > 0. */
+  /** 0..1 watched fraction; shows a thin bar over the poster when > 0 (not on a watched title, which shows its tick instead). */
   progress?: number;
   /** Watched as a whole (C4): a tick on the poster's top-end corner, with the rating beside it. */
   watched?: boolean | undefined;
@@ -38,8 +38,11 @@ export interface PosterCardProps {
   index?: number;
   onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
   className?: string;
-  /** Hold focus by keyboard without being in the tab order (roving). */
-  tabIndex?: number;
+  /**
+   * The link's tab index under a roving tabindex (a rail's `rail.tabIndex`). When set, the card's
+   * My List corner button leaves the Tab order too, so the host stays one Tab stop; the host binds S.
+   */
+  tabIndex?: number | undefined;
   /** Keyboard cursor of a listbox grid (aria-activedescendant) rests here. */
   active?: boolean;
   /**
@@ -165,7 +168,7 @@ function PosterCardView({
   const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
   const r = formatRating(rating, i18n.language);
   const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
-  const hasProgress = progress !== undefined && Number.isFinite(progress) && progress > 0;
+  const hasProgress = showsProgress(progress, watched);
   const progressLabel = hasProgress ? t('percentWatched', { percent: Math.max(1, Math.round(Math.min(1, progress) * 100)) }) : undefined;
   const label = posterCardLabel({
     title: fullTitle ?? title,
@@ -292,8 +295,10 @@ function PosterCardView({
           variant="icon"
           itemRef={myList.itemRef}
           snapshot={myList.snapshot}
+          // Roving host (rail): the link is the card's only Tab stop; S toggles, and the corner shows while the link has focus.
+          tabIndex={tabIndex !== undefined ? -1 : undefined}
           className={cn(
-            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
+            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
             'motion-safe:transition-[opacity,background-color,color,transform]',
             hasProgress ? 'bottom-5' : 'bottom-1.5',
           )}
@@ -311,7 +316,7 @@ function GridPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; s
   const { t } = useTranslation('vod');
   const { itemRef, snapshot } = props.myList;
   const inList = useInMyList([itemRef]).has(itemKey(itemRef));
-  const hasProgress = props.progress !== undefined && Number.isFinite(props.progress) && props.progress > 0;
+  const hasProgress = showsProgress(props.progress, props.watched);
   return (
     <PosterCardView
       {...props}
@@ -389,6 +394,11 @@ function GridMyListToggle({
       <Icon aria-hidden size={17} strokeWidth={2.25} className={cn(loading && 'motion-safe:animate-pulse')} />
     </span>
   );
+}
+
+/** A saved position draws the bar, unless the title is watched: its tick says that, and a part-filled bar would contradict it. */
+function showsProgress(progress: number | undefined, watched: boolean | undefined): progress is number {
+  return !watched && progress !== undefined && Number.isFinite(progress) && progress > 0;
 }
 
 /** Placeholder with the same footprint as `PosterCard`. */

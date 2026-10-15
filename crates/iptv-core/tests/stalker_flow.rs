@@ -187,7 +187,9 @@ async fn sync_imports_live_and_radio_and_vod_categories_only() {
         .filter(|ev| ev.kind == "import.progress")
         .map(|ev| ev.payload["phase"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert_eq!(phases.first().map(String::as_str), Some("fetching"));
+    // L1-sources-home-10: every run opens with `connecting`, before its first request.
+    assert_eq!(phases.first().map(String::as_str), Some("connecting"));
+    assert_eq!(phases.get(1).map(String::as_str), Some("fetching"));
     assert_eq!(phases.last().map(String::as_str), Some("done"));
     assert!(events.iter().any(|ev| ev.kind == "sources.changed"));
     // Secrets never leave in events.

@@ -185,5 +185,9 @@
   "reminderSwitched": "Passato a {{channel}}",
   "undoSwitch": "Annulla",
   "reminderSwitchFailed": "Impossibile passare al canale",
-  "recordNeedsMpv": "Per registrare questo canale serve mpv. Installa mpv o indica il suo percorso nelle impostazioni del lettore."
+  "recordNeedsMpv": "Per registrare questo canale serve mpv. Installa mpv o indica il suo percorso nelle impostazioni del lettore.",
+  "locked": "Bloccato",
+  "lockedGuide": "Bloccato. Inserisci il PIN per vedere cosa va in onda.",
+  "unlock": "Sblocca",
+  "ribbonFailed": "Impossibile caricare la guida di questo canale"
 }

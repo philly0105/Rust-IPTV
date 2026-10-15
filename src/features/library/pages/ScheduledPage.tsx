@@ -6,7 +6,7 @@
  * state pointing at the guide) goes last.
  */
 
-import { AlarmClock, Bell, CalendarRange, Square, Trash2, X } from 'lucide-react';
+import { AlarmClock, Bell, CalendarRange, LoaderCircle, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -25,13 +25,17 @@ import {
   ProgressBar,
   RecordingRulesPanel,
   SkeletonList,
+  StopRecordingDialog,
   clockDuration,
   elapsedSeconds,
   finishedRecordings,
   groupByDay,
   recordingFraction,
   recordingNow,
+  recordingStartedAt,
+  stoppedEarly,
   upcoming,
+  useCancelPending,
   useRecordingCapabilities,
   useRecordingProgress,
   useRecordings,
@@ -142,13 +146,20 @@ export function ScheduledPage() {
           </Section>
         ) : null}
         {rulesAboveUpcoming ? rulesPanel : null}
-        <Section title={t('scheduledUpcoming')} count={next.length} testId="scheduled-upcoming">
+        <Section
+          title={t('scheduledUpcoming')}
+          count={next.length}
+          testId="scheduled-upcoming"
+          // One grid for every day group (rows are subgrids): the time column takes the
+          // widest time in the locale, so times never wrap and stay aligned.
+          bodyClassName={next.length > 0 ? UPCOMING_GRID : undefined}
+        >
           {next.length === 0 ? (
             <p className="px-4 py-6 text-sm text-fg-muted">{t('scheduledUpcomingEmpty')}</p>
           ) : (
             groupByDay(next).map((g) => (
-              <div key={g.day} role="group" aria-label={dayLabel(g.day, now, lang)}>
-                <p className="bg-surface-2/50 px-4 py-1.5 text-xs font-medium text-fg-muted first-letter:uppercase">{dayLabel(g.day, now, lang)}</p>
+              <div key={g.day} role="group" aria-label={dayLabel(g.day, now, lang)} className="col-span-full grid grid-cols-subgrid">
+                <p className="col-span-full bg-surface-2/50 px-4 py-1.5 text-xs font-medium text-fg-muted first-letter:uppercase">{dayLabel(g.day, now, lang)}</p>
                 {g.entries.map((e) => (
                   <UpcomingRow key={`${e.type}:${e.id}`} entry={e} />
                 ))}
@@ -181,7 +192,19 @@ export function ScheduledPage() {
   );
 }
 
-function Section({ title, count, testId, children }: { title: string; count: number; testId: string; children: React.ReactNode }) {
+function Section({
+  title,
+  count,
+  testId,
+  bodyClassName,
+  children,
+}: {
+  title: string;
+  count: number;
+  testId: string;
+  bodyClassName?: string;
+  children: React.ReactNode;
+}) {
   const id = `${testId}-title`;
   return (
     <section aria-labelledby={id} data-testid={testId} className="flex flex-col gap-2">
@@ -191,15 +214,24 @@ function Section({ title, count, testId, children }: { title: string; count: num
         </h2>
         <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
       </div>
-      <div className="flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-border bg-surface">{children}</div>
+      <div className={cn('flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-border bg-surface', bodyClassName)}>{children}</div>
     </section>
   );
 }
 
+/** Upcoming rows: time, kind mark, title block, kind badge (from sm), cancel. */
+const UPCOMING_GRID = 'grid grid-cols-[max-content_auto_minmax(0,1fr)_auto] sm:grid-cols-[max-content_auto_minmax(0,1fr)_auto_auto]';
+
+/** Icon-button content while its action runs: a spinner in place of the icon. */
+function Busy() {
+  return <LoaderCircle size={16} aria-hidden className="motion-safe:animate-spin" />;
+}
+
 function RecordingNowRow({ recording: r, now }: { recording: Recording; now: number }) {
   const { t, i18n } = useTranslation('library');
-  const actions = useScheduleActions();
   const live = useRecordingProgress((s) => s.byId[r.id]);
+  const stopping = useCancelPending(r.id);
+  const [confirm, setConfirm] = useState(false);
   const name = r.title ?? r.channelName;
   const bytes = live?.bytes ?? r.bytes;
   const elapsed = elapsedSeconds(r, now);
@@ -218,6 +250,7 @@ function RecordingNowRow({ recording: r, now }: { recording: Recording; now: num
             </span>
           ) : null}
         </div>
+        {/* Measured from when this recording began writing, in step with the elapsed clock. */}
         <ProgressBar value={recordingFraction(r, now) * 100} tone="accent" label={t('scheduledProgressFor', { title: name })} />
         <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
           <span className="font-display tabular-nums text-fg">{clockDuration(elapsed)}</span>
@@ -228,10 +261,13 @@ function RecordingNowRow({ recording: r, now }: { recording: Recording; now: num
       </div>
       <IconButton
         label={t('scheduledStop', { title: name })}
-        icon={<Square size={16} aria-hidden />}
-        onClick={() => void actions.cancelRecording(r)}
+        icon={stopping ? <Busy /> : <Square size={16} aria-hidden />}
+        disabled={stopping}
+        aria-busy={stopping || undefined}
+        onClick={() => setConfirm(true)}
         data-testid="recording-stop"
       />
+      <StopRecordingDialog recording={confirm ? r : null} onClose={() => setConfirm(false)} />
     </div>
   );
 }
@@ -245,38 +281,53 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
   const item: Reminder | Recording = isReminder ? entry.reminder : entry.recording;
   const name = (isReminder ? entry.reminder.title : entry.recording.title) ?? item.channelName;
   const range = `${timeOf(item.start, lang)}–${timeOf(item.end, lang)}`;
+  const cancelling = useCancelPending(isReminder ? undefined : entry.recording.id);
+  const [removing, setRemoving] = useState(false);
+  const busy = cancelling || removing;
 
   const cancel = async () => {
+    if (busy) return;
     if (entry.type === 'recording') {
       await actions.cancelRecording(entry.recording);
       return;
     }
+    setRemoving(true);
     try {
       await rpc('reminders.remove', { id: entry.reminder.id });
       toast({ title: t('scheduledReminderRemoved', { title: name }) });
+      // Stays pending until the refreshed list drops the row.
+      await invalidate('reminders.');
     } catch (e) {
       toast({ variant: 'error', title: t('scheduledCancelFailed'), description: RpcError.from(e).message });
-    } finally {
+      setRemoving(false);
       void invalidate('reminders.');
     }
   };
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3" data-testid="upcoming-row" data-kind={entry.type}>
-      <span className="w-14 shrink-0 font-display text-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
+    <div className="col-span-full grid grid-cols-subgrid items-center gap-x-4 px-4 py-3" data-testid="upcoming-row" data-kind={entry.type}>
+      <span className="whitespace-nowrap font-display text-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
       <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
-        {isReminder ? <Bell size={16} className="text-accent" /> : <span className="block size-2.5 rounded-full bg-live" />}
+        {/* A waiting recording gets a hollow mark; the filled live dot is for recordings writing now. */}
+        {isReminder ? (
+          <Bell size={16} className="text-accent" />
+        ) : (
+          <span className="block size-2.5 rounded-full border-2 border-fg-subtle" data-testid="upcoming-record-mark" />
+        )}
       </span>
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-col">
         <span dir="auto" className="truncate text-sm font-medium text-fg">
           {name}
         </span>
-        <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
-          <span dir="auto" className="truncate">
+        {/* The channel comes first and keeps its room; on a narrow row the range wraps under it. */}
+        <span className="flex min-w-0 flex-wrap gap-x-3 text-xs text-fg-muted">
+          <span dir="auto" className="min-w-0 max-w-full truncate">
             {item.channelName}
           </span>
           <span className="shrink-0 tabular-nums">{range}</span>
-          {entry.type === 'recording' && entry.recording.kind === 'programme' && (entry.recording.paddingBeforeMinutes > 0 || entry.recording.paddingAfterMinutes > 0) ? (
+          {entry.type === 'recording' &&
+          entry.recording.kind === 'programme' &&
+          (entry.recording.paddingBeforeMinutes > 0 || entry.recording.paddingAfterMinutes > 0) ? (
             <span className="hidden truncate text-fg-subtle md:inline">
               {t('scheduledPadding', { before: entry.recording.paddingBeforeMinutes, after: entry.recording.paddingAfterMinutes })}
             </span>
@@ -284,11 +335,13 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
         </span>
       </div>
       <Badge variant={isReminder ? 'outline' : 'neutral'} className="hidden shrink-0 sm:inline-flex">
-        {isReminder ? t('scheduledKindReminder') : t('scheduledKindRecording')}
+        {isReminder ? t('scheduledKindReminder') : t('scheduledKindWillRecord')}
       </Badge>
       <IconButton
         label={isReminder ? t('scheduledCancelReminder', { title: name }) : t('scheduledCancelRecording', { title: name })}
-        icon={<X size={16} aria-hidden />}
+        icon={busy ? <Busy /> : <X size={16} aria-hidden />}
+        disabled={busy}
+        aria-busy={busy || undefined}
         onClick={() => void cancel()}
         data-testid="upcoming-cancel"
       />
@@ -300,16 +353,23 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
   const { t, i18n } = useTranslation('library');
   const { toast } = useToast();
   const lang = i18n.language;
+  const [removing, setRemoving] = useState(false);
   const name = r.title ?? r.channelName;
-  const when = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(r.start));
+  // When the recording itself began: a programme joined part-way starts after the programme does.
+  const when = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(recordingStartedAt(r));
+  const early = stoppedEarly(r);
   const note = recordingNote(r, t);
 
   const remove = async () => {
+    if (removing) return;
+    setRemoving(true);
     try {
       await rpc('recordings.remove', { id: r.id });
+      // Stays pending until the refreshed list drops the row.
+      await invalidate('recordings.');
     } catch (e) {
       toast({ variant: 'error', title: t('scheduledRemoveFailed'), description: RpcError.from(e).message });
-    } finally {
+      setRemoving(false);
       void invalidate('recordings.');
     }
   };
@@ -321,8 +381,8 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
           <span dir="auto" className="truncate text-sm font-medium text-fg">
             {name}
           </span>
-          <Badge variant={STATUS_VARIANT[r.status]} className="shrink-0" data-status={r.status}>
-            {t(k('recStatus', r.status))}
+          <Badge variant={early ? 'warning' : STATUS_VARIANT[r.status]} className="shrink-0" data-status={early ? 'stoppedEarly' : r.status}>
+            {early ? t('recStatusStoppedEarly') : t(k('recStatus', r.status))}
           </Badge>
         </div>
         <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
@@ -345,7 +405,14 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
           {t('scheduledShowFiles')}
         </Link>
       ) : null}
-      <IconButton label={t('scheduledRemove', { title: name })} icon={<Trash2 size={16} aria-hidden />} onClick={() => void remove()} data-testid="finished-remove" />
+      <IconButton
+        label={t('scheduledRemove', { title: name })}
+        icon={removing ? <Busy /> : <Trash2 size={16} aria-hidden />}
+        disabled={removing}
+        aria-busy={removing || undefined}
+        onClick={() => void remove()}
+        data-testid="finished-remove"
+      />
     </div>
   );
 }

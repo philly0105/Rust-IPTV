@@ -132,9 +132,13 @@ pub fn build(rows: &[RecordingRow], dir: &Path) -> Vec<RecordingFile> {
             });
         }
     }
+    // A recording's parts stay together and in recorded order: by name,
+    // "A (part 2).ts" sorts before "A.ts" and "part 10" before "part 2".
     out.sort_by(|a, b| {
         b.date
             .cmp(&a.date)
+            .then_with(|| a.recording_id.cmp(&b.recording_id))
+            .then_with(|| a.part.cmp(&b.part))
             .then_with(|| a.file_name.cmp(&b.file_name))
     });
     out
@@ -487,6 +491,27 @@ mod tests {
         let mut parts: Vec<_> = lib.iter().filter_map(|f| f.part).collect();
         parts.sort_unstable();
         assert_eq!(parts, vec![1, 2]);
+    }
+
+    #[test]
+    fn parts_are_listed_in_recorded_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<String> = (1..=11)
+            .map(|n| {
+                let name = if n == 1 {
+                    "A.ts".to_string()
+                } else {
+                    format!("A (part {n}).ts")
+                };
+                let p = dir.path().join(name);
+                std::fs::write(&p, b"x").unwrap();
+                p.to_string_lossy().into_owned()
+            })
+            .collect();
+        let lib = build(&[row("m", paths, RecordingStatus::Completed)], dir.path());
+        let order: Vec<_> = lib.iter().map(|f| f.part.unwrap()).collect();
+        assert_eq!(order, (1..=11).collect::<Vec<_>>());
+        assert_eq!(lib[0].file_name, "A.ts");
     }
 
     #[test]

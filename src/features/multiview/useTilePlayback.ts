@@ -95,8 +95,14 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
   chRef.current = ch;
 
   const startPlay = useCallback((el: HTMLVideoElement, isCurrent: () => boolean) => {
+    // Sound refused earlier, but the page has had a gesture since (a click on Retry is one):
+    // try with sound again instead of carrying the muted fallback into the new stream.
+    if (blockedRef.current && hadGesture()) blockedRef.current = false;
     el.volume = volumeRef.current;
     el.muted = !audibleRef.current || blockedRef.current;
+    // Still no gesture (a retry on its own, when the network came back): the tile plays muted
+    // and asks for a click again, rather than playing silently with no hint.
+    if (blockedRef.current && audibleRef.current) setState((s) => (s.soundBlocked ? s : { ...s, soundBlocked: true }));
     el.play().catch((err: unknown) => {
       if (!isCurrent()) return;
       // No gesture yet: play muted rather than sit still, and ask for a click.

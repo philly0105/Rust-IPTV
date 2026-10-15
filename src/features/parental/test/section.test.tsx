@@ -247,6 +247,35 @@ describe('ParentalSection', () => {
     expect(lastToast()?.title).toBe('2 lock changes saved');
   });
 
+  it('asks before dropping ticked groups, and closes at once with nothing changed', async () => {
+    given({ pin: PIN });
+    renderUi(<Section />, queryClient);
+    await waitFor(() => expect(screen.getAllByTestId('parental-choose-groups')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('parental-choose-groups')[0]!);
+    const dialog = await screen.findByRole('dialog', { name: 'Lock groups in Home IPTV' });
+    await waitFor(() => expect(within(dialog).getAllByTestId('lock-group-row')).toHaveLength(3));
+    const kids = within(dialog).getAllByTestId('lock-group-row').find((r) => r.textContent?.includes('Kids'))!;
+    fireEvent.click(within(kids).getByRole('checkbox'));
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    const ask = await screen.findByRole('dialog', { name: 'Discard your changes?' });
+    fireEvent.click(within(ask).getByTestId('lock-groups-keep'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Discard your changes?' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'Lock groups in Home IPTV' })).toBeTruthy();
+    expect(within(dialog).getByTestId('lock-groups-changes').textContent).toBe('1 unsaved change');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard your changes?' })).getByTestId('lock-groups-discard-confirm'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(core.callsOf('parental.setLocked')).toEqual([]);
+
+    // Nothing ticked: Cancel closes without asking.
+    fireEvent.click(screen.getAllByTestId('parental-choose-groups')[0]!);
+    const again = await screen.findByRole('dialog', { name: 'Lock groups in Home IPTV' });
+    fireEvent.click(within(again).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
   it('turns parental controls off with the PIN and keeps the locks', async () => {
     given({ pin: PIN });
     core.lock(late);

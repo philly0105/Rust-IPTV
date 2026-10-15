@@ -24,6 +24,12 @@ export interface RowBase {
 export interface RowRenderInfo {
   index: number;
   active: boolean;
+  /**
+   * The row holds the list's single Tab stop (roving focus). Rows pass this to
+   * their action buttons so Tab from the row reaches them; buttons in other
+   * rows stay out of the Tab order.
+   */
+  tabStop: boolean;
 }
 
 export interface VirtualRowsProps<R extends RowBase> {
@@ -229,7 +235,7 @@ export function VirtualRows<R extends RowBase>({
               className="absolute start-0 top-0 w-full rounded-md focus-visible:outline-offset-[-2px]"
               style={{ height: vi.size, transform: `translateY(${vi.start - headerHeight}px)` }}
             >
-              {renderRow(row, { index: vi.index, active: vi.index === activeIndex })}
+              {renderRow(row, { index: vi.index, active: vi.index === activeIndex, tabStop: focusable && vi.index === tabStop })}
             </div>
           );
         })}

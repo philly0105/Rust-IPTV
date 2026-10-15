@@ -395,6 +395,10 @@ fn user_message(err: &CoreError) -> String {
         }
         // Server-mode guard refusals already say what to do.
         CoreError::Invalid(m) if m.contains(crate::http::ALLOW_PRIVATE_HINT) => m.clone(),
+        // A cut-off download: the URL is fine, the next refresh may succeed.
+        CoreError::Invalid(m) if m == xmltv::CUT_OFF_MESSAGE => {
+            format!("{m} Refresh to try again.")
+        }
         CoreError::Unsupported(m) => m.clone(),
         CoreError::Invalid(m) => format!(
             "{}. Check that the URL points to an XMLTV file.",
@@ -637,6 +641,107 @@ mod tests {
             ..Default::default()
         };
         assert!(unreadable_warning(&s).is_none());
+    }
+
+    /// L1-core-6: a download cut before `</tv>` (here after the first
+    /// channel's programmes, then a cut gzip stream) failed nothing: it replaced
+    /// the full guide with its first part and stored the new ETag, so a later
+    /// 304 kept the partial guide.
+    #[test]
+    fn cut_off_feed_keeps_the_previous_guide_and_etag() {
+        use std::io::Write;
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        let mut full = String::from("<?xml version=\"1.0\"?>\n<tv>\n");
+        for ch in ["a", "b", "c"] {
+            for h in 12..15 {
+                full.push_str(&format!(
+                    "<programme channel=\"{ch}\" start=\"20261012{h}0000 +0000\" stop=\"20261012{}0000 +0000\"><title>{ch}{h}</title></programme>\n",
+                    h + 1
+                ));
+            }
+        }
+        full.push_str("</tv>");
+        let ingest = |conn: &mut rusqlite::Connection, body: &[u8], etag: &str| {
+            let reader = std::io::BufReader::new(body);
+            ingest_reader(
+                conn,
+                "u",
+                reader,
+                Window::unbounded(),
+                Some(etag),
+                &mut |_, _| {},
+            )
+        };
+        let stored = |conn: &rusqlite::Connection| -> (i64, Option<String>, String) {
+            conn.query_row(
+                "SELECT (SELECT count(*) FROM epg_programs WHERE epg_url = 'u'), etag, status FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            ingest(&mut conn, full.as_bytes(), "v1").unwrap().programs,
+            9
+        );
+        assert_eq!(stored(&conn), (9, Some("v1".into()), "ok".into()));
+
+        // Cut cleanly between two programmes, inside a title, inside a tag.
+        let cut_at = full.find("<programme channel=\"b\"").unwrap();
+        for cut in [cut_at, cut_at + 70, cut_at + 20] {
+            let err = ingest(&mut conn, &full.as_bytes()[..cut], "v2").unwrap_err();
+            assert!(
+                matches!(&err, CoreError::Invalid(m) if m == xmltv::CUT_OFF_MESSAGE),
+                "cut at {cut}: {err}"
+            );
+            assert_eq!(
+                stored(&conn),
+                (9, Some("v1".into()), "ok".into()),
+                "cut at {cut}"
+            );
+            assert!(
+                user_message(&err).contains("cut off"),
+                "{}",
+                user_message(&err)
+            );
+        }
+
+        // A gzip stream cut in the middle, through the real reader.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.xml.gz");
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        enc.write_all(full.as_bytes()).unwrap();
+        let gz = enc.finish().unwrap();
+        std::fs::write(&path, &gz[..gz.len() / 2]).unwrap();
+        let reader = super::fetch::open_reader(&path).unwrap();
+        let err = ingest_reader(
+            &mut conn,
+            "u",
+            reader,
+            Window::unbounded(),
+            Some("v3"),
+            &mut |_, _| {},
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CoreError::Invalid(m) if m == xmltv::CUT_OFF_MESSAGE),
+            "{err}"
+        );
+        assert_eq!(stored(&conn), (9, Some("v1".into()), "ok".into()));
+
+        // The whole file, with or without a trailing newline, still replaces it.
+        let mut with_nl = full.clone();
+        with_nl.push_str("\r\n\n");
+        assert_eq!(
+            ingest(&mut conn, with_nl.as_bytes(), "v4")
+                .unwrap()
+                .programs,
+            9
+        );
+        assert_eq!(stored(&conn), (9, Some("v4".into()), "ok".into()));
     }
 
     #[test]

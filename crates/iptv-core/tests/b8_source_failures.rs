@@ -116,5 +116,8 @@ async fn ten_k_fixture_imports() {
         src.channel_count + src.radio_count + src.movie_count + src.series_count,
         iptv_mock::playlists::TEN_K_CHANNELS as i64
     );
-    assert!(src.channel_count > 9_000, "{}", src.channel_count);
+    // Every tenth entry is an Xtream-style `/movie/` URL: a movie, not a
+    // channel (L1-core-3; this test used to pin the misclassification).
+    assert!(src.channel_count > 8_500, "{}", src.channel_count);
+    assert!(src.movie_count >= 900, "{}", src.movie_count);
 }

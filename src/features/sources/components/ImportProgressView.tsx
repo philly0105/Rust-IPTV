@@ -1,4 +1,6 @@
+import { clsx } from 'clsx';
 import { CircleSlash } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ImportPhase, SourceKind } from '@/api/types';
@@ -12,6 +14,7 @@ import { redactText } from '../lib/redact';
 import { splitErrorText } from '../lib/sourceError';
 
 const PHASE_KEY: Record<ImportPhase, string> = {
+  connecting: 'phaseStarting',
   fetching: 'phaseFetching',
   parsing: 'phaseParsing',
   saving: 'phaseSaving',
@@ -32,14 +35,59 @@ export interface ImportProgressViewProps {
   cancelledNote?: string;
   /** Kind of the source importing. An M3U download reports bytes, not items, while it fetches. */
   kind?: SourceKind;
+  /** Server the import contacts, for "Connecting to <host>" until the first progress arrives. */
+  host?: string;
+  /** When the run started (ms), for the seconds shown while waiting; defaults to when this view mounted. */
+  startedAt?: number;
+}
+
+/**
+ * True until the run reports something to show: no event yet, a `connecting` event (sent by
+ * cores that announce the start), or a download still waiting for its first byte.
+ */
+export function isWaitingForData(entry: ProgressEntry | undefined): boolean {
+  if (!entry) return true;
+  const phase: string = entry.phase;
+  return phase === 'connecting' || (phase === 'fetching' && !(entry.done > 0) && !entry.total);
+}
+
+/** Whole seconds since `since`, ticking once a second while `on`. */
+function useElapsedSeconds(since: number, on: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [on]);
+  return Math.max(0, Math.floor((now - since) / 1000));
+}
+
+function formatSeconds(n: number, lang: string): string {
+  try {
+    return new Intl.NumberFormat(lang, { style: 'unit', unit: 'second', unitDisplay: 'narrow' }).format(n);
+  } catch {
+    return `${n}s`;
+  }
 }
 
 /** Phase, counts, and a bar for one import, with Cancel while it runs and a designed cancelled state. */
-export function ImportProgressView({ entry, compact, onCancel, cancelling, cancelledNote, kind }: ImportProgressViewProps) {
+export function ImportProgressView({ entry, compact, onCancel, cancelling, cancelledNote, kind, host, startedAt }: ImportProgressViewProps) {
   const { t, i18n } = useTranslation('sources');
   const phase: ImportPhase = entry?.phase ?? 'fetching';
   const running = isRunningPhase(phase);
-  const label = cancelling && running ? t('phaseCancelling') : t(PHASE_KEY[phase]);
+  // Before the first progress (a slow server, a long first byte) the view says what it waits on and counts the seconds.
+  const waiting = running && isWaitingForData(entry);
+  const [mountedAt] = useState(() => Date.now());
+  const elapsed = useElapsedSeconds(startedAt ?? mountedAt, waiting);
+  const label =
+    cancelling && running
+      ? t('phaseCancelling')
+      : waiting
+        ? host
+          ? t('phaseConnectingTo', { host })
+          : t('phaseStarting')
+        : t(PHASE_KEY[phase] ?? 'phaseFetching');
 
   if (phase === 'cancelled') {
     return (
@@ -58,8 +106,11 @@ export function ImportProgressView({ entry, compact, onCancel, cancelling, cance
   }
 
   const fraction = entry ? progressFraction(entry) : undefined;
-  const counts =
-    entry && entry.done > 0 && phase !== 'error'
+  const counts = waiting
+    ? elapsed > 0
+      ? formatSeconds(elapsed, i18n.language)
+      : null
+    : entry && entry.done > 0 && phase !== 'error'
       ? kind === 'm3u' && phase === 'fetching'
         ? t('progressBytes', { size: formatFileSize(entry.done, i18n.language) })
         : entry.total
@@ -75,14 +126,23 @@ export function ImportProgressView({ entry, compact, onCancel, cancelling, cance
   const errorSummary = phase === 'error' && (entry?.code || entry?.message) ? t(importSummaryKey(entry.message, entry.code)) : null;
 
   return (
-    <div className={compact ? 'flex flex-col gap-1' : 'flex flex-col gap-2'} data-testid="import-progress" data-phase={phase}>
+    <div
+      className={compact ? 'flex flex-col gap-1' : 'flex flex-col gap-2'}
+      data-testid="import-progress"
+      data-phase={phase}
+      data-waiting={waiting || undefined}
+    >
       <div className="flex items-center justify-between gap-3 text-sm">
         {/* Only the phase is live: counts tick many times a second on a big import and would flood a screen reader. */}
-        <span aria-live="polite" className={phase === 'error' ? 'text-danger' : 'text-fg'} data-testid="import-progress-phase">
+        <span aria-live="polite" className={clsx('min-w-0 truncate', phase === 'error' ? 'text-danger' : 'text-fg')} title={label} data-testid="import-progress-phase">
           {label}
         </span>
-        <span className="flex items-center gap-2">
-          {counts ? <span className="font-display tabular-nums text-fg-muted">{counts}</span> : null}
+        <span className="flex shrink-0 items-center gap-2">
+          {counts ? (
+            <span className="font-display tabular-nums text-fg-muted" data-testid={waiting ? 'import-progress-elapsed' : 'import-progress-counts'}>
+              {counts}
+            </span>
+          ) : null}
           {onCancel && running ? (
             <Button
               size="sm"

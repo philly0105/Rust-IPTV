@@ -147,6 +147,40 @@ pub fn apply_overrides(conn: &Connection, channels: &mut [Channel]) -> CoreResul
 // URL builder (mirror of catchup.ts)
 // ---------------------------------------------------------------------------
 
+/// Every catch-up `type` (lowercase) the URL builder can serve, with the type
+/// it is handled as. `default` and `append` use `catchup-source` when present
+/// and otherwise the standard `?utc={utc}&lutc={lutc}` convention; `shift`
+/// (alias `timeshift`) always uses that convention; `xc` and `flussonic`
+/// (aliases `flussonic-hls`, `flussonic-ts`, `fs`) derive the URL from the
+/// stream URL. The importer ([`catchup_usable`]) and [`mode`] both read this
+/// table, so a type enables an archive exactly when the builder serves it.
+pub const CATCHUP_TYPES: [(&str, &str); 9] = [
+    ("default", "default"),
+    ("append", "append"),
+    ("shift", "shift"),
+    ("timeshift", "shift"),
+    ("xc", "xc"),
+    ("flussonic", "flussonic"),
+    ("flussonic-hls", "flussonic"),
+    ("flussonic-ts", "flussonic"),
+    ("fs", "flussonic"),
+];
+
+/// The type a catch-up `type` (case-insensitive) is handled as (the second
+/// column of [`CATCHUP_TYPES`]), or `None` when the builder cannot serve it.
+pub fn catchup_kind(kind: &str) -> Option<&'static str> {
+    let k = kind.trim().to_ascii_lowercase();
+    CATCHUP_TYPES
+        .iter()
+        .find(|(t, _)| *t == k)
+        .map(|(_, handled_as)| *handled_as)
+}
+
+/// True when a catch-up `type` (case-insensitive) is one clients can play.
+pub fn catchup_usable(kind: &str) -> bool {
+    catchup_kind(kind).is_some()
+}
+
 /// Which builder applies to a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -195,14 +229,16 @@ pub fn mode(channel: &Channel) -> Option<Mode> {
         .and_then(|c| c.source.as_deref())
         .map(str::trim)
         .filter(|s| !s.is_empty());
-    let kind = channel
-        .catchup
-        .as_ref()
-        .map(|c| c.kind.trim().to_ascii_lowercase())
-        .unwrap_or_default();
+    let kind = channel.catchup.as_ref().map_or("", |c| c.kind.trim());
+    // An archive without a catch-up type is served like `shift`.
+    let kind = if kind.is_empty() {
+        "shift"
+    } else {
+        catchup_kind(kind)?
+    };
     let http_url = is_http_url(url);
-    match kind.as_str() {
-        "" | "shift" | "timeshift" => http_url.then_some(Mode::Shift),
+    match kind {
+        "shift" => http_url.then_some(Mode::Shift),
         "default" => {
             if is_http_url(source) {
                 Some(Mode::Template)
@@ -214,7 +250,7 @@ pub fn mode(channel: &Channel) -> Option<Mode> {
         }
         "append" => (source.is_some() && http_url).then_some(Mode::Append),
         "xc" => url.filter(|u| XC_RE.is_match(u)).map(|_| Mode::Xc),
-        "flussonic" | "flussonic-hls" | "flussonic-ts" | "fs" => url
+        "flussonic" => url
             .filter(|u| FLUSSONIC_RE.is_match(u))
             .map(|_| Mode::Flussonic),
         _ => None,
@@ -369,6 +405,20 @@ mod tests {
     use super::*;
     use crate::model::ItemRef;
     use serde::Deserialize;
+
+    /// L1-live-5: `timeshift` and the Flussonic spellings enable an archive
+    /// and use the same builder as their canonical type.
+    #[test]
+    fn catchup_aliases_are_usable() {
+        assert_eq!(catchup_kind("timeshift"), Some("shift"));
+        assert_eq!(catchup_kind(" TimeShift "), Some("shift"));
+        for fs in ["flussonic-hls", "flussonic-ts", "fs"] {
+            assert_eq!(catchup_kind(fs), Some("flussonic"), "{fs}");
+        }
+        assert!(catchup_usable("timeshift"));
+        assert!(!catchup_usable("vod"));
+        assert!(!catchup_usable(""));
+    }
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]

@@ -127,6 +127,11 @@ export interface ScrollMemoryOptions {
   ready: boolean;
   /** Runs once after the offset is restored (focus the last item, mark it). */
   onRestored?: (spot: ScrollSpot, scroller: HTMLElement) => void;
+  /**
+   * False makes this visit start at the top (a PUSH: a link or a new sort is a fresh visit).
+   * Read when the key first becomes ready; the offset is recorded either way. Defaults to true.
+   */
+  restore?: boolean;
 }
 
 /**
@@ -134,8 +139,10 @@ export interface ScrollMemoryOptions {
  * while you scroll, and puts it back the first time the content is ready
  * after the page mounts again (back from a detail view).
  */
-export function useScrollMemory({ key, getScroller, ready, onRestored }: ScrollMemoryOptions): void {
+export function useScrollMemory({ key, getScroller, ready, onRestored, restore = true }: ScrollMemoryOptions): void {
   const restoredFor = useRef<string | null>(null);
+  const restoreRef = useRef(restore);
+  restoreRef.current = restore;
   const getRef = useRef(getScroller);
   getRef.current = getScroller;
   const onRestoredRef = useRef(onRestored);
@@ -146,6 +153,7 @@ export function useScrollMemory({ key, getScroller, ready, onRestored }: ScrollM
     const el = getRef.current();
     if (!el) return;
     restoredFor.current = key;
+    if (!restoreRef.current) return;
     const spot = recallSpot(key);
     if (!spot) return;
     el.scrollTop = spot.scrollTop;

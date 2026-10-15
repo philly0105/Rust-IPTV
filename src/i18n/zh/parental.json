@@ -152,5 +152,10 @@
   "turnOffTitle": "要关闭家长控制吗？",
   "turnOffConfirmText": "输入 PIN 码。在设置新 PIN 码之前，已锁定的内容将对所有人开放。",
   "turnedOffToast": "家长控制已关闭",
-  "turnedOffToastText": "你的锁定已保留。设置 PIN 码即可再次使用。"
+  "turnedOffToastText": "你的锁定已保留。设置 PIN 码即可再次使用。",
+  "menuLockedWithGroup": "随所在分组锁定",
+  "discardTitle": "放弃更改？",
+  "discardText": "你在此勾选或取消勾选的分组不会被保存。",
+  "keepEditing": "继续编辑",
+  "discard": "放弃"
 }

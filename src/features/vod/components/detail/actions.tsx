@@ -5,9 +5,10 @@ import { Link } from 'react-router';
 import { invalidate, useRpcMutation } from '@/api/query';
 import type { Download, ItemRef, ItemSnapshot } from '@/api/types';
 
-import { captureWatched, watchedUndoAction } from '@/features/library/lib/watchedUndo';
+import { captureWatched } from '@/features/library/lib/watchedUndo';
 
 import { useSetWatched } from '../../hooks/queries';
+import { seriesWatchedTargets, watchedToastId, watchedUndoAll } from '../../lib/seriesWatched';
 import { Button, IconButton, buttonClass, cn, useToast } from '@/ui';
 
 export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
@@ -36,20 +37,29 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { ite
   );
 }
 
-/** Toggles watched for a movie (no `episodeIds`) or a set of episodes. */
+/**
+ * Toggles watched for a movie (no `episodeIds`) or a set of episodes, and with `series` the
+ * series-level row too (`lib/seriesWatched` works out which episodes; they may be none).
+ */
 export function WatchedButton({
   itemRef,
   episodeIds,
+  series,
   watched,
   compact,
   labels,
+  name,
 }: {
   itemRef: ItemRef;
   episodeIds?: string[];
+  /** With `episodeIds`: also set the series-level row to the new state. */
+  series?: boolean;
   watched: boolean;
   compact?: boolean;
   /** Overrides for the two button labels (season-level wording). */
   labels?: { mark: string; unmark: string };
+  /** What the toast says was marked ("Season 2", the series title). */
+  name?: string;
 }) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
@@ -57,19 +67,21 @@ export function WatchedButton({
   const label = watched ? (labels?.unmark ?? t('markUnwatched')) : (labels?.mark ?? t('markWatched'));
   const onClick = async () => {
     const next = !watched;
-    const target = { ref: itemRef, ...(episodeIds ? { episodeIds } : {}) };
+    const targets = episodeIds ? seriesWatchedTargets(itemRef, { episodeIds, series: !!series }) : [{ ref: itemRef }];
     // The rows about to change, so Undo can put them back; without them the toast has no Undo.
-    const before = await captureWatched(target).catch(() => undefined);
+    const before = await Promise.all(targets.map((x) => captureWatched(x))).catch(() => undefined);
     setWatched.mutate(
-      { ...target, watched: next },
+      { ref: itemRef, ...(episodeIds ? { episodeIds, series: !!series } : {}), watched: next },
       {
         onSuccess: () =>
           toast({
-            title: next ? t('markedWatched') : t('markedUnwatched'),
+            // One toast per title: marking season after season replaces it (L1-vod-14).
+            id: watchedToastId(itemRef),
+            title: name ? t(next ? 'namedMarkedWatched' : 'namedMarkedUnwatched', { name }) : next ? t('markedWatched') : t('markedUnwatched'),
             variant: 'success',
             ...(before
               ? {
-                  action: watchedUndoAction(target, before, {
+                  action: watchedUndoAll(targets, before, {
                     label: t('undo', { ns: 'library' }),
                     onFailed: () => toast({ title: t('undoFailed', { ns: 'library' }), variant: 'error' }),
                   }),

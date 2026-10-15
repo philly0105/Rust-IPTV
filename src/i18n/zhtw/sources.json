@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "匯入時發生問題。",
   "errorSummaryWrongUrl": "這個位址不是頻道清單。",
   "technicalDetails": "技術詳細資訊",
-  "addRetryNote": "「{{name}}」已儲存，但發生此錯誤。請修正資訊後在此重試，或關閉此視窗，稍後在其卡片上點選「重試」。",
+  "addRetryNote": "修正資料後在此重試。關閉此視窗會移除「{{name}}」（可以復原）。",
   "retryImport": "重試",
   "retrying": "正在重試...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "回看天數",
   "catchupDaysHint": "回看可追溯的天數。留空則保留播放清單中的值。",
   "errorCatchupTemplate": "最多 {{max}} 個字元，且不能包含控制字元。",
-  "errorCatchupDays": "請輸入一到 {{max}} 之間的整數天數。"
+  "errorCatchupDays": "請輸入一到 {{max}} 之間的整數天數。",
+  "testExpired": "已登入，但帳戶已過期。",
+  "testExpiredNamed": "已登入 {{name}}，但帳戶已過期。",
+  "testAccountInactiveHint": "在供應商續約或重新啟用帳戶之前，頻道無法播放。",
+  "phaseConnectingTo": "正在連線到 {{host}}…",
+  "phaseStarting": "正在開始…",
+  "discardedFailedHint": "首次匯入失敗。選擇「復原」即可保留它，並從其卡片上重試。",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

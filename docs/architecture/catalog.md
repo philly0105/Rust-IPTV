@@ -47,7 +47,7 @@ Duplicate `(content_type, item_id)` rows keep the first one (`INSERT OR IGNORE`)
 | `genres` | string array (a comma string is split) | `genres` |
 | `durationSeconds` | number | `VodItem.durationSeconds` |
 | `tmdbId` | number | `tmdbId` |
-| `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`: default, append, shift, xc, flussonic, flussonic-hls, flussonic-ts, fs), as does `archive_hours > 0` |
+| `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`, case-insensitive: default, append, shift, xc and flussonic, plus the aliases in `CATCHUP_TYPES` in `catchup/m3u.rs`: timeshift is handled as shift; flussonic-hls, flussonic-ts and fs as flussonic), as does `archive_hours > 0` |
 | `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped); the player merges them over the source-level headers |
 
 The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`. Readers pass unknown keys through untouched.

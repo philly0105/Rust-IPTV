@@ -1,7 +1,7 @@
 import { ListVideo, Lock, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useLocation, useParams } from 'react-router';
+import { Navigate, useLocation, useNavigationType, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { sameRef, type Episode, type ItemRef } from '@/api/types';
@@ -15,6 +15,7 @@ import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
+import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { WatchStage } from '../components/detail/WatchStage';
 import { SimilarSection } from '../components/SimilarSection';
 import {
@@ -38,7 +39,8 @@ import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, prev
 import { Button, EmptyState, ErrorState, useToast } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
-import { captureWatched, watchedUndoAction } from '@/features/library/lib/watchedUndo';
+import { captureWatched } from '@/features/library/lib/watchedUndo';
+import { seriesWatchedTargets, seriesWatchedWrite, watchedToastId, watchedUndoAll } from '../lib/seriesWatched';
 
 export function SeriesDetailPage() {
   const { t } = useTranslation('vod');
@@ -84,21 +86,27 @@ export function SeriesDetailPage() {
   const positions = useMemo(() => new Map(positionList.filter((p) => p.episodeId).map((p) => [p.episodeId!, p])), [positionList]);
   const setWatched = useSetWatched();
   const { toast } = useToast();
+  const allEpisodeIds = useMemo(() => order.map((e) => e.id), [order]);
   const toggleEpisodeWatched = async (ep: Episode) => {
     const next = !isWatched(positions.get(ep.id));
-    const target = { ref, episodeIds: [ep.id] };
-    // The row about to change, so Undo can put it back; without it the toast has no Undo.
-    const before = await captureWatched(target).catch(() => undefined);
+    // L1-vod-1: the last unwatched episode also marks the series; unmarking one clears it.
+    const write = seriesWatchedWrite(allEpisodeIds, positionList, { episodeIds: [ep.id], watched: next });
+    const targets = seriesWatchedTargets(ref, write);
+    // The rows about to change, so Undo can put them back; without them the toast has no Undo.
+    const before = await Promise.all(targets.map((x) => captureWatched(x))).catch(() => undefined);
+    const name = episodeCode(ep.season, ep.episode);
     setWatched.mutate(
-      { ...target, watched: next },
+      { ref, episodeIds: write.episodeIds, series: write.series, watched: next },
       {
         onSuccess: () =>
           toast({
-            title: next ? t('markedWatched') : t('markedUnwatched'),
+            // One toast per series: marking episode after episode replaces it (L1-vod-14).
+            id: watchedToastId(ref),
+            title: t(next ? 'namedMarkedWatched' : 'namedMarkedUnwatched', { name }),
             variant: 'success',
             ...(before
               ? {
-                  action: watchedUndoAction(target, before, {
+                  action: watchedUndoAll(targets, before, {
                     label: t('undo', { ns: 'library' }),
                     onFailed: () => toast({ title: t('undoFailed', { ns: 'library' }), variant: 'error' }),
                   }),
@@ -113,14 +121,17 @@ export function SeriesDetailPage() {
 
   const watch = useWatchState(ref);
   const seasonKey = `${sourceId}|${itemId}`;
-  const [season, setSeasonState] = useState<number | undefined>(() => recallSeason(seasonKey));
-  // A season you picked is kept for this series until the app restarts (back from an actor or a similar title).
+  // L1-vod-11: a season you picked is kept for Back and Forward (back from an actor or a similar
+  // title). A fresh visit opens on the season Play/Resume points at, so the two never disagree.
+  const navigationType = useNavigationType();
+  const recalled = () => (navigationType === 'POP' ? recallSeason(seasonKey) : undefined);
+  const [season, setSeasonState] = useState<number | undefined>(recalled);
   const setSeason = (n: number) => {
     rememberSeason(seasonKey, n);
     setSeasonState(n);
   };
   // Another series in the same page instance (similar titles): start from its own pick.
-  useEffect(() => setSeasonState(recallSeason(seasonKey)), [seasonKey]);
+  useEffect(() => setSeasonState(recalled()), [seasonKey]);
   const playingSeason = order.find((e) => e.id === watch.episodeId)?.season;
   // A remembered pick that the provider no longer lists falls back to the default choice.
   const pickedSeason = season !== undefined && seasons.some((x) => x.number === season) ? season : undefined;
@@ -147,9 +158,9 @@ export function SeriesDetailPage() {
   const target = useMemo<PlayTarget | undefined>(
     () =>
       item && source.data
-        ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
+        ? { ref, sourceKind: source.data.kind, title: model?.titleBase ?? model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
         : undefined,
-    [item, source.data, ref, model?.title, model?.posterUrl],
+    [item, source.data, ref, model?.titleBase, model?.title, model?.posterUrl],
   );
   const playback = usePlayback(target);
   const downloads = useItemDownloads(ref, playback.canDownload);
@@ -160,8 +171,10 @@ export function SeriesDetailPage() {
   useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item });
 
   // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
-  const pageTitle = (gate.state === 'open' ? model?.title : undefined) ?? t('series');
-  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.title } : null);
+  const pageTitle = (gate.state === 'open' ? (model?.titleBase ?? model?.title) : undefined) ?? t('series');
+  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
+    categoryId: item?.categoryId,
+  });
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
 
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
@@ -198,12 +211,20 @@ export function SeriesDetailPage() {
           <ParentalLocked
             itemRef={ref}
             categoryId={stalkerSource ? item?.categoryId : undefined}
-            title={model?.title}
+            title={model?.titleBase ?? model?.title}
             failed={gate.state === 'failed'}
             onRetry={gate.retry}
             fallbackHref={`/s/${encodeURIComponent(sourceId)}/series`}
           />
         )}
+      </div>
+    );
+  }
+  if (source.isError && isSourceMissing(source.error)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <SourceMissing />
       </div>
     );
   }
@@ -234,17 +255,30 @@ export function SeriesDetailPage() {
   const seasonEpisodeIds = episodes.map((e) => e.id);
   const seasonWatched = episodes.length > 0 && episodes.every((e) => isWatched(positions.get(e.id)));
   // Watched as a whole: the item-level row (no episode id), as `positions.watchedContains` reads it.
+  // The marks below keep it and the episode rows in step (lib/seriesWatched, L1-vod-1).
   const seriesWatched = positionList.some((p) => !p.episodeId && p.watched === true);
-  const snapshot = { title: model.title, posterUrl: model.posterUrl, contentType: 'series' as const };
-  // My List saves what a poster card saves (myListTarget): the base title, with the year as the subtitle.
-  const listSnapshot = { ...snapshot, title: model.titleBase ?? model.title, ...(model.year ? { subtitle: String(model.year) } : {}) };
+  const seriesWrite = seriesWatchedWrite(allEpisodeIds, positionList, { watched: !seriesWatched });
+  const seasonWrite = seriesWatchedWrite(allEpisodeIds, positionList, { episodeIds: seasonEpisodeIds, watched: !seasonWatched });
+  const seasonName = selectedSeason !== undefined && selectedSeason <= 0 ? t('specials') : t('seasonNumber', { number: selectedSeason });
+  // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
+  // (My List saves what a poster card saves, myListTarget).
+  const snapshot = {
+    title: model.titleBase ?? model.title,
+    posterUrl: model.posterUrl,
+    contentType: 'series' as const,
+    ...(model.year ? { subtitle: String(model.year) } : {}),
+  };
+  const listSnapshot = snapshot;
   const favorite = (
     <>
       <MyListButton itemRef={ref} snapshot={listSnapshot} size={watch.active ? 'sm' : 'lg'} />
       <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact={watch.active} />
-      {/* C4: the series as a whole, which ticks its poster; watched episodes never do. */}
+      {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too. */}
       <WatchedButton
         itemRef={ref}
+        episodeIds={seriesWrite.episodeIds}
+        series={seriesWrite.series}
+        name={model.titleBase ?? model.title}
         watched={seriesWatched}
         compact={watch.active}
         labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
@@ -262,7 +296,7 @@ export function SeriesDetailPage() {
     <div ref={scrollRef} className="isolate h-full overflow-y-auto pb-12" data-testid="vod-series-detail">
       {watch.active ? (
         <WatchStage
-          title={model.title}
+          title={model.titleBase ?? model.title}
           subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title) : source.data?.name}
           onClose={playback.stop}
           aside={
@@ -336,7 +370,9 @@ export function SeriesDetailPage() {
               <WatchedButton
                 key={selectedSeason}
                 itemRef={ref}
-                episodeIds={seasonEpisodeIds}
+                episodeIds={seasonWrite.episodeIds}
+                series={seasonWrite.series}
+                name={seasonName}
                 watched={seasonWatched}
                 compact={watch.active}
                 labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
@@ -386,7 +422,7 @@ export function SeriesDetailPage() {
         )}
       </div>
 
-      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.title} />}
+      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}
     </div>
   );
 }

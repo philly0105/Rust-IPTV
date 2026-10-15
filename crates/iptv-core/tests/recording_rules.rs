@@ -641,6 +641,38 @@ async fn removing_a_rule_cancels_its_scheduled_recordings() {
 }
 
 #[tokio::test]
+async fn a_rule_added_again_reschedules_what_its_removal_cancelled() {
+    let r = rig().await;
+    r.guide(&[(HOUR, SHOW), (25 * HOUR, SHOW)]).await;
+    let first = r.add_rule(SHOW).await;
+    assert_eq!(first["upcoming"], 2);
+    r.call("recordings.removeRule", json!({"id": first["id"]}))
+        .await;
+    let cancelled = r.titled(SHOW).await;
+    assert_eq!(cancelled.len(), 2);
+    for x in &cancelled {
+        assert_eq!(x.status, RecordingStatus::Cancelled);
+        assert_eq!(x.error_code.as_deref(), Some("ruleRemoved"), "{x:?}");
+    }
+
+    // The user removed the rule, not the airings: the same rule added again
+    // schedules them again, in place of the cancelled rows.
+    let again = r.add_rule(SHOW).await;
+    assert_eq!(again["upcoming"], 2, "{again}");
+    assert_eq!(
+        r.titled(SHOW)
+            .await
+            .iter()
+            .map(|x| (r.offset(&x.start), x.status))
+            .collect::<Vec<_>>(),
+        vec![
+            (HOUR, RecordingStatus::Scheduled),
+            (25 * HOUR, RecordingStatus::Scheduled)
+        ]
+    );
+}
+
+#[tokio::test]
 async fn a_disabled_rule_schedules_nothing_new() {
     let r = rig().await;
     r.guide(&[(HOUR, SHOW)]).await;

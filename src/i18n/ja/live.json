@@ -180,5 +180,9 @@
   "reminderSwitched": "{{channel}} に切り替えました",
   "undoSwitch": "元に戻す",
   "reminderSwitchFailed": "チャンネルを切り替えられませんでした",
-  "recordNeedsMpv": "このチャンネルの録画には mpv が必要です。mpv をインストールするか、プレーヤー設定でパスを指定してください。"
+  "recordNeedsMpv": "このチャンネルの録画には mpv が必要です。mpv をインストールするか、プレーヤー設定でパスを指定してください。",
+  "locked": "ロック中",
+  "lockedGuide": "ロック中です。PINを入力すると放送中の番組が表示されます。",
+  "unlock": "ロック解除",
+  "ribbonFailed": "このチャンネルの番組表を読み込めませんでした"
 }

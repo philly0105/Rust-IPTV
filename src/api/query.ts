@@ -16,6 +16,7 @@ import {
 
 import { onAnyAppEvent } from './events';
 import { RpcError, rpcRaw, type RpcArgs, type RpcName, type RpcResult } from './transport';
+import type { Settings } from './types';
 
 const MAX_RETRIES = 2;
 
@@ -112,7 +113,8 @@ export function useRpcQuery<K extends RpcName>(
 ): UseQueryResult<RpcResult<K>, RpcError> {
   const options: UseQueryOptions<RpcResult<K>, RpcError> = {
     queryKey: rpcKey(cmd, args),
-    queryFn: async () => (await rpcRaw(cmd, args)) as RpcResult<K>,
+    // The signal aborts a refetch that a newer invalidation or an unmount replaced.
+    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal })) as RpcResult<K>,
   };
   // Only set what the caller gave: an explicit `undefined` would hide the per-command defaults.
   if (opts?.enabled !== undefined) options.enabled = opts.enabled;
@@ -135,14 +137,55 @@ export function useRpcMutation<K extends RpcName>(
   });
 }
 
-/** Invalidates queries whose key[0] starts with `prefix` (e.g. 'xtream.' or 'sources.list'). */
+function matchesAny(prefixes: ReadonlySet<string>): (q: { queryKey: QueryKey }) => boolean {
+  return (q) => {
+    const head = q.queryKey[0];
+    if (typeof head !== 'string') return false;
+    for (const p of prefixes) if (head.startsWith(p)) return true;
+    return false;
+  };
+}
+
+/**
+ * How long an event burst collects invalidations before one refetch round. The core sends
+ * related events back to back (`import.progress` done, then `sources.changed`); without this
+ * each one cancelled and restarted the same refetches.
+ */
+export const EVENT_BURST_MS = 50;
+
+interface Burst {
+  prefixes: Set<string>;
+  all: boolean;
+  done: Promise<void>;
+}
+
+let burst: Burst | null = null;
+
+/** The open burst, or a new one that flushes after {@link EVENT_BURST_MS}. */
+function openBurst(): Burst {
+  if (burst) return burst;
+  let resolve!: () => void;
+  const b: Burst = { prefixes: new Set(), all: false, done: new Promise<void>((r) => (resolve = r)) };
+  burst = b;
+  setTimeout(() => {
+    burst = null;
+    const run = b.all ? queryClient.invalidateQueries() : queryClient.invalidateQueries({ predicate: matchesAny(b.prefixes) });
+    void run.then(resolve, resolve);
+  }, EVENT_BURST_MS);
+  return b;
+}
+
+/**
+ * Invalidates queries whose key[0] starts with `prefix` (e.g. 'xtream.' or 'sources.list').
+ * While an event burst is open (an event handler calling this), the prefix joins the burst's
+ * single refetch round and the promise resolves when that round has refetched.
+ */
 export function invalidate(prefix: string): Promise<void> {
-  return queryClient.invalidateQueries({
-    predicate: (q) => {
-      const head = q.queryKey[0];
-      return typeof head === 'string' && head.startsWith(prefix);
-    },
-  });
+  if (burst) {
+    burst.prefixes.add(prefix);
+    return burst.done;
+  }
+  return queryClient.invalidateQueries({ predicate: matchesAny(new Set([prefix])) });
 }
 
 /**
@@ -156,6 +199,7 @@ export const DEFAULT_EVENT_INVALIDATION: Readonly<Record<string, readonly string
   'import.progress': ['catalog.', 'sources.', 'lists.'],
   'epg.changed': ['epg.'],
   'downloads.update': ['downloads.', 'myvideos.'],
+  // Only without a payload: the event normally carries the full settings, written into the cache.
   'settings.changed': ['settings.'],
   // C7: My List writes (this window or another).
   'watchlist.changed': ['watchlist.'],
@@ -175,10 +219,18 @@ export function invalidationPrefixes(
   extra: Record<string, readonly string[]> = {},
 ): string[] {
   if (event.type === 'import.progress') {
-    const phase = (event.payload as { phase?: unknown } | null | undefined)?.phase;
-    if (phase !== 'done') return [];
+    const p = event.payload as { phase?: unknown; message?: unknown } | null | undefined;
+    if (p?.phase !== 'done') return [];
+    // The core kept the catalog (the playlist did not change): only the source's import time moved.
+    if (p.message === 'unchanged') return ['sources.'];
   }
-  return [...new Set([...(DEFAULT_EVENT_INVALIDATION[event.type] ?? []), ...(extra[event.type] ?? [])])];
+  const defaults = event.type === 'settings.changed' && isSettingsPayload(event.payload) ? [] : (DEFAULT_EVENT_INVALIDATION[event.type] ?? []);
+  return [...new Set([...defaults, ...(extra[event.type] ?? [])])];
+}
+
+/** `settings.changed` carries the settings `settings.get` returns (core `for_client`). */
+function isSettingsPayload(payload: unknown): payload is Settings {
+  return typeof payload === 'object' && payload !== null && !Array.isArray(payload);
 }
 
 /**
@@ -187,10 +239,17 @@ export function invalidationPrefixes(
  */
 export function bindEventInvalidation(map: Record<string, readonly string[]> = {}): () => void {
   return onAnyAppEvent((event) => {
+    // Written before any refetch, so readers see the new settings in the same tick.
+    if (event.type === 'settings.changed' && isSettingsPayload(event.payload)) {
+      queryClient.setQueryData(rpcKey('settings.get'), event.payload);
+    }
     if (INVALIDATE_ALL_EVENTS.has(event.type)) {
-      void queryClient.invalidateQueries();
+      openBurst().all = true;
       return;
     }
-    for (const p of invalidationPrefixes(event, map)) void invalidate(p);
+    const prefixes = invalidationPrefixes(event, map);
+    if (prefixes.length === 0) return;
+    const b = openBurst();
+    for (const p of prefixes) b.prefixes.add(p);
   });
 }

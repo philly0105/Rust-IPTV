@@ -84,6 +84,22 @@ describe('pure helpers', () => {
     expect(recordingNote({}, t)).toBeUndefined();
   });
 
+  it('recordingNote falls back to the core English text when the locale lacks the code', async () => {
+    const { default: i18next } = await import('i18next');
+    const de = i18next.createInstance();
+    await de.init({
+      lng: 'de',
+      ns: ['library'],
+      defaultNS: 'library',
+      resources: { de: { library: { recErrorStopped: 'Gestoppt.' } } },
+      initAsync: false,
+    });
+    const t = de.t.bind(de);
+    expect(recordingNote({ error: 'Stopped.', errorCode: 'stopped' }, t)).toBe('Gestoppt.');
+    const disk = 'The disk is full. Free some space or choose another recordings folder in Settings.';
+    expect(recordingNote({ error: disk, errorCode: 'diskFull' }, t)).toBe(disk);
+  });
+
   it('minuteChoices keeps an off-list saved value', () => {
     expect(minuteChoices([0, 5, 10], 5)).toEqual([0, 5, 10]);
     expect(minuteChoices([0, 5, 10], 7)).toEqual([0, 5, 7, 10]);
@@ -160,6 +176,50 @@ describe('ScheduledPage', () => {
     expect(within(done).getByText('The source of this channel was removed.')).toBeTruthy();
     expect(within(done).getByText('The app was not running when this recording was due.')).toBeTruthy();
     expect(within(done).queryByText('core text A')).toBeNull();
+  });
+
+  it('asks before stopping a running recording, then stops it once (L1-guide-library-4)', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.list'] = () => [rec({ id: 'run', status: 'recording', start: at(-10), end: at(20), startedAt: at(-11), bytes: 1_000_000 })];
+    let finish: (v: null) => void = () => undefined;
+    rpc.handlers['recordings.cancel'] = () => new Promise<null>((resolve) => (finish = resolve));
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+
+    const stop = await screen.findByTestId('recording-stop');
+    fireEvent.click(stop);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Stop recording?')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep recording' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('recordings.cancel')).toEqual([]);
+
+    fireEvent.click(stop);
+    const confirm = await screen.findByTestId('stop-recording-confirm');
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await waitFor(() => expect((screen.getByTestId('recording-stop') as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(screen.getByTestId('recording-stop'));
+    expect(rpc.callsOf('recordings.cancel')).toEqual([{ id: 'run' }]);
+    finish(null);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('recordings.cancel')).toEqual([{ id: 'run' }]);
+  });
+
+  it('marks a waiting recording apart from a live one and flags one stopped early (L1-guide-library-15, -9)', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.list'] = () => [
+      rec({ id: 'next' }),
+      rec({ id: 'cut', status: 'completed', start: at(-120), end: at(-60), paddingAfterMinutes: 0, endedAt: at(-90), fileNames: ['a.ts'], bytes: 10 }),
+      rec({ id: 'full', title: 'Whole', status: 'completed', start: at(-240), end: at(-180), paddingAfterMinutes: 0, endedAt: at(-180), fileNames: ['b.ts'], bytes: 10 }),
+    ];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+
+    const next = await screen.findByTestId('scheduled-upcoming');
+    expect(within(next).getByTestId('upcoming-record-mark')).toBeTruthy();
+    expect(within(next).getByText('Will record')).toBeTruthy();
+    const done = screen.getAllByTestId('finished-row');
+    const statusOf = (row: HTMLElement) => row.querySelector('[data-status]:not([data-testid])')?.textContent;
+    expect(done.map(statusOf)).toEqual(['Stopped early', 'Completed']);
   });
 
   it('explains when the server cannot record', async () => {

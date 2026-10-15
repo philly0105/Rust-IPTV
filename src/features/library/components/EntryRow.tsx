@@ -103,7 +103,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
               icon={<ArrowUp size={15} aria-hidden />}
               disabled={!reorder.canUp || busy}
               onClick={() => reorder.onMove(-1)}
-              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              className={REORDER_ARROW}
             />
             <IconButton
               size="sm"
@@ -112,7 +112,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
               icon={<ArrowDown size={15} aria-hidden />}
               disabled={!reorder.canDown || busy}
               onClick={() => reorder.onMove(1)}
-              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              className={REORDER_ARROW}
             />
           </>
         )}
@@ -130,5 +130,13 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
     </div>
   );
 }
+
+/**
+ * Move up/down arrows: shown on hover or focus only when they can move the row
+ * (a disabled arrow stays invisible, overriding the kit's disabled:opacity-50),
+ * and left out of the layout below sm so titles keep their width on a phone
+ * (drag and Alt+arrow still reorder there).
+ */
+const REORDER_ARROW = 'hidden sm:inline-flex opacity-0 disabled:opacity-0 enabled:group-hover:opacity-100 enabled:group-focus-within:opacity-100';
 
 export const EntryRow = memo(EntryRowImpl);

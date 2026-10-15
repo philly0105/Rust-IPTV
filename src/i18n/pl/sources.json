@@ -253,7 +253,7 @@
   "errorSummaryGeneric": "Podczas importu coś poszło nie tak.",
   "errorSummaryWrongUrl": "Ten adres nie prowadzi do listy kanałów.",
   "technicalDetails": "Szczegóły techniczne",
-  "addRetryNote": "Źródło „{{name}}” zostało zapisane z tym błędem. Popraw dane i spróbuj ponownie tutaj albo zamknij to okno i później użyj opcji Spróbuj ponownie na jego karcie.",
+  "addRetryNote": "Popraw dane i spróbuj ponownie tutaj. Zamknięcie tego okna usuwa „{{name}}” (można to cofnąć).",
   "retryImport": "Spróbuj ponownie",
   "retrying": "Ponawianie...",
 
@@ -384,5 +384,14 @@
   "catchupDays": "Dni archiwum",
   "catchupDaysHint": "Jak daleko wstecz sięga archiwum. Zostaw puste, aby zachować wartość z playlisty.",
   "errorCatchupTemplate": "Użyj najwyżej {{max}} znaków, bez znaków sterujących.",
-  "errorCatchupDays": "Wpisz całkowitą liczbę dni od jednego do {{max}}."
+  "errorCatchupDays": "Wpisz całkowitą liczbę dni od jednego do {{max}}.",
+  "testExpired": "Zalogowano, ale konto wygasło.",
+  "testExpiredNamed": "Zalogowano do {{name}}, ale konto wygasło.",
+  "testAccountInactiveHint": "Kanały nie będą odtwarzane, dopóki dostawca nie przedłuży lub nie reaktywuje konta.",
+  "phaseConnectingTo": "Łączenie z {{host}}…",
+  "phaseStarting": "Uruchamianie…",
+  "discardedFailedHint": "Pierwszy import się nie powiódł. Wybierz Cofnij, aby zachować źródło i spróbować ponownie z jego karty.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

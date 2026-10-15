@@ -30,9 +30,9 @@ const channel: ParentalLockTarget = { sourceId: 'src1', contentType: 'live', kin
 const group: ParentalLockTarget = { sourceId: 'src1', contentType: 'live', kind: 'category', targetId: 'xxx', name: 'XXX' };
 
 /** Renders the entries as buttons, the way a context menu would. */
-function Menu({ target }: { target: ParentalLockTarget | null }) {
+function Menu({ target, categoryId }: { target: ParentalLockTarget | null; categoryId?: string }) {
   useParentalEvents();
-  const items = useLockMenuItems(target);
+  const items = useLockMenuItems(target, { categoryId });
   return (
     <>
       <ul data-testid="menu" data-count={items.length}>
@@ -160,6 +160,25 @@ describe('useLockMenuItems', () => {
     renderUi(<Menu target={group} />, queryClient);
     expect(await screen.findByRole('button', { name: 'Lock group' })).toBeTruthy();
     expect(core.callsOf('parental.adultCategories')).toEqual([]);
+  });
+
+  it('says a channel in a locked group is locked with it instead of offering a lock', async () => {
+    core.reset({ pin: PIN, mode: 'ask' });
+    core.lock({ sourceId: 'src1', contentType: 'live', kind: 'category', targetId: 'sports', name: 'Sports' });
+    const view = renderUi(<Menu target={channel} categoryId="sports" />, queryClient);
+    const entry = await screen.findByRole('button', { name: 'Locked with its group' });
+    expect((entry as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Lock channel' })).toBeNull();
+    view.unmount();
+    // Another group's channel still gets the lock.
+    renderUi(<Menu target={channel} categoryId="news" />, queryClient);
+    expect(await screen.findByRole('button', { name: 'Lock channel' })).toBeTruthy();
+  });
+
+  it('says a channel in an adult group is locked with it while the rule is on', async () => {
+    core.reset({ pin: PIN, mode: 'ask', adult: { 'src1|live': ['xxx'] } });
+    renderUi(<Menu target={channel} categoryId="xxx" />, queryClient);
+    expect(await screen.findByRole('button', { name: 'Locked with its group' })).toBeTruthy();
   });
 
   it('says so when the lock cannot be saved', async () => {

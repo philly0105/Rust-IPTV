@@ -34,5 +34,6 @@
   "clearTitle": "İzleme istatistikleri temizlensin mi?",
   "clearBody": "Sayılan tüm izleme süresi silinir. İzleme ilerlemesi ve Son izlenenler korunur.",
   "cleared": "İzleme istatistikleri temizlendi",
-  "clearFailed": "İstatistikler temizlenemedi"
+  "clearFailed": "İstatistikler temizlenemedi",
+  "watchLive": "Canlı TV izle"
 }

@@ -250,12 +250,8 @@
   "backupReplaceConfirmTitle": "Замяніць усе крыніцы?",
   "backupReplaceConfirmBody": "Спачатку імпартуюцца крыніцы з копіі. Калі загрузіцца хоць адна з іх, бягучыя крыніцы разам з абраным і гісторыяй прагляду будуць выдалены. Калі не загрузіцца ніводная, нічога не зменіцца.",
   "backupReplaceConfirm": "Замяніць",
-  "backupImported_one": "Імпартавана {{count}} крыніца",
-  "backupImported_few": "Імпартаваны {{count}} крыніцы",
-  "backupImported_many": "Імпартавана {{count}} крыніц",
-  "backupImported_other": "Імпартавана крыніц: {{count}}",
   "backupImportFailed": "Не ўдалося імпартаваць рэзервовую копію",
-  "backupResult": "Імпартавана: {{imported}}, прапушчана: {{skipped}}",
+  "backupResult": "Дададзена або абноўлена: {{imported}}. Прапушчана: {{skipped}}.",
   "backupWarnings_one": "{{count}} папярэджанне",
   "backupWarnings_few": "{{count}} папярэджанні",
   "backupWarnings_many": "{{count}} папярэджанняў",
@@ -453,5 +449,9 @@
   "imageCacheCleared": "Кэш выяў ачышчаны",
   "imageCacheClearFailed": "Не ўдалося ачысціць кэш выяў",
   "imageCacheLoadFailed": "Не ўдалося прачытаць кэш выяў: {{message}}",
-  "imageCacheUnavailable": "На гэтым серверы няма кэша выяў, таму выявы загружаюцца непасрэдна ў пастаўшчыкоў."
+  "imageCacheUnavailable": "На гэтым серверы няма кэша выяў, таму выявы загружаюцца непасрэдна ў пастаўшчыкоў.",
+  "backupOldVersion": "Гэтая копія мае старэйшы фармат, які нельга прачытаць. Экспартуйце новую копію і імпартуйце яе.",
+  "backupImportDone": "Рэзервовая копія імпартавана",
+  "backupReplacePinTitle": "Увядзіце PIN, каб замяніць крыніцы",
+  "backupReplacePinText": "Замена выдаляе бягучыя крыніцы і іх бацькоўскія блакіроўкі, таму патрабуе PIN бацькоўскага кантролю."
 }

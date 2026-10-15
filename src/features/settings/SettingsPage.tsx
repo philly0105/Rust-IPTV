@@ -57,16 +57,34 @@ const SECTIONS: Record<SectionId, { icon: LucideIcon; label: string; component: 
 
 /**
  * Section list. `panel` is the vertical list in the shell's context panel;
- * `inline` is the wrapping row the page shows itself while the shell keeps the
- * panel in a drawer (under 1440 px, the shell's inline-panel breakpoint).
+ * `inline` is the row the page shows itself where the shell has no room for the
+ * panel (under 1440 px, the shell's inline-panel breakpoint): one
+ * horizontally scrolling row of chips in a narrow container (a phone), with
+ * the current section scrolled into view, and wrapping rows from @2xl.
  */
 export function SettingsNav({ current, variant = 'panel' }: { current: SectionId; variant?: 'panel' | 'inline' }) {
   const { t } = useTranslation('settings');
   const inline = variant === 'inline';
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!inline) return;
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
+    // Centre the current chip inside the row only; never scroll the page.
+    const navBox = nav.getBoundingClientRect();
+    const box = active.getBoundingClientRect();
+    nav.scrollLeft += box.left + box.width / 2 - (navBox.left + navBox.width / 2);
+  }, [inline, current]);
   return (
     <nav
+      ref={navRef}
       aria-label={t('navLabel')}
-      className={inline ? 'flex flex-wrap gap-1.5' : 'flex flex-col gap-0.5 p-3'}
+      className={
+        inline
+          ? '-mx-4 flex scroll-px-4 gap-1.5 overflow-x-auto px-4 pb-1 scrollbar-none @2xl:mx-0 @2xl:flex-wrap @2xl:overflow-visible @2xl:px-0 @2xl:pb-0'
+          : 'flex flex-col gap-0.5 p-3'
+      }
       data-testid={inline ? 'settings-nav-inline' : 'settings-nav'}
     >
       {SECTION_IDS.map((id) => {
@@ -79,7 +97,7 @@ export function SettingsNav({ current, variant = 'panel' }: { current: SectionId
             aria-current={active ? 'page' : undefined}
             className={clsx(
               'flex items-center font-medium motion-safe:transition-colors',
-              inline ? 'gap-2 rounded-full border px-3 py-1.5 text-sm' : 'gap-3 rounded-md px-3 py-2 text-sm',
+              inline ? 'shrink-0 gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm' : 'gap-3 rounded-md px-3 py-2 text-sm',
               inline
                 ? active
                   ? 'border-accent/60 bg-accent/10 text-fg'
@@ -176,7 +194,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (!valid) return;
-    setContextPanel(<SettingsNav current={current} />);
+    // Below 1440 px the page lists the sections inline (below), so no drawer and header toggle there.
+    setContextPanel(<SettingsNav current={current} />, { drawer: false });
   }, [setContextPanel, current, valid]);
 
   useEffect(() => () => setContextPanel(null), [setContextPanel]);
@@ -191,9 +210,9 @@ export function SettingsPage() {
       <h1 className="sr-only">{t('title')}</h1>
       {/*
         At 1440 px and up the shell shows the context panel (and its section list) beside the page.
-        Below that the panel lives in a drawer, so the page lists the sections itself.
+        Below that the panel has no drawer (drawer: false), so the page lists the sections itself.
       */}
-      <div className="mb-8 border-b border-divider pb-5 min-[1440px]:hidden" data-testid="settings-nav-inline-wrap">
+      <div className="mb-6 border-b border-divider pb-4 @2xl:mb-8 @2xl:pb-5 min-[1440px]:hidden" data-testid="settings-nav-inline-wrap">
         <SettingsNav current={current} variant="inline" />
       </div>
       {query.isPending ? (

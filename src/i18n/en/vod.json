@@ -197,5 +197,12 @@
   "markSeriesWatched": "Mark series watched",
   "markSeriesUnwatched": "Mark series unwatched",
   "shortcutWatched": "Mark watched or unwatched",
-  "shortcutHideWatched": "Hide or show watched titles"
+  "shortcutHideWatched": "Hide or show watched titles",
+  "sourceMissingTitle": "This source was removed",
+  "sourceMissingBody": "It is no longer in your sources. Pick another source, or add it again from Sources.",
+  "goToDashboard": "Go to dashboard",
+  "categoryMissingTitle": "Category not found",
+  "categoryMissingBody": "This source has no category with that link. The provider may have renamed or dropped it.",
+  "namedMarkedWatched": "{{name}} marked watched",
+  "namedMarkedUnwatched": "{{name}} marked unwatched"
 }

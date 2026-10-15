@@ -569,11 +569,14 @@ function SourceLocks({
 
   return (
     <div className="flex flex-col gap-2 px-4 py-4" data-testid="parental-source-locks">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h4 className="min-w-0 flex-1 truncate font-medium text-fg" dir="auto">
-          <span className="text-match-parent">{name}</span>
-        </h4>
-        {locks.length > 0 ? <span className="text-sm text-fg-subtle tabular">{t('lockCount', { count: locks.length })}</span> : null}
+      {/* The name wraps rather than truncates (a phone leaves it little room beside the button); the count sits under it. */}
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <h4 className="font-medium text-fg [overflow-wrap:anywhere]" dir="auto">
+            <span className="text-match-parent">{name}</span>
+          </h4>
+          {locks.length > 0 ? <span className="text-sm text-fg-subtle tabular">{t('lockCount', { count: locks.length })}</span> : null}
+        </div>
         {onChooseGroups ? (
           <Button ref={chooseRef} size="sm" variant="secondary" icon={<ListChecks aria-hidden size={16} />} onClick={onChooseGroups} data-testid="parental-choose-groups">
             {t('chooseGroups')}

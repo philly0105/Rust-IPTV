@@ -138,17 +138,21 @@ test.describe('Watch stats', () => {
   });
 
   test('designed empty states', async ({ page, request }) => {
+    // Nothing watched at all: no "Show 30 days", point at the source's live TV instead.
     await page.goto('/stats');
-    await expect(page.getByText('Nothing played in the last 7 days.')).toBeVisible();
-    await page.getByTestId('stats-show-month').click();
-    await expect(page).toHaveURL(/range=30/);
-    await expect(page.getByTestId('stats-go-home')).toHaveAttribute('href', '/');
+    await expect(page.getByText('Nothing watched yet')).toBeVisible();
+    await expect(page.getByText('Time spent on live TV, movies and series shows up here.')).toBeVisible();
+    await expect(page.getByTestId('stats-watch-live')).toHaveAttribute('href', `/s/${encodeURIComponent(sourceId)}/live`);
+    await expect(page.getByTestId('stats-show-month')).toHaveCount(0);
 
     // Ten days ago shows on 30 days only. The core takes a record only within two days of its
     // own date, so record today and move the page's clock ten days on.
     await record(request, movieRef(), MOCK_FACTS.firstMovie.title, 600, 0);
     await page.clock.setFixedTime(Date.now() + 10 * 86_400_000);
     await page.reload();
+    await expect(page.getByText('Nothing played in the last 7 days.')).toBeVisible();
+    await page.getByTestId('stats-show-month').click();
+    await expect(page).toHaveURL(/range=30/);
     await expect(page.getByTestId('stats-total')).toHaveText('10 min watched in the last 30 days');
     await page.getByRole('tab', { name: '7 days' }).click();
     await expect(page.getByText('Nothing played in the last 7 days.')).toBeVisible();

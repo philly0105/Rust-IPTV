@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "Alle Quellen ersetzen?",
   "backupReplaceConfirmBody": "Zuerst werden die Quellen aus dem Backup importiert. Sobald mindestens eine davon geladen ist, werden Ihre aktuellen Quellen samt Favoriten und Wiedergabeverlauf entfernt. Lädt keine, ändert sich nichts.",
   "backupReplaceConfirm": "Ersetzen",
-  "backupImported_one": "{{count}} Quelle importiert",
-  "backupImported_other": "{{count}} Quellen importiert",
   "backupImportFailed": "Das Backup konnte nicht importiert werden",
-  "backupResult": "{{imported}} importiert, {{skipped}} übersprungen",
+  "backupResult": "Hinzugefügt oder aktualisiert: {{imported}}. Übersprungen: {{skipped}}.",
   "backupWarnings_one": "{{count}} Warnung",
   "backupWarnings_other": "{{count}} Warnungen",
   "backupNotJson": "Diese Datei ist kein gültiges JSON.",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "Bild-Cache geleert",
   "imageCacheClearFailed": "Bild-Cache konnte nicht geleert werden",
   "imageCacheLoadFailed": "Bild-Cache konnte nicht gelesen werden: {{message}}",
-  "imageCacheUnavailable": "Dieser Server hat keinen Bild-Cache. Bilder werden direkt vom jeweiligen Anbieter geladen."
+  "imageCacheUnavailable": "Dieser Server hat keinen Bild-Cache. Bilder werden direkt vom jeweiligen Anbieter geladen.",
+  "backupOldVersion": "Diese Sicherung hat ein älteres Format, das nicht gelesen werden kann. Exportiere eine neue Sicherung und importiere diese.",
+  "backupImportDone": "Sicherung importiert",
+  "backupReplacePinTitle": "PIN eingeben, um Quellen zu ersetzen",
+  "backupReplacePinText": "Beim Ersetzen werden deine aktuellen Quellen und ihre Jugendschutz-Sperren entfernt, daher ist die Jugendschutz-PIN nötig."
 }

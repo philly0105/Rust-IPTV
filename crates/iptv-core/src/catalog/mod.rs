@@ -218,26 +218,10 @@ impl ItemRow {
     }
 }
 
-/// Catch-up types a client can build archive URLs for. `default` and
-/// `append` use `catchup-source` when present and otherwise the standard
-/// `?utc={utc}&lutc={lutc}` convention; `shift` always uses that convention;
-/// `xc` and the flussonic variants derive the URL from the stream URL.
-pub const CATCHUP_TYPES: [&str; 7] = [
-    "default",
-    "append",
-    "shift",
-    "xc",
-    "flussonic",
-    "flussonic-hls",
-    "flussonic-ts",
-];
-
-/// True when a catch-up `type` (case-insensitive) is one clients can play.
-/// `fs` is accepted as the common alias of `flussonic`.
-pub fn catchup_usable(kind: &str) -> bool {
-    let k = kind.trim().to_ascii_lowercase();
-    k == "fs" || CATCHUP_TYPES.contains(&k.as_str())
-}
+/// The catch-up types a client can build archive URLs for, and the check of
+/// one. They live with the URL builder, so the importer enables an archive
+/// for exactly the types the builder serves (aliases included).
+pub use crate::catchup::m3u::{catchup_usable, CATCHUP_TYPES};
 
 /// One category to write with [`replace_catalog`] / [`CatalogWriter::finish`].
 #[derive(Debug, Clone, PartialEq, Eq)]

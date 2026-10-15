@@ -336,6 +336,42 @@ describe('ArchivePage', () => {
     expect(list[1]?.getAttribute('tabindex')).toBe('0');
   });
 
+  it('opens on the airing programme by scrolling only its list (L1-live-11, L1-visual-5)', async () => {
+    const rect = (top: number, height: number) =>
+      ({ top, height, bottom: top + height, left: 0, right: 800, width: 800, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    const tops = new Map<Element, number>();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: Element) {
+        return tops.get(this) ?? 0;
+      },
+      set(this: Element, v: number) {
+        tops.set(this, v);
+      },
+    });
+    const intoView = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const box = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.testid === 'archive-panel') return rect(100, 300);
+      if (this.dataset.state === 'airing') return rect(700, 40);
+      return rect(0, 0);
+    });
+    try {
+      renderAt('/live/archive/src1/c0', ROUTE);
+      await rows();
+      const panel = screen.getByTestId('archive-panel');
+      // The airing row lands in the middle of the list's own scroller: 700 - 100 - (300 - 40) / 2.
+      await waitFor(() => expect(panel.scrollTop).toBe(470));
+      // Nothing scrolls the page, so the channel header and day tabs stay in view.
+      expect(intoView).not.toHaveBeenCalled();
+      expect(panel.className).toContain('overflow-y-auto');
+      expect(panel.contains(screen.getByTestId('archive-days'))).toBe(false);
+    } finally {
+      box.mockRestore();
+      intoView.mockRestore();
+      delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop;
+    }
+  });
+
   it('plays a past programme from the archive and ignores future ones', async () => {
     renderAt('/live/archive/src1/c0', ROUTE);
     const list = await rows();

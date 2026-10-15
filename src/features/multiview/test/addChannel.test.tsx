@@ -140,14 +140,21 @@ describe('useMultiviewMenuItem', () => {
     expect(result.current.disabled).toBe(true);
   });
 
-  it('adds the channel and opens /multiview', async () => {
+  it('adds the channel, stays on the list and offers the wall in a counted toast', async () => {
+    store().add(input(2));
     const { result } = renderHook(() => useMultiviewMenuItem(input(1)), { wrapper });
     expect(result.current.disabled).toBe(false);
     act(() => result.current.onSelect());
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/multiview'));
-    expect(store().tiles.map((t) => t.title)).toEqual(['Channel 1']);
+    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(store().tiles.map((t) => t.title)).toEqual(['Channel 2', 'Channel 1']);
+    // L1-live-15: no jump to /multiview on every add; the toast says how full the wall is.
+    expect(screen.getByTestId('location').textContent).toBe('/live');
+    expect(toasts[0]).toMatchObject({ variant: 'success', title: 'Added Channel 1 to multi-view', description: '2 of 4 on the wall' });
+    expect(toasts[0]!.action!.label).toBe('Open multi-view');
+    act(() => toasts[0]!.action!.onClick());
+    expect(screen.getByTestId('location').textContent).toBe('/multiview');
     // The page is told which tile to focus, so keyboard focus does not fall to the body.
-    expect(JSON.parse(screen.getByTestId('location').dataset['state']!)).toEqual({ focusTile: store().tiles[0]!.key });
+    expect(JSON.parse(screen.getByTestId('location').dataset['state']!)).toEqual({ focusTile: store().tiles[1]!.key });
   });
 
   it('says so when the channel is already up, with a way to the wall', async () => {

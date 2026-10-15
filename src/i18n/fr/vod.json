@@ -206,5 +206,12 @@
   "markSeriesWatched": "Marquer la série comme vue",
   "markSeriesUnwatched": "Marquer la série comme non vue",
   "shortcutWatched": "Marquer comme vu ou non vu",
-  "shortcutHideWatched": "Masquer ou afficher les titres vus"
+  "shortcutHideWatched": "Masquer ou afficher les titres vus",
+  "sourceMissingTitle": "Cette source a été supprimée",
+  "sourceMissingBody": "Elle ne fait plus partie de vos sources. Choisissez une autre source ou ajoutez-la de nouveau depuis Sources.",
+  "goToDashboard": "Aller au tableau de bord",
+  "categoryMissingTitle": "Catégorie introuvable",
+  "categoryMissingBody": "Cette source n'a aucune catégorie avec ce lien. Le fournisseur l'a peut-être renommée ou supprimée.",
+  "namedMarkedWatched": "{{name}} marqué comme vu",
+  "namedMarkedUnwatched": "{{name}} marqué comme non vu"
 }

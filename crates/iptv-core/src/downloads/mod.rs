@@ -374,9 +374,12 @@ async fn cleanup_part(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
     Ok(())
 }
 
-/// Removes a download row. Unfinished rows always lose their `.part`;
-/// completed rows delete the media file only when `delete_file` is set. When
-/// a file cannot be deleted (locked), the row stays so the user can retry.
+/// Removes a download row. `delete_file` deletes the row's file: the `.part`
+/// of an unfinished row, the media file of a completed one. Without it an
+/// unfinished row's `.part` stays on disk (a new download reserves its own
+/// `.part`, so the kept one is never reused or overwritten); a completed
+/// row's leftover `.part` is always cleared. When a file cannot be deleted
+/// (locked), the row stays so the user can retry.
 pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreResult<()> {
     let mut d = get(state, id).await?;
     if let Stopped::Running(rx) = manager::manager(state).stop(id, StopReason::Detach) {
@@ -389,7 +392,9 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
     let completed = d.status == DownloadStatus::Completed;
     tokio::task::spawn_blocking(move || -> CoreResult<()> {
         if let Some(p) = path.as_deref().map(Path::new) {
-            naming::remove_regular_file(&naming::part_path(p))?;
+            if delete_file || completed {
+                naming::remove_regular_file(&naming::part_path(p))?;
+            }
             if completed && delete_file {
                 naming::remove_regular_file(p)?;
             }

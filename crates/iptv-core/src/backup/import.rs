@@ -21,7 +21,6 @@ use crate::userstate::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -1260,7 +1259,7 @@ async fn import_entry(
                     // only fires when the catalog really matches the text.
                     // Inline text compares directly; a cached copy (raw = '')
                     // compares by the sha the importer recorded for it.
-                    let sha = hex::encode(Sha256::digest(text.as_bytes()));
+                    let sha = crate::m3u::importer::playlist_sha(text.as_bytes());
                     tx.execute(
                         "INSERT INTO m3u_raw(source_id, raw, sha256, fetched_at) VALUES (?1, ?2, '', ?3)
                          ON CONFLICT(source_id) DO UPDATE SET
@@ -1419,12 +1418,20 @@ async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Resu
                     tracing::warn!(source_id = %id, error = %err, "could not record the portal totals");
                 }
             }
+            // Ends the source's progress toast, as `sources::run_import` does.
+            let total = (summary.channels + summary.movies + summary.series).max(0) as u64;
+            crate::sources::progress(state, id, "done", total, Some(total), None);
             Ok(())
         }
         Err(err) => {
             let msg = crate::sources::error_text(&err);
             tracing::warn!(source_id = %id, %kind, error = %msg, "backup source import failed");
             let _ = set_error_coded(state, id, Some((&msg, err.code()))).await;
+            if crate::sources::is_cancelled_error(&err) {
+                crate::sources::progress_cancelled(state, id, &msg);
+            } else {
+                crate::sources::progress_error(state, id, &msg, err.code());
+            }
             Err(msg)
         }
     }

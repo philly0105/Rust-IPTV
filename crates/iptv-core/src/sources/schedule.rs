@@ -221,7 +221,13 @@ pub async fn tick(state: &Arc<AppState>, clock: &dyn Clock, stagger: Duration) -
         }
         tracing::info!(source_id = %id, "scheduled refresh");
         let outcome = try_run_import(state.clone(), id).await;
-        let ran = outcome.is_some();
+        // An unchanged playlist sent `done` + "unchanged" instead of
+        // `sources.changed` (clients refetch `sources.*` on it, which covers
+        // `sources.schedule`); repeating `sources.changed` here would make
+        // every client refetch its catalog after a no-op refresh.
+        let notify = outcome
+            .as_ref()
+            .is_some_and(|r| !r.as_ref().is_ok_and(|(_, s)| s.unchanged));
         match outcome {
             None => report.busy.push(id.clone()),
             Some(Ok(_)) => {
@@ -252,7 +258,7 @@ pub async fn tick(state: &Arc<AppState>, clock: &dyn Clock, stagger: Duration) -
                 report.failed.push(id.clone());
             }
         }
-        if ran {
+        if notify {
             // The import's own `sources.changed` fired before the backoff
             // above was stored; tell the UI again so `sources.schedule` shows
             // the real next attempt.

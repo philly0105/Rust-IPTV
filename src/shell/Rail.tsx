@@ -22,7 +22,7 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { type CSSProperties, type RefObject, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
 
@@ -211,6 +211,58 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
   );
 }
 
+/** Fade masks for the rail's scrolling list: a soft edge where links continue out of view. */
+const FADE = '24px';
+export function railFadeMask(top: boolean, bottom: boolean): CSSProperties | undefined {
+  if (!top && !bottom) return undefined;
+  const stops = [top ? `transparent, #000 ${FADE}` : '#000', bottom ? `#000 calc(100% - ${FADE}), transparent` : '#000'];
+  const image = `linear-gradient(to bottom, ${stops.join(', ')})`;
+  return { maskImage: image, WebkitMaskImage: image };
+}
+
+/**
+ * At laptop heights the rail's links overflow: the edge that has more links fades out, and on
+ * every route change the active link scrolls into the visible part of the rail (only the rail
+ * scrolls, never the page).
+ */
+function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string, deps: readonly unknown[]): { top: boolean; bottom: boolean } {
+  const [fade, setFade] = useState({ top: false, bottom: false });
+  const scrolledFor = useRef<string | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const top = el.scrollTop > 1;
+      const bottom = el.scrollHeight - el.clientHeight - el.scrollTop > 1;
+      setFade((f) => (f.top === top && f.bottom === bottom ? f : { top, bottom }));
+    };
+    // Once per route (and once more when the source links arrive), so a refetch never undoes
+    // the user's own scrolling of the rail.
+    const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"]');
+    scrolledFor.current = scrollKey;
+    if (active) {
+      const box = el.getBoundingClientRect();
+      const link = active.getBoundingClientRect();
+      const pad = 24;
+      if (link.top < box.top) el.scrollTop -= box.top - link.top + pad;
+      else if (link.bottom > box.bottom) el.scrollTop += link.bottom - box.bottom + pad;
+    }
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (ro) {
+      ro.observe(el);
+      for (const child of el.children) ro.observe(child);
+    }
+    return () => {
+      el.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollKey, ...deps]);
+  return fade;
+}
+
 export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCollapsed: boolean }) {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
@@ -218,6 +270,8 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const location = useLocation();
   const activeSourceId = /^\/s\/([^/]+)/.exec(location.pathname)?.[1];
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const fade = useRailScroll(scrollRef, `${location.pathname}|${sources.data ? 'ready' : 'pending'}`, [sources.data, collapsed]);
 
   return (
     <nav
@@ -239,7 +293,14 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
         </Link>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden px-2 pb-3">
+      <div
+        ref={scrollRef}
+        data-testid="rail-scroll"
+        data-fade-top={fade.top || undefined}
+        data-fade-bottom={fade.bottom || undefined}
+        style={railFadeMask(fade.top, fade.bottom)}
+        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden px-2 pb-3"
+      >
         <ul className="flex flex-col gap-0.5">
           {PRIMARY.map((l) => (
             <li key={l.to}>

@@ -34,5 +34,6 @@
   "clearTitle": "Cancellare le statistiche di visione?",
   "clearBody": "Tutto il tempo di visione conteggiato viene eliminato. I progressi e Visti di recente restano.",
   "cleared": "Statistiche di visione cancellate",
-  "clearFailed": "Impossibile cancellare le statistiche"
+  "clearFailed": "Impossibile cancellare le statistiche",
+  "watchLive": "Guarda la TV in diretta"
 }

@@ -32,17 +32,18 @@ export function TmdbRail({
       items={items}
       loading={loading}
       empty={empty}
-      render={(b, i) => <TmdbCard brief={b} index={i} sourceId={sourceId} />}
+      render={(b, i, rail) => <TmdbCard brief={b} index={i} sourceId={sourceId} tabIndex={rail.tabIndex} />}
     />
   );
 }
 
 /** One TMDB title; resting on it warms the search page it links to (C4). */
-function TmdbCard({ brief, index, sourceId }: { brief: TmdbBrief; index: number; sourceId: string | undefined }) {
+function TmdbCard({ brief, index, sourceId, tabIndex }: { brief: TmdbBrief; index: number; sourceId: string | undefined; tabIndex: number }) {
   const intent = useSearchPrefetchIntent({ title: brief.title, sourceId });
   return (
     <PosterCard
       index={index}
+      tabIndex={tabIndex}
       title={brief.title}
       href={searchHref(brief.title, sourceId)}
       posterUrl={brief.posterUrl}

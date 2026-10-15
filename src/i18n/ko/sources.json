@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "가져오는 중 문제가 발생했습니다.",
   "errorSummaryWrongUrl": "이 주소는 채널 목록이 아닙니다.",
   "technicalDetails": "기술 정보",
-  "addRetryNote": "\"{{name}}\" 소스가 이 오류 상태로 저장되었습니다. 정보를 수정해 여기서 다시 시도하거나, 이 창을 닫고 나중에 카드의 다시 시도를 사용하세요.",
+  "addRetryNote": "정보를 수정하고 여기서 다시 시도하세요. 이 창을 닫으면 \"{{name}}\"이(가) 삭제됩니다(실행 취소 가능).",
   "retryImport": "다시 시도",
   "retrying": "다시 시도하는 중...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "아카이브 일수",
   "catchupDaysHint": "아카이브를 거슬러 볼 수 있는 기간입니다. 비워 두면 재생목록 값을 유지합니다.",
   "errorCatchupTemplate": "{{max}}자 이하로, 제어 문자 없이 입력하세요.",
-  "errorCatchupDays": "일수는 1일부터 {{max}}일까지의 정수로 입력하세요."
+  "errorCatchupDays": "일수는 1일부터 {{max}}일까지의 정수로 입력하세요.",
+  "testExpired": "로그인했지만 계정이 만료되었습니다.",
+  "testExpiredNamed": "{{name}}에 로그인했지만 계정이 만료되었습니다.",
+  "testAccountInactiveHint": "제공업체가 계정을 갱신하거나 다시 활성화할 때까지 채널이 재생되지 않습니다.",
+  "phaseConnectingTo": "{{host}}에 연결하는 중…",
+  "phaseStarting": "시작하는 중…",
+  "discardedFailedHint": "첫 가져오기에 실패했습니다. 소스를 유지하고 카드에서 다시 시도하려면 실행 취소를 선택하세요.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

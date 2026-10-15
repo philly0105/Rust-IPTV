@@ -48,6 +48,7 @@ import { playFromList } from '../lib/play';
 import { useAddToListShortcut } from '../hooks/useAddToList';
 import { useListActions } from '../hooks/useListActions';
 import { useListChannels } from '../hooks/useListChannels';
+import { useListLocks } from '../hooks/useListLocks';
 import { useLists } from '../hooks/useLists';
 import { LISTS_PATH } from '../paths';
 import { openEditListItems, openListPicker, openManageLists } from '../store';
@@ -65,6 +66,8 @@ export function ListPage() {
   const lists = useLists();
   const list = lists.data?.find((l) => l.id === listId);
   const paged = useListChannels(listId, { now, epgOffsetMinutes: prefs.epgOffsetMinutes });
+  // C2: Ask mode marks locked channels and keeps their programme titles back, as on Live.
+  const locks = useListLocks(paged.channels);
   const actions = useListActions();
   const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
   const sources = useVisibleSources();
@@ -363,6 +366,7 @@ export function ListPage() {
         onContextMenu={onContextMenu}
         favoriteOverrides={favOverrides}
         onActiveChange={onActiveChange}
+        locks={locks}
       />
     );
   }

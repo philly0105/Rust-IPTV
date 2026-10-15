@@ -180,5 +180,9 @@
   "reminderSwitched": "{{channel}} kanalına geçildi",
   "undoSwitch": "Geri al",
   "reminderSwitchFailed": "Kanala geçilemedi",
-  "recordNeedsMpv": "Bu kanalı kaydetmek için mpv gerekir. mpv'yi kurun veya yolunu oynatıcı ayarlarında belirtin."
+  "recordNeedsMpv": "Bu kanalı kaydetmek için mpv gerekir. mpv'yi kurun veya yolunu oynatıcı ayarlarında belirtin.",
+  "locked": "Kilitli",
+  "lockedGuide": "Kilitli. Yayın akışını görmek için PIN kodunu girin.",
+  "unlock": "Kilidi aç",
+  "ribbonFailed": "Bu kanalın rehberi yüklenemedi"
 }

@@ -95,6 +95,12 @@ pub fn encode_segment(s: &str) -> String {
     utf8_percent_encode(s.trim(), SEGMENT).to_string()
 }
 
+/// Encodes the password as a URL path segment, untrimmed: providers do
+/// issue passwords with a leading or trailing space (L1-core-20).
+fn encode_password(s: &str) -> String {
+    utf8_percent_encode(s, SEGMENT).to_string()
+}
+
 /// `{server}/player_api.php`
 pub fn api_endpoint(server: &str) -> String {
     format!("{server}/player_api.php")
@@ -106,7 +112,7 @@ pub fn xmltv_url(server: &str, username: &str, password: &str) -> String {
         .unwrap_or_else(|_| url::Url::parse("http://invalid/xmltv.php").expect("static url"));
     url.query_pairs_mut()
         .append_pair("username", username.trim())
-        .append_pair("password", password.trim());
+        .append_pair("password", password);
     url.to_string()
 }
 
@@ -125,7 +131,7 @@ pub fn live_url(server: &str, username: &str, password: &str, id: &str, ext: &st
     format!(
         "{server}/live/{}/{}/{}.{ext}",
         encode_segment(username),
-        encode_segment(password),
+        encode_password(password),
         encode_segment(id)
     )
 }
@@ -135,7 +141,7 @@ pub fn movie_url(server: &str, username: &str, password: &str, id: &str, ext: &s
     format!(
         "{server}/movie/{}/{}/{}.{ext}",
         encode_segment(username),
-        encode_segment(password),
+        encode_password(password),
         encode_segment(id)
     )
 }
@@ -145,7 +151,7 @@ pub fn episode_url(server: &str, username: &str, password: &str, id: &str, ext: 
     format!(
         "{server}/series/{}/{}/{}.{ext}",
         encode_segment(username),
-        encode_segment(password),
+        encode_password(password),
         encode_segment(id)
     )
 }
@@ -162,7 +168,7 @@ pub fn timeshift_url(
     format!(
         "{server}/timeshift/{}/{}/{}/{start_stamp}/{}.ts",
         encode_segment(username),
-        encode_segment(password),
+        encode_password(password),
         duration_minutes.max(1),
         encode_segment(id)
     )
@@ -260,6 +266,15 @@ mod tests {
         assert_eq!(x, "http://h:8080/base/xmltv.php?username=u&password=a%26b");
         assert!(is_xmltv_url_for(&x, s));
         assert!(!is_xmltv_url_for("http://other/xmltv.php?x", s));
+        // L1-core-20: the username is trimmed, the password is sent as typed.
+        assert_eq!(
+            live_url(s, " u ", " p ", "101", "ts"),
+            "http://h:8080/base/live/u/%20p%20/101.ts"
+        );
+        assert_eq!(
+            xmltv_url(s, " u ", " p "),
+            "http://h:8080/base/xmltv.php?username=u&password=+p+"
+        );
     }
 
     #[test]

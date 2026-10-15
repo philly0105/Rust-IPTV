@@ -139,13 +139,17 @@ export function DashboardRail<T>({
       setCanPrev(edges.canPrev);
       setCanNext(edges.canNext);
     };
-    measure();
+    // No synchronous first measure: reading scroll sizes right after the rail's DOM went in
+    // forced a layout per rail on mount (most of a 100 ms task on a cold start). The
+    // ResizeObserver's first callback comes after layout and sets the arrows for free.
     el.addEventListener('scroll', measure, { passive: true });
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
     ro?.observe(el);
+    const raf = ro ? 0 : requestAnimationFrame(measure);
     return () => {
       el.removeEventListener('scroll', measure);
       ro?.disconnect();
+      cancelAnimationFrame(raf);
     };
   }, [count]);
 

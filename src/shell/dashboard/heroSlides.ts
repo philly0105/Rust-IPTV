@@ -57,7 +57,8 @@ function fromItem(v: VodItem | SeriesItem): HeroSlide {
     key: itemKey(v.ref),
     kind: 'new',
     ref: v.ref,
-    title: v.title,
+    // The title the detail page shows: no trailing year or provider tag (the year has its own fact).
+    title: v.titleBase || v.title,
     posterUrl: v.posterUrl,
     backdropUrl: v.backdropUrl,
     plot: v.plot,
@@ -89,6 +90,18 @@ export function buildHeroSlides(
     slides.push(fromItem(v));
   }
   return slides;
+}
+
+/**
+ * True when `title` already ends with `year`, as provider titles often do ("Summer Static (2025)",
+ * "Summer Static [2025]", "Summer Static - 2025"), so a facts line need not repeat it.
+ */
+export function titleEndsWithYear(title: string | undefined, year: number | string | undefined): boolean {
+  if (!title || year === undefined || year === '') return false;
+  const y = String(year).trim();
+  if (!/^\d{4}$/.test(y)) return false;
+  const m = /(?:\((\d{4})\)|\[(\d{4})\]|[-–—]\s*(\d{4}))\s*$/.exec(title.trim());
+  return !!m && (m[1] ?? m[2] ?? m[3]) === y;
 }
 
 /** Index `step` slides away from `index`, wrapping both ways. */

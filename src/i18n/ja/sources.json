@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "読み込み中に問題が発生しました。",
   "errorSummaryWrongUrl": "このアドレスはチャンネルリストではありません。",
   "technicalDetails": "技術的な詳細",
-  "addRetryNote": "「{{name}}」はこのエラーのまま保存されました。情報を修正してここで再試行するか、このウィンドウを閉じて後でカードの「再試行」を使用してください。",
+  "addRetryNote": "内容を修正してここで再試行してください。このウィンドウを閉じると「{{name}}」は削除されます(元に戻せます)。",
   "retryImport": "再試行",
   "retrying": "再試行中...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "アーカイブの日数",
   "catchupDaysHint": "アーカイブをさかのぼれる期間です。空欄にするとプレイリストの値を使います。",
   "errorCatchupTemplate": "{{max}} 文字以内で、制御文字は使えません。",
-  "errorCatchupDays": "日数は一から {{max}} までの整数で入力してください。"
+  "errorCatchupDays": "日数は一から {{max}} までの整数で入力してください。",
+  "testExpired": "サインインしましたが、アカウントの有効期限が切れています。",
+  "testExpiredNamed": "{{name}} にサインインしましたが、アカウントの有効期限が切れています。",
+  "testAccountInactiveHint": "プロバイダーがアカウントを更新または再開するまで、チャンネルは再生されません。",
+  "phaseConnectingTo": "{{host}} に接続中…",
+  "phaseStarting": "開始中…",
+  "discardedFailedHint": "最初のインポートに失敗しました。残してカードから再試行するには「元に戻す」を選んでください。",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

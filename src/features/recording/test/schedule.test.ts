@@ -13,7 +13,9 @@ import {
   programOptions,
   recordingFraction,
   recordingNow,
+  recordingStartedAt,
   slotKey,
+  stoppedEarly,
   upcoming,
 } from '../lib/schedule';
 
@@ -113,6 +115,25 @@ describe('Scheduled page helpers', () => {
     expect(recordingFraction(r, T0 + 29 * 60_000)).toBeCloseTo(0.5);
     expect(recordingFraction(r, T0 + 600 * 60_000)).toBe(1);
     expect(recordingFraction(recording({ start: iso(0), end: iso(0), paddingBeforeMinutes: 0, paddingAfterMinutes: 0 }), T0)).toBe(0);
+  });
+
+  it('measures a programme joined part-way from when the recording began', () => {
+    // 60-minute programme, joined 30 minutes in: the bar starts empty, in step with the elapsed clock.
+    const r = recording({ status: 'recording', start: iso(-30), end: iso(30), paddingBeforeMinutes: 0, paddingAfterMinutes: 0, startedAt: iso(0) });
+    expect(recordingStartedAt(r)).toBe(T0);
+    expect(recordingFraction(r, T0)).toBe(0);
+    expect(recordingFraction(r, T0 + 15 * 60_000)).toBeCloseTo(0.5);
+    expect(recordingStartedAt(recording({ start: iso(0), paddingBeforeMinutes: 1 }))).toBe(T0 - 60_000);
+  });
+
+  it('flags a completed recording that ended well before its padded end', () => {
+    const base = { start: iso(-60), end: iso(0), paddingAfterMinutes: 5 };
+    expect(stoppedEarly(recording({ ...base, status: 'completed', endedAt: iso(-20) }))).toBe(true);
+    expect(stoppedEarly(recording({ ...base, status: 'completed', endedAt: iso(5) }))).toBe(false);
+    // Within a minute of the end counts as a full recording.
+    expect(stoppedEarly(recording({ ...base, status: 'completed', endedAt: iso(4.5) }))).toBe(false);
+    expect(stoppedEarly(recording({ ...base, status: 'completed' }))).toBe(false);
+    expect(stoppedEarly(recording({ ...base, status: 'failed', endedAt: iso(-20) }))).toBe(false);
   });
 
   it('prefers the engine-reported elapsed time', () => {

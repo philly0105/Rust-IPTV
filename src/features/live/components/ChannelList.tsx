@@ -6,6 +6,7 @@ import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type Ite
 import { useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
+import type { ParentalLocks } from '../hooks/useParentalLocks';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ChannelRow } from './ChannelRow';
@@ -29,6 +30,8 @@ export interface ChannelListProps {
   favoriteOverrides?: ReadonlyMap<ItemKey, boolean>;
   /** Reports the channel under the keyboard cursor, once it has rested for ACTIVE_SETTLE_MS. */
   onActiveChange?(channel: Channel | undefined): void;
+  /** Parental Ask mode: channels that ask for the PIN (rows show a lock and keep programmes back). */
+  locks?: ParentalLocks;
 }
 
 interface ListPlace {
@@ -130,6 +133,13 @@ export function ChannelList(props: ChannelListProps) {
       mounted.current = true;
       // initialOffset positioned the virtualizer; make the element agree with it.
       if (saved && scrollRef.current) scrollRef.current.scrollTop = saved.scrollTop;
+      // Back to a list you left (Back, a round trip through another page): keyboard focus returns to
+      // the row you were on, unless something else already holds it. The list holds it until the row renders.
+      const focused = document.activeElement;
+      if (saved && scrollRef.current && (focused === null || focused === document.body)) {
+        scrollRef.current.focus({ preventScroll: true });
+        focusPending.current = saved.active;
+      }
       return;
     }
     setActive(saved?.active ?? 0);
@@ -359,6 +369,7 @@ export function ChannelList(props: ChannelListProps) {
                   stripPrefix={prefs.stripCountryPrefix}
                   epgOffsetMinutes={prefs.epgOffsetMinutes}
                   guideUnavailable={paged.guideUnavailable}
+                  locked={props.locks?.channelLocked(ch) ?? false}
                   onActivate={activate}
                   onToggleFavorite={props.onToggleFavorite}
                   onContextMenu={onRowContext}

@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Technikai részletek",
   "errorHintTimeout": "Lehet, hogy a szolgáltató túlterhelt. Próbálja újra kicsit később.",
   "errorHintAuth": "Ellenőrizze a felhasználónevet, a jelszót vagy a MAC-címet a forrás beállításaiban.",
-  "errorHintNotFound": "Lehet, hogy a szolgáltató eltávolította. A lista frissítéséhez frissítse a forrást.",
+  "errorHintNotFound": "Lehet, hogy eltávolították, vagy ez a hivatkozás elavult.",
   "errorHintInvalid": "Ellenőrizze a megadott értékeket, majd próbálja újra.",
   "errorHintUnsupported": "Ez a forrás vagy adatfolyamtípus nem támogatja ezt a műveletet. Próbáljon ki egy külső lejátszót.",
   "errorHintConflict": "Töltse be újra a legfrissebb változatot, majd próbálja újra.",

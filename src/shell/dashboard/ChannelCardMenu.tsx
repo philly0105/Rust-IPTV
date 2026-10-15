@@ -53,6 +53,8 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
     channel
       ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name: channel.name }
       : null,
+    // Empty for snapshot channels (snapshots save no category id): the menu then offers the plain lock.
+    { categoryId: channel?.categoryId },
   );
 
   const items = useMemo((): MenuItem[] => {

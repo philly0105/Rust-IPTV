@@ -12,6 +12,7 @@ import {
   revertPatch,
   tmdbPatch,
   validateArgs,
+  validateEpgOffset,
   validatePort,
 } from '../lib/patch';
 
@@ -76,6 +77,14 @@ describe('settings validators', () => {
     expect(addEpgUrl([], 'epg.example.com/guide.xml')).toEqual({ ok: true, list: ['http://epg.example.com/guide.xml'] });
     expect(addEpgUrl(['http://epg.example.com/guide.xml'], 'http://epg.example.com/guide.xml')).toEqual({ ok: false, error: 'errorEpgDuplicate' });
   });
+
+  it('reads a typographic minus in the EPG offset as a minus sign', () => {
+    expect(validateEpgOffset('−60')).toEqual({ ok: true, minutes: -60 });
+    expect(validateEpgOffset(' -30 ')).toEqual({ ok: true, minutes: -30 });
+    expect(validateEpgOffset('+90')).toEqual({ ok: true, minutes: 90 });
+    expect(validateEpgOffset('1.5')).toEqual({ ok: false, error: 'errorOffsetNumber' });
+    expect(validateEpgOffset('−800')).toEqual({ ok: false, error: 'errorOffsetRange' });
+  });
 });
 
 describe('inspectBackup', () => {
@@ -99,5 +108,11 @@ describe('inspectBackup', () => {
     expect(inspectBackup('not json')).toEqual({ ok: false, error: 'backupNotJson' });
     expect(inspectBackup('{"kind":"other"}')).toEqual({ ok: false, error: 'backupWrongFormat' });
     expect(inspectBackup('{"kind":"iptvnator-playlist-backup","version":2,"playlists":[]}')).toEqual({ ok: false, error: 'backupWrongVersion' });
+  });
+
+  it('tells an older or unversioned backup apart from a newer one', () => {
+    expect(inspectBackup('{"kind":"iptvnator-playlist-backup","version":0,"playlists":[]}')).toEqual({ ok: false, error: 'backupOldVersion' });
+    expect(inspectBackup('{"kind":"iptvnator-playlist-backup","playlists":[]}')).toEqual({ ok: false, error: 'backupOldVersion' });
+    expect(inspectBackup('{"kind":"iptvnator-playlist-backup","version":"3","playlists":[]}')).toEqual({ ok: false, error: 'backupWrongVersion' });
   });
 });

@@ -248,11 +248,8 @@
   "backupReplaceConfirmTitle": "Sostituire tutte le sorgenti?",
   "backupReplaceConfirmBody": "Prima vengono importate le fonti del backup. Appena almeno una si carica, le tue fonti attuali con preferiti e cronologia vengono rimosse. Se non se ne carica nessuna, non cambia nulla.",
   "backupReplaceConfirm": "Sostituisci",
-  "backupImported_one": "{{count}} sorgente importata",
-  "backupImported_many": "{{count}} sorgenti importate",
-  "backupImported_other": "{{count}} sorgenti importate",
   "backupImportFailed": "Impossibile importare il backup",
-  "backupResult": "{{imported}} importate, {{skipped}} ignorate",
+  "backupResult": "Aggiunte o aggiornate: {{imported}}. Saltate: {{skipped}}.",
   "backupWarnings_one": "{{count}} avviso",
   "backupWarnings_many": "{{count}} avvisi",
   "backupWarnings_other": "{{count}} avvisi",
@@ -447,5 +444,9 @@
   "imageCacheCleared": "Cache delle immagini svuotata",
   "imageCacheClearFailed": "Impossibile svuotare la cache delle immagini",
   "imageCacheLoadFailed": "Impossibile leggere la cache delle immagini: {{message}}",
-  "imageCacheUnavailable": "Questo server non ha una cache delle immagini, quindi le immagini vengono caricate direttamente da ogni provider."
+  "imageCacheUnavailable": "Questo server non ha una cache delle immagini, quindi le immagini vengono caricate direttamente da ogni provider.",
+  "backupOldVersion": "Questo backup usa un formato precedente che non può essere letto. Esporta un nuovo backup e importa quello.",
+  "backupImportDone": "Backup importato",
+  "backupReplacePinTitle": "Inserisci il PIN per sostituire le sorgenti",
+  "backupReplacePinText": "La sostituzione rimuove le sorgenti attuali e i relativi blocchi parentali, quindi serve il PIN del controllo parentale."
 }

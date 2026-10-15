@@ -206,5 +206,12 @@
   "markSeriesWatched": "Segna serie come vista",
   "markSeriesUnwatched": "Segna serie come non vista",
   "shortcutWatched": "Segna come visto o non visto",
-  "shortcutHideWatched": "Nascondi o mostra i titoli visti"
+  "shortcutHideWatched": "Nascondi o mostra i titoli visti",
+  "sourceMissingTitle": "Questa sorgente è stata rimossa",
+  "sourceMissingBody": "Non è più tra le tue sorgenti. Scegline un'altra o aggiungila di nuovo da Sorgenti.",
+  "goToDashboard": "Vai alla dashboard",
+  "categoryMissingTitle": "Categoria non trovata",
+  "categoryMissingBody": "Questa sorgente non ha una categoria con questo link. Il fornitore potrebbe averla rinominata o rimossa.",
+  "namedMarkedWatched": "{{name}} segnato come visto",
+  "namedMarkedUnwatched": "{{name}} segnato come non visto"
 }

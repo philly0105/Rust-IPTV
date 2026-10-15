@@ -254,14 +254,8 @@
   "backupReplaceConfirmTitle": "استبدال كل المصادر؟",
   "backupReplaceConfirmBody": "تُستورد مصادر النسخة الاحتياطية أولًا. عندما يُحمَّل واحد منها على الأقل، تُزال مصادرك الحالية ومفضلتها وسجل مشاهدتها. إن لم يُحمَّل أي منها، فلن يتغير شيء.",
   "backupReplaceConfirm": "استبدال",
-  "backupImported_zero": "تم استيراد {{count}} مصدر",
-  "backupImported_one": "تم استيراد {{count}} مصدر",
-  "backupImported_two": "تم استيراد {{count}} مصدرين",
-  "backupImported_few": "تم استيراد {{count}} مصادر",
-  "backupImported_many": "تم استيراد {{count}} مصدرًا",
-  "backupImported_other": "تم استيراد {{count}} مصدر",
   "backupImportFailed": "تعذّر استيراد النسخة الاحتياطية",
-  "backupResult": "المستورد: {{imported}}، المتخطى: {{skipped}}",
+  "backupResult": "المضاف أو المحدَّث: {{imported}}. المتخطى: {{skipped}}.",
   "backupWarnings_zero": "{{count}} تحذير",
   "backupWarnings_one": "{{count}} تحذير",
   "backupWarnings_two": "{{count}} تحذيران",
@@ -465,5 +459,9 @@
   "imageCacheCleared": "تم مسح ذاكرة الصور المؤقتة",
   "imageCacheClearFailed": "تعذّر مسح ذاكرة الصور المؤقتة",
   "imageCacheLoadFailed": "تعذّرت قراءة ذاكرة الصور المؤقتة: {{message}}",
-  "imageCacheUnavailable": "لا يحتوي هذا الخادم على ذاكرة مؤقتة للصور، لذا تُحمَّل الصور مباشرة من كل مزوّد."
+  "imageCacheUnavailable": "لا يحتوي هذا الخادم على ذاكرة مؤقتة للصور، لذا تُحمَّل الصور مباشرة من كل مزوّد.",
+  "backupOldVersion": "تستخدم هذه النسخة الاحتياطية تنسيقًا أقدم لا يمكن قراءته. صدّر نسخة احتياطية جديدة واستوردها.",
+  "backupImportDone": "تم استيراد النسخة الاحتياطية",
+  "backupReplacePinTitle": "أدخل رمز PIN لاستبدال المصادر",
+  "backupReplacePinText": "يؤدي الاستبدال إلى إزالة مصادرك الحالية وأقفال الرقابة الأبوية الخاصة بها، لذلك يتطلب رمز PIN للرقابة الأبوية."
 }

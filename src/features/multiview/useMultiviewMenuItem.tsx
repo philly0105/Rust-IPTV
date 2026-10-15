@@ -13,6 +13,7 @@ import { sameRef } from '@/api/types';
 import { toast, type MenuAction } from '@/ui';
 
 import { addToWall, wallAccepts } from './addChannel';
+import { MAX_TILES } from './layout';
 import { MULTIVIEW_PATH, type MultiviewLocationState } from './paths';
 import { useMultiviewStore } from './store';
 import type { MultiviewChannelInput } from './types';
@@ -27,10 +28,19 @@ export async function addFromMenu(
   const open = { label: t('openMultiview'), onClick: () => void navigate(MULTIVIEW_PATH) };
   switch (r) {
     case 'added': {
-      // The page focuses the new tile, so a keyboard user lands on what they added.
-      const key = useMultiviewStore.getState().tiles.find((x) => sameRef(x.ref, ch.ref))?.key;
+      // The user stays on the list to add the next channel; the toast counts the wall and opens
+      // it. One toast id, so a run of adds updates one toast instead of stacking them.
+      const { tiles } = useMultiviewStore.getState();
+      // Opening from here focuses the new tile, so a keyboard user lands on what they added.
+      const key = tiles.find((x) => sameRef(x.ref, ch.ref))?.key;
       const state: MultiviewLocationState = key ? { focusTile: key } : {};
-      void navigate(MULTIVIEW_PATH, { state });
+      toast({
+        id: 'multiview-add',
+        variant: 'success',
+        title: t('toastAdded', { name: ch.title }),
+        description: t('subtitle', { n: tiles.length, max: MAX_TILES }),
+        action: { label: t('openMultiview'), onClick: () => void navigate(MULTIVIEW_PATH, { state }) },
+      });
       return;
     }
     case 'duplicate':
@@ -53,8 +63,10 @@ export async function addFromMenu(
 
 /**
  * The menu action for `ch`. Disabled when there is no channel or it is not live TV (radio has
- * no picture). Selecting it puts the channel on the wall through the parental gate and opens
- * `/multiview`; a channel already up or a full wall gets a toast that offers to open the wall.
+ * no picture). Selecting it puts the channel on the wall through the parental gate and says so
+ * in a toast ("2 of 4 on the wall") that offers to open `/multiview`, so a wall is built
+ * without leaving the list; a channel already up or a full wall gets a toast with the same way
+ * to the wall.
  */
 export function useMultiviewMenuItem(ch: MultiviewChannelInput | null): MenuAction {
   const { t } = useTranslation('multiview');

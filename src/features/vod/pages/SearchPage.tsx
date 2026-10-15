@@ -8,12 +8,14 @@ import { useLocation, useParams, useSearchParams } from 'react-router';
 import { rpcKey, useRpcQuery } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { RpcError, rpcRaw } from '@/api/transport';
-import type { Channel, Page, SeriesItem, Source, VodItem } from '@/api/types';
+import { itemKey, type Channel, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
 
 import { myListTarget, PosterCard } from '../components/PosterCard';
+import { isSourceMissing, SourceMissing } from '../components/SourceMissing';
 import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
 import { useScrollMemory } from '../hooks/useScrollMemory';
+import { useWatchedKeys } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { itemLanguage } from '../lib/language';
@@ -31,7 +33,7 @@ import {
   type SearchMore,
   type SourceSearch,
 } from '../lib/search';
-import { COVER_WIDTH } from './CategoryGridPage';
+import { useCoverWidth } from '../hooks/useCoverWidth';
 import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useToast } from '@/ui';
 
 const DEBOUNCE_MS = 250;
@@ -225,7 +227,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   };
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const coverWidth = COVER_WIDTH[useSettings().coverSize] ?? COVER_WIDTH.medium;
+  const coverWidth = useCoverWidth(useSettings().coverSize);
   const resume = useResumeLookup(!!query);
   // One result type at a time, chosen by tab; a type missing from these results falls back to the first one present.
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
@@ -238,7 +240,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const partialError = groups.length > 0 ? (catalog.isError ? catalog.error : stalker.error) : undefined;
 
   let body;
-  if (!query) {
+  if (scoped && scopedSource.isError && isSourceMissing(scopedSource.error)) {
+    // L1-vod-13: the scoped source was removed; nothing to search, so offer the way back instead.
+    body = <SourceMissing />;
+  } else if (!query) {
     body = (
       <EmptyState
         icon={<Search size={28} />}
@@ -547,6 +552,9 @@ function PosterGrid({
   /** Watched fraction by `resumeKey`, for the poster progress bar. */
   resume: Map<string, number>;
 }) {
+  // L1-vod-6: the watched tick, as on the category grid (the first 500 hits; the rest show none).
+  const items = useMemo(() => hits.map((h) => h.item as VodItem | SeriesItem), [hits]);
+  const watched = useWatchedKeys(items);
   return (
     <HitGrid
       hits={hits}
@@ -566,6 +574,7 @@ function PosterGrid({
             posterUrl={h.imageUrl}
             meta={h.meta}
             progress={resume.get(resumeKey(item.ref))}
+            watched={watched.has(itemKey(item.ref))}
             language={itemLanguage(item.title, item.categoryName)}
             badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
             badgeLabel={showBadges ? h.sourceName : undefined}

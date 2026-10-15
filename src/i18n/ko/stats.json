@@ -34,5 +34,6 @@
   "clearTitle": "시청 통계를 지울까요?",
   "clearBody": "집계된 시청 시간이 모두 삭제됩니다. 시청 진행 상황과 최근에 시청한 항목은 유지됩니다.",
   "cleared": "시청 통계를 지웠습니다",
-  "clearFailed": "통계를 지울 수 없습니다"
+  "clearFailed": "통계를 지울 수 없습니다",
+  "watchLive": "실시간 TV 보기"
 }

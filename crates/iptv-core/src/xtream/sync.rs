@@ -216,6 +216,7 @@ pub async fn sync_source(
         channels: count(ContentType::Live) + count(ContentType::Radio),
         movies: count(ContentType::Movie),
         series: count(ContentType::Series),
+        unchanged: false,
     };
 
     // XMLTV link + caches.

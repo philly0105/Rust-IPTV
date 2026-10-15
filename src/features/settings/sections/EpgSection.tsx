@@ -284,13 +284,15 @@ export function EpgSection({ settings, update }: SectionProps) {
           )}
         </SettingsRow>
         <SettingsRow label={t('epgOffset')} description={t('epgOffsetHint')} error={offsetError ? t(offsetError) : null}>
-          {({ id, describedBy }) => (
+          {({ id, describedBy, invalid }) => (
             <div className="flex items-center gap-2">
               <CommitInput
                 id={id}
                 describedBy={describedBy}
+                invalid={invalid}
                 type="text"
-                inputMode="numeric"
+                // Not "numeric": phone keypads for it have no minus sign, and the shift can be negative.
+                inputMode="text"
                 value={String(offset)}
                 className="w-24 text-end tabular-nums"
                 onError={setOffsetError}

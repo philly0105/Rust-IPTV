@@ -197,5 +197,12 @@
   "markSeriesWatched": "Serie markeren als bekeken",
   "markSeriesUnwatched": "Serie markeren als niet bekeken",
   "shortcutWatched": "Markeren als bekeken of niet bekeken",
-  "shortcutHideWatched": "Bekeken titels verbergen of tonen"
+  "shortcutHideWatched": "Bekeken titels verbergen of tonen",
+  "sourceMissingTitle": "Deze bron is verwijderd",
+  "sourceMissingBody": "Deze staat niet meer bij je bronnen. Kies een andere bron of voeg hem opnieuw toe via Bronnen.",
+  "goToDashboard": "Naar dashboard",
+  "categoryMissingTitle": "Categorie niet gevonden",
+  "categoryMissingBody": "Deze bron heeft geen categorie met die link. De provider heeft hem misschien hernoemd of verwijderd.",
+  "namedMarkedWatched": "{{name}} gemarkeerd als bekeken",
+  "namedMarkedUnwatched": "{{name}} gemarkeerd als niet bekeken"
 }

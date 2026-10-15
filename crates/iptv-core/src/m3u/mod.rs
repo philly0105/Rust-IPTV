@@ -4,6 +4,7 @@
 pub mod body;
 pub mod importer;
 pub mod parser;
+mod remap;
 pub mod rpc;
 
 pub use importer::{

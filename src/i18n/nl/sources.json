@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "Er ging iets mis bij het importeren.",
   "errorSummaryWrongUrl": "Dit adres leidt niet naar een zenderlijst.",
   "technicalDetails": "Technische details",
-  "addRetryNote": "“{{name}}” is met deze fout opgeslagen. Corrigeer de gegevens en probeer het hier opnieuw, of sluit dit venster en gebruik later Opnieuw proberen op de kaart.",
+  "addRetryNote": "Pas de gegevens aan en probeer het hier opnieuw. Als je dit venster sluit, wordt \"{{name}}\" verwijderd (dat kun je ongedaan maken).",
   "retryImport": "Opnieuw proberen",
   "retrying": "Opnieuw proberen...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "Archiefdagen",
   "catchupDaysHint": "Hoe ver het archief teruggaat. Laat leeg om de waarde uit de playlist te houden.",
   "errorCatchupTemplate": "Gebruik hoogstens {{max}} tekens en geen stuurtekens.",
-  "errorCatchupDays": "Voer een geheel aantal dagen in van één tot {{max}}."
+  "errorCatchupDays": "Voer een geheel aantal dagen in van één tot {{max}}.",
+  "testExpired": "Aangemeld, maar het account is verlopen.",
+  "testExpiredNamed": "Aangemeld bij {{name}}, maar het account is verlopen.",
+  "testAccountInactiveHint": "Zenders spelen pas weer af als je provider het account verlengt of opnieuw activeert.",
+  "phaseConnectingTo": "Verbinden met {{host}}…",
+  "phaseStarting": "Starten…",
+  "discardedFailedHint": "De eerste import is mislukt. Kies Ongedaan maken om de bron te houden en het opnieuw te proberen vanaf de kaart.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

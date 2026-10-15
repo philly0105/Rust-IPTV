@@ -112,6 +112,12 @@ export function checkOrigin(value: string): string | null {
   }
 }
 
+/**
+ * Last path parts that say nothing about the source: playlist and Xtream endpoints, and the
+ * stock Stalker/Ministra portal paths (`/c/`, `/stalker_portal/`, `/portal.php`, `/server/load.php`).
+ */
+const GENERIC_STEM = /^(get|playlist|index|player_api|c|stalker_portal|portal|server|load|panel)$/i;
+
 /** Derives a readable default name from a URL or file path. */
 export function suggestName(input: string): string {
   const v = input.trim();
@@ -120,7 +126,7 @@ export function suggestName(input: string): string {
     const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `http://${v}`);
     const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
     const stem = safeDecode(last).replace(/\.(m3u8?|php|txt)$/i, '');
-    if (stem && !/^(get|playlist|index|player_api)$/i.test(stem)) return stem;
+    if (stem && !GENERIC_STEM.test(stem)) return stem;
     return u.hostname.replace(/^www\./, '');
   } catch {
     const file = v.split(/[\\/]/).pop() ?? v;

@@ -298,6 +298,25 @@ describe('HeroCarousel', () => {
     expect(hero.innerHTML).not.toMatch(/backdrop-blur|glass-blur/);
   });
 
+  it('titles a new arrival with titleBase like its detail page, and the year line follows what is shown', () => {
+    const [base] = buildHeroSlides([], [vod('d', { title: 'Dune: Part Two (2024) [MULTI]', titleBase: 'Dune: Part Two', year: 2024 })]);
+    expect(base).toMatchObject({ title: 'Dune: Part Two', year: 2024 });
+    renderHero([base!]);
+    let panel = screen.getByRole('tabpanel');
+    expect(within(panel).getByRole('heading', { name: 'Dune: Part Two' })).toBeTruthy();
+    expect(panel.textContent).not.toContain('[MULTI]');
+    // The shown title has no year, so the facts line carries it (joinList wraps each fact in bidi isolates).
+    expect(within(panel).getByText(/^\W*2024\W*$/)).toBeTruthy();
+    cleanup();
+
+    // No titleBase from the core: the raw title shows, and its year is not repeated below it.
+    const [raw] = buildHeroSlides([], [vod('e', { title: 'Summer Static (2025)', year: 2025 })]);
+    renderHero([raw!]);
+    panel = screen.getByRole('tabpanel');
+    expect(within(panel).getByRole('heading', { name: 'Summer Static (2025)' })).toBeTruthy();
+    expect(within(panel).queryByText(/^\W*2025\W*$/)).toBeNull();
+  });
+
   it('a single slide shows no slide controls and does not rotate', () => {
     const { hero } = renderHero([slide('a')]);
     expect(screen.queryByTestId('hero-controls')).toBeNull();

@@ -8,13 +8,14 @@ import { Bell, BellRing, Circle, Repeat, Square } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { itemKey, type Channel, type EpgProgram } from '@/api/types';
+import { itemKey, type Channel, type EpgProgram, type Recording } from '@/api/types';
 import { IconButton, Menu, type MenuItem } from '@/ui';
 
 import { useRecordingCapabilities, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
 import { canHaveRule, ruleFor } from '../lib/rules';
 import { CHANNEL_DURATIONS, markFor, programOptions } from '../lib/schedule';
 import { RecordSeriesDialog, RemoveRuleDialog, type SeriesTarget } from './SeriesDialogs';
+import { StopRecordingDialog } from './StopRecordingDialog';
 
 export interface RibbonActionsProps {
   channel: Channel;
@@ -32,6 +33,7 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
   const rule = program ? ruleFor(ruleIndex, channel.ref, program.title) : undefined;
   const [seriesTarget, setSeriesTarget] = useState<SeriesTarget | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [confirmStop, setConfirmStop] = useState<Recording | null>(null);
   const caps = useRecordingCapabilities();
   const actions = useScheduleActions();
   const mark = program ? markFor(index, channel.ref, program) : {};
@@ -52,7 +54,8 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
       id: 'stop',
       label: stoppable.status === 'recording' ? t('stopRecording') : t('cancelRecording'),
       icon: <Square className="size-4" />,
-      onSelect: () => void actions.cancelRecording(stoppable),
+      // Stopping a recording that is writing now cannot be undone: it asks first.
+      onSelect: () => (stoppable.status === 'recording' ? setConfirmStop(stoppable) : void actions.cancelRecording(stoppable)),
     });
   } else if (target && options.record) {
     items.push({
@@ -103,6 +106,7 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
       ) : null}
       <RecordSeriesDialog target={seriesTarget} onClose={() => setSeriesTarget(null)} />
       <RemoveRuleDialog rule={removing ? (rule ?? null) : null} onClose={() => setRemoving(false)} />
+      <StopRecordingDialog recording={confirmStop} onClose={() => setConfirmStop(null)} />
     </>
   );
 }

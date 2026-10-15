@@ -82,10 +82,11 @@ export function RemoteSection({ settings, update }: SectionProps) {
       <SettingsGroup>
         <SwitchRow label={t('remoteEnabled')} description={t('remoteEnabledHint')} checked={enabled} disabled={busy} onChange={(v) => void setEnabled(v)} testId="toggle-remote" />
         <SettingsRow label={t('remotePort')} description={t('remotePortHint')} error={portError ? t(portError) : null}>
-          {({ id, describedBy }) => (
+          {({ id, describedBy, invalid }) => (
             <CommitInput
               id={id}
               describedBy={describedBy}
+              invalid={invalid}
               inputMode="numeric"
               className="w-28 text-end tabular-nums"
               value={String(settings.remoteControl.port)}

@@ -190,5 +190,9 @@
   "reminderSwitched": "Przełączono na {{channel}}",
   "undoSwitch": "Cofnij",
   "reminderSwitchFailed": "Nie udało się przełączyć kanału",
-  "recordNeedsMpv": "Nagrywanie tego kanału wymaga mpv. Zainstaluj mpv albo podaj jego ścieżkę w ustawieniach odtwarzacza."
+  "recordNeedsMpv": "Nagrywanie tego kanału wymaga mpv. Zainstaluj mpv albo podaj jego ścieżkę w ustawieniach odtwarzacza.",
+  "locked": "Zablokowany",
+  "lockedGuide": "Zablokowany. Wpisz PIN, aby zobaczyć, co jest emitowane.",
+  "unlock": "Odblokuj",
+  "ribbonFailed": "Nie udało się wczytać przewodnika tego kanału"
 }

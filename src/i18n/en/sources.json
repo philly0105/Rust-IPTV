@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "Something went wrong while importing.",
   "errorSummaryWrongUrl": "That address doesn't lead to a channel list.",
   "technicalDetails": "Technical details",
-  "addRetryNote": "\"{{name}}\" was saved with this error. Fix the details and try again here, or close this window and use Try again on its card later.",
+  "addRetryNote": "Fix the details and try again here. Closing this window removes \"{{name}}\" (you can undo that).",
   "retryImport": "Try again",
   "retrying": "Trying again...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "Archive days",
   "catchupDaysHint": "How far back the archive reaches. Leave empty to keep the playlist's value.",
   "errorCatchupTemplate": "Use at most {{max}} characters and no control characters.",
-  "errorCatchupDays": "Enter a whole number of days from one to {{max}}."
+  "errorCatchupDays": "Enter a whole number of days from one to {{max}}.",
+  "testExpired": "Signed in, but the account has expired.",
+  "testExpiredNamed": "Signed in to {{name}}, but the account has expired.",
+  "testAccountInactiveHint": "Channels won't play until your provider renews or reactivates the account.",
+  "phaseConnectingTo": "Connecting to {{host}}…",
+  "phaseStarting": "Starting…",
+  "discardedFailedHint": "Its first import failed. Choose Undo to keep it and try again from its card.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

@@ -163,5 +163,10 @@
   "turnOffTitle": "Turn off parental controls?",
   "turnOffConfirmText": "Enter the PIN. Locked content opens for everyone until a new PIN is set.",
   "turnedOffToast": "Parental controls are off",
-  "turnedOffToastText": "Your locks are kept. Set a PIN to use them again."
+  "turnedOffToastText": "Your locks are kept. Set a PIN to use them again.",
+  "menuLockedWithGroup": "Locked with its group",
+  "discardTitle": "Discard your changes?",
+  "discardText": "The groups you ticked or unticked here won't be saved.",
+  "keepEditing": "Keep editing",
+  "discard": "Discard"
 }

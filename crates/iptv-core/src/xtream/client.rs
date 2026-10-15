@@ -52,11 +52,12 @@ impl XtreamClient {
     pub fn new(http: reqwest::Client, cfg: &XtreamSourceConfig) -> CoreResult<Self> {
         let server = normalize_server_url(&cfg.server_url)?;
         let username = cfg.username.trim().to_string();
-        let password = cfg.password.trim().to_string();
+        // The password is sent as typed (L1-core-20).
+        let password = cfg.password.clone();
         if username.is_empty() {
             return Err(CoreError::invalid("Enter the Xtream username."));
         }
-        if password.is_empty() {
+        if password.trim().is_empty() {
             return Err(CoreError::invalid("Enter the Xtream password."));
         }
         Ok(Self {

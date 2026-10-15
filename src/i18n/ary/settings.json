@@ -254,14 +254,8 @@
   "backupReplaceConfirmTitle": "تعوّض كل المصادر؟",
   "backupReplaceConfirmBody": "المصادر ديال النسخة الاحتياطية كيتستوردو الأول. ملي يتشارجا واحد منهم على الأقل، المصادر الحالية ديالك والمفضلة ديالها وسجل المشاهدة كيتحيدو. إلا ما تشارجا حتى واحد، ما كيتبدل والو.",
   "backupReplaceConfirm": "عوّض",
-  "backupImported_zero": "حتى مصدر ما تستورد",
-  "backupImported_one": "تستورد {{count}} مصدر",
-  "backupImported_two": "تستوردو جوج مصادر",
-  "backupImported_few": "تستوردو {{count}} مصادر",
-  "backupImported_many": "تستوردو {{count}} مصدر",
-  "backupImported_other": "المصادر اللي تستوردو: {{count}}",
   "backupImportFailed": "ما قدرناش نستوردو النسخة الاحتياطية",
-  "backupResult": "تستوردو {{imported}}، تخطاو {{skipped}}",
+  "backupResult": "تزادو ولا تحدّثو: {{imported}}. تخطّاو: {{skipped}}.",
   "backupWarnings_zero": "حتى تنبيه ما كاين",
   "backupWarnings_one": "{{count}} تنبيه",
   "backupWarnings_two": "جوج تنبيهات",
@@ -465,5 +459,9 @@
   "imageCacheCleared": "تمسح الكاش ديال التصاور",
   "imageCacheClearFailed": "ما قدرناش نمسحو الكاش ديال التصاور",
   "imageCacheLoadFailed": "ما قدرناش نقراو الكاش ديال التصاور: {{message}}",
-  "imageCacheUnavailable": "هاد السيرفر ما فيهش الكاش ديال التصاور، داكشي علاش التصاور كيتحملو نيشان من عند كل مزوّد."
+  "imageCacheUnavailable": "هاد السيرفر ما فيهش الكاش ديال التصاور، داكشي علاش التصاور كيتحملو نيشان من عند كل مزوّد.",
+  "backupOldVersion": "هاد النسخة الاحتياطية فيها شكل قديم وما يمكنش يتقرا. صدّر نسخة جديدة واستوردها.",
+  "backupImportDone": "تستوردات النسخة الاحتياطية",
+  "backupReplacePinTitle": "دخّل الرمز PIN باش تعوّض المصادر",
+  "backupReplacePinText": "التعويض كيحيّد المصادر اللي عندك والقفول ديال الرقابة الأبوية ديالها، داكشي علاش خاصو الرمز PIN."
 }

@@ -200,5 +200,9 @@
   "reminderSwitched": "تم التبديل إلى {{channel}}",
   "undoSwitch": "تراجع",
   "reminderSwitchFailed": "تعذر التبديل إلى القناة",
-  "recordNeedsMpv": "يتطلب تسجيل هذه القناة وجود mpv. ثبّت mpv أو حدّد مساره في إعدادات المشغّل."
+  "recordNeedsMpv": "يتطلب تسجيل هذه القناة وجود mpv. ثبّت mpv أو حدّد مساره في إعدادات المشغّل.",
+  "locked": "مقفلة",
+  "lockedGuide": "مقفلة. أدخل رمز PIN لترى ما يُعرض.",
+  "unlock": "فتح القفل",
+  "ribbonFailed": "تعذّر تحميل دليل هذه القناة"
 }

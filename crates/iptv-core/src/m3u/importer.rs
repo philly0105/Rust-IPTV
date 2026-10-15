@@ -110,6 +110,28 @@ pub fn stored_text(
     Ok(Some((raw, sha, fetched_at)))
 }
 
+/// Version of the parse + classify rules. It is hashed into every stored
+/// playlist sha ([`playlist_hasher`]), so bumping it makes the next refresh of
+/// every M3U source (URL, file and pasted text) re-import an unchanged
+/// playlist once and pick up parser and classifier fixes. Bump it whenever a
+/// change alters the rows an import writes.
+pub const IMPORT_VERSION: u32 = 2;
+
+/// sha256 state for a playlist body, seeded with [`IMPORT_VERSION`]. Every
+/// `m3u_raw.sha256` is computed this way (64 hex chars).
+pub fn playlist_hasher() -> Sha256 {
+    let mut h = Sha256::new();
+    h.update(format!("tsrust-m3u-import-v{IMPORT_VERSION}\n").as_bytes());
+    h
+}
+
+/// The stored sha of a playlist body (see [`playlist_hasher`]).
+pub fn playlist_sha(bytes: &[u8]) -> String {
+    let mut h = playlist_hasher();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
 /// First 16 hex chars of sha256(s).
 pub fn hash16(s: &str) -> String {
     let d = Sha256::digest(s.as_bytes());
@@ -130,11 +152,25 @@ pub fn group_id(group: &str) -> String {
     hash16(group)
 }
 
-/// Content type of an entry: `radio="true"` -> radio; a movie container URL in
-/// a group whose title mentions movie / vod / film -> movie; else live.
+/// Content type of an entry: `radio="true"` -> radio; an Xtream-style
+/// `/movie/` or `/series/` URL path (the `get.php?type=m3u_plus` shape) or a
+/// file-only container (`.mkv`, `.avi`, `.mov`, `.m4v`) -> movie, whatever the
+/// group; an `.mp4` URL in a group whose title mentions movie / vod / film ->
+/// movie (`.mp4` alone is ambiguous: looping live channels use it too); else
+/// live. Series episodes are movies until M3U series grouping exists.
 pub fn classify(e: &M3uEntry) -> ContentType {
     if e.radio {
         return ContentType::Radio;
+    }
+    let path = url_path_lower(&e.url);
+    if path.contains("/movie/") || path.contains("/series/") {
+        return ContentType::Movie;
+    }
+    if [".mkv", ".avi", ".mov", ".m4v"]
+        .iter()
+        .any(|ext| path.ends_with(ext))
+    {
+        return ContentType::Movie;
     }
     if has_movie_extension(&e.url) {
         let g = e.group.as_deref().unwrap_or("").to_lowercase();
@@ -143,6 +179,16 @@ pub fn classify(e: &M3uEntry) -> ContentType {
         }
     }
     ContentType::Live
+}
+
+/// The lowercased path of a stream URL (no scheme, host, query or fragment).
+fn url_path_lower(url: &str) -> String {
+    let no_query = url.split(['?', '#']).next().unwrap_or(url);
+    let after_scheme = no_query
+        .split_once("://")
+        .map_or(no_query, |(_, rest)| rest);
+    let path = after_scheme.find('/').map_or("", |i| &after_scheme[i..]);
+    path.to_ascii_lowercase()
 }
 
 /// Turns parser entries into catalog rows: stable ids (with a suffix for exact
@@ -434,24 +480,8 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                         .into(),
                 )
             };
-            // Pasted text changes only through sources.add or a restore, which
-            // store its sha (or '' when it still has to be imported): an
-            // imported text playlist with a sha is unchanged without reading it.
-            let sid = source_id.clone();
-            let stored_sha = state
-                .db_call(move |c| {
-                    Ok(c.query_row(
-                        "SELECT sha256 FROM m3u_raw WHERE source_id = ?1",
-                        [&sid],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()?)
-                })
-                .await?
-                .ok_or_else(missing)?;
-            if source.last_refresh_at.is_some() && !stored_sha.is_empty() {
-                return keep_unchanged(&state, &source_id).await;
-            }
+            // The text is hashed like a download (with IMPORT_VERSION), so the
+            // unchanged check below re-imports it once after a parser change.
             let sid = source_id.clone();
             let raw = state
                 .db_call(move |c| {
@@ -476,7 +506,7 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                     sha,
                 )
             } else {
-                let sha = hex::encode(Sha256::digest(raw.as_bytes()));
+                let sha = playlist_sha(raw.as_bytes());
                 (Payload::Text(raw), sha)
             }
         }
@@ -569,11 +599,19 @@ async fn keep_unchanged(state: &Arc<AppState>, source_id: &str) -> CoreResult<Im
         })
         .await?;
     tracing::info!(source_id, "playlist unchanged; catalog kept");
-    sources::progress(state, source_id, "saving", 0, None, Some("unchanged"));
+    sources::progress(
+        state,
+        source_id,
+        "saving",
+        0,
+        None,
+        Some(sources::UNCHANGED_MESSAGE),
+    );
     Ok(ImportSummary {
         channels,
         movies,
         series,
+        unchanged: true,
     })
 }
 
@@ -603,6 +641,9 @@ fn write_catalog(
     let mut builder = RowBuilder::new(source_id);
     let started = std::time::Instant::now();
 
+    // Read before the writer deletes the old rows: lets user state follow
+    // items whose id changed (token rotation) and tells a first import apart.
+    let mut remapper = super::remap::Remapper::before(&tx, source_id)?;
     let (header, stats, summary) = {
         let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES, cancel.clone())?;
         let reader: Box<dyn std::io::BufRead + '_> = match &payload {
@@ -616,7 +657,9 @@ fn write_catalog(
         let mut n = 0u64;
         for entry in parser.by_ref() {
             let row = builder.row(entry);
-            writer.insert(&row)?;
+            if writer.insert(&row)? {
+                remapper.saw(&row);
+            }
             n += 1;
             if n % PROGRESS_EVERY == 0 {
                 check_cancel()?;
@@ -633,12 +676,24 @@ fn write_catalog(
                 "this is not an M3U playlist (no #EXTM3U header and no #EXTINF entries); check the URL or file".into(),
             ));
         }
+        // A bare `#EXTM3U` (panels answer that during maintenance or after an
+        // account lapses) must not wipe the catalog: returning here drops the
+        // transaction, so the previous rows stay.
+        if writer.inserted() == 0 {
+            return Err(CoreError::Invalid(if remapper.old_rows > 0 {
+                "The playlist came back empty; kept the previous channels. The provider may be down or the account may have expired; try again later.".into()
+            } else {
+                "The playlist is empty: it has no channels. Check the URL, or ask the provider whether the account is active.".into()
+            }));
+        }
+        remapper.apply(&tx, source_id)?;
         sources::progress(state, source_id, "saving", n, Some(n), None);
         let summary = ImportSummary {
             channels: (writer.inserted_of(ContentType::Live)
                 + writer.inserted_of(ContentType::Radio)) as i64,
             movies: writer.inserted_of(ContentType::Movie) as i64,
             series: writer.inserted_of(ContentType::Series) as i64,
+            unchanged: false,
         };
         writer.finish(&builder.categories())?;
         (header, stats, summary)
@@ -772,7 +827,7 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
                 path.display()
             )));
         }
-        let mut h = Sha256::new();
+        let mut h = playlist_hasher();
         let mut buf = vec![0u8; READ_BUF];
         loop {
             let n = f.read(&mut buf)?;
@@ -785,6 +840,13 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
     })
     .await?
 }
+
+/// Time a playlist server may take before the response head. Large provider
+/// playlists are often generated on request and take 20-60 s to start.
+#[cfg(not(test))]
+const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+#[cfg(test)]
+const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// Longest gap between two body chunks of a playlist download.
 #[cfg(not(test))]
@@ -884,7 +946,9 @@ async fn fetch_to_file(
     // Err((error, stalled)): `stalled` when the body stopped arriving.
     let attempt = || async {
         let req = crate::http::apply_source_headers(client.get(url), &cfg.headers);
-        let resp = crate::http::send(req).await.map_err(|e| (e, false))?;
+        let resp = crate::http::send_within(req, PLAYLIST_HEADER_TIMEOUT)
+            .await
+            .map_err(|e| (e, false))?;
         if !resp.status().is_success() {
             return Err((playlist_status_error(resp.status(), &host), false));
         }
@@ -900,7 +964,7 @@ async fn fetch_to_file(
         let mut file = tokio::fs::File::create(dest)
             .await
             .map_err(|e| (e.into(), false))?;
-        let mut hasher = Sha256::new();
+        let mut hasher = playlist_hasher();
         let mut done: u64 = 0;
         let mut last_report: u64 = 0;
         let mut rate = MinRate::standard();
@@ -974,7 +1038,9 @@ async fn fetch_to_file(
             Ok(sha) => return Ok(sha),
             Err((err, stalled)) => {
                 tracing::warn!(url = %safe_url, error = %err, attempt = n + 1, "playlist download failed");
-                if stalled || !err.is_retryable() {
+                // A head that did not arrive within PLAYLIST_HEADER_TIMEOUT
+                // comes from a slow generator; it will be as slow again.
+                if stalled || !err.is_retryable() || matches!(err, CoreError::Timeout(_)) {
                     return Err(err);
                 }
                 if n + 1 >= FETCH_ATTEMPTS {
@@ -1336,6 +1402,46 @@ mod tests {
         assert_eq!(movie.year, Some(1995));
         assert_eq!(movie.container_extension.as_deref(), Some("mp4"));
         assert_eq!(movie.number, None);
+    }
+
+    /// L1-core-4: Xtream `m3u_plus` movies and episodes landed in Live TV
+    /// because only an `.mp4`-style URL in a "movie" group was a movie.
+    #[test]
+    fn xtream_m3u_plus_vod_is_classified_as_movies() {
+        let (e, _, _) = parse_str(
+            "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"EN | Action\",Dune (2021)\nhttp://h:8080/movie/u/p/1001.mkv\n\
+             #EXTINF:-1 group-title=\"EN | Drama\",Show S01 E01\nhttp://h:8080/series/u/p/5001.mp4\n\
+             #EXTINF:-1 group-title=\"EN | Action\",Film\nhttp://h/vod/f.avi?token=1\n\
+             #EXTINF:-1 group-title=\"News\",Live\nhttp://h:8080/u/p/7.ts\n\
+             #EXTINF:-1 group-title=\"News\",Loop\nhttp://h/loop.mp4\n\
+             #EXTINF:-1 group-title=\"News\",Movie host\nhttp://movie.example/live/1.m3u8\n",
+        );
+        let types: Vec<ContentType> = e.iter().map(classify).collect();
+        assert_eq!(
+            types,
+            [
+                ContentType::Movie,
+                ContentType::Movie,
+                ContentType::Movie,
+                ContentType::Live,
+                ContentType::Live,
+                ContentType::Live
+            ]
+        );
+    }
+
+    /// L1-core-13: a playlist generator that takes longer than the generic
+    /// 15 s head timeout to answer is waited for (PLAYLIST_HEADER_TIMEOUT),
+    /// and a head that never comes is not retried three times.
+    #[tokio::test]
+    async fn slow_playlist_head_is_tried_once() {
+        let (url, hits) = raw_stub("").await;
+        let (r, took) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(took < PLAYLIST_HEADER_TIMEOUT * 2, "{took:?}");
     }
 
     /// B8-parsers: `catchup-days` * 24 overflowed (debug panic) on garbage.

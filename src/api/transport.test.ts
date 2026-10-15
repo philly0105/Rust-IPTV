@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RPC_ERROR_CODES, RpcError, isCancelledRun, isDesktop, proxiedUrl, rpc, rpcRaw, sourceRunDetails } from './transport';
+import { onServerAnswered } from './reachability';
 import type { PlayerSource } from './types';
 
 const base: PlayerSource = { url: 'http://cdn.example/a.m3u8', kind: 'hls', title: 't', isLive: true, isRadio: false };
@@ -65,6 +66,41 @@ describe('rpc (web)', () => {
     await rpc('app.ping');
     await rpcRaw('app.ping', undefined, { keepalive: true });
     expect(fetchMock.mock.calls.map(([, init]) => init?.keepalive)).toEqual([undefined, true]);
+  });
+
+  it('aborts the request with the signal and rejects with its AbortError, not an RpcError', async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const ctl = new AbortController();
+    const call = rpcRaw('catalog.channels', { sourceId: 's1' }, { signal: ctl.signal });
+    expect(fetchMock.mock.calls[0]![1]?.signal).toBe(ctl.signal);
+    ctl.abort();
+    await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(call).rejects.not.toBeInstanceOf(RpcError);
+  });
+
+  it('reports a server answer (success or its own error payload) but not a proxy 502', async () => {
+    const answered = vi.fn();
+    const off = onServerAnswered(answered);
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('null', { status: 200 })));
+      await rpc('app.ping');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{"code":"invalid","message":"bad"}', { status: 400 })));
+      await expect(rpc('app.ping')).rejects.toBeInstanceOf(RpcError);
+      expect(answered).toHaveBeenCalledTimes(2);
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('Bad Gateway', { status: 502 })));
+      await expect(rpc('app.ping')).rejects.toBeInstanceOf(RpcError);
+      vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
+      await expect(rpc('app.ping')).rejects.toMatchObject({ code: 'network' });
+      expect(answered).toHaveBeenCalledTimes(2);
+    } finally {
+      off();
+    }
   });
 
   it('surfaces the server error body as RpcError without retrying', async () => {

@@ -250,12 +250,8 @@
   "backupReplaceConfirmTitle": "Zastąpić wszystkie źródła?",
   "backupReplaceConfirmBody": "Najpierw importowane są źródła z kopii. Gdy wczyta się co najmniej jedno z nich, obecne źródła wraz z ulubionymi i historią oglądania zostaną usunięte. Jeśli żadne się nie wczyta, nic się nie zmieni.",
   "backupReplaceConfirm": "Zastąp",
-  "backupImported_one": "Zaimportowano {{count}} źródło",
-  "backupImported_few": "Zaimportowano {{count}} źródła",
-  "backupImported_many": "Zaimportowano {{count}} źródeł",
-  "backupImported_other": "Zaimportowano {{count}} źródła",
   "backupImportFailed": "Nie udało się zaimportować kopii zapasowej",
-  "backupResult": "Zaimportowano: {{imported}}, pominięto: {{skipped}}",
+  "backupResult": "Dodano lub zaktualizowano: {{imported}}. Pominięto: {{skipped}}.",
   "backupWarnings_one": "{{count}} ostrzeżenie",
   "backupWarnings_few": "{{count}} ostrzeżenia",
   "backupWarnings_many": "{{count}} ostrzeżeń",
@@ -453,5 +449,9 @@
   "imageCacheCleared": "Wyczyszczono pamięć podręczną obrazów",
   "imageCacheClearFailed": "Nie udało się wyczyścić pamięci podręcznej obrazów",
   "imageCacheLoadFailed": "Nie udało się odczytać pamięci podręcznej obrazów: {{message}}",
-  "imageCacheUnavailable": "Ten serwer nie ma pamięci podręcznej obrazów, więc obrazy są wczytywane bezpośrednio od dostawców."
+  "imageCacheUnavailable": "Ten serwer nie ma pamięci podręcznej obrazów, więc obrazy są wczytywane bezpośrednio od dostawców.",
+  "backupOldVersion": "Ta kopia zapasowa ma starszy format, którego nie da się odczytać. Wyeksportuj nową kopię i zaimportuj ją.",
+  "backupImportDone": "Zaimportowano kopię zapasową",
+  "backupReplacePinTitle": "Wpisz PIN, aby zastąpić źródła",
+  "backupReplacePinText": "Zastąpienie usuwa obecne źródła i ich blokady rodzicielskie, więc wymaga PIN-u kontroli rodzicielskiej."
 }

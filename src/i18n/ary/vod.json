@@ -233,5 +233,12 @@
   "markSeriesWatched": "علّم المسلسل بلي تشاف",
   "markSeriesUnwatched": "علّم المسلسل بلي ما تشافش",
   "shortcutWatched": "علّم بلي تشاف ولا ما تشافش",
-  "shortcutHideWatched": "خبّي ولا ورّي العناوين اللي تشافو"
+  "shortcutHideWatched": "خبّي ولا ورّي العناوين اللي تشافو",
+  "sourceMissingTitle": "هاد المصدر تحيّد",
+  "sourceMissingBody": "ما بقاش فالمصادر ديالك. ختار مصدر آخر، ولا زيدو عاوتاني من المصادر.",
+  "goToDashboard": "سير للوحة التحكم",
+  "categoryMissingTitle": "ما لقيناش هاد الفئة",
+  "categoryMissingBody": "هاد المصدر ما فيهش فئة بهاد الرابط. يمكن المزوّد بدّل سميتها ولا حيّدها.",
+  "namedMarkedWatched": "{{name}} تعلّم بلي تشاف",
+  "namedMarkedUnwatched": "{{name}} تعلّم بلي ما تشافش"
 }

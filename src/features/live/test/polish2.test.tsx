@@ -41,10 +41,14 @@ const rpcMock = vi.hoisted(() => {
   return { handlers, calls, call };
 });
 
+// Server mode unless a test switches it: external players exist only in the desktop app.
+const desktop = vi.hoisted(() => ({ value: false }));
 vi.mock('@/api/transport', () => ({
   rpc: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
   rpcRaw: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
-  isDesktop: false,
+  get isDesktop() {
+    return desktop.value;
+  },
   RpcError: class RpcError extends Error {},
   proxiedUrl: (s: { url: string }) => s.url,
 }));
@@ -890,12 +894,27 @@ describe('Live context menu: Copy stream address (round 2)', () => {
     // No PIN dialog host is mounted here, so the gate refuses (as a cancelled PIN prompt does).
     await waitFor(() => expect(calls('parental.check')).toHaveLength(1));
     expect(calls('parental.check')[0]!.args).toEqual({ items: [{ ref: makeChannel(4).ref, categoryId: 'g1' }] });
-    menu = await openMenu(4);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in MPV' }));
-    await waitFor(() => expect(calls('parental.check')).toHaveLength(2));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(writeText).not.toHaveBeenCalled();
-    expect(calls('player.openExternal')).toHaveLength(0);
+    desktop.value = true;
+    try {
+      menu = await openMenu(4);
+      fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play in MPV' }));
+      await waitFor(() => expect(calls('parental.check')).toHaveLength(2));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(writeText).not.toHaveBeenCalled();
+      expect(calls('player.openExternal')).toHaveLength(0);
+    } finally {
+      desktop.value = false;
+    }
+  });
+
+  it('offers Play in MPV and VLC only in the desktop app (L1-visual-9)', async () => {
+    asM3u((i) => `https://cdn.example.com/hls/channel${i}.m3u8`);
+    renderIn('/s/src1/live', LIVE);
+    const menu = await openMenu(4);
+    // Server mode: the core answers `unsupported` for external players, so they are not offered.
+    expect(within(menu).queryByRole('menuitem', { name: 'Play in MPV' })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Play in VLC' })).toBeNull();
+    expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
   });
 });
 

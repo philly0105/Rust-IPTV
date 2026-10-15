@@ -107,16 +107,35 @@ describe('stats page', () => {
     expect(await screen.findByTestId('stats-total')).toBeTruthy();
   });
 
-  it('offers 30 days from an empty week, and Home from an empty month', async () => {
+  it('offers 30 days from an empty week only when those 30 days hold something', async () => {
+    rpc.handlers['stats.summary'] = (raw) => {
+      const days = (raw as { days: 7 | 30 }).days;
+      return days === 30 ? h.summary(30, { 12: { live: 900 } }) : h.summary(7);
+    };
+    open();
+    expect(await screen.findByText('Nothing played in the last 7 days.')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('stats-show-month'));
+    await waitFor(() => expect(h.location.current).toBe('/stats?range=30'));
+    expect(await screen.findByTestId('stats-total')).toBeTruthy();
+  });
+
+  it('with nothing watched at all, points at live TV instead of an empty 30 days', async () => {
     rpc.handlers['stats.summary'] = (raw) => h.summary((raw as { days: 7 | 30 }).days);
     open();
     expect(await screen.findByText('Nothing watched yet')).toBeTruthy();
-    expect(screen.getByText('Nothing played in the last 7 days.')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('stats-show-month'));
-    await waitFor(() => expect(h.location.current).toBe('/stats?range=30'));
     expect(await screen.findByText('Time spent on live TV, movies and series shows up here.')).toBeTruthy();
-    expect(screen.getByTestId('stats-go-home').getAttribute('href')).toBe('/');
+    expect(screen.queryByTestId('stats-show-month')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('stats-watch-live').getAttribute('href')).toBe('/s/src1/live'));
     expect(screen.queryByTestId('stats-clear')).toBeNull();
+  });
+
+  it('with nothing watched and no sources, offers Home', async () => {
+    rpc.handlers['sources.list'] = () => [];
+    rpc.handlers['stats.summary'] = (raw) => h.summary((raw as { days: 7 | 30 }).days);
+    open('/stats?range=30');
+    expect(await screen.findByText('Time spent on live TV, movies and series shows up here.')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('stats-go-home').getAttribute('href')).toBe('/'));
+    expect(screen.queryByTestId('stats-show-month')).toBeNull();
   });
 
   it('keeps the range in the URL, from the tabs and from 7 and 3', async () => {

@@ -1,6 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { CalendarClock, ChartGantt, History, LayoutList, Link2, Radio, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { CalendarClock, ChartGantt, CircleAlert, History, LayoutList, Link2, Lock, Radio, RotateCcw } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -8,8 +8,11 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast } from '@/ui';
+// The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
+import { ensureUnlocked } from '@/features/parental/gate';
+import { Button, IconButton, Skeleton, useToast } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
+import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
@@ -42,6 +45,13 @@ export const RIBBON_PX_PER_MIN = 4;
 const AHEAD = 12 * HOUR;
 const LIST_ROW = 52;
 
+type Mode = 'timeline' | 'list';
+/**
+ * The body keeps one height per view whatever it shows (programmes, loading, no guide, locked,
+ * an error, no channel yet), so the video above never resizes on a zap or a source switch.
+ */
+const BODY_HEIGHT: Record<Mode, string> = { timeline: 'h-[104px]', list: 'h-56' };
+
 export interface EpgRibbonProps {
   channel?: Channel;
   sourceKind?: SourceKind;
@@ -53,8 +63,6 @@ export interface EpgRibbonProps {
   onMapEpg(channel: Channel): void;
   guideHref?: string;
 }
-
-type Mode = 'timeline' | 'list';
 
 export function EpgRibbon(props: EpgRibbonProps) {
   const { t, i18n } = useTranslation('live');
@@ -82,7 +90,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
   const [focused, setFocused] = useState<EpgProgram | undefined>(undefined);
   useEffect(() => setFocused(undefined), [channel?.ref.itemId]);
-  const shown = focused ?? current;
+  // Ask mode: a locked channel's programmes stay back until the PIN, like its stream.
+  const locks = useParentalLocks(channel?.ref.sourceId, channel?.ref.contentType === 'radio' ? 'radio' : 'live');
+  const locked = locks.channelLocked(channel);
+  const shown = locked ? undefined : (focused ?? current);
 
   const setMode = async (m: Mode) => {
     setLocalMode(m);
@@ -118,7 +129,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   const header = (
     <div className="flex min-w-0 items-start gap-3 px-4 pt-3 pb-2">
-      <div className="min-w-0 flex-1">
+      {/* Three lines tall with or without a programme (time, title, description), so a zap never moves the video. */}
+      <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center">
         {shown ? (
           <>
             {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
@@ -158,7 +170,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
             ) : null}
           </>
         ) : (
-          <p className="truncate text-sm font-semibold text-fg">{channelName || t('guide')}</p>
+          <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
+            {channelName || t('guide')}
+          </p>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -213,36 +227,69 @@ export function EpgRibbon(props: EpgRibbonProps) {
 
   let body;
   if (!channel) {
-    body = <EmptyState icon={<CalendarClock className="size-6" />} title={t('ribbonPickChannel')} />;
-  } else if (programs.error) {
-    body = <ErrorState error={programs.error} onRetry={programs.refetch} />;
-  } else if (programs.isLoading) {
+    // Also what shows for a moment after a source switch, before the list reports its first row.
+    body = <RibbonNote icon={<CalendarClock className="size-4" />} text={t('ribbonPickChannel')} />;
+  } else if (locked) {
     body = (
-      <div className="flex gap-1 px-4 pt-6" aria-busy="true" aria-label={t('loadingGuide')}>
-        {[160, 220, 120, 260, 180, 200].map((w, i) => (
-          <div key={i} className="shrink-0" style={{ width: w }}>
-            <Skeleton className="h-12" />
-          </div>
-        ))}
-      </div>
+      <RibbonNote icon={<Lock className="size-4" />} testId="ribbon-locked" text={t('lockedGuide')}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Lock className="size-3.5" />}
+          onClick={() => void ensureUnlocked([{ ref: channel.ref, categoryId: channel.categoryId, title: channelName }])}
+        >
+          {t('unlock')}
+        </Button>
+      </RibbonNote>
     );
-  } else if (list.length === 0) {
+  } else if (programs.error) {
     body = (
-      <EmptyState
-        icon={<CalendarClock className="size-6" />}
-        title={t('noGuideFor', { name: channelName })}
-        description={t('noGuideHint')}
-        action={
-          <div className="flex flex-wrap justify-center gap-2">
-            <Button size="sm" icon={<Link2 className="size-3.5" />} onClick={() => props.onMapEpg(channel)}>
-              {t('mapEpg')}
-            </Button>
-            <Link to="/settings/epg" className="inline-flex h-8 items-center rounded-md px-3 text-sm text-accent hover:underline">
-              {t('epgSettings')}
-            </Link>
-          </div>
-        }
-      />
+      <RibbonNote
+        icon={<CircleAlert className="size-4 text-danger" />}
+        role="alert"
+        text={t('ribbonFailed')}
+        detail={programs.error instanceof Error ? programs.error.message : undefined}
+      >
+        <Button size="sm" variant="secondary" icon={<RotateCcw className="size-3.5" />} onClick={() => void programs.refetch()}>
+          {t('retry')}
+        </Button>
+      </RibbonNote>
+    );
+  } else if (programs.isLoading) {
+    // Shaped like what lands: programme blocks for the timeline, rows for the list.
+    body =
+      mode === 'list' ? (
+        <div className="flex flex-col" aria-busy="true" aria-label={t('loadingGuide')}>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-3 border-b border-divider px-4" style={{ height: LIST_ROW }}>
+              <Skeleton className="h-3 w-24 shrink-0" />
+              <Skeleton className="h-3 flex-1" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex gap-1 overflow-hidden px-4 pt-5 pb-2" aria-busy="true" aria-label={t('loadingGuide')}>
+          {[160, 220, 120, 260, 180, 200].map((w, i) => (
+            <div key={i} className="shrink-0" style={{ width: w }}>
+              <Skeleton className="h-[77px]" />
+            </div>
+          ))}
+        </div>
+      );
+  } else if (list.length === 0) {
+    // One line: the channel's name is the heading just above, so this says only what is missing and how to fix it.
+    body = (
+      <RibbonNote icon={<CalendarClock className="size-4" />} testId="ribbon-no-guide" text={t('noGuideShort')} title={t('noGuideHint')}>
+        <Button size="sm" variant="secondary" icon={<Link2 className="size-3.5" />} onClick={() => props.onMapEpg(channel)}>
+          {t('mapEpg')}
+        </Button>
+        <Link
+          to="/settings/epg"
+          className="inline-flex h-8 shrink-0 items-center rounded-md px-2 text-sm whitespace-nowrap text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {t('epgSettings')}
+        </Link>
+      </RibbonNote>
     );
   } else if (mode === 'timeline') {
     body = (
@@ -264,10 +311,47 @@ export function EpgRibbon(props: EpgRibbonProps) {
   }
 
   return (
-    <section aria-label={t('guide')} data-testid="epg-ribbon" className="flex min-h-0 flex-col border-t border-divider bg-surface">
+    <section aria-label={t('guide')} data-testid="epg-ribbon" className="flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface">
       {header}
-      <div className={mode === 'list' && list.length > 0 ? 'h-56' : 'min-h-[104px]'}>{body}</div>
+      <div className={`${BODY_HEIGHT[mode]} overflow-hidden`} data-testid="ribbon-body">
+        {body}
+      </div>
     </section>
+  );
+}
+
+/** A one-line ribbon state (no channel, no guide, locked, failed): icon, text, then its actions. */
+function RibbonNote({
+  icon,
+  text,
+  detail,
+  title,
+  testId,
+  role,
+  children,
+}: {
+  icon: ReactNode;
+  text: string;
+  /** What happened, after the text (an error's message). */
+  detail?: string;
+  /** The longer explanation, on hover. */
+  title?: string;
+  testId?: string;
+  role?: 'alert';
+  children?: ReactNode;
+}) {
+  return (
+    <div role={role} data-testid={testId} className="flex h-full min-w-0 items-center gap-3 px-4">
+      <span aria-hidden className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-divider bg-surface-2 text-fg-muted">
+        {icon}
+      </span>
+      <p className="min-w-0 truncate text-sm text-fg-muted" title={title ?? (detail ? `${text}
+${detail}` : text)}>
+        {text}
+        {detail ? <span className="ms-2 text-fg-subtle">{detail}</span> : null}
+      </p>
+      {children ? <div className="flex shrink-0 items-center gap-1">{children}</div> : null}
+    </div>
   );
 }
 

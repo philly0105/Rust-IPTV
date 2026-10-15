@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "替换所有播放源？",
   "backupReplaceConfirmBody": "先导入备份中的源。只要其中至少一个加载成功，当前的源及其收藏和观看记录就会被移除。如果一个都没加载成功，则不做任何更改。",
   "backupReplaceConfirm": "替换",
-  "backupImported_one": "已导入 {{count}} 个播放源",
-  "backupImported_other": "已导入 {{count}} 个播放源",
   "backupImportFailed": "无法导入备份",
-  "backupResult": "已导入 {{imported}} 个，已跳过 {{skipped}} 个",
+  "backupResult": "已添加或更新：{{imported}}。已跳过：{{skipped}}。",
   "backupWarnings_one": "{{count}} 条警告",
   "backupWarnings_other": "{{count}} 条警告",
   "backupNotJson": "此文件不是有效的 JSON。",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "图片缓存已清除",
   "imageCacheClearFailed": "无法清除图片缓存",
   "imageCacheLoadFailed": "无法读取图片缓存：{{message}}",
-  "imageCacheUnavailable": "此服务器没有图片缓存，图片将直接从各提供商加载。"
+  "imageCacheUnavailable": "此服务器没有图片缓存，图片将直接从各提供商加载。",
+  "backupOldVersion": "此备份使用无法读取的旧格式。请导出新的备份后再导入。",
+  "backupImportDone": "已导入备份",
+  "backupReplacePinTitle": "输入 PIN 以替换源",
+  "backupReplacePinText": "替换会移除当前的源及其家长锁定，因此需要家长控制 PIN。"
 }

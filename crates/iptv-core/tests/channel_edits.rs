@@ -1070,6 +1070,138 @@ async fn reset_drops_every_edit_of_one_source() {
     assert_eq!(name_of(&page["items"], "101"), "BBC One");
 }
 
+/// Saves channel `id` of `s1` as a favorite (re-adding it when it already
+/// is one, so the snapshot is replaced), in history and in the watch log
+/// under `title`, as the app does with the name it shows. Its custom list
+/// item (added once by the test) is set to `title` too.
+async fn save_as(a: &App, id: &str, title: &str) {
+    let (item, name) = (id.to_string(), title.to_string());
+    a.state
+        .db_call(move |c| {
+            c.execute(
+                "UPDATE custom_list_items SET title = ?2 WHERE item_id = ?1",
+                params![item, name],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let r = live("s1", id);
+    let fav = json!({"ref": r, "snapshot": snap(title)});
+    if a.call("favorites.toggle", fav.clone()).await["isFavorite"] == json!(false) {
+        a.call("favorites.toggle", fav).await;
+    }
+    a.call("recent.add", json!({"ref": r, "snapshot": snap(title)}))
+        .await;
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    a.call(
+        "stats.record",
+        json!({"ref": r, "title": title, "seconds": 60, "day": today}),
+    )
+    .await;
+}
+
+/// Titles of channel `id` of `s1` in `favorites.list`, `recent.list`, its
+/// stored list item and its watch-log row.
+async fn saved_titles(a: &App, id: &str) -> [String; 4] {
+    let title = |v: &Value| -> String {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["ref"]["itemId"] == id)
+            .unwrap_or_else(|| panic!("{id} missing from {v}"))["snapshot"]["title"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let favs = title(&a.call("favorites.list", json!({})).await);
+    let recent = title(&a.call("recent.list", json!({})).await);
+    let id = id.to_string();
+    let (list, log) = a
+        .state
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT (SELECT title FROM custom_list_items WHERE item_id = ?1),
+                        (SELECT title FROM watch_log WHERE item_id = ?1)",
+                [id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    [favs, recent, list, log]
+}
+
+/// Favorites, history, list items and the watch log store the name the app
+/// showed, here the custom one. Clearing the name (undo or reset of one
+/// channel, `channels.reset`, a newer hidden-only backup entry) puts the
+/// provider name back, so they stop showing the old custom name.
+#[tokio::test]
+async fn clearing_a_rename_restores_the_provider_name_in_saved_titles() {
+    let a = app().await;
+    let rename = |name: Value| json!({"ref": live("s1", "101"), "name": name});
+    let beeb = || ["Beeb", "Beeb", "Beeb", "Beeb"].map(String::from);
+    let bbc_one = || ["BBC One", "BBC One", "BBC One", "BBC One"].map(String::from);
+
+    a.call("channels.rename", rename(json!("Beeb"))).await;
+    a.call(
+        "lists.create",
+        json!({"name": "Mine", "items": [
+            {"ref": live("s1", "101"), "snapshot": snap("Beeb")},
+            {"ref": live("s1", "102"), "snapshot": snap("My CNN")},
+        ]}),
+    )
+    .await;
+    save_as(&a, "101", "Beeb").await;
+    // A channel that is not renamed keeps whatever title it was saved with.
+    save_as(&a, "102", "My CNN").await;
+    assert_eq!(saved_titles(&a, "101").await, beeb());
+
+    // Undo / Reset name: `channels.rename` with `null`.
+    a.call("channels.rename", rename(Value::Null)).await;
+    assert_eq!(saved_titles(&a, "101").await, bbc_one(), "after undo");
+
+    // Naming it back to the provider name clears the custom name too.
+    a.call("channels.rename", rename(json!("Beeb"))).await;
+    save_as(&a, "101", "Beeb").await;
+    a.call("channels.rename", rename(json!("BBC One"))).await;
+    assert_eq!(saved_titles(&a, "101").await, bbc_one(), "named BBC One");
+
+    // `channels.reset` of the whole source.
+    a.call("channels.rename", rename(json!("Beeb"))).await;
+    save_as(&a, "101", "Beeb").await;
+    assert_eq!(saved_titles(&a, "101").await, beeb());
+    a.call("channels.reset", json!({"sourceId": "s1"})).await;
+    assert_eq!(saved_titles(&a, "101").await, bbc_one(), "after reset");
+    assert_eq!(
+        saved_titles(&a, "102").await,
+        ["My CNN", "My CNN", "My CNN", "My CNN"].map(String::from),
+        "a channel that was not renamed is left alone"
+    );
+
+    // A newer backup entry that only hides the channel clears the name.
+    a.call("channels.rename", rename(json!("Beeb"))).await;
+    save_as(&a, "101", "Beeb").await;
+    let rows = vec![ChannelEditBackup {
+        content_type: ContentType::Live,
+        item_id: "101".into(),
+        hidden: true,
+        name: None,
+        original_name: "BBC One".into(),
+        updated_at: "2999-01-01T00:00:00Z".into(),
+    }];
+    let stored = a
+        .state
+        .db_call(move |c| {
+            assert_eq!(channeledit::import_edits(c, "s1", &rows)?, 1);
+            iptv_core::userstate::recent_list(c, None, None)
+        })
+        .await
+        .unwrap();
+    let entry = stored.iter().find(|e| e.item_ref.item_id == "101").unwrap();
+    assert_eq!(entry.snapshot.title, "BBC One", "after a backup import");
+}
+
 #[tokio::test]
 async fn writes_that_change_nothing_send_no_event() {
     let mut a = app().await;

@@ -182,19 +182,37 @@ const RUNTIME_KEY: &str = "recording_runtime";
 const MAX_SLEEP: Duration = Duration::from_secs(15);
 /// Guide re-match runs at most this often (and after each guide refresh).
 const REMATCH_EVERY: i64 = 5 * 60;
-/// Consecutive failed attempts (nothing written) before a recording fails.
-pub const MAX_ATTEMPTS: u32 = 5;
+/// Longest wait between two reconnect attempts. A recording keeps
+/// reconnecting until its end: a provider that drops for a minute must not
+/// cost the rest of the programme.
+pub const MAX_BACKOFF_SECS: u64 = 30;
 /// A part shorter than this that ended on its own counts as a failed
 /// attempt: a provider answering an over-limit connection with a few seconds
-/// of "too many connections" video must not produce endless tiny parts.
+/// of "too many connections" video backs off instead of reconnecting at once.
 pub const MIN_PART_SECONDS: u64 = 15;
-/// Most part files one recording writes before it gives up.
+/// Most part files one recording keeps (a safety cap: small reconnect parts
+/// are joined to the part before, see [`MERGE_MAX_BYTES`]).
 pub const MAX_PARTS: usize = 50;
+/// A reconnect part up to this size is appended to the part before it, so a
+/// flaky stream still gives one file per programme (MPEG-TS joins byte for
+/// byte). A larger one stays a separate part: copying it would take long
+/// enough to miss more of the programme.
+pub const MERGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// How often the bytes written so far are saved while a part is written, so
+/// a crash mid-part still knows the recording has data.
+const SAVE_BYTES_EVERY: u32 = 5;
 
-/// True when a finished part counts toward [`MAX_ATTEMPTS`]: nothing was
-/// written, or the stream ended on its own within [`MIN_PART_SECONDS`].
+/// True when a finished part counts as a failed attempt (the backoff before
+/// the next one grows): nothing was written, or the stream ended on its own
+/// within [`MIN_PART_SECONDS`].
 pub fn part_failed(bytes: u64, seconds: u64, stopped: bool) -> bool {
     bytes == 0 || (!stopped && seconds < MIN_PART_SECONDS)
+}
+
+/// Wait before reconnect attempt number `failures` (consecutive failed
+/// attempts so far): 1, 2, 4, 8, 16 s, then [`MAX_BACKOFF_SECS`].
+pub fn backoff(failures: u32) -> Duration {
+    Duration::from_secs(2u64.saturating_pow(failures.min(6)).min(MAX_BACKOFF_SECS))
 }
 
 /// Interval of `recordings.progress` events.
@@ -536,8 +554,31 @@ pub struct ScheduleRequest {
     pub duration_minutes: Option<i64>,
 }
 
-/// Longest channel recording.
+/// Longest channel recording, and longest programme recording (a guide
+/// programme longer than this is a placeholder, not a show).
 pub const MAX_DURATION_MINUTES: i64 = 12 * 60;
+/// Furthest ahead a programme recording can start.
+pub const MAX_DAYS_AHEAD: i64 = 30;
+/// Why a programme is refused as too long.
+pub const PROGRAMME_TOO_LONG_MESSAGE: &str = "This programme is longer than 12 hours, so the guide entry is probably a placeholder. Record the channel for a set time instead.";
+/// Why a programme is refused as too far ahead.
+pub const TOO_FAR_AHEAD_MESSAGE: &str = "Recordings can be scheduled up to 30 days ahead.";
+
+/// Checks a programme's times: it ends after it starts, lasts at most
+/// [`MAX_DURATION_MINUTES`] and starts at most [`MAX_DAYS_AHEAD`] days after
+/// `now`.
+pub fn check_programme_times(start: i64, end: i64, now: i64) -> CoreResult<()> {
+    if end <= start {
+        return Err(CoreError::invalid("the programme must end after it starts"));
+    }
+    if end - start > MAX_DURATION_MINUTES * 60 {
+        return Err(CoreError::invalid(PROGRAMME_TOO_LONG_MESSAGE));
+    }
+    if start > now + MAX_DAYS_AHEAD * 86_400 {
+        return Err(CoreError::invalid(TOO_FAR_AHEAD_MESSAGE));
+    }
+    Ok(())
+}
 
 /// Why recording is or is not possible here.
 pub fn capabilities(state: &AppState) -> Capabilities {
@@ -589,9 +630,7 @@ pub async fn schedule(state: &Arc<AppState>, req: ScheduleRequest) -> CoreResult
             };
             let start = parse_time("start", s)?;
             let end = parse_time("end", e)?;
-            if end <= start {
-                return Err(CoreError::invalid("the programme must end after it starts"));
-            }
+            check_programme_times(start, end, now)?;
             let title = req
                 .title
                 .as_deref()
@@ -942,6 +981,26 @@ pub const SOURCE_REMOVED_MESSAGE: &str = "The source of this channel was removed
 pub const STREAM_DROPPED_MESSAGE: &str = "Recording stopped early: the stream kept dropping.";
 /// Prefix of the note on a recording waiting to reconnect.
 pub const RECONNECTING_PREFIX: &str = "Reconnecting: ";
+/// Completed, but the stream dropped at least once on the way.
+pub const STREAM_GAPS_MESSAGE: &str =
+    "The stream dropped during the recording, so parts of the programme may be missing.";
+/// The stream address answered 404 or 410.
+pub const STREAM_NOT_FOUND_MESSAGE: &str = "The channel's stream address no longer exists. Refresh the source, then schedule the recording again.";
+/// The stream address answered 401, 403 or another refusal.
+pub const STREAM_REJECTED_MESSAGE: &str = "The provider refused the stream. Check that the subscription is active and not already using all of its connections.";
+/// The provider's server could not be reached or sent no answer.
+pub const STREAM_NO_ANSWER_MESSAGE: &str = "The provider's server did not answer. Check the internet connection and that the server is online.";
+/// The provider's server answered 429 or 5xx.
+pub const STREAM_SERVER_ERROR_MESSAGE: &str =
+    "The provider's server is busy or down. Try again later.";
+/// The stream address answered with a web page.
+pub const NOT_A_STREAM_MESSAGE: &str = "The channel's address answered with a web page, not a video stream. Refresh the source, then schedule the recording again.";
+/// The recordings folder's disk is full.
+pub const DISK_FULL_MESSAGE: &str =
+    "The disk is full. Free some space or choose another recordings folder in Settings.";
+/// A scheduled airing cancelled because its series rule was removed (a rule
+/// added again may schedule it again, unlike an airing the user cancelled).
+pub const RULE_REMOVED_MESSAGE: &str = "Cancelled because its series rule was removed.";
 
 /// Stable code (camelCase) of a status message this module writes, so the
 /// UI can translate it; `None` for free-text stream errors.
@@ -961,6 +1020,14 @@ pub fn error_code(message: &str) -> Option<&'static str> {
         STOPPED_MESSAGE => "stopped",
         SOURCE_REMOVED_MESSAGE => "sourceRemoved",
         STREAM_DROPPED_MESSAGE => "streamDropped",
+        STREAM_GAPS_MESSAGE => "streamGaps",
+        STREAM_NOT_FOUND_MESSAGE => "streamNotFound",
+        STREAM_REJECTED_MESSAGE => "streamRejected",
+        STREAM_NO_ANSWER_MESSAGE => "streamNoAnswer",
+        STREAM_SERVER_ERROR_MESSAGE => "streamServerError",
+        NOT_A_STREAM_MESSAGE => "notAStream",
+        DISK_FULL_MESSAGE => "diskFull",
+        RULE_REMOVED_MESSAGE => "ruleRemoved",
         _ => return None,
     })
 }
@@ -1056,7 +1123,15 @@ async fn apply(
 async fn close_orphan(state: &AppState, row: &RecordingRow, note: Option<&str>) -> CoreResult<()> {
     let now = runtime(state).now();
     let id = row.id.clone();
-    let (status, msg) = if row.bytes > 0 {
+    // The files decide, not `row.bytes`: a crash mid-part leaves the row
+    // with the bytes saved last while the file holds everything written.
+    let parts = row.parts.clone();
+    let on_disk = tokio::task::spawn_blocking(move || total_bytes(&parts))
+        .await
+        .unwrap_or(0);
+    let bytes = if on_disk > 0 { on_disk } else { row.bytes };
+    let parts = row.parts.clone();
+    let (status, msg) = if bytes > 0 {
         (
             RecordingStatus::Completed,
             note.unwrap_or(CLOSED_EARLY_MESSAGE).to_string(),
@@ -1066,14 +1141,18 @@ async fn close_orphan(state: &AppState, row: &RecordingRow, note: Option<&str>) 
     };
     let done = state
         .db_call(move |c| {
-            store::transition(
+            let done = store::transition(
                 c,
                 &id,
                 &[RecordingStatus::Recording],
                 status,
                 Some(now),
                 Some(&msg),
-            )
+            )?;
+            if done && on_disk > 0 {
+                store::set_progress(c, &id, &parts, on_disk)?;
+            }
+            Ok(done)
         })
         .await?;
     if done {
@@ -1204,6 +1283,8 @@ async fn run(
                     Some(STOPPED_SHUTDOWN_MESSAGE.to_string())
                 } else if done.gave_up {
                     Some(STREAM_DROPPED_MESSAGE.to_string())
+                } else if done.dropped {
+                    Some(STREAM_GAPS_MESSAGE.to_string())
                 } else {
                     None
                 };
@@ -1248,8 +1329,16 @@ async fn run(
 struct Recorded {
     bytes: i64,
     last_error: Option<String>,
-    /// Stopped early because the stream kept failing or dropping.
+    /// Stopped early: the stream dropped so often that [`MAX_PARTS`] large
+    /// parts were written.
     gave_up: bool,
+    /// The stream dropped at least once after something was recorded.
+    dropped: bool,
+}
+
+/// An error's message without its kind prefix ("not found: ...").
+fn plain(e: CoreError) -> String {
+    crate::error::RpcError::from(e).message
 }
 
 /// Records until the end; returns total bytes and the last stream error.
@@ -1295,8 +1384,11 @@ async fn record(
     let mut parts = row.parts.clone();
     let mut failures: u32 = 0;
     let mut gave_up = false;
+    let mut dropped = false;
     let mut last_error: Option<String> = None;
     let elapsed_base = row.started_at.unwrap_or(started);
+    // Keeps reconnecting until the end (or a stop): only a refusal that
+    // retrying cannot change ends it early.
     loop {
         if *stop.borrow() || tokio::time::Instant::now() >= until {
             break;
@@ -1304,7 +1396,7 @@ async fn record(
         match resolve_source(state, &row.item_ref).await {
             Err(e) => {
                 failures += 1;
-                last_error = Some(e.to_string());
+                last_error = Some(plain(e));
             }
             Ok((source, kind)) => {
                 let (engine, source) = engine::choose(state, source, kind)?;
@@ -1353,21 +1445,37 @@ async fn record(
                     let _ = crate::downloads::naming::remove_regular_file(&path);
                     parts.pop();
                 }
-                if part_failed(len, part_started.elapsed().as_secs(), end.stopped) {
+                let failed = part_failed(len, part_started.elapsed().as_secs(), end.stopped);
+                if failed {
                     failures += 1;
                 } else {
                     failures = 0;
+                }
+                if len > 0 && parts.len() >= 2 && len <= MERGE_MAX_BYTES {
+                    join_last_part(&mut parts).await;
                 }
                 save_progress(state, id, &parts).await;
                 if end.stopped {
                     break;
                 }
+                dropped |= total_bytes(&parts) > 0;
                 if let Some(err) = end.error {
-                    last_error = Some(err);
+                    // Says why in words the user can act on when the
+                    // address, the provider or the disk is the cause.
+                    let why = if failed {
+                        tokio::select! {
+                            w = engine::diagnose(state, &source, &row.item_ref.source_id, &dir) => w,
+                            _ = tokio::time::sleep_until(until) => None,
+                            _ = stop.changed() => None,
+                        }
+                    } else {
+                        None
+                    };
+                    last_error = Some(why.map(str::to_owned).unwrap_or(err));
                 }
             }
         }
-        if failures >= MAX_ATTEMPTS || parts.len() >= MAX_PARTS {
+        if parts.len() >= MAX_PARTS {
             gave_up = true;
             break;
         }
@@ -1377,10 +1485,10 @@ async fn record(
             let _ = state
                 .db_call(move |c| store::set_error(c, &key, Some(&msg)))
                 .await;
+            changed(state, EVENT_RECORDINGS_UPDATE);
         }
-        let backoff = Duration::from_secs(2u64.saturating_pow(failures.min(5)).min(30));
         tokio::select! {
-            _ = tokio::time::sleep(backoff) => {}
+            _ = tokio::time::sleep(backoff(failures)) => {}
             _ = tokio::time::sleep_until(until) => {}
             _ = stop.changed() => {}
         }
@@ -1396,7 +1504,29 @@ async fn record(
         bytes,
         last_error,
         gave_up,
+        dropped,
     })
+}
+
+/// Appends the last part to the one before it and forgets it (see
+/// [`MERGE_MAX_BYTES`]). On failure both stay as separate parts.
+async fn join_last_part(parts: &mut Vec<String>) {
+    let [.., into, from] = parts.as_slice() else {
+        return;
+    };
+    let (from, into) = (PathBuf::from(from), PathBuf::from(into));
+    let src = from.clone();
+    let joined = tokio::task::spawn_blocking(move || naming::append_part(&src, &into)).await;
+    match joined {
+        Ok(Ok(())) => {
+            parts.pop();
+            if let Err(e) = crate::downloads::naming::remove_regular_file(&from) {
+                tracing::warn!(error = %e, "could not delete a recording part after joining it");
+            }
+        }
+        Ok(Err(e)) => tracing::warn!(error = %e, "could not join a recording part; keeping it"),
+        Err(e) => tracing::warn!(error = %e, "could not join a recording part; keeping it"),
+    }
 }
 
 async fn save_progress(state: &Arc<AppState>, id: &str, parts: &[String]) {
@@ -1411,7 +1541,8 @@ async fn save_progress(state: &Arc<AppState>, id: &str, parts: &[String]) {
     }
 }
 
-/// Emits `recordings.progress` every 2 s while a part is written.
+/// Emits `recordings.progress` every 2 s while a part is written, and saves
+/// the byte count every [`SAVE_BYTES_EVERY`] ticks.
 fn spawn_progress(
     state: Arc<AppState>,
     id: String,
@@ -1420,17 +1551,30 @@ fn spawn_progress(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut every = tokio::time::interval(PROGRESS_EVERY);
+        let mut ticks: u32 = 0;
         loop {
             every.tick().await;
             let rt = runtime(&state);
+            let bytes = total_bytes(&parts);
             state.emit(
                 EVENT_RECORDINGS_PROGRESS,
                 RecordingProgress {
                     id: id.clone(),
-                    bytes: total_bytes(&parts),
+                    bytes,
                     elapsed_seconds: (rt.now() - started).max(0),
                 },
             );
+            ticks = ticks.wrapping_add(1);
+            if ticks % SAVE_BYTES_EVERY == 0 {
+                let key = id.clone();
+                // Bytes only: the parts list is the engine's to write.
+                if let Err(e) = state
+                    .db_call(move |c| store::set_bytes(c, &key, bytes))
+                    .await
+                {
+                    tracing::debug!(error = %e, "could not save recording bytes");
+                }
+            }
         }
     })
 }
@@ -1833,6 +1977,14 @@ mod tests {
             (SOURCE_REMOVED_MESSAGE, "sourceRemoved"),
             (STREAM_DROPPED_MESSAGE, "streamDropped"),
             (engine::ENGINE_MISSING_MESSAGE, "engineMissing"),
+            (STREAM_GAPS_MESSAGE, "streamGaps"),
+            (STREAM_NOT_FOUND_MESSAGE, "streamNotFound"),
+            (STREAM_REJECTED_MESSAGE, "streamRejected"),
+            (STREAM_NO_ANSWER_MESSAGE, "streamNoAnswer"),
+            (STREAM_SERVER_ERROR_MESSAGE, "streamServerError"),
+            (NOT_A_STREAM_MESSAGE, "notAStream"),
+            (DISK_FULL_MESSAGE, "diskFull"),
+            (RULE_REMOVED_MESSAGE, "ruleRemoved"),
         ] {
             assert_eq!(error_code(msg), Some(code), "{msg}");
         }
@@ -1841,6 +1993,27 @@ mod tests {
         let missing = CoreError::EngineMissing(engine::ENGINE_MISSING_MESSAGE.into()).to_string();
         assert_eq!(error_code(&missing), Some("engineMissing"));
         assert_eq!(error_code("example.com answered 403"), None);
+    }
+
+    #[test]
+    fn programme_times_are_capped_in_length_and_horizon() {
+        let now = 1_800_000_000;
+        assert!(check_programme_times(now, now + 3600, now).is_ok());
+        assert!(check_programme_times(now, now + MAX_DURATION_MINUTES * 60, now).is_ok());
+        assert!(check_programme_times(now, now, now).is_err());
+        assert!(check_programme_times(now, now + MAX_DURATION_MINUTES * 60 + 1, now).is_err());
+        let far = now + MAX_DAYS_AHEAD * 86_400;
+        assert!(check_programme_times(far, far + 60, now).is_ok());
+        assert!(check_programme_times(far + 1, far + 61, now).is_err());
+    }
+
+    #[test]
+    fn reconnect_backoff_grows_and_stays_capped() {
+        assert_eq!(backoff(0), Duration::from_secs(1));
+        assert_eq!(backoff(1), Duration::from_secs(2));
+        assert_eq!(backoff(3), Duration::from_secs(8));
+        assert_eq!(backoff(5), Duration::from_secs(MAX_BACKOFF_SECS));
+        assert_eq!(backoff(u32::MAX), Duration::from_secs(MAX_BACKOFF_SECS));
     }
 
     #[test]

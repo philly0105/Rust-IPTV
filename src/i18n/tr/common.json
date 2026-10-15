@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Teknik ayrıntılar",
   "errorHintTimeout": "Sağlayıcı yoğun olabilir. Biraz sonra tekrar deneyin.",
   "errorHintAuth": "Kaynak ayarlarındaki kullanıcı adını, parolayı veya MAC adresini kontrol edin.",
-  "errorHintNotFound": "Sağlayıcı tarafından kaldırılmış olabilir. Listeyi güncellemek için kaynağı yenileyin.",
+  "errorHintNotFound": "Kaldırılmış olabilir ya da bu bağlantı artık güncel değil.",
   "errorHintInvalid": "Girdiğiniz değerleri gözden geçirip tekrar deneyin.",
   "errorHintUnsupported": "Bu kaynak veya yayın türü bu işlemi desteklemiyor. Harici bir oynatıcı deneyin.",
   "errorHintConflict": "En son sürümü görmek için yeniden yükleyin, ardından tekrar deneyin.",

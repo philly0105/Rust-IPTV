@@ -197,5 +197,12 @@
   "markSeriesWatched": "シリーズを視聴済みにする",
   "markSeriesUnwatched": "シリーズを未視聴にする",
   "shortcutWatched": "視聴済み・未視聴を切り替える",
-  "shortcutHideWatched": "視聴済みの作品を隠す・表示する"
+  "shortcutHideWatched": "視聴済みの作品を隠す・表示する",
+  "sourceMissingTitle": "このソースは削除されました",
+  "sourceMissingBody": "このソースはもう登録されていません。別のソースを選ぶか、「ソース」からもう一度追加してください。",
+  "goToDashboard": "ダッシュボードへ",
+  "categoryMissingTitle": "カテゴリが見つかりません",
+  "categoryMissingBody": "このソースにはそのリンクのカテゴリがありません。プロバイダーが名前を変えたか削除した可能性があります。",
+  "namedMarkedWatched": "{{name}}を視聴済みにしました",
+  "namedMarkedUnwatched": "{{name}}を未視聴にしました"
 }

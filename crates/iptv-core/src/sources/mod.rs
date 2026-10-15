@@ -78,7 +78,9 @@ pub fn importer(state: &AppState, kind: SourceKind) -> Option<Arc<dyn Importer>>
 #[serde(rename_all = "camelCase")]
 pub struct ImportProgress<'a> {
     pub source_id: &'a str,
-    /// `fetching` | `parsing` | `saving` | `done` | `error` | `cancelled`
+    /// `connecting` | `fetching` | `parsing` | `saving` | `done` | `error` |
+    /// `cancelled`. `connecting` opens every run, before its first request;
+    /// `done` with the message `unchanged` means the catalog was kept as is.
     pub phase: &'a str,
     pub done: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -126,6 +128,17 @@ pub fn progress_error(state: &AppState, source_id: &str, message: &str, code: Rp
             code: Some(code),
         },
     );
+}
+
+/// Message of the `done` progress of a run whose playlist had not changed
+/// ([`ImportSummary::unchanged`]). Clients refetch only `sources.*` for it.
+pub const UNCHANGED_MESSAGE: &str = "unchanged";
+
+/// Emits `import.progress` with `phase: "connecting"`: a run has the source's
+/// lock and is about to send its first request. Clients show "Connecting to
+/// <host>" until the first fetch progress arrives.
+pub fn progress_connecting(state: &AppState, source_id: &str) {
+    progress(state, source_id, "connecting", 0, None, None);
 }
 
 /// Emits `import.progress` with `phase: "cancelled"` (C8): the run stopped
@@ -343,14 +356,15 @@ pub fn validate_xtream(cfg: XtreamSourceConfig) -> CoreResult<XtreamSourceConfig
     if username.is_empty() {
         return Err(CoreError::Invalid("enter the Xtream username".into()));
     }
-    let password = cfg.password.trim().to_string();
-    if password.is_empty() {
+    // The password is kept as typed: providers do issue passwords with a
+    // leading or trailing space.
+    if cfg.password.trim().is_empty() {
         return Err(CoreError::Invalid("enter the Xtream password".into()));
     }
     Ok(XtreamSourceConfig {
         server_url: server,
         username,
-        password,
+        password: cfg.password,
     })
 }
 
@@ -421,31 +435,74 @@ pub fn normalize_urls(urls: Vec<String>) -> Vec<String> {
     out
 }
 
-fn default_name(kind: SourceKind, cfg: &SourceConfig) -> String {
-    let from_url = |u: &str| -> Option<String> {
-        let parsed = url::Url::parse(u).ok()?;
-        let seg = parsed
-            .path_segments()
-            .and_then(|mut s| s.next_back().map(str::to_owned))
-            .filter(|s| !s.is_empty());
-        seg.or_else(|| parsed.host_str().map(str::to_owned))
+/// Last path parts that say nothing about the source: playlist and Xtream
+/// endpoints, and the stock Stalker/Ministra portal paths. Mirrors
+/// `GENERIC_STEM` in `src/features/sources/lib/validate.ts`.
+const GENERIC_STEMS: &[&str] = &[
+    "get",
+    "playlist",
+    "index",
+    "player_api",
+    "c",
+    "stalker_portal",
+    "portal",
+    "server",
+    "load",
+    "panel",
+];
+
+/// `name` without a trailing `.m3u` / `.m3u8` / `.txt` (and `.php` for URLs).
+fn strip_playlist_ext(name: &str, php: bool) -> &str {
+    let lower = name.to_ascii_lowercase();
+    let exts: &[&str] = if php {
+        &[".m3u8", ".m3u", ".php", ".txt"]
+    } else {
+        &[".m3u8", ".m3u", ".txt"]
     };
+    exts.iter()
+        .find(|e| lower.ends_with(*e))
+        .map_or(name, |e| &name[..name.len() - e.len()])
+}
+
+/// Readable name from a URL, as the UI's `suggestName` derives it: the
+/// percent-decoded last path part without its playlist extension, or the host
+/// (without `www.`) when that part is empty or a generic endpoint name.
+fn name_from_url(u: &str) -> Option<String> {
+    let parsed = url::Url::parse(u).ok()?;
+    let last = parsed
+        .path_segments()
+        .and_then(|mut s| s.rfind(|p| !p.is_empty()))
+        .unwrap_or("");
+    // A broken escape (invalid UTF-8) keeps the raw text, like `safeDecode`.
+    let decoded = percent_encoding::percent_decode_str(last)
+        .decode_utf8()
+        .map_or_else(|_| last.to_string(), |d| d.into_owned());
+    let stem = strip_playlist_ext(&decoded, true).trim();
+    if !stem.is_empty() && !GENERIC_STEMS.iter().any(|g| g.eq_ignore_ascii_case(stem)) {
+        return Some(stem.to_string());
+    }
+    let host = parsed.host_str()?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+fn default_name(kind: SourceKind, cfg: &SourceConfig) -> String {
     match cfg {
         SourceConfig::M3u(c) => match c.origin {
-            M3uOrigin::Url => c.url.as_deref().and_then(from_url),
+            M3uOrigin::Url => c.url.as_deref().and_then(name_from_url),
             M3uOrigin::File => c.file_path.as_deref().and_then(|p| {
-                std::path::Path::new(p)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
+                let file = std::path::Path::new(p).file_name()?.to_string_lossy();
+                let stem = strip_playlist_ext(&file, false).trim();
+                Some(if stem.is_empty() { file.as_ref() } else { stem }.to_string())
             }),
             M3uOrigin::Text => None,
         }
         .unwrap_or_else(|| "Pasted playlist".to_string()),
         SourceConfig::Xtream(c) => {
-            from_url(&c.server_url).unwrap_or_else(|| kind.as_str().to_string())
+            name_from_url(&c.server_url).unwrap_or_else(|| kind.as_str().to_string())
         }
         SourceConfig::Stalker(c) => {
-            from_url(&c.portal_url).unwrap_or_else(|| kind.as_str().to_string())
+            name_from_url(&c.portal_url).unwrap_or_else(|| kind.as_str().to_string())
         }
     }
 }
@@ -711,6 +768,7 @@ pub async fn run_import_with<T: CancelOutcome>(
         return T::cancelled(import_cancelled_error());
     }
     let run = RunGuard::new(state, id, token.clone());
+    progress_connecting(state, id);
     let fut = IMPORT_RUN.scope(run.run.clone(), IMPORT_CANCEL.scope(token.clone(), fut));
     tokio::pin!(fut);
     let out = tokio::select! {
@@ -955,6 +1013,7 @@ async fn run_import_locked(
         return Err(err);
     };
     let started = std::time::Instant::now();
+    progress_connecting(&state, id);
     let fut = IMPORT_RUN.scope(
         run.run.clone(),
         IMPORT_CANCEL.scope(token.clone(), imp.import(state.clone(), &source)),
@@ -994,18 +1053,25 @@ async fn run_import_locked(
             // The backup import lock is never taken while this source's
             // import lock is held (lock order: backup, then source).
             drop(guard);
-            apply_parked_backup(&state, id).await;
+            let restored = apply_parked_backup(&state, id).await;
             let total = (summary.channels + summary.movies + summary.series).max(0) as u64;
-            progress(&state, id, "done", total, Some(total), None);
+            // Unchanged: only the source's import time moved, so clients
+            // refetch `sources.*` (on this message) and keep their catalog,
+            // list and guide queries; no `sources.changed`.
+            let message = summary.unchanged.then_some(UNCHANGED_MESSAGE);
+            progress(&state, id, "done", total, Some(total), message);
             tracing::info!(
                 source_id = id,
                 channels = summary.channels,
                 movies = summary.movies,
                 series = summary.series,
+                unchanged = summary.unchanged,
                 ms = started.elapsed().as_millis() as u64,
                 "source imported"
             );
-            emit_changed(&state);
+            if !summary.unchanged || restored {
+                emit_changed(&state);
+            }
             let source = get(&state, id).await?;
             spawn_guide_refresh(&state, &source);
             // account:
@@ -1130,7 +1196,7 @@ fn spawn_guide_refresh(state: &Arc<AppState>, source: &Source) {
 /// Only a source with a parked row (`backup_pending:<id>`) waits for the
 /// global backup import lock, so adding or refreshing an unrelated source never
 /// blocks behind a running `backup.import`.
-async fn apply_parked_backup(state: &Arc<AppState>, id: &str) {
+async fn apply_parked_backup(state: &Arc<AppState>, id: &str) -> bool {
     let key = format!("{}{id}", crate::backup::PENDING_PREFIX);
     let parked = state
         .db_call(move |c| {
@@ -1140,23 +1206,26 @@ async fn apply_parked_backup(state: &Arc<AppState>, id: &str) {
         .await;
     match parked {
         Ok(true) => {}
-        Ok(false) => return,
+        Ok(false) => return false,
         Err(err) => {
             tracing::warn!(source_id = id, %err, "could not check for parked backup state");
-            return;
+            return false;
         }
     }
     match crate::backup::apply_pending_restore(state, id).await {
-        Ok(w) if !w.is_empty() => {
-            tracing::info!(
-                source_id = id,
-                warnings = w.len(),
-                "applied parked backup state"
-            )
+        Ok(w) => {
+            if !w.is_empty() {
+                tracing::info!(
+                    source_id = id,
+                    warnings = w.len(),
+                    "applied parked backup state"
+                );
+            }
+            true
         }
-        Ok(_) => {}
         Err(err) => {
-            tracing::warn!(source_id = id, %err, "parked backup state could not be applied")
+            tracing::warn!(source_id = id, %err, "parked backup state could not be applied");
+            false
         }
     }
 }
@@ -1503,6 +1572,70 @@ mod tests {
         assert!(done.is_ok());
     }
 
+    /// L1-sources-home-6: names given to sources added without one follow the
+    /// UI's `suggestName` (no `c`, `get.php` or percent-encoded names).
+    #[test]
+    fn default_names_follow_the_ui_rules() {
+        let m3u = |origin, url: Option<&str>, file: Option<&str>| {
+            default_name(
+                SourceKind::M3u,
+                &SourceConfig::M3u(M3uSourceConfig {
+                    origin,
+                    url: url.map(str::to_string),
+                    file_path: file.map(str::to_string),
+                    headers: RequestHeaders::default(),
+                    catchup: None,
+                }),
+            )
+        };
+        let url = |u: &str| m3u(M3uOrigin::Url, Some(u), None);
+        assert_eq!(
+            url("http://www.example.com/get.php?username=u&password=p"),
+            "example.com"
+        );
+        assert_eq!(url("http://tv.example.com/My%20List.m3u8"), "My List");
+        assert_eq!(url("http://tv.example.com/lists/sports.M3U"), "sports");
+        assert_eq!(url("http://tv.example.com/lists/news.txt/"), "news");
+        assert_eq!(url("http://tv.example.com/Playlist.m3u"), "tv.example.com");
+        assert_eq!(url("http://tv.example.com/panel"), "tv.example.com");
+        assert_eq!(url("http://tv.example.com/"), "tv.example.com");
+        // A broken escape keeps the raw text.
+        assert_eq!(url("http://tv.example.com/bad%E0%A4.m3u"), "bad%E0%A4");
+        assert_eq!(
+            m3u(M3uOrigin::File, None, Some("C:/lists/family.m3u8")),
+            "family"
+        );
+        assert_eq!(m3u(M3uOrigin::Text, None, None), "Pasted playlist");
+
+        let xtream = |server: &str| {
+            default_name(
+                SourceKind::Xtream,
+                &SourceConfig::Xtream(XtreamSourceConfig {
+                    server_url: server.into(),
+                    username: "u".into(),
+                    password: "p".into(),
+                }),
+            )
+        };
+        assert_eq!(xtream("http://www.provider.tv:8080"), "provider.tv");
+        assert_eq!(xtream("http://provider.tv/player_api.php"), "provider.tv");
+        assert_eq!(xtream("not a url"), "xtream");
+
+        for portal in [
+            "http://portal.example.net/c",
+            "http://portal.example.net/c/",
+            "http://portal.example.net/stalker_portal/c/",
+            "http://portal.example.net/portal.php",
+            "http://portal.example.net/stalker_portal/server/load.php",
+        ] {
+            assert_eq!(
+                name_from_url(portal).as_deref(),
+                Some("portal.example.net"),
+                "{portal}"
+            );
+        }
+    }
+
     #[test]
     fn validation_normalizes() {
         assert_eq!(
@@ -1519,6 +1652,23 @@ mod tests {
         })
         .unwrap();
         assert_eq!(x.server_url, "http://h:8080");
+        // L1-core-20: the username is trimmed, the password is not.
+        let spaced = validate_xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: " u ".into(),
+            password: " p ".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            (spaced.username.as_str(), spaced.password.as_str()),
+            ("u", " p ")
+        );
+        assert!(validate_xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: "u".into(),
+            password: "   ".into(),
+        })
+        .is_err());
         assert!(validate_xtream(XtreamSourceConfig {
             server_url: "ftp://h".into(),
             username: "u".into(),

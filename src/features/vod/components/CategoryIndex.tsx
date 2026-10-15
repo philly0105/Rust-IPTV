@@ -28,6 +28,8 @@ export interface CategoryIndexProps {
 const MIN_COL = 260;
 const GAP = 8;
 const ROW_H = 48;
+/** Location state on the landing's category links (the grid's Escape steps back through history). */
+const FROM_LANDING = { fromLanding: true } as const;
 
 /**
  * The category index: a dial-like list of category names with their item
@@ -79,6 +81,8 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label }: CategoryIn
               <div key={entry.id} role="listitem" className="min-w-0">
                 <Link
                   to={hrefFor(entry.id)}
+                  // The grid reads this: Escape there goes back one step instead of pushing the landing again.
+                  state={FROM_LANDING}
                   data-grid-index={i}
                   className={cn(
                     'group flex h-11 items-center gap-3 rounded-md border-b border-divider px-3',

@@ -197,5 +197,12 @@
   "markSeriesWatched": "Serie als angesehen markieren",
   "markSeriesUnwatched": "Serie als nicht angesehen markieren",
   "shortcutWatched": "Als angesehen oder nicht angesehen markieren",
-  "shortcutHideWatched": "Angesehene Titel aus- oder einblenden"
+  "shortcutHideWatched": "Angesehene Titel aus- oder einblenden",
+  "sourceMissingTitle": "Diese Quelle wurde entfernt",
+  "sourceMissingBody": "Sie ist nicht mehr in deinen Quellen. Wähle eine andere Quelle oder füge sie unter Quellen erneut hinzu.",
+  "goToDashboard": "Zum Dashboard",
+  "categoryMissingTitle": "Kategorie nicht gefunden",
+  "categoryMissingBody": "Diese Quelle hat keine Kategorie mit diesem Link. Der Anbieter hat sie vielleicht umbenannt oder entfernt.",
+  "namedMarkedWatched": "{{name}} als gesehen markiert",
+  "namedMarkedUnwatched": "{{name}} als nicht gesehen markiert"
 }

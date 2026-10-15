@@ -180,5 +180,9 @@
   "reminderSwitched": "Overgeschakeld naar {{channel}}",
   "undoSwitch": "Ongedaan maken",
   "reminderSwitchFailed": "Kon niet naar de zender schakelen",
-  "recordNeedsMpv": "Voor het opnemen van deze zender is mpv nodig. Installeer mpv of stel het pad in bij de spelerinstellingen."
+  "recordNeedsMpv": "Voor het opnemen van deze zender is mpv nodig. Installeer mpv of stel het pad in bij de spelerinstellingen.",
+  "locked": "Vergrendeld",
+  "lockedGuide": "Vergrendeld. Voer de pincode in om te zien wat er op is.",
+  "unlock": "Ontgrendelen",
+  "ribbonFailed": "De gids van dit kanaal kon niet worden geladen"
 }

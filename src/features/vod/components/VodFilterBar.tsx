@@ -26,6 +26,12 @@ export interface VodFilterBarProps {
   categoryId: string;
   /** Stalker portals: fixed decades, filtered on loaded pages. */
   stalker: boolean;
+  /**
+   * Whether this kind of source usually gives years (Xtream does, M3U mostly
+   * not). Placeholder chips show while the facets load only when it does, or
+   * when this source has shown years before, so the row doesn't pop in and out.
+   */
+  yearsLikely: boolean;
   range: YearRange;
   onRangeChange: (range: YearRange) => void;
   hideWatched: boolean;
@@ -37,6 +43,9 @@ const CHIP =
   'motion-safe:transition-[color,background-color,box-shadow] motion-safe:duration-150';
 const CHIP_IDLE = 'bg-surface-2 text-fg-muted ring-1 ring-inset ring-border hover:bg-surface-3 hover:text-fg';
 const CHIP_ON = 'bg-accent font-medium text-accent-fg ring-1 ring-inset ring-accent';
+
+/** Sources whose facets had years this session: their row is worth reserving while it loads. */
+const sourcesWithYears = new Set<string>();
 
 /**
  * The filter row under a VOD grid's toolbar (C4): decade chips, an exact
@@ -57,6 +66,7 @@ export function VodFilterBar({
   kind,
   categoryId,
   stalker,
+  yearsLikely,
   range,
   onRangeChange,
   hideWatched,
@@ -92,8 +102,9 @@ export function VodFilterBar({
   const active = hasYearRange(range);
   const activeDecade = rangeDecade(range);
   const max = chips.reduce((m, c) => Math.max(m, c.count ?? 0), 0);
+  if (!stalker && (facets.data?.length ?? 0) > 0) sourcesWithYears.add(sourceId);
   // Titles without any year: nothing to filter by, unless a link already set a range.
-  const showYears = loading || chips.length > 0 || active;
+  const showYears = (loading && (yearsLikely || sourcesWithYears.has(sourceId))) || chips.length > 0 || active;
   const fades = useEdgeFades(`${loading}|${chips.map((c) => c.decade).join(',')}|${i18n.language}`);
   const { el: chipRow } = fades;
   // A range set by a link (or a pick made after scrolling) keeps its chip in view.

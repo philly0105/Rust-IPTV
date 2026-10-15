@@ -37,9 +37,8 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
   ],
   'epg.changed': ['epg.'],
   'downloads.update': ['downloads.', 'myvideos.'],
-  // account: a new subscription check; the refresh interval moves every next-refresh time.
+  // account: a new subscription check.
   'account.changed': ['account.'],
-  'settings.changed': ['sources.schedule'],
 };
 
 /** Maps an `iptv://` URL to an in-app path, or null when unsupported. */
@@ -209,12 +208,33 @@ export function useShellEvents(): void {
     offs.push(bindRailEmptySync(queryClient));
     offs.push(bindTmdbCacheSync(queryClient));
 
-    // englishOnly filters in the core, so catalog lists refetch when it flips.
-    // Tracked here because the settings cache is already updated optimistically.
-    let englishOnly = queryClient.getQueryData<Settings>(rpcKey('settings.get'))?.englishOnly;
+    // englishOnly filters in the core, so catalog lists refetch when it flips; the
+    // refresh interval moves every next-refresh time on the Sources page. Both are
+    // tracked here, not read from the cache: the settings cache is updated
+    // optimistically, and bindEventInvalidation writes each settings.changed payload
+    // into it before this handler runs.
+    // Unknown until settings first load (the cache is usually still empty at mount):
+    // the first value seen is the baseline, never a change, so the first settings write
+    // after a cold start (lastRoute, 1.2 s in) does not refetch every catalog query.
+    const cached = queryClient.getQueryData<Settings>(rpcKey('settings.get'));
+    let englishOnly = cached?.englishOnly;
+    let refreshHours = cached?.sourceRefreshIntervalHours;
+    offs.push(
+      queryClient.getQueryCache().subscribe((event) => {
+        if (event.type !== 'updated' || event.query.queryKey[0] !== 'settings.get') return;
+        const data = event.query.state.data as Settings | undefined;
+        englishOnly ??= data?.englishOnly;
+        refreshHours ??= data?.sourceRefreshIntervalHours;
+      }),
+    );
     offs.push(
       onAppEvent('settings.changed', (s: Settings) => {
-        queryClient.setQueryData(rpcKey('settings.get'), s);
+        if (refreshHours !== undefined && s.sourceRefreshIntervalHours !== refreshHours) void invalidate('sources.schedule');
+        refreshHours = s.sourceRefreshIntervalHours;
+        if (englishOnly === undefined) {
+          englishOnly = s.englishOnly;
+          return;
+        }
         if (s.englishOnly !== englishOnly) {
           englishOnly = s.englishOnly;
           void invalidate('catalog.');
@@ -227,12 +247,10 @@ export function useShellEvents(): void {
         const tr = tRef.current;
         const id = `import-${p.sourceId}`;
         const onSources = isSourcesRoute(pathRef.current);
+        // A finished import's catalog and source queries are invalidated by bindEventInvalidation
+        // (DEFAULT_EVENT_INVALIDATION in api/query.ts); doing it here too refetched them twice.
         if (importToastPolicy(p.phase, onSources) === 'dismiss') {
           dismissToast(id);
-          if (p.phase === 'done') {
-            void invalidate('sources.');
-            void invalidate('catalog.');
-          }
           if (p.phase === 'cancelled') void invalidate('sources.');
           return;
         }
@@ -245,8 +263,6 @@ export function useShellEvents(): void {
             description: tr('importDoneDetail', { count: p.done }),
             duration: 4000,
           });
-          void invalidate('sources.');
-          void invalidate('catalog.');
           return;
         }
         // Cancelled is final like done and error: replace the progress toast,
@@ -273,7 +289,7 @@ export function useShellEvents(): void {
           });
           return;
         }
-        const phaseLabel = tr(`importPhase_${p.phase}`);
+        const phaseLabel = p.phase === 'connecting' ? tr('sources:phaseStarting') : tr(`importPhase_${p.phase}`);
         toast({
           id,
           variant: 'info',
@@ -313,22 +329,24 @@ export function useShellEvents(): void {
       });
     }
 
-    // Web mode: tell the user when the live event stream drops, once.
+    // Web mode: tell the user, once per outage, when the live event stream is down for
+    // 3 s: after a drop, and also when the page never connected (server down at load).
     if (!isDesktop) {
-      let wasOpen = false;
+      let shown = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
       offs.push(
         onConnectionState((s) => {
           if (s === 'open') {
             if (timer) clearTimeout(timer);
             timer = null;
-            if (wasOpen) dismissToast('connection');
-            wasOpen = true;
+            if (shown) dismissToast('connection');
+            shown = false;
             return;
           }
-          if (s === 'closed' && wasOpen && !timer) {
+          if (s === 'closed' && !shown && !timer) {
             timer = setTimeout(() => {
               timer = null;
+              shown = true;
               toast({ id: 'connection', variant: 'error', title: tRef.current('connectionLost'), description: tRef.current('connectionLostHint'), duration: 0 });
             }, 3000);
           }

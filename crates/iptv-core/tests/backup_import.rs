@@ -192,6 +192,7 @@ impl Importer for MockCatalogImporter {
             channels: 40,
             movies: 35,
             series: 10,
+            unchanged: false,
         })
     }
 }
@@ -226,6 +227,41 @@ async fn app(xtream_live: bool) -> (tempfile::TempDir, Arc<AppState>) {
         register_importer(&state, Arc::new(MockCatalogImporter));
     }
     (dir, state)
+}
+
+/// L1-settings-2: every source a backup import loads ends its progress with
+/// `done`, so the UI's progress toast closes.
+#[tokio::test]
+async fn backup_import_ends_each_source_progress_with_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sink, mut rx) = BroadcastSink::channel(4096);
+    let st = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    iptv_core::m3u::init(st.clone()).await.unwrap();
+    iptv_core::xtream::init(st.clone()).await.unwrap();
+    iptv_core::stalker::init(st.clone()).await.unwrap();
+    register_importer(&st, Arc::new(MockCatalogImporter));
+    let r = router();
+    import(&r, &st, &inline_manifest(), "merge").await;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut last: std::collections::HashMap<String, String> = Default::default();
+    loop {
+        match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Ok(Ok(ev)) if ev.kind == "import.progress" => {
+                let id = ev.payload["sourceId"].as_str().unwrap_or("").to_string();
+                let phase = ev.payload["phase"].as_str().unwrap_or("").to_string();
+                last.insert(id, phase);
+                if !last.is_empty() && last.values().all(|p| p == "done") {
+                    break;
+                }
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) | Err(_) => break,
+        }
+    }
+    assert!(!last.is_empty(), "the import reported progress");
+    assert!(last.values().all(|p| p == "done"), "{last:?}");
 }
 
 fn router() -> RpcRouter {
@@ -828,6 +864,7 @@ impl Importer for HangingImporter {
             channels: 0,
             movies: 0,
             series: 0,
+            unchanged: false,
         })
     }
 }

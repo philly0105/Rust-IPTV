@@ -174,5 +174,10 @@
   "turnOffTitle": "Désactiver le contrôle parental ?",
   "turnOffConfirmText": "Saisissez le code PIN. Les contenus verrouillés seront ouverts à tous jusqu’à la définition d’un nouveau code.",
   "turnedOffToast": "Le contrôle parental est désactivé",
-  "turnedOffToastText": "Vos verrous sont conservés. Définissez un code PIN pour les réutiliser."
+  "turnedOffToastText": "Vos verrous sont conservés. Définissez un code PIN pour les réutiliser.",
+  "menuLockedWithGroup": "Verrouillé avec son groupe",
+  "discardTitle": "Ignorer vos modifications ?",
+  "discardText": "Les groupes cochés ou décochés ici ne seront pas enregistrés.",
+  "keepEditing": "Continuer",
+  "discard": "Ignorer"
 }

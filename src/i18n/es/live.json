@@ -185,5 +185,9 @@
   "reminderSwitched": "Cambiado a {{channel}}",
   "undoSwitch": "Deshacer",
   "reminderSwitchFailed": "No se pudo cambiar al canal",
-  "recordNeedsMpv": "Para grabar este canal hace falta mpv. Instala mpv o indica su ruta en los ajustes del reproductor."
+  "recordNeedsMpv": "Para grabar este canal hace falta mpv. Instala mpv o indica su ruta en los ajustes del reproductor.",
+  "locked": "Bloqueado",
+  "lockedGuide": "Bloqueado. Introduce el PIN para ver qué están emitiendo.",
+  "unlock": "Desbloquear",
+  "ribbonFailed": "No se pudo cargar la guía de este canal"
 }

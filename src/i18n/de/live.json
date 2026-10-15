@@ -180,5 +180,9 @@
   "reminderSwitched": "Zu {{channel}} gewechselt",
   "undoSwitch": "Rückgängig",
   "reminderSwitchFailed": "Wechsel zum Sender fehlgeschlagen",
-  "recordNeedsMpv": "Für die Aufnahme dieses Senders wird mpv benötigt. Installieren Sie mpv oder geben Sie den Pfad in den Player-Einstellungen an."
+  "recordNeedsMpv": "Für die Aufnahme dieses Senders wird mpv benötigt. Installieren Sie mpv oder geben Sie den Pfad in den Player-Einstellungen an.",
+  "locked": "Gesperrt",
+  "lockedGuide": "Gesperrt. Geben Sie die PIN ein, um zu sehen, was läuft.",
+  "unlock": "Entsperren",
+  "ribbonFailed": "Das Programm dieses Senders konnte nicht geladen werden"
 }

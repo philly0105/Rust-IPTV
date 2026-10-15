@@ -9,14 +9,15 @@ const bannerClass =
 
 /** Identity of one over-limit situation: dismissing it hides it until the numbers change. */
 export function loadKey(l: SourceLoad): string {
-  return `${l.sourceId}|${l.tiles}|${l.max}`;
+  return `${l.sourceId}|${l.tiles}|${l.own}|${l.max}`;
 }
 
 /**
- * Accounts whose tiles on the wall outnumber their connections. Providers refuse (or cut)
- * streams past the limit, so tiles of that account may fail; the banner says which account
- * and by how much. Dismissed per situation (the page keeps which, `loadKey`): adding another
- * tile of that account shows it again.
+ * Accounts whose streams in use (tiles that open a stream, plus this app's recordings and
+ * main player) outnumber their connections. Providers refuse (or cut) streams past the
+ * limit, so tiles of that account may fail; the banner says which account and by how much.
+ * Dismissed per situation (the page keeps which, `loadKey`): adding another tile of that
+ * account, or a recording starting on it, shows it again.
  */
 export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[]; onDismiss(l: SourceLoad): void }) {
   const { t } = useTranslation('multiview');
@@ -35,6 +36,7 @@ export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[];
             <span className="font-semibold">{t('limitTitle')} </span>
             <span className="text-fg-muted">
               {t('limitBody', { count: l.max, tiles: l.tiles, source: l.name || t('limitUnknownSource') })}
+              {l.own > 0 ? ` ${t('limitOwn')}` : null}
             </span>
           </p>
           <button

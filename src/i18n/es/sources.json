@@ -240,7 +240,7 @@
   "errorSummaryGeneric": "Algo salió mal durante la importación.",
   "errorSummaryWrongUrl": "Esa dirección no lleva a una lista de canales.",
   "technicalDetails": "Detalles técnicos",
-  "addRetryNote": "«{{name}}» se guardó con este error. Corrige los datos y vuelve a intentarlo aquí, o cierra esta ventana y usa Reintentar en su tarjeta más tarde.",
+  "addRetryNote": "Corrige los datos y vuelve a intentarlo aquí. Al cerrar esta ventana se elimina «{{name}}» (puedes deshacerlo).",
   "retryImport": "Reintentar",
   "retrying": "Reintentando...",
 
@@ -365,5 +365,14 @@
   "catchupDays": "Días de archivo",
   "catchupDaysHint": "Hasta cuándo llega el archivo. Déjalo vacío para mantener el valor de la lista.",
   "errorCatchupTemplate": "Usa como máximo {{max}} caracteres y ningún carácter de control.",
-  "errorCatchupDays": "Introduce un número entero de días entre uno y {{max}}."
+  "errorCatchupDays": "Introduce un número entero de días entre uno y {{max}}.",
+  "testExpired": "Sesión iniciada, pero la cuenta ha caducado.",
+  "testExpiredNamed": "Sesión iniciada en {{name}}, pero la cuenta ha caducado.",
+  "testAccountInactiveHint": "Los canales no se reproducirán hasta que tu proveedor renueve o reactive la cuenta.",
+  "phaseConnectingTo": "Conectando con {{host}}…",
+  "phaseStarting": "Iniciando…",
+  "discardedFailedHint": "Su primera importación falló. Elige Deshacer para conservarla y volver a intentarlo desde su tarjeta.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

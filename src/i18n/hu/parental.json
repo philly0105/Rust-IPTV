@@ -163,5 +163,10 @@
   "turnOffTitle": "Kikapcsolja a szülői felügyeletet?",
   "turnOffConfirmText": "Adja meg a PIN-kódot. A zárolt tartalom mindenki számára elérhető lesz, amíg új PIN-kódot nem állít be.",
   "turnedOffToast": "A szülői felügyelet kikapcsolva",
-  "turnedOffToastText": "A zárolások megmaradtak. Állítson be PIN-kódot, hogy újra használja őket."
+  "turnedOffToastText": "A zárolások megmaradtak. Állítson be PIN-kódot, hogy újra használja őket.",
+  "menuLockedWithGroup": "A csoportjával együtt zárolva",
+  "discardTitle": "Elveted a módosításokat?",
+  "discardText": "Az itt bejelölt vagy kijelölésből kivett csoportok nem lesznek mentve.",
+  "keepEditing": "Szerkesztés folytatása",
+  "discard": "Elvetés"
 }

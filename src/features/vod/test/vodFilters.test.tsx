@@ -338,7 +338,7 @@ describe('watched tick and Hide watched', () => {
 });
 
 describe('Mark series watched', () => {
-  it('marks the series as a whole (no episode id) and reflects the item-level row', async () => {
+  it('marks the series as a whole (and, L1-vod-1, its episodes) and reflects the item-level row', async () => {
     const sref = { sourceId: 'src1', contentType: 'series' as const, itemId: 's1' };
     let seriesRow = false;
     rpcMock.handlers['xtream.seriesDetail'] = (): SeriesDetail => ({
@@ -360,8 +360,12 @@ describe('Mark series watched', () => {
     };
     renderAt('/s/src1/series/s1', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
     fireEvent.click(await screen.findByRole('button', { name: 'Mark series watched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
-    expect(callsOf('userstate.setWatched')[0]!.args).toEqual({ ref: sref, watched: true });
+    // The episodes first, then the item-level row that ticks the poster.
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
+    expect(callsOf('userstate.setWatched').map((c) => c.args)).toEqual([
+      { ref: sref, episodeId: 'e11', watched: true },
+      { ref: sref, watched: true },
+    ]);
     await screen.findByRole('button', { name: 'Mark series unwatched' });
   });
 });

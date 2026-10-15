@@ -180,5 +180,9 @@
   "reminderSwitched": "Átváltva erre: {{channel}}",
   "undoSwitch": "Visszavonás",
   "reminderSwitchFailed": "Nem sikerült átváltani a csatornára",
-  "recordNeedsMpv": "Ennek a csatornának a felvételéhez mpv kell. Telepítse az mpv-t, vagy adja meg az elérési útját a lejátszó beállításaiban."
+  "recordNeedsMpv": "Ennek a csatornának a felvételéhez mpv kell. Telepítse az mpv-t, vagy adja meg az elérési útját a lejátszó beállításaiban.",
+  "locked": "Zárolva",
+  "lockedGuide": "Zárolva. Adja meg a PIN-kódot, hogy lássa, mi megy rajta.",
+  "unlock": "Feloldás",
+  "ribbonFailed": "Nem sikerült betölteni a csatorna műsorát"
 }

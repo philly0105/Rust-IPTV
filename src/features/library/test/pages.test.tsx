@@ -73,7 +73,7 @@ describe('DownloadsPage', () => {
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
 
     const rows = await screen.findAllByTestId('download-row');
-    expect(rows.map((r) => r.dataset['status'])).toEqual(['downloading', 'queued', 'paused', 'canceled', 'failed']);
+    expect(rows.map((r) => r.dataset['status'])).toEqual(['queued', 'downloading', 'paused', 'canceled', 'failed']);
     const actions = (status: string) =>
       within(rows.find((r) => r.dataset['status'] === status)!)
         .getAllByRole('button')
@@ -81,10 +81,10 @@ describe('DownloadsPage', () => {
         .filter(Boolean);
     expect(actions('downloading')).toEqual(['pause', 'cancel']);
     expect(actions('queued')).toEqual(['pause', 'cancel']);
-    expect(actions('paused')).toEqual(['resume', 'cancel', 'remove']);
+    expect(actions('paused')).toEqual(['resume', 'remove']);
     expect(actions('failed')).toEqual(['retry', 'remove']);
     expect(actions('canceled')).toEqual(['retry', 'remove']);
-    expect(screen.getByText('Downloading now')).toBeTruthy();
+    expect(screen.getByText('Queue')).toBeTruthy();
     expect(screen.getByText('Needs attention')).toBeTruthy();
     expect(screen.getByText('HTTP 403')).toBeTruthy();
     expect(screen.queryByText('Title completed')).toBeNull();
@@ -146,6 +146,49 @@ describe('DownloadsPage', () => {
     expect(rpc.callsOf('downloads.cancel')).toEqual([]);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel download' }));
     await waitFor(() => expect(rpc.callsOf('downloads.cancel')).toEqual([{ id: 11 }]));
+  });
+
+  it('offers to delete the partial file of an unfinished download and sends the choice', async () => {
+    const paused = makeDownload({ id: 30, status: 'paused', title: 'Half done', bytesDownloaded: 400, totalBytes: 1000 });
+    rpc.handlers['downloads.list'] = () => [paused];
+    rpc.handlers['downloads.remove'] = () => undefined;
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Half done' }));
+    const toggle = await screen.findByRole('switch', { name: 'Delete the partial file' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('Frees the disk space. When off, the partial file stays in the downloads folder.')).toBeTruthy();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.remove')).toEqual([{ id: 30, deleteFile: false }]));
+  });
+
+  it('hides the partial-file toggle once the download has finished and keeps the finished file', async () => {
+    const { invalidate } = await import('@/api/query');
+    const paused = makeDownload({ id: 31, status: 'paused', title: 'Almost', bytesDownloaded: 900, totalBytes: 1000 });
+    let current = paused;
+    rpc.handlers['downloads.list'] = () => [current];
+    rpc.handlers['downloads.remove'] = () => undefined;
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Almost' }));
+    expect(await screen.findByRole('switch', { name: 'Delete the partial file' })).toBeTruthy();
+    // Resumed elsewhere and finished while the dialog was open.
+    current = { ...paused, status: 'completed', bytesDownloaded: 1000 };
+    await invalidate('downloads.');
+    await waitFor(() => expect(screen.queryByRole('switch', { name: 'Delete the partial file' })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.remove')).toEqual([{ id: 31, deleteFile: false }]));
+  });
+
+  it('shows the full error of a failed download in a tooltip', async () => {
+    const long = 'HTTP 403 Forbidden: the provider refused this title because the account has reached its connection limit';
+    rpc.handlers['downloads.list'] = () => [makeDownload({ id: 32, status: 'failed', title: 'Blocked', errorMessage: long })];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+
+    const detail = within(await screen.findByTestId('download-row')).getByTestId('download-detail');
+    expect(detail.textContent).toBe(long);
+    expect(detail.getAttribute('title')).toBe(long);
   });
 
   it('shows the empty state when only completed items remain', async () => {

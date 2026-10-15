@@ -99,6 +99,19 @@ describe('MyListRail', () => {
     expect(within(rail).queryByText('Heat')).toBeNull();
   });
 
+  it('a second dashboard visit reads the cached list instead of refetching it (L1-perf-9)', async () => {
+    h.installCore(rpc, [h.entry(m('m1'), 'Arrival')]);
+    renderRail();
+    await screen.findByTestId('mylist-rail-count');
+    expect(rpc.callsOf('watchlist.list')).toHaveLength(1);
+    cleanup();
+
+    renderRail();
+    await screen.findByTestId('mylist-rail-count');
+    // Watched changes invalidate the key themselves (watchlist.changed, invalidateWatched).
+    expect(rpc.callsOf('watchlist.list')).toHaveLength(1);
+  });
+
   it('shows its own error with Retry, unless the dashboard already shows one', async () => {
     const core = h.installCore(rpc, [h.entry(m('m1'), 'Arrival')]);
     core.fail['watchlist.list'] = 'db';

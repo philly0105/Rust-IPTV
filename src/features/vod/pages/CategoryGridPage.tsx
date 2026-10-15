@@ -1,12 +1,12 @@
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, CalendarX2, CircleCheck, Clapperboard, Info, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, CalendarX2, CircleCheck, Clapperboard, FolderX, Info, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useRpcQuery } from '@/api/query';
-import { itemKey, type CoverSize, type ItemRef, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
+import { itemKey, type ItemRef, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 
 import { useMyListMenuItem } from '@/features/mylist/hooks/useMyListMenuItem';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
@@ -15,11 +15,13 @@ import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useShortcut } from '@/shell';
 
 import { PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
+import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { VodFilterBar } from '../components/VodFilterBar';
 import { usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
+import { useCoverWidth } from '../hooks/useCoverWidth';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { formatRating } from '../lib/format';
@@ -44,7 +46,6 @@ import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
 import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass } from '@/ui';
 
-export const COVER_WIDTH: Record<CoverSize, number> = { small: 128, medium: 164, large: 212 };
 const SEARCH_DEBOUNCE_MS = 250;
 
 /** Below this many visible titles, a rating-filtered Stalker grid keeps loading pages on its own. */
@@ -288,6 +289,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   };
 
   const category = cats.data?.find((c) => c.id === categoryId);
+  // A link to a category the source no longer has (removed upstream, or a stale bookmark). Decided
+  // only once the categories have loaded, so a slow list never flashes this state.
+  const categoryMissing = categoryId !== ALL_CATEGORIES && cats.isSuccess && !category;
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
   const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
@@ -303,7 +307,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   );
 
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
-  const coverWidth = COVER_WIDTH[settings.coverSize] ?? COVER_WIDTH.medium;
+  const coverWidth = useCoverWidth(settings.coverSize);
   const backHref = `/s/${encodeURIComponent(sourceId)}/${section}`;
   const dirLabel = dir === 'asc' ? t('sortAscending') : t('sortDescending');
   const resume = useResumeMap(sourceId, kind);
@@ -320,15 +324,20 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // all the time, S would swallow the player's screenshot key on this page (amendment 15:19).
   const [gridFocused, setGridFocused] = useState(false);
   const cursorKeys = gridShown && gridFocused;
+  // Only a return comes back to the old spot: Back/Forward (POP), and the restart and fallback
+  // redirects, which replace the entry (StartupRedirect's <Navigate replace>). A link or a new sort
+  // (PUSH) is a fresh visit and starts at the top.
+  const returning = useNavigationType() !== 'PUSH';
   useScrollMemory({
     key: memoryKey,
     getScroller: getListbox,
     ready: gridShown,
+    restore: returning,
     // The cursor itself comes back through VirtualGrid's initialActiveIndex.
     onRestored: (_spot, listbox) => listbox.focus({ preventScroll: true }),
   });
   /** Title opened from this grid last time (read by VirtualGrid on mount only). */
-  const restoredIndex = recallSpot(memoryKey)?.index;
+  const restoredIndex = returning ? recallSpot(memoryKey)?.index : undefined;
   const openTitle = (ref: ItemRef | undefined, index: number) => {
     const href = ref && detailHref(ref);
     if (!href) return;
@@ -373,7 +382,29 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     },
     { description: t('shortcutWatched'), area: 'Vod', enabled: cursorKeys },
   );
-  useShortcut('shift+w', () => setHideWatched(!hideWatched), { description: t('shortcutHideWatched'), area: 'Vod', enabled: !!input });
+  // Shift+W changes what the grid holds, so the grid remounts and the focused listbox goes away.
+  // A toggle made from the grid puts focus back on the new listbox (VirtualGrid clamps the cursor),
+  // so the arrow keys keep working; it never takes focus from somewhere the user moved it.
+  const refocusFor = useRef<boolean | null>(null);
+  useShortcut(
+    'shift+w',
+    () => {
+      refocusFor.current = document.activeElement === getListbox() ? !hideWatched : null;
+      setHideWatched(!hideWatched);
+    },
+    { description: t('shortcutHideWatched'), area: 'Vod', enabled: !!input },
+  );
+  useEffect(() => {
+    if (refocusFor.current === null || refocusFor.current !== hideWatched) return;
+    const listbox = gridWrapRef.current?.querySelector<HTMLElement>('[role="listbox"]');
+    if (listbox) {
+      refocusFor.current = null;
+      const dropped = !document.activeElement || document.activeElement === document.body;
+      if (dropped) listbox.focus({ preventScroll: true });
+    } else if (firstReady && total === 0) {
+      refocusFor.current = null;
+    }
+  });
 
   // A poster's menu (right click, Shift+F10, the context-menu key): open it, or My List.
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; item: VodItem | SeriesItem; index: number } | null>(null);
@@ -403,8 +434,10 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   useShortcut('shift+f10', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
   useShortcut('contextmenu', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
 
-  // Escape on the grid returns to the category list.
-  useEscapeBack(true, () => navigate(backHref));
+  // Escape on the grid returns to the category list. Opened from the landing, that is one step
+  // back; otherwise the landing replaces the grid, so Escape never stacks grid/landing pairs.
+  const fromLanding = (location.state as { fromLanding?: unknown } | null)?.fromLanding === true;
+  useEscapeBack(true, () => void (fromLanding ? navigate(-1) : navigate(backHref, { replace: true })));
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
@@ -458,6 +491,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           kind={kind}
           categoryId={categoryId}
           stalker={stalker}
+          yearsLikely={source.data?.kind !== 'm3u'}
           range={years}
           onRangeChange={setYears}
           hideWatched={hideWatched}
@@ -493,7 +527,20 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           if (e.target.getAttribute('role') === 'listbox') setGridFocused(false);
         }}
       >
-        {source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
+        {source.isError && isSourceMissing(source.error) ? (
+          <SourceMissing />
+        ) : !source.isError && categoryMissing ? (
+          <EmptyState
+            icon={<FolderX size={32} />}
+            title={t('categoryMissingTitle')}
+            description={t('categoryMissingBody')}
+            action={
+              <Link to={backHref} className={buttonClass('secondary', 'sm')}>
+                {t('backToCategories')}
+              </Link>
+            }
+          />
+        ) : source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
           <ErrorState
             error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
             onRetry={() => {
@@ -504,7 +551,20 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         ) : !input || (clientFiltered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
           <SkeletonGrid count={18} minColumnWidth={coverWidth} />
         ) : total === 0 ? (
-          filtered ? (
+          // The search query is the narrowest thing the user typed, so it names the empty result
+          // first; clearing it falls through to the rating, year and watched states below.
+          search ? (
+            <EmptyState
+              icon={<SearchX size={32} />}
+              title={t('noSearchMatchTitle', { query: search })}
+              description={t('noSearchMatchHint')}
+              action={
+                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
+                  {t('clearSearch')}
+                </button>
+              }
+            />
+          ) : filtered ? (
             <EmptyState
               icon={<Star size={32} />}
               title={t('ratingFilterEmptyTitle', { rating: formatRating(minRating, i18n.language) })}
@@ -532,17 +592,6 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               action={
                 <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setHideWatched(false)}>
                   {t('showWatched')}
-                </button>
-              }
-            />
-          ) : search ? (
-            <EmptyState
-              icon={<SearchX size={32} />}
-              title={t('noSearchMatchTitle', { query: search })}
-              description={t('noSearchMatchHint')}
-              action={
-                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
-                  {t('clearSearch')}
                 </button>
               }
             />

@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Szczegóły techniczne",
   "errorHintTimeout": "Dostawca może być przeciążony. Spróbuj ponownie za chwilę.",
   "errorHintAuth": "Sprawdź nazwę użytkownika, hasło lub adres MAC w ustawieniach źródła.",
-  "errorHintNotFound": "Dostawca mógł to usunąć. Odśwież źródło, aby zaktualizować listę.",
+  "errorHintNotFound": "Mogło zostać usunięte albo ten link jest nieaktualny.",
   "errorHintInvalid": "Sprawdź wprowadzone wartości i spróbuj ponownie.",
   "errorHintUnsupported": "To źródło lub typ strumienia nie obsługuje tej akcji. Spróbuj zewnętrznego odtwarzacza.",
   "errorHintConflict": "Załaduj ponownie, aby zobaczyć najnowszą wersję, i spróbuj jeszcze raz.",

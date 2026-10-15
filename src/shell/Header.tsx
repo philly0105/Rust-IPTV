@@ -1,4 +1,4 @@
-import { Moon, PanelRight, Search, SquareChevronRight, Sun } from 'lucide-react';
+import { ListTree, Moon, Search, SquareChevronRight, Sun } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
@@ -15,7 +15,7 @@ import { useTheme } from './theme';
 export function Header({ panelInline, narrow = false }: { panelInline: boolean; narrow?: boolean }) {
   const { t } = useTranslation('shell');
   const header = useShellStore((s) => s.header);
-  const hasPanel = useShellStore((s) => s.contextPanel !== null);
+  const hasPanel = useShellStore((s) => s.contextPanel !== null && s.panelDrawer);
   const panelOpen = useShellStore((s) => s.panelOpen);
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
@@ -38,6 +38,8 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
       <div
         className={cn(
           'flex min-w-0 flex-1 items-baseline gap-3',
+          // The title keeps a few letters' room however wide the page's header actions are.
+          header?.title && 'min-w-[min(8ch,30%)]',
           'max-sm:group-has-[[data-shell-search]:focus]/header:hidden max-sm:group-has-[[data-shell-search]:not(:placeholder-shown)]/header:hidden',
         )}
       >
@@ -45,9 +47,10 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
           <>
             {/*
               Not a heading: each page owns its single <h1> (C16), so the
-              header title stays a styled paragraph to avoid two h1s.
+              header title stays a styled paragraph to avoid two h1s. A long
+              title truncates; hovering it shows the whole name.
             */}
-            <p dir="auto" className="truncate font-display text-xl font-semibold" data-testid="page-title">
+            <p dir="auto" title={header.title} className="truncate font-display text-xl font-semibold" data-testid="page-title">
               {header.title}
             </p>
             {header.subtitle && <p dir="auto" className="hidden truncate text-sm text-fg-muted md:block">{header.subtitle}</p>}
@@ -103,7 +106,8 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
         {hasPanel && !panelInline && (
           <IconButton
             label={panelOpen ? t('hideDetails') : t('showDetails')}
-            icon={<PanelRight size={18} className="rtl:-scale-x-100" />}
+            // A list glyph, so it never reads as the palette's square-and-chevron next to it.
+            icon={<ListTree size={18} className="rtl:-scale-x-100" />}
             aria-expanded={panelOpen}
             aria-haspopup="dialog"
             onClick={() => setPanelOpen(!panelOpen)}

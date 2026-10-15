@@ -1,7 +1,8 @@
-import { CircleAlert, Star } from 'lucide-react';
+import { ArrowLeft, CircleAlert, Star } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useGoBack } from '../../hooks/useBackKey';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
@@ -43,6 +44,10 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
     // An isolated hero would paint its bleed over the season tabs below.
     <section className="relative" aria-labelledby="vod-detail-title">
       <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} />
+      {/* L1-vod-2: the window has no browser chrome, so Back is on the page. */}
+      <div className="absolute inset-x-0 top-0 z-10 mx-auto w-full max-w-[1800px] px-4 pt-4 md:px-8">
+        <BackButton fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />
+      </div>
       <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-4 pt-[clamp(120px,22vh,280px)] pb-8 sm:flex-row sm:items-end md:px-8">
         <div className="w-36 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-border/60 sm:w-44 lg:w-56" data-testid="vod-detail-poster">
           {/* Provider artwork first (through the cache, then directly); when it fails, the TMDB poster (if any) the same way. */}
@@ -107,6 +112,31 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Back to where you came from (the grid or search restores its place), or to the
+ * movies/series landing when the page was opened cold. A frosted pill, so it
+ * reads on any backdrop.
+ */
+function BackButton({ fallbackHref }: { fallbackHref: string }) {
+  const { t } = useTranslation('common');
+  const goBack = useGoBack(fallbackHref);
+  return (
+    <button
+      type="button"
+      onClick={goBack}
+      data-testid="vod-detail-back"
+      className={cn(
+        'inline-flex h-9 items-center gap-1.5 rounded-full border border-glass-border bg-glass ps-2.5 pe-3.5 text-sm font-medium text-on-glass shadow-1 glass-blur',
+        'hover:bg-glass-strong active:bg-glass-strong focus-visible:outline-2 focus-visible:outline-offset-2',
+        'motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
+      )}
+    >
+      <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
+      {t('back')}
+    </button>
   );
 }
 

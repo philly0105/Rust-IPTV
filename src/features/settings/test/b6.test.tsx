@@ -1,7 +1,7 @@
 /** B6 settings fixes: reset with undo, ordered saves, backup checks, stale player paths, EPG URL undo. */
 
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -143,6 +143,69 @@ describe('Backup file checks match the core (D10)', () => {
     expect((await screen.findByTestId('backup-skipped')).textContent).toBe(
       'No playlists in this file. Only its guide URLs and settings will be imported.',
     );
+  });
+});
+
+describe('Interface size slider', () => {
+  it('does not resize the app under the pointer mid-drag, and previews on release', async () => {
+    const { useAppearanceStore } = await import('@/shell/theme');
+    useAppearanceStore.setState({ preview: null });
+    renderAt(settingsRoutes, '/settings/appearance');
+    const slider = (await screen.findByTestId('ui-scale')) as HTMLInputElement;
+
+    fireEvent.pointerDown(slider);
+    fireEvent.change(slider, { target: { value: '110' } });
+    expect(screen.getByTestId('ui-scale-value').textContent).toBe('110%');
+    expect(useAppearanceStore.getState().preview).toBeNull();
+
+    fireEvent.pointerUp(slider);
+    expect(useAppearanceStore.getState().preview).toEqual({ uiScale: 1.1 });
+    await waitFor(() => expect(patches()).toEqual([{ uiScale: 1.1 }]));
+    await waitFor(() => expect(useAppearanceStore.getState().preview).toBeNull());
+
+    // Keys preview at once: nothing moves under a pointer there.
+    fireEvent.change(slider, { target: { value: '115' } });
+    expect(useAppearanceStore.getState().preview).toEqual({ uiScale: 1.15 });
+    fireEvent.keyUp(slider, { key: 'ArrowRight' });
+    await waitFor(() => expect(patches()).toEqual([{ uiScale: 1.1 }, { uiScale: 1.15 }]));
+  });
+});
+
+describe('Replace import while parental controls are locked', () => {
+  it('asks for the PIN, unlocks, and runs the import again', async () => {
+    const { ParentalGateHost } = await import('@/features/parental');
+    let calls = 0;
+    rpcMock.handlers['backup.import'] = () => {
+      calls += 1;
+      if (calls === 1) throw { code: 'auth', message: 'unlock parental controls first' };
+      return { imported: 3, skipped: 1, warnings: [] };
+    };
+    rpcMock.handlers['parental.unlock'] = () => ({ enabled: true, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: true, failedAttempts: 0 });
+    const body = JSON.stringify({ kind: 'iptvnator-playlist-backup', version: 1, playlists: [{ portalType: 'm3u' }] });
+
+    renderAt(settingsRoutes, '/settings/backup');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ParentalGateHost />
+      </QueryClientProvider>,
+    );
+    const input = (await screen.findByTestId('backup-file-input')) as HTMLInputElement;
+    const file = Object.assign(new File([body], 'b.json', { type: 'application/json' }), { text: async () => body });
+    fireEvent.change(input, { target: { files: [file] } });
+    await screen.findByTestId('backup-summary');
+    fireEvent.click(screen.getByRole('radio', { name: 'Replace' }));
+    fireEvent.click(screen.getByTestId('backup-import'));
+    fireEvent.click(await screen.findByTestId('backup-replace-confirm'));
+
+    const pin = await screen.findByRole('dialog', { name: 'Enter the PIN to replace sources' });
+    fireEvent.change(within(pin).getByLabelText('PIN'), { target: { value: '2580' } });
+    fireEvent.click(within(pin).getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() => expect(rpcMock.callsOf('backup.import')).toHaveLength(2));
+    expect(rpcMock.callsOf('parental.unlock')).toEqual([{ pin: '2580' }]);
+    await waitFor(() => expect(lastToast()?.title).toBe('Backup imported'));
+    expect(lastToast()?.description).toBe('Added or updated: 3. Skipped: 1.');
+    expect(screen.queryByTestId('backup-import-error')).toBeNull();
   });
 });
 

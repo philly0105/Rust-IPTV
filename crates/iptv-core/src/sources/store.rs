@@ -140,8 +140,7 @@ pub fn insert(
     // not held during a large write; it is removed again if the insert fails.
     let raw = match raw_text {
         Some((data_dir, text)) => {
-            use sha2::{Digest, Sha256};
-            let sha = hex::encode(Sha256::digest(text.as_bytes()));
+            let sha = crate::m3u::importer::playlist_sha(text.as_bytes());
             Some((
                 crate::m3u::place_raw_text(data_dir, id, text)?,
                 sha,

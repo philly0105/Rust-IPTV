@@ -1,5 +1,5 @@
 import { CircleAlert } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -30,9 +30,10 @@ import {
   useSourceProgress,
   wasCancelled,
 } from '../lib/progress';
+import { scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
-import { parseXtreamLink, suggestName } from '../lib/validate';
+import { checkHttpUrl, displayHost, parseXtreamLink, suggestName } from '../lib/validate';
 import { Field } from './Field';
 import { ImportProgressView } from './ImportProgressView';
 import { M3uForm } from './M3uForm';
@@ -66,6 +67,17 @@ export function initialDraft(initial: AddSourceInitial | undefined): SourceDraft
   }
   if (initial?.name) d.name = initial.name;
   return d;
+}
+
+/** Host a draft's import contacts, for the progress line; none for a file or pasted playlist. */
+export function draftHost(d: SourceDraft): string | undefined {
+  const raw = d.kind === 'm3u' ? (d.m3u.origin === 'url' ? d.m3u.url : '') : d.kind === 'xtream' ? d.xtream.serverUrl : d.stalker.portalUrl;
+  const check = checkHttpUrl(raw);
+  return check.ok ? displayHost(check.url) : undefined;
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 export function AddSourceDialog({
@@ -107,7 +119,15 @@ export function AddSourceDialog({
   const bodyRef = useRef<HTMLFormElement>(null);
   const cancelledRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
   const nextFrame = useNextFrame();
+  const scrollFrame = useNextFrame();
+  /**
+   * Bumped whenever the dialog opens, closes or unmounts. A submit left running by "Close, keep
+   * importing" finishes in the background (the source card shows it), but once its opening is
+   * over it no longer drives this form, and never closes the dialog the user opened since.
+   */
+  const runRef = useRef(0);
   /**
    * Import errors this dialog reports itself, so the shell does not toast them as well:
    * the source a failed add left behind, and, from the first submit until one succeeds,
@@ -117,12 +137,19 @@ export function AddSourceDialog({
 
   // Reset whenever the dialog opens with a (possibly new) initial request.
   const initialKey = JSON.stringify(initial ?? null);
+  useEffect(
+    () => () => {
+      runRef.current += 1;
+    },
+    [open, initialKey],
+  );
   useEffect(() => {
     if (!open) return;
     setDraft(initialDraft(initial));
     setErrors({});
     setNameTouched(Boolean(initial?.name));
     setSuggested('');
+    setSubmitting(false);
     setSubmitError(null);
     setStartedAt(null);
     setIdsAtSubmit([]);
@@ -181,6 +208,12 @@ export function AddSourceDialog({
     target.focus({ preventScroll: true });
   }, [submitting]);
 
+  // On a short window the progress (and its Cancel) sits below the fold: bring it into view as the run starts.
+  useEffect(() => {
+    if (!submitting) return;
+    scrollFrame(() => progressRef.current?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }));
+  }, [submitting, scrollFrame]);
+
   const onFieldBlur = (path: string) => setErrors((e) => withFieldError(e, path, blurError(draft, path)));
 
   const setKind = (kind: SourceKind) => {
@@ -196,6 +229,8 @@ export function AddSourceDialog({
   };
 
   const submit = async () => {
+    const run = runRef.current;
+    const live = () => run === runRef.current;
     setSubmitError(null);
     setCancelled(false);
     cancelIdRef.current = null;
@@ -211,9 +246,9 @@ export function AddSourceDialog({
     setIdsAtSubmit(knownIds);
     claimRef.current.knownAtSubmit ??= new Set(knownIds);
     try {
-      const source = failed ? await retry(failed.id, named, built.value) : await rpc('sources.add', built.value);
+      const source = failed ? await retry(failed.id, named, built.value, live) : await rpc('sources.add', built.value);
       if (!source) {
-        focusFirstInvalid();
+        if (live()) focusFirstInvalid();
         return;
       }
       // Load the guide right away (playlist url-tvg, Xtream xmltv.php). It runs in the
@@ -228,11 +263,18 @@ export function AddSourceDialog({
         description: t(guides.length > 0 ? 'addedDescriptionGuide' : 'addedDescription', { count: total }),
         action: { label: t('open'), onClick: () => navigate(`/s/${source.id}/live`) },
       });
+      // Closed meanwhile ("Close, keep importing"): the toast is the whole answer.
+      if (!live()) return;
       claimRef.current = { failedId: null, knownAtSubmit: null };
       onAdded?.(source);
       onClose();
     } catch (e) {
       const err = RpcError.from(e);
+      if (!live()) {
+        // The card shows how the background import ended; the shell toasts a failure no open dialog claims.
+        void invalidate('sources.');
+        return;
+      }
       const createdId = failedSourceId(err);
       if (cancelIdRef.current !== null && wasCancelled(cancelIdRef.current, err)) {
         // The user stopped it. A source this submit created has no channels yet: take it away
@@ -263,13 +305,52 @@ export function AddSourceDialog({
       // failure (proxy 504, network blip during a long import) names nothing although the core
       // may already have created the row: look for it among the sources that are new since submit.
       const id = createdId ?? (failed ? null : await adoptCreatedSource(built.value));
+      if (!live()) return;
       if (id) claimRef.current.failedId = id;
       if (id) setFailed({ id, name: built.value.name });
       else setFailed((f) => (f ? { ...f, name: built.value.name } : f));
       void invalidate('sources.');
     } finally {
-      setSubmitting(false);
+      if (live()) setSubmitting(false);
     }
+  };
+
+  /**
+   * Closing the dialog after a failed add takes the source that add left behind with it, so a
+   * broken entry never stays in the list (and in every Refresh all) unasked. The toast offers Undo.
+   */
+  const discardFailed = (f: { id: string; name: string }) => {
+    scheduleRemoval({
+      id: f.id,
+      toast: { variant: 'info', title: t('removedTitle', { name: f.name }), description: t('discardedFailedHint') },
+      undoLabel: t('undo'),
+      remove: async () => {
+        try {
+          await rpc('sources.remove', { id: f.id });
+        } catch (e) {
+          if (RpcError.from(e).code !== 'not_found') throw e;
+        }
+      },
+      onRemoved: () => {
+        useImportProgressStore.getState().clear(f.id);
+        void invalidate('sources.');
+      },
+      onFailed: (e) => {
+        void invalidate('sources.');
+        toast({
+          variant: 'error',
+          title: t('removeFailed', { name: f.name }),
+          description: `${t(summaryKey(RpcError.from(e)))} ${t('removeFailedKept')}`,
+        });
+      },
+      onUndone: () => void invalidate('sources.'),
+    });
+  };
+
+  /** Cancel, Escape or the close button. "Close, keep importing" leaves a running import alone. */
+  const dismiss = () => {
+    if (!submitting && failed) discardFailed(failed);
+    onClose();
   };
 
   /**
@@ -295,7 +376,7 @@ export function AddSourceDialog({
    * Retries the source a failed add left behind. Same kind and M3U origin: save the edited details
    * and re-import it. Otherwise (or when it is gone) the config cannot be patched, so it is replaced.
    */
-  const retry = async (id: string, named: SourceDraft, args: SourcesAddArgs): Promise<Source | null> => {
+  const retry = async (id: string, named: SourceDraft, args: SourcesAddArgs, live: () => boolean): Promise<Source | null> => {
     let existing: Source | null = null;
     try {
       existing = await rpc('sources.get', { id });
@@ -309,7 +390,7 @@ export function AddSourceDialog({
     if (existing && patchable) {
       const patch = buildUpdatePatch(existing, named, { isDesktop });
       if (!patch.ok) {
-        setErrors(patch.errors);
+        if (live()) setErrors(patch.errors);
         return null;
       }
       if (Object.keys(patch.value).length > 0) await rpc('sources.update', { id, patch: patch.value });
@@ -318,31 +399,44 @@ export function AddSourceDialog({
       return rpc('sources.refresh', { id });
     }
     if (existing) await rpc('sources.remove', { id });
-    setFailed(null);
+    if (live()) setFailed(null);
     return rpc('sources.add', args);
   };
 
   // Locked while an import runs: switching kind mid-import would show a form that is not the one importing.
   // The current tab stays enabled so it keeps its place in the tab order.
-  const kinds: { id: SourceKind; label: string; disabled: boolean }[] = (
+  // On a phone the three full names do not fit in one row: the tabs show the short name, and the
+  // full one stays the tab's accessible name.
+  const kinds: { id: SourceKind; label: ReactNode; disabled: boolean }[] = (
     [
-      ['m3u', t('kindM3u')],
-      ['xtream', t('kindXtream')],
-      ['stalker', t('kindStalker')],
+      ['m3u', t('kindM3u'), t('kindM3uShort')],
+      ['xtream', t('kindXtream'), t('kindXtreamShort')],
+      ['stalker', t('kindStalker'), t('kindStalkerShort')],
     ] as const
-  ).map(([id, label]) => ({ id, label, disabled: submitting && id !== draft.kind }));
+  ).map(([id, label, short]) => ({
+    id,
+    label: (
+      <>
+        <span aria-hidden className="sm:hidden">
+          {short}
+        </span>
+        <span className="max-sm:sr-only">{label}</span>
+      </>
+    ),
+    disabled: submitting && id !== draft.kind,
+  }));
 
   const isTextOrigin = draft.kind === 'm3u' && draft.m3u.origin !== 'url' && !(draft.m3u.origin === 'file' && isDesktop);
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={dismiss}
       title={t('addSource')}
       size="lg"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={dismiss}>
             {submitting ? t('closeKeepImporting') : t('cancel')}
           </Button>
           <Button variant="primary" loading={submitting} onClick={() => void submit()} data-testid="add-source-submit">
@@ -431,7 +525,18 @@ export function AddSourceDialog({
           description={isTextOrigin ? t('autoRefreshUnavailable') : t('autoRefreshHint')}
         />
 
-        {submitting ? <ImportProgressView entry={progress} kind={draft.kind} onCancel={progress ? onCancelImport : undefined} cancelling={cancellingImport} /> : null}
+        {submitting ? (
+          <div ref={progressRef} className="scroll-my-4">
+            <ImportProgressView
+              entry={progress}
+              kind={draft.kind}
+              host={draftHost(draft)}
+              startedAt={startedAt ?? undefined}
+              onCancel={progress ? onCancelImport : undefined}
+              cancelling={cancellingImport}
+            />
+          </div>
+        ) : null}
 
         {cancelled && !submitting ? (
           <div ref={cancelledRef} tabIndex={-1} role="status" className="rounded-md border border-border bg-surface-2/60 p-3 outline-none" data-testid="add-source-cancelled">

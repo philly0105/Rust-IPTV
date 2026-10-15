@@ -185,5 +185,10 @@
   "turnOffTitle": "Wyłączyć kontrolę rodzicielską?",
   "turnOffConfirmText": "Wpisz PIN. Zablokowane treści będą otwarte dla wszystkich, dopóki nie ustawisz nowego kodu PIN.",
   "turnedOffToast": "Kontrola rodzicielska jest wyłączona",
-  "turnedOffToastText": "Blokady są zachowane. Ustaw PIN, aby znów ich używać."
+  "turnedOffToastText": "Blokady są zachowane. Ustaw PIN, aby znów ich używać.",
+  "menuLockedWithGroup": "Zablokowane razem z grupą",
+  "discardTitle": "Odrzucić zmiany?",
+  "discardText": "Grupy zaznaczone lub odznaczone tutaj nie zostaną zapisane.",
+  "keepEditing": "Edytuj dalej",
+  "discard": "Odrzuć"
 }

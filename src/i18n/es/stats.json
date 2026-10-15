@@ -34,5 +34,6 @@
   "clearTitle": "¿Borrar las estadísticas de visualización?",
   "clearBody": "Se borra todo el tiempo de visualización contado. El progreso y Vistos recientemente se conservan.",
   "cleared": "Estadísticas de visualización borradas",
-  "clearFailed": "No se pudieron borrar las estadísticas"
+  "clearFailed": "No se pudieron borrar las estadísticas",
+  "watchLive": "Ver TV en directo"
 }

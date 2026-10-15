@@ -185,5 +185,9 @@
   "reminderSwitched": "Passage sur {{channel}}",
   "undoSwitch": "Annuler",
   "reminderSwitchFailed": "Impossible de changer de chaîne",
-  "recordNeedsMpv": "L'enregistrement de cette chaîne nécessite mpv. Installez mpv ou indiquez son chemin dans les réglages du lecteur."
+  "recordNeedsMpv": "L'enregistrement de cette chaîne nécessite mpv. Installez mpv ou indiquez son chemin dans les réglages du lecteur.",
+  "locked": "Verrouillée",
+  "lockedGuide": "Verrouillée. Saisissez le code PIN pour voir ce qui passe.",
+  "unlock": "Déverrouiller",
+  "ribbonFailed": "Impossible de charger le guide de cette chaîne"
 }

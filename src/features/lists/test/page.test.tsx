@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Channel, SourceKind } from '@/api/types';
+import { itemKey, type Channel, type ParentalLock, type SourceKind } from '@/api/types';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> } }));
 const played = vi.hoisted(() => [] as { channel: Channel; kind: SourceKind | undefined; name: string }[]);
@@ -37,6 +37,7 @@ const { CustomListRails } = await import('../rails');
 const { ChannelMenuHost } = await import('@/shell/dashboard/ChannelCardMenu');
 const { usePlayerStore } = await import('../deps');
 const { useShellStore } = await import('@/shell/store');
+const { resetPendingRemovalsForTests, usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
 
 const BBC = h.channel('1', 'BBC One');
 const CNN = h.channel('2', 'CNN', { sourceId: 'src2' });
@@ -64,6 +65,7 @@ beforeEach(() => {
   played.length = 0;
   localStorage.clear();
   usePlayerStore.setState({ zapContext: undefined, source: undefined });
+  resetPendingRemovalsForTests();
 });
 afterEach(cleanup);
 
@@ -199,6 +201,76 @@ describe('list page', () => {
     await waitFor(() => expect(screen.getByTestId('list-ribbon').className).not.toContain('max-md:hidden'));
   });
 
+  describe('parental controls', () => {
+    const status = (mode: 'ask' | 'hide', autoAdult = false) => {
+      rpc.handlers['parental.status'] = () => ({ enabled: true, mode, autoAdult, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    };
+    const lock = (sourceId: string, targetId: string): ParentalLock => ({
+      sourceId,
+      contentType: 'live',
+      kind: 'item',
+      targetId,
+      name: targetId,
+      createdAt: '2026-10-15T00:00:00Z',
+    });
+    const onAir = (...channels: Channel[]) => {
+      const start = new Date(Date.now() - 10 * 60_000).toISOString();
+      const end = new Date(Date.now() + 20 * 60_000).toISOString();
+      rpc.handlers['epg.nowNext'] = () =>
+        Object.fromEntries(channels.map((c) => [itemKey(c.ref), { now: { channelId: c.ref.itemId, start, end, title: `${c.name} Tonight` } }]));
+    };
+    const locked = (row: HTMLElement) => within(row).queryByTestId('row-locked') !== null;
+
+    it('Ask mode marks locked channels by their own source and keeps their programme titles back', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN, ARTE])]);
+      stubLiveExtras();
+      onAir(BBC, CNN, ARTE);
+      status('ask');
+      // CNN is item 2 of src2. The src2 lock on item 1 must not catch src1's BBC One (also item 1).
+      rpc.handlers['parental.locks'] = () => [lock('src2', '2'), lock('src2', '1')];
+      h.renderAt('/lists/L1', routes);
+      await waitFor(() => expect(rows()).toHaveLength(3));
+      await waitFor(() => expect(locked(rows()[1]!)).toBe(true));
+      expect(rows()[1]!.getAttribute('aria-label')).toContain('Locked');
+      expect(rows()[1]!.textContent).not.toContain('CNN Tonight');
+      expect(rows().map(locked)).toEqual([false, true, false]);
+      expect(rows()[0]!.textContent).toContain('BBC One Tonight');
+      // One lock list covers every source in the list.
+      expect(rpc.callsOf('parental.locks')).toContainEqual({});
+    });
+
+    it('Ask mode reads the adult groups of each source in the list', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+      stubLiveExtras();
+      status('ask', true);
+      rpc.handlers['parental.locks'] = () => [];
+      rpc.handlers['parental.adultCategories'] = (a) => ((a as { sourceId: string }).sourceId === 'src2' ? ['cat1'] : []);
+      h.renderAt('/lists/L1', routes);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      await waitFor(() => expect(rows().map(locked)).toEqual([false, true]));
+      expect(rpc.callsOf('parental.adultCategories')).toEqual(
+        expect.arrayContaining([
+          { sourceId: 'src1', contentType: 'live' },
+          { sourceId: 'src2', contentType: 'live' },
+        ]),
+      );
+    });
+
+    it('Hide mode marks nothing (the core leaves locked channels out)', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+      stubLiveExtras();
+      onAir(BBC, CNN);
+      status('hide');
+      rpc.handlers['parental.locks'] = () => [lock('src2', '2')];
+      h.renderAt('/lists/L1', routes);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      await waitFor(() => expect(rpc.callsOf('parental.status').length).toBeGreaterThan(0));
+      await waitFor(() => expect(rows()[1]!.textContent).toContain('CNN Tonight'));
+      expect(rows().map(locked)).toEqual([false, false]);
+      expect(rpc.callsOf('parental.locks')).toEqual([]);
+    });
+  });
+
   it('an unknown list id is not found, with a way back', async () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
     stubLiveExtras();
@@ -280,6 +352,22 @@ describe('Home rails', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: /^Play/ }));
     await waitFor(() => expect(played.map((p) => p.channel.name)).toEqual(['CNN']));
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src2', listId: 'L1' });
+  });
+
+  it('leaves out the channels of a source in its delete-undo window, and brings them back on Undo', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN, ARTE], { onDashboard: true })]);
+    usePendingRemovals.setState({ ids: new Set(['src2']) });
+    h.renderAt('/dashboard', [{ path: '/dashboard', element: <CustomListRails /> }]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    expect(await within(sports).findByRole('button', { name: /BBC One/ })).toBeTruthy();
+    expect(within(sports).getByRole('button', { name: /Arte/ })).toBeTruthy();
+    expect(within(sports).queryByRole('button', { name: /CNN/ })).toBeNull();
+    expect(within(sports).getByText('2 channels')).toBeTruthy();
+    // The rail asks the guide only for the channels it shows.
+    await waitFor(() => expect(rpc.callsOf('epg.nowNext').at(-1)).toEqual({ refs: [BBC.ref, ARTE.ref] }));
+    act(() => usePendingRemovals.setState({ ids: new Set() }));
+    expect(await within(sports).findByRole('button', { name: /CNN/ })).toBeTruthy();
+    expect(within(sports).getByText('3 channels')).toBeTruthy();
   });
 
   it('renders nothing when no list is on Home', async () => {

@@ -215,5 +215,12 @@
   "markSeriesWatched": "Oznacz serial jako obejrzany",
   "markSeriesUnwatched": "Oznacz serial jako nieobejrzany",
   "shortcutWatched": "Oznacz jako obejrzane lub nieobejrzane",
-  "shortcutHideWatched": "Ukryj lub pokaż obejrzane tytuły"
+  "shortcutHideWatched": "Ukryj lub pokaż obejrzane tytuły",
+  "sourceMissingTitle": "To źródło zostało usunięte",
+  "sourceMissingBody": "Nie ma go już na liście źródeł. Wybierz inne źródło lub dodaj je ponownie w Źródłach.",
+  "goToDashboard": "Przejdź do pulpitu",
+  "categoryMissingTitle": "Nie znaleziono kategorii",
+  "categoryMissingBody": "To źródło nie ma kategorii o tym linku. Dostawca mógł zmienić jej nazwę lub ją usunąć.",
+  "namedMarkedWatched": "{{name}}: oznaczono jako obejrzane",
+  "namedMarkedUnwatched": "{{name}}: oznaczono jako nieobejrzane"
 }

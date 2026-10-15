@@ -209,9 +209,14 @@ const SCALE_STEP = 0.05;
 const SCALE_TICKS = Math.round((UI_SCALE_MAX - UI_SCALE_MIN) / SCALE_STEP) + 1;
 
 /**
- * Interface size slider with a live preview: dragging resizes the whole app
- * through previewAppearance, and the value is saved on release (pointer up,
- * key up, blur). Keyboard arrows step by 5 % and save each step.
+ * Interface size slider with a preview: the whole app resizes through
+ * previewAppearance, and the value is saved on release (pointer up, key up,
+ * blur). Keyboard arrows step by 5 %, preview at once and save each step.
+ *
+ * While the pointer drags, only the readout and ticks follow it; the app
+ * resizes when the pointer lets go. Resizing mid-drag rescales the track under
+ * the pointer, so the same pointer position maps to another value and the
+ * thumb flips back and forth between two sizes.
  */
 function ScaleControl({
   value,
@@ -227,6 +232,7 @@ function ScaleControl({
   const { t, i18n } = useTranslation('settings');
   const [draft, setDraft] = useState(value);
   const editing = useRef(false);
+  const dragging = useRef(false);
   const seq = useRef(0);
   useEffect(() => {
     if (!editing.current) setDraft(value);
@@ -238,12 +244,14 @@ function ScaleControl({
 
   const commit = (v: number) => {
     editing.current = false;
+    dragging.current = false;
     const mine = ++seq.current;
     if (v === value) {
       previewAppearance(null);
       return;
     }
     // The preview stays up until the save settles, so the size never flickers back.
+    previewAppearance({ uiScale: v });
     void onCommit(v).then(() => {
       if (mine === seq.current && !editing.current) previewAppearance(null);
     });
@@ -254,7 +262,7 @@ function ScaleControl({
     editing.current = true;
     seq.current++;
     setDraft(v);
-    previewAppearance({ uiScale: v });
+    if (!dragging.current) previewAppearance({ uiScale: v });
   };
 
   // Where the thumb's centre sits for a value: the track minus half a (1rem) thumb at each end.
@@ -291,7 +299,11 @@ function ScaleControl({
         aria-valuetext={pct(draft)}
         data-testid="ui-scale"
         onChange={(e) => onInput(Number(e.currentTarget.value))}
+        onPointerDown={() => {
+          dragging.current = true;
+        }}
         onPointerUp={() => commit(draft)}
+        onPointerCancel={() => commit(draft)}
         onKeyUp={(e) => {
           if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key.startsWith('Page')) commit(draft);
         }}

@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Technical details",
   "errorHintTimeout": "The provider may be busy. Try again in a moment.",
   "errorHintAuth": "Check the username, password, or MAC address in the source settings.",
-  "errorHintNotFound": "It may have been removed by the provider. Refresh the source to update the list.",
+  "errorHintNotFound": "It may have been removed, or this link is out of date.",
   "errorHintInvalid": "Review the values you entered and try again.",
   "errorHintUnsupported": "This source or stream type doesn't support that action. Try an external player.",
   "errorHintConflict": "Reload to see the latest version, then try again.",

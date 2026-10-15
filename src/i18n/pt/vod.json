@@ -206,5 +206,12 @@
   "markSeriesWatched": "Marcar série como assistida",
   "markSeriesUnwatched": "Marcar série como não assistida",
   "shortcutWatched": "Marcar como assistido ou não assistido",
-  "shortcutHideWatched": "Ocultar ou mostrar títulos assistidos"
+  "shortcutHideWatched": "Ocultar ou mostrar títulos assistidos",
+  "sourceMissingTitle": "Esta fonte foi removida",
+  "sourceMissingBody": "Ela já não está nas suas fontes. Escolha outra fonte ou adicione-a novamente em Fontes.",
+  "goToDashboard": "Ir para o painel",
+  "categoryMissingTitle": "Categoria não encontrada",
+  "categoryMissingBody": "Esta fonte não tem nenhuma categoria com esse link. O fornecedor pode tê-la renomeado ou removido.",
+  "namedMarkedWatched": "{{name}} marcado como visto",
+  "namedMarkedUnwatched": "{{name}} marcado como não visto"
 }

@@ -46,6 +46,25 @@ export function useWatchStats(range: StatsRange) {
   return { query, today };
 }
 
+/**
+ * Whether the last 30 days hold any watch time, asked only while `enabled`
+ * (an empty 7-day page): "Show 30 days" is offered only when it would show
+ * something. Same key as the 30-day page, so switching to it is instant.
+ */
+export function useMonthHasData(enabled: boolean, today: string) {
+  const args = { days: 30, today, top: TOP_COUNT } as const;
+  const query = useQuery<WatchStats, RpcError>({
+    queryKey: rpcKey('stats.summary', args),
+    queryFn: () => rpc('stats.summary', args),
+    enabled,
+    staleTime: 0,
+  });
+  // Unknown (still asking) is null; a failed probe keeps the offer, as before.
+  if (!enabled) return null;
+  if (query.isPending) return null;
+  return query.data ? query.data.totalSeconds > 0 : true;
+}
+
 export function useClearStats() {
   const client = useQueryClient();
   return useMutation<void, RpcError>({

@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "Alle bronnen vervangen?",
   "backupReplaceConfirmBody": "Eerst worden de bronnen uit de back-up geïmporteerd. Zodra er minstens één laadt, worden je huidige bronnen met hun favorieten en kijkgeschiedenis verwijderd. Laadt er geen, dan verandert er niets.",
   "backupReplaceConfirm": "Vervangen",
-  "backupImported_one": "{{count}} bron geïmporteerd",
-  "backupImported_other": "{{count}} bronnen geïmporteerd",
   "backupImportFailed": "Kan de backup niet importeren",
-  "backupResult": "{{imported}} geïmporteerd, {{skipped}} overgeslagen",
+  "backupResult": "Toegevoegd of bijgewerkt: {{imported}}. Overgeslagen: {{skipped}}.",
   "backupWarnings_one": "{{count}} waarschuwing",
   "backupWarnings_other": "{{count}} waarschuwingen",
   "backupNotJson": "Dit bestand is geen geldige JSON.",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "Afbeeldingscache gewist",
   "imageCacheClearFailed": "Kan de afbeeldingscache niet wissen",
   "imageCacheLoadFailed": "Kan de afbeeldingscache niet lezen: {{message}}",
-  "imageCacheUnavailable": "Deze server heeft geen afbeeldingscache, dus afbeeldingen worden rechtstreeks bij elke provider geladen."
+  "imageCacheUnavailable": "Deze server heeft geen afbeeldingscache, dus afbeeldingen worden rechtstreeks bij elke provider geladen.",
+  "backupOldVersion": "Deze back-up gebruikt een ouder formaat dat niet gelezen kan worden. Exporteer een nieuwe back-up en importeer die.",
+  "backupImportDone": "Back-up geïmporteerd",
+  "backupReplacePinTitle": "Voer de pincode in om bronnen te vervangen",
+  "backupReplacePinText": "Vervangen verwijdert je huidige bronnen en hun ouderlijk-toezichtvergrendelingen, dus de pincode voor ouderlijk toezicht is nodig."
 }

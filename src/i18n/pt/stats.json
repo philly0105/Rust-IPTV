@@ -34,5 +34,6 @@
   "clearTitle": "Limpar as estatísticas de exibição?",
   "clearBody": "Todo o tempo de exibição contado é apagado. O progresso e Assistidos recentemente são mantidos.",
   "cleared": "Estatísticas de exibição limpas",
-  "clearFailed": "Não foi possível limpar as estatísticas"
+  "clearFailed": "Não foi possível limpar as estatísticas",
+  "watchLive": "Ver TV em direto"
 }

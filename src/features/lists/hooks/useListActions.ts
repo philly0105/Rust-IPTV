@@ -11,7 +11,7 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { queryClient, rpcKey } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { RpcError, rpc } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type CustomList, type CustomListEntry, type ItemRef } from '@/api/types';
 
 import { useToast } from '../deps';
@@ -49,6 +49,25 @@ function createQueue() {
 }
 const listOrderQueue = createQueue();
 const itemOrderQueue = createQueue();
+
+/**
+ * Saves a list's channel order. A move made while a Remove is still on its
+ * way (or right after a refetch that raced one) can name a channel the core
+ * has already dropped, which it refuses as `invalid`. Then the order is sent
+ * once more with only the channels the list still holds, so the move sticks
+ * instead of rolling back with an error.
+ */
+export async function saveEntryOrder(listId: string, refs: readonly ItemRef[]): Promise<void> {
+  try {
+    await rpc('lists.reorderItems', { id: listId, refs: [...refs] });
+  } catch (err) {
+    if (!(err instanceof RpcError) || err.code !== 'invalid') throw err;
+    const held = new Set((await rpc('lists.items', { id: listId })).map((e) => itemKey(e.ref)));
+    const kept = refs.filter((r) => held.has(itemKey(r)));
+    if (kept.length === refs.length) throw err;
+    if (kept.length > 0) await rpc('lists.reorderItems', { id: listId, refs: kept });
+  }
+}
 
 const containingKey = (ref: ItemRef) => rpcKey('lists.containing', { ref });
 
@@ -235,7 +254,7 @@ export function useListActions(): ListActions {
       const previous = patchItems(listId, () => next.map((e, position) => ({ ...e, position })));
       const refs = next.map((e) => e.ref);
       itemOrderQueue(
-        () => rpc('lists.reorderItems', { id: listId, refs }),
+        () => saveEntryOrder(listId, refs),
         (err) => {
           rollbackItems(listId, previous);
           toast({ title: t('reorderFailed'), description: errorText(err, t), variant: 'error' });

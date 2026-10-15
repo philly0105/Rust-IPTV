@@ -62,9 +62,9 @@ function lock(request: APIRequestContext, target: ParentalLockTarget): Promise<v
   return rpc(request, 'parental.setLocked', { target, locked: true });
 }
 
-/** A group link in the live view's Groups navigation ("News 3"). */
+/** A group link in the live view's Groups navigation ("News 3", or "Sports Locked 12" when Ask mode marks it). */
 function groupLink(page: Page, name: string): Locator {
-  return page.getByRole('navigation', { name: 'Groups' }).getByRole('link', { name: new RegExp(`^${name} \\d+$`) });
+  return page.getByRole('navigation', { name: 'Groups' }).getByRole('link', { name: new RegExp(`^${name}(?: Locked)? \\d+$`) });
 }
 
 function toast(page: Page, text: string): Locator {

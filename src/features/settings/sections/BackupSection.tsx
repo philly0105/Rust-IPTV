@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next';
 import type { BackupImportResult } from '@/api/rpc';
 import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 
+import { requestPin } from '@/features/parental/gate';
+import { applyStatus } from '@/features/parental/status';
 import { Button, Dialog, useToast } from '@/ui';
 import { downloadText, readFileText } from '../../sources/lib/files';
 import { absoluteTime, formatCount } from '../../sources/lib/format';
@@ -101,9 +103,30 @@ export function BackupSection(_props: SectionProps) {
       setPicked(null);
       // Everything may have changed: sources, catalog, favorites, settings.
       await queryClient.invalidateQueries();
-      toast({ variant: r.warnings.length ? 'info' : 'success', title: t('backupImported', { count: r.imported }) });
+      // `imported` counts sources added and sources merged into ones you have, so the copy claims neither.
+      toast({
+        variant: r.warnings.length ? 'info' : 'success',
+        title: t('backupImportDone'),
+        description: t('backupResult', { imported: formatCount(r.imported, lang), skipped: formatCount(r.skipped, lang) }),
+      });
     } catch (e) {
-      setImportError(RpcError.from(e));
+      const err = RpcError.from(e);
+      // Replace removes every source and its parental locks, so the core wants an unlocked session.
+      // Ask for the PIN here and run the import again, rather than ending on an error with no way on.
+      if (mode === 'replace' && err.code === 'auth') {
+        const unlocked = await requestPin({
+          title: t('backupReplacePinTitle'),
+          description: t('backupReplacePinText'),
+          confirmLabel: t('backupReplaceConfirm'),
+          danger: true,
+          submit: async (pin) => {
+            applyStatus(await rpc('parental.unlock', { pin }));
+          },
+        });
+        if (unlocked) await doImport();
+        return;
+      }
+      setImportError(err);
     } finally {
       setImporting(false);
     }

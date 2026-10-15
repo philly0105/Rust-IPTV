@@ -9,15 +9,6 @@ import type { Download, DownloadStatus } from '@/api/types';
 export type QueueAction = 'pause' | 'resume' | 'cancel' | 'retry' | 'remove' | 'reveal';
 export type QueueSection = 'active' | 'attention';
 
-const STATUS_ORDER: Record<DownloadStatus, number> = {
-  downloading: 0,
-  queued: 1,
-  paused: 2,
-  failed: 3,
-  canceled: 4,
-  completed: 5,
-};
-
 export function sectionOf(status: DownloadStatus): QueueSection | undefined {
   if (status === 'downloading' || status === 'queued' || status === 'paused') return 'active';
   if (status === 'failed' || status === 'canceled') return 'attention';
@@ -33,9 +24,10 @@ function byUpdatedDesc(a: Download, b: Download): number {
 }
 
 /**
- * Splits the list into the two sections. Active rows run in queue order
- * (downloading, then queued FIFO, then paused); attention rows show the most
- * recent failure first. Completed rows are dropped.
+ * Splits the list into the two sections. Active rows keep the order they were
+ * added in (each row shows its own status), so pausing or resuming one never
+ * moves it out from under the pointer; attention rows show the most recent
+ * failure first. Completed rows are dropped.
  */
 export function partitionQueue(downloads: readonly Download[]): { active: Download[]; attention: Download[] } {
   const active: Download[] = [];
@@ -45,7 +37,7 @@ export function partitionQueue(downloads: readonly Download[]): { active: Downlo
     if (s === 'active') active.push(d);
     else if (s === 'attention') attention.push(d);
   }
-  active.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || byCreatedAsc(a, b));
+  active.sort(byCreatedAsc);
   attention.sort(byUpdatedDesc);
   return { active, attention };
 }
@@ -68,14 +60,20 @@ export function buildQueueRows(downloads: readonly Download[]): QueueRow[] {
   return rows;
 }
 
-/** Actions offered for a row, in display order. The first one is the primary action. */
+/**
+ * Actions offered for a row, in display order. The first one is the primary
+ * action. A row keeps two buttons in the same places while it toggles between
+ * downloading and paused (Pause/Resume, then Cancel/Remove), so nothing shifts
+ * under the pointer; a paused transfer is removed rather than canceled, since
+ * a canceled one would only wait in Needs attention to be removed.
+ */
 export function actionsFor(status: DownloadStatus, opts: { canReveal: boolean; hasFile: boolean }): QueueAction[] {
   switch (status) {
     case 'downloading':
     case 'queued':
       return ['pause', 'cancel'];
     case 'paused':
-      return ['resume', 'cancel', 'remove'];
+      return ['resume', 'remove'];
     case 'failed':
       return opts.canReveal && opts.hasFile ? ['retry', 'reveal', 'remove'] : ['retry', 'remove'];
     case 'canceled':

@@ -240,7 +240,7 @@
   "errorSummaryGeneric": "Un problème est survenu pendant l'importation.",
   "errorSummaryWrongUrl": "Cette adresse ne mène pas à une liste de chaînes.",
   "technicalDetails": "Détails techniques",
-  "addRetryNote": "« {{name}} » a été enregistré avec cette erreur. Corrigez les informations et réessayez ici, ou fermez cette fenêtre et utilisez plus tard Réessayer sur sa carte.",
+  "addRetryNote": "Corrigez les informations et réessayez ici. Fermer cette fenêtre supprime « {{name}} » (vous pourrez annuler).",
   "retryImport": "Réessayer",
   "retrying": "Nouvelle tentative...",
 
@@ -365,5 +365,14 @@
   "catchupDays": "Jours d'archives",
   "catchupDaysHint": "Jusqu'où remontent les archives. Laissez vide pour garder la valeur de la playlist.",
   "errorCatchupTemplate": "Utilisez au plus {{max}} caractères, sans caractères de contrôle.",
-  "errorCatchupDays": "Saisissez un nombre entier de jours entre un et {{max}}."
+  "errorCatchupDays": "Saisissez un nombre entier de jours entre un et {{max}}.",
+  "testExpired": "Connecté, mais le compte a expiré.",
+  "testExpiredNamed": "Connecté à {{name}}, mais le compte a expiré.",
+  "testAccountInactiveHint": "Les chaînes ne seront pas lues tant que votre fournisseur n’aura pas renouvelé ou réactivé le compte.",
+  "phaseConnectingTo": "Connexion à {{host}}…",
+  "phaseStarting": "Démarrage…",
+  "discardedFailedHint": "Sa première importation a échoué. Choisissez Annuler pour la garder et réessayer depuis sa carte.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

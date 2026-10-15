@@ -17,6 +17,7 @@ import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { WatchStage } from '../components/detail/WatchStage';
 import { SimilarSection } from '../components/SimilarSection';
+import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import {
   useIsFavorite,
   useMovieDetail,
@@ -94,13 +95,13 @@ export function MovieDetailPage() {
   const ownTarget = useMemo<PlayTarget | undefined>(
     () =>
       item && source.data
-        ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
+        ? { ref, sourceKind: source.data.kind, title: model?.titleBase ?? model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
         : undefined,
-    [item, source.data, ref, model?.title, model?.posterUrl],
+    [item, source.data, ref, model?.titleBase, model?.title, model?.posterUrl],
   );
   const targetFor = (copy: VodItem): PlayTarget | undefined => {
     const kind = sources.get(copy.ref.sourceId)?.kind;
-    return kind ? { ref: copy.ref, sourceKind: kind, title: model?.title ?? copy.title, posterUrl: model?.posterUrl ?? copy.posterUrl } : undefined;
+    return kind ? { ref: copy.ref, sourceKind: kind, title: model?.titleBase ?? model?.title ?? copy.title, posterUrl: model?.posterUrl ?? copy.posterUrl } : undefined;
   };
   const pinnedTarget = pinnedOther ? targetFor(pinnedOther) : undefined;
   const playback = usePlayback(ownTarget);
@@ -116,8 +117,10 @@ export function MovieDetailPage() {
   useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
 
   // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
-  const pageTitle = (gate.state === 'open' ? model?.title : undefined) ?? t('movies');
-  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'movie', kind: 'item', targetId: itemId, name: model.title } : null);
+  const pageTitle = (gate.state === 'open' ? (model?.titleBase ?? model?.title) : undefined) ?? t('movies');
+  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'movie', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
+    categoryId: item?.categoryId,
+  });
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
 
   const resumable = isResumable(position.data);
@@ -147,12 +150,20 @@ export function MovieDetailPage() {
           <ParentalLocked
             itemRef={ref}
             categoryId={stalkerSource ? item?.categoryId : undefined}
-            title={model?.title}
+            title={model?.titleBase ?? model?.title}
             failed={gate.state === 'failed'}
             onRetry={gate.retry}
             fallbackHref={`/s/${encodeURIComponent(sourceId)}/movies`}
           />
         )}
+      </div>
+    );
+  }
+  if (source.isError && isSourceMissing(source.error)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <SourceMissing />
       </div>
     );
   }
@@ -183,9 +194,15 @@ export function MovieDetailPage() {
   const download = downloads.get('');
   const sourceName = source.data?.name ?? sourceId;
 
-  const snapshot = { title: model.title, posterUrl: model.posterUrl, contentType: 'movie' as const };
-  // My List saves what a poster card saves (myListTarget): the base title, with the year as the subtitle.
-  const listSnapshot = { ...snapshot, title: model.titleBase ?? model.title, ...(model.year ? { subtitle: String(model.year) } : {}) };
+  // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
+  // (My List saves what a poster card saves, myListTarget).
+  const snapshot = {
+    title: model.titleBase ?? model.title,
+    posterUrl: model.posterUrl,
+    contentType: 'movie' as const,
+    ...(model.year ? { subtitle: String(model.year) } : {}),
+  };
+  const listSnapshot = snapshot;
   const secondary = (
     <>
       <MyListButton itemRef={ref} snapshot={listSnapshot} size={watching ? 'sm' : 'lg'} />
@@ -217,7 +234,7 @@ export function MovieDetailPage() {
     <div ref={detailScrollRef} className="isolate h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
       {watching ? (
         <>
-          <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
+          <WatchStage title={model.titleBase ?? model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
           <section className="mx-auto mt-6 flex w-full max-w-[1800px] flex-col gap-3 px-4 md:px-8" aria-label={t('about')}>
             <div className="flex flex-wrap items-center gap-2">{secondary}</div>
             {model.plot && <p dir="auto" className="max-w-[72ch] text-[calc(15rem/15)] leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
@@ -269,7 +286,7 @@ export function MovieDetailPage() {
         )}
       </div>
 
-      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.title} />}
+      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}
       {others.length > 0 && (
         <OtherSourcesDialog
           open={othersOpen}

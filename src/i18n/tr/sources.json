@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "İçe aktarma sırasında bir sorun oluştu.",
   "errorSummaryWrongUrl": "Bu adres bir kanal listesine çıkmıyor.",
   "technicalDetails": "Teknik ayrıntılar",
-  "addRetryNote": "\"{{name}}\" bu hatayla kaydedildi. Bilgileri düzeltip burada yeniden deneyin ya da bu pencereyi kapatıp daha sonra kartındaki Yeniden dene düğmesini kullanın.",
+  "addRetryNote": "Bilgileri düzeltip burada yeniden deneyin. Bu pencereyi kapatmak \"{{name}}\" kaynağını kaldırır (geri alabilirsiniz).",
   "retryImport": "Yeniden dene",
   "retrying": "Yeniden deneniyor...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "Arşiv günleri",
   "catchupDaysHint": "Arşivin ne kadar geriye gittiği. Oynatma listesindeki değeri korumak için boş bırakın.",
   "errorCatchupTemplate": "En fazla {{max}} karakter kullanın, denetim karakteri kullanmayın.",
-  "errorCatchupDays": "Bir ile {{max}} arasında tam sayı olarak gün girin."
+  "errorCatchupDays": "Bir ile {{max}} arasında tam sayı olarak gün girin.",
+  "testExpired": "Oturum açıldı, ancak hesabın süresi dolmuş.",
+  "testExpiredNamed": "{{name}} oturumu açıldı, ancak hesabın süresi dolmuş.",
+  "testAccountInactiveHint": "Sağlayıcınız hesabı yenileyene veya yeniden etkinleştirene kadar kanallar oynatılmaz.",
+  "phaseConnectingTo": "{{host}} ile bağlantı kuruluyor…",
+  "phaseStarting": "Başlatılıyor…",
+  "discardedFailedHint": "İlk içe aktarma başarısız oldu. Kaynağı tutup kartından yeniden denemek için Geri al’ı seçin.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

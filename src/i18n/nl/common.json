@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "Technische details",
   "errorHintTimeout": "De provider is mogelijk druk. Probeer het zo opnieuw.",
   "errorHintAuth": "Controleer de gebruikersnaam, het wachtwoord of het MAC-adres in de broninstellingen.",
-  "errorHintNotFound": "Mogelijk heeft de provider het verwijderd. Vernieuw de bron om de lijst bij te werken.",
+  "errorHintNotFound": "Het is misschien verwijderd, of deze link is verouderd.",
   "errorHintInvalid": "Controleer de ingevoerde waarden en probeer het opnieuw.",
   "errorHintUnsupported": "Deze bron of dit streamtype ondersteunt die actie niet. Probeer een externe speler.",
   "errorHintConflict": "Laad opnieuw om de nieuwste versie te zien en probeer het dan nog eens.",

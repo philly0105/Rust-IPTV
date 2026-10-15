@@ -5,6 +5,7 @@
 
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
+import { notifyServerAnswered } from './reachability';
 import type { RpcMap } from './rpc';
 import type { PlayerSource, RpcErrorCode, RpcErrorPayload, SourceRunErrorDetails } from './types';
 
@@ -109,7 +110,13 @@ export const isDesktop: boolean = typeof window !== 'undefined' && '__TAURI_INTE
 
 const API_BASE = '/api';
 
-async function callDesktop(cmd: string, args: unknown): Promise<unknown> {
+/** The rejection for a call whose signal was aborted: the signal's reason, as `fetch` rejects. */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+async function callDesktop(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
+  if (opts?.signal?.aborted) throw abortReason(opts.signal);
   try {
     return await invoke('rpc', { cmd, args: args ?? null });
   } catch (err) {
@@ -125,6 +132,13 @@ export interface CallOptions {
    * (64 kB across all keepalive requests in flight).
    */
   keepalive?: boolean;
+  /**
+   * Cancels the call (TanStack Query passes one to every `queryFn`). Web: the request is aborted,
+   * so a refetch that an invalidation replaced stops transferring. Desktop: a call not yet sent
+   * is skipped; one already sent runs to the end. Either way the call rejects with the signal's
+   * reason (an `AbortError`), not an RpcError.
+   */
+  signal?: AbortSignal;
 }
 
 async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
@@ -135,8 +149,10 @@ async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args ?? null),
       ...(opts?.keepalive ? { keepalive: true } : {}),
+      ...(opts?.signal ? { signal: opts.signal } : {}),
     });
   } catch (err) {
+    if (opts?.signal?.aborted) throw abortReason(opts.signal);
     const message = err instanceof Error ? err.message : 'Network request failed';
     // `details.transport` tells the UI the app's own server is unreachable (not a provider error).
     throw new RpcError('network', `Cannot reach the server: ${message}`, true, { transport: 'unreachable' });
@@ -152,6 +168,8 @@ async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<
       body = text;
     }
   }
+  // A success or one of our own error payloads proves the server is up (a proxy's 502 does not).
+  if (res.ok || isErrorPayload(body)) notifyServerAnswered();
 
   if (!res.ok) {
     if (isErrorPayload(body)) throw RpcError.from(body);
@@ -165,7 +183,7 @@ async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<
 
 /** Untyped call; prefer `rpc()`. */
 export function rpcRaw(cmd: string, args?: unknown, opts?: CallOptions): Promise<unknown> {
-  return isDesktop ? callDesktop(cmd, args) : callWeb(cmd, args, opts);
+  return isDesktop ? callDesktop(cmd, args, opts) : callWeb(cmd, args, opts);
 }
 
 export function rpc<K extends RpcName>(

@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "要取代所有播放來源嗎？",
   "backupReplaceConfirmBody": "先匯入備份中的來源。只要其中至少一個載入成功，目前的來源及其收藏和觀看紀錄就會被移除。如果一個都沒載入成功，則不做任何變更。",
   "backupReplaceConfirm": "取代",
-  "backupImported_one": "已匯入 {{count}} 個播放來源",
-  "backupImported_other": "已匯入 {{count}} 個播放來源",
   "backupImportFailed": "無法匯入備份",
-  "backupResult": "已匯入 {{imported}} 個，已略過 {{skipped}} 個",
+  "backupResult": "已新增或更新：{{imported}}。已略過：{{skipped}}。",
   "backupWarnings_one": "{{count}} 則警告",
   "backupWarnings_other": "{{count}} 則警告",
   "backupNotJson": "此檔案不是有效的 JSON。",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "已清除圖片快取",
   "imageCacheClearFailed": "無法清除圖片快取",
   "imageCacheLoadFailed": "無法讀取圖片快取：{{message}}",
-  "imageCacheUnavailable": "此伺服器沒有圖片快取，圖片會直接從各供應商載入。"
+  "imageCacheUnavailable": "此伺服器沒有圖片快取，圖片會直接從各供應商載入。",
+  "backupOldVersion": "此備份使用無法讀取的舊格式。請匯出新的備份後再匯入。",
+  "backupImportDone": "已匯入備份",
+  "backupReplacePinTitle": "輸入 PIN 以取代來源",
+  "backupReplacePinText": "取代會移除目前的來源及其家長鎖定，因此需要家長監護 PIN。"
 }

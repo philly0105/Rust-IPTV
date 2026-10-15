@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "技術的な詳細",
   "errorHintTimeout": "プロバイダーが混雑している可能性があります。しばらくしてからもう一度お試しください。",
   "errorHintAuth": "ソース設定のユーザー名、パスワード、またはMACアドレスを確認してください。",
-  "errorHintNotFound": "プロバイダーによって削除された可能性があります。ソースを更新して一覧を最新にしてください。",
+  "errorHintNotFound": "削除されたか、このリンクが古くなっている可能性があります。",
   "errorHintInvalid": "入力した値を確認して、もう一度お試しください。",
   "errorHintUnsupported": "このソースまたはストリームの種類はこの操作に対応していません。外部プレーヤーをお試しください。",
   "errorHintConflict": "再読み込みして最新の状態を確認してから、もう一度お試しください。",

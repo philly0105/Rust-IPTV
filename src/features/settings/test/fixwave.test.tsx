@@ -125,9 +125,13 @@ describe('Parity settings', () => {
     fireEvent.change(input, { target: { value: '1000' } });
     fireEvent.blur(input);
     expect(await screen.findByText('Use a shift between -720 and 720 minutes (12 hours).')).toBeTruthy();
+    // The field itself is marked, not only the message under it; its keypad has a minus sign.
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(input.getAttribute('inputmode')).toBe('text');
     fireEvent.change(input, { target: { value: '-30' } });
     fireEvent.blur(input);
     await waitFor(() => expect(patches()).toEqual([{ epgOffsetMinutes: -30 }]));
+    await waitFor(() => expect(input.getAttribute('aria-invalid')).toBeNull());
   });
 
   it('Guide: clear all guide data asks first, then calls epg.clearAll', async () => {

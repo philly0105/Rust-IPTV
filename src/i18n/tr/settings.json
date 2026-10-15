@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "Tüm kaynaklar değiştirilsin mi?",
   "backupReplaceConfirmBody": "Önce yedekteki kaynaklar içe aktarılır. En az biri yüklendiğinde mevcut kaynaklarınız, favorileri ve izleme geçmişiyle birlikte kaldırılır. Hiçbiri yüklenmezse hiçbir şey değişmez.",
   "backupReplaceConfirm": "Değiştir",
-  "backupImported_one": "{{count}} kaynak içe aktarıldı",
-  "backupImported_other": "{{count}} kaynak içe aktarıldı",
   "backupImportFailed": "Yedek içe aktarılamadı",
-  "backupResult": "{{imported}} içe aktarıldı, {{skipped}} atlandı",
+  "backupResult": "Eklenen veya güncellenen: {{imported}}. Atlanan: {{skipped}}.",
   "backupWarnings_one": "{{count}} uyarı",
   "backupWarnings_other": "{{count}} uyarı",
   "backupNotJson": "Bu dosya geçerli bir JSON değil.",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "Görsel önbelleği temizlendi",
   "imageCacheClearFailed": "Görsel önbelleği temizlenemedi",
   "imageCacheLoadFailed": "Görsel önbelleği okunamadı: {{message}}",
-  "imageCacheUnavailable": "Bu sunucuda görsel önbelleği yok; görseller doğrudan her sağlayıcıdan yüklenir."
+  "imageCacheUnavailable": "Bu sunucuda görsel önbelleği yok; görseller doğrudan her sağlayıcıdan yüklenir.",
+  "backupOldVersion": "Bu yedek okunamayan eski bir biçimde. Yeni bir yedek dışa aktarın ve onu içe aktarın.",
+  "backupImportDone": "Yedek içe aktarıldı",
+  "backupReplacePinTitle": "Kaynakları değiştirmek için PIN'i girin",
+  "backupReplacePinText": "Değiştirme mevcut kaynaklarınızı ve ebeveyn kilitlerini kaldırır, bu yüzden ebeveyn denetimi PIN'i gerekir."
 }

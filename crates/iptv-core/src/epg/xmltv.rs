@@ -13,8 +13,11 @@
 //!   `Z`, `UTC` or `GMT` offset, plus RFC 3339 as a fallback;
 //! - programmes without `stop`: the stop is inferred from the next programme
 //!   on the same channel, or start + 1 h when none follows;
-//! - mismatched end tags, unclosed tags (`<br>` inside a description) and a
-//!   truncated tail (data read so far is kept).
+//! - mismatched end tags and unclosed tags (`<br>` inside a description).
+//!
+//! A document that opens `<tv>` but ends (cleanly or with an error, a cut
+//! gzip stream included) before its `</tv>` is a cut-off download: parsing
+//! fails with [`CUT_OFF_MESSAGE`] so the stored guide is kept.
 //!
 //! Hostile input is bounded: the document stops with an `Invalid` error once
 //! more than [`MAX_DOCUMENT_BYTES`] (decompressed) were read, a text, CDATA or
@@ -75,6 +78,8 @@ pub const MAX_URL_BYTES: usize = 4096;
 pub const MAX_PENDING: usize = 100_000;
 /// Approximate bytes of held stop-less programmes (see [`MAX_PENDING`]).
 pub const MAX_PENDING_BYTES: usize = 64 << 20;
+/// `Invalid` message of a document that ends before its `</tv>`.
+pub const CUT_OFF_MESSAGE: &str = "The guide download was cut off; kept the previous guide.";
 
 /// A `<channel>` element.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +154,8 @@ pub struct ParseStats {
     pub skipped_invalid: u64,
     /// Programmes whose stop was inferred.
     pub inferred_stop: u64,
-    /// Set when the document ended with an XML error after some data was read.
+    /// Set when an XML error followed the closing `</tv>` (the guide itself
+    /// is complete).
     pub truncated: Option<String>,
 }
 
@@ -242,6 +248,8 @@ struct Parser<'s> {
     pending_seq: u64,
     stats: ParseStats,
     saw_tv: bool,
+    /// The last `<tv>` opened was closed (`</tv>` or `<tv/>`).
+    tv_closed: bool,
     sink: &'s mut dyn FnMut(XmltvItem) -> CoreResult<()>,
 }
 
@@ -249,9 +257,12 @@ struct Parser<'s> {
 /// programme inside `window`. The sink may return an error to abort.
 ///
 /// Errors: `Invalid` when the input is not XMLTV or holds neither channels nor
-/// programmes; whatever the sink or the reader returns. An XML syntax error
-/// after at least one channel or programme was read ends parsing early and is
-/// reported in [`ParseStats::truncated`] instead.
+/// programmes, and `Invalid(`[`CUT_OFF_MESSAGE`]`)` when it opens `<tv>` but
+/// ends before `</tv>` (the sink has then seen only part of the feed, so the
+/// caller must not keep it); whatever the sink or the reader returns. An XML
+/// syntax error after at least one channel or programme was read ends parsing
+/// early; past `</tv>` (or in a document without `<tv>`) it is reported in
+/// [`ParseStats::truncated`] instead.
 pub fn parse<R: BufRead>(
     reader: R,
     window: Window,
@@ -293,6 +304,7 @@ pub fn parse_with_limits<R: BufRead>(
         pending_seq: 0,
         stats: ParseStats::default(),
         saw_tv: false,
+        tv_closed: false,
         sink,
     };
     let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
@@ -308,13 +320,18 @@ pub fn parse_with_limits<R: BufRead>(
                     }
                 }
                 let pos = pos_base + xml.buffer_position();
-                if p.stats.channels + p.stats.programmes + p.stats.skipped_window > 0 {
-                    let msg = format!("XMLTV ended early at byte {pos}: {err}");
-                    tracing::warn!(%msg, "keeping data parsed before the error");
-                    p.stats.truncated = Some(msg);
+                // Inside `<tv>` the read error (often a cut gzip stream) is a
+                // cut-off download, even before the first programme.
+                if p.saw_tv || p.stats.channels + p.stats.programmes + p.stats.skipped_window > 0 {
+                    // Checked against `</tv>` after the loop.
+                    p.stats.truncated = Some(format!("XMLTV ended early at byte {pos}: {err}"));
                     break;
                 }
                 if let quick_xml::Error::Io(io) = &err {
+                    // A gzip stream cut before its first decoded byte.
+                    if io.kind() == std::io::ErrorKind::UnexpectedEof {
+                        return Err(CoreError::Invalid(CUT_OFF_MESSAGE.into()));
+                    }
                     return Err(CoreError::Io(std::io::Error::new(
                         io.kind(),
                         io.to_string(),
@@ -395,7 +412,21 @@ pub fn parse_with_limits<R: BufRead>(
             "XMLTV text nodes larger than {max_node} bytes were cut"
         );
     }
-    // A programme still open at EOF (truncated file) is finished with what it has.
+    // A download cut mid-file (proxy, flaky link, truncated gzip) ends before
+    // `</tv>`: storing it would replace the full guide with its first part.
+    if p.saw_tv && !p.tv_closed {
+        tracing::warn!(
+            detail = p.stats.truncated.as_deref().unwrap_or("end of input"),
+            channels = p.stats.channels,
+            programmes = p.stats.programmes,
+            "XMLTV document ended before </tv>"
+        );
+        return Err(CoreError::Invalid(CUT_OFF_MESSAGE.into()));
+    }
+    if let Some(msg) = &p.stats.truncated {
+        tracing::warn!(%msg, "keeping data parsed before the error");
+    }
+    // A programme still open at EOF (no `<tv>` root) is finished with what it has.
     if let Ctx::Programme(_) = p.ctx {
         p.on_end(b"programme")?;
     }
@@ -462,7 +493,10 @@ impl Parser<'_> {
         let name = e.local_name();
         let name = name.as_ref();
         match name {
-            b"tv" => self.saw_tv = true,
+            b"tv" => {
+                self.saw_tv = true;
+                self.tv_closed = empty;
+            }
             b"channel" => {
                 self.capture = None;
                 let id = self.attr(e, b"id", MAX_ID_BYTES);
@@ -572,6 +606,7 @@ impl Parser<'_> {
                     self.finish_programme(p)?;
                 }
             }
+            b"tv" => self.tv_closed = true,
             _ => {}
         }
         Ok(())

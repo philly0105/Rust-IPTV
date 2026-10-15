@@ -34,5 +34,6 @@
   "clearTitle": "Wyczyścić statystyki oglądania?",
   "clearBody": "Cały zliczony czas oglądania zostanie usunięty. Postęp oglądania i Ostatnio oglądane zostaną zachowane.",
   "cleared": "Wyczyszczono statystyki oglądania",
-  "clearFailed": "Nie udało się wyczyścić statystyk"
+  "clearFailed": "Nie udało się wyczyścić statystyk",
+  "watchLive": "Oglądaj telewizję na żywo"
 }

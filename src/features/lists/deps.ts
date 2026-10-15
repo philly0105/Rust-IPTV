@@ -28,6 +28,7 @@ export { useShell } from '@/shell/store';
 export { useShortcut } from '@/shell/shortcuts';
 export { useVisibleSources } from '@/shell/useVisibleSources';
 export { DashboardRail } from '@/shell/dashboard/DashboardRail';
+export { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 export { ChannelCard } from '@/shell/dashboard/cards';
 export { ChannelList } from '@/features/live/components/ChannelList';
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';
@@ -36,8 +37,10 @@ export { ContextMenu, type MenuItem } from '@/features/live/components/ContextMe
 export { CHANNEL_PAGE_SIZE, type PagedChannels } from '@/features/live/hooks/usePagedChannels';
 export { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
+export { buildLocks, locksShown, type ParentalLocks } from '@/features/live/hooks/useParentalLocks';
 export { useNow } from '@/features/live/hooks/useNow';
 export { displayChannelName } from '@/features/live/lib/channelName';
 export { playChannel } from '@/features/live/lib/playback';
+export { useParentalStatus } from '@/features/parental/status';
 export { PlayerStage, usePlayerStore } from '@/features/player';
 export { sourceKindOf } from '@/features/player/store';

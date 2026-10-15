@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, PlugZap } from 'lucide-react';
+import { CircleAlert, CircleCheck, PlugZap, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -9,6 +9,9 @@ import { RpcError } from '@/api/transport';
 import { Button } from '@/ui';
 import { importErrorCode, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
+
+/** The core's text for a sign-in whose account has run out ("Signed in, but the account has expired."). */
+const EXPIRED = /\bexpired\b/i;
 
 type TestState = { status: 'idle' } | { status: 'running' } | { status: 'done'; result: ConnectionTestResult } | { status: 'failed'; error: RpcError };
 
@@ -55,27 +58,44 @@ export function ConnectionTest({
     }
   };
 
-  const ok = state.status === 'done' && state.result.ok;
+  // ok: signed in and usable; warn: signed in, but the provider says the account is not active
+  // (Xtream sends a message with `ok` only then; Stalker's is its plain success summary); fail: no.
+  let verdict: 'ok' | 'warn' | 'fail' | null = null;
   let message: string | null = null;
   let nextStep: string | null = null;
   let detail: string | null = null;
   if (state.status === 'done') {
     const r = state.result;
-    if (r.ok) message = r.name ? t('testOkNamed', { name: r.name }) : (r.message ?? t('testOk'));
-    else {
+    const expired = r.message !== undefined && EXPIRED.test(r.message);
+    if (r.ok && r.message && kind === 'xtream') {
+      verdict = 'warn';
+      message = expired ? (r.name ? t('testExpiredNamed', { name: r.name }) : t('testExpired')) : r.message;
+      nextStep = t('testAccountInactiveHint');
+    } else if (r.ok) {
+      verdict = 'ok';
+      message = r.name ? t('testOkNamed', { name: r.name }) : (r.message ?? t('testOk'));
+    } else if (expired) {
+      // A core that refuses an expired account outright: same plain words, same advice.
+      verdict = 'fail';
+      message = t('testExpired');
+      nextStep = t('testAccountInactiveHint');
+    } else {
+      verdict = 'fail';
       message = r.message ?? t('testFailedGeneric');
       const code = importErrorCode(r.message);
       if (code !== 'internal') nextStep = t(nextStepKey({ code, message: r.message }, kind));
     }
   } else if (state.status === 'failed') {
     // The plain summary first; the core's own text (English, often technical) behind a disclosure.
+    verdict = 'fail';
     message = t(summaryKey(state.error));
     nextStep = t(nextStepKey(state.error, kind));
     detail = state.error.message;
   }
+  const tone = verdict === 'ok' ? 'text-success' : verdict === 'warn' ? 'text-warning' : 'text-danger';
 
   return (
-    <div className="flex flex-wrap items-start gap-3" data-testid="connection-test" data-status={state.status}>
+    <div className="flex flex-wrap items-start gap-3" data-testid="connection-test" data-status={state.status} data-verdict={verdict ?? undefined}>
       <Button
         size="sm"
         variant="secondary"
@@ -90,13 +110,15 @@ export function ConnectionTest({
         {message ? (
           <>
             <p className="flex min-w-0 items-center gap-1.5">
-              {ok ? (
+              {verdict === 'ok' ? (
                 <CircleCheck aria-hidden className="size-4 shrink-0 text-success" />
+              ) : verdict === 'warn' ? (
+                <TriangleAlert aria-hidden className="size-4 shrink-0 text-warning" />
               ) : (
                 <CircleAlert aria-hidden className="size-4 shrink-0 text-danger" />
               )}
               {/* Portal messages can echo the request URL, password included. */}
-              <span className={ok ? 'break-words text-success' : 'break-words text-danger'} data-testid="connection-test-result">
+              <span className={`break-words ${tone}`} data-testid="connection-test-result">
                 {redactText(message)}
               </span>
             </p>

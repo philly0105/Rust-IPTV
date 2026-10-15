@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type CustomList } from '@/api/types';
 
-import { ChannelCard, DashboardRail, displayChannelName, toast, useDisplayPrefs, useVisibleSources } from '../deps';
+import { ChannelCard, DashboardRail, displayChannelName, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
 import { useListItems } from '../hooks/useLists';
 import { playFromList } from '../lib/play';
 import { listPath } from '../paths';
@@ -32,10 +32,17 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
   const { t: ts } = useTranslation('shell');
   const prefs = useDisplayPrefs();
   const items = useListItems(list.id);
-  const channels = useMemo(
-    () => (items.data ?? []).flatMap((e) => (e.available && e.channel ? [e.channel] : [])).slice(0, LIST_RAIL_LIMIT),
-    [items.data],
+  // Channels of a source in its delete-undo window are already gone, as on the other Home rails.
+  const removingSources = usePendingRemovals((s) => s.ids);
+  const entries = useMemo(
+    () => (removingSources.size === 0 ? items.data : items.data?.filter((e) => !removingSources.has(e.ref.sourceId))),
+    [items.data, removingSources],
   );
+  const channels = useMemo(
+    () => (entries ?? []).flatMap((e) => (e.available && e.channel ? [e.channel] : [])).slice(0, LIST_RAIL_LIMIT),
+    [entries],
+  );
+  const itemCount = list.itemCount - ((items.data?.length ?? 0) - (entries?.length ?? 0));
   const refs = useMemo(() => channels.map((c) => c.ref), [channels]);
   const offset = prefs.epgOffsetMinutes;
   const nowNext = useRpcQuery('epg.nowNext', offset ? { refs, offsetMinutes: offset } : { refs }, { enabled: refs.length > 0, staleTime: 60_000 });
@@ -52,7 +59,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
       errorHint={t('localDataHint')}
       onRetry={() => void items.refetch()}
       seeAll={{ to: listPath(list.id) }}
-      meta={<span className="text-xs tabular-nums text-fg-subtle">{t('channelCount', { count: list.itemCount, formatted: fmt.format(list.itemCount) })}</span>}
+      meta={<span className="text-xs tabular-nums text-fg-subtle">{t('channelCount', { count: itemCount, formatted: fmt.format(itemCount) })}</span>}
       getKey={(c) => itemKey(c.ref)}
       cardWidth={232}
       skeletonAspect={16 / 9}

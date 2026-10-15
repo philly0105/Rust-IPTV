@@ -465,6 +465,35 @@ fn drop_if_empty(conn: &Connection, r: &ItemRef) -> CoreResult<()> {
     Ok(())
 }
 
+/// Writes `title` (the provider name) back into the titles stored with a
+/// channel whose custom name was just cleared. Favorites and history
+/// snapshots (relabelled on read by [`apply_snapshot_names`]), custom list
+/// items and the watch log keep the name shown when they were saved, which
+/// is the custom name while the channel was renamed; with the name gone,
+/// nothing relabels them on read any more.
+fn restore_titles(conn: &Connection, r: &ItemRef, title: &str) -> CoreResult<()> {
+    for table in ["favorites", "recent"] {
+        conn.prepare_cached(&format!(
+            "UPDATE {table} SET snapshot_json = json_set(snapshot_json, '$.title', ?4)
+             WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3
+               AND json_valid(snapshot_json) AND json_type(snapshot_json) = 'object'"
+        ))?
+        .execute(params![
+            r.source_id,
+            r.content_type.as_str(),
+            r.item_id,
+            title
+        ])?;
+    }
+    for table in ["custom_list_items", "watch_log"] {
+        conn.prepare_cached(&format!(
+            "UPDATE {table} SET title = ?4 WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3"
+        ))?
+        .execute(params![r.source_id, r.content_type.as_str(), r.item_id, title])?;
+    }
+    Ok(())
+}
+
 const SELECT_EDIT: &str = "SELECT e.source_id, e.content_type, e.item_id, e.hidden, e.name, COALESCE(i.title, e.original_name), e.updated_at FROM channel_edits e LEFT JOIN items i ON i.source_id = e.source_id AND i.content_type = e.content_type AND i.item_id = e.item_id";
 
 fn read_edit(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelEdit> {
@@ -706,10 +735,12 @@ fn short_id(id: &str) -> String {
 ///
 /// A name equal to the provider name clears the custom name (the channel
 /// then shows the provider name, and follows it if the provider renames
-/// it). Setting a name needs the channel in the catalog; clearing also works
-/// for a dropped channel whose row exists. `NotFound` otherwise. When the
-/// custom name already is the requested one nothing is written (the row
-/// keeps its `updatedAt`) and the flag is false, so no event goes out.
+/// it). Clearing a name also puts the provider name back into the titles
+/// stored with the channel (favorites, history, lists, watch log). Setting
+/// a name needs the channel in the catalog; clearing also works for a
+/// dropped channel whose row exists. `NotFound` otherwise. When the custom
+/// name already is the requested one nothing is written (the row keeps its
+/// `updatedAt`) and the flag is false, so no event goes out.
 pub fn rename(
     conn: &mut Connection,
     r: &ItemRef,
@@ -744,6 +775,12 @@ pub fn rename(
             .execute(params![r.source_id, r.content_type.as_str(), r.item_id, now])?;
         }
     }
+    if name.is_none() {
+        // The custom name was cleared: `originalName` is the provider name.
+        if let Some(e) = edit_of(&tx, r)? {
+            restore_titles(&tx, r, &e.original_name)?;
+        }
+    }
     drop_if_empty(&tx, r)?;
     let out = edit_of(&tx, r)?;
     tx.commit()?;
@@ -764,12 +801,22 @@ fn stored_name(conn: &Connection, r: &ItemRef) -> CoreResult<Option<String>> {
         .flatten())
 }
 
-/// `channels.reset`: drops every edit of the source and recounts it.
-/// Returns the number of rows removed; 0 changes nothing (no recount, and
-/// the command sends no event).
+/// `channels.reset`: drops every edit of the source and recounts it, and
+/// puts the provider names back into the titles stored with the renamed
+/// channels. Returns the number of rows removed; 0 changes nothing (no
+/// recount, and the command sends no event).
 pub fn reset(conn: &mut Connection, source_id: &str) -> CoreResult<usize> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     require_source(&tx, source_id)?;
+    let renamed: Vec<ChannelEdit> = tx
+        .prepare_cached(&format!(
+            "{SELECT_EDIT} WHERE e.source_id = ?1 AND e.name IS NOT NULL"
+        ))?
+        .query_map([source_id], read_edit)?
+        .collect::<Result<_, _>>()?;
+    for e in &renamed {
+        restore_titles(&tx, &e.item_ref, &e.original_name)?;
+    }
     let n = tx.execute(
         "DELETE FROM channel_edits WHERE source_id = ?1",
         [source_id],
@@ -883,6 +930,13 @@ pub fn import_edits(
         };
         let updated_at = crate::userstate::normalize_ts_str(&e.updated_at)
             .unwrap_or_else(crate::userstate::now_ts);
+        let r = ItemRef {
+            source_id: source_id.to_string(),
+            content_type: e.content_type,
+            item_id: item_id.to_string(),
+        };
+        // A newer hidden-only entry clears a custom name.
+        let clears = name.is_none() && stored_name(conn, &r)?.is_some();
         let n = stmt.execute(params![
             source_id,
             e.content_type.as_str(),
@@ -895,6 +949,11 @@ pub fn import_edits(
         if n > 0 {
             written += n;
             types.insert(e.content_type);
+            if clears {
+                if let Some(edit) = edit_of(conn, &r)? {
+                    restore_titles(conn, &r, &edit.original_name)?;
+                }
+            }
         }
     }
     if written > 0 {

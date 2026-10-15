@@ -71,6 +71,29 @@ function message(e: unknown): string {
   return RpcError.from(e).message;
 }
 
+/**
+ * Recording ids with a stop or cancel in flight, until the refreshed list
+ * arrives. Every Stop and cancel button reads it (`useCancelPending`), so a
+ * second click, or the guide and the Scheduled page at once, cannot send
+ * another cancel or show a second toast.
+ */
+const useCancelling = create<{ ids: ReadonlySet<string> }>(() => ({ ids: new Set<string>() }));
+const cancelsInFlight = new Map<string, Promise<boolean>>();
+
+function setCancelling(id: string, on: boolean): void {
+  useCancelling.setState((s) => {
+    const ids = new Set(s.ids);
+    if (on) ids.add(id);
+    else ids.delete(id);
+    return { ids };
+  });
+}
+
+/** True while recording `id` is being stopped or cancelled. */
+export function useCancelPending(id: string | undefined): boolean {
+  return useCancelling((s) => id !== undefined && s.ids.has(id));
+}
+
 /** Reminder and recording actions with their toasts. */
 export function useScheduleActions() {
   const { t } = useTranslation('live');
@@ -123,16 +146,29 @@ export function useScheduleActions() {
     [t, toast],
   );
 
+  /** Stops a running recording or cancels a waiting one; resolves true on success. Repeats while one runs join it. */
   const cancelRecording = useCallback(
-    async (r: Recording): Promise<void> => {
-      try {
-        await rpc('recordings.cancel', { id: r.id });
-        toast({ title: r.status === 'recording' ? t('recordingStopped', { title: r.title ?? r.channelName }) : t('recordingCancelled', { title: r.title ?? r.channelName }) });
-      } catch (e) {
-        toast({ variant: 'error', title: t('recordCancelFailed'), description: message(e) });
-      } finally {
-        void invalidate('recordings.');
-      }
+    (r: Recording): Promise<boolean> => {
+      const running = cancelsInFlight.get(r.id);
+      if (running) return running;
+      setCancelling(r.id, true);
+      const work = (async () => {
+        try {
+          await rpc('recordings.cancel', { id: r.id });
+          toast({ title: r.status === 'recording' ? t('recordingStopped', { title: r.title ?? r.channelName }) : t('recordingCancelled', { title: r.title ?? r.channelName }) });
+          return true;
+        } catch (e) {
+          toast({ variant: 'error', title: t('recordCancelFailed'), description: message(e) });
+          return false;
+        } finally {
+          // Pending until the list no longer offers Stop for this row.
+          await invalidate('recordings.').catch(() => undefined);
+          cancelsInFlight.delete(r.id);
+          setCancelling(r.id, false);
+        }
+      })();
+      cancelsInFlight.set(r.id, work);
+      return work;
     },
     [t, toast],
   );

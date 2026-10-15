@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "すべてのソースを置き換えますか？",
   "backupReplaceConfirmBody": "先にバックアップのソースを読み込みます。1つでも読み込めたら、現在のソースとそのお気に入り、視聴履歴が削除されます。1つも読み込めなければ何も変わりません。",
   "backupReplaceConfirm": "置き換え",
-  "backupImported_one": "{{count}}件のソースをインポートしました",
-  "backupImported_other": "{{count}}件のソースをインポートしました",
   "backupImportFailed": "バックアップをインポートできませんでした",
-  "backupResult": "{{imported}}件をインポート、{{skipped}}件をスキップ",
+  "backupResult": "追加または更新: {{imported}}。スキップ: {{skipped}}。",
   "backupWarnings_one": "警告{{count}}件",
   "backupWarnings_other": "警告{{count}}件",
   "backupNotJson": "このファイルは有効なJSONではありません。",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "画像キャッシュを消去しました",
   "imageCacheClearFailed": "画像キャッシュを消去できませんでした",
   "imageCacheLoadFailed": "画像キャッシュを読み取れませんでした: {{message}}",
-  "imageCacheUnavailable": "このサーバーには画像キャッシュがないため、画像は各プロバイダーから直接読み込まれます。"
+  "imageCacheUnavailable": "このサーバーには画像キャッシュがないため、画像は各プロバイダーから直接読み込まれます。",
+  "backupOldVersion": "このバックアップは古い形式のため読み込めません。新しいバックアップを書き出して読み込んでください。",
+  "backupImportDone": "バックアップを読み込みました",
+  "backupReplacePinTitle": "ソースを置き換えるには PIN を入力してください",
+  "backupReplacePinText": "置き換えると現在のソースとそのペアレンタルロックが削除されるため、ペアレンタル PIN が必要です。"
 }

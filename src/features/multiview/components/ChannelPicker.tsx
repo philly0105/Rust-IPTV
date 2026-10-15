@@ -10,7 +10,7 @@ import { addToWall, channelInput, replaceOnWall } from '../addChannel';
 import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, SearchInput, Select, SkeletonList, toast } from '../deps';
 import { MAX_TILES } from '../layout';
 import { useMultiviewStore } from '../store';
-import { useSourceLoads, useSources } from '../useWallData';
+import { inUse, useParentalState, useSourceLoads, useSources } from '../useWallData';
 import { ChannelMark } from './ChannelMark';
 
 /** What the picker is for: filling free slots, or changing the channel of one tile. */
@@ -65,13 +65,14 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
   const replacing = mode.kind === 'replace' ? tiles.find((t) => t.key === mode.key) : undefined;
   const replaceSlot = replacing ? tiles.indexOf(replacing) + 1 : 0;
   const full = mode.kind === 'add' && tiles.length >= MAX_TILES;
-  // Every connection of the chosen account already plays on the wall: one more may be refused.
+  // Every connection of the chosen account is already in use: one more may be refused.
   const { byId } = useSources(open);
-  const loads = useSourceLoads(tiles, byId);
+  const parental = useParentalState();
+  const loads = useSourceLoads(tiles, byId, parental.active);
   // Sources a pick would push past their limit. Replacing a tile with a channel of its own
   // source adds no connection, so that source is left out.
   const limited = useMemo(
-    () => loads.filter((l) => l.max > 0 && l.tiles >= l.max && (mode.kind === 'add' || replacing?.ref.sourceId !== l.sourceId)),
+    () => loads.filter((l) => l.max > 0 && inUse(l) >= l.max && (mode.kind === 'add' || replacing?.ref.sourceId !== l.sourceId)),
     [loads, mode.kind, replacing?.ref.sourceId],
   );
   const limitedIds = useMemo(() => new Set(limited.map((l) => l.sourceId)), [limited]);
@@ -339,7 +340,10 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
               data-testid="multiview-picker-limit"
             >
               <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
-              <span>{t('pickerAtLimit', { source: l.name || t('limitUnknownSource') })}</span>
+              <span>
+                {t('pickerAtLimit', { source: l.name || t('limitUnknownSource') })}
+                {l.own > 0 ? ` ${t('limitOwn')}` : null}
+              </span>
             </p>
           ))}
         </div>

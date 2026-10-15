@@ -197,5 +197,12 @@
   "markSeriesWatched": "Sorozat megjelölése megtekintettként",
   "markSeriesUnwatched": "Sorozat megjelölése nem megtekintettként",
   "shortcutWatched": "Megjelölés megtekintettként vagy nem megtekintettként",
-  "shortcutHideWatched": "Megtekintett címek elrejtése vagy megjelenítése"
+  "shortcutHideWatched": "Megtekintett címek elrejtése vagy megjelenítése",
+  "sourceMissingTitle": "Ezt a forrást eltávolították",
+  "sourceMissingBody": "Már nincs a források között. Válassz másik forrást, vagy add hozzá újra a Források oldalon.",
+  "goToDashboard": "Ugrás az irányítópultra",
+  "categoryMissingTitle": "A kategória nem található",
+  "categoryMissingBody": "Ennek a forrásnak nincs ilyen hivatkozású kategóriája. Lehet, hogy a szolgáltató átnevezte vagy törölte.",
+  "namedMarkedWatched": "{{name}} megtekintettnek jelölve",
+  "namedMarkedUnwatched": "{{name}} nem megtekintettnek jelölve"
 }

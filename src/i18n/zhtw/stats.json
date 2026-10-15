@@ -34,5 +34,6 @@
   "clearTitle": "要清除觀看統計嗎？",
   "clearBody": "所有已統計的觀看時間都會刪除。觀看進度和「最近觀看」會保留。",
   "cleared": "已清除觀看統計",
-  "clearFailed": "無法清除統計"
+  "clearFailed": "無法清除統計",
+  "watchLive": "觀看直播電視"
 }

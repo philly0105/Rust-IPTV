@@ -163,5 +163,10 @@
   "turnOffTitle": "Ebeveyn denetimi kapatılsın mı?",
   "turnOffConfirmText": "PIN'i girin. Yeni bir PIN belirlenene kadar kilitli içerik herkese açık olur.",
   "turnedOffToast": "Ebeveyn denetimi kapalı",
-  "turnedOffToastText": "Kilitleriniz saklandı. Yeniden kullanmak için bir PIN belirleyin."
+  "turnedOffToastText": "Kilitleriniz saklandı. Yeniden kullanmak için bir PIN belirleyin.",
+  "menuLockedWithGroup": "Grubuyla birlikte kilitli",
+  "discardTitle": "Değişiklikler atılsın mı?",
+  "discardText": "Burada işaretlediğiniz veya işaretini kaldırdığınız gruplar kaydedilmeyecek.",
+  "keepEditing": "Düzenlemeye devam et",
+  "discard": "At"
 }

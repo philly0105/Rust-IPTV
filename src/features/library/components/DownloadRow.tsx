@@ -25,28 +25,41 @@ const ICONS: Record<QueueAction, typeof Pause> = {
   reveal: FolderOpen,
 };
 
+/** Letter shortcut for an action on the focused row (DownloadsPage), shown in the button's tooltip. */
+const SHORTCUT_KEYS: Partial<Record<QueueAction, string>> = { pause: 'P', resume: 'P', retry: 'R', cancel: 'X', reveal: 'O' };
+
 export interface DownloadRowProps {
   download: Download;
   progress: EffectiveProgress;
   source: Source | undefined;
   actions: readonly QueueAction[];
   busy: boolean;
+  /**
+   * The row is the list's keyboard tab stop: its action buttons join the Tab
+   * order after it (Tab from the row reaches Pause, Show in folder, ...).
+   * Other rows keep theirs out of it, so Tab leaves the list in one step.
+   */
+  tabbable?: boolean;
   onAction: (action: QueueAction, d: Download) => void;
 }
 
 /**
  * Progress track styled as a tuning dial: tick marks every 10 %, an amber
- * fill, and a needle at the current position. Indeterminate when the total
- * size is unknown.
+ * fill, and a needle at the current position. With no percent the track
+ * stays empty, unless `indeterminate` (a transfer running with no known size)
+ * sweeps a segment across it; with reduced motion that segment becomes a
+ * faint full-width wash, so it never reads as a real 25 %.
  */
 export function DialProgress({
   percent,
   tone,
   label,
+  indeterminate = false,
 }: {
   percent: number | undefined;
   tone: 'accent' | 'muted' | 'danger';
   label: string;
+  indeterminate?: boolean;
 }) {
   const fill = tone === 'accent' ? 'bg-accent' : tone === 'danger' ? 'bg-danger/70' : 'bg-fg-subtle/60';
   return (
@@ -67,7 +80,17 @@ export function DialProgress({
         }}
       />
       {percent === undefined ? (
-        <div aria-hidden className={cn('absolute inset-y-0 start-0 w-1/4 rounded-full motion-safe:animate-pulse', fill)} />
+        indeterminate ? (
+          <div
+            aria-hidden
+            data-testid="dial-indeterminate"
+            className={cn(
+              'absolute inset-y-0 start-0 w-1/3 rounded-full motion-safe:animate-indeterminate rtl:-scale-x-100',
+              'motion-reduce:inset-x-0 motion-reduce:w-auto motion-reduce:opacity-30',
+              fill,
+            )}
+          />
+        ) : null
       ) : (
         <>
           <div
@@ -88,7 +111,7 @@ export function DialProgress({
   );
 }
 
-function DownloadRowImpl({ download: d, progress, source, actions, busy, onAction }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, progress, source, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const lang = i18n.language;
   const pct = percentOf(progress.bytesDownloaded, progress.totalBytes);
@@ -131,7 +154,7 @@ function DownloadRowImpl({ download: d, progress, source, actions, busy, onActio
           {d.subtitle && <span className="hidden truncate text-[calc(13rem/15)] text-fg-muted md:inline">{d.subtitle}</span>}
           <StatusBadge status={d.status} className="ms-auto shrink-0" />
         </div>
-        <DialProgress percent={pct} tone={tone} label={t('progressFor', { title: d.title })} />
+        <DialProgress percent={pct} tone={tone} indeterminate={isActive && pct === undefined} label={t('progressFor', { title: d.title })} />
         <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
           <span className="font-display tabular-nums text-fg">{pct !== undefined ? `${pct}%` : ''}</span>
           {sizeText && <span className="font-display tabular-nums">{sizeText}</span>}
@@ -154,10 +177,10 @@ function DownloadRowImpl({ download: d, progress, source, actions, busy, onActio
               size="sm"
               variant={a === actions[0] ? 'secondary' : 'ghost'}
               label={t(k('action', a) + 'Aria', { title: d.title })}
-              title={t(k('action', a))}
+              title={SHORTCUT_KEYS[a] ? `${t(k('action', a))} (${SHORTCUT_KEYS[a]})` : t(k('action', a))}
               icon={<Icon size={16} aria-hidden />}
               disabled={busy}
-              tabIndex={-1}
+              tabIndex={tabbable ? 0 : -1}
               data-action={a}
               onClick={() => onAction(a, d)}
             />

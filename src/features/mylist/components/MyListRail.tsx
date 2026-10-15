@@ -11,8 +11,9 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type WatchlistEntry } from '@/api/types';
+import { PosterCard, itemPath, joinList } from '@/shell/dashboard/cards';
 
-import { DashboardRail, PosterCard, itemPath, joinList, usePendingRemovals, useSettings } from '../deps';
+import { DashboardRail, usePendingRemovals, useSettings } from '../deps';
 import { useMyList } from '../hooks/useMyList';
 import { MY_LIST_PATH } from '../paths';
 
@@ -30,8 +31,10 @@ export interface MyListRailProps {
 export function MyListRail({ hideError = false }: MyListRailProps = {}) {
   const { t, i18n } = useTranslation('mylist');
   const settings = useSettings();
-  // staleTime 0: watched tags change from the player, so a dashboard visit re-reads them.
-  const query = useMyList({ staleTime: 0 });
+  // The command's default staleTime: every write that changes a Watched tag invalidates the key
+  // (watchlist.changed, the player's finishing save and the mark-watched actions through
+  // invalidateWatched), so a dashboard visit need not re-read it.
+  const query = useMyList();
   const hidden = usePendingRemovals((s) => s.ids);
   const items = useMemo<WatchlistEntry[] | undefined>(() => {
     if (!query.data) return undefined;

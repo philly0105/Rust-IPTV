@@ -107,6 +107,13 @@ describe('error state', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  it('offers no Try again for not_found and its hint does not ask for a refresh', () => {
+    render(<ErrorState error={new RpcError('not_found', 'gone')} onRetry={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    const hint = screen.getByText('It may have been removed, or this link is out of date.');
+    expect(hint.textContent).not.toMatch(/refresh|reload|try again/i);
+  });
+
   it('keeps the unreachable-server hint over a caller hint', () => {
     render(<ErrorState error={new RpcError('network', 'Failed to fetch', true, { transport: 'unreachable' })} hint="Local hint" />);
     expect(screen.queryByText('Local hint')).toBeNull();

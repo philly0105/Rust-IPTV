@@ -17,12 +17,13 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { isDesktop, rpc } from '@/api/transport';
 import { itemKey, sameRef, type Category, type Channel, type ContentType, type EpgNowNext, type ItemKey, type ItemRef } from '@/api/types';
 
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast } from '@/ui';
-import { PlayerStage, RadioPlayer, useChannelZap, usePlayerStore } from '@/features/player';
+import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
+import { hideZapBanner } from '@/features/player/zapBanner';
 import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
 import { ListsSidebarSection, useAddToListMenuItem, useAddToListShortcut } from '@/features/lists';
 import { channelInput } from '@/features/multiview/addChannel';
@@ -35,6 +36,7 @@ import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
+import { useParentalLocks } from '../hooks/useParentalLocks';
 import { usePortalEpg } from '../hooks/usePortalEpg';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
 import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -199,6 +201,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashOsd = useCallback((s: ZapFeedback, ms = 2000) => {
     if (osdTimer.current) clearTimeout(osdTimer.current);
+    hideZapBanner();
     setOsd(s);
     osdTimer.current = setTimeout(() => setOsd(null), ms);
   }, []);
@@ -212,7 +215,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         // The number belongs to the list on screen: radio numbers never zap to the live channel with that number.
         const ch = await rpc('catalog.channelByNumber', { sourceId, number: n, contentType: isRadio ? 'radio' : 'live' });
         if (ch) {
-          flashOsd({ kind: 'found', number: n, name: displayChannelName(ch.name, prefs.stripCountryPrefix) });
+          // The zap banner (or the radio stage) names the channel it tuned to: the number readout just goes.
+          if (osdTimer.current) clearTimeout(osdTimer.current);
+          setOsd(null);
           play(ch);
         } else {
           flashOsd({ kind: 'missing', number: n });
@@ -222,12 +227,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         toast({ title: t('zapFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
       }
     },
-    [sourceId, isRadio, prefs.stripCountryPrefix, flashOsd, play, t, toast],
+    [sourceId, isRadio, flashOsd, play, t, toast],
   );
   const digits = useDigitEntry((n) => void selectNumber(n));
   useEffect(() => {
     if (digits.buffer) {
       if (osdTimer.current) clearTimeout(osdTimer.current);
+      // The readout owns the picture's top while you type; the zap that follows brings the banner back.
+      hideZapBanner();
       setOsd({ kind: 'typing', digits: digits.buffer });
     }
   }, [digits.buffer]);
@@ -335,10 +342,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       actions: (
         <Link
           to={guideHref}
+          aria-label={t('openGuide')}
           className="inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
         >
           <CalendarClock className="size-4" aria-hidden />
-          {t('openGuide')}
+          {/* Icon only on a phone, so the label does not squeeze the page title. */}
+          <span className="max-sm:sr-only">{t('openGuide')}</span>
         </Link>
       ),
     });
@@ -433,6 +442,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           name: displayChannelName(menuChannel.name, prefs.stripCountryPrefix),
         }
       : null,
+    { categoryId: menuChannel?.categoryId },
   );
   // Run 2: "Add to list…" (C3) and Rename / Reset name / Hide (C2).
   const addToListItem = useAddToListMenuItem(menuChannel);
@@ -444,6 +454,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   );
   // Groups get a menu (right click, context-menu key) only while there is something in it.
   const parentalOn = useParentalStatus().data?.enabled === true;
+  // Ask mode: what will ask for the PIN carries a lock in the groups and the list (C2).
+  const locks = useParentalLocks(sourceId, contentType);
   const closeGroupMenu = useCallback(() => setGroupMenu(null), []);
   const openGroupMenu = useCallback((pos: { x: number; y: number }, category: Category) => setGroupMenu({ pos, category }), []);
   const menuItems: MenuItem[] = useMemo(() => {
@@ -466,8 +478,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       ...(canBrowseArchive(ch, src.kind)
         ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => navigate(archivePath(ch.ref)) }]
         : []),
-      { id: 'mpv', label: t('playIn', { player: 'MPV' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv')() },
-      { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc')() },
+      // External players run only in the desktop app; the server answers `unsupported` (as InlinePlayer gates them).
+      ...(isDesktop
+        ? [
+            { id: 'mpv', label: t('playIn', { player: 'MPV' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv')() },
+            { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc')() },
+          ]
+        : []),
       {
         id: 'fav',
         label: menu.favorite ? t('removeFavorite') : t('addFavorite'),
@@ -540,6 +557,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onNavigate={() => setDrawerOpen(false)}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
           onGroupMenu={parentalOn ? openGroupMenu : undefined}
+          isLocked={locks.categoryLocked}
         />
       </div>
       <HiddenChannelsButton sourceId={sourceId} />
@@ -628,6 +646,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onContextMenu={onContextMenu}
         favoriteOverrides={favOverrides}
         onActiveChange={onActiveChange}
+        locks={locks}
       />
     );
   }
@@ -775,12 +794,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
 function RadioStage({ channel, stripPrefix }: { channel?: Channel; stripPrefix: boolean }) {
   const { t } = useTranslation('live');
-  const source = usePlayerStore((st) => st.source);
-  const playingRadio = !!source?.isRadio;
+  const playingRadio = usePlayerStore((st) => !!st.source?.isRadio);
   return (
     <div className="relative flex min-h-56 flex-1 flex-col bg-black md:min-h-0" data-testid="radio-stage">
       {playingRadio ? (
-        <RadioPlayer variant="stage" className="h-full" />
+        // The running player moves into this slot (the dock draws the station's stage view and owns
+        // the audio), so the page shows one player, not this one plus the floating mini dock.
+        <PlayerStage className="min-h-56 flex-1 md:min-h-0" />
       ) : (
         <div className="flex flex-1 items-center justify-center bg-surface">
           <EmptyState

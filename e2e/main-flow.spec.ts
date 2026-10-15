@@ -80,15 +80,21 @@ test('main flow: channel with zap banner, a movie in My List, multi-view with tw
   await expect(page.getByTestId('mylist-row')).toHaveCount(1);
   await expect(page.getByTestId('mylist-row').first()).toContainText(title);
 
-  // Multi-view: "Add to multi-view" on two channels; each add opens the wall.
-  for (const [i, name] of ['BBC One', 'BBC News'].entries()) {
-    await gotoLive(page, source.id);
+  // Multi-view: "Add to multi-view" on two channels; each add stays on the list and says so in a
+  // toast whose "Open multi-view" action opens the wall.
+  await gotoLive(page, source.id);
+  const addedToast = (name: string) =>
+    page.getByRole('region', { name: 'Notifications' }).getByRole('listitem').filter({ hasText: `Added ${name} to multi-view` });
+  for (const name of ['BBC One', 'BBC News']) {
     await channelButton(page, name).click({ button: 'right' });
     await page.getByRole('menu').getByRole('menuitem', { name: 'Add to multi-view' }).click();
-    await expect(page).toHaveURL(/\/multiview$/);
-    await expect(page.getByTestId('multiview-tile')).toHaveCount(i + 1);
+    await expect(addedToast(name)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/s/${source.id}/live`));
   }
+  await addedToast('BBC News').getByRole('button', { name: 'Open multi-view' }).click();
+  await expect(page).toHaveURL(/\/multiview$/);
   const tiles = page.getByTestId('multiview-tile');
+  await expect(tiles).toHaveCount(2);
   await expect(tiles.filter({ hasText: 'BBC One' })).toHaveCount(1);
   await expect(tiles.filter({ hasText: 'BBC News' })).toHaveCount(1);
   // Both tiles play: each video has data and its clock moves on.

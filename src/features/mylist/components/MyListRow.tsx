@@ -19,8 +19,9 @@ import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Source, WatchlistEntry } from '@/api/types';
+import { joinList } from '@/shell/dashboard/cards';
 
-import { IconButton, Poster, cn, joinList } from '../deps';
+import { IconButton, Poster, cn } from '../deps';
 
 /**
  * Fixed row height for the virtual list: a 48 x 72 poster plus breathing room,

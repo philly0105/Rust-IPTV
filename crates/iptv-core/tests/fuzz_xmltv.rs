@@ -218,9 +218,11 @@ fn fuzz_parse() {
             assert_eq!(a, b, "read buffer size changed the result");
         },
     );
-    // Guard against a generator that never reaches the programme path.
+    // Guard against a generator that never reaches the programme path. Most
+    // mutated inputs are cut before `</tv>` and now fail as cut-off downloads
+    // (L1-core-6), so far fewer programmes count than before.
     assert!(
-        parsed > 1000,
+        parsed > 100,
         "only {parsed} programmes parsed in the whole run"
     );
 }

@@ -12,14 +12,17 @@
 //! `recordings` for the channel (any status, so a cancelled, failed or
 //! finished one counts) or listed in `recording_rule_skips` is left alone.
 //! Cancelling a rule-made recording writes a skip row, so removing the
-//! cancelled row from the list does not bring the airing back.
+//! cancelled row from the list does not bring the airing back. The one
+//! exception is a recording cancelled because its rule was removed
+//! ([`super::RULE_REMOVED_MESSAGE`]): the user cancelled the rule, not the
+//! airing, so a rule added again for the title schedules it again.
 
 use super::scheduler::title_key;
 use super::store::{self, RecordingRow};
 use super::{
     capabilities, changed, check_engine, check_live, insert_scheduled, rfc3339, runtime,
     RecordingKind, RecordingRuleBackup, RecordingStatus, Runtime, EVENT_RECORDINGS_UPDATE,
-    SERVER_NO_MPV,
+    MAX_DURATION_MINUTES, RULE_REMOVED_MESSAGE, SERVER_NO_MPV,
 };
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, ItemRef};
@@ -245,13 +248,20 @@ pub(super) fn move_skip(c: &Connection, skip: &SkipClaim, start: i64, end: i64) 
     Ok(())
 }
 
-/// Starts of every recording of `r`, whatever its status.
+/// Starts of every recording of `r`, whatever its status, except the ones
+/// cancelled only because their rule was removed.
 fn recorded_starts(c: &Connection, r: &ItemRef) -> CoreResult<HashSet<i64>> {
     let mut s = c.prepare_cached(
-        "SELECT start_at FROM recordings WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        "SELECT start_at FROM recordings WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3
+         AND NOT (status = 'cancelled' AND error_message IS ?4)",
     )?;
     let rows = s.query_map(
-        params![r.source_id, r.content_type.as_str(), r.item_id],
+        params![
+            r.source_id,
+            r.content_type.as_str(),
+            r.item_id,
+            RULE_REMOVED_MESSAGE
+        ],
         |row| row.get::<_, i64>(0),
     )?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -475,7 +485,7 @@ pub async fn remove(state: &Arc<AppState>, id: &str, keep_scheduled: bool) -> Co
                         &[RecordingStatus::Scheduled],
                         RecordingStatus::Cancelled,
                         Some(now),
-                        None,
+                        Some(RULE_REMOVED_MESSAGE),
                     )?;
                 }
             }
@@ -591,6 +601,25 @@ pub(super) async fn materialise(
                     if taken.contains(&start) || skipped.contains(&start) {
                         continue;
                     }
+                    // A guide entry longer than a manual recording may be
+                    // is a placeholder ("off air" for a day), not a show.
+                    if end - start > MAX_DURATION_MINUTES * 60 {
+                        continue;
+                    }
+                    // The airing cancelled with an earlier rule makes way
+                    // for the new one rather than listing it twice.
+                    tx.execute(
+                        "DELETE FROM recordings WHERE source_id = ?1 AND content_type = ?2
+                         AND item_id = ?3 AND start_at = ?4 AND status = 'cancelled'
+                         AND error_message IS ?5",
+                        params![
+                            rule.item_ref.source_id,
+                            rule.item_ref.content_type.as_str(),
+                            rule.item_ref.item_id,
+                            start,
+                            RULE_REMOVED_MESSAGE
+                        ],
+                    )?;
                     let row = RecordingRow {
                         id: uuid::Uuid::new_v4().to_string(),
                         item_ref: rule.item_ref.clone(),

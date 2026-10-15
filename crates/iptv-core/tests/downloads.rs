@@ -712,6 +712,35 @@ async fn remove_with_delete_file_deletes_media_and_part() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_without_delete_file_keeps_the_partial_file() {
+    let mut c = ctx().await;
+    iptv_core::downloads::set_rate_limit(&c.state, Some(2 * 1024 * 1024));
+    let p = c.start("1", "partial", "/files/video.bin").await;
+    let ppath = p.file_path.clone().unwrap();
+    c.wait_progress(p.id, 256 * 1024).await;
+    c.ok("downloads.pause", json!({"id": p.id})).await;
+    let kept = file_len(&part_of(&ppath)).unwrap();
+    assert!(kept > 0);
+    c.ok("downloads.remove", json!({"id": p.id, "deleteFile": false}))
+        .await;
+    assert_eq!(file_len(&part_of(&ppath)), Some(kept), ".part kept");
+    let err = c
+        .call("downloads.get", json!({"id": p.id}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::NotFound, "row removed");
+
+    // A new download of the same item reserves its own file.
+    let again = c.start("1", "partial", "/files/video.bin").await;
+    assert_ne!(again.file_path.as_deref(), Some(ppath.as_str()));
+    assert_eq!(
+        file_len(&part_of(&ppath)),
+        Some(kept),
+        "kept .part untouched"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn set_dir_persists_through_settings_save() {
     let mut c = ctx().await;
     let custom = c.data_dir.join("library");

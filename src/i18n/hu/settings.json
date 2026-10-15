@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "Lecseréli az összes forrást?",
   "backupReplaceConfirmBody": "Először a mentés forrásai kerülnek importálásra. Ha legalább egy betöltődik, a jelenlegi források a kedvencekkel és a megtekintési előzményekkel együtt törlődnek. Ha egy sem töltődik be, semmi sem változik.",
   "backupReplaceConfirm": "Csere",
-  "backupImported_one": "{{count}} forrás importálva",
-  "backupImported_other": "{{count}} forrás importálva",
   "backupImportFailed": "Nem sikerült importálni a biztonsági mentést",
-  "backupResult": "{{imported}} importálva, {{skipped}} kihagyva",
+  "backupResult": "Hozzáadva vagy frissítve: {{imported}}. Kihagyva: {{skipped}}.",
   "backupWarnings_one": "{{count}} figyelmeztetés",
   "backupWarnings_other": "{{count}} figyelmeztetés",
   "backupNotJson": "Ez a fájl nem érvényes JSON.",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "Képgyorsítótár kiürítve",
   "imageCacheClearFailed": "Nem sikerült kiüríteni a képgyorsítótárat",
   "imageCacheLoadFailed": "Nem sikerült beolvasni a képgyorsítótárat: {{message}}",
-  "imageCacheUnavailable": "Ezen a szerveren nincs képgyorsítótár, ezért a képek közvetlenül a szolgáltatóktól töltődnek be."
+  "imageCacheUnavailable": "Ezen a szerveren nincs képgyorsítótár, ezért a képek közvetlenül a szolgáltatóktól töltődnek be.",
+  "backupOldVersion": "Ez a biztonsági mentés régebbi formátumú, ezért nem olvasható. Exportálj új mentést, és azt importáld.",
+  "backupImportDone": "Biztonsági mentés importálva",
+  "backupReplacePinTitle": "Add meg a PIN-kódot a források cseréjéhez",
+  "backupReplacePinText": "A csere eltávolítja a jelenlegi forrásokat és a szülői zárolásaikat, ezért szükség van a szülői PIN-kódra."
 }

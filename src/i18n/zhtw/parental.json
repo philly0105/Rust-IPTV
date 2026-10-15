@@ -152,5 +152,10 @@
   "turnOffTitle": "要關閉家長監護嗎？",
   "turnOffConfirmText": "請輸入 PIN 碼。在設定新 PIN 碼之前，已鎖定的內容會對所有人開放。",
   "turnedOffToast": "家長監護已關閉",
-  "turnedOffToastText": "您的鎖定已保留。設定 PIN 碼即可再次使用。"
+  "turnedOffToastText": "您的鎖定已保留。設定 PIN 碼即可再次使用。",
+  "menuLockedWithGroup": "隨所在群組鎖定",
+  "discardTitle": "要捨棄變更嗎？",
+  "discardText": "你在此勾選或取消勾選的群組不會被儲存。",
+  "keepEditing": "繼續編輯",
+  "discard": "捨棄"
 }

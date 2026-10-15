@@ -200,5 +200,9 @@
   "reminderSwitched": "دوّزناك ل {{channel}}",
   "undoSwitch": "رجّع",
   "reminderSwitchFailed": "ما قدرناش نبدلو للقناة",
-  "recordNeedsMpv": "باش تسجل هاد القناة خاصك mpv. ثبت mpv ولا حط الطريق ديالو فإعدادات المشغل."
+  "recordNeedsMpv": "باش تسجل هاد القناة خاصك mpv. ثبت mpv ولا حط الطريق ديالو فإعدادات المشغل.",
+  "locked": "مسدودة",
+  "lockedGuide": "مسدودة. دخّل الرمز PIN باش تشوف شنو داير.",
+  "unlock": "حلّ القفل",
+  "ribbonFailed": "ما قدرناش نجيبو الدليل ديال هاد القناة"
 }

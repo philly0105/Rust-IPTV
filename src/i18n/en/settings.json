@@ -246,10 +246,8 @@
   "backupReplaceConfirmTitle": "Replace all sources?",
   "backupReplaceConfirmBody": "The backup's sources are imported first. Once at least one of them loads, your current sources and their favorites and watch history are removed. If none load, nothing changes.",
   "backupReplaceConfirm": "Replace",
-  "backupImported_one": "Imported {{count}} source",
-  "backupImported_other": "Imported {{count}} sources",
   "backupImportFailed": "Couldn't import the backup",
-  "backupResult": "{{imported}} imported, {{skipped}} skipped",
+  "backupResult": "Added or updated: {{imported}}. Skipped: {{skipped}}.",
   "backupWarnings_one": "{{count}} warning",
   "backupWarnings_other": "{{count}} warnings",
   "backupNotJson": "This file isn't valid JSON.",
@@ -441,5 +439,9 @@
   "imageCacheCleared": "Image cache cleared",
   "imageCacheClearFailed": "Couldn't clear the image cache",
   "imageCacheLoadFailed": "Couldn't read the image cache: {{message}}",
-  "imageCacheUnavailable": "This server has no image cache, so pictures load straight from each provider."
+  "imageCacheUnavailable": "This server has no image cache, so pictures load straight from each provider.",
+  "backupOldVersion": "This backup uses an older format that can't be read. Export a new backup and import that.",
+  "backupImportDone": "Backup imported",
+  "backupReplacePinTitle": "Enter the PIN to replace sources",
+  "backupReplacePinText": "Replacing removes your current sources and their parental locks, so it needs the parental PIN."
 }

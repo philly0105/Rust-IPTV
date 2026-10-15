@@ -117,6 +117,8 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
   const { t } = useTranslation('common');
   const err = RpcError.from(error);
   const unreachable = isServerUnreachable(err);
+  // Asking again cannot bring back something that is not there.
+  const retry = err.code === 'not_found' ? undefined : onRetry;
   return (
     <div
       role="alert"
@@ -154,15 +156,15 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
           )}
         </details>
       </div>
-      {(onRetry || action) && (
+      {(retry || action) && (
         <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-          {onRetry && (
+          {retry && (
             <Button
               variant="primary"
               size={size === 'page' ? 'md' : 'sm'}
               icon={<RotateCw size={16} aria-hidden />}
               loading={retrying}
-              onClick={onRetry}
+              onClick={retry}
             >
               {t('retry')}
             </Button>

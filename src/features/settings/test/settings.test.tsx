@@ -73,6 +73,8 @@ describe('Settings page states', () => {
     renderAt(settingsRoutes, '/settings/playback');
     await screen.findByTestId('settings-playback');
     await waitFor(() => expect(useShellStore.getState().contextPanel).toBeTruthy());
+    // Below 1440 px the page lists the sections inline: no drawer (and no header toggle) repeats them.
+    expect(useShellStore.getState().panelDrawer).toBe(false);
   });
 });
 

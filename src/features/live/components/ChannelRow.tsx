@@ -1,4 +1,4 @@
-import { History, Star } from 'lucide-react';
+import { History, Lock, Star } from 'lucide-react';
 import { memo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -33,6 +33,8 @@ export interface ChannelRowProps {
   epgOffsetMinutes?: number;
   /** Stalker: the portal's guide is not answering, so a row without a programme says so. */
   guideUnavailable?: boolean;
+  /** Parental Ask mode: the channel asks for the PIN, so the row carries a lock and keeps its programmes back. */
+  locked?: boolean;
   onActivate(index: number, how: 'click' | 'double' | 'key'): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
@@ -57,7 +59,9 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const { channel, nowNext, favorite, playing, active, index, now, compact } = props;
   if (!channel) return <RowSkeleton />;
 
-  const shifted = shiftNowNext(nowNext, props.epgOffsetMinutes ?? 0);
+  const locked = props.locked ?? false;
+  // A locked channel's programme titles wait for the PIN, like its stream.
+  const shifted = locked ? undefined : shiftNowNext(nowNext, props.epgOffsetMinutes ?? 0);
   // A programme with unreadable times would read as airing since 1970: show the group instead.
   const cur = shifted?.now && isValidProgram(shifted.now) ? shifted.now : undefined;
   const nxt = shifted?.next && isValidProgram(shifted.next) ? shifted.next : undefined;
@@ -82,6 +86,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
           name,
+          locked ? t('locked') : '',
           cur ? t('nowShowing', { title: cur.title }) : '',
           playing ? t('playingNow') : '',
         ]
@@ -94,7 +99,10 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         <span className="w-8 shrink-0 text-end text-xs tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
         {!compact ? <ChannelLogo src={channel.logoUrl} name={name} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span dir="auto" className={`truncate text-sm text-match-parent ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span dir="auto" className={`truncate text-sm text-match-parent ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
+            {locked ? <Lock data-testid="row-locked" aria-hidden className="size-3 shrink-0 text-fg-subtle" /> : null}
+          </span>
           {cur ? (
             <>
               {/* The title takes the width; the remaining time stays a compact "38m" so narrow lists keep the title readable. */}
@@ -107,7 +115,12 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                 </span>
               </span>
               <span className="relative h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                <span data-testid="channel-progress" className="absolute inset-y-0 start-0 rounded-full bg-live" style={{ width: `${progress * 100}%` }} />
+                {/* Neutral on every row, the accent on the one playing: a list of red bars read as "all live, all alerting". */}
+                <span
+                  data-testid="channel-progress"
+                  className={`absolute inset-y-0 start-0 rounded-full ${playing ? 'bg-accent' : 'bg-fg-subtle'}`}
+                  style={{ width: `${progress * 100}%` }}
+                />
               </span>
               {nxt && !compact ? (
                 // Only the title truncates, in its own direction: one RTL truncate over clock and a Latin
@@ -141,7 +154,10 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           >
             <History className="size-3.5" aria-label={t('archive')} />
           </span>
-        ) : null}
+        ) : (
+          // The slot stays when a row has no archive, so progress bars and times line up row to row.
+          <span aria-hidden className="size-6" />
+        )}
         <button
           type="button"
           tabIndex={-1}

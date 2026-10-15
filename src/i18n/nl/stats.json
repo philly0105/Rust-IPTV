@@ -34,5 +34,6 @@
   "clearTitle": "Kijkstatistieken wissen?",
   "clearBody": "Alle getelde kijktijd wordt verwijderd. Je voortgang en Recent bekeken blijven bewaard.",
   "cleared": "Kijkstatistieken gewist",
-  "clearFailed": "Kan de statistieken niet wissen"
+  "clearFailed": "Kan de statistieken niet wissen",
+  "watchLive": "Live tv kijken"
 }

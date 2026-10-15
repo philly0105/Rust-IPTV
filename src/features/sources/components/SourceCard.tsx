@@ -236,7 +236,8 @@ export function SourceCard(props: SourceCardProps) {
           className={clsx('pointer-events-none absolute inset-x-3 h-0.5 rounded-full bg-accent', props.dropTarget === 'before' ? '-top-1.5' : '-bottom-1.5')}
         />
       ) : null}
-      <div className="flex items-center gap-2 p-3 @2xl:gap-4 @2xl:p-4">
+      {/* Below @2xl the actions take a row of their own, so the name and status keep the card's full width. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 @2xl:flex-nowrap @2xl:gap-4 @2xl:p-4">
         {reorderable ? (
         <button
           type="button"
@@ -246,7 +247,8 @@ export function SourceCard(props: SourceCardProps) {
           onDragEnd={props.onDragEnd}
           aria-label={t('reorderHandle', { name: s.name, position: index + 1, total })}
           aria-describedby="sources-reorder-help"
-          className="flex h-11 w-6 shrink-0 cursor-grab items-center justify-center rounded-sm text-fg-subtle hover:text-fg active:cursor-grabbing"
+          // Not on touch screens (they cannot drag it) or narrow cards (the name needs the room): Alt+Arrow on the card still moves it.
+          className="hidden h-11 w-6 shrink-0 cursor-grab items-center justify-center rounded-sm text-fg-subtle hover:text-fg active:cursor-grabbing @sm:pointer-fine:flex"
         >
           <GripVertical aria-hidden className="size-4" />
         </button>
@@ -265,6 +267,7 @@ export function SourceCard(props: SourceCardProps) {
               to={`/s/${s.id}/live`}
               id={nameId}
               dir="auto"
+              title={s.name}
               className="truncate font-display text-lg font-semibold text-fg hover:text-accent"
               data-testid="source-name"
             >
@@ -275,22 +278,22 @@ export function SourceCard(props: SourceCardProps) {
             <AccountBadges status={props.account} warnDays={props.warnDays ?? 0} />
           </div>
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 text-sm text-fg-muted">
-            <span className="truncate" dir="auto">
+            <span className="max-w-full truncate" dir="auto" title={sourceOrigin(s, t)} data-testid="source-origin">
               {sourceOrigin(s, t)}
             </span>
             {/* With an error and no good refresh yet, the error strip says it all; "Not refreshed yet" beside it reads as a contradiction. */}
             {refreshed || !s.lastError ? (
-              <span className="text-fg-subtle" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
+              <span className="max-w-full text-fg-subtle" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
                 {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
               </span>
             ) : null}
             {failed ? (
-              <span className="text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
+              <span className="max-w-full text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
                 {t('failedAgo', { when: failed })}
               </span>
             ) : null}
             {next ? (
-              <span className="text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
+              <span className="max-w-full text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
                 {next}
               </span>
             ) : null}
@@ -323,8 +326,8 @@ export function SourceCard(props: SourceCardProps) {
           )}
         </dl>
 
-        {/* Fixed width: the account button's place is kept when there is none, so icons line up across cards. */}
-        <div className="flex shrink-0 items-center gap-0.5" data-testid="source-actions">
+        {/* On its own row when narrow. In one row the account button's place is kept when there is none, so icons line up across cards. */}
+        <div className="-mb-1 flex w-full shrink-0 items-center justify-end gap-0.5 @2xl:mb-0 @2xl:w-auto" data-testid="source-actions">
           <IconButton
             label={t('refreshSource', { name: s.name })}
             icon={<RefreshCw aria-hidden className={clsx('size-4', busy && 'motion-safe:animate-spin')} />}
@@ -340,7 +343,7 @@ export function SourceCard(props: SourceCardProps) {
               data-testid="source-account"
             />
           ) : (
-            <span aria-hidden className="h-10 w-10" />
+            <span aria-hidden className="hidden h-10 w-10 @2xl:block" />
           )}
           <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden className="size-4" />} onClick={props.onEdit} data-testid="source-edit" />
           <IconButton

@@ -34,5 +34,6 @@
   "clearTitle": "Effacer les statistiques de visionnage ?",
   "clearBody": "Tout le temps de visionnage compté est supprimé. La progression et « Récemment regardés » sont conservés.",
   "cleared": "Statistiques de visionnage effacées",
-  "clearFailed": "Impossible d'effacer les statistiques"
+  "clearFailed": "Impossible d'effacer les statistiques",
+  "watchLive": "Regarder la TV en direct"
 }

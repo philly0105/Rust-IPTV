@@ -84,9 +84,9 @@ export function revertPatch(current: Settings, before: Settings, patch: Settings
   return out;
 }
 
-/** Guide time shift in minutes: a whole number within +/- 12 hours. */
+/** Guide time shift in minutes: a whole number within +/- 12 hours. A typographic minus (U+2212) counts as "-". */
 export function validateEpgOffset(raw: string): { ok: true; minutes: number } | { ok: false; error: string } {
-  const v = raw.trim();
+  const v = raw.trim().replace(/^−/, '-');
   if (!/^[+-]?\d+$/.test(v)) return { ok: false, error: 'errorOffsetNumber' };
   const minutes = Number(v);
   if (minutes < -720 || minutes > 720) return { ok: false, error: 'errorOffsetRange' };

@@ -287,9 +287,12 @@ describe('ShellLayout', () => {
     await screen.findByText('Night Portal');
     await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
     const emit = events.handlers.get('import.progress')!;
-    act(() => emit({ sourceId: 's1', phase: 'parsing', done: 50, total: 200 }));
+    // Every run opens with `connecting`, before its first request.
+    act(() => emit({ sourceId: 's1', phase: 'connecting', done: 0 }));
     expect(await screen.findByText('Importing Night Portal')).toBeTruthy();
-    expect(screen.getByText('Reading the playlist: 50 of 200')).toBeTruthy();
+    expect(screen.getByText('Starting…')).toBeTruthy();
+    act(() => emit({ sourceId: 's1', phase: 'parsing', done: 50, total: 200 }));
+    expect(await screen.findByText('Reading the playlist: 50 of 200')).toBeTruthy();
     act(() => emit({ sourceId: 's1', phase: 'done', done: 200 }));
     expect(await screen.findByText('Night Portal is ready')).toBeTruthy();
     expect(screen.queryByText('Importing Night Portal')).toBeNull();
@@ -763,6 +766,29 @@ describe('B7 shell fixes', () => {
     expect(within(rail).queryByRole('img', { name: 'Fresh Arrival' })).toBeNull();
   });
 
+  it('recently added cards show the title without its year or provider tag, as the detail page does', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? ([
+            {
+              ref: { sourceId: 's1', contentType: 'movie', itemId: '98' },
+              title: 'Dune: Part Two (2024) [MULTI]',
+              titleBase: 'Dune: Part Two',
+              year: 2024,
+              added: '2026-10-09T00:00:00Z',
+              categoryId: 'c',
+            },
+          ] satisfies VodItem[])
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recently-added');
+    const link = await within(rail).findByRole('link', { name: /Dune: Part Two/ });
+    expect(link.getAttribute('aria-label')).not.toMatch(/MULTI|\(2024\)/);
+    expect(within(link).getByText('Dune: Part Two')).toBeTruthy();
+    expect(within(link).getByText(/2024/)).toBeTruthy();
+    expect(within(rail).queryByText(/MULTI/)).toBeNull();
+  });
+
   it('rail source errors are spoken, and ids with spaces stay valid IDREFs', async () => {
     rpcMock.handlers['sources.list'] = () => [makeSource('my source', { name: 'Broken One', lastError: 'boom' } as never)];
     renderRoutes(routes(), '/favorites');
@@ -1197,6 +1223,104 @@ describe('Run 3 onboarding wiring', () => {
       await waitFor(() => expect(useOnboardingStore.getState().overlay?.kind).toBe(kind));
       expect(useOnboardingStore.getState().overlay?.auto).toBe(false);
       await waitFor(() => expect(screen.queryByTestId('command-palette')).toBeNull());
+    }
+  });
+});
+
+describe('L1 shell polish', () => {
+  it('Esc blurs a text field but leaves focus on a link', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const { isTextEntry } = await import('../ShellLayout');
+    const link = within(screen.getByRole('navigation', { name: 'Main navigation' })).getAllByRole('link')[0]!;
+    link.focus();
+    key('Escape');
+    expect(document.activeElement).toBe(link);
+    const input = document.createElement('input');
+    expect(isTextEntry(input)).toBe(true);
+    input.type = 'checkbox';
+    expect(isTextEntry(input)).toBe(false);
+    expect(isTextEntry(document.createElement('button'))).toBe(false);
+  });
+
+  it('palette opens with an empty query after Ctrl+K closed it', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    const input = (await screen.findByPlaceholderText('Type a command or search')) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'night' } });
+    key('k', { ctrlKey: true });
+    await waitFor(() => expect(screen.queryByPlaceholderText('Type a command or search')).toBeNull());
+    key('k', { ctrlKey: true });
+    expect(((await screen.findByPlaceholderText('Type a command or search')) as HTMLInputElement).value).toBe('');
+  });
+
+  it('palette lists Radio for a playlist source that has radio channels', async () => {
+    rpcMock.handlers['sources.list'] = () => [
+      makeSource('m1', { kind: 'm3u', name: 'Radio Box', radioCount: 3 }),
+      makeSource('m2', { kind: 'm3u', name: 'Plain List', position: 1, radioCount: 0 }),
+    ];
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    await screen.findByPlaceholderText('Type a command or search');
+    expect(await screen.findByText('Radio Box: Radio')).toBeTruthy();
+    expect(screen.queryByText('Plain List: Radio')).toBeNull();
+  });
+
+  it('navigation closes the palette and the shortcut help', async () => {
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    await screen.findByPlaceholderText('Type a command or search');
+    act(() => useShellStore.setState({ helpOpen: true }));
+    await act(() => router.navigate('/recent'));
+    await screen.findByText('recent page');
+    expect(useShellStore.getState().paletteOpen).toBe(false);
+    expect(useShellStore.getState().helpOpen).toBe(false);
+  });
+
+  it('Back restores the outlet scroll offset; a new page opens at the top', async () => {
+    const { forgetShellScrollForTests, focusSelector } = await import('../scrollMemory');
+    forgetShellScrollForTests();
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const main = document.getElementById('main')!;
+    Object.defineProperty(main, 'scrollHeight', { value: 5000, configurable: true });
+    Object.defineProperty(main, 'clientHeight', { value: 500, configurable: true });
+    main.scrollTop = 800;
+    fireEvent.scroll(main);
+    await act(() => router.navigate('/recent'));
+    await screen.findByText('recent page');
+    expect(main.scrollTop).toBe(0);
+    await act(() => router.navigate(-1));
+    await screen.findByText('favorites page');
+    await waitFor(() => expect(main.scrollTop).toBe(800));
+    const a = document.createElement('a');
+    a.setAttribute('href', '/s/x y/live');
+    expect(focusSelector(a)).toMatch(/^a\[href="/);
+  });
+
+  it('a panel with drawer off has no header toggle below 1440 px', async () => {
+    renderRoutes(routes(), '/panel');
+    await screen.findByTestId('panel-toggle');
+    act(() => useShellStore.setState({ panelDrawer: false }));
+    await waitFor(() => expect(screen.queryByTestId('panel-toggle')).toBeNull());
+  });
+
+  it('the dashboard hides a pending-removal source in continue watching and favourites', async () => {
+    const { usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
+    act(() => usePendingRemovals.setState({ ids: new Set(['s1']) }));
+    try {
+      renderRoutes(routes(), '/dashboard');
+      expect(await screen.findByText('Metro Sport')).toBeTruthy();
+      expect(screen.queryByText('The Long Signal')).toBeNull();
+      expect(screen.queryByText('Harbor News')).toBeNull();
+      expect(screen.queryByText('Quiet Coast')).toBeNull();
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+      expect((await screen.findAllByText('Harbor News')).length).toBeGreaterThan(0);
+    } finally {
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
     }
   });
 });

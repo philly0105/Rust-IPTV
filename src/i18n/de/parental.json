@@ -163,5 +163,10 @@
   "turnOffTitle": "Jugendschutz ausschalten?",
   "turnOffConfirmText": "Geben Sie die PIN ein. Gesperrte Inhalte sind dann für alle offen, bis eine neue PIN festgelegt wird.",
   "turnedOffToast": "Jugendschutz ist ausgeschaltet",
-  "turnedOffToastText": "Ihre Sperren bleiben erhalten. Legen Sie eine PIN fest, um sie wieder zu nutzen."
+  "turnedOffToastText": "Ihre Sperren bleiben erhalten. Legen Sie eine PIN fest, um sie wieder zu nutzen.",
+  "menuLockedWithGroup": "Mit der Gruppe gesperrt",
+  "discardTitle": "Änderungen verwerfen?",
+  "discardText": "Die hier an- oder abgehakten Gruppen werden nicht gespeichert.",
+  "keepEditing": "Weiter bearbeiten",
+  "discard": "Verwerfen"
 }

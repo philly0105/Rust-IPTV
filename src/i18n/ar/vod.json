@@ -233,5 +233,12 @@
   "markSeriesWatched": "تعليم المسلسل كمُشاهَد",
   "markSeriesUnwatched": "تعليم المسلسل كغير مُشاهَد",
   "shortcutWatched": "تعليم كمُشاهَد أو كغير مُشاهَد",
-  "shortcutHideWatched": "إخفاء العناوين التي تمت مشاهدتها أو إظهارها"
+  "shortcutHideWatched": "إخفاء العناوين التي تمت مشاهدتها أو إظهارها",
+  "sourceMissingTitle": "تمت إزالة هذا المصدر",
+  "sourceMissingBody": "لم يعد ضمن مصادرك. اختر مصدرًا آخر، أو أضفه مجددًا من المصادر.",
+  "goToDashboard": "الانتقال إلى لوحة التحكم",
+  "categoryMissingTitle": "لم يتم العثور على الفئة",
+  "categoryMissingBody": "لا يحتوي هذا المصدر على فئة بهذا الرابط. ربما أعاد المزوّد تسميتها أو حذفها.",
+  "namedMarkedWatched": "تم وضع علامة مشاهَد على {{name}}",
+  "namedMarkedUnwatched": "تمت إزالة علامة المشاهدة عن {{name}}"
 }

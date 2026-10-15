@@ -26,6 +26,7 @@ import { RpcError, isDesktop, rpc } from '@/api/transport';
 import { IMAGE_CACHE_MAX_MB_MAX, IMAGE_CACHE_MAX_MB_MIN, type ImageCacheStats, type Settings } from '@/api/types';
 import { Button, Dialog, Select, Skeleton, cn, useToast } from '@/ui';
 
+import type { SettingsPatch } from '../lib/patch';
 import { useSettingsQuery, useUpdateSettings } from '../lib/useUpdateSettings';
 
 /** The cap select's choices, in `settings.imageCacheMaxMb` units. */
@@ -65,14 +66,18 @@ export function capOptions(current: number | undefined, locale: string): { value
   return [...values].sort((a, b) => a - b).map((mb) => ({ value: String(mb), label: formatCacheMb(mb, locale) }));
 }
 
-/** Image cache size against the cap, the cap select and Clear (confirm, then the toast "Image cache cleared"). */
-export function ImageCacheRow(): JSX.Element {
+/**
+ * Image cache size against the cap, the cap select and Clear (confirm, then the toast "Image cache cleared").
+ * `update` is the settings page's tracked update, so a cap change shows "Saved" like every other setting.
+ */
+export function ImageCacheRow({ update: tracked }: { update?: (patch: SettingsPatch) => Promise<boolean> } = {}): JSX.Element {
   const { t, i18n } = useTranslation('settings');
   const locale = i18n.language;
   const { toast } = useToast();
   const qc = useQueryClient();
   const settings = useSettingsQuery();
-  const update = useUpdateSettings();
+  const own = useUpdateSettings();
+  const update = tracked ?? own;
   // Always fresh on open: browsing elsewhere fills the cache without any event.
   const stats = useRpcQuery('images.stats', undefined, { staleTime: 0 });
   const [confirming, setConfirming] = useState(false);

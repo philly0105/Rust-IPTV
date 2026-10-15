@@ -130,12 +130,40 @@ export function elapsedSeconds(r: Pick<Recording, 'startedAt'>, now: number, rep
   return s ? Math.max(0, Math.floor((now - s) / 1000)) : 0;
 }
 
-/** 0..1 of a running recording's padded window. */
+/**
+ * When a recording began writing, epoch ms: `startedAt`, or the padded start
+ * when the engine has not reported one. A programme recorded part-way through
+ * starts late, so this is what the recording itself covers.
+ */
+export function recordingStartedAt(r: Pick<Recording, 'start' | 'paddingBeforeMinutes' | 'startedAt'>): number {
+  const s = r.startedAt ? epoch(r.startedAt) : 0;
+  return s || recordingBegins(r);
+}
+
+/**
+ * 0..1 of a running recording: from when it began writing to its padded end.
+ * It tracks the recording, not the programme, so recording a programme that is
+ * already half over starts the bar at empty, in step with the elapsed clock.
+ */
 export function recordingFraction(r: Recording, now: number): number {
-  const from = recordingBegins(r);
+  const from = recordingStartedAt(r);
   const to = recordingEnds(r);
   if (to <= from) return 0;
   return Math.min(1, Math.max(0, (now - from) / (to - from)));
+}
+
+/** A finished recording that ends this long before its padded end was cut short. */
+const STOPPED_EARLY_SLACK_MS = 60_000;
+
+/**
+ * A completed recording that ended well before its padded end: stopped from
+ * the app, or the stream or the app gave out. Its file holds less than the
+ * programme, so the lists say "Stopped early" instead of "Completed".
+ */
+export function stoppedEarly(r: Pick<Recording, 'status' | 'endedAt' | 'end' | 'paddingAfterMinutes'>): boolean {
+  if (r.status !== 'completed' || !r.endedAt) return false;
+  const ended = epoch(r.endedAt);
+  return ended > 0 && ended < recordingEnds(r) - STOPPED_EARLY_SLACK_MS;
 }
 
 /** `h:mm:ss` / `m:ss` clock for elapsed time; digits only, so it reads in every locale. */

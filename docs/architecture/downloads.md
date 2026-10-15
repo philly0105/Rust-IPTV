@@ -49,7 +49,7 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 - The `.part` is opened only after `symlink_metadata` confirms a regular file, so a symlink planted while the download was paused is never followed.
 - Completion moves the `.part` into place without overwriting. `std::fs::rename` replaces existing files, so the move uses a hard link (fails atomically when the target exists) and then deletes the `.part`. File systems without hard links (FAT/exFAT, some network shares) fall back to copying into a destination opened with `create_new`, then deleting the `.part`, so the fallback is equally atomic about the destination at the cost of one extra pass over the data. When the recorded final path got occupied (for example the user created `Movie.mp4` while the download was paused), the next free numbered name wins (`Movie (1).mp4`, with both final and `.part` free) and the row records it.
 - Pause keeps the `.part`. Cancel deletes it and clears `fileName`/`filePath`. A failure keeps it when the total size is known and bytes reached disk (retry continues via Range); otherwise it is deleted. A `.part` that cannot be deleted (locked file) keeps its row and path so a later cancel or remove retries the cleanup.
-- `remove {deleteFile}` always deletes an unfinished `.part`. It deletes a completed media file only when `deleteFile` is true, and only if it is a regular file.
+- `remove {deleteFile}` deletes the row's file only when `deleteFile` is true: the `.part` of an unfinished row, or the media file of a completed one (only if it is a regular file). With `deleteFile: false` an unfinished row's `.part` stays on disk; a later download of the same item reserves its own `.part`, so the kept one is never reused or overwritten. A completed row's leftover `.part` is always deleted.
 - `fileAvailable` is derived on every read for completed rows: true only for a regular, non-symlink file at `filePath`. A missing file never changes the persisted `completed` status. Starting the same item again re-downloads it.
 
 ## Transfer
@@ -87,6 +87,7 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 - `retry` of a completed item whose file was deleted re-downloads it under the same row and name; a folder squatting on the old path is left alone; `myvideos.list` reports `fileAvailable: false` meanwhile;
 - `pause` on a queued item: stays paused with an untouched `.part` after both slots free up, then `resume` completes it;
 - `remove {deleteFile: true}` on paused, running, and completed rows deletes both the media file and the `.part`;
+- `remove {deleteFile: false}` on a paused row removes the row and keeps its `.part` at the same size, and a new download of the same item reserves a different file;
 - the rate limit applies to a running transfer in both directions (lifted and imposed mid-transfer);
 - `start` input validation;
 - Xtream re-resolution: a download queued with a stale URL fails while the source password is wrong, and after the password is edited `retry` completes and persists the new URL; a start with an expired URL on a correct source completes;

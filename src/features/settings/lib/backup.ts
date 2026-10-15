@@ -41,7 +41,10 @@ export function inspectBackup(text: string): BackupCheck {
   if (!data || typeof data !== 'object') return { ok: false, error: 'backupWrongFormat' };
   const o = data as Record<string, unknown>;
   if (o.kind !== 'iptvnator-playlist-backup') return { ok: false, error: 'backupWrongFormat' };
-  if (intOf(o.version) !== 1) return { ok: false, error: 'backupWrongVersion' };
+  const version = intOf(o.version);
+  // Newer than this app reads, or older (or missing): each gets its own advice.
+  if (version !== undefined && version > 1) return { ok: false, error: 'backupWrongVersion' };
+  if (version !== 1) return { ok: false, error: 'backupOldVersion' };
   if (!Array.isArray(o.playlists)) return { ok: false, error: 'backupWrongFormat' };
   const byKind = { m3u: 0, xtream: 0, stalker: 0 };
   let skipped = 0;

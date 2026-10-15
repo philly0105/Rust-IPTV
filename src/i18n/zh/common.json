@@ -40,7 +40,7 @@
   "errorTechnicalDetails": "技术详情",
   "errorHintTimeout": "提供商可能正忙，请稍后重试。",
   "errorHintAuth": "请在播放源设置中检查用户名、密码或 MAC 地址。",
-  "errorHintNotFound": "提供商可能已将其移除。刷新播放源以更新列表。",
+  "errorHintNotFound": "它可能已被删除，或此链接已过期。",
   "errorHintInvalid": "请检查输入的内容，然后重试。",
   "errorHintUnsupported": "此播放源或流类型不支持该操作。请尝试使用外部播放器。",
   "errorHintConflict": "请重新加载以查看最新版本，然后重试。",

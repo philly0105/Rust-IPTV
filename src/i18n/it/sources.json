@@ -240,7 +240,7 @@
   "errorSummaryGeneric": "Si è verificato un problema durante l'importazione.",
   "errorSummaryWrongUrl": "Questo indirizzo non porta a un elenco di canali.",
   "technicalDetails": "Dettagli tecnici",
-  "addRetryNote": "\"{{name}}\" è stata salvata con questo errore. Correggi i dati e riprova qui, oppure chiudi questa finestra e usa Riprova sulla sua scheda più tardi.",
+  "addRetryNote": "Correggi i dati e riprova qui. Chiudendo questa finestra «{{name}}» viene rimossa (puoi annullare).",
   "retryImport": "Riprova",
   "retrying": "Nuovo tentativo...",
 
@@ -365,5 +365,14 @@
   "catchupDays": "Giorni di archivio",
   "catchupDaysHint": "Quanto indietro arriva l'archivio. Lascia vuoto per mantenere il valore della playlist.",
   "errorCatchupTemplate": "Usa al massimo {{max}} caratteri e nessun carattere di controllo.",
-  "errorCatchupDays": "Inserisci un numero intero di giorni da uno a {{max}}."
+  "errorCatchupDays": "Inserisci un numero intero di giorni da uno a {{max}}.",
+  "testExpired": "Accesso effettuato, ma l’account è scaduto.",
+  "testExpiredNamed": "Accesso effettuato a {{name}}, ma l’account è scaduto.",
+  "testAccountInactiveHint": "I canali non verranno riprodotti finché il provider non rinnova o riattiva l’account.",
+  "phaseConnectingTo": "Connessione a {{host}}…",
+  "phaseStarting": "Avvio…",
+  "discardedFailedHint": "La prima importazione non è riuscita. Scegli Annulla per tenerla e riprovare dalla sua scheda.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

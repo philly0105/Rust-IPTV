@@ -227,7 +227,7 @@
   "errorSummaryGeneric": "Beim Import ist ein Fehler aufgetreten.",
   "errorSummaryWrongUrl": "Diese Adresse führt nicht zu einer Senderliste.",
   "technicalDetails": "Technische Details",
-  "addRetryNote": "„{{name}}“ wurde mit diesem Fehler gespeichert. Korrigieren Sie die Angaben und versuchen Sie es hier erneut, oder schließen Sie dieses Fenster und verwenden Sie später „Erneut versuchen“ auf der Karte.",
+  "addRetryNote": "Korrigieren Sie die Angaben und versuchen Sie es hier erneut. Wenn Sie dieses Fenster schließen, wird „{{name}}“ entfernt (das lässt sich rückgängig machen).",
   "retryImport": "Erneut versuchen",
   "retrying": "Wird erneut versucht...",
 
@@ -346,5 +346,14 @@
   "catchupDays": "Archivtage",
   "catchupDaysHint": "Wie weit das Archiv zurückreicht. Leer lassen, um den Wert der Playlist zu behalten.",
   "errorCatchupTemplate": "Höchstens {{max}} Zeichen und keine Steuerzeichen.",
-  "errorCatchupDays": "Geben Sie eine ganze Zahl von Tagen zwischen eins und {{max}} ein."
+  "errorCatchupDays": "Geben Sie eine ganze Zahl von Tagen zwischen eins und {{max}} ein.",
+  "testExpired": "Angemeldet, aber das Konto ist abgelaufen.",
+  "testExpiredNamed": "Bei {{name}} angemeldet, aber das Konto ist abgelaufen.",
+  "testAccountInactiveHint": "Sender laufen erst wieder, wenn Ihr Anbieter das Konto verlängert oder reaktiviert.",
+  "phaseConnectingTo": "Verbindung zu {{host}} wird hergestellt…",
+  "phaseStarting": "Wird gestartet…",
+  "discardedFailedHint": "Der erste Import ist fehlgeschlagen. Wählen Sie Rückgängig, um die Quelle zu behalten und es auf ihrer Karte erneut zu versuchen.",
+  "kindM3uShort": "M3U",
+  "kindXtreamShort": "Xtream",
+  "kindStalkerShort": "Stalker"
 }

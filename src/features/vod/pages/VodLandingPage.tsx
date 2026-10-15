@@ -4,15 +4,17 @@ import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import type { SeriesItem, VodItem } from '@/api/types';
+import { itemKey, type SeriesItem, type VodItem } from '@/api/types';
 
 import { CategoryIndex, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { itemLanguage } from '../lib/language';
 import { PosterRail } from '../components/PosterRail';
+import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { resumeKey, useRecentlyAdded, useResumeMap, useSource } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
@@ -31,6 +33,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const allCats = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true }, { enabled: !!sourceId });
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
+  const watched = useWatchedKeys(recent.data);
 
   const title = kind === 'movie' ? t('movies') : t('series');
   usePageHeader(
@@ -88,7 +91,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     return (
       <div className="h-full overflow-y-auto">
         <h1 className="sr-only">{title}</h1>
-        <ErrorState error={source.error} onRetry={() => void source.refetch()} />
+        {isSourceMissing(source.error) ? <SourceMissing /> : <ErrorState error={source.error} onRetry={() => void source.refetch()} />}
       </div>
     );
   }
@@ -128,9 +131,11 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               items={recent.data ?? []}
               loading={recent.isPending && !!source.data}
               empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => void recent.refetch()} /> : undefined}
-              render={(item, i) => (
+              myList={myListTarget}
+              render={(item, i, rail) => (
                 <PosterCard
                   index={i}
+                  tabIndex={rail.tabIndex}
                   title={item.titleBase || item.title}
                   fullTitle={item.title}
                   href={detailHref(item.ref) ?? '#'}
@@ -138,6 +143,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   year={item.year}
                   rating={item.rating}
                   progress={resume.get(resumeKey(item.ref))}
+                  watched={watched.has(itemKey(item.ref))}
                   language={itemLanguage(item.title, item.categoryName)}
                   myList={myListTarget(item)}
                   prefetch={

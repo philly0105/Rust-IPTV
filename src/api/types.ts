@@ -757,6 +757,8 @@ export interface ImportSummary {
   channels: number;
   movies: number;
   series: number;
+  /** The playlist had not changed since the last import; the catalog was kept. */
+  unchanged?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -899,10 +901,12 @@ export interface SourceRunErrorDetails {
 // ---------------------------------------------------------------------------
 
 /**
+ * `connecting` opens every run, before its first request. `done` with the message
+ * `unchanged` means the playlist had not changed and the catalog was kept as is.
  * `cancelled` (C8): the run was stopped by `sources.cancelImport`; the source's
  * previous catalog is left intact (no half-written data).
  */
-export type ImportPhase = 'fetching' | 'parsing' | 'saving' | 'done' | 'error' | 'cancelled';
+export type ImportPhase = 'connecting' | 'fetching' | 'parsing' | 'saving' | 'done' | 'error' | 'cancelled';
 
 export interface ImportProgressEvent {
   sourceId: string;
@@ -1060,7 +1064,15 @@ export type RecordingErrorCode =
   | 'nothingRecorded'
   | 'stopped'
   | 'sourceRemoved'
-  | 'streamDropped';
+  | 'streamDropped'
+  | 'streamGaps'
+  | 'streamNotFound'
+  | 'streamRejected'
+  | 'streamNoAnswer'
+  | 'streamServerError'
+  | 'notAStream'
+  | 'diskFull'
+  | 'ruleRemoved';
 
 /** A scheduled (or finished) recording. `start`/`end` exclude padding. */
 export interface Recording {

@@ -163,5 +163,10 @@
   "turnOffTitle": "Ouderlijk toezicht uitzetten?",
   "turnOffConfirmText": "Voer de pincode in. Vergrendelde inhoud is dan voor iedereen open tot er een nieuwe pincode is.",
   "turnedOffToast": "Ouderlijk toezicht staat uit",
-  "turnedOffToastText": "Je vergrendelingen blijven bewaard. Stel een pincode in om ze weer te gebruiken."
+  "turnedOffToastText": "Je vergrendelingen blijven bewaard. Stel een pincode in om ze weer te gebruiken.",
+  "menuLockedWithGroup": "Vergrendeld met de groep",
+  "discardTitle": "Wijzigingen verwerpen?",
+  "discardText": "De groepen die je hier hebt aan- of uitgevinkt, worden niet opgeslagen.",
+  "keepEditing": "Verder bewerken",
+  "discard": "Verwerpen"
 }

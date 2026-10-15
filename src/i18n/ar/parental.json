@@ -207,5 +207,10 @@
   "turnOffTitle": "إيقاف الرقابة الأبوية؟",
   "turnOffConfirmText": "أدخل رمز PIN. سيُفتح المحتوى المقفل للجميع حتى يُعيَّن رمز PIN جديد.",
   "turnedOffToast": "تم إيقاف الرقابة الأبوية",
-  "turnedOffToastText": "أقفالك محفوظة. عيّن رمز PIN لاستخدامها من جديد."
+  "turnedOffToastText": "أقفالك محفوظة. عيّن رمز PIN لاستخدامها من جديد.",
+  "menuLockedWithGroup": "مقفل مع مجموعته",
+  "discardTitle": "تجاهل التغييرات؟",
+  "discardText": "لن تُحفظ المجموعات التي حددتها أو ألغيت تحديدها هنا.",
+  "keepEditing": "متابعة التعديل",
+  "discard": "تجاهل"
 }

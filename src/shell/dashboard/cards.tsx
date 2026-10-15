@@ -318,6 +318,11 @@ export interface ChannelCardProps {
   /** 0..1 progress through the current programme. */
   nowProgress?: number;
   sourceName?: string;
+  /**
+   * Also name the source when the programme fills the second line (more than one source on
+   * Home, where the same channel can come from two of them).
+   */
+  showSourceWithNow?: boolean;
   isRadio?: boolean;
   onPlay: () => void;
   ariaLabel?: string;
@@ -331,7 +336,20 @@ export interface ChannelCardProps {
 }
 
 /** 16:9 channel tile with the logo centered on a per-channel tint. */
-export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName, isRadio, onPlay, ariaLabel, channel, sourceId }: ChannelCardProps) {
+export function ChannelCard({
+  rail,
+  name,
+  logoUrl,
+  now,
+  nowProgress,
+  sourceName,
+  showSourceWithNow = false,
+  isRadio,
+  onPlay,
+  ariaLabel,
+  channel,
+  sourceId,
+}: ChannelCardProps) {
   const { t } = useTranslation('shell');
   const openMenu = useContext(ChannelMenuContext);
   const hue = hueOf(name);
@@ -382,7 +400,18 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
         )}
       </div>
       <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{name}</span>
-      <span dir="auto" className="block truncate text-match-parent text-sm text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
+      {now && showSourceWithNow && sourceName ? (
+        // Programme first; the source keeps up to half the line, so it never truncates away.
+        <span className="flex min-w-0 items-baseline gap-1.5 text-sm text-fg-muted">
+          <span dir="auto" className="min-w-0 truncate text-match-parent">{now}</span>
+          <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+          <span dir="auto" className="max-w-[50%] shrink-0 truncate text-fg-subtle" data-testid="channel-card-source">
+            {sourceName}
+          </span>
+        </span>
+      ) : (
+        <span dir="auto" className="block truncate text-match-parent text-sm text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
+      )}
     </button>
   );
 }

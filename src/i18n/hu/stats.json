@@ -34,5 +34,6 @@
   "clearTitle": "Törli a nézési statisztikát?",
   "clearBody": "A teljes számolt nézési idő törlődik. A lejátszási előrehaladás és a Legutóbb megtekintett lista megmarad.",
   "cleared": "Nézési statisztika törölve",
-  "clearFailed": "Nem sikerült törölni a statisztikát"
+  "clearFailed": "Nem sikerült törölni a statisztikát",
+  "watchLive": "Élő TV nézése"
 }

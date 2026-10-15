@@ -1,7 +1,8 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { MyListKey, useMyListKeyFocus, type MyListTarget } from '../hooks/useMyListKey';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { IconButton, cn } from '@/ui';
 import { PosterCardSkeleton } from './PosterCard';
@@ -36,10 +37,15 @@ export function railEdges(scrollLeft: number, clientWidth: number, scrollWidth: 
   return { start: pos <= RAIL_EDGE_TOLERANCE, end: pos + clientWidth >= scrollWidth - RAIL_EDGE_TOLERANCE };
 }
 
+/** What a rail hands each card: pass `tabIndex` to the card's link (one Tab stop per rail). */
+export interface RailCardProps {
+  tabIndex: number;
+}
+
 export interface PosterRailProps<T> {
   title: ReactNode;
   items: readonly T[];
-  render: (item: T, index: number) => ReactNode;
+  render: (item: T, index: number, rail: RailCardProps) => ReactNode;
   loading?: boolean;
   /** Shown instead of the rail when there are no items and not loading. Omit to hide the rail. */
   empty?: ReactNode;
@@ -47,18 +53,32 @@ export interface PosterRailProps<T> {
   /** Card width in px. */
   cardWidth?: number;
   className?: string;
+  /** The title a card saves to My List: S on a focused card toggles it (its corner button is out of the Tab order). */
+  myList?: ((item: T) => MyListTarget | undefined) | undefined;
 }
 
 /**
  * Horizontal rail of fixed-width cards (capped lists: recently added,
- * similar, known for). Arrow keys move between cards; the step buttons
+ * similar, known for). The rail is one Tab stop (roving tabindex): Tab lands
+ * on the card you were last on, arrow keys move between cards, and S saves
+ * the focused card to My List when the rail has `myList`. The step buttons
  * page by the visible width.
  */
-export function PosterRail<T>({ title, items, render, loading, empty, action, cardWidth = 150, className }: PosterRailProps<T>) {
+export function PosterRail<T>({ title, items, render, loading, empty, action, cardWidth = 150, className, myList }: PosterRailProps<T>) {
   const { t } = useTranslation('vod');
   const headingId = useId();
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
+  // The card holding the rail's Tab stop: the last one focused, clamped when the list shrinks.
+  const [current, setCurrent] = useState(0);
+  const tabStop = Math.max(0, Math.min(current, items.length - 1));
+  const myListFocus = useMyListKeyFocus();
+  const onCardFocus = (e: FocusEvent<HTMLDivElement>) => {
+    myListFocus.onFocus();
+    const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
+    const index = Number(cell?.dataset['gridIndex']);
+    if (cell && Number.isInteger(index) && index !== current) setCurrent(index);
+  };
 
   const updateEdges = useCallback(() => {
     const el = scroller.current;
@@ -87,6 +107,15 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
 
   return (
     <section aria-labelledby={headingId} className={cn('min-w-0', className)}>
+      {myList && (
+        <MyListKey
+          enabled={myListFocus.focused}
+          targetAt={(i) => {
+            const item = items[i];
+            return item === undefined ? undefined : myList(item);
+          }}
+        />
+      )}
       <div className="mb-3 flex items-end gap-3">
         <h2 id={headingId} className="text-base text-fg">
           {title}
@@ -120,6 +149,8 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
           ref={scroller}
           role="list"
           onScroll={updateEdges}
+          onFocus={onCardFocus}
+          onBlur={myListFocus.onBlur}
           onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: items.length })}
           // Skeletons have nothing to focus, so the loading row clips instead of scrolling (axe scrollable-region-focusable).
           className={cn('-mx-1 flex snap-x scroll-px-1 gap-4 px-1 pt-1 pb-3 motion-safe:scroll-smooth', loading ? 'overflow-x-hidden' : 'overflow-x-auto')}
@@ -132,7 +163,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
               ))
             : items.map((item, i) => (
                 <div key={i} role="listitem" className="shrink-0 snap-start" style={{ width: cardWidth }}>
-                  {render(item, i)}
+                  {render(item, i, { tabIndex: i === tabStop ? 0 : -1 })}
                 </div>
               ))}
         </div>

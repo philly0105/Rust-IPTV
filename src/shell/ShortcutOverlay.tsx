@@ -81,6 +81,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'r', descKey: 'library:shortcutRetry', area: 'Downloads' },
   { combo: 'x', descKey: 'library:shortcutCancel', area: 'Downloads' },
   { combo: 'delete', descKey: 'library:shortcutRemove', area: 'Downloads' },
+  { combo: 'o', descKey: 'library:shortcutReveal', area: 'Downloads' },
   { combo: 'backspace', descKey: 'library:backToLibrary', area: 'My videos' },
   { combo: '7', descKey: 'stats:showWeek', area: 'Stats' },
   { combo: '3', descKey: 'stats:showMonth', area: 'Stats' },

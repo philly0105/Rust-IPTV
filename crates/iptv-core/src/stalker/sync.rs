@@ -279,5 +279,6 @@ async fn run(
         channels: (channel_count + radio_count) as i64,
         movies,
         series,
+        unchanged: false,
     })
 }

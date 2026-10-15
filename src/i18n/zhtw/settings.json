@@ -281,6 +281,8 @@
   "aboutActionFailed": "無法開啟該資料夾",
   "aboutServerNote": "正以伺服器模式執行。資料夾位於主機上。",
   "aboutCredits": "以 IPTVnator 的構想為基礎打造。電影與影集資料來自 TMDB。",
+  "aboutWhatsNew": "新功能",
+  "aboutTakeTour": "開始導覽",
 
   "errorRequired": "必填。",
   "errorUrlInvalid": "請輸入完整位址，例如 http://example.com/guide.xml。",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "通知我",
   "reminderActionSwitch": "切換頻道",
   "reminderActionNotifyHint": "顯示附有立即觀看按鈕的通知。",
-  "reminderActionSwitchHint": "切換到該頻道並將應用程式帶到前景。可以復原。"
+  "reminderActionSwitchHint": "切換到該頻道並將應用程式帶到前景。可以復原。",
+  "imageCache": "圖片快取",
+  "imageCacheHint": "海報、台標和背景圖會儲存在此裝置上，瀏覽過的頁面可立即顯示。快取達到上限時，最久未使用的圖片會被移除。",
+  "imageCacheUsage": "{{used}} / {{limit}}",
+  "imageCachePictures_one": "{{count, number}} 張圖片",
+  "imageCachePictures_other": "{{count, number}} 張圖片",
+  "imageCacheEmpty": "目前是空的。瀏覽時會自動儲存圖片。",
+  "imageCacheLimit": "上限",
+  "imageCacheClear": "清除快取",
+  "imageCacheClearTitle": "要清除圖片快取嗎？",
+  "imageCacheClearBody": "這會刪除已儲存的圖片，共 {{size}}。每張圖片會在下次顯示時重新下載。",
+  "imageCacheCleared": "已清除圖片快取",
+  "imageCacheClearFailed": "無法清除圖片快取",
+  "imageCacheLoadFailed": "無法讀取圖片快取：{{message}}",
+  "imageCacheUnavailable": "此伺服器沒有圖片快取，圖片會直接從各供應商載入。"
 }

@@ -80,7 +80,7 @@ export function ContinueRail({
                 aria-label={t('continueTitle', { title, time: formatClock(p.positionSeconds) })}
               >
                 <div className="overflow-hidden rounded-lg ring-1 ring-border group-hover:ring-accent/60">
-                  <Poster src={p.snapshot?.posterUrl} alt="" label={title} aspect="poster" />
+                  <Poster src={p.snapshot?.posterUrl} sourceId={p.ref.sourceId} alt="" label={title} aspect="poster" />
                 </div>
                 {fraction !== undefined && <ProgressBar value={fraction * 100} max={100} size="xs" label={t('watchedPercent', { percent: Math.round(fraction * 100) })} />}
                 <span className="flex flex-col">

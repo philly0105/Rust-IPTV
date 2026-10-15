@@ -303,7 +303,7 @@ export function SleepPrompt({ small = false, className }: { small?: boolean; cla
       data-mpv-overlay=""
       data-mpv-reserved=""
       className={cn(
-        'player-glass player-glass-edge pointer-events-auto absolute inset-x-0 z-30 mx-auto w-fit max-w-[calc(100%-1.5rem)] border text-white motion-safe:animate-pop-in',
+        'player-glass player-glass-edge glass-blur pointer-events-auto absolute inset-x-0 z-30 mx-auto w-fit max-w-[calc(100%-1.5rem)] border text-white motion-safe:animate-pop-in',
         small ? 'rounded-md px-2.5 py-2' : 'rounded-lg px-4 py-3',
         className,
       )}

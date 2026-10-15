@@ -34,7 +34,11 @@
   --color-focus: #ffc865;
   --color-glow: rgb(245 181 68 / 0.28);
 
-  /* Glass (C8): bg-glass, bg-glass-strong, border-glass-border, text-on-glass, backdrop-blur-glass. */
+  /*
+   * Glass (C8): bg-glass, bg-glass-strong, border-glass-border, text-on-glass.
+   * Blur behind glass only through the glass-blur utility below (C5); --blur-glass
+   * stays at or under 10px (src/perf-budget.test.ts).
+   */
   --color-glass: rgb(12 19 32 / 0.72);
   --color-glass-strong: rgb(12 19 32 / 0.88);
   --color-glass-border: rgb(255 255 255 / 0.14);
@@ -42,7 +46,7 @@
   --color-on-glass-muted: #c8cfdc;
   --color-glass-accent: #f5b544;
   --color-glass-accent-fg: #1b1204;
-  --blur-glass: 14px;
+  --blur-glass: 10px;
 
   /* 10px at 100 % UI scale; rem so it follows the scale like the stock sizes. */
   --text-2xs: calc(10rem / 15);
@@ -318,22 +322,41 @@ html[data-theme-switching='true'] *::after {
 }
 
 /*
- * Glass panel (C8) for chrome laid over video or artwork. The solid fallback
- * keeps text readable where backdrop-filter is unsupported or turned off.
+ * Glass panel (C8) for chrome laid over video or artwork: the strong glass
+ * surface with its text and border colours, and no blur. It is cheap enough
+ * for chrome that is on screen all the time (the hero's slide controls, the
+ * multi-view toolbar) and reads on any frame without one.
  */
 @utility glass {
   background-color: var(--color-glass-strong);
   color: var(--color-on-glass);
   border-color: var(--color-glass-border);
+}
+
+/*
+ * The one way to blur what is behind an element (C5, src/perf-budget.test.ts).
+ * A backdrop filter re-samples everything under the element on every frame
+ * that changes beneath it, so it belongs on small, short-lived overlays over
+ * video or artwork (menus, chips on hover, the player's control pane), never
+ * on chrome that is always on screen. Pair it with bg-glass (or another
+ * translucent surface): without backdrop-filter support that surface stands
+ * alone, and the contrast test holds on-glass text to 4.5:1 on it unblurred.
+ * With reduced transparency the surface turns strong and the blur goes.
+ */
+@utility glass-blur {
   @supports (backdrop-filter: blur(1px)) {
-    background-color: var(--color-glass);
-    backdrop-filter: blur(var(--blur-glass)) saturate(1.2);
+    backdrop-filter: blur(var(--blur-glass));
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--color-glass-strong) !important;
+    backdrop-filter: none !important;
   }
 }
 
 /*
- * The dashboard hero's frost: glass that is solid behind the text column and
- * clears toward the inline end, so the artwork shows beside the copy. On
+ * The dashboard hero's frost: a glass tint (and, under it, a cheaply blurred
+ * copy of the artwork) that is solid behind the text column and clears toward
+ * the inline end, so the artwork shows beside the copy. On
  * narrow screens the copy runs edge to edge, so the whole frame is frosted.
  * --hero-solid covers padding, poster (lg+) and the 28rem text column.
  */

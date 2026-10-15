@@ -90,7 +90,7 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
             return (
               <>
                 <span className={cn('flex min-w-0 flex-1 items-center gap-3 px-1', !entry.available && 'opacity-60 grayscale')}>
-                  <ChannelLogo src={logo} name={name} size={32} />
+                  <ChannelLogo src={logo} name={name} size={32} sourceId={entry.ref.sourceId} />
                   <span className="min-w-0">
                     <span dir="auto" className="block truncate text-sm font-medium text-fg">
                       {name}

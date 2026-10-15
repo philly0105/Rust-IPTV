@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Ganz unten",
   "subtitleStyle.positionValue": "{{value}} % angehoben",
   "subtitleStyle.preview": "Untertitelvorschau",
-  "subtitleStyle.previewText": "Der letzte Zug fährt um zehn.\nWir sollten jetzt gehen."
+  "subtitleStyle.previewText": "Der letzte Zug fährt um zehn.\nWir sollten jetzt gehen.",
+  "screenshot": "Screenshot aufnehmen",
+  "screenshotSaved": "Screenshot gespeichert",
+  "screenshotDownloaded": "In Ihren Downloads gespeichert",
+  "screenshotOpen": "Öffnen",
+  "screenshotOpenFailed": "Der Screenshot konnte nicht geöffnet werden",
+  "screenshotFailed": "Screenshot nicht gespeichert",
+  "screenshotCors": "Der Server des Streams erlaubt nicht, sein Bild zu kopieren (keine CORS-Freigabe).",
+  "screenshotCorsMpv": "Eingebettetes MPV kann es aufnehmen: Wählen Sie es unter Einstellungen > Player.",
+  "screenshotNotReady": "Noch kein Bild vorhanden. Versuchen Sie es erneut, sobald das Video läuft.",
+  "screenshotNoVideo": "Radio hat kein Bild, das aufgenommen werden kann.",
+  "screenshotExternal": "Dies läuft in einem externen Player. Verwenden Sie dessen eigene Screenshot-Taste."
 }

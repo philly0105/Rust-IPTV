@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Na samym dole",
   "subtitleStyle.positionValue": "Wyżej o {{value}}%",
   "subtitleStyle.preview": "Podgląd napisów",
-  "subtitleStyle.previewText": "Ostatni pociąg odjeżdża o dziesiątej.\nPowinniśmy już iść."
+  "subtitleStyle.previewText": "Ostatni pociąg odjeżdża o dziesiątej.\nPowinniśmy już iść.",
+  "screenshot": "Zrób zrzut ekranu",
+  "screenshotSaved": "Zrzut ekranu zapisany",
+  "screenshotDownloaded": "Zapisano w pobranych plikach",
+  "screenshotOpen": "Otwórz",
+  "screenshotOpenFailed": "Nie udało się otworzyć zrzutu ekranu",
+  "screenshotFailed": "Nie zapisano zrzutu ekranu",
+  "screenshotCors": "Serwer strumienia nie pozwala kopiować obrazu (brak zgody CORS).",
+  "screenshotCorsMpv": "Osadzony MPV może go przechwycić: wybierz go w Ustawienia > Odtwarzacze.",
+  "screenshotNotReady": "Nie ma jeszcze obrazu. Spróbuj ponownie, gdy wideo zacznie się odtwarzać.",
+  "screenshotNoVideo": "Radio nie ma obrazu do przechwycenia.",
+  "screenshotExternal": "To jest odtwarzane w zewnętrznym odtwarzaczu. Użyj jego własnego klawisza zrzutu ekranu."
 }

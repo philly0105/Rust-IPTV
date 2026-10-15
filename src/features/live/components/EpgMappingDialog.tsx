@@ -125,7 +125,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
                   }
                   className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-start hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
                 >
-                  <ChannelLogo src={m.icon} name={m.displayName} size={28} />
+                  <ChannelLogo src={m.icon} name={m.displayName} size={28} sourceId={channel?.ref.sourceId} />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm text-fg">{m.displayName}</span>
                     <span className="truncate text-xs text-fg-subtle">{joinList([m.channelId, hostOf(m.epgUrl)], i18n.language)}</span>

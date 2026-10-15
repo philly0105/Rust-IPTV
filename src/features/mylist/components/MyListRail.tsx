@@ -82,11 +82,11 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
   );
 }
 
-/** Frosted tag over the artwork: readable on any poster. */
+/** Solid glass tag over the artwork: readable on any poster. Always on screen, so no backdrop blur (C5). */
 function WatchedTag({ label }: { label: string }) {
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-sm border border-glass-border bg-glass px-1.5 py-0.5 text-[calc(11rem/15)] font-medium leading-4 text-on-glass backdrop-blur-glass"
+      className="inline-flex items-center gap-1 rounded-sm border border-glass-border bg-glass-strong px-1.5 py-0.5 text-[calc(11rem/15)] font-medium leading-4 text-on-glass"
       data-testid="mylist-watched-tag"
     >
       <Check aria-hidden size={12} strokeWidth={2.75} className="text-success" />

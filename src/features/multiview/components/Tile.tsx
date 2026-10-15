@@ -6,7 +6,7 @@ import type { ParentalMode } from '@/api/types';
 
 import { cn } from '../deps';
 import { classifyTileFault, retriesWhenOnline, tileFaultCopy } from '../errors';
-import { GLASS, GLASS_ACCENT_BORDER, GLASS_ACCENT_FILL, GLASS_ACCENT_TEXT, GLASS_BUTTON, GLASS_STRONG, ON_GLASS_MUTED } from '../styles';
+import { GLASS, GLASS_ACCENT_BORDER, GLASS_ACCENT_FILL, GLASS_ACCENT_TEXT, GLASS_BLUR, GLASS_BUTTON, GLASS_STRONG, ON_GLASS_MUTED } from '../styles';
 import type { MultiviewTile } from '../types';
 import { useRetryWhenOnline } from '../useRetryWhenOnline';
 import { useTilePlayback } from '../useTilePlayback';
@@ -84,7 +84,7 @@ function TilePanel({
       data-testid={testId}
       data-error-class={errorClass}
       className={cn(
-        GLASS,
+        GLASS_BLUR,
         'pointer-events-auto flex max-w-[24rem] flex-col items-center gap-1 rounded-md px-3 py-1.5 text-center motion-safe:animate-fade-in',
         '@[20rem]/tile:gap-1.5 @[20rem]/tile:px-4 @[20rem]/tile:py-2.5 @[26rem]/tile:py-3',
       )}
@@ -389,7 +389,7 @@ export const Tile = memo(function Tile({
       {/* Tools: top end; shown on hover and focus, always where there is no hover. */}
       <div
         className={cn(
-          GLASS,
+          GLASS_BLUR,
           'absolute end-2 top-2 z-30 flex items-center gap-0.5 rounded-lg p-0.5',
           'opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100',
           'motion-safe:transition-opacity motion-safe:duration-150',

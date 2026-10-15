@@ -56,8 +56,17 @@ All of these are Radix-free and keyboard-complete:
 - the `ContextPanel`: inline at 1440px and wider, a drawer below that
 - `ExternalPlaybackFooter` and `PlayerDock`, both from `@/features/player`
 - `CommandPalette`, `ShortcutOverlay`, and `ToastViewport`
+- `OnboardingHost` (Run 3 C7), lazy from `@/features/onboarding/host`, not the barrel, so the release notes and their icons stay out of the shell chunk. It decides on the first-run tour and What's new and shows them; see onboarding.md.
 
 The rail collapses to icons below 1024px or when the user collapses it. That preference is stored in localStorage.
+
+Tour anchors (`[data-tour]`, read by the onboarding tour's `findAnchor`, which takes the first laid-out match inside the window):
+
+- `live`: the first source's rail row, collapsed or expanded. It is always rendered, unlike a source's Live TV sub-link, which only shows while the source is open.
+- `vod`: the My List rail link (always shown), the closest primary entry to movies and series.
+- `search`: the header's search field when the page has one, otherwise its "Search everything" button (1024px and wider), and the palette button wherever neither is laid out.
+
+The palette's Settings group has "Take the tour" (`help.tour`) and "What's new" (`help.whatsNew`); Settings > About has the same two buttons. All four import `openTour` / `openWhatsNew` from `@/features/onboarding/store`, which has no UI imports.
 
 Page API, which works without a provider (zustand):
 

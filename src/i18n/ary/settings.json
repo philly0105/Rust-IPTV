@@ -301,6 +301,8 @@
   "aboutActionFailed": "ما قدرناش نحلو هاد المجلد",
   "aboutServerNote": "خدام كخادم. المجلدات كاينين فالجهاز المضيف.",
   "aboutCredits": "مبني على أفكار من IPTVnator. بيانات الأفلام والسلاسل من TMDB.",
+  "aboutWhatsNew": "شنو الجديد",
+  "aboutTakeTour": "بدا الجولة",
 
   "errorRequired": "ضروري.",
   "errorUrlInvalid": "دخّل عنوان كامل، بحال http://example.com/guide.xml.",
@@ -443,5 +445,23 @@
   "reminderActionNotify": "علّمني",
   "reminderActionSwitch": "بدّل القناة",
   "reminderActionNotifyHint": "كيبيّن إشعار فيه بوطونة تفرج دابا.",
-  "reminderActionSwitchHint": "كيدوّز للقناة وكيجيب التطبيق للقدام. تقدر ترجعها."
+  "reminderActionSwitchHint": "كيدوّز للقناة وكيجيب التطبيق للقدام. تقدر ترجعها.",
+  "imageCache": "الكاش ديال التصاور",
+  "imageCacheHint": "البوسترات واللوغوات والخلفيات كيتحفظو فهاد الجهاز، باش الصفحات اللي شفتي قبل يبانو دغيا. ملي الكاش كيوصل للحد ديالو، التصاور اللي ما تستعملوش هادي مدة كيتمسحو باش يخليو البلاصة.",
+  "imageCacheUsage": "{{used}} من {{limit}}",
+  "imageCachePictures_zero": "حتى تصويرة",
+  "imageCachePictures_one": "تصويرة وحدة",
+  "imageCachePictures_two": "جوج تصاور",
+  "imageCachePictures_few": "{{count, number}} تصاور",
+  "imageCachePictures_many": "{{count, number}} تصويرة",
+  "imageCachePictures_other": "{{count, number}} تصويرة",
+  "imageCacheEmpty": "خاوي. التصاور كيتحفظو ملي كتتصفح.",
+  "imageCacheLimit": "الحد",
+  "imageCacheClear": "مسح الكاش",
+  "imageCacheClearTitle": "واش بغيتي تمسح الكاش ديال التصاور؟",
+  "imageCacheClearBody": "هادشي غادي يمسح {{size}} ديال التصاور المحفوظة. كل تصويرة غادي تتحمّل من جديد ملي تبان مرة خرا.",
+  "imageCacheCleared": "تمسح الكاش ديال التصاور",
+  "imageCacheClearFailed": "ما قدرناش نمسحو الكاش ديال التصاور",
+  "imageCacheLoadFailed": "ما قدرناش نقراو الكاش ديال التصاور: {{message}}",
+  "imageCacheUnavailable": "هاد السيرفر ما فيهش الكاش ديال التصاور، داكشي علاش التصاور كيتحملو نيشان من عند كل مزوّد."
 }

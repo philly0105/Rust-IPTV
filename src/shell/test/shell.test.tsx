@@ -1084,3 +1084,40 @@ describe('B7 review round 3', () => {
     expect(strip(within(vod).getByRole('link', { name: /Quiet Coast/ }).getAttribute('aria-label'))).toBe('Quiet Coast, Series');
   });
 });
+
+describe('Run 3 onboarding wiring', () => {
+  const onboarding = () => import('@/features/onboarding/store');
+
+  afterEach(async () => (await onboarding()).resetOnboardingStore());
+
+  it('the rail and header carry one tour anchor per step', async () => {
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await within(nav).findByText('Night Portal');
+    const live = nav.querySelectorAll('[data-tour="live"]');
+    expect(live).toHaveLength(1);
+    expect(live[0]!.textContent).toContain('Night Portal');
+    expect(within(nav).getByRole('link', { name: /My List/ }).getAttribute('data-tour')).toBe('vod');
+    expect(document.querySelector('[data-tour="search"]')).not.toBeNull();
+  });
+
+  it('the palette starts the tour and opens What\'s new', async () => {
+    const { useOnboardingStore } = await onboarding();
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    for (const [query, kind] of [
+      ['take the tour', 'tour'],
+      ["what's new", 'whatsNew'],
+    ] as const) {
+      (await onboarding()).resetOnboardingStore();
+      act(() => useShellStore.getState().setPaletteOpen(true));
+      const palette = await screen.findByTestId('command-palette');
+      const input = within(palette).getByPlaceholderText('Type a command or search');
+      fireEvent.change(input, { target: { value: query } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(useOnboardingStore.getState().overlay?.kind).toBe(kind));
+      expect(useOnboardingStore.getState().overlay?.auto).toBe(false);
+      await waitFor(() => expect(screen.queryByTestId('command-palette')).toBeNull());
+    }
+  });
+});

@@ -391,7 +391,7 @@ function HitRow({
           <span className={cn('font-display text-[calc(14rem/15)] leading-tight font-semibold whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg')}>{time}</span>
           {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
         </span>
-        <ChannelLogo src={hit.logoUrl} name={name} size={28} />
+        <ChannelLogo src={hit.logoUrl} name={name} size={28} sourceId={hit.ref.sourceId} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span dir="auto" className="truncate text-sm font-medium text-match-parent">
             {program.title}

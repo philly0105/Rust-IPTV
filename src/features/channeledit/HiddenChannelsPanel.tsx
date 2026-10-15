@@ -300,7 +300,7 @@ function HiddenRow({
       className="flex items-center gap-3 border-b border-divider px-3 last:border-b-0 has-[:focus-visible]:bg-surface-2"
     >
       <span className={cn(gone && 'opacity-50 grayscale')}>
-        <ChannelLogo src={logo} name={row.name} size={32} />
+        <ChannelLogo src={logo} name={row.name} size={32} sourceId={row.edit.ref.sourceId} />
       </span>
       <div className="flex min-w-0 flex-1 flex-col">
         <span dir="auto" className={cn('truncate text-sm font-medium', gone ? 'text-fg-muted' : 'text-fg')}>

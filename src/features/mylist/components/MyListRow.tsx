@@ -133,7 +133,7 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
 
       {/* Artwork is a mouse shortcut: the title button carries the name for keyboard and AT. */}
       <div aria-hidden onClick={onOpen} className="row-span-2 w-12 shrink-0 cursor-pointer self-center overflow-hidden rounded-md shadow-1">
-        <Poster src={snapshot.posterUrl} alt="" label={title} aspect="poster" />
+        <Poster src={snapshot.posterUrl} sourceId={ref.sourceId} alt="" label={title} aspect="poster" />
       </div>
 
       <button

@@ -347,11 +347,14 @@ describe('groups drawer below 1024 px', () => {
 describe('channel logos in reused rows', () => {
   it('a broken logo does not stick to the slot when the row shows another channel', () => {
     const { rerender, container } = render(<ChannelLogo src="https://x/broken.png" name="Alpha One" />);
+    // Run 3 C3: the cache route fails first, then the original address is tried once.
+    fireEvent.error(container.querySelector('img')!);
     fireEvent.error(container.querySelector('img')!);
     expect(container.querySelector('img')).toBeNull();
     expect(container.textContent).toBe('AO');
     rerender(<ChannelLogo src="https://x/good.png" name="Beta" />);
-    expect(container.querySelector('img')?.getAttribute('src')).toBe('https://x/good.png');
+    // The next channel starts its own chain from the top: the cache route first.
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('https://x/good.png')}`);
   });
 
   it('initials keep whole characters (emoji, astral letters)', () => {

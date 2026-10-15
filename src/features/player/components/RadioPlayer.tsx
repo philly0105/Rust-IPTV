@@ -1,6 +1,7 @@
 import { Pause, Play, Radio, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
 import { safeImageUrl } from '../format';
@@ -39,13 +40,12 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const waiting = useMediaStore((s) => s.waiting);
-  const [artFailed, setArtFailed] = useState<string | null>(null);
+  // Station art through the image cache (C3), then its own URL once, then the radio icon.
+  const art = useImageChain([safeImageUrl(source?.posterUrl)], source?.ref?.sourceId);
   if (!source) return null;
 
   const store = usePlayerStore.getState();
   const playing = status === 'playing';
-  const art = safeImageUrl(source.posterUrl);
-  const showArt = art && artFailed !== art;
   const shown = muted ? 0 : volume;
   const VolIcon = shown === 0 ? VolumeX : shown < 0.5 ? Volume1 : Volume2;
   const canZap = !!source.ref;
@@ -68,8 +68,8 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
           stage ? 'size-[clamp(96px,22vh,200px)]' : 'size-12',
         )}
       >
-        {showArt ? (
-          <img src={art} alt="" className="h-full w-full object-contain p-1" onError={() => setArtFailed(art)} />
+        {art.url ? (
+          <img src={art.url} alt="" className="h-full w-full object-contain p-1" onError={art.onError} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-accent">
             <Radio className={stage ? 'size-12' : 'size-6'} aria-hidden />

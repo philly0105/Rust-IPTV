@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
 import type { PlayerSource } from '@/api/types';
 
+import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import {
@@ -65,6 +66,9 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
   const settings = usePlayerSettings();
+  // The VOD poster (C3): through the image cache, then its own URL once. It is the video's
+  // poster and, with ambient mode on, the soft colour field behind the picture.
+  const art = useImageChain([as === 'video' && source && !source.isLive ? safeImageUrl(source.posterUrl) : undefined], source?.ref?.sourceId);
   const elRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
   /** Subtitles drawn by the player over the video (subtitles/inline.ts). */
   const subsRef = useRef<HTMLDivElement>(null);
@@ -329,17 +333,20 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     setRetryNonce((n) => n + 1);
   }, []);
 
-  const ambient = settings?.playerAmbientMode && source && !source.isLive && as === 'video' ? safeImageUrl(source.posterUrl) : undefined;
+  const ambient = !!settings?.playerAmbientMode;
   const Tag = as;
 
   return (
     <div className={cn('relative h-full w-full overflow-hidden bg-black', className)}>
-      {ambient && (
+      {art.url && (
+        // Ambient: a quarter-size copy scaled up under a small blur (C5), never a full-size blur.
+        // Without ambient mode it stays hidden and only tells `art` when the poster fails to load.
         <img
-          src={ambient}
+          src={art.url}
           alt=""
           aria-hidden
-          className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-3xl saturate-150"
+          onError={art.onError}
+          className={ambient ? cn('pointer-events-none opacity-45 saturate-150', QUARTER_BLUR) : 'hidden'}
         />
       )}
       <Tag
@@ -347,7 +354,9 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
         playsInline
         preload="auto"
         className={cn('relative h-full w-full object-contain', as === 'audio' && 'hidden')}
-        poster={as === 'video' && source && !source.isLive ? safeImageUrl(source.posterUrl) : undefined}
+        poster={art.url}
+        // Found by the screenshot code (C6), which draws this frame on a canvas.
+        data-player-video={as === 'video' ? '' : undefined}
       />
       {as === 'video' && <div ref={subsRef} data-subtitle-overlay aria-hidden className="player-subs" />}
       {status === 'error' && (

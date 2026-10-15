@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "At the bottom",
   "subtitleStyle.positionValue": "Raised {{value}}%",
   "subtitleStyle.preview": "Subtitle preview",
-  "subtitleStyle.previewText": "The last train leaves at ten.\nWe should go now."
+  "subtitleStyle.previewText": "The last train leaves at ten.\nWe should go now.",
+  "screenshot": "Take screenshot",
+  "screenshotSaved": "Screenshot saved",
+  "screenshotDownloaded": "Saved to your downloads",
+  "screenshotOpen": "Open",
+  "screenshotOpenFailed": "Could not open the screenshot",
+  "screenshotFailed": "Screenshot not saved",
+  "screenshotCors": "The stream's server does not allow its picture to be copied (no CORS permission).",
+  "screenshotCorsMpv": "Embedded MPV can capture it: choose it in Settings > Players.",
+  "screenshotNotReady": "There is no picture yet. Try again once the video plays.",
+  "screenshotNoVideo": "Radio has no picture to capture.",
+  "screenshotExternal": "This plays in an external player. Use its own screenshot key."
 }

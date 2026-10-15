@@ -1,9 +1,10 @@
-import { ChevronLeft, Copy, Maximize, Minimize, Pause, PictureInPicture2, Play } from 'lucide-react';
+import { Camera, ChevronLeft, Copy, Maximize, Minimize, Pause, PictureInPicture2, Play } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useToast } from '@/ui/Toast';
 import { useMediaStore } from '../media';
+import { takeScreenshot } from '../screenshot';
 import { usePipStore } from '../pip';
 import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
@@ -18,16 +19,18 @@ const EDGE = 8;
 
 type View = 'root' | 'audio' | 'text' | 'style' | 'sync' | 'sleep';
 
-function MenuAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick(): void }) {
+function MenuAction({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint?: string; onClick(): void }) {
   return (
     <button
       type="button"
       role="menuitem"
+      aria-keyshortcuts={hint}
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-sm text-white hover:bg-white/10"
     >
       {icon}
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {hint && <kbd className="font-sans text-xs text-white/50">{hint}</kbd>}
     </button>
   );
 }
@@ -168,7 +171,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge fixed z-50 max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur fixed z-50 max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -204,6 +207,13 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           {/* Sleep timer (C5), as in the options menu. */}
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
+          {/* Screenshot (C6): the menu closes first, so it is never in the picture. */}
+          <MenuAction
+            icon={<Camera className={icon} aria-hidden />}
+            label={t('screenshot')}
+            hint="S"
+            onClick={() => pick(() => void takeScreenshot())}
+          />
           {canShareSource(source, knownSourceKind) && (
             <MenuAction icon={<Copy className={icon} aria-hidden />} label={t('copyStreamLink')} onClick={() => void copyLink()} />
           )}

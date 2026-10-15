@@ -13,7 +13,6 @@ import { onAppEvent, onConnectionState } from '@/api/events';
 import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, WindowState } from '@/api/types';
-import { usePipStore } from '@/features/player/pip';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { applyLanguage, languageUnresolved } from '@/i18n';
 import { dismissToast, toast } from '@/ui';
@@ -416,6 +415,9 @@ export function useWindowStatePersistence(): void {
     void (async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        // pip pulls in the player store and engines; loading it here keeps them out of the
+        // main chunk (C4 entry budget). It is desktop-only, like the rest of this effect.
+        const { usePipStore } = await import('@/features/player/pip');
         const win = getCurrentWindow();
         let lastNormal: WindowState | null = await rpc('window.getState').catch(() => null);
         if (disposed) return;

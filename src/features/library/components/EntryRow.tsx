@@ -75,7 +75,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       )}
       {/* Artwork is a mouse shortcut only: the title button beside it and the Play button carry the name for keyboard and AT. */}
       <div aria-hidden data-testid="entry-artwork" onClick={onOpen} className={cn('shrink-0 cursor-pointer overflow-hidden rounded-sm', square ? 'w-12' : 'w-9')}>
-        <Poster src={snapshot.posterUrl} alt="" label={snapshot.title} aspect={square ? 'square' : 'poster'} />
+        <Poster src={snapshot.posterUrl} sourceId={entryRef.sourceId} alt="" label={snapshot.title} aspect={square ? 'square' : 'poster'} />
       </div>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start text-start">
         <span dir="auto" className="w-full truncate text-match-parent text-sm font-medium text-fg">

@@ -36,6 +36,8 @@ export const NAMESPACES = [
   'channels',
   'guide',
   'stats',
+  // Run 3: first-run tour and What's new.
+  'onboarding',
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 

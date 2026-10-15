@@ -76,10 +76,13 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 - Movie and series grids filter by decade or an exact year range (kept in the URL), mark watched titles with a tick, and "Hide watched" (Shift+W) leaves them out. W marks the title under the cursor watched or unwatched, and a series page can mark the whole series watched.
 - Watch stats (`/stats`, in the side rail): time watched per day over the last 7 or 30 days (7 and 3 switch), split into live TV and movies and series, with the most watched channels and titles. The log stays on this device, keeps 90 days, and Clear stats empties it.
 - Settings > Appearance: light, dark or system theme, OLED black for the dark theme, seven accent colours, a compact density, and an interface size from 90 to 125 %.
+- Posters, channel logos and backdrops are cached on disk the first time they show, so pages you have seen fill in at once, also offline. Settings > General > Image cache shows how much it holds, clears it, and sets its limit (250 MB to 5 GB, default 500 MB); past the limit the pictures used longest ago are dropped. In the browser the server keeps the cache. See `docs/architecture/image-cache.md`.
+- Screenshots: the camera button in the player controls, "Take screenshot" in the embedded MPV right-click menu, or S while a video plays saves the current frame as a PNG in `Pictures\Tsrust IPTV` (in `<app data>\screenshots` when there is no Pictures folder), with an Open button in the toast. In the browser the picture goes to your downloads. A stream whose server forbids copying its picture (no CORS) says so. With an external player or radio the button stays but is disabled and says why. See `docs/architecture/screenshot.md`.
+- After the first source is added, a three-step tour points at Live TV, Movies and series, and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See `docs/architecture/onboarding.md`.
 
 ## Data
 
-The desktop app keeps everything under the platform app data folder (`%APPDATA%\com.philly.tsrustiptv` on Windows): `iptv.db` (SQLite), `logs/` (rotating JSON logs, secrets redacted), and `downloads/` unless you choose another downloads folder. A corrupt database is moved aside as `iptv.db.corrupt-<timestamp>` and a fresh one is created.
+The desktop app keeps everything under the platform app data folder (`%APPDATA%\com.philly.tsrustiptv` on Windows): `iptv.db` (SQLite), `logs/` (rotating JSON logs, secrets redacted), `image-cache/` (cached posters and logos, size-capped), and `downloads/` unless you choose another downloads folder. A corrupt database is moved aside as `iptv.db.corrupt-<timestamp>` and a fresh one is created.
 
 ## Checks
 
@@ -89,7 +92,7 @@ pnpm check
 
 This runs, in order: `pnpm typecheck` (tsc-rs), `pnpm test` (vitest), `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --all -- --check`. Two more:
 
-- `pnpm build` produces `dist/`.
+- `pnpm build` produces `dist/`. `pnpm size:check` then lists every chunk and fails when the entry chunk (`dist/assets/index-*.js`) is over 268,000 bytes (`tools/check-bundle.mjs`; see `docs/architecture/performance.md`).
 - `pnpm e2e` runs Playwright against `iptv-server` (port 7180) and `iptv-mock` (port 7290) with a fresh `./.e2e-data`. It needs `dist/` and uses installed Microsoft Edge by default (`PW_CHANNEL=chromium` switches to Playwright's bundled Chromium, which cannot play H.264).
 
 The performance tests run in release mode: `cargo test -p iptv-core --release --test m3u_perf` (50k channels) and `--test epg_perf` (120 MB XMLTV). `--test catalog_perf` checks that live list pages and searches over 50k channels answer in under 100 ms.
@@ -131,6 +134,7 @@ Press `?` in the app for the full list. The main ones:
 | C | Captions on / off (in fullscreen live TV: the channel panel) |
 | Shift+C | Subtitles menu: load a subtitle file, pick a track, change the look |
 | Z | Sleep timer: off, 15, 30, 45, 60, 90 minutes |
+| S | Take a screenshot (while a video plays; in a focused live channel list S still toggles the favorite) |
 | Shift+N | Add a source (Sources page) |
 | L | Add the focused channel to a custom list (live TV, list pages) |
 | F2 | Rename the focused channel (live TV, list pages) |
@@ -184,7 +188,7 @@ Settings > Backup exports and imports the IPTVnator playlist backup format (`ipt
 - The TV guide is empty after an update: this version clears the saved guide once on its first start (database migration 0007) and the next EPG refresh, which starts within a minute of start-up, downloads every guide again. Settings > Guide > "Refresh all guides" starts it at once.
 - Error codes: a failed source shows "Error code: X" on its card. `network` means the server could not be reached, `timeout` that it did not answer in time, `auth` that the credentials or MAC were rejected, `not_found` that the address is wrong, `invalid` that the response or the entered details are not usable, `unsupported` that the format or portal feature is not supported, `conflict` that another run of the same source is already going (or the run was cancelled), `server` that the provider answered with a server error (5xx) or a rate limit (429), so try again later, `engine_missing` that mpv was not found or would not run (see the mpv entry above), and `io`, `db` or `internal` a local file, database or app fault. Those last three are worth reporting with the logs.
 - Logs live in `%APPDATA%\com.philly.tsrustiptv\logs` (Settings > About > "Open log folder"). Secrets are redacted.
-- Reset settings: Settings > General > "Reset settings" puts every setting back to its default, including language, theme and player paths. Sources, favorites, history and downloads stay.
+- Reset settings: Settings > General > "Reset settings" puts every setting back to its default, including language, theme, player paths and the image cache limit. Sources, favorites, history and downloads stay, and the tour and What's new do not show again.
 
 ### Sources
 

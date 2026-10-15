@@ -13,6 +13,9 @@ import { expectNoHorizontalScroll, settle } from './helpers/layout';
 // (empty and with two tiles), My List and the parental controls section.
 // Run 2 (check 12): a custom list page, watch stats, the guide with its
 // search panel open, and the hidden-channels and rename dialogs.
+// Run 3 (check 11): the image cache row in Settings > General (loaded, not its skeleton), the
+// first-run tour (each of its three steps) and the What's new dialog, both opened from About.
+// Check 14: under reduced motion the dashboard hero does not rotate.
 
 const NAME = 'A11y Xtream';
 const VIEWPORTS = [
@@ -83,7 +86,15 @@ test.describe('accessibility and layout', () => {
           await expect(p.getByTestId('vod-series-detail').getByRole('heading', { level: 1 })).toBeVisible();
         },
       },
-      { name: 'settings', path: '/settings/general', ready: (p) => expect(p.getByRole('main')).toBeVisible() },
+      {
+        name: 'settings',
+        path: '/settings/general',
+        ready: async (p) => {
+          await expect(p.getByRole('main')).toBeVisible();
+          // Run 3: the image cache row with its numbers, not the loading skeleton.
+          await expect(p.getByTestId('image-cache-row').getByTestId('image-cache-size')).toBeVisible();
+        },
+      },
       { name: 'sources', path: '/sources', ready: (p) => expect(p.getByTestId('sources-page')).toBeVisible() },
       { name: 'multiview empty', path: '/multiview', ready: (p) => expect(p.getByTestId('multiview-page')).toBeVisible() },
       {
@@ -139,6 +150,26 @@ test.describe('accessibility and layout', () => {
           await expect(p.getByTestId('channel-rename-dialog')).toBeVisible();
         },
       },
+      // Run 3 C7, opened by hand from About (the automatic ones are marked seen for this run).
+      ...([1, 2, 3] as const).map((step) => ({
+        name: `tour step ${step}`,
+        path: '/settings/about',
+        ready: async (p: Page) => {
+          await p.getByTestId('about-tour').click();
+          const card = p.getByTestId('tour-card');
+          await expect(card).toBeVisible();
+          for (let n = 1; n < step; n++) await card.getByTestId('tour-next').click();
+          await expect(p.getByTestId('tour-progress')).toHaveText(`Step ${step} of 3`);
+        },
+      })),
+      {
+        name: "what's new",
+        path: '/settings/about',
+        ready: async (p) => {
+          await p.getByTestId('about-whats-new').click();
+          await expect(p.getByTestId('whats-new').getByTestId('whats-new-item').first()).toBeVisible();
+        },
+      },
     ];
   });
 
@@ -156,4 +187,21 @@ test.describe('accessibility and layout', () => {
       expect(failures, 'axe serious/critical violations').toEqual([]);
     });
   }
+
+  test('check 14: under reduced motion the dashboard hero does not rotate', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/dashboard');
+    const hero = page.getByTestId('dashboard-hero');
+    await expect(hero).toBeVisible();
+    // More than one slide, so there is something it could rotate to.
+    expect(await hero.locator('[data-hero-tab]').count()).toBeGreaterThan(1);
+    const shown = await hero.locator('[data-hero-tab][aria-selected="true"]').getAttribute('data-hero-tab');
+    await expect(hero).not.toHaveAttribute('data-rotating', /.*/);
+    await settle(page, 9000);
+    expect(await hero.locator('[data-hero-tab][aria-selected="true"]').getAttribute('data-hero-tab')).toBe(shown);
+    await expect(hero).not.toHaveAttribute('data-rotating', /.*/);
+    // Allowing motion again starts the rotation, so the attribute above means what it says.
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(hero).toHaveAttribute('data-rotating', 'true');
+  });
 });

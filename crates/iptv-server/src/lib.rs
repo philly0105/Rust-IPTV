@@ -13,6 +13,9 @@
 //!   every URI goes back through the proxy, and serves only media types
 //!   (anything else as a sandboxed attachment).
 //! - `GET /api/files/{downloadId}`: Range-capable serving of completed downloads.
+//! - `GET /api/img?url=&sourceId=`: posters, logos and backdrops through the
+//!   core's disk image cache ([`img`]), with `X-Image-Cache: hit|miss`, a
+//!   week of browser caching and the same sandbox headers as the proxy.
 //! - Everything else: the built UI (`dist/`) with SPA fallback and cache headers.
 //!
 //! The binary (`main.rs`) parses the CLI and calls [`router`]; integration
@@ -21,6 +24,7 @@
 pub mod api;
 pub mod files;
 pub mod guard;
+pub mod img;
 pub mod proxy;
 // recording:
 pub mod recordings;
@@ -154,6 +158,7 @@ pub fn router(server: Server) -> Router {
         .route("/health", get(api::health))
         .route("/proxy", get(proxy::handler))
         .route("/files/{id}", get(files::handler))
+        .route("/img", get(img::handler))
         // recording:
         .route("/recordings/{id}", get(recordings::handler))
         .route("/{*rest}", any(api::not_found))

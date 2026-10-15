@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "In fondo",
   "subtitleStyle.positionValue": "Alzati del {{value}}%",
   "subtitleStyle.preview": "Anteprima sottotitoli",
-  "subtitleStyle.previewText": "L'ultimo treno parte alle dieci.\nDovremmo andare adesso."
+  "subtitleStyle.previewText": "L'ultimo treno parte alle dieci.\nDovremmo andare adesso.",
+  "screenshot": "Cattura schermata",
+  "screenshotSaved": "Schermata salvata",
+  "screenshotDownloaded": "Salvata nei tuoi download",
+  "screenshotOpen": "Apri",
+  "screenshotOpenFailed": "Impossibile aprire la schermata",
+  "screenshotFailed": "Schermata non salvata",
+  "screenshotCors": "Il server del flusso non consente di copiarne l'immagine (nessuna autorizzazione CORS).",
+  "screenshotCorsMpv": "MPV integrato può catturarla: sceglilo in Impostazioni > Lettori.",
+  "screenshotNotReady": "Non c'è ancora un'immagine. Riprova quando il video è in riproduzione.",
+  "screenshotNoVideo": "La radio non ha immagini da catturare.",
+  "screenshotExternal": "Viene riprodotto in un lettore esterno. Usa il suo tasto per le schermate."
 }

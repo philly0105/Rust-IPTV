@@ -180,7 +180,8 @@ describe('what the banner shows', () => {
     expect(banner.getAttribute('role')).toBe('status');
     expect(screen.getByTestId('zap-number').textContent).toBe('1');
     expect(screen.getByTestId('zap-title').textContent).toBe('News 24');
-    expect(screen.getByTestId('zap-logo').getAttribute('src')).toBe('http://h/logo/101.png');
+    // Through the image cache (C3) first.
+    expect(screen.getByTestId('zap-logo').getAttribute('src')).toBe('/api/img?url=http%3A%2F%2Fh%2Flogo%2F101.png&sourceId=s1');
     expect(screen.getByTestId('zap-now').textContent).toBe('Evening News');
     expect(screen.getByTestId('zap-next').textContent).toBe('Weather');
     // 15 of 60 minutes aired.
@@ -203,6 +204,9 @@ describe('what the banner shows', () => {
     tune(news);
     render(<ZapBanner />);
     await advance(0);
+    // The cache URL fails: the logo's own URL once, then the icon.
+    fireEvent.error(screen.getByTestId('zap-logo'));
+    expect(screen.getByTestId('zap-logo').getAttribute('src')).toBe('http://h/logo/101.png');
     fireEvent.error(screen.getByTestId('zap-logo'));
     expect(screen.getByTestId('zap-logo-fallback')).toBeTruthy();
   });

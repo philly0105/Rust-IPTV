@@ -28,6 +28,8 @@ pub mod catchup;
 pub mod channeledit;
 pub mod downloads;
 pub mod epg;
+// imagecache: posters, logos and backdrops on disk (Run 3 contract C2).
+pub mod imagecache;
 // lists: custom channel lists (Run 2 contract C3).
 pub mod lists;
 pub mod m3u;
@@ -37,6 +39,8 @@ pub mod player;
 // recording:
 pub mod recording;
 pub mod remote;
+// screenshot: player frames saved to Pictures\Tsrust IPTV (Run 3 contract C6).
+pub mod screenshot;
 pub mod settings;
 pub mod sources;
 pub mod stalker;

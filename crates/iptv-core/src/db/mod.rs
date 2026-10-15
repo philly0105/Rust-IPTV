@@ -183,6 +183,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0016_watch_log",
         sql: include_str!("migrations/0016_watch_log.sql"),
     },
+    // imagecache: image_cache index of the on-disk image cache (Run 3 C2).
+    Migration {
+        version: 17,
+        name: "0017_image_cache",
+        sql: include_str!("migrations/0017_image_cache.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -547,6 +553,16 @@ mod tests {
             );
         }
         assert!(latest_version() >= 16);
+    }
+
+    /// Run 3 slot: the image cache index sits at 17, right after Run 2's last
+    /// migration.
+    #[test]
+    fn run3_migration_slot_is_reserved() {
+        let names: Vec<&str> = MIGRATIONS.iter().map(|m| m.name).collect();
+        assert_eq!(names.get(16).copied(), Some("0017_image_cache"));
+        assert_eq!(MIGRATIONS[16].version, 17);
+        assert!(latest_version() >= 17);
     }
 
     /// A database left at any earlier version (including one that stopped

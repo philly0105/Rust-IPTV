@@ -822,3 +822,28 @@ describe('watched movies (Run 2 C4)', () => {
     expect(store.isWatchedReplay({ ...row, ref: { sourceId: 's1', contentType: 'series', itemId: '9' } })).toBe(false);
   });
 });
+
+describe('query cache after saves (Run 3 C4)', () => {
+  it('recent.add refreshes `recent.` queries and a position save marks `positions.` stale', async () => {
+    const { queryClient } = await import('@/api/query');
+    queryClient.clear();
+    queryClient.setQueryData(['recent.list', null], []);
+    queryClient.setQueryData(['positions.continueWatching', null], []);
+    queryClient.setQueryData(['favorites.list', null], []);
+    const stale = (key: unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
+
+    await usePlayerStore.getState().play(vod('1'));
+    await flush();
+    expect(stale(['recent.list', null])).toBe(true);
+    expect(stale(['positions.continueWatching', null])).toBe(false);
+
+    store.reportStatus('playing');
+    store.reportProgress(42, 600);
+    usePlayerStore.getState().stop();
+    await flush();
+    expect(calls('positions.set')).toHaveLength(1);
+    expect(stale(['positions.continueWatching', null])).toBe(true);
+    expect(stale(['favorites.list', null])).toBe(false);
+    queryClient.clear();
+  });
+});

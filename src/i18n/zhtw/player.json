@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "最底部",
   "subtitleStyle.positionValue": "上移 {{value}}%",
   "subtitleStyle.preview": "字幕預覽",
-  "subtitleStyle.previewText": "末班車十點開。\n我們該走了。"
+  "subtitleStyle.previewText": "末班車十點開。\n我們該走了。",
+  "screenshot": "擷取畫面",
+  "screenshotSaved": "螢幕擷圖已儲存",
+  "screenshotDownloaded": "已儲存到你的下載資料夾",
+  "screenshotOpen": "開啟",
+  "screenshotOpenFailed": "無法開啟螢幕擷圖",
+  "screenshotFailed": "螢幕擷圖未儲存",
+  "screenshotCors": "這個串流的伺服器不允許複製畫面（沒有 CORS 許可）。",
+  "screenshotCorsMpv": "內嵌 MPV 可以擷取：請在「設定 > 播放器」中選擇它。",
+  "screenshotNotReady": "還沒有畫面。請在影片開始播放後再試一次。",
+  "screenshotNoVideo": "廣播沒有可擷取的畫面。",
+  "screenshotExternal": "正在外部播放器中播放。請使用該播放器本身的擷圖按鍵。"
 }

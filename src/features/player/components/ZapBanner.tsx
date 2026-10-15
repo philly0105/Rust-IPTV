@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type EpgNowNext, type EpgProgram, type ItemRef } from '@/api/types';
 import { formatClock, ms } from '@/features/live/lib/epgTime';
+import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
 import { safeImageUrl } from '../format';
@@ -65,12 +66,14 @@ function useClock(active: boolean): number {
   return now;
 }
 
-function Logo({ url, compact }: { url: string | undefined; compact: boolean }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
-  const src = safeImageUrl(url);
+/**
+ * The channel's logo: the guide's logo, else the item's own picture, each through the image
+ * cache (C3) and then its original URL once; the TV icon when none loads.
+ */
+function Logo({ urls, sourceId, compact }: { urls: readonly (string | undefined)[]; sourceId: string; compact: boolean }) {
+  const logo = useImageChain(urls.map(safeImageUrl), sourceId);
   const box = compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
-  if (!src || failed) {
+  if (!logo.url) {
     return (
       <span
         data-testid="zap-logo-fallback"
@@ -83,13 +86,13 @@ function Logo({ url, compact }: { url: string | undefined; compact: boolean }) {
   }
   return (
     <img
-      src={src}
+      src={logo.url}
       alt=""
       aria-hidden
       draggable={false}
       data-testid="zap-logo"
       className={cn('shrink-0 bg-white/8 object-contain p-1 ring-1 ring-white/10', box)}
-      onError={() => setFailed(true)}
+      onError={logo.onError}
     />
   );
 }
@@ -219,7 +222,7 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
 
   if (!shown || !source || !ref) return null;
   const number = info?.number;
-  const logo = info?.logoUrl ?? source.posterUrl;
+  const logos = [info?.logoUrl, source.posterUrl];
 
   return (
     <div
@@ -232,7 +235,7 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
       data-mpv-overlay=""
       data-mpv-reserved=""
       className={cn(
-        'player-glass player-glass-edge pointer-events-auto absolute z-[12] border motion-safe:animate-pop-in',
+        'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-[12] border motion-safe:animate-pop-in',
         // Full: a size container, so the guide rows can fit a phone-width banner.
         compact ? 'rounded-md px-2.5 py-2' : '@container w-[min(30rem,calc(100%-1.5rem))] rounded-xl p-3 sm:p-3.5',
         className,
@@ -244,7 +247,7 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className={cn('flex min-w-0 items-start', compact ? 'gap-2' : 'gap-3')}>
-        <Logo url={logo} compact={compact} />
+        <Logo urls={logos} sourceId={ref.sourceId} compact={compact} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             {number !== undefined && (

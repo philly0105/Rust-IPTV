@@ -291,6 +291,8 @@
   "aboutActionFailed": "Не ўдалося адкрыць папку",
   "aboutServerNote": "Працуе як сервер. Папкі знаходзяцца на хост-машыне.",
   "aboutCredits": "Створана на ідэях IPTVnator. Даныя пра фільмы і серыялы з TMDB.",
+  "aboutWhatsNew": "Што новага",
+  "aboutTakeTour": "Паглядзець агляд",
 
   "errorRequired": "Абавязковае поле.",
   "errorUrlInvalid": "Увядзіце поўны адрас, напрыклад http://example.com/guide.xml.",
@@ -433,5 +435,21 @@
   "reminderActionNotify": "Апавясціць",
   "reminderActionSwitch": "Пераключыць канал",
   "reminderActionNotifyHint": "Паказвае апавяшчэнне з кнопкай «Глядзець».",
-  "reminderActionSwitchHint": "Уключае канал і выводзіць праграму на пярэдні план. Гэта можна адрабіць."
+  "reminderActionSwitchHint": "Уключае канал і выводзіць праграму на пярэдні план. Гэта можна адрабіць.",
+  "imageCache": "Кэш выяў",
+  "imageCacheHint": "Постары, лагатыпы і фоны захоўваюцца на гэтай прыладзе, таму ўжо прагледжаныя старонкі адкрываюцца адразу. Калі кэш дасягае ліміту, месца вызваляюць выявы, якімі найдаўжэй не карысталіся.",
+  "imageCacheUsage": "{{used}} з {{limit}}",
+  "imageCachePictures_one": "{{count, number}} выява",
+  "imageCachePictures_few": "{{count, number}} выявы",
+  "imageCachePictures_many": "{{count, number}} выяў",
+  "imageCachePictures_other": "{{count, number}} выявы",
+  "imageCacheEmpty": "Пуста. Выявы захоўваюцца падчас прагляду.",
+  "imageCacheLimit": "Ліміт",
+  "imageCacheClear": "Ачысціць кэш",
+  "imageCacheClearTitle": "Ачысціць кэш выяў?",
+  "imageCacheClearBody": "Будзе выдалена {{size}} захаваных выяў. Кожная загрузіцца зноў, калі спатрэбіцца.",
+  "imageCacheCleared": "Кэш выяў ачышчаны",
+  "imageCacheClearFailed": "Не ўдалося ачысціць кэш выяў",
+  "imageCacheLoadFailed": "Не ўдалося прачытаць кэш выяў: {{message}}",
+  "imageCacheUnavailable": "На гэтым серверы няма кэша выяў, таму выявы загружаюцца непасрэдна ў пастаўшчыкоў."
 }

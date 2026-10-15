@@ -286,6 +286,8 @@
   "aboutActionFailed": "No se pudo abrir esa carpeta",
   "aboutServerNote": "Ejecutándose como servidor. Las carpetas están en la máquina anfitriona.",
   "aboutCredits": "Basado en ideas de IPTVnator. Datos de películas y series de TMDB.",
+  "aboutWhatsNew": "Novedades",
+  "aboutTakeTour": "Hacer el recorrido",
 
   "errorRequired": "Obligatorio.",
   "errorUrlInvalid": "Introduce una dirección completa, como http://example.com/guide.xml.",
@@ -428,5 +430,20 @@
   "reminderActionNotify": "Avisarme",
   "reminderActionSwitch": "Cambiar de canal",
   "reminderActionNotifyHint": "Muestra una notificación con el botón Ver ahora.",
-  "reminderActionSwitchHint": "Sintoniza el canal y trae la app al frente. Puedes deshacerlo."
+  "reminderActionSwitchHint": "Sintoniza el canal y trae la app al frente. Puedes deshacerlo.",
+  "imageCache": "Caché de imágenes",
+  "imageCacheHint": "Los pósteres, logotipos y fondos se guardan en este dispositivo para que las páginas que ya viste aparezcan al instante. Cuando la caché llega a su límite, las imágenes que llevan más tiempo sin usarse dejan sitio.",
+  "imageCacheUsage": "{{used}} de {{limit}}",
+  "imageCachePictures_one": "{{count, number}} imagen",
+  "imageCachePictures_many": "{{count, number}} de imágenes",
+  "imageCachePictures_other": "{{count, number}} imágenes",
+  "imageCacheEmpty": "Vacía. Las imágenes se guardan mientras navegas.",
+  "imageCacheLimit": "Límite",
+  "imageCacheClear": "Vaciar caché",
+  "imageCacheClearTitle": "¿Vaciar la caché de imágenes?",
+  "imageCacheClearBody": "Se eliminarán {{size}} de imágenes guardadas. Cada una se volverá a descargar la próxima vez que se muestre.",
+  "imageCacheCleared": "Caché de imágenes vaciada",
+  "imageCacheClearFailed": "No se pudo vaciar la caché de imágenes",
+  "imageCacheLoadFailed": "No se pudo leer la caché de imágenes: {{message}}",
+  "imageCacheUnavailable": "Este servidor no tiene caché de imágenes, así que las imágenes se cargan directamente desde cada proveedor."
 }

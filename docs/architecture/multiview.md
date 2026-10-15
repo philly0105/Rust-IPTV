@@ -79,7 +79,7 @@ Chrome follows the broadcast multiviewer pattern:
 - A label strip along the bottom shows the slot plate, logo, number, name and the current programme from `epg.nowNext`.
 - The tile with sound gets a tally: an accent edge and a lit slot plate.
 - Tool buttons sit at the top end: listen, move, replace and close. They appear on hover and focus, and always on touch screens.
-- The chrome is glass on video: C8 tokens (`--color-glass*`, `--color-on-glass`) with `var()` fallbacks.
+- The chrome is glass on video: C8 tokens (`--color-glass*`, `--color-on-glass`) with `var()` fallbacks. The label strip and pills, on screen all the time over up to four videos, use the solid `GLASS` (strong fill, no blur); only the hover tools and the error and lock panels use `GLASS_BLUR` (`glass-blur`, Run 3 C5). Both are in `styles.ts`.
 - Panels with actions (error, lock, lock-check failure, source removed) are centred in the band above the label strip, so the strip never covers their buttons. Every slot is 16:9, so the tile's width (`@container/tile`) also gives its height, and the panel grows in steps: below 20rem the icon sits beside the headline and the help line is left out; from 20rem the icon stands above it; from 26rem the help line shows.
 
 ## Page

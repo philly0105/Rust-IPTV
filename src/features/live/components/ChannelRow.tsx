@@ -92,7 +92,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-3 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       >
         <span className="w-8 shrink-0 text-end text-xs tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
-        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} /> : null}
+        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span dir="auto" className={`truncate text-sm text-match-parent ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
           {cur ? (

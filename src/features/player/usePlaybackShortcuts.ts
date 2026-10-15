@@ -20,6 +20,11 @@ export const SEEK_STEP_JL = 10;
 /** Volume change per arrow press or wheel notch. */
 export const VOLUME_STEP = 0.05;
 
+/** Takes a screenshot (C6), loading the capture code on first use so it stays out of the entry chunk. */
+export function screenshot(): Promise<void> {
+  return import('./screenshot').then((m) => m.takeScreenshot());
+}
+
 /**
  * Changes the volume by `steps` steps (negative = quieter) and shows the readout: the arrow
  * keys and the wheel over the native video both go through here.
@@ -50,8 +55,9 @@ export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'play
 
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down; and the player
- * slice's j/l, g/h, i, b, shift+b, shift+p, z for the sleep timer, and shift+c for the
- * Subtitles menu). Registered once by the dock; active while something plays in-app.
+ * slice's j/l, g/h, i, b, shift+b, shift+p, z for the sleep timer, shift+c for the
+ * Subtitles menu, and s for a screenshot). Registered once by the dock; active while
+ * something plays in-app.
  */
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
   const { t, i18n } = useTranslation('player');
@@ -212,6 +218,12 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     { ...base, description: t('shortcutSleepTimer') },
   );
   useShortcut('i', guard('letter', () => void toggleStreamInfo()), { ...base, enabled: active && video, description: t('shortcutStreamInfo') });
+  // Screenshot (C6): video only. A focused Live list row or multi-view tile keeps its own S.
+  useShortcut('s', guard('letter', () => void screenshot().catch(() => showOsd(t('screenshotFailed')))), {
+    ...base,
+    enabled: active && video,
+    description: t('screenshot'),
+  });
   useShortcut(
     'b',
     guard('letter', () => {

@@ -129,7 +129,7 @@ export function PickerDialog({ channel, onClose }: { channel: Channel; onClose()
       }
     >
       <div className="mb-3 flex items-center gap-3 rounded-md border border-divider bg-surface-2 p-2">
-        <ChannelLogo src={channel.logoUrl} name={name} size={36} />
+        <ChannelLogo src={channel.logoUrl} name={name} size={36} sourceId={channel.ref.sourceId} />
         <div className="min-w-0">
           <p dir="auto" className="truncate text-sm font-medium text-fg">
             {name}

@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Tout en bas",
   "subtitleStyle.positionValue": "Remontés de {{value}} %",
   "subtitleStyle.preview": "Aperçu des sous-titres",
-  "subtitleStyle.previewText": "Le dernier train part à dix heures.\nOn devrait y aller."
+  "subtitleStyle.previewText": "Le dernier train part à dix heures.\nOn devrait y aller.",
+  "screenshot": "Prendre une capture d'écran",
+  "screenshotSaved": "Capture d'écran enregistrée",
+  "screenshotDownloaded": "Enregistrée dans vos téléchargements",
+  "screenshotOpen": "Ouvrir",
+  "screenshotOpenFailed": "Impossible d'ouvrir la capture d'écran",
+  "screenshotFailed": "Capture d'écran non enregistrée",
+  "screenshotCors": "Le serveur du flux n'autorise pas la copie de son image (aucune autorisation CORS).",
+  "screenshotCorsMpv": "MPV embarqué peut la prendre : choisissez-le dans Paramètres > Lecteurs.",
+  "screenshotNotReady": "Pas encore d'image. Réessayez dès que la vidéo est lue.",
+  "screenshotNoVideo": "La radio n'a pas d'image à capturer.",
+  "screenshotExternal": "La lecture se fait dans un lecteur externe. Utilisez sa propre touche de capture d'écran."
 }

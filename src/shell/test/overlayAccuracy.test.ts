@@ -53,6 +53,8 @@ describe('shortcut overlay accuracy', () => {
     for (const c of ['pageup', 'pagedown', 'home', 'end']) expect(has(c, 'Seek bar'), c).toBe(true);
     for (const c of ['home', 'end', 'pageup', 'pagedown', 'delete', 'arrowleft']) expect(has(c, 'Dialogs and lists'), c).toBe(true);
     expect(has('n', 'Playback')).toBe(true);
+    // Run 3 C6: the screenshot key sits under Playback beside the Live, Multi-view and VOD uses of `s`.
+    expect(DOCUMENTED_SHORTCUTS.some((d) => d.combo === 's' && d.area === 'Playback' && d.descKey === 'player:screenshot')).toBe(true);
   });
 
   it('says list reordering keys work in the dialogs that bind them (wiring-r1 F3)', () => {

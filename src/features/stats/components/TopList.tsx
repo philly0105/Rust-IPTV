@@ -52,6 +52,7 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
           <Rank n={i + 1} />
           <Poster
             src={item.posterUrl ?? null}
+            sourceId={item.ref.sourceId}
             alt=""
             label={item.title}
             aspect="square"
@@ -99,7 +100,7 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
             className="flex min-w-0 flex-1 items-center gap-3 rounded-md p-0.5 hover:bg-surface-2 motion-safe:transition-colors"
             data-testid="stats-open"
           >
-            <Poster src={item.posterUrl ?? null} alt="" label={item.title} aspect="poster" rounded="sm" className="w-9 shrink-0" />
+            <Poster src={item.posterUrl ?? null} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" rounded="sm" className="w-9 shrink-0" />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{item.title}</span>
               {item.sourceName && <span className="block truncate text-xs text-fg-subtle">{item.sourceName}</span>}

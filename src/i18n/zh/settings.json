@@ -281,6 +281,8 @@
   "aboutActionFailed": "无法打开该文件夹",
   "aboutServerNote": "正以服务器模式运行。文件夹位于主机上。",
   "aboutCredits": "基于 IPTVnator 的理念构建。电影和剧集数据来自 TMDB。",
+  "aboutWhatsNew": "新功能",
+  "aboutTakeTour": "开始导览",
 
   "errorRequired": "必填。",
   "errorUrlInvalid": "请输入完整地址，例如 http://example.com/guide.xml。",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "通知我",
   "reminderActionSwitch": "切换频道",
   "reminderActionNotifyHint": "显示带有立即观看按钮的通知。",
-  "reminderActionSwitchHint": "切换到该频道并将应用调到前台。可以撤销。"
+  "reminderActionSwitchHint": "切换到该频道并将应用调到前台。可以撤销。",
+  "imageCache": "图片缓存",
+  "imageCacheHint": "海报、台标和背景图会保存在此设备上，浏览过的页面可立即显示。缓存达到上限时，最久未使用的图片会被移除。",
+  "imageCacheUsage": "{{used}} / {{limit}}",
+  "imageCachePictures_one": "{{count, number}} 张图片",
+  "imageCachePictures_other": "{{count, number}} 张图片",
+  "imageCacheEmpty": "为空。浏览时会自动保存图片。",
+  "imageCacheLimit": "上限",
+  "imageCacheClear": "清除缓存",
+  "imageCacheClearTitle": "清除图片缓存？",
+  "imageCacheClearBody": "这将删除已保存的图片，共 {{size}}。每张图片会在下次显示时重新下载。",
+  "imageCacheCleared": "图片缓存已清除",
+  "imageCacheClearFailed": "无法清除图片缓存",
+  "imageCacheLoadFailed": "无法读取图片缓存：{{message}}",
+  "imageCacheUnavailable": "此服务器没有图片缓存，图片将直接从各提供商加载。"
 }

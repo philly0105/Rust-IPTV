@@ -5,12 +5,22 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
+import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
 import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
+
+/** A row's channel logo through the image cache (C3), then its own URL once, then a blank tile. */
+function RowLogo({ url, sourceId }: { url?: string | null; sourceId: string }) {
+  const logo = useImageChain([safeImageUrl(url ?? undefined)], sourceId);
+  if (!logo.url) return <span className="size-8 shrink-0 rounded-sm bg-white/5" aria-hidden />;
+  return (
+    <img src={logo.url} alt="" loading="lazy" onError={logo.onError} className="size-8 shrink-0 rounded-sm bg-white/5 object-contain" />
+  );
+}
 
 const PAGE = 100;
 const ROW = 52;
@@ -241,7 +251,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          'player-glass-strong absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-white shadow-2',
+          'player-glass-strong glass-blur absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-white shadow-2',
           'motion-safe:transition-transform motion-safe:duration-200',
           open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
         )}
@@ -318,11 +328,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         <span className="w-10 shrink-0 text-end font-display text-sm text-white/70 tabular-nums">
                           {c.number ?? ''}
                         </span>
-                        {safeImageUrl(c.logoUrl) ? (
-                          <img src={safeImageUrl(c.logoUrl)} alt="" loading="lazy" className="size-8 shrink-0 rounded-sm bg-white/5 object-contain" />
-                        ) : (
-                          <span className="size-8 shrink-0 rounded-sm bg-white/5" aria-hidden />
-                        )}
+                        <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} />
                         {/* guide: name over the programme on now. */}
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span dir="auto" className="truncate text-sm text-match-parent">{c.name}</span>

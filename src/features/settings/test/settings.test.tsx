@@ -258,3 +258,25 @@ describe('Section-level error states', () => {
     await waitFor(() => expect(screen.queryByTestId('remote-status-error')).toBeNull());
   });
 });
+
+describe('Run 3 wiring', () => {
+  it('General shows the image cache row', async () => {
+    rpcMock.handlers['images.stats'] = () => ({ bytes: 3 * 1024 * 1024, files: 12, maxBytes: 500 * 1024 * 1024 });
+    renderAt(settingsRoutes, '/settings/general');
+    const row = await screen.findByTestId('image-cache-row');
+    expect(await within(row).findByTestId('image-cache-size')).toBeTruthy();
+  });
+
+  it("About opens What's new and the tour", async () => {
+    const { resetOnboardingStore, useOnboardingStore } = await import('@/features/onboarding/store');
+    resetOnboardingStore();
+    rpcMock.handlers['app.info'] = () => ({ version: '0.1.0', dataDir: 'C:/data', platform: 'windows', isDesktop: false, logFile: 'C:/data/log.txt' });
+    renderAt(settingsRoutes, '/settings/about');
+    fireEvent.click(await screen.findByTestId('about-whats-new'));
+    expect(useOnboardingStore.getState().overlay).toEqual({ kind: 'whatsNew', since: null, auto: false });
+    resetOnboardingStore();
+    fireEvent.click(screen.getByTestId('about-tour'));
+    expect(useOnboardingStore.getState().overlay).toEqual({ kind: 'tour', auto: false });
+    resetOnboardingStore();
+  });
+});

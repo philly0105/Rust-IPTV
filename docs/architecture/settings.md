@@ -10,7 +10,7 @@ Code: `crates/iptv-core/src/settings/`. Tests: `crates/iptv-core/tests/settings_
 | --- | --- |
 | `settings.get` | Current settings. |
 | `settings.update {patch}` | RFC 7396 merge patch over the current JSON: objects merge recursively, `null` removes a key (so the field falls back to its default or `None`), anything else replaces. The result is deserialized, normalized and validated, then persisted, cached in `state.settings`, and announced with `settings.changed` (payload: the full settings). A patch that changes nothing writes nothing and emits nothing. |
-| `settings.reset` | Writes `Settings::default()` and emits `settings.changed`. |
+| `settings.reset` | Writes `Settings::default()` and emits `settings.changed`. `tourCompleted` and `lastSeenVersion` keep their values: they record what the user has already seen, so a reset neither replays the first-run tour nor shows What's new for an unchanged version (the tour can still be replayed by hand). `imageCacheMaxMb` resets to 500 like any preference. |
 | `settings.detectPlayers` | `crate::player::detect(&settings)` on the blocking pool. Returns `{mpvPath?, vlcPath?}`. |
 | `window.getState` | `app_state` key `window_state`, or `null`. Unreadable JSON reads as `null`. |
 | `window.setState {state}` | Validates and stores `{x?, y?, width, height, maximized}`. |
@@ -32,6 +32,8 @@ Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `download
 - `recordingPaddingBeforeMinutes` 0..=60, `recordingPaddingAfterMinutes` 0..=120, `reminderLeadMinutes` 0..=60.
 - `uiScale` is rounded to 4 decimal places first (slider noise such as `1.2500000000000002`), then must be finite and in 0.9..=1.25 (`UI_SCALE_RANGE`).
 - `subtitlePosition` must be a whole number in 0..=40 (`SUBTITLE_POSITION_RANGE`); a fraction or a negative number fails deserialization.
+- `imageCacheMaxMb` must be a whole number in 50..=5000 (`IMAGE_CACHE_MAX_MB_RANGE`).
+- `lastSeenVersion` must be `''` or 1..=32 characters of `[0-9A-Za-z.+-]` (a version such as `0.1.0` or `1.2.0-beta.1+42`).
 - Unknown enum values or wrong types fail deserialization.
 - Window state: width and height 1..=32768 px, and |x|, |y| <= 100000.
 
@@ -74,10 +76,13 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `subtitleBackground` | `"box"` | Behind subtitle text: `shadow` (a text shadow only), `box` (a translucent box) or `solid` (an opaque black box). |
 | `subtitlePosition` | `0` | Percent of the picture height subtitles are raised from the bottom, a whole number 0..40 (`SUBTITLE_POSITION_RANGE`), else `Invalid`. |
 | `vodHideWatched` | `false` | The movie and series grids' Hide watched toggle (Shift+W): `catalog.movies` / `catalog.series` are asked with `hideWatched`. See vod-browsing.md. |
+| `imageCacheMaxMb` | `500` | Size cap of the poster and logo cache in MB, 50..5000, else `Invalid`. Applies in server mode too (to the server's cache). Settings > General, image cache row (250 MB to 5 GB); see image-cache.md. |
+| `tourCompleted` | `false` | The first-run tour was finished or skipped, so it does not start on its own again. Kept by `settings.reset`. See onboarding.md. |
+| `lastSeenVersion` | `""` | The app version whose What's new the user has seen; `''` on a fresh profile. Kept by `settings.reset`. See onboarding.md. |
 
 Parental controls are not part of `Settings`: their options and PIN live in the `parental_config` table and change only through the `parental.*` commands (see parental.md); Settings > Parental controls is their page.
 
-`backup::APP_SETTING_KEYS` lists the fields that round-trip through `backup.export` / `backup.import`: `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields (`recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`), the five appearance and playback fields (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`), and Run 2's four subtitle fields and `vodHideWatched` (`subtitleSize`, `subtitleColor`, `subtitleBackground`, `subtitlePosition`, `vodHideWatched`): 24 keys. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md).
+`backup::APP_SETTING_KEYS` lists the fields that round-trip through `backup.export` / `backup.import`: `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields (`recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`), the five appearance and playback fields (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`), and Run 2's four subtitle fields and `vodHideWatched` (`subtitleSize`, `subtitleColor`, `subtitleBackground`, `subtitlePosition`, `vodHideWatched`): 24 keys. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are left out: they describe this machine's playback and network setup (see backup.md). Run 3's three fields (`imageCacheMaxMb`, `tourCompleted`, `lastSeenVersion`) are machine-local too and also left out: a cache cap belongs to this disk, and the onboarding markers to this install.
 
 Stored JSON from older builds reads with these defaults (struct-level `#[serde(default)]`).
 

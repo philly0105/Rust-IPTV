@@ -6,6 +6,11 @@
 //! (same SSRF guard, header injection, Range pass-through, and HLS rewriting)
 //! on `127.0.0.1:<random port>` inside the app process.
 //!
+//! It also serves the image cache route next to it (`/<token>/api/img`, the
+//! same `iptv_server::img::handler` as server mode's `/api/img`): posters and
+//! logos load from `data_dir/image-cache` after the first view, with
+//! `X-Image-Cache: hit|miss` (exposed to the webview through CORS).
+//!
 //! Hardening, since any local program or web page can reach a loopback port:
 //! - `loopback_host_only`: the `Host` header must be a loopback name, which
 //!   defeats DNS rebinding.
@@ -34,7 +39,7 @@ use axum::routing::get;
 use axum::Router;
 use iptv_core::rpc::RpcRouter;
 use iptv_core::AppState;
-use iptv_server::{guard, proxy, Server, ServerOptions};
+use iptv_server::{guard, img, proxy, Server, ServerOptions};
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
@@ -140,14 +145,20 @@ pub fn router(state: Arc<AppState>, token: &str) -> Router {
         }))
         .allow_methods([Method::GET, Method::HEAD])
         .allow_headers([RANGE, HeaderName::from_static("if-range")])
-        .expose_headers([CONTENT_RANGE, CONTENT_LENGTH, ACCEPT_RANGES, CONTENT_TYPE]);
-    let api =
-        Router::new()
-            .route("/proxy", get(proxy::handler))
-            .layer(middleware::from_fn_with_state(
-                server.clone(),
-                guard::api_guard,
-            ));
+        .expose_headers([
+            CONTENT_RANGE,
+            CONTENT_LENGTH,
+            ACCEPT_RANGES,
+            CONTENT_TYPE,
+            img::X_IMAGE_CACHE,
+        ]);
+    let api = Router::new()
+        .route("/proxy", get(proxy::handler))
+        .route("/img", get(img::handler))
+        .layer(middleware::from_fn_with_state(
+            server.clone(),
+            guard::api_guard,
+        ));
     let token: Arc<str> = Arc::from(token);
     Router::new()
         .nest(&format!("/{token}/api"), api)
@@ -285,9 +296,57 @@ URI=\"/T/api/proxy?url=k\"
             "http://tauri.localhost"
         );
 
-        // Only the proxy route exists.
+        // Only the proxy and image routes exist.
         let r = call(&app, None, "127.0.0.1:1", &format!("/{T}/api/rpc/app.info")).await;
         assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn image_route_caches_behind_the_token_and_exposes_the_cache_header() {
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 2 3\"/>";
+        let upstream = Router::new().route(
+            "/poster.svg",
+            get(move || async move { ([(CONTENT_TYPE, "image/svg+xml")], svg) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+
+        let (_dir, app) = app().await;
+        let q = format!("url=http%3A%2F%2F127.0.0.1%3A{port}%2Fposter.svg");
+        let path = format!("/{T}/api/img?{q}");
+        for expected in ["miss", "hit"] {
+            let r = call(&app, Some("http://tauri.localhost"), "127.0.0.1:1", &path).await;
+            assert_eq!(r.status(), StatusCode::OK, "{expected}");
+            assert_eq!(r.headers()[CONTENT_TYPE], "image/svg+xml");
+            assert_eq!(r.headers()["x-image-cache"], expected);
+            assert_eq!(r.headers()["content-security-policy"], proxy::SANDBOX_CSP);
+            assert_eq!(
+                r.headers()["access-control-allow-origin"],
+                "http://tauri.localhost"
+            );
+            let exposed = r.headers()["access-control-expose-headers"]
+                .to_str()
+                .unwrap()
+                .to_ascii_lowercase();
+            assert!(exposed.contains("x-image-cache"), "{exposed}");
+            let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(body, svg.as_bytes());
+        }
+
+        // A no-cors <img> from the webview (no Origin) works too.
+        let r = call(&app, None, "127.0.0.1:1", &path).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        // Without the launch token, or from another page: refused.
+        let r = call(&app, None, "127.0.0.1:1", &format!("/api/img?{q}")).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let r = call(&app, Some("https://evil.example"), "127.0.0.1:1", &path).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // Bad URL: 400 from the handler.
+        let r = call(&app, None, "127.0.0.1:1", &format!("/{T}/api/img?url=nope")).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

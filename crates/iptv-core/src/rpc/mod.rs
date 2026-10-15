@@ -184,6 +184,10 @@ pub fn build_router() -> RpcRouter {
     crate::lists::rpc::register(&mut r);
     // stats: watch statistics (Run 2 C7).
     crate::stats::rpc::register(&mut r);
+    // imagecache: disk image cache stats and clear (Run 3 C2).
+    crate::imagecache::rpc::register(&mut r);
+    // screenshot: player frames to Pictures\Tsrust IPTV (Run 3 C6).
+    crate::screenshot::rpc::register(&mut r);
     r
 }
 
@@ -217,6 +221,9 @@ pub async fn init_all(state: Arc<AppState>) -> CoreResult<()> {
     run_init("lists", crate::lists::init(state.clone())).await;
     // stats: prunes watch log rows older than 90 days.
     run_init("stats", crate::stats::init(state.clone())).await;
+    // imagecache: loads the running byte total and reconciles rows and files
+    // in the background.
+    run_init("imagecache", crate::imagecache::init(state.clone())).await;
     run_init("player", crate::player::init(state)).await;
     tracing::info!("module init complete");
     Ok(())
@@ -334,7 +341,7 @@ mod tests {
             .collect();
 
         // Every module's own command list is registered.
-        let module_lists: [&[&str]; 11] = [
+        let module_lists: [&[&str]; 13] = [
             crate::downloads::rpc::COMMANDS,
             crate::player::rpc::COMMANDS,
             &crate::remote::rpc::COMMANDS,
@@ -349,6 +356,9 @@ mod tests {
             crate::channeledit::rpc::COMMANDS,
             crate::lists::rpc::COMMANDS,
             crate::stats::rpc::COMMANDS,
+            // imagecache, screenshot (Run 3):
+            crate::imagecache::rpc::COMMANDS,
+            crate::screenshot::rpc::COMMANDS,
         ];
         for list in module_lists {
             for c in list {
@@ -429,6 +439,37 @@ mod tests {
         .chain(crate::channeledit::rpc::COMMANDS)
         .chain(crate::lists::rpc::COMMANDS)
         .chain(crate::stats::rpc::COMMANDS)
+        {
+            assert!(r.contains(c), "{c} is not registered");
+        }
+    }
+
+    /// Every Run 3 command is in the router from wave 0 on (as a stub until
+    /// its module lands), under exactly the contract's names.
+    #[test]
+    fn run3_commands_are_registered() {
+        let sorted = |list: &[&'static str]| {
+            let mut v = list.to_vec();
+            v.sort_unstable();
+            v
+        };
+        assert_eq!(
+            sorted(crate::imagecache::rpc::COMMANDS),
+            ["images.clear", "images.stats"]
+        );
+        assert_eq!(
+            sorted(crate::screenshot::rpc::COMMANDS),
+            [
+                "screenshot.mpv",
+                "screenshot.open",
+                "screenshot.reveal",
+                "screenshot.save"
+            ]
+        );
+        let r = build_router();
+        for c in crate::imagecache::rpc::COMMANDS
+            .iter()
+            .chain(crate::screenshot::rpc::COMMANDS)
         {
             assert!(r.contains(c), "{c} is not registered");
         }

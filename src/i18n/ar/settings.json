@@ -301,6 +301,8 @@
   "aboutActionFailed": "تعذّر فتح هذا المجلد",
   "aboutServerNote": "يعمل كخادم. المجلدات موجودة على الجهاز المضيف.",
   "aboutCredits": "مبني على أفكار من IPTVnator. بيانات الأفلام والمسلسلات من TMDB.",
+  "aboutWhatsNew": "ما الجديد",
+  "aboutTakeTour": "ابدأ الجولة",
 
   "errorRequired": "مطلوب.",
   "errorUrlInvalid": "أدخل عنوانًا كاملًا، مثل http://example.com/guide.xml.",
@@ -443,5 +445,23 @@
   "reminderActionNotify": "إشعاري",
   "reminderActionSwitch": "تبديل القناة",
   "reminderActionNotifyHint": "يعرض إشعارًا مع زر شاهد الآن.",
-  "reminderActionSwitchHint": "ينتقل إلى القناة ويُظهر التطبيق في المقدمة. يمكنك التراجع."
+  "reminderActionSwitchHint": "ينتقل إلى القناة ويُظهر التطبيق في المقدمة. يمكنك التراجع.",
+  "imageCache": "ذاكرة الصور المؤقتة",
+  "imageCacheHint": "تُحفظ الملصقات والشعارات والخلفيات على هذا الجهاز، فتظهر الصفحات التي شاهدتها من قبل فورًا. وعندما تبلغ الذاكرة المؤقتة حدّها، تُحذف الصور التي لم تُستخدم منذ أطول مدة لإفساح المجال.",
+  "imageCacheUsage": "{{used}} من {{limit}}",
+  "imageCachePictures_zero": "لا توجد صور",
+  "imageCachePictures_one": "صورة واحدة",
+  "imageCachePictures_two": "صورتان",
+  "imageCachePictures_few": "{{count, number}} صور",
+  "imageCachePictures_many": "{{count, number}} صورة",
+  "imageCachePictures_other": "{{count, number}} صورة",
+  "imageCacheEmpty": "فارغة. تُحفظ الصور أثناء التصفح.",
+  "imageCacheLimit": "الحد",
+  "imageCacheClear": "مسح الذاكرة المؤقتة",
+  "imageCacheClearTitle": "هل تريد مسح ذاكرة الصور المؤقتة؟",
+  "imageCacheClearBody": "سيؤدي هذا إلى حذف {{size}} من الصور المحفوظة. ستُنزَّل كل صورة من جديد في المرة التالية التي تظهر فيها.",
+  "imageCacheCleared": "تم مسح ذاكرة الصور المؤقتة",
+  "imageCacheClearFailed": "تعذّر مسح ذاكرة الصور المؤقتة",
+  "imageCacheLoadFailed": "تعذّرت قراءة ذاكرة الصور المؤقتة: {{message}}",
+  "imageCacheUnavailable": "لا يحتوي هذا الخادم على ذاكرة مؤقتة للصور، لذا تُحمَّل الصور مباشرة من كل مزوّد."
 }

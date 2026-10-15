@@ -190,7 +190,7 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
-        <ChannelLogo src={channel.logoUrl} name={name} size={44} />
+        <ChannelLogo src={channel.logoUrl} name={name} size={44} sourceId={channel.ref.sourceId} />
         <div className="min-w-0 flex-1">
           <p dir="auto" className="truncate text-lg font-semibold text-fg">
             {name}

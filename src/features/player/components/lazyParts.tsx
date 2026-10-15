@@ -74,3 +74,8 @@ export const RadioPlayer = lazyPart(() => import('./RadioPlayer').then((m) => m.
 /** The Subtitles submenu and its compact style view (C6). */
 export const SubtitleTrackMenu = lazyPart(() => import('./SubtitleMenu').then((m) => m.SubtitleTrackMenu));
 export const SubtitleStyleMenu = lazyPart(() => import('./SubtitleMenu').then((m) => m.SubtitleStyleMenu));
+/** The camera button (Run 3 C6) and the capture code behind it; a same-size gap while it loads. */
+export const ScreenshotButton = lazyPart(
+  () => import('./ScreenshotButton').then((m) => m.ScreenshotButton),
+  (p) => <span aria-hidden className={p.stage ? 'size-9' : 'size-10 shrink-0'} />,
+);

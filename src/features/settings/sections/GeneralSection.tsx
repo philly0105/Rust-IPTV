@@ -11,6 +11,7 @@ import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } fro
 import { clampRating, diffSettings, railsPatch, type SettingsPatch } from '../lib/patch';
 import { useResetSettings } from '../lib/useUpdateSettings';
 import { DownloadsFolderRow } from './DownloadsFolderRow';
+import { ImageCacheRow } from './ImageCacheRow';
 import { RecordingsFolderRow } from './RecordingsFolderRow';
 // account:
 import { SourceRefreshGroup } from './SourceRefreshGroup';
@@ -228,6 +229,11 @@ export function GeneralSection({ settings, update }: SectionProps) {
       <SettingsGroup title={t('downloads')} description={t('downloadsHint')}>
         <DownloadsFolderRow custom={Boolean(settings.downloadsDir?.trim())} />
         <RecordingsFolderRow value={extra.recordingsDir} update={update} />
+      </SettingsGroup>
+
+      {/* Run 3 C3: the disk image cache (size against the cap, the cap, Clear). Server mode has one too. */}
+      <SettingsGroup>
+        <ImageCacheRow />
       </SettingsGroup>
 
       <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>

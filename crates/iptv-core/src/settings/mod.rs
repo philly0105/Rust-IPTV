@@ -65,6 +65,11 @@ const UI_SCALE_DECIMALS: i32 = 4;
 /// Accepted `subtitlePosition` range: percent of the picture height subtitles
 /// are raised from the bottom (mpv `sub-pos = 100 - position`).
 pub const SUBTITLE_POSITION_RANGE: std::ops::RangeInclusive<u32> = 0..=40;
+// Run 3:
+/// Accepted `imageCacheMaxMb` range: the on-disk image cache cap in MB.
+pub const IMAGE_CACHE_MAX_MB_RANGE: std::ops::RangeInclusive<u32> = 50..=5000;
+/// Longest accepted `lastSeenVersion` (characters of `[0-9A-Za-z.+-]`).
+pub const LAST_SEEN_VERSION_MAX_LEN: usize = 32;
 
 /// Fields only the desktop app may change: they name executables, their
 /// arguments, and folders on the machine running the core. In server (PWA)
@@ -197,12 +202,21 @@ pub async fn update(state: &Arc<AppState>, mut patch: Value) -> CoreResult<Setti
 /// server mode the [`DESKTOP_ONLY_FIELDS`] keep their values: a server
 /// client cannot set them, so an Undo that resent them would be refused and
 /// leave every setting reset (review round 3).
+///
+/// `tourCompleted` and `lastSeenVersion` also keep their values everywhere:
+/// they record what the user has already seen, not a preference, so a reset
+/// must not replay the first-run tour or show "What's new" for a version
+/// that did not change (Run 3 C7).
 pub async fn reset(state: &Arc<AppState>) -> CoreResult<Settings> {
     let lock = write_lock(state);
     let _guard = lock.lock().await;
-    let mut next = Settings::default();
+    let current = state.settings_snapshot();
+    let mut next = Settings {
+        tour_completed: current.tour_completed,
+        last_seen_version: current.last_seen_version.clone(),
+        ..Settings::default()
+    };
     if !state.is_desktop {
-        let current = state.settings_snapshot();
         // Server clients only ever saw the mask, so an Undo cannot resend
         // the key: keep it in memory for [`unmask_key`].
         if current.tmdb.api_key.is_some() {
@@ -423,6 +437,19 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
             SUBTITLE_POSITION_RANGE.end()
         )));
     }
+    // Run 3:
+    if !IMAGE_CACHE_MAX_MB_RANGE.contains(&next.image_cache_max_mb) {
+        return Err(CoreError::invalid(format!(
+            "imageCacheMaxMb must be a whole number between {} and {}",
+            IMAGE_CACHE_MAX_MB_RANGE.start(),
+            IMAGE_CACHE_MAX_MB_RANGE.end()
+        )));
+    }
+    if !is_valid_version_marker(&next.last_seen_version) {
+        return Err(CoreError::invalid(format!(
+            "lastSeenVersion must be empty or 1 to {LAST_SEEN_VERSION_MAX_LEN} letters, digits, '.', '+' or '-'"
+        )));
+    }
     let changed = |a: &Option<String>, b: &Option<String>| a != b;
     if changed(&current.mpv_path, &next.mpv_path) {
         check_file("mpvPath", next.mpv_path.as_deref())?;
@@ -437,6 +464,14 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
         check_dir("recordingsDir", next.recordings_dir.as_deref())?;
     }
     Ok(next)
+}
+
+/// `lastSeenVersion`: `''`, or 1..=[`LAST_SEEN_VERSION_MAX_LEN`] ASCII
+/// characters of `[0-9A-Za-z.+-]` (a semver such as `0.1.0` or `1.2.0-beta.1+42`).
+fn is_valid_version_marker(v: &str) -> bool {
+    v.len() <= LAST_SEEN_VERSION_MAX_LEN
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'+' | b'-'))
 }
 
 fn check_dir(field: &str, dir: Option<&str>) -> CoreResult<()> {
@@ -748,6 +783,131 @@ mod tests {
             "vodHideWatched",
         ] {
             assert!(!DESKTOP_ONLY_FIELDS.contains(&key), "{key}");
+        }
+    }
+
+    /// Run 3 C1: the image cache cap (whole MB, 50..=5000) and the
+    /// onboarding markers.
+    #[test]
+    fn run3_fields_validate() {
+        let cur = Settings::default();
+        let n = apply_patch(
+            &cur,
+            &json!({"imageCacheMaxMb": 2000, "tourCompleted": true, "lastSeenVersion": "0.1.0"}),
+        )
+        .unwrap();
+        assert_eq!(n.image_cache_max_mb, 2000);
+        assert!(n.tour_completed);
+        assert_eq!(n.last_seen_version, "0.1.0");
+
+        let cap = |v: Value| apply_patch(&cur, &json!({ "imageCacheMaxMb": v }));
+        for ok in [50, 250, 500, 1000, 5000] {
+            assert_eq!(cap(json!(ok)).unwrap().image_cache_max_mb, ok);
+        }
+        for bad in [0, 49, 5001, 100_000] {
+            let err = cap(json!(bad)).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("imageCacheMaxMb must be a whole number between 50 and 5000"),
+                "{bad}: {err}"
+            );
+        }
+        for bad in [json!(-1), json!(250.5), json!("500"), json!(true)] {
+            assert!(cap(bad.clone()).is_err(), "{bad} should be invalid");
+        }
+
+        let version = |v: &str| {
+            apply_patch(&n, &json!({ "lastSeenVersion": v })).map(|s| s.last_seen_version)
+        };
+        for ok in [
+            "",
+            "0.1.0",
+            "1.2.0-beta.1+42",
+            "v2",
+            "A.b-C+d",
+            "12345678901234567890123456789012",
+        ] {
+            assert_eq!(version(ok).unwrap(), ok, "{ok:?}");
+        }
+        for bad in [
+            " 0.1.0",
+            "0.1.0 ",
+            "0 1",
+            "0.1.0_beta",
+            "1/2",
+            "<script>",
+            "ver\u{e9}",
+            "123456789012345678901234567890123",
+        ] {
+            let err = version(bad).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("lastSeenVersion must be empty or 1 to 32"),
+                "{bad:?}: {err}"
+            );
+        }
+        assert!(apply_patch(&cur, &json!({"lastSeenVersion": 1})).is_err());
+        assert!(apply_patch(&cur, &json!({"tourCompleted": "yes"})).is_err());
+
+        // Removing a key falls back to its default.
+        let back = apply_patch(
+            &n,
+            &json!({"imageCacheMaxMb": null, "lastSeenVersion": null}),
+        )
+        .unwrap();
+        assert_eq!(back.image_cache_max_mb, 500);
+        assert_eq!(back.last_seen_version, "");
+        assert!(back.tour_completed, "others are kept");
+        // A Rust caller of `save` is caught by `validate` too.
+        for next in [
+            Settings {
+                image_cache_max_mb: 10,
+                ..Settings::default()
+            },
+            Settings {
+                last_seen_version: "x".repeat(33),
+                ..Settings::default()
+            },
+        ] {
+            assert!(validate(&cur, normalize(next)).is_err());
+        }
+        // Server mode may change all three (the cap sizes the server's cache).
+        for key in ["imageCacheMaxMb", "tourCompleted", "lastSeenVersion"] {
+            assert!(!DESKTOP_ONLY_FIELDS.contains(&key), "{key}");
+        }
+    }
+
+    /// `settings.reset` restores every preference, including the image cache
+    /// cap, but keeps the onboarding markers so neither the tour nor "What's
+    /// new" comes back for a version the user has already seen.
+    #[tokio::test]
+    async fn reset_keeps_onboarding_markers() {
+        for desktop in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new(
+                dir.path().to_path_buf(),
+                Arc::new(crate::events::NoopSink),
+                desktop,
+            )
+            .await
+            .unwrap();
+            update(
+                &state,
+                json!({
+                    "theme": "dark",
+                    "imageCacheMaxMb": 1000,
+                    "tourCompleted": true,
+                    "lastSeenVersion": "0.1.0"
+                }),
+            )
+            .await
+            .unwrap();
+            let after = reset(&state).await.unwrap();
+            assert_eq!(after.theme, Settings::default().theme, "desktop={desktop}");
+            assert_eq!(after.image_cache_max_mb, 500, "desktop={desktop}");
+            assert!(after.tour_completed, "desktop={desktop}");
+            assert_eq!(after.last_seen_version, "0.1.0", "desktop={desktop}");
+            assert_eq!(get(&state), after, "the cache holds what was stored");
         }
     }
 

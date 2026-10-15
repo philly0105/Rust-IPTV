@@ -166,14 +166,15 @@ html[data-reduced-motion='true'] .player-osd {
   border-color: var(--color-glass-border, rgb(255 255 255 / 0.14));
   background-color: var(--color-glass-strong, rgb(12 19 32 / 0.88));
 }
-@supports (backdrop-filter: blur(1px)) {
-  .player-glass {
-    background-color: var(--color-glass, rgb(12 19 32 / 0.72));
-    backdrop-filter: blur(var(--blur-glass, 14px)) saturate(1.2);
-  }
-  .player-glass-strong {
-    backdrop-filter: blur(var(--blur-glass, 14px)) saturate(1.2);
-  }
+/*
+ * Blur behind glass is opt-in (Run 3 C5): only panes that come and go (the floating control
+ * bar, menus, the zap banner, popovers) add the `.glass-blur` utility from src/styles, which
+ * owns the one blur in the app. A blurred pane can take the lighter glass; with less
+ * transparency asked for, the utility drops the blur and restores the solid glass.
+ * Always-visible strips (the dock bar, the PiP bar) stay solid and unblurred.
+ */
+.player-glass.glass-blur {
+  background-color: var(--color-glass, rgb(12 19 32 / 0.72));
 }
 /*
  * Glass stays dark in the light theme, where the page accent is a deep tone (2.9:1 on black):

@@ -112,6 +112,8 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'i', descKey: 'player:shortcutStreamInfo', area: 'Playback' },
   { combo: 'shift+c', descKey: 'player:shortcutSubtitleMenu', area: 'Playback' },
   { combo: 'z', descKey: 'scSleepTimer', area: 'Playback' },
+  // Run 3 C6: bound while a video plays in the app; a focused Live row or multi-view tile keeps its own `s`.
+  { combo: 's', descKey: 'player:screenshot', area: 'Playback' },
   // Bound by pip.ts only while picture-in-picture is on.
   { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
   // Bound by the focused seek bar (SeekBar.tsx onKeyDown). Its own area: PgUp/PgDn mean channel up/down in Playback.

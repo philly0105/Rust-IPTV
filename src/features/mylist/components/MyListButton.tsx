@@ -90,7 +90,7 @@ export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg
           'motion-safe:transition-[background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
           inList
             ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover active:bg-accent-pressed'
-            : 'border-glass-border bg-glass text-on-glass backdrop-blur-glass hover:bg-glass-strong',
+            : 'border-glass-border bg-glass text-on-glass glass-blur hover:bg-glass-strong',
           (pending || loading) && 'cursor-progress',
           loading && 'opacity-70',
           className,

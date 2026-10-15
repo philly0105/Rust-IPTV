@@ -230,7 +230,7 @@ export function Dialog({
     >
       <div
         aria-hidden
-        className="fixed inset-0 bg-scrim backdrop-blur-[2px] motion-safe:animate-fade-in"
+        className="fixed inset-0 bg-scrim motion-safe:animate-fade-in"
         onMouseDown={() => dismissible && onCloseRef.current()}
       />
       {/* Plain divs for the title row and footer: a portaled <header>/<footer> would map to a second banner/contentinfo landmark. */}

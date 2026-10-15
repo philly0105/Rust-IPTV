@@ -286,6 +286,8 @@
   "aboutActionFailed": "Impossibile aprire la cartella",
   "aboutServerNote": "In esecuzione come server. Le cartelle si trovano sulla macchina host.",
   "aboutCredits": "Basato su idee di IPTVnator. Dati di film e serie da TMDB.",
+  "aboutWhatsNew": "Novità",
+  "aboutTakeTour": "Fai il tour",
 
   "errorRequired": "Obbligatorio.",
   "errorUrlInvalid": "Inserisci un indirizzo completo, ad esempio http://example.com/guide.xml.",
@@ -428,5 +430,20 @@
   "reminderActionNotify": "Avvisami",
   "reminderActionSwitch": "Cambia canale",
   "reminderActionNotifyHint": "Mostra una notifica con il pulsante Guarda ora.",
-  "reminderActionSwitchHint": "Sintonizza il canale e porta l'app in primo piano. Puoi annullare."
+  "reminderActionSwitchHint": "Sintonizza il canale e porta l'app in primo piano. Puoi annullare.",
+  "imageCache": "Cache delle immagini",
+  "imageCacheHint": "Locandine, loghi e sfondi vengono salvati su questo dispositivo, così le pagine già viste si caricano subito. Quando la cache raggiunge il limite, le immagini inutilizzate da più tempo lasciano spazio.",
+  "imageCacheUsage": "{{used}} di {{limit}}",
+  "imageCachePictures_one": "{{count, number}} immagine",
+  "imageCachePictures_many": "{{count, number}} di immagini",
+  "imageCachePictures_other": "{{count, number}} immagini",
+  "imageCacheEmpty": "Vuota. Le immagini vengono salvate mentre navighi.",
+  "imageCacheLimit": "Limite",
+  "imageCacheClear": "Svuota cache",
+  "imageCacheClearTitle": "Svuotare la cache delle immagini?",
+  "imageCacheClearBody": "Verranno rimossi {{size}} di immagini salvate. Ciascuna verrà scaricata di nuovo la prossima volta che viene mostrata.",
+  "imageCacheCleared": "Cache delle immagini svuotata",
+  "imageCacheClearFailed": "Impossibile svuotare la cache delle immagini",
+  "imageCacheLoadFailed": "Impossibile leggere la cache delle immagini: {{message}}",
+  "imageCacheUnavailable": "Questo server non ha una cache delle immagini, quindi le immagini vengono caricate direttamente da ogni provider."
 }

@@ -5,7 +5,7 @@ import { Link } from 'react-router';
 import type { Person } from '@/api/types';
 
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { cn } from '@/ui';
+import { cn, useImageChain } from '@/ui';
 
 const MAX_CAST = 16;
 
@@ -61,15 +61,30 @@ export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }
   );
 }
 
+/**
+ * A cast member's TMDB profile picture through the image cache (then directly
+ * once), with their initials when there is none or it fails to load.
+ */
 function Avatar({ person }: { person: Person }) {
+  const image = useImageChain([person.profileUrl]);
   const initials = person.name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('');
-  return person.profileUrl ? (
-    <img src={person.profileUrl} alt="" loading="lazy" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+  return image.url ? (
+    <img
+      key={image.url}
+      src={image.url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      referrerPolicy="no-referrer"
+      onError={image.onError}
+      className="h-8 w-8 shrink-0 rounded-full bg-surface-3 object-cover"
+    />
   ) : (
     <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[calc(11rem/15)] font-semibold text-fg-muted">
       {initials}

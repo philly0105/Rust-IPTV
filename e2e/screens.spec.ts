@@ -13,6 +13,8 @@ import { channelButton, gotoLive, playerRegion } from './helpers/ui';
 // its width (no horizontal scroll: scrollWidth <= clientWidth on the document and the shell's
 // scroller) and is saved to test-results/screens/<screen>-<viewport>-<theme>.png for review.
 // Run 2 (check 13) adds a custom list page, the stats page and the guide with its search open.
+// Run 3 (check 13) adds the first-run tour (its first step, pointing at the rail) and the What's new
+// dialog, both opened from Settings > About, and the General section with the image cache row.
 
 const NAME = 'Screens Xtream';
 const SHOTS = 'test-results/screens';
@@ -115,6 +117,25 @@ test.describe.serial('main screens at desktop and phone widths, in every theme',
         await page.goto('/settings/appearance');
         await expect(page.getByRole('main').getByRole('radiogroup').first()).toBeVisible();
         await shoot('settings');
+
+        await page.goto('/settings/general');
+        await page.getByTestId('image-cache-row').scrollIntoViewIfNeeded();
+        await expect(page.getByTestId('image-cache-row').getByTestId('image-cache-size')).toBeVisible();
+        await shoot('settings-general');
+
+        // Run 3 C7: the tour's first step and What's new, opened by hand (the automatic ones are seen).
+        await page.goto('/settings/about');
+        await page.getByTestId('about-tour').click();
+        await expect(page.getByTestId('tour-card')).toBeVisible();
+        await expect(page.getByTestId('tour-progress')).toHaveText('Step 1 of 3');
+        await shoot('tour');
+        await page.keyboard.press('Escape');
+        await expect(page.getByTestId('tour')).toHaveCount(0);
+        await page.getByTestId('about-whats-new').click();
+        await expect(page.getByTestId('whats-new').getByTestId('whats-new-item').first()).toBeVisible();
+        await shoot('whats-new');
+        await page.getByTestId('whats-new-close').click();
+        await expect(page.getByTestId('whats-new')).toHaveCount(0);
 
         await page.goto(`/lists/${listId}`);
         await expect(page.getByTestId('list-page').getByTestId('channel-list').locator('button[data-row-index]').first()).toBeVisible();

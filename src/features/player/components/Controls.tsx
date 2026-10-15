@@ -37,7 +37,17 @@ import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '.
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { InlineSpinner } from './InlineSpinner';
 // failover: AlternatesMenu, AlternatesRow
-import { AlternatesMenu, AlternatesRow, ChannelHistory, SleepChip, SleepMenu, SleepRowValue, SubtitleStyleMenu, SubtitleTrackMenu } from './lazyParts';
+import {
+  AlternatesMenu,
+  AlternatesRow,
+  ChannelHistory,
+  ScreenshotButton,
+  SleepChip,
+  SleepMenu,
+  SleepRowValue,
+  SubtitleStyleMenu,
+  SubtitleTrackMenu,
+} from './lazyParts';
 import { SeekBar } from './SeekBar';
 import { SyncRows, useSyncSummary } from './SyncMenu';
 
@@ -461,7 +471,7 @@ function OptionsMenu({
         }
       }}
       style={room !== null ? { maxHeight: `min(60vh, 360px, ${room}px)` } : undefined}
-      className="player-glass-strong player-glass-edge max-h-[min(60vh,360px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur max-h-[min(60vh,360px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -693,7 +703,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       <div
         data-testid="controls-pane"
         className={cn(
-          variant === 'overlay' && 'player-glass',
+          variant === 'overlay' && 'player-glass glass-blur',
           floating && 'player-glass-edge rounded-xl border px-1.5 pt-1 sm:px-2.5',
           variant === 'overlay' && compact && 'border-t px-1',
         )}
@@ -797,6 +807,8 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
 
           <div className="flex-1" />
           {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
+          {/* Screenshot (C6): disabled with its reason for radio. */}
+          {!compact && <ScreenshotButton />}
 
           {tracks.text.length > 0 && !compact && (
             <CtlButton

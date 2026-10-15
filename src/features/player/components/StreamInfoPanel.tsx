@@ -53,7 +53,7 @@ function OpenPanel({ className }: { className?: string }) {
       onDoubleClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
-        'player-glass player-glass-edge pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-white motion-safe:animate-pop-in',
+        'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-white motion-safe:animate-pop-in',
         className,
       )}
     >

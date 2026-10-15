@@ -1,10 +1,11 @@
 import { BookmarkCheck, Play } from 'lucide-react';
-import { createContext, useContext, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { MyListButton, canSave, useInMyList } from '@/features/mylist';
+import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { CARD_ART, CARD_ROOT, LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
@@ -57,6 +58,34 @@ export function itemPath(ref: ItemRef): string {
   }
 }
 
+/**
+ * Source kinds by source id, for hover prefetch targets (C4). The dashboard
+ * provides it from `sources.list`; a card outside a provider, or of a source
+ * not in it, simply does not prefetch.
+ */
+export const SourceKindContext = createContext<ReadonlyMap<string, SourceKind> | null>(null);
+
+/**
+ * The detail-page prefetch target for a movie or series ref, or null (no ref,
+ * another content type, or an unknown source kind). Memoised on the ref's
+ * fields, so a card re-rendered with an equal ref keeps the same target.
+ */
+export function usePrefetchTarget(ref: ItemRef | undefined, posterUrl?: string, backdropUrl?: string): PrefetchTarget | null {
+  const kinds = useContext(SourceKindContext);
+  const sourceId = ref?.sourceId;
+  const contentType = ref?.contentType;
+  const itemId = ref?.itemId;
+  const sourceKind = sourceId !== undefined ? kinds?.get(sourceId) : undefined;
+  return useMemo(() => {
+    if (sourceId === undefined || itemId === undefined || !sourceKind) return null;
+    if (contentType !== 'movie' && contentType !== 'series') return null;
+    const target: PrefetchTarget = { ref: { sourceId, contentType, itemId }, sourceKind };
+    if (posterUrl) target.posterUrl = posterUrl;
+    if (backdropUrl) target.backdropUrl = backdropUrl;
+    return target;
+  }, [sourceId, contentType, itemId, sourceKind, posterUrl, backdropUrl]);
+}
+
 function PlayGlyph() {
   return (
     <span
@@ -89,6 +118,13 @@ export interface PosterCardProps {
    * so the My List rail's cards take part too. Live, radio and search cards get neither.
    */
   myList?: { itemRef: ItemRef; snapshot: ItemSnapshot } | undefined;
+  /**
+   * The source the artwork belongs to, for the image cache (C3). Defaults to the source of the
+   * card's title (`myList`, or the movie or series an `itemPath` link opens).
+   */
+  sourceId?: string;
+  /** The title's backdrop, warmed with its detail page when a linked card is hovered or focused (C4). */
+  backdropUrl?: string;
 }
 
 /**
@@ -112,12 +148,17 @@ function linkTarget(to: string | undefined, title: string, posterUrl: string | u
   return { itemRef: { sourceId: decodeURIComponent(m[1]!), contentType, itemId: decodeURIComponent(m[3]!) }, snapshot };
 }
 
-/** 2:3 artwork card; activates `onPlay` (button) or navigates to `to` (link). */
+/**
+ * 2:3 artwork card; activates `onPlay` (button) or navigates to `to` (link). A link to a movie
+ * or series prefetches its detail page when the pointer rests on it or it takes focus (C4).
+ */
 export function PosterCard(props: PosterCardProps) {
-  const target = props.myList ?? (props.onPlay ? undefined : linkTarget(props.to, props.title, props.posterUrl));
-  if (!target || !canSave(target.itemRef)) return <PosterCardView {...props} />;
-  if (props.onPlay) return <SavedMarkerCard {...props} itemRef={target.itemRef} />;
-  return <MyListPosterCard {...props} myList={target} />;
+  const linked = props.onPlay ? undefined : linkTarget(props.to, props.title, props.posterUrl);
+  const target = props.myList ?? linked;
+  const withSource = { ...props, sourceId: props.sourceId ?? target?.itemRef.sourceId };
+  if (!target || !canSave(target.itemRef)) return <PosterCardView {...withSource} />;
+  if (props.onPlay) return <SavedMarkerCard {...withSource} itemRef={target.itemRef} />;
+  return <MyListPosterCard {...withSource} myList={target} />;
 }
 
 interface PosterCardViewProps extends PosterCardProps {
@@ -127,12 +168,29 @@ interface PosterCardViewProps extends PosterCardProps {
   artClassName?: string;
 }
 
-function PosterCardView({ rail, title, subtitle, posterUrl, progress, badge, onPlay, to, ariaLabel, artCorner, artClassName }: PosterCardViewProps) {
+function PosterCardView({
+  rail,
+  title,
+  subtitle,
+  posterUrl,
+  backdropUrl,
+  sourceId,
+  progress,
+  badge,
+  onPlay,
+  to,
+  ariaLabel,
+  artCorner,
+  artClassName,
+}: PosterCardViewProps) {
+  // Only a link to a movie or series page prefetches; play cards and search links do not.
+  const opens = onPlay ? undefined : linkTarget(to, title, posterUrl)?.itemRef;
+  const intent = usePrefetchIntent(usePrefetchTarget(opens, posterUrl, backdropUrl));
   const body = (
     <>
       <div className={cn(CARD_ART, artClassName)}>
         {/* The caption below names the card; alt text would read the title twice. */}
-        <Poster src={posterUrl} alt="" label={title} aspect="poster" className="after:hidden">
+        <Poster src={posterUrl} sourceId={sourceId} alt="" label={title} aspect="poster" className="after:hidden">
           {onPlay && <PlayGlyph />}
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
@@ -156,7 +214,15 @@ function PosterCardView({ rail, title, subtitle, posterUrl, progress, badge, onP
     );
   }
   return (
-    <Link to={to ?? '#'} {...rail} aria-label={ariaLabel} className={cardRoot}>
+    <Link
+      to={to ?? '#'}
+      {...rail}
+      aria-label={ariaLabel}
+      className={cardRoot}
+      onPointerEnter={opens ? intent.onPointerEnter : undefined}
+      onPointerLeave={opens ? intent.onPointerLeave : undefined}
+      onFocus={opens ? intent.onFocus : undefined}
+    >
       {body}
     </Link>
   );
@@ -259,10 +325,12 @@ export interface ChannelCardProps {
    * channel menu (Play, Add to multi-view, Add to list, Rename, Hide, locks) where a host provides one.
    */
   channel?: Channel;
+  /** The source the logo belongs to, for the image cache (C3). Defaults to `channel`'s source. */
+  sourceId?: string;
 }
 
 /** 16:9 channel tile with the logo centered on a per-channel tint. */
-export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName, isRadio, onPlay, ariaLabel, channel }: ChannelCardProps) {
+export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName, isRadio, onPlay, ariaLabel, channel, sourceId }: ChannelCardProps) {
   const { t } = useTranslation('shell');
   const openMenu = useContext(ChannelMenuContext);
   const hue = hueOf(name);
@@ -290,7 +358,17 @@ export function ChannelCard({ rail, name, logoUrl, now, nowProgress, sourceName,
         className={cn(CARD_ART, 'aspect-video w-full')}
         style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
       >
-        <Poster src={logoUrl} alt="" label={name} aspect="wide" fit="contain" kind={isRadio ? 'radio' : 'live'} className="bg-transparent after:hidden" rounded="sm" />
+        <Poster
+          src={logoUrl}
+          sourceId={sourceId ?? channel?.ref.sourceId}
+          alt=""
+          label={name}
+          aspect="wide"
+          fit="contain"
+          kind={isRadio ? 'radio' : 'live'}
+          className="bg-transparent after:hidden"
+          rounded="sm"
+        />
         <PlayGlyph />
         <span className="absolute top-2 start-2">
           <LiveBadge />

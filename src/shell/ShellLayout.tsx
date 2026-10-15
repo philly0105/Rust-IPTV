@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useNavigate } from 'react-router';
 
@@ -6,8 +6,6 @@ import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
-import { ExternalPlaybackFooter, PlayerDock, restorePlayback } from '@/features/player';
-import { useWatchStatsReporter } from '@/features/stats/reporter';
 import '@/i18n';
 import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
 
@@ -21,6 +19,56 @@ import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings } from './useSettings';
 
+// player: the dock and the external-playback footer carry the whole playback UI (surfaces,
+// controls, engines, the store), about a third of the app's code. They load in their own chunk,
+// and the request starts as soon as this module runs, not on first render, so the dock is
+// usually there by the time the shell paints (C4 entry budget, docs/architecture/performance.md).
+type PlayerModule = typeof import('@/features/player');
+let loadedPlayer: PlayerModule | null = null;
+const playerModule = import('@/features/player').then((m) => (loadedPlayer = m));
+
+/**
+ * The player module: on the first render when its chunk is already in (the usual case, so the
+ * dock mounts without a Suspense round), otherwise as soon as it arrives.
+ */
+function usePlayerModule(): PlayerModule | null {
+  const [player, setPlayer] = useState(loadedPlayer);
+  useEffect(() => {
+    if (player) return;
+    let live = true;
+    // A failed chunk load leaves the shell usable without the dock, like a missing engine.
+    void playerModule
+      .then((m) => {
+        if (live) setPlayer(m);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [player]);
+  return player;
+}
+
+/**
+ * Run 2 C7: counts watch time from the player store for as long as the shell is mounted. The
+ * reporter loads with the player store in a lazy chunk instead of pulling it into the main one.
+ */
+function useWatchStats(): void {
+  useEffect(() => {
+    let live = true;
+    let stop: (() => void) | null = null;
+    void import('@/features/stats/reporter')
+      .then((m) => {
+        if (live) stop = m.startWatchStatsReporter();
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+}
+
 // recording: renders nothing; split out so the recording hooks and schedule logic stay out of the main chunk.
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 // parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
@@ -28,6 +76,10 @@ const ParentalGateHost = lazy(() => import('@/features/parental/GateHost').then(
 // The palette and the `?` overlay only show on demand; they load right after the shell, outside the main chunk.
 const CommandPalette = lazy(() => import('./CommandPalette').then((m) => ({ default: m.CommandPalette })));
 const ShortcutOverlay = lazy(() => import('./ShortcutOverlay').then((m) => ({ default: m.ShortcutOverlay })));
+// Run 3 C7: the first-run tour and What's new. The host (decision, store) loads right after the
+// shell; the overlays and release notes are its own lazy chunks. Imported from `host`, not the
+// barrel, so RELEASE_NOTES and its icons stay out of this chunk.
+const OnboardingHost = lazy(() => import('@/features/onboarding/host').then((m) => ({ default: m.OnboardingHost })));
 
 /** Opens the command palette from anywhere. */
 export function openPalette(): void {
@@ -174,12 +226,12 @@ export function ShellLayout() {
 
   useShellEvents();
   useParentalEvents();
-  // Run 2 C7: counts watch time from the player store; renders nothing.
-  useWatchStatsReporter();
+  useWatchStats();
   // The layout counts as the parental gate's host from its first render, so a PIN request made
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
   useEffect(() => registerGateHost(), []);
+  const player = usePlayerModule();
   const languageSettled = useLanguageSync(settings.data?.language, settings.isError);
   useLastRoutePersistence(settings.isSuccess, settings.data?.lastRoute);
   useWindowStatePersistence();
@@ -187,9 +239,7 @@ export function ShellLayout() {
   useEffect(() => {
     if (playbackRestored) return;
     playbackRestored = true;
-    void Promise.resolve()
-      .then(() => restorePlayback())
-      .catch(() => {});
+    void playerModule.then((m) => m.restorePlayback()).catch(() => {});
   }, []);
 
   if (!languageSettled) {
@@ -232,9 +282,9 @@ export function ShellLayout() {
           </main>
           <ContextPanel inline={wide} />
         </div>
-        <ExternalPlaybackFooter />
+        {player && <player.ExternalPlaybackFooter />}
       </div>
-      <PlayerDock />
+      {player && <player.PlayerDock />}
       <Suspense fallback={null}>
         <CommandPalette />
         <ShortcutOverlay />
@@ -250,6 +300,9 @@ export function ShellLayout() {
       {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
       <ListsDialogHost />
       <ChannelEditDialogHost />
+      <Suspense fallback={null}>
+        <OnboardingHost />
+      </Suspense>
     </div>
   );
 }

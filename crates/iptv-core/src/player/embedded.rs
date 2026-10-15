@@ -785,6 +785,84 @@ async fn stop_recording(s: &Session) {
     });
 }
 
+// screenshot:
+/// The IPC command that saves the frame on screen to `path` (mpv picks the
+/// format from the extension): `subtitles` includes the subtitles as shown,
+/// `video` is the bare frame. It runs on the session's IPC client directly
+/// ([`screenshot_to_file`]), never through `mpv.command`, whose allowlist
+/// keeps refusing `screenshot-to-file`: the path is chosen by the core
+/// (`crate::screenshot`), never by the caller.
+pub fn screenshot_command(path: &Path, with_subtitles: bool) -> Vec<Value> {
+    vec![
+        json!("screenshot-to-file"),
+        json!(path.display().to_string()),
+        json!(if with_subtitles { "subtitles" } else { "video" }),
+    ]
+}
+
+fn no_video_frame() -> CoreError {
+    CoreError::Conflict(
+        "There is no video frame to capture. Screenshots need a stream with video.".into(),
+    )
+}
+
+/// The attached session when it shows something to capture: Conflict when
+/// nothing is attached or loaded, or when mpv reports tracks but no selected
+/// video track (an audio-only stream).
+fn capturable_session(state: &AppState) -> CoreResult<Arc<Session>> {
+    ensure_platform()?;
+    let s = current(&manager(state)).ok_or_else(not_attached)?;
+    let st = s.client.state();
+    if !st.loaded {
+        return Err(CoreError::Conflict(
+            "Nothing is playing in the embedded player, so there is nothing to capture.".into(),
+        ));
+    }
+    let has_video = st
+        .tracks
+        .iter()
+        .any(|t| t.selected && t.track_type == crate::model::MpvTrackType::Video);
+    if !st.tracks.is_empty() && !has_video {
+        return Err(no_video_frame());
+    }
+    Ok(s)
+}
+
+/// Title of the item playing in the embedded player (names screenshots;
+/// may be empty). Unsupported off Windows; Conflict when no session is
+/// attached, nothing is loaded, or the stream has no video.
+pub fn playing_title(state: &AppState) -> CoreResult<String> {
+    let s = capturable_session(state)?;
+    let title = s.title.lock().clone();
+    Ok(title)
+}
+
+/// Saves the current frame to `path` with [`screenshot_command`]. Does not
+/// take the op lock (like `mpv.command`). mpv answers once the file is
+/// written; the IPC client gives up after its reply timeout (5 s), which the
+/// caller sees as Timeout while mpv may still finish the file. A failure mpv
+/// reports ("error running command": no decoded frame yet, no video) is a
+/// Conflict.
+pub async fn screenshot_to_file(
+    state: &AppState,
+    path: &Path,
+    with_subtitles: bool,
+) -> CoreResult<()> {
+    let s = capturable_session(state)?;
+    match s
+        .client
+        .command(screenshot_command(path, with_subtitles))
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(CoreError::Invalid(reason)) => {
+            tracing::warn!(%reason, "mpv could not take the screenshot");
+            Err(no_video_frame())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// `mpv.setProperty`.
 pub async fn set_property(state: &Arc<AppState>, name: &str, value: Value) -> CoreResult<()> {
     ensure_platform()?;

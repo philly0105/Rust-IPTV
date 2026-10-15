@@ -40,12 +40,17 @@ function summary(request: APIRequestContext, days: 7 | 30 = 7): Promise<WatchSta
 
 const movieRef = (): ItemRef => ({ sourceId, contentType: 'movie', itemId: MOCK_FACTS.firstMovie.id });
 
+// The core takes days within 2 of its UTC date. West of UTC late in the
+// evening the local date is a day behind, so local "two days ago" is three UTC
+// days back; the 5 min film then goes on yesterday instead.
+const FILM_DAYS_AGO = localDay() < new Date().toISOString().slice(0, 10) ? 1 : 2;
+
 async function seed(request: APIRequestContext): Promise<void> {
   // Today 1 h 20 min (1 h live, 20 min film); yesterday 1 h live; two days ago 5 min film.
   await record(request, channel.ref, channel.name, 3600, 0);
   await record(request, movieRef(), MOCK_FACTS.firstMovie.title, 1200, 0);
   await record(request, channel.ref, channel.name, 3600, 1);
-  await rpc(request, 'stats.record', { ref: movieRef(), title: MOCK_FACTS.firstMovie.title, seconds: 300, day: localDay(2) });
+  await rpc(request, 'stats.record', { ref: movieRef(), title: MOCK_FACTS.firstMovie.title, seconds: 300, day: localDay(FILM_DAYS_AGO) });
 }
 
 /** The visible toast with this text (the sr-only live region repeats it outside the list). */
@@ -90,7 +95,9 @@ test.describe('Watch stats', () => {
     await slider.focus();
     await page.keyboard.press('ArrowLeft');
     await expect(slider).toHaveAttribute('aria-valuenow', '5');
-    await expect(page.getByTestId('stats-readout')).toContainText('1 hr (1 hr live, 0 min movies and series)');
+    await expect(page.getByTestId('stats-readout')).toContainText(
+      FILM_DAYS_AGO === 1 ? '1 hr 5 min (1 hr live, 5 min movies and series)' : '1 hr (1 hr live, 0 min movies and series)',
+    );
     await page.keyboard.press('Home');
     await expect(slider).toHaveAttribute('aria-valuenow', '0');
 

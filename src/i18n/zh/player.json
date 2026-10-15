@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "最底部",
   "subtitleStyle.positionValue": "上移 {{value}}%",
   "subtitleStyle.preview": "字幕预览",
-  "subtitleStyle.previewText": "末班车十点开。\n我们该走了。"
+  "subtitleStyle.previewText": "末班车十点开。\n我们该走了。",
+  "screenshot": "截图",
+  "screenshotSaved": "截图已保存",
+  "screenshotDownloaded": "已保存到你的下载文件夹",
+  "screenshotOpen": "打开",
+  "screenshotOpenFailed": "无法打开截图",
+  "screenshotFailed": "截图未保存",
+  "screenshotCors": "该流的服务器不允许复制画面（没有 CORS 许可）。",
+  "screenshotCorsMpv": "嵌入式 MPV 可以截取：请在“设置 > 播放器”中选择它。",
+  "screenshotNotReady": "还没有画面。请在视频开始播放后重试。",
+  "screenshotNoVideo": "电台没有可截取的画面。",
+  "screenshotExternal": "正在外部播放器中播放。请使用该播放器自己的截图键。"
 }

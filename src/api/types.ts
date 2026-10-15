@@ -440,6 +440,13 @@ void _allSubtitleBackgroundsListed;
 export const SUBTITLE_POSITION_MIN = 0;
 /** Largest accepted `settings.subtitlePosition` (`settings::SUBTITLE_POSITION_RANGE` in the core). */
 export const SUBTITLE_POSITION_MAX = 40;
+// Run 3:
+/** Smallest accepted `settings.imageCacheMaxMb` (`settings::IMAGE_CACHE_MAX_MB_RANGE` in the core). */
+export const IMAGE_CACHE_MAX_MB_MIN = 50;
+/** Largest accepted `settings.imageCacheMaxMb` (`settings::IMAGE_CACHE_MAX_MB_RANGE` in the core). */
+export const IMAGE_CACHE_MAX_MB_MAX = 5000;
+/** Longest accepted `settings.lastSeenVersion` (`settings::LAST_SEEN_VERSION_MAX_LEN` in the core). */
+export const LAST_SEEN_VERSION_MAX_LENGTH = 32;
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -570,6 +577,19 @@ export interface Settings {
   // vod:
   /** The VOD grid's "Hide watched" toggle (`hideWatched` on `catalog.movies` / `catalog.series`). */
   vodHideWatched: boolean;
+  // Run 3 (machine-local: never in backups).
+  /**
+   * Size cap of the on-disk image cache in MB: an integer in
+   * `IMAGE_CACHE_MAX_MB_MIN..=IMAGE_CACHE_MAX_MB_MAX` (50..5000). Applies in server mode too.
+   */
+  imageCacheMaxMb: number;
+  /** The first-run tour was finished or skipped. `settings.reset` keeps it. */
+  tourCompleted: boolean;
+  /**
+   * App version whose "What's new" was last seen: '' (never) or 1..32 characters of
+   * `[0-9A-Za-z.+-]` (`LAST_SEEN_VERSION_MAX_LENGTH`). `settings.reset` keeps it.
+   */
+  lastSeenVersion: string;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -642,6 +662,10 @@ export const DEFAULT_SETTINGS: Settings = {
   subtitlePosition: 0,
   // vod:
   vodHideWatched: false,
+  // Run 3:
+  imageCacheMaxMb: 500,
+  tourCompleted: false,
+  lastSeenVersion: '',
 };
 
 export interface WindowState {
@@ -1266,4 +1290,19 @@ export interface WatchStats {
   topChannels: WatchStatsTop[];
   /** Movies and series. */
   topTitles: WatchStatsTop[];
+}
+
+// imagecache: disk image cache (Run 3 contract C2; crates/iptv-core/src/imagecache).
+/** `images.stats` / `images.clear`: what the cache holds against its cap (`settings.imageCacheMaxMb` in bytes). */
+export interface ImageCacheStats {
+  bytes: number;
+  files: number;
+  maxBytes: number;
+}
+
+// screenshot: player frames (Run 3 contract C6; crates/iptv-core/src/screenshot). Desktop only.
+/** A saved screenshot: `path` is absolute (inside the screenshot folder); `fileName` is for the toast. */
+export interface ScreenshotResult {
+  path: string;
+  fileName: string;
 }

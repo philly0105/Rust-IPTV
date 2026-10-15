@@ -28,7 +28,7 @@ export function Header({ panelInline }: { panelInline: boolean }) {
   return (
     <header
       data-testid="shell-header"
-      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
+      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/95 px-4 sm:gap-4 sm:px-5"
     >
       {/* Below sm the title gives way to the page search while it is in use (focused or holding a query). */}
       <div
@@ -75,11 +75,13 @@ export function Header({ panelInline }: { panelInline: boolean }) {
           onSubmit={header.search.onSubmit}
           placeholder={header.search.placeholder}
           data-shell-search=""
+          data-tour="search"
         />
       ) : (
         <button
           type="button"
           onClick={() => navigate('/search')}
+          data-tour="search"
           className={cn(
             'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
             'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-2 motion-safe:transition-colors',
@@ -111,6 +113,9 @@ export function Header({ panelInline }: { panelInline: boolean }) {
           icon={<SquareChevronRight size={18} className="rtl:-scale-x-100" />}
           onClick={() => setPaletteOpen(true)}
           data-testid="open-palette"
+          // The tour's search step (Run 3 C7) points at the first visible anchor: the search field or
+          // button above, or this button where those fold away (below lg).
+          data-tour="search"
         />
         <IconButton
           label={resolved === 'dark' ? t('switchToLight') : t('switchToDark')}

@@ -570,6 +570,8 @@ function PosterGrid({
             badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
             badgeLabel={showBadges ? h.sourceName : undefined}
             myList={myListTarget(item)}
+            // C4: warm the detail page on hover or focus (needs the source kind for its command).
+            prefetch={h.sourceKind ? { ref: item.ref, sourceKind: h.sourceKind, posterUrl: h.imageUrl, backdropUrl: item.backdropUrl } : undefined}
           />
         );
       }}

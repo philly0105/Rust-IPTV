@@ -286,6 +286,8 @@
   "aboutActionFailed": "Não foi possível abrir essa pasta",
   "aboutServerNote": "Executando como servidor. As pastas ficam na máquina host.",
   "aboutCredits": "Baseado em ideias do IPTVnator. Dados de filmes e séries do TMDB.",
+  "aboutWhatsNew": "Novidades",
+  "aboutTakeTour": "Fazer o tour",
 
   "errorRequired": "Obrigatório.",
   "errorUrlInvalid": "Informe um endereço completo, como http://example.com/guide.xml.",
@@ -428,5 +430,20 @@
   "reminderActionNotify": "Notificar",
   "reminderActionSwitch": "Mudar de canal",
   "reminderActionNotifyHint": "Mostra uma notificação com o botão Assistir agora.",
-  "reminderActionSwitchHint": "Sintoniza o canal e traz o app para a frente. Dá para desfazer."
+  "reminderActionSwitchHint": "Sintoniza o canal e traz o app para a frente. Dá para desfazer.",
+  "imageCache": "Cache de imagens",
+  "imageCacheHint": "Pôsteres, logotipos e fundos ficam guardados neste dispositivo para que as páginas que você já viu apareçam na hora. Quando o cache atinge o limite, as imagens sem uso há mais tempo abrem espaço.",
+  "imageCacheUsage": "{{used}} de {{limit}}",
+  "imageCachePictures_one": "{{count, number}} imagem",
+  "imageCachePictures_many": "{{count, number}} de imagens",
+  "imageCachePictures_other": "{{count, number}} imagens",
+  "imageCacheEmpty": "Vazio. As imagens são guardadas enquanto você navega.",
+  "imageCacheLimit": "Limite",
+  "imageCacheClear": "Limpar cache",
+  "imageCacheClearTitle": "Limpar o cache de imagens?",
+  "imageCacheClearBody": "Isso remove {{size}} de imagens guardadas. Cada uma será baixada de novo na próxima vez que aparecer.",
+  "imageCacheCleared": "Cache de imagens limpo",
+  "imageCacheClearFailed": "Não foi possível limpar o cache de imagens",
+  "imageCacheLoadFailed": "Não foi possível ler o cache de imagens: {{message}}",
+  "imageCacheUnavailable": "Este servidor não tem cache de imagens, então as imagens carregam direto de cada provedor."
 }

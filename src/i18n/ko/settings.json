@@ -281,6 +281,8 @@
   "aboutActionFailed": "폴더를 열 수 없습니다",
   "aboutServerNote": "서버로 실행 중입니다. 폴더는 호스트 컴퓨터에 있습니다.",
   "aboutCredits": "IPTVnator의 아이디어를 바탕으로 만들었습니다. 영화 및 시리즈 데이터는 TMDB에서 제공합니다.",
+  "aboutWhatsNew": "새로운 기능",
+  "aboutTakeTour": "둘러보기 시작",
 
   "errorRequired": "필수 항목입니다.",
   "errorUrlInvalid": "전체 주소를 입력하세요. 예: http://example.com/guide.xml",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "알림 표시",
   "reminderActionSwitch": "채널 전환",
   "reminderActionNotifyHint": "지금 보기 버튼이 있는 알림을 표시합니다.",
-  "reminderActionSwitchHint": "채널로 전환하고 앱을 앞으로 가져옵니다. 실행 취소할 수 있습니다."
+  "reminderActionSwitchHint": "채널로 전환하고 앱을 앞으로 가져옵니다. 실행 취소할 수 있습니다.",
+  "imageCache": "이미지 캐시",
+  "imageCacheHint": "포스터, 로고, 배경 이미지를 이 기기에 저장하므로 이미 본 페이지는 바로 표시됩니다. 한도에 도달하면 가장 오래 사용하지 않은 이미지부터 삭제됩니다.",
+  "imageCacheUsage": "{{used}} / {{limit}}",
+  "imageCachePictures_one": "이미지 {{count, number}}개",
+  "imageCachePictures_other": "이미지 {{count, number}}개",
+  "imageCacheEmpty": "비어 있습니다. 둘러보는 동안 이미지가 저장됩니다.",
+  "imageCacheLimit": "한도",
+  "imageCacheClear": "캐시 지우기",
+  "imageCacheClearTitle": "이미지 캐시를 지울까요?",
+  "imageCacheClearBody": "저장된 이미지(총 {{size}})를 삭제합니다. 각 이미지는 다음에 표시될 때 다시 다운로드됩니다.",
+  "imageCacheCleared": "이미지 캐시를 지웠습니다",
+  "imageCacheClearFailed": "이미지 캐시를 지우지 못했습니다",
+  "imageCacheLoadFailed": "이미지 캐시를 읽지 못했습니다: {{message}}",
+  "imageCacheUnavailable": "이 서버에는 이미지 캐시가 없어 이미지를 각 제공업체에서 직접 불러옵니다."
 }

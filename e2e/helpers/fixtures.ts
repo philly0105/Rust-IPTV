@@ -1,4 +1,6 @@
 import { test as base, expect, type ConsoleMessage } from '@playwright/test';
+
+import { markOnboardingSeen } from './api';
 import { MOCK } from './env';
 
 /**
@@ -54,7 +56,24 @@ export interface ConsoleLog {
  * specs do not need to opt in; a spec that provokes an error on purpose calls
  * `consoleLog.allow(pattern)` before it (or `consoleLog.clear()` afterwards).
  */
-export const test = base.extend<{ consoleLog: ConsoleLog }>({
+export const test = base.extend<{ consoleLog: ConsoleLog }, { onboardingSeen: void }>({
+  /**
+   * Run 3 C7: once per worker (the run shares one data dir), the tour is done and the running
+   * version seen, so no spec meets an overlay it does not test. e2e/onboarding.spec.ts writes the
+   * markers it needs in its own hooks and puts them back to "seen" when it ends.
+   */
+  onboardingSeen: [
+    async ({ playwright }, use) => {
+      const request = await playwright.request.newContext();
+      try {
+        await markOnboardingSeen(request);
+      } finally {
+        await request.dispose();
+      }
+      await use();
+    },
+    { scope: 'worker', auto: true },
+  ],
   consoleLog: [
     async ({ page }, use, testInfo) => {
       const errors: string[] = [];

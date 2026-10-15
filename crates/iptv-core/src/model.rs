@@ -1157,6 +1157,16 @@ pub struct Settings {
     /// The VOD grid's "Hide watched" toggle: `catalog.movies` / `catalog.series`
     /// are asked with `hideWatched`.
     pub vod_hide_watched: bool,
+    // Run 3 (machine-local: none of these is in `backup::APP_SETTING_KEYS`):
+    /// Size cap of the on-disk image cache in MB, an integer in
+    /// [`crate::settings::IMAGE_CACHE_MAX_MB_RANGE`] (50..=5000). Applies to
+    /// the desktop app and to the server's cache in server mode.
+    pub image_cache_max_mb: u32,
+    /// The first-run tour was finished or skipped.
+    pub tour_completed: bool,
+    /// App version whose "What's new" the user last saw: `''` (never) or 1..=32
+    /// characters of `[0-9A-Za-z.+-]` ([`crate::settings::LAST_SEEN_VERSION_MAX_LEN`]).
+    pub last_seen_version: String,
 }
 
 impl Default for Settings {
@@ -1223,6 +1233,10 @@ impl Default for Settings {
             subtitle_position: 0,
             // vod:
             vod_hide_watched: false,
+            // Run 3:
+            image_cache_max_mb: 500,
+            tour_completed: false,
+            last_seen_version: String::new(),
         }
     }
 }
@@ -1812,6 +1826,45 @@ mod tests {
         assert!(serde_json::from_str::<Settings>(r#"{"subtitlePosition":-1}"#).is_err());
     }
 
+    /// Run 3 C1: the image cache cap and the onboarding markers default for
+    /// JSON stored by older builds, keep saved values, and stay machine-local
+    /// (a backup never carries them).
+    #[test]
+    fn run3_defaults_round_trip_and_stay_machine_local() {
+        let old: Settings =
+            serde_json::from_str(r#"{"theme":"dark","vodHideWatched":true}"#).unwrap();
+        assert_eq!(old.image_cache_max_mb, 500);
+        assert!(!old.tour_completed);
+        assert_eq!(old.last_seen_version, "");
+
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(v["imageCacheMaxMb"], 500);
+        assert_eq!(v["tourCompleted"], false);
+        assert_eq!(v["lastSeenVersion"], "");
+
+        let saved: Settings = serde_json::from_str(
+            r#"{"imageCacheMaxMb":2000,"tourCompleted":true,"lastSeenVersion":"0.1.0"}"#,
+        )
+        .unwrap();
+        assert_eq!(saved.image_cache_max_mb, 2000);
+        assert!(saved.tour_completed);
+        assert_eq!(saved.last_seen_version, "0.1.0");
+        let round: Settings =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(round, saved);
+        assert!(serde_json::from_str::<Settings>(r#"{"imageCacheMaxMb":-1}"#).is_err());
+        assert!(serde_json::from_str::<Settings>(r#"{"imageCacheMaxMb":250.5}"#).is_err());
+        assert!(serde_json::from_str::<Settings>(r#"{"tourCompleted":"yes"}"#).is_err());
+        assert!(serde_json::from_str::<Settings>(r#"{"lastSeenVersion":1}"#).is_err());
+
+        for key in ["imageCacheMaxMb", "tourCompleted", "lastSeenVersion"] {
+            assert!(
+                !crate::backup::APP_SETTING_KEYS.contains(&key),
+                "{key} is machine-local and must not be exported"
+            );
+        }
+    }
+
     /// Every key `backup.export` / `backup.import` carry is a real top-level
     /// settings field (a typo would silently drop the value), listed once.
     #[test]
@@ -2150,6 +2203,14 @@ mod tests {
         assert_eq!(
             constant("SUBTITLE_POSITION_MAX"),
             f64::from(*position.end())
+        );
+        // Run 3: image cache cap and the lastSeenVersion length.
+        let cap = crate::settings::IMAGE_CACHE_MAX_MB_RANGE;
+        assert_eq!(constant("IMAGE_CACHE_MAX_MB_MIN"), f64::from(*cap.start()));
+        assert_eq!(constant("IMAGE_CACHE_MAX_MB_MAX"), f64::from(*cap.end()));
+        assert_eq!(
+            constant("LAST_SEEN_VERSION_MAX_LENGTH"),
+            crate::settings::LAST_SEEN_VERSION_MAX_LEN as f64
         );
     }
 

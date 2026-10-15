@@ -9,6 +9,7 @@
 
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
+import { invalidate, queryClient } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import { QUIT_FLUSH_EVENT, type QuitFlushDetail } from '@/api/window';
 import type {
@@ -362,6 +363,8 @@ let lastSavedPosition = -1;
  */
 let finishedSavedFor: PlayerSource | undefined;
 
+const isPositionsKey = (key: readonly unknown[]) => typeof key[0] === 'string' && key[0].startsWith('positions.');
+
 /** Sends the VOD position; the promise settles when the core has it (or the send failed). */
 function savePosition(): Promise<void> {
   const { source, positionSeconds, durationSeconds } = usePlayerStore.getState();
@@ -380,6 +383,9 @@ function savePosition(): Promise<void> {
   if (snap) args.snapshot = snap;
   return rpc('positions.set', args).then(
     () => {
+      // C4 caches `positions.` for 15 s and no event follows a save: mark it stale so Continue
+      // Watching reads the new position on its next mount. No refetch now: this runs every 5 s.
+      void queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'none' });
       // The save that finishes a title makes it watched in the core (handleEnded, or a stop
       // past 95 %): refresh grid ticks, Hide watched pages and Continue Watching, which may
       // stay mounted under the mini player.
@@ -489,7 +495,8 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
 
     if (source.ref) {
       const snapshot = snapshotOf(source);
-      if (snapshot) rpc('recent.add', { ref: source.ref, snapshot }).catch(() => undefined);
+      // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
+      if (snapshot) rpc('recent.add', { ref: source.ref, snapshot }).then(() => invalidate('recent.'), () => undefined);
     }
 
     if (mode === 'external') {

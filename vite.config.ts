@@ -36,6 +36,19 @@ function vendorChunk(id: string): string | undefined {
   return VENDOR_CHUNKS.find(([, pkgs]) => pkgs.includes(pkg))?.[0];
 }
 
+/**
+ * Lazy chunks are named after their first module, so a feature barrel loaded with
+ * `import('@/features/player')` would also come out as `index-*.js`, next to the entry.
+ * Prefix those with their folder instead (`player-index-*.js`), so `dist/assets/index-*.js` is
+ * only the entry chunk that `pnpm size:check` budgets (C4, docs/architecture/performance.md).
+ */
+function chunkFileName(chunk: { name: string; facadeModuleId: string | null; moduleIds: readonly string[] }): string {
+  if (chunk.name !== 'index') return 'assets/[name]-[hash].js';
+  const id = chunk.facadeModuleId ?? chunk.moduleIds.at(-1) ?? '';
+  const dir = id.split(/[\\/]/).at(-2);
+  return `assets/${dir && dir !== 'src' ? dir : 'chunk'}-index-[hash].js`;
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -67,6 +80,7 @@ export default defineConfig({
         // Player engines (hls.js, mpegts.js, shaka) are already dynamic
         // imports and keep their own lazy chunks, so they are not listed.
         manualChunks: vendorChunk,
+        chunkFileNames: chunkFileName,
       },
     },
   },

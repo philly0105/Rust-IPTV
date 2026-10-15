@@ -112,7 +112,7 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
         tight
           ? 'absolute inset-x-0 bottom-0 z-30 border-t'
           : variant === 'overlay'
-            ? 'player-glass-edge absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-xl border motion-safe:animate-pop-in'
+            ? 'player-glass-edge glass-blur absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-xl border motion-safe:animate-pop-in'
             : 'shrink-0 border-t',
       )}
       onClick={(e) => e.stopPropagation()}

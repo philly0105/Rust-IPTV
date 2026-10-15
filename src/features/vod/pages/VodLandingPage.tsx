@@ -140,6 +140,11 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   progress={resume.get(resumeKey(item.ref))}
                   language={itemLanguage(item.title, item.categoryName)}
                   myList={myListTarget(item)}
+                  prefetch={
+                    source.data
+                      ? { ref: item.ref, sourceKind: source.data.kind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }
+                      : undefined
+                  }
                 />
               )}
             />

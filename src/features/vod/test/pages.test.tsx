@@ -210,6 +210,52 @@ describe('CategoryGridPage', () => {
     queryClient.clear();
   });
 
+  it('binds S (and the other cursor keys) only while the grid listbox has focus (Run 3 amendment 15:19)', async () => {
+    const list: unknown[] = [];
+    rpcMock.handlers['watchlist.list'] = () => list;
+    rpcMock.handlers['watchlist.toggle'] = () => ({ inList: true });
+    const { queryClient } = await import('@/api/query');
+    queryClient.setQueryData(['watchlist.list', {}], list);
+    const { shortcutRegistry } = await import('@/shell');
+    let offOther: (() => void) | undefined;
+    try {
+      renderAt('/s/src1/movies/c/c1', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
+      await screen.findByText('Movie 0');
+      const grid = screen.getByTestId('vod-grid');
+      expect(document.activeElement).not.toBe(grid);
+
+      // Unfocused grid: S, W and the poster menu keys are not claimed (fireEvent returns false
+      // when a handler cancelled the event), and S is not in the live shortcut list.
+      expect(fireEvent.keyDown(document.body, { key: 's' })).toBe(true);
+      expect(fireEvent.keyDown(document.body, { key: 'w' })).toBe(true);
+      expect(fireEvent.keyDown(document.body, { key: 'F10', shiftKey: true })).toBe(true);
+      expect(shortcutRegistry.list().some((x) => x.area === 'Vod' && x.combo === 's')).toBe(false);
+
+      // Another page-wide S (the player's screenshot) registered while the grid is shown gets the key.
+      const otherS = vi.fn();
+      offOther = shortcutRegistry.register('s', otherS, { description: 'other', area: 'Playback' });
+      fireEvent.keyDown(document.body, { key: 's' });
+      expect(otherS).toHaveBeenCalledTimes(1);
+      offOther();
+      offOther = undefined;
+
+      // Focused grid: S belongs to the grid's cursor.
+      act(() => grid.focus());
+      fireEvent.keyDown(grid, { key: 'ArrowRight' });
+      expect(fireEvent.keyDown(grid, { key: 's' })).toBe(false);
+      await waitFor(() => expect(callsOf('watchlist.toggle')).toHaveLength(1));
+      expect(shortcutRegistry.list().some((x) => x.area === 'Vod' && x.combo === 's')).toBe(true);
+
+      // Focus moves to the search box: S is free again.
+      act(() => screen.getByPlaceholderText('Search this category').focus());
+      expect(fireEvent.keyDown(document.body, { key: 's' })).toBe(true);
+      expect(callsOf('watchlist.toggle')).toHaveLength(1);
+    } finally {
+      offOther?.();
+      queryClient.clear();
+    }
+  });
+
   it('the corner toggle is busy and neither pressed nor saved until My List has loaded (C3)', async () => {
     let resolve: ((v: unknown) => void) | undefined;
     rpcMock.handlers['watchlist.list'] = () => new Promise((r) => (resolve = r));

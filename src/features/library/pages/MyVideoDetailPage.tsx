@@ -13,6 +13,7 @@ import { RpcError, isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
+import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 
 import { Button, EmptyState, ErrorState, PlayerStage, Poster, Skeleton, Toggle, useShortcut, useToast, usePlayerStore } from '../deps';
 import { ConfirmDialog, PageTitle, SectionHeading, SourceBadge } from '../components/bits';
@@ -208,7 +209,8 @@ export function MyVideoDetailPage() {
     );
   }
 
-  const source = sources.get((entry.kind === 'movie' ? entry.download : entry.latest).ref.sourceId);
+  const artSourceId = (entry.kind === 'movie' ? entry.download : entry.latest).ref.sourceId;
+  const source = sources.get(artSourceId);
   const movieMissing = entry.kind === 'movie' && entry.missing;
   const allMissing = entry.kind === 'series' && entry.missingCount === entry.episodes.length;
   const totalSize = (entry.kind === 'movie' ? [entry.download] : entry.episodes.map((e) => e.download)).reduce(
@@ -388,16 +390,9 @@ export function MyVideoDetailPage() {
       data-state="browse"
     >
       <div className="relative flex shrink-0 gap-6 lg:gap-10">
-        {entry.posterUrl && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -inset-x-6 -top-6 h-72 overflow-hidden opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)]"
-          >
-            <img src={entry.posterUrl} alt="" className="h-full w-full scale-110 object-cover blur-2xl" />
-          </div>
-        )}
+        {entry.posterUrl && <PosterGlow src={entry.posterUrl} sourceId={artSourceId} />}
         <div className={cn('relative w-32 shrink-0 md:w-44 xl:w-56', (movieMissing || allMissing) && 'opacity-60 grayscale')}>
-          <Poster src={entry.posterUrl} alt={entry.title} aspect="poster" />
+          <Poster src={entry.posterUrl} sourceId={artSourceId} alt={entry.title} aspect="poster" priority />
         </div>
         <div className="relative flex min-w-0 flex-1 flex-col justify-end gap-4 pb-1">
           <div className="flex min-w-0 flex-col gap-2">
@@ -410,6 +405,25 @@ export function MyVideoDetailPage() {
       </div>
       {entry.kind === 'series' && <div className="flex min-h-0 flex-1 flex-col">{episodeList}</div>}
       {removeDialog}
+    </div>
+  );
+}
+
+/**
+ * The soft colour wash behind the header: the poster through the image cache,
+ * drawn quarter-size, blurred and scaled up (C5), fading out downward. Nothing
+ * at all when the picture fails, so no broken-image box shows through.
+ */
+function PosterGlow({ src, sourceId }: { src: string; sourceId: string }) {
+  const image = useImageChain([src], sourceId);
+  if (!image.url) return null;
+  return (
+    <div
+      aria-hidden
+      data-testid="myvideo-poster-glow"
+      className="pointer-events-none absolute -inset-x-6 -top-6 h-72 overflow-hidden opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)]"
+    >
+      <img key={image.url} src={image.url} alt="" draggable={false} decoding="async" referrerPolicy="no-referrer" onError={image.onError} className={QUARTER_BLUR} />
     </div>
   );
 }

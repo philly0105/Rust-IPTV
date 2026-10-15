@@ -1,6 +1,6 @@
 import type { APIRequestContext } from '@playwright/test';
 
-import type { FavoriteEntry, Settings, Source } from '../../src/api/types';
+import type { AppInfo, FavoriteEntry, Settings, Source } from '../../src/api/types';
 import { M3U_URL, MOCK, SERVER, STALKER, XTREAM } from './env';
 
 /** Thrown when `POST /api/rpc/{cmd}` answers with a non-2xx status (body is the RpcError JSON). */
@@ -41,6 +41,16 @@ export async function removeAllSources(request: APIRequestContext): Promise<void
   for (const s of await listSources(request)) {
     await rpc(request, 'sources.remove', { id: s.id });
   }
+}
+
+/**
+ * Run 3 C7: marks the first-run tour as done and the running version as seen, so neither the tour
+ * nor What's new opens over the pages a spec tests. `settings.reset` keeps both markers, so once
+ * per data dir is enough; the fixtures do it for every worker (e2e/onboarding.spec.ts sets its own).
+ */
+export async function markOnboardingSeen(request: APIRequestContext): Promise<void> {
+  const { version } = await rpc<AppInfo>(request, 'app.info');
+  await rpc<Settings>(request, 'settings.update', { patch: { tourCompleted: true, lastSeenVersion: version } });
 }
 
 /** Fresh-install state: no sources, default settings, mock reset. */

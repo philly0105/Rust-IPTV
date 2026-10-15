@@ -8,6 +8,7 @@ import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useInMyList, useMyListState } from '@/features/mylist/hooks/useMyList';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 
+import { usePrefetchIntent, type PrefetchIntent, type PrefetchTarget } from '../hooks/prefetch';
 import { formatRating } from '../lib/format';
 import { languageName, type ItemLanguage } from '../lib/language';
 import { joinList } from '@/shell/dashboard/cards';
@@ -55,6 +56,15 @@ export interface PosterCardProps {
    * marker, the option's name says "In My List", and the grid binds a key (S) for the keyboard.
    */
   myList?: { itemRef: ItemRef; snapshot: ItemSnapshot } | undefined;
+  /**
+   * The detail page this card opens, warmed when the pointer rests on the card or it takes
+   * focus (C4). Its source also routes the poster through that source's image cache rules.
+   */
+  prefetch?: PrefetchTarget | undefined;
+  /** Ready-made intent handlers (a TMDB rail's search link); used instead of `prefetch`. */
+  intent?: PrefetchIntent | undefined;
+  /** The source the artwork belongs to, when `prefetch` and `myList` do not name it. */
+  sourceId?: string | undefined;
 }
 
 /**
@@ -143,10 +153,16 @@ function PosterCardView({
   active,
   interactive = true,
   myList,
+  prefetch,
+  intent,
+  sourceId,
   extraLabel,
   artCorner,
 }: PosterCardViewProps) {
   const { t, i18n } = useTranslation('vod');
+  const ownIntent = usePrefetchIntent(intent ? null : (prefetch ?? null));
+  const { onPointerEnter, onPointerLeave, onFocus } = intent ?? ownIntent;
+  const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
   const r = formatRating(rating, i18n.language);
   const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
   const hasProgress = progress !== undefined && Number.isFinite(progress) && progress > 0;
@@ -168,7 +184,7 @@ function PosterCardView({
     <>
       <div className={cn(CARD_ART, interactive && myList && WRAPPER_HOVER_ART, active && CARD_ART_CURSOR)}>
         {/* The frame's ring is the edge; the poster's own hairline would double it. */}
-        <Poster src={posterUrl} alt="" label={title} aspect="poster" className="after:hidden" />
+        <Poster src={posterUrl} sourceId={artSourceId} alt="" label={title} aspect="poster" className="after:hidden" />
         {badge && (
           <div aria-hidden className="pointer-events-none absolute start-1.5 top-1.5 flex gap-1">
             {badge}
@@ -229,7 +245,17 @@ function PosterCardView({
   if (!interactive) {
     return (
       // A named, non-interactive group: its label becomes the option's accessible name.
-      <div role="group" aria-label={fullLabel} data-grid-index={index} data-poster-card="" className={classes} title={fullTitle ?? title}>
+      // Focus stays on the listbox (aria-activedescendant), so only the pointer warms the page here.
+      <div
+        role="group"
+        aria-label={fullLabel}
+        data-grid-index={index}
+        data-poster-card=""
+        className={classes}
+        title={fullTitle ?? title}
+        onPointerEnter={onPointerEnter}
+        onPointerLeave={onPointerLeave}
+      >
         {content}
       </div>
     );
@@ -238,6 +264,9 @@ function PosterCardView({
     <Link
       to={href}
       onClick={onClick}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      onFocus={onFocus}
       data-grid-index={index}
       tabIndex={tabIndex}
       // The focus ring is drawn on the artwork (group-focus-visible below), not around the caption.
@@ -344,7 +373,7 @@ function GridMyListToggle({
         'motion-safe:transition-[opacity,background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
         saved
           ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover'
-          : 'border-glass-border bg-glass text-on-glass opacity-0 backdrop-blur-glass group-hover/card:opacity-100 hover:bg-glass-strong [@media(hover:none)]:opacity-100',
+          : 'border-glass-border bg-glass text-on-glass opacity-0 glass-blur group-hover/card:opacity-100 hover:bg-glass-strong [@media(hover:none)]:opacity-100',
         shown && 'opacity-100',
         (pending || loading) && 'cursor-progress',
         raised ? 'bottom-5' : 'bottom-1.5',

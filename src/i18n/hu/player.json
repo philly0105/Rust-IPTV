@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Legalul",
   "subtitleStyle.positionValue": "{{value}}%-kal feljebb",
   "subtitleStyle.preview": "Felirat előnézete",
-  "subtitleStyle.previewText": "Az utolsó vonat tízkor indul.\nMost már mennünk kell."
+  "subtitleStyle.previewText": "Az utolsó vonat tízkor indul.\nMost már mennünk kell.",
+  "screenshot": "Képernyőkép készítése",
+  "screenshotSaved": "Képernyőkép mentve",
+  "screenshotDownloaded": "Mentve a letöltések közé",
+  "screenshotOpen": "Megnyitás",
+  "screenshotOpenFailed": "Nem sikerült megnyitni a képernyőképet",
+  "screenshotFailed": "A képernyőkép nem lett mentve",
+  "screenshotCors": "Az adás szervere nem engedi a kép másolását (nincs CORS-engedély).",
+  "screenshotCorsMpv": "A beágyazott MPV el tudja készíteni: válassza ki a Beállítások > Külső lejátszók részben.",
+  "screenshotNotReady": "Még nincs kép. Próbálja újra, amint elindul a videó lejátszása.",
+  "screenshotNoVideo": "A rádiónak nincs rögzíthető képe.",
+  "screenshotExternal": "Ez külső lejátszóban fut. Használja annak saját képernyőkép-billentyűjét."
 }

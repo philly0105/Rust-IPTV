@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "最下部",
   "subtitleStyle.positionValue": "下端から {{value}}%",
   "subtitleStyle.preview": "字幕のプレビュー",
-  "subtitleStyle.previewText": "終電は10時だ。\nもう行かないと。"
+  "subtitleStyle.previewText": "終電は10時だ。\nもう行かないと。",
+  "screenshot": "スクリーンショットを撮る",
+  "screenshotSaved": "スクリーンショットを保存しました",
+  "screenshotDownloaded": "ダウンロードフォルダーに保存しました",
+  "screenshotOpen": "開く",
+  "screenshotOpenFailed": "スクリーンショットを開けませんでした",
+  "screenshotFailed": "スクリーンショットを保存できませんでした",
+  "screenshotCors": "ストリームのサーバーが映像のコピーを許可していません（CORS の許可がありません）。",
+  "screenshotCorsMpv": "埋め込みMPVなら撮影できます。設定 > プレーヤーで選択してください。",
+  "screenshotNotReady": "まだ映像がありません。動画の再生が始まってからもう一度お試しください。",
+  "screenshotNoVideo": "ラジオには撮影できる映像がありません。",
+  "screenshotExternal": "外部プレーヤーで再生中です。そのプレーヤーのスクリーンショットキーを使ってください。"
 }

@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Helemaal onderaan",
   "subtitleStyle.positionValue": "{{value}}% hoger",
   "subtitleStyle.preview": "Ondertitelvoorbeeld",
-  "subtitleStyle.previewText": "De laatste trein vertrekt om tien uur.\nWe moeten nu gaan."
+  "subtitleStyle.previewText": "De laatste trein vertrekt om tien uur.\nWe moeten nu gaan.",
+  "screenshot": "Schermafbeelding maken",
+  "screenshotSaved": "Schermafbeelding opgeslagen",
+  "screenshotDownloaded": "Opgeslagen in je downloads",
+  "screenshotOpen": "Openen",
+  "screenshotOpenFailed": "Kan de schermafbeelding niet openen",
+  "screenshotFailed": "Schermafbeelding niet opgeslagen",
+  "screenshotCors": "De server van de stream staat niet toe dat het beeld wordt gekopieerd (geen CORS-toestemming).",
+  "screenshotCorsMpv": "Ingebouwde MPV kan het vastleggen: kies het via Instellingen > Spelers.",
+  "screenshotNotReady": "Er is nog geen beeld. Probeer het opnieuw zodra de video speelt.",
+  "screenshotNoVideo": "Radio heeft geen beeld om vast te leggen.",
+  "screenshotExternal": "Dit speelt in een externe speler. Gebruik de eigen screenshottoets daarvan."
 }

@@ -1,0 +1,94 @@
+# Image cache
+
+Code: `crates/iptv-core/src/imagecache/` (core: `mod.rs` request flow, `fetch.rs` upstream fetch and type checks, `store.rs` index writer, eviction and reconcile, `rpc.rs` commands) and `crates/iptv-server/src/img.rs` (the HTTP route). Tests: `crates/iptv-core/tests/image_cache.rs`, the `img_*` cases in `crates/iptv-server/tests/server.rs`, `image_route_caches_behind_the_token_and_exposes_the_cache_header` in `crates/iptv-tauri/src/proxy.rs`, and unit tests in each core file.
+
+Posters, channel logos and backdrops are cached on disk, so a poster wall that was seen once loads from the device on the next visit and offline (Run 3 contract C2). The UI sends every http(s) image through `<base>/img?url=<absolute url>&sourceId=<id?>` (C3, `src/api/images.ts`). The first request fetches the image upstream; later requests read it from disk. The cache has a size cap from `settings.imageCacheMaxMb` (default 500, 50 to 5000) and drops the least recently used images when it goes over.
+
+## Storage
+
+Files live under `data_dir/image-cache/<first 2 hex>/<key>`, where the key is the lowercase hex SHA-256 of the normalised URL. The bytes are stored exactly as received. A download is written to `<key>.<random>.tmp` in the shard folder and renamed into place, so a reader never sees half a file.
+
+Migration `0017_image_cache.sql` creates the index:
+
+| Column | Notes |
+| --- | --- |
+| `key` | Primary key, the file name. |
+| `url` | The normalised URL (absolute http(s), no user info, no fragment, at most 8 KiB). |
+| `content_type` | The stored type, `image/*` only. It is served as `Content-Type`. |
+| `bytes` | File size. A row whose file is missing or has another size counts as a miss. |
+| `created_at`, `last_access` | Unix seconds. `last_access` orders eviction (`idx_image_cache_lru`). |
+
+A data dir that ran the empty Run 3 placeholder of migration 0017 has no table. The first use of the cache creates it from the same SQL (`CREATE TABLE IF NOT EXISTS`).
+
+### Writer
+
+Every index write goes through one writer task (`store::run`). It takes inserts, `last_access` touches, row removals, eviction and Clear from a channel and applies up to 256 of them in one IMMEDIATE transaction. Fifty posters that load during a catalog import therefore wait on the write lock as one connection, not fifty. The writer owns the running byte total, which starts from `SUM(bytes)`.
+
+### LRU
+
+After an insert takes the total over the cap, the writer deletes rows and files in `last_access`, `created_at`, `key` order until the total is at most 90 % of the cap (`EVICT_TARGET_PERCENT`). A lowered cap takes effect on the next insert or the next `images.stats`. A hit moves `last_access` forward at most once a minute per key (`TOUCH_INTERVAL_SECS`), so scrolling a cached wall does not write the database on every image.
+
+Eviction and Clear keep the file of a key whose fetch is still running, because that fetch may already have renamed a fresh copy into place. Without a row, such a file is overwritten by the next fetch or removed by a reconcile.
+
+### Reconcile
+
+`imagecache::init` (run at core startup) loads the total and starts a background pass over the folder:
+
+- a row whose file is missing or has the wrong size is removed;
+- a file without a row, a file whose size does not match its row, and a leftover `.tmp` file are deleted once they are 10 minutes old (younger ones may belong to a fetch in progress);
+- a file without a row that is over the 10 MB limit is deleted at once.
+
+## Request flow
+
+`imagecache::fetch(state, url, source_id)` returns a `CachedImage { path, content_type, bytes, hit }` or an `ImageError` with a kind. `imagecache::get` is the same with the error mapped onto `CoreError`.
+
+1. The URL is parsed and normalised. Anything that is not an absolute http(s) URL is `BadUrl`.
+2. The source, when `sourceId` names one, contributes its request headers (`config_json.headers`: User-Agent, Referer and the others a provider may need) and, in server mode, its own `host:port` as trusted by the SSRF guard. An unknown `sourceId` adds nothing; the image still loads without it.
+3. In server mode the guard checks the URL before the cache is read, so a URL the guard refuses is refused even when the cache already holds it.
+4. A row with its file on disk is a hit.
+5. Otherwise the request joins or starts the single fetch for that key and trust scope. The fetch runs as its own task, so a client that disconnects does not cancel it for the others. Concurrent requests share its result and all report `miss`. A request that joins after the fetch has finished (while its row is still committing) reports `hit`, as does a fetch that found the image already stored by an earlier one.
+6. The fetch sends an image `Accept` header with a 15 s limit for the response head, a 20 s idle limit between body chunks and a 60 s limit overall.
+7. The response is checked. 404 and 410 become `NotFound`; any other non-2xx status or transport error becomes `Upstream`. An `image/*` type is accepted, unless the body is really HTML. A generic type (`application/octet-stream`, `binary/octet-stream`, `text/plain` and similar) or a missing one is sniffed (PNG, JPEG, GIF, WebP, AVIF, ICO, BMP, SVG) and stored as the type found. Anything else is `NotImage`. A body over 10 MB (`MAX_IMAGE_BYTES`) is `TooLarge`, and an empty body is `Upstream`.
+8. The file is written, renamed and indexed. The answer waits up to 500 ms for the row to commit, so the request that follows finds the row and is a hit. A busy database (a catalog import, say) can delay the commit past that; the row still commits, and the fetch stays joinable until it does.
+
+A failed fetch is remembered for 10 minutes (`FAILURE_TTL`, at most 4096 entries) per key and trust scope, so a broken poster wall does not refetch on every scroll. A local disk or database error is not remembered. `images.clear` forgets every failure.
+
+## Commands (C2)
+
+| Command | Behaviour |
+| --- | --- |
+| `images.stats` | `{bytes, files, maxBytes}`. Evicts down to the cap first, so it also applies a lowered `imageCacheMaxMb`. |
+| `images.clear` | Deletes every file and row, forgets failures, and returns the empty stats. |
+
+## HTTP route
+
+`iptv_server::img::handler` serves `GET <base>/img?url=<absolute http(s) url>&sourceId=<id?>`. The first value of each parameter wins, and a blank `sourceId` counts as absent.
+
+- Server mode mounts it at `/api/img`, before the `/{*rest}` catch-all.
+- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks. CORS exposes `X-Image-Cache` to the webview.
+
+| Status | When | Body |
+| --- | --- | --- |
+| 200 | Cached bytes, with the stored `Content-Type`, `Cache-Control: private, max-age=604800`, `X-Image-Cache: hit` or `miss`, and `Last-Modified`. HEAD, `If-Modified-Since` (304) and Range work through `tower_http::services::ServeFile`. | The image |
+| 400 | Missing or bad URL (`invalid`) | JSON `RpcError` |
+| 403 | Refused by the server-mode SSRF guard (`invalid`) | JSON |
+| 404 | Upstream 404 or 410 (`not_found`) | JSON |
+| 415 | Not an image (`unsupported`) | JSON |
+| 502 | Any other upstream failure, including a body over 10 MB (`network`) | JSON |
+| 500 | Local disk or database failure (`io`), or a file that vanished twice while being read | JSON |
+
+Errors carry `Cache-Control: no-store`, so the browser asks again after the failure memory expires.
+
+Every response carries `harden()`: CSP `sandbox; default-src 'none'` and `X-Content-Type-Options: nosniff`. An SVG poster is served from the app's own origin, so it must never run as a document.
+
+`get` maps the kinds onto `CoreError` as C2 asks: not an image is `Unsupported`, too large and bad or refused URLs are `Invalid`, upstream 404 is `NotFound`, other upstream failures are `Network`, and local failures are `Io`. The route answers 502 for a body over 10 MB rather than 400, because the failure is the upstream's, not the request's.
+
+If eviction or Clear removes the file between the lookup and the read, the handler looks once more; that lookup sees the row gone and fetches again.
+
+## Server mode and trust
+
+With the guard active (`allow_private` off), a private or loopback target is refused unless the request names a source whose own `host:port` is that target. Flights and remembered failures are kept per trust scope, so an untrusted request never shares a fetch or a failure with a trusted one. The guard check comes before the cache lookup, so an image cached through a trusted source is still refused when it is asked for by IP without the source. A host name that resolves to a private address is checked when it is fetched, not when a cached copy is served.
+
+## Desktop
+
+The desktop app has no guard. Images are fetched with the shared client, plus the source's headers when `sourceId` is given. `imageUrl` builds the route from the proxy base (`.../proxy` becomes `.../img`), so images go through the token-protected loopback server.

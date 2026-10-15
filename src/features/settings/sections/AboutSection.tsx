@@ -1,9 +1,11 @@
-import { Copy, FolderOpen, ScrollText } from 'lucide-react';
+import { Copy, FolderOpen, Gift, Route, ScrollText } from 'lucide-react';
 import { version as reactVersion } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
+// The openers only (no UI imports): the dialogs load on first open.
+import { openTour, openWhatsNew } from '@/features/onboarding/store';
 
 import { Button, ErrorState, Skeleton, useToast } from '@/ui';
 import { SettingsGroup, SettingsSection } from '../components';
@@ -86,6 +88,15 @@ export function AboutSection(_props: SectionProps) {
             ) : null}
             <Button variant="ghost" icon={<Copy aria-hidden className="size-4" />} onClick={() => void copyDiagnostics()}>
               {t('aboutCopyDiagnostics')}
+            </Button>
+          </div>
+          {/* Run 3 C7: What's new lists every release so far; the tour replays from step one. */}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" icon={<Gift aria-hidden className="size-4" />} onClick={openWhatsNew} data-testid="about-whats-new">
+              {t('aboutWhatsNew')}
+            </Button>
+            <Button variant="ghost" icon={<Route aria-hidden className="size-4" />} onClick={openTour} data-testid="about-tour">
+              {t('aboutTakeTour')}
             </Button>
           </div>
           {!isDesktop ? <p className="text-sm text-fg-muted">{t('aboutServerNote')}</p> : null}

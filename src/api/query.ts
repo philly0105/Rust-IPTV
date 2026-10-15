@@ -8,7 +8,9 @@ import {
   keepPreviousData,
   useMutation,
   useQuery,
+  type QueryKey,
   type UseMutationResult,
+  type UseQueryOptions,
   type UseQueryResult,
 } from '@tanstack/react-query';
 
@@ -17,10 +19,70 @@ import { RpcError, rpcRaw, type RpcArgs, type RpcName, type RpcResult } from './
 
 const MAX_RETRIES = 2;
 
-export const queryClient = new QueryClient({
+/** Any RPC command name, as used in key[0]. */
+export type RpcCommand = RpcName;
+
+/** Cache timing for one query: how long data counts as fresh, and how long an unused entry stays cached. */
+export interface QueryTiming {
+  staleTime: number;
+  gcTime: number;
+}
+
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+
+/** Default timing for commands the table below does not list (C4). */
+export const DEFAULT_QUERY_TIMING: Readonly<QueryTiming> = { staleTime: 30 * SECOND, gcTime: 10 * MINUTE };
+
+/**
+ * Per-prefix timing (Run 3 C4). The first matching prefix wins. Event invalidation still
+ * marks these stale whatever their staleTime, so long stale times only save idle refetches.
+ */
+const QUERY_TIMINGS: readonly (readonly [prefix: string, staleTime: number, gcTime: number])[] = [
+  // Events and setSettingsCache keep these fresh.
+  ['settings.get', Infinity, DEFAULT_QUERY_TIMING.gcTime],
+  ['app.info', Infinity, DEFAULT_QUERY_TIMING.gcTime],
+  ['sources.list', 5 * MINUTE, DEFAULT_QUERY_TIMING.gcTime],
+  ['sources.get', 5 * MINUTE, DEFAULT_QUERY_TIMING.gcTime],
+  ['catalog.categories', 5 * MINUTE, DEFAULT_QUERY_TIMING.gcTime],
+  // Grid pages: back-navigation within 2 min shows the cached page without a refetch.
+  ['catalog.channels', 2 * MINUTE, 10 * MINUTE],
+  ['catalog.movies', 2 * MINUTE, 10 * MINUTE],
+  ['catalog.series', 2 * MINUTE, 10 * MINUTE],
+  ['catalog.yearFacets', 2 * MINUTE, 10 * MINUTE],
+  // Guide windows are large; drop them soon after the guide closes.
+  ['epg.grid', 5 * MINUTE, 2 * MINUTE],
+  ['epg.programs', 5 * MINUTE, 2 * MINUTE],
+  ['tmdb.', Infinity, 30 * MINUTE],
+  ['positions.', 15 * SECOND, DEFAULT_QUERY_TIMING.gcTime],
+  ['stats.', 15 * SECOND, DEFAULT_QUERY_TIMING.gcTime],
+];
+
+/** staleTime and gcTime for a command: its C4 table row, or {@link DEFAULT_QUERY_TIMING}. */
+export function queryDefaultsFor(cmd: RpcCommand): QueryTiming {
+  for (const [prefix, staleTime, gcTime] of QUERY_TIMINGS) {
+    if (cmd.startsWith(prefix)) return { staleTime, gcTime };
+  }
+  return { ...DEFAULT_QUERY_TIMING };
+}
+
+/**
+ * Applies {@link queryDefaultsFor} to every query whose key[0] is a command, including raw
+ * `useQuery`/`prefetchQuery` callers. Precedence, lowest first: client defaults, the C4
+ * table, `setQueryDefaults` entries, then the options passed with the query.
+ */
+class RpcQueryClient extends QueryClient {
+  override getQueryDefaults(queryKey: QueryKey): ReturnType<QueryClient['getQueryDefaults']> {
+    const registered = super.getQueryDefaults(queryKey);
+    const head = queryKey[0];
+    return typeof head === 'string' ? { ...queryDefaultsFor(head as RpcCommand), ...registered } : registered;
+  }
+}
+
+export const queryClient: QueryClient = new RpcQueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      ...DEFAULT_QUERY_TIMING,
       refetchOnWindowFocus: false,
       retry: (failureCount, error) => error instanceof RpcError && error.retryable && failureCount < MAX_RETRIES,
     },
@@ -36,7 +98,10 @@ export function rpcKey<K extends RpcName>(cmd: K, args?: RpcArgs<K>): readonly u
 
 export interface RpcQueryOptions {
   enabled?: boolean;
+  /** Overrides the command's {@link queryDefaultsFor} staleTime. */
   staleTime?: number;
+  /** Overrides the command's {@link queryDefaultsFor} gcTime. */
+  gcTime?: number;
   keepPrevious?: boolean;
 }
 
@@ -45,13 +110,16 @@ export function useRpcQuery<K extends RpcName>(
   args: RpcArgs<K>,
   opts?: RpcQueryOptions,
 ): UseQueryResult<RpcResult<K>, RpcError> {
-  return useQuery<RpcResult<K>, RpcError>({
+  const options: UseQueryOptions<RpcResult<K>, RpcError> = {
     queryKey: rpcKey(cmd, args),
     queryFn: async () => (await rpcRaw(cmd, args)) as RpcResult<K>,
-    enabled: opts?.enabled,
-    staleTime: opts?.staleTime,
-    placeholderData: opts?.keepPrevious ? keepPreviousData : undefined,
-  });
+  };
+  // Only set what the caller gave: an explicit `undefined` would hide the per-command defaults.
+  if (opts?.enabled !== undefined) options.enabled = opts.enabled;
+  if (opts?.staleTime !== undefined) options.staleTime = opts.staleTime;
+  if (opts?.gcTime !== undefined) options.gcTime = opts.gcTime;
+  if (opts?.keepPrevious) options.placeholderData = keepPreviousData;
+  return useQuery<RpcResult<K>, RpcError>(options);
 }
 
 export function useRpcMutation<K extends RpcName>(

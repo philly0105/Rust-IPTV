@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Abajo del todo",
   "subtitleStyle.positionValue": "Subidos un {{value}} %",
   "subtitleStyle.preview": "Vista previa de subtítulos",
-  "subtitleStyle.previewText": "El último tren sale a las diez.\nDeberíamos irnos ya."
+  "subtitleStyle.previewText": "El último tren sale a las diez.\nDeberíamos irnos ya.",
+  "screenshot": "Hacer captura de pantalla",
+  "screenshotSaved": "Captura de pantalla guardada",
+  "screenshotDownloaded": "Guardada en tus descargas",
+  "screenshotOpen": "Abrir",
+  "screenshotOpenFailed": "No se pudo abrir la captura de pantalla",
+  "screenshotFailed": "No se guardó la captura de pantalla",
+  "screenshotCors": "El servidor de la emisión no permite copiar su imagen (no envía permiso CORS).",
+  "screenshotCorsMpv": "MPV integrado puede capturarla: elígelo en Ajustes > Reproductores.",
+  "screenshotNotReady": "Todavía no hay imagen. Vuelve a intentarlo cuando se reproduzca el vídeo.",
+  "screenshotNoVideo": "La radio no tiene imagen que capturar.",
+  "screenshotExternal": "Se reproduce en un reproductor externo. Usa su propia tecla de captura."
 }

@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "В самом низу",
   "subtitleStyle.positionValue": "Выше на {{value}}%",
   "subtitleStyle.preview": "Предпросмотр субтитров",
-  "subtitleStyle.previewText": "Последний поезд уходит в десять.\nНам пора идти."
+  "subtitleStyle.previewText": "Последний поезд уходит в десять.\nНам пора идти.",
+  "screenshot": "Сделать снимок экрана",
+  "screenshotSaved": "Снимок экрана сохранён",
+  "screenshotDownloaded": "Сохранено в папке загрузок",
+  "screenshotOpen": "Открыть",
+  "screenshotOpenFailed": "Не удалось открыть снимок экрана",
+  "screenshotFailed": "Снимок экрана не сохранён",
+  "screenshotCors": "Сервер потока не разрешает копировать изображение (нет разрешения CORS).",
+  "screenshotCorsMpv": "Встроенный MPV может его сделать: выберите его в разделе «Настройки» > «Плееры».",
+  "screenshotNotReady": "Изображения ещё нет. Повторите, когда начнётся воспроизведение видео.",
+  "screenshotNoVideo": "У радио нет изображения для снимка.",
+  "screenshotExternal": "Воспроизведение идёт во внешнем плеере. Используйте его собственную клавишу снимка экрана."
 }

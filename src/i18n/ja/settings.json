@@ -281,6 +281,8 @@
   "aboutActionFailed": "フォルダーを開けませんでした",
   "aboutServerNote": "サーバーとして実行中です。フォルダーはホストマシン上にあります。",
   "aboutCredits": "IPTVnatorのアイデアをもとに作られています。映画とシリーズのデータはTMDBから取得しています。",
+  "aboutWhatsNew": "新機能",
+  "aboutTakeTour": "ツアーを開始",
 
   "errorRequired": "必須項目です。",
   "errorUrlInvalid": "http://example.com/guide.xml のような完全なアドレスを入力してください。",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "通知する",
   "reminderActionSwitch": "チャンネルを切り替える",
   "reminderActionNotifyHint": "「今すぐ視聴」ボタン付きの通知を表示します。",
-  "reminderActionSwitchHint": "チャンネルに切り替えてアプリを前面に表示します。元に戻せます。"
+  "reminderActionSwitchHint": "チャンネルに切り替えてアプリを前面に表示します。元に戻せます。",
+  "imageCache": "画像キャッシュ",
+  "imageCacheHint": "ポスター、ロゴ、背景画像をこのデバイスに保存するため、一度見たページはすぐに表示されます。上限に達すると、最も長く使われていない画像から削除されます。",
+  "imageCacheUsage": "{{used}} / {{limit}}",
+  "imageCachePictures_one": "{{count, number}} 枚の画像",
+  "imageCachePictures_other": "{{count, number}} 枚の画像",
+  "imageCacheEmpty": "空です。閲覧すると画像が保存されます。",
+  "imageCacheLimit": "上限",
+  "imageCacheClear": "キャッシュを消去",
+  "imageCacheClearTitle": "画像キャッシュを消去しますか？",
+  "imageCacheClearBody": "保存済みの画像 {{size}} を削除します。各画像は次に表示されるときに再ダウンロードされます。",
+  "imageCacheCleared": "画像キャッシュを消去しました",
+  "imageCacheClearFailed": "画像キャッシュを消去できませんでした",
+  "imageCacheLoadFailed": "画像キャッシュを読み取れませんでした: {{message}}",
+  "imageCacheUnavailable": "このサーバーには画像キャッシュがないため、画像は各プロバイダーから直接読み込まれます。"
 }

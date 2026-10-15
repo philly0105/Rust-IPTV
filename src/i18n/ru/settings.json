@@ -291,6 +291,8 @@
   "aboutActionFailed": "Не удалось открыть папку",
   "aboutServerNote": "Работает как сервер. Папки находятся на хост-компьютере.",
   "aboutCredits": "Основано на идеях IPTVnator. Данные о фильмах и сериалах предоставлены TMDB.",
+  "aboutWhatsNew": "Что нового",
+  "aboutTakeTour": "Посмотреть обзор",
 
   "errorRequired": "Обязательное поле.",
   "errorUrlInvalid": "Введите полный адрес, например http://example.com/guide.xml.",
@@ -433,5 +435,21 @@
   "reminderActionNotify": "Уведомить",
   "reminderActionSwitch": "Переключить канал",
   "reminderActionNotifyHint": "Показывает уведомление с кнопкой «Смотреть».",
-  "reminderActionSwitchHint": "Включает канал и выводит приложение на передний план. Это можно отменить."
+  "reminderActionSwitchHint": "Включает канал и выводит приложение на передний план. Это можно отменить.",
+  "imageCache": "Кэш изображений",
+  "imageCacheHint": "Постеры, логотипы и фоны хранятся на этом устройстве, поэтому уже просмотренные страницы открываются сразу. Когда кэш достигает лимита, место освобождают изображения, которые дольше всего не использовались.",
+  "imageCacheUsage": "{{used}} из {{limit}}",
+  "imageCachePictures_one": "{{count, number}} изображение",
+  "imageCachePictures_few": "{{count, number}} изображения",
+  "imageCachePictures_many": "{{count, number}} изображений",
+  "imageCachePictures_other": "{{count, number}} изображения",
+  "imageCacheEmpty": "Пусто. Изображения сохраняются по мере просмотра.",
+  "imageCacheLimit": "Лимит",
+  "imageCacheClear": "Очистить кэш",
+  "imageCacheClearTitle": "Очистить кэш изображений?",
+  "imageCacheClearBody": "Будет удалено {{size}} сохранённых изображений. Каждое загрузится заново, когда снова понадобится.",
+  "imageCacheCleared": "Кэш изображений очищен",
+  "imageCacheClearFailed": "Не удалось очистить кэш изображений",
+  "imageCacheLoadFailed": "Не удалось прочитать кэш изображений: {{message}}",
+  "imageCacheUnavailable": "На этом сервере нет кэша изображений, поэтому изображения загружаются напрямую у провайдеров."
 }

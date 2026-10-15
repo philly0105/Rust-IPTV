@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "У самым нізе",
   "subtitleStyle.positionValue": "Вышэй на {{value}}%",
   "subtitleStyle.preview": "Папярэдні прагляд субтытраў",
-  "subtitleStyle.previewText": "Апошні цягнік адыходзіць а дзясятай.\nНам пара ісці."
+  "subtitleStyle.previewText": "Апошні цягнік адыходзіць а дзясятай.\nНам пара ісці.",
+  "screenshot": "Зрабіць здымак экрана",
+  "screenshotSaved": "Здымак экрана захаваны",
+  "screenshotDownloaded": "Захавана ў папцы спамповак",
+  "screenshotOpen": "Адкрыць",
+  "screenshotOpenFailed": "Не ўдалося адкрыць здымак экрана",
+  "screenshotFailed": "Здымак экрана не захаваны",
+  "screenshotCors": "Сервер патоку не дазваляе капіраваць выяву (няма дазволу CORS).",
+  "screenshotCorsMpv": "Убудаваны MPV можа яго зрабіць: выберыце яго ў Налады > Плэеры.",
+  "screenshotNotReady": "Выявы яшчэ няма. Паспрабуйце зноў, калі пачнецца прайграванне відэа.",
+  "screenshotNoVideo": "У радыё няма выявы для здымка.",
+  "screenshotExternal": "Прайграванне ідзе ў знешнім плэеры. Карыстайцеся яго ўласнай клавішай здымка экрана."
 }

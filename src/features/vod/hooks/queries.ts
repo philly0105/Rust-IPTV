@@ -4,11 +4,11 @@
  * reaches them.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { onAppEvent } from '@/api/events';
-import { invalidate, useRpcQuery } from '@/api/query';
+import { invalidate, queryDefaultsFor, useRpcQuery } from '@/api/query';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type {
   ItemRef,
@@ -28,11 +28,19 @@ import { DEFAULT_SETTINGS } from '@/api/types';
 import { buildPageRequest, type GridQueryInput } from '../lib/paging';
 import { invalidateWatched } from '../lib/watchedQueries';
 
-/** Grid pages stay cached for a minute after their cells scroll away. */
-const PAGE_CACHE_MS = 60_000;
+/**
+ * Grid pages, SQLite or portal, use the catalog row of the C4 table (2 min fresh, 10 min
+ * cached), so going back to a grid within that time shows the pages without a refetch.
+ * Explicit here so portal commands (`stalker.movies`) get the same timing.
+ */
+const PAGE_TIMING = queryDefaultsFor('catalog.movies');
 
+/** Detail data stays fresh for 5 minutes, so a hover prefetch is still good when the page opens. */
+export const DETAIL_STALE_MS = 5 * 60_000;
+
+// Timing comes from queryDefaultsFor (C4): events and setSettingsCache keep settings fresh.
 export function useSettings(): Settings {
-  const q = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const q = useRpcQuery('settings.get', undefined);
   return q.data ?? DEFAULT_SETTINGS;
 }
 
@@ -59,7 +67,7 @@ export function useResumeMap(sourceId: string, kind: 'movie' | 'series'): Map<st
  * `filterKey` names what `accept` checks, so a new filter recomputes the map.
  */
 export function useResumeLookup(enabled = true, accept?: (ref: ItemRef) => boolean, filterKey = ''): Map<string, number> {
-  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { staleTime: 15_000, enabled });
+  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { enabled });
   const acceptRef = useRef(accept);
   acceptRef.current = accept;
   return useMemo(() => {
@@ -78,11 +86,11 @@ export function useResumeLookup(enabled = true, accept?: (ref: ItemRef) => boole
 }
 
 export function useSource(sourceId: string | undefined): UseQueryResult<Source, RpcError> {
-  return useRpcQuery('sources.get', { id: sourceId ?? '' }, { enabled: !!sourceId, staleTime: 60_000 });
+  return useRpcQuery('sources.get', { id: sourceId ?? '' }, { enabled: !!sourceId });
 }
 
 export function useSourcesList(): UseQueryResult<Source[], RpcError> {
-  return useRpcQuery('sources.list', undefined, { staleTime: 60_000 });
+  return useRpcQuery('sources.list', undefined);
 }
 
 /** One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected. */
@@ -98,8 +106,7 @@ export function useVodPage(
       return (await rpcRaw(req.cmd, req.args)) as Page<VodItem | SeriesItem>;
     },
     enabled: !!req,
-    staleTime: PAGE_CACHE_MS,
-    gcTime: PAGE_CACHE_MS,
+    ...PAGE_TIMING,
   });
 }
 
@@ -124,8 +131,7 @@ export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: b
       return last.items.length > 0 && loaded < last.total ? pages.length : undefined;
     },
     enabled: enabled && !!input,
-    staleTime: PAGE_CACHE_MS,
-    gcTime: PAGE_CACHE_MS,
+    ...PAGE_TIMING,
   });
 }
 
@@ -161,36 +167,53 @@ function detailCommand(sourceKind: SourceKind, kind: 'movie' | 'series'): string
   return 'catalog.item';
 }
 
-/** Movie detail: provider detail for portals; for m3u the catalog row wrapped as a detail. */
-export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
-  const cmd = source ? detailCommand(source.kind, 'movie') : 'catalog.item';
-  return useQuery<VodDetail, RpcError>({
-    queryKey: [cmd, { ref }],
+/** Only the ItemRef fields, so a ref carrying extra properties still hits the same cache entry. */
+function plainRef(ref: ItemRef): ItemRef {
+  return { sourceId: ref.sourceId, contentType: ref.contentType, itemId: ref.itemId };
+}
+
+/**
+ * Movie detail query: provider detail for portals; for m3u the catalog row wrapped as a detail.
+ * Shared by useMovieDetail and the hover prefetch (C4), so both use one key and fn.
+ */
+export function movieDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
+  const cmd = sourceKind ? detailCommand(sourceKind, 'movie') : 'catalog.item';
+  const args = { ref: plainRef(ref) };
+  return queryOptions<VodDetail, RpcError>({
+    queryKey: [cmd, args],
     queryFn: async () => {
-      const res = await rpcRaw(cmd, { ref });
+      const res = await rpcRaw(cmd, args);
       if (cmd === 'catalog.item') return { item: res as VodItem, cast: [], backdrops: [], providerDetailsUnavailable: false };
       return res as VodDetail;
     },
-    enabled: !!source,
-    staleTime: 5 * 60_000,
+    staleTime: DETAIL_STALE_MS,
   });
 }
 
-export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<SeriesDetail, RpcError> {
-  const cmd = source ? detailCommand(source.kind, 'series') : 'xtream.seriesDetail';
-  return useQuery<SeriesDetail, RpcError>({
-    queryKey: [cmd, { ref }],
+/** Series detail query, shared by useSeriesDetail and the hover prefetch (C4). */
+export function seriesDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
+  const cmd = sourceKind ? detailCommand(sourceKind, 'series') : 'xtream.seriesDetail';
+  const args = { ref: plainRef(ref) };
+  return queryOptions<SeriesDetail, RpcError>({
+    queryKey: [cmd, args],
     queryFn: async () => {
       if (cmd === 'catalog.item') {
         // m3u playlists have no series metadata; show the row with no episodes.
-        const item = (await rpcRaw(cmd, { ref })) as SeriesItem;
+        const item = (await rpcRaw(cmd, args)) as SeriesItem;
         return { item, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
       }
-      return (await rpcRaw(cmd, { ref })) as SeriesDetail;
+      return (await rpcRaw(cmd, args)) as SeriesDetail;
     },
-    enabled: !!source,
-    staleTime: 5 * 60_000,
+    staleTime: DETAIL_STALE_MS,
   });
+}
+
+export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
+  return useQuery({ ...movieDetailQuery(source?.kind, ref), enabled: !!source });
+}
+
+export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<SeriesDetail, RpcError> {
+  return useQuery({ ...seriesDetailQuery(source?.kind, ref), enabled: !!source });
 }
 
 interface TmdbLookup {
@@ -210,16 +233,16 @@ function lookupArgs(item: Pick<VodItem, 'title' | 'titleBase' | 'year' | 'tmdbId
 /** TMDB movie lookup, only when enrichment is on. Provider tmdbId goes first (the server tries it before the title). */
 export function useTmdbMovie(item: VodItem | undefined, enabled: boolean): UseQueryResult<TmdbMovie | null, RpcError> {
   const args = lookupArgs(item);
-  return useRpcQuery('tmdb.movie', args ?? { title: '' }, { enabled: enabled && !!args, staleTime: Infinity });
+  return useRpcQuery('tmdb.movie', args ?? { title: '' }, { enabled: enabled && !!args });
 }
 
 export function useTmdbTv(item: SeriesItem | undefined, enabled: boolean): UseQueryResult<TmdbTv | null, RpcError> {
   const args = lookupArgs(item);
-  return useRpcQuery('tmdb.tv', args ?? { title: '' }, { enabled: enabled && !!args, staleTime: Infinity });
+  return useRpcQuery('tmdb.tv', args ?? { title: '' }, { enabled: enabled && !!args });
 }
 
 export function useTmdbSimilar(mediaType: 'movie' | 'tv', tmdbId: number | undefined, enabled: boolean) {
-  return useRpcQuery('tmdb.similar', { mediaType, tmdbId: tmdbId ?? 0 }, { enabled: enabled && !!tmdbId, staleTime: Infinity });
+  return useRpcQuery('tmdb.similar', { mediaType, tmdbId: tmdbId ?? 0 }, { enabled: enabled && !!tmdbId });
 }
 
 export function useIsFavorite(ref: ItemRef): boolean {

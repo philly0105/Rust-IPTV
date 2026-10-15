@@ -281,6 +281,8 @@
   "aboutActionFailed": "Klasör açılamadı",
   "aboutServerNote": "Sunucu olarak çalışıyor. Klasörler ana makinede.",
   "aboutCredits": "IPTVnator'dan alınan fikirler üzerine kuruldu. Film ve dizi verileri TMDB'den.",
+  "aboutWhatsNew": "Yenilikler",
+  "aboutTakeTour": "Turu başlat",
 
   "errorRequired": "Zorunlu.",
   "errorUrlInvalid": "Tam bir adres girin, örneğin http://example.com/guide.xml.",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "Bildir",
   "reminderActionSwitch": "Kanalı değiştir",
   "reminderActionNotifyHint": "Şimdi izle düğmeli bir bildirim gösterir.",
-  "reminderActionSwitchHint": "Kanala geçer ve uygulamayı öne getirir. Geri alabilirsiniz."
+  "reminderActionSwitchHint": "Kanala geçer ve uygulamayı öne getirir. Geri alabilirsiniz.",
+  "imageCache": "Görsel önbelleği",
+  "imageCacheHint": "Afişler, logolar ve arka planlar bu cihazda saklanır; böylece daha önce gördüğünüz sayfalar anında dolar. Önbellek sınıra ulaştığında en uzun süredir kullanılmayan görseller yer açar.",
+  "imageCacheUsage": "{{used}} / {{limit}}",
+  "imageCachePictures_one": "{{count, number}} görsel",
+  "imageCachePictures_other": "{{count, number}} görsel",
+  "imageCacheEmpty": "Boş. Görseller siz gezindikçe kaydedilir.",
+  "imageCacheLimit": "Sınır",
+  "imageCacheClear": "Önbelleği temizle",
+  "imageCacheClearTitle": "Görsel önbelleği temizlensin mi?",
+  "imageCacheClearBody": "Bu işlem kayıtlı görsellerden {{size}} siler. Her biri bir sonraki gösterilişinde yeniden indirilir.",
+  "imageCacheCleared": "Görsel önbelleği temizlendi",
+  "imageCacheClearFailed": "Görsel önbelleği temizlenemedi",
+  "imageCacheLoadFailed": "Görsel önbelleği okunamadı: {{message}}",
+  "imageCacheUnavailable": "Bu sunucuda görsel önbelleği yok; görseller doğrudan her sağlayıcıdan yüklenir."
 }

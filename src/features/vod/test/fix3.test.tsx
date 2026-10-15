@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { imageCandidates } from '@/api/images';
 import type { ItemRef, Page, PageQuery, SeriesDetail, TmdbMovie, TmdbTv, VodDetail, VodItem } from '@/api/types';
 
 import { CategoryGridPage } from '../pages/CategoryGridPage';
@@ -227,9 +228,18 @@ describe('U4-fix3: detail hero', () => {
     });
     renderAt('/s/src1/movie/m7', movieRoute);
     const frame = await screen.findByTestId('vod-detail-poster');
-    await waitFor(() => expect(within(frame).getByRole('img').getAttribute('src')).toBe('http://provider/bad.jpg'));
-    fireEvent.error(within(frame).getByRole('img'));
-    await waitFor(() => expect(within(frame).getByRole('img').getAttribute('src')).toBe('http://tmdb/poster.jpg'));
+    // The TMDB stand-in joins the chain once TMDB answers; fail the provider only after that.
+    await screen.findByTestId('tmdb-attribution');
+    const img = () => within(frame).getByRole('img');
+    // Run 3 C3: each picture is tried through the image cache, then directly, before the next one.
+    const [cachedProvider, provider, cachedTmdb] = imageCandidates(['http://provider/bad.jpg', 'http://tmdb/poster.jpg'], 'src1');
+    expect(provider).toBe('http://provider/bad.jpg');
+    await waitFor(() => expect(img().getAttribute('src')).toBe(cachedProvider));
+    fireEvent.error(img());
+    await waitFor(() => expect(img().getAttribute('src')).toBe(provider));
+    fireEvent.error(img());
+    await waitFor(() => expect(img().getAttribute('src')).toBe(cachedTmdb));
+    expect(cachedTmdb).toContain(encodeURIComponent('http://tmdb/poster.jpg'));
   });
 
   it('renders the row with an inline notice when provider details are unavailable', async () => {

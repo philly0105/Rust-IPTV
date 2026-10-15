@@ -784,7 +784,7 @@ function RadioStage({ channel, stripPrefix }: { channel?: Channel; stripPrefix: 
       ) : (
         <div className="flex flex-1 items-center justify-center bg-surface">
           <EmptyState
-            icon={channel ? <ChannelLogo src={channel.logoUrl} name={displayChannelName(channel.name, stripPrefix)} size={72} /> : <RadioIcon className="size-8" />}
+            icon={channel ? <ChannelLogo src={channel.logoUrl} name={displayChannelName(channel.name, stripPrefix)} size={72} sourceId={channel.ref.sourceId} /> : <RadioIcon className="size-8" />}
             title={t('radioIdle')}
             description={t('radioIdleHint')}
           />

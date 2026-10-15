@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
+import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
 import { safeImageUrl } from '../format';
@@ -43,9 +44,9 @@ function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string>
 }
 
 function Logo({ entry }: { entry: HistoryEntry }) {
-  const [failed, setFailed] = useState(false);
-  const src = safeImageUrl(entry.posterUrl);
-  if (!src || failed) {
+  // Through the image cache (C3), then the logo's own URL once, then the icon.
+  const logo = useImageChain([safeImageUrl(entry.posterUrl)], entry.ref.sourceId);
+  if (!logo.url) {
     const Icon = entry.isRadio ? Radio : Tv;
     return (
       <span className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-white/8 text-white/60" aria-hidden>
@@ -53,7 +54,7 @@ function Logo({ entry }: { entry: HistoryEntry }) {
       </span>
     );
   }
-  return <img src={src} alt="" aria-hidden className="size-8 shrink-0 rounded-sm bg-white/8 object-contain" onError={() => setFailed(true)} />;
+  return <img src={logo.url} alt="" aria-hidden className="size-8 shrink-0 rounded-sm bg-white/8 object-contain" onError={logo.onError} />;
 }
 
 /**
@@ -105,7 +106,7 @@ export function ChannelHistory() {
           items[to]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border p-1.5 text-white motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border p-1.5 text-white motion-safe:animate-pop-in"
     >
       <div className="mb-1 flex items-center gap-1 border-b border-white/10">
         <span className="flex-1 px-2 py-2 text-sm font-medium">{t('channelHistory')}</span>

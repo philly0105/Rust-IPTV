@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "Na parte inferior",
   "subtitleStyle.positionValue": "Elevadas em {{value}}%",
   "subtitleStyle.preview": "Pré-visualização das legendas",
-  "subtitleStyle.previewText": "O último trem sai às dez.\nÉ melhor irmos agora."
+  "subtitleStyle.previewText": "O último trem sai às dez.\nÉ melhor irmos agora.",
+  "screenshot": "Capturar tela",
+  "screenshotSaved": "Captura de tela salva",
+  "screenshotDownloaded": "Salva nos seus downloads",
+  "screenshotOpen": "Abrir",
+  "screenshotOpenFailed": "Não foi possível abrir a captura de tela",
+  "screenshotFailed": "A captura de tela não foi salva",
+  "screenshotCors": "O servidor da transmissão não permite copiar a imagem (sem permissão CORS).",
+  "screenshotCorsMpv": "O MPV incorporado consegue capturá-la: escolha-o em Configurações > Reprodutores.",
+  "screenshotNotReady": "Ainda não há imagem. Tente novamente quando o vídeo estiver em reprodução.",
+  "screenshotNoVideo": "O rádio não tem imagem para capturar.",
+  "screenshotExternal": "Isto é reproduzido num reprodutor externo. Use a tecla de captura dele."
 }

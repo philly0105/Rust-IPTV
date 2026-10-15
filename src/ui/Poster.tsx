@@ -2,6 +2,7 @@ import { Clapperboard, Radio, Tv } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { useImageChain } from './image';
 
 export type PosterAspect = 'poster' | 'wide' | 'square';
 
@@ -23,6 +24,18 @@ export interface PosterProps {
   fit?: 'cover' | 'contain';
   /** Load immediately (above the fold). */
   eager?: boolean;
+  /**
+   * The picture the user is looking at first (the visible hero slide, a detail
+   * page's poster): `loading="eager"` and `fetchPriority="high"`.
+   */
+  priority?: boolean;
+  /** The source the artwork belongs to, so the image cache can apply that source's network rules. */
+  sourceId?: string;
+  /**
+   * A second picture to try when `src` fails both through the cache and
+   * directly (the TMDB poster behind a broken provider poster).
+   */
+  fallbackSrc?: string | null;
   rounded?: 'sm' | 'md' | 'lg';
 }
 
@@ -51,9 +64,15 @@ export function initialsOf(text: string): string {
 }
 
 /**
- * Artwork frame with lazy loading, a blurred-in reveal, and a designed
- * fallback tile (initials on a per-title tint plus a glyph) when the image is
- * missing or fails.
+ * Artwork frame with lazy loading, a fade-in reveal, and a designed fallback
+ * tile (initials on a per-title tint plus a glyph) when the image is missing
+ * or fails.
+ *
+ * Remote artwork loads through the image cache (`imageUrl`). When the cache
+ * route errors, the original URL is tried once, then `fallbackSrc` the same
+ * way, and only then the initials tile. The reveal animates opacity only: a
+ * blur or scale transition on every card of a grid costs a filter pass per
+ * card per frame (C5, src/perf-budget.test.ts).
  */
 export function Poster({
   src,
@@ -65,13 +84,16 @@ export function Poster({
   children,
   fit = 'cover',
   eager,
+  priority,
+  sourceId,
+  fallbackSrc,
   rounded = 'md',
 }: PosterProps) {
-  // Keyed by src so a src change never inherits the previous image's state.
-  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const state: 'loading' | 'loaded' | 'error' =
-    !src || failedSrc === src ? 'error' : loadedSrc === src ? 'loaded' : 'loading';
+  const image = useImageChain([src, fallbackSrc], sourceId);
+  // Keyed by URL so a new attempt or a new picture never inherits the previous one's state.
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const url = image.url;
+  const state: 'loading' | 'loaded' | 'error' = !url ? 'error' : loadedUrl === url ? 'loaded' : 'loading';
 
   const fallbackText = label ?? alt;
   const hue = hueOf(fallbackText);
@@ -119,21 +141,25 @@ export function Poster({
           )}
         </div>
       )}
-      {src && state !== 'error' && (
+      {url && (
         <img
-          src={src}
+          // A new element per attempt: the browser never shows the failed attempt's broken-image box.
+          key={url}
+          src={url}
           alt={alt}
-          loading={eager ? 'eager' : 'lazy'}
+          loading={priority || eager ? 'eager' : 'lazy'}
+          fetchPriority={priority ? 'high' : undefined}
           decoding="async"
           draggable={false}
           referrerPolicy="no-referrer"
-          onLoad={() => setLoadedSrc(src)}
-          onError={() => setFailedSrc(src)}
+          data-poster-state={state}
+          onLoad={() => setLoadedUrl(url)}
+          onError={image.onError}
           className={cn(
             'absolute inset-0 h-full w-full',
             fit === 'cover' ? 'object-cover' : 'object-contain p-[12%]',
-            'motion-safe:transition-[opacity,filter,transform] motion-safe:duration-500',
-            state === 'loaded' ? 'scale-100 opacity-100 blur-0' : 'scale-105 opacity-0 blur-md',
+            'motion-safe:transition-opacity motion-safe:duration-300 motion-safe:ease-out',
+            state === 'loaded' ? 'opacity-100' : 'opacity-0',
           )}
         />
       )}

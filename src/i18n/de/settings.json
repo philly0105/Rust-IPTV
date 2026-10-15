@@ -281,6 +281,8 @@
   "aboutActionFailed": "Dieser Ordner konnte nicht geöffnet werden",
   "aboutServerNote": "Läuft als Server. Die Ordner befinden sich auf dem Host-Rechner.",
   "aboutCredits": "Basiert auf Ideen von IPTVnator. Film- und Seriendaten von TMDB.",
+  "aboutWhatsNew": "Neuigkeiten",
+  "aboutTakeTour": "Rundgang starten",
 
   "errorRequired": "Pflichtfeld.",
   "errorUrlInvalid": "Geben Sie eine vollständige Adresse ein, zum Beispiel http://example.com/guide.xml.",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "Benachrichtigen",
   "reminderActionSwitch": "Sender wechseln",
   "reminderActionNotifyHint": "Zeigt eine Benachrichtigung mit der Schaltfläche Jetzt ansehen.",
-  "reminderActionSwitchHint": "Schaltet auf den Sender um und holt die App nach vorn. Das lässt sich rückgängig machen."
+  "reminderActionSwitchHint": "Schaltet auf den Sender um und holt die App nach vorn. Das lässt sich rückgängig machen.",
+  "imageCache": "Bild-Cache",
+  "imageCacheHint": "Poster, Logos und Hintergrundbilder werden auf diesem Gerät gespeichert, damit bereits besuchte Seiten sofort vollständig erscheinen. Ist das Limit erreicht, machen die am längsten nicht genutzten Bilder Platz.",
+  "imageCacheUsage": "{{used}} von {{limit}}",
+  "imageCachePictures_one": "{{count, number}} Bild",
+  "imageCachePictures_other": "{{count, number}} Bilder",
+  "imageCacheEmpty": "Leer. Bilder werden beim Stöbern gespeichert.",
+  "imageCacheLimit": "Limit",
+  "imageCacheClear": "Cache leeren",
+  "imageCacheClearTitle": "Bild-Cache leeren?",
+  "imageCacheClearBody": "Dadurch werden {{size}} gespeicherte Bilder entfernt. Jedes Bild wird beim nächsten Anzeigen neu geladen.",
+  "imageCacheCleared": "Bild-Cache geleert",
+  "imageCacheClearFailed": "Bild-Cache konnte nicht geleert werden",
+  "imageCacheLoadFailed": "Bild-Cache konnte nicht gelesen werden: {{message}}",
+  "imageCacheUnavailable": "Dieser Server hat keinen Bild-Cache. Bilder werden direkt vom jeweiligen Anbieter geladen."
 }

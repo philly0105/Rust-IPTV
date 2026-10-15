@@ -291,6 +291,8 @@
   "aboutActionFailed": "Nie udało się otworzyć folderu",
   "aboutServerNote": "Działa jako serwer. Foldery znajdują się na komputerze hosta.",
   "aboutCredits": "Oparte na pomysłach z IPTVnator. Dane filmów i seriali z TMDB.",
+  "aboutWhatsNew": "Co nowego",
+  "aboutTakeTour": "Pokaż wprowadzenie",
 
   "errorRequired": "Pole wymagane.",
   "errorUrlInvalid": "Podaj pełny adres, np. http://example.com/guide.xml.",
@@ -433,5 +435,21 @@
   "reminderActionNotify": "Powiadom mnie",
   "reminderActionSwitch": "Przełącz kanał",
   "reminderActionNotifyHint": "Pokazuje powiadomienie z przyciskiem Oglądaj teraz.",
-  "reminderActionSwitchHint": "Przełącza na kanał i wysuwa aplikację na wierzch. Można to cofnąć."
+  "reminderActionSwitchHint": "Przełącza na kanał i wysuwa aplikację na wierzch. Można to cofnąć.",
+  "imageCache": "Pamięć podręczna obrazów",
+  "imageCacheHint": "Plakaty, logotypy i tła są przechowywane na tym urządzeniu, więc odwiedzone już strony wczytują się od razu. Gdy pamięć podręczna osiągnie limit, miejsce zwalniają obrazy nieużywane najdłużej.",
+  "imageCacheUsage": "{{used}} z {{limit}}",
+  "imageCachePictures_one": "{{count, number}} obraz",
+  "imageCachePictures_few": "{{count, number}} obrazy",
+  "imageCachePictures_many": "{{count, number}} obrazów",
+  "imageCachePictures_other": "{{count, number}} obrazu",
+  "imageCacheEmpty": "Pusta. Obrazy są zapisywane podczas przeglądania.",
+  "imageCacheLimit": "Limit",
+  "imageCacheClear": "Wyczyść pamięć",
+  "imageCacheClearTitle": "Wyczyścić pamięć podręczną obrazów?",
+  "imageCacheClearBody": "Spowoduje to usunięcie {{size}} zapisanych obrazów. Każdy zostanie pobrany ponownie, gdy znów się pojawi.",
+  "imageCacheCleared": "Wyczyszczono pamięć podręczną obrazów",
+  "imageCacheClearFailed": "Nie udało się wyczyścić pamięci podręcznej obrazów",
+  "imageCacheLoadFailed": "Nie udało się odczytać pamięci podręcznej obrazów: {{message}}",
+  "imageCacheUnavailable": "Ten serwer nie ma pamięci podręcznej obrazów, więc obrazy są wczytywane bezpośrednio od dostawców."
 }

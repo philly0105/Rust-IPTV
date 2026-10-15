@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "size:check": "node tools/check-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc-rs --noEmit -p tsconfig.json",
     "typecheck:tsc": "tsc --noEmit -p tsconfig.json",

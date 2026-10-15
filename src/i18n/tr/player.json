@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "En altta",
   "subtitleStyle.positionValue": "%{{value}} yukarıda",
   "subtitleStyle.preview": "Altyazı önizlemesi",
-  "subtitleStyle.previewText": "Son tren onda kalkıyor.\nArtık gitmeliyiz."
+  "subtitleStyle.previewText": "Son tren onda kalkıyor.\nArtık gitmeliyiz.",
+  "screenshot": "Ekran görüntüsü al",
+  "screenshotSaved": "Ekran görüntüsü kaydedildi",
+  "screenshotDownloaded": "İndirilenler klasörünüze kaydedildi",
+  "screenshotOpen": "Aç",
+  "screenshotOpenFailed": "Ekran görüntüsü açılamadı",
+  "screenshotFailed": "Ekran görüntüsü kaydedilmedi",
+  "screenshotCors": "Yayının sunucusu görüntünün kopyalanmasına izin vermiyor (CORS izni yok).",
+  "screenshotCorsMpv": "Gömülü MPV bunu yakalayabilir: Ayarlar > Oynatıcılar bölümünden seçin.",
+  "screenshotNotReady": "Henüz görüntü yok. Video oynatılmaya başlayınca tekrar deneyin.",
+  "screenshotNoVideo": "Radyonun yakalanacak bir görüntüsü yok.",
+  "screenshotExternal": "Bu, harici bir oynatıcıda oynatılıyor. O oynatıcının kendi ekran görüntüsü tuşunu kullanın."
 }

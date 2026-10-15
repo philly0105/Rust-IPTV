@@ -281,6 +281,8 @@
   "aboutActionFailed": "Kan die map niet openen",
   "aboutServerNote": "Draait als server. Mappen staan op de hostmachine.",
   "aboutCredits": "Gebaseerd op ideeën uit IPTVnator. Film- en seriegegevens van TMDB.",
+  "aboutWhatsNew": "Wat is er nieuw",
+  "aboutTakeTour": "Rondleiding starten",
 
   "errorRequired": "Verplicht.",
   "errorUrlInvalid": "Voer een volledig adres in, zoals http://example.com/guide.xml.",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "Melding geven",
   "reminderActionSwitch": "Van zender wisselen",
   "reminderActionNotifyHint": "Toont een melding met een knop Nu kijken.",
-  "reminderActionSwitchHint": "Schakelt naar de zender en haalt de app naar voren. Je kunt het ongedaan maken."
+  "reminderActionSwitchHint": "Schakelt naar de zender en haalt de app naar voren. Je kunt het ongedaan maken.",
+  "imageCache": "Afbeeldingscache",
+  "imageCacheHint": "Posters, logo's en achtergronden worden op dit apparaat bewaard, zodat pagina's die je al hebt gezien meteen gevuld zijn. Als de cache zijn limiet bereikt, maken de afbeeldingen die het langst niet zijn gebruikt plaats.",
+  "imageCacheUsage": "{{used}} van {{limit}}",
+  "imageCachePictures_one": "{{count, number}} afbeelding",
+  "imageCachePictures_other": "{{count, number}} afbeeldingen",
+  "imageCacheEmpty": "Leeg. Afbeeldingen worden bewaard terwijl je bladert.",
+  "imageCacheLimit": "Limiet",
+  "imageCacheClear": "Cache wissen",
+  "imageCacheClearTitle": "Afbeeldingscache wissen?",
+  "imageCacheClearBody": "Hiermee verwijder je {{size}} aan bewaarde afbeeldingen. Elke afbeelding wordt opnieuw gedownload zodra die weer wordt getoond.",
+  "imageCacheCleared": "Afbeeldingscache gewist",
+  "imageCacheClearFailed": "Kan de afbeeldingscache niet wissen",
+  "imageCacheLoadFailed": "Kan de afbeeldingscache niet lezen: {{message}}",
+  "imageCacheUnavailable": "Deze server heeft geen afbeeldingscache, dus afbeeldingen worden rechtstreeks bij elke provider geladen."
 }

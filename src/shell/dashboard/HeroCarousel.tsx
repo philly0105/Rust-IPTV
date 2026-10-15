@@ -12,7 +12,12 @@
  *
  * Text sits on frosted glass (C8 tokens) that clears toward the inline end, so
  * it stays readable on any artwork in every theme; a slide with no artwork gets
- * a per-title tint instead. Every slide body is laid into one grid cell, so the
+ * a per-title tint instead. The frost is not a backdrop filter (C5): it is a
+ * glass tint over a quarter-size, lightly blurred copy of the artwork, masked
+ * to the text column, so nothing re-samples the page while the hero is on
+ * screen. Artwork loads through the image cache; the visible slide's pictures
+ * load at high priority, and the next slide's backdrop is mounted (and so
+ * fetched at low priority) once the main thread is idle. Every slide body is laid into one grid cell, so the
  * hero keeps the height of its tallest slide and nothing below it moves when
  * the rotation turns.
  */
@@ -24,10 +29,11 @@ import { Link } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
-import { Poster, ProgressBar, cn, hueOf } from '@/ui';
+import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
+import { Poster, ProgressBar, QUARTER_BLUR, cn, hueOf, useImageChain, whenIdle } from '@/ui';
 
 import { useReducedMotion } from '../theme';
-import { itemPath, joinList } from './cards';
+import { itemPath, joinList, usePrefetchTarget } from './cards';
 import { HERO_BODY, HERO_FRAME } from './HeroSkeleton';
 import { HERO_DWELL_MS, wrapIndex, type HeroSlide } from './heroSlides';
 
@@ -127,15 +133,20 @@ function tint(title: string): string {
  * One slide's backdrop. The incoming layer animates in on top (z-index 1);
  * the outgoing one stays opaque underneath for the length of that fade and
  * then drops out, so the crossfade never dips through to the frame colour.
+ *
+ * The backdrop loads through the image cache, then directly once, then the
+ * poster the same way, then the tint stays. A poster standing in for a
+ * missing backdrop is drawn quarter-size, blurred and scaled up (C5), so it
+ * reads as colour, not as a picture.
  */
 function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean; title: string }) {
   const s = useSlideDetails(slide, true);
-  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const image = useImageChain([s.backdropUrl, s.posterUrl], s.ref.sourceId);
   const [loaded, setLoaded] = useState<string | null>(null);
-  const backdrop = s.backdropUrl && !failed.has(s.backdropUrl) ? s.backdropUrl : undefined;
-  const poster = !backdrop && s.posterUrl && !failed.has(s.posterUrl) ? s.posterUrl : undefined;
-  const src = backdrop ?? poster;
-  const fail = (url: string) => setFailed((prev) => new Set(prev).add(url));
+  const url = image.url;
+  const wide = !!url && image.source === s.backdropUrl?.trim();
+  const shown = !!url && loaded === url;
+  const fetchPriority = active ? 'high' : 'low';
   return (
     <div
       aria-hidden
@@ -149,23 +160,35 @@ function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean;
       )}
       style={{ background: tint(title) }}
     >
-      {src && (
+      {url && (
         <img
-          src={src}
+          key={url}
+          src={url}
           alt=""
           draggable={false}
+          loading="eager"
           decoding="async"
           referrerPolicy="no-referrer"
-          fetchPriority={active ? 'high' : 'low'}
-          onLoad={() => setLoaded(src)}
-          onError={() => fail(src)}
+          fetchPriority={fetchPriority}
+          data-hero-image={wide ? 'backdrop' : 'poster'}
+          onLoad={() => setLoaded(url)}
+          onError={image.onError}
           className={cn(
-            'absolute inset-0 h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-500',
-            // A poster stands in for a missing backdrop: blown up and softened, it reads as colour, not as a picture.
-            backdrop ? 'object-[center_25%]' : 'scale-125 blur-2xl saturate-150',
-            loaded === src ? (backdrop ? 'opacity-100' : 'opacity-70') : 'opacity-0',
+            'motion-safe:transition-opacity motion-safe:duration-500',
+            wide ? 'absolute inset-0 h-full w-full object-cover object-[center_25%]' : cn(QUARTER_BLUR, 'saturate-150'),
+            shown ? (wide ? 'opacity-100' : 'opacity-70') : 'opacity-0',
           )}
         />
+      )}
+      {/*
+        The frost's texture: the same backdrop, quarter-size and blurred, under the
+        glass tint and masked like it. Mounted once the picture has loaded, so it
+        comes from the memory cache and never shows a broken image.
+      */}
+      {wide && shown && (
+        <div data-hero-frost-art="" className="absolute inset-0 overflow-hidden hero-frost">
+          <img src={url} alt="" draggable={false} decoding="async" referrerPolicy="no-referrer" className={cn(QUARTER_BLUR, 'object-[center_25%] saturate-125')} />
+        </div>
       )}
     </div>
   );
@@ -200,6 +223,8 @@ function SlideBody({
   const facts = joinList([s.year, s.genres?.slice(0, 2).join(' / ')], i18n.language);
   const eyebrow = continuing ? t('heroEyebrow') : sourceName ? t('heroNewIn', { source: sourceName }) : t('heroNew');
   const titleId = `${panelId}-title-${index}`;
+  // Details warms the detail page (query, route chunk, artwork) on hover or focus (C4).
+  const details = usePrefetchIntent(usePrefetchTarget(vod && active ? s.ref : undefined, s.posterUrl, s.backdropUrl));
 
   return (
     <div
@@ -213,7 +238,15 @@ function SlideBody({
     >
       <div className="hidden w-[10rem] shrink-0 lg:block">
         {active || s.posterUrl ? (
-          <Poster src={s.posterUrl} alt="" label={title} aspect="poster" eager={active} className="shadow-2 ring-1 ring-glass-border" />
+          <Poster
+            src={s.posterUrl}
+            alt=""
+            label={title}
+            aspect="poster"
+            sourceId={s.ref.sourceId}
+            priority={active}
+            className="shadow-2 ring-1 ring-glass-border"
+          />
         ) : (
           <div className="aspect-[2/3] w-full" />
         )}
@@ -275,6 +308,9 @@ function SlideBody({
             <Link
               to={itemPath(s.ref)}
               aria-describedby={titleId}
+              onPointerEnter={details.onPointerEnter}
+              onPointerLeave={details.onPointerLeave}
+              onFocus={details.onFocus}
               className={cn(
                 'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-glass-border bg-on-glass/10 px-5 text-base font-medium text-on-glass select-none',
                 'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
@@ -325,15 +361,20 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
   );
   useRotation(active?.key, running, dwellMs, () => go(1));
 
-  // Backdrops mount once visited, plus the next one so it has loaded before its turn.
+  // Backdrops mount once visited. The next one mounts when the main thread is idle, so it
+  // is fetched (at low priority, through the image cache) and decoded before its turn
+  // without competing with the visible slide's pictures.
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
   const nextKey = count > 1 ? slides[wrapIndex(index, 1, count)]?.key : undefined;
+  const visibleKey = active?.key;
   useEffect(() => {
-    setSeen((prev) => {
-      const add = [active?.key, nextKey].filter((k): k is string => !!k && !prev.has(k));
-      return add.length ? new Set([...prev, ...add]) : prev;
-    });
-  }, [active?.key, nextKey]);
+    if (!visibleKey) return;
+    setSeen((prev) => (prev.has(visibleKey) ? prev : new Set([...prev, visibleKey])));
+  }, [visibleKey]);
+  useEffect(() => {
+    if (!nextKey) return;
+    return whenIdle(() => setSeen((prev) => (prev.has(nextKey) ? prev : new Set([...prev, nextKey]))));
+  }, [nextKey]);
 
   if (!active) return null;
 
@@ -385,7 +426,7 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
         the inline end so the picture shows. Narrow screens frost the whole frame,
         because the text runs edge to edge there.
       */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 z-[2] glass hero-frost" />
+      <div aria-hidden className="pointer-events-none absolute inset-0 z-[2] bg-glass hero-frost" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-1/3 bg-gradient-to-t from-glass to-transparent" />
 
       {count > 1 && (

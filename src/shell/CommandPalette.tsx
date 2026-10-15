@@ -6,6 +6,7 @@ import {
   ChartColumn,
   CornerDownLeft,
   Download,
+  Gift,
   HardDrive,
   Heart,
   History,
@@ -18,6 +19,7 @@ import {
   Monitor,
   Moon,
   Plus,
+  Route,
   Search,
   Settings as SettingsIcon,
   Sun,
@@ -29,6 +31,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { RpcError } from '@/api/transport';
+// The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
+import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
 import { Dialog, Kbd, toast } from '@/ui';
 
@@ -136,6 +140,9 @@ export function usePaletteItems(): PaletteItem[] {
       { id: 'theme.light', title: t('themeLight'), group: set, icon: Sun, run: () => void persistTheme('light'), keywords: ['theme', 'day'] },
       { id: 'theme.system', title: t('themeSystem'), group: set, icon: Monitor, run: () => void persistTheme('system'), keywords: ['theme', 'auto'] },
       { id: 'help.shortcuts', title: t('keyboardShortcuts'), group: set, icon: Keyboard, shortcut: '?', run: () => setHelpOpen(true), keywords: ['keys', 'help'] },
+      // Run 3 C7: replay the first-run tour, or read every release's notes.
+      { id: 'help.tour', title: t('takeTour'), group: set, icon: Route, run: openTour, keywords: ['tour', 'onboarding', 'introduction', 'help', 'guide'] },
+      { id: 'help.whatsNew', title: t('whatsNew'), group: set, icon: Gift, run: openWhatsNew, keywords: ['release notes', 'changelog', 'updates', 'version'] },
     );
     if (canLockParental) {
       items.push({

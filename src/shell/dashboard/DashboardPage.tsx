@@ -29,7 +29,7 @@ import { useVisibleSources } from '../useVisibleSources';
 import { useSettings } from '../useSettings';
 // account:
 import { AccountAlerts } from './AccountAlerts';
-import { ChannelCard, PosterCard, SourceCard, itemPath, joinList } from './cards';
+import { ChannelCard, PosterCard, SourceCard, SourceKindContext, itemPath, joinList } from './cards';
 import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail } from './DashboardRail';
 import { HeroCarousel } from './HeroCarousel';
@@ -138,6 +138,8 @@ function DashboardBody() {
   const sources = useVisibleSources();
   const hasSources = (sources.data?.length ?? 0) > 0;
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  // Hover prefetch targets (C4) need each card's source kind.
+  const sourceKinds = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.kind])), [sources.data]);
 
   const continueWatching = useRpcQuery('positions.continueWatching', { limit: RAIL_LIMIT }, { enabled: hasSources });
   const favorites = useRpcQuery('favorites.list', {}, { enabled: hasSources });
@@ -307,271 +309,274 @@ function DashboardBody() {
 
   return (
     // gap-10 pt-8 match the startup frame (StartupRedirect), and both follow density through --spacing.
-    <div className="flex flex-col gap-10 pt-8 pb-16" data-testid="dashboard">
-      {/* account: subscription expiry alerts, above everything else. */}
-      {hasSources && <AccountAlerts sources={sources.data ?? []} />}
-      {/*
-        The shared error takes the hero's place in the normal flow. With the hero on,
-        an invisible hero skeleton shares its grid cell, so the slot keeps at least the
-        loading state's height and the content below doesn't jump up under it.
-      */}
-      {showSharedError && (
-        <div className="grid" data-testid="dashboard-error-slot">
-          {visible('hero') && (
-            <div aria-hidden className="invisible col-start-1 row-start-1" data-hero-spacer="">
-              <HeroSkeleton />
+    <SourceKindContext.Provider value={sourceKinds}>
+      <div className="flex flex-col gap-10 pt-8 pb-16" data-testid="dashboard">
+        {/* account: subscription expiry alerts, above everything else. */}
+        {hasSources && <AccountAlerts sources={sources.data ?? []} />}
+        {/*
+          The shared error takes the hero's place in the normal flow. With the hero on,
+          an invisible hero skeleton shares its grid cell, so the slot keeps at least the
+          loading state's height and the content below doesn't jump up under it.
+        */}
+        {showSharedError && (
+          <div className="grid" data-testid="dashboard-error-slot">
+            {visible('hero') && (
+              <div aria-hidden className="invisible col-start-1 row-start-1" data-hero-spacer="">
+                <HeroSkeleton />
+              </div>
+            )}
+            <div className="col-start-1 row-start-1 mx-4 flex rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-error">
+              <ErrorState
+                error={sharedError}
+                size="inline"
+                className="flex-1"
+                title={t('dashboardLoadFailed')}
+                hint={t('dashboardLocalDataHint')}
+                onRetry={retryAllRails}
+              />
             </div>
-          )}
-          <div className="col-start-1 row-start-1 mx-4 flex rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-error">
-            <ErrorState
-              error={sharedError}
-              size="inline"
-              className="flex-1"
-              title={t('dashboardLoadFailed')}
-              hint={t('dashboardLocalDataHint')}
-              onRetry={retryAllRails}
-            />
           </div>
-        </div>
-      )}
-      {show('hero') &&
-        (heroLoading ? (
-          <HeroSkeleton />
-        ) : heroSlides.length > 0 ? (
-          <HeroCarousel
-            slides={heroSlides}
-            sourceName={(id) => sourceById.get(id)?.name}
-            canPlay={(ref) => sourceById.has(ref.sourceId)}
-            onPlay={playSlide}
-          />
-        ) : null)}
-
-      {visible('continueWatching') && (
-        <DashboardRail<PlaybackPosition>
-          id="continue-watching"
-          title={t('railContinueWatching')}
-          items={continueWatching.data}
-          loading={continueWatching.isPending}
-          loaded={continueWatching.isSuccess}
-          error={railError(continueWatching.error)}
-          errorHint={t('dashboardLocalDataHint')}
-          onRetry={() => void continueWatching.refetch()}
-          getKey={(p) => `${itemKey(p.ref)}|${p.episodeId ?? ''}`}
-          cardWidth={168}
-          skeletonAspect={2 / 3}
-          renderCard={(p, rail) => {
-            const title = p.snapshot?.title ?? t('untitled');
-            const left = minutesLeft(p);
-            return (
-              <PosterCard
-                rail={rail}
-                title={title}
-                subtitle={left !== undefined ? t('minutesLeft', { count: left }) : p.snapshot?.subtitle}
-                posterUrl={p.snapshot?.posterUrl}
-                progress={watchedFraction(p)}
-                badge={seriesBadge(p)}
-                ariaLabel={t('resumeTitle', { title })}
-                myList={{ itemRef: p.ref, snapshot: p.snapshot ?? { title, contentType: p.ref.contentType } }}
-                onPlay={() =>
-                  play({ ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot?.subtitle, posterUrl: p.snapshot?.posterUrl })
-                }
-              />
-            );
-          }}
-        />
-      )}
-
-      {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
-      {visible('myList') && <MyListRail hideError={showSharedError} />}
-      {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
-      <CustomListRails />
-
-      {visible('liveFavorites') && (
-        <DashboardRail<FavoriteEntry>
-          id="live-favorites"
-          title={t('railLiveFavorites')}
-          items={liveFavorites}
-          loading={favorites.isPending}
-          loaded={favorites.isSuccess}
-          error={railError(favorites.error)}
-          errorHint={t('dashboardLocalDataHint')}
-          onRetry={() => void favorites.refetch()}
-          seeAll={{ to: '/favorites' }}
-          getKey={(f) => itemKey(f.ref)}
-          cardWidth={232}
-          skeletonAspect={16 / 9}
-          renderCard={(f, rail) => {
-            const nn = nowNext.data?.[itemKey(f.ref)];
-            return (
-              <ChannelCard
-                rail={rail}
-                name={f.snapshot.title}
-                logoUrl={f.snapshot.posterUrl}
-                now={nn?.now?.title}
-                nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
-                sourceName={sourceById.get(f.ref.sourceId)?.name}
-                isRadio={f.ref.contentType === 'radio'}
-                ariaLabel={t('playTitle', { title: f.snapshot.title })}
-                onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
-                channel={snapshotChannel(f.ref, f.snapshot)}
-              />
-            );
-          }}
-        />
-      )}
-
-      {visible('recentlyWatchedLive') && (
-        <DashboardRail<RecentEntry>
-          id="recent-live"
-          title={t('railRecentLive')}
-          items={recentLive}
-          loading={recent.isPending}
-          loaded={recent.isSuccess}
-          error={railError(recent.error)}
-          errorHint={t('dashboardLocalDataHint')}
-          onRetry={() => void recent.refetch()}
-          seeAll={{ to: '/recent' }}
-          getKey={(r) => itemKey(r.ref)}
-          cardWidth={232}
-          skeletonAspect={16 / 9}
-          renderCard={(r, rail) => (
-            <ChannelCard
-              rail={rail}
-              name={r.snapshot.title}
-              logoUrl={r.snapshot.posterUrl}
-              sourceName={sourceById.get(r.ref.sourceId)?.name}
-              isRadio={r.ref.contentType === 'radio'}
-              ariaLabel={t('playTitle', { title: r.snapshot.title })}
-              onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
-              channel={snapshotChannel(r.ref, r.snapshot)}
+        )}
+        {show('hero') &&
+          (heroLoading ? (
+            <HeroSkeleton />
+          ) : heroSlides.length > 0 ? (
+            <HeroCarousel
+              slides={heroSlides}
+              sourceName={(id) => sourceById.get(id)?.name}
+              canPlay={(ref) => sourceById.has(ref.sourceId)}
+              onPlay={playSlide}
             />
-          )}
-        />
-      )}
+          ) : null)}
 
-      {visible('favoriteMoviesAndSeries') && (
-        <DashboardRail<FavoriteEntry>
-          id="favorite-vod"
-          title={t('railFavoriteVod')}
-          items={vodFavorites}
-          loading={favorites.isPending}
-          loaded={favorites.isSuccess}
-          // Both favorites rails read one query: only one of them shows its error.
-          error={show('liveFavorites') ? undefined : railError(favorites.error)}
-          errorHint={t('dashboardLocalDataHint')}
-          onRetry={() => void favorites.refetch()}
-          seeAll={{ to: '/favorites' }}
-          getKey={(f) => itemKey(f.ref)}
-          cardWidth={168}
-          skeletonAspect={2 / 3}
-          renderCard={(f, rail) => {
-            const subtitle = f.snapshot.subtitle ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
-            return (
-              <PosterCard
-                rail={rail}
-                title={f.snapshot.title}
-                subtitle={subtitle}
-                posterUrl={f.snapshot.posterUrl}
-                to={itemPath(f.ref)}
-                ariaLabel={joinList([f.snapshot.title, subtitle], i18n.language)}
-                myList={{ itemRef: f.ref, snapshot: f.snapshot }}
-              />
-            );
-          }}
-        />
-      )}
-
-      {visible('recentSources') && (
-        <DashboardRail<Source>
-          id="recent-sources"
-          title={t('railRecentSources')}
-          items={rankedSources}
-          loading={sources.isPending}
-          seeAll={{ to: '/sources', label: t('manageSources') }}
-          getKey={(s) => s.id}
-          cardWidth={232}
-          skeletonAspect={16 / 9}
-          renderCard={(s, rail) => <SourceCard rail={rail} source={s} />}
-        />
-      )}
-
-      {visible('recentlyAdded') && (
-        <DashboardRail<VodItem | SeriesItem>
-          id="recently-added"
-          title={t('railRecentlyAdded')}
-          items={recentlyAdded}
-          loading={addedMovies.isPending || addedSeries.isPending}
-          loaded={addedMovies.isSuccess && addedSeries.isSuccess}
-          error={railError(addedMovies.error ?? addedSeries.error)}
-          errorHint={t('dashboardLocalDataHint')}
-          onRetry={() => {
-            void addedMovies.refetch();
-            void addedSeries.refetch();
-          }}
-          getKey={(v) => itemKey(v.ref)}
-          cardWidth={168}
-          skeletonAspect={2 / 3}
-          renderCard={(v, rail) => {
-            const rating = v.rating ? v.rating.toFixed(1) : undefined;
-            return (
-              <PosterCard
-                rail={rail}
-                title={v.title}
-                subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, v.year], i18n.language)}
-                posterUrl={v.posterUrl}
-                badge={rating ? <Badge variant="neutral">{rating}</Badge> : undefined}
-                to={itemPath(v.ref)}
-                // Name first: the rating badge sits before the caption in the DOM.
-                ariaLabel={joinList(
-                  [v.title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
-                  i18n.language,
-                )}
-                myList={myListTarget(v)}
-              />
-            );
-          }}
-        />
-      )}
-
-      {visible('tmdbTrending') && tmdbEnabled && (
-        <DashboardRail<TmdbBrief>
-          id="tmdb-trending"
-          title={t('railTrending')}
-          items={trending.data}
-          loading={trending.isPending}
-          loaded={trending.isSuccess}
-          error={railError(trending.error)}
-          onRetry={() => void trending.refetch()}
-          getKey={(b) => `${b.mediaType}-${b.tmdbId}`}
-          cardWidth={168}
-          skeletonAspect={2 / 3}
-          renderCard={(b, rail) => (
-            <PosterCard
-              rail={rail}
-              title={b.title}
-              subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
-              posterUrl={b.posterUrl}
-              badge={b.rating ? <Badge variant="neutral">{b.rating.toFixed(1)}</Badge> : undefined}
-              to={`/search?q=${encodeURIComponent(b.title)}`}
-              ariaLabel={t('findTitle', { title: b.title })}
-            />
-          )}
-        />
-      )}
-
-      {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && (
-          <EmptyState
-            size="inline"
-            icon={<Play size={22} />}
-            title={t('dashboardQuietTitle')}
-            description={t('dashboardQuietBody')}
-            action={
-              <Button variant="primary" onClick={() => navigate(`/s/${encodeURIComponent(rankedSources[0]!.id)}/live`)}>
-                {t('browseLive')}
-              </Button>
-            }
+        {visible('continueWatching') && (
+          <DashboardRail<PlaybackPosition>
+            id="continue-watching"
+            title={t('railContinueWatching')}
+            items={continueWatching.data}
+            loading={continueWatching.isPending}
+            loaded={continueWatching.isSuccess}
+            error={railError(continueWatching.error)}
+            errorHint={t('dashboardLocalDataHint')}
+            onRetry={() => void continueWatching.refetch()}
+            getKey={(p) => `${itemKey(p.ref)}|${p.episodeId ?? ''}`}
+            cardWidth={168}
+            skeletonAspect={2 / 3}
+            renderCard={(p, rail) => {
+              const title = p.snapshot?.title ?? t('untitled');
+              const left = minutesLeft(p);
+              return (
+                <PosterCard
+                  rail={rail}
+                  title={title}
+                  subtitle={left !== undefined ? t('minutesLeft', { count: left }) : p.snapshot?.subtitle}
+                  posterUrl={p.snapshot?.posterUrl}
+                  progress={watchedFraction(p)}
+                  badge={seriesBadge(p)}
+                  ariaLabel={t('resumeTitle', { title })}
+                  myList={{ itemRef: p.ref, snapshot: p.snapshot ?? { title, contentType: p.ref.contentType } }}
+                  onPlay={() =>
+                    play({ ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot?.subtitle, posterUrl: p.snapshot?.posterUrl })
+                  }
+                />
+              );
+            }}
           />
         )}
-    </div>
+
+        {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
+        {visible('myList') && <MyListRail hideError={showSharedError} />}
+        {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
+        <CustomListRails />
+
+        {visible('liveFavorites') && (
+          <DashboardRail<FavoriteEntry>
+            id="live-favorites"
+            title={t('railLiveFavorites')}
+            items={liveFavorites}
+            loading={favorites.isPending}
+            loaded={favorites.isSuccess}
+            error={railError(favorites.error)}
+            errorHint={t('dashboardLocalDataHint')}
+            onRetry={() => void favorites.refetch()}
+            seeAll={{ to: '/favorites' }}
+            getKey={(f) => itemKey(f.ref)}
+            cardWidth={232}
+            skeletonAspect={16 / 9}
+            renderCard={(f, rail) => {
+              const nn = nowNext.data?.[itemKey(f.ref)];
+              return (
+                <ChannelCard
+                  rail={rail}
+                  name={f.snapshot.title}
+                  logoUrl={f.snapshot.posterUrl}
+                  now={nn?.now?.title}
+                  nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
+                  sourceName={sourceById.get(f.ref.sourceId)?.name}
+                  isRadio={f.ref.contentType === 'radio'}
+                  ariaLabel={t('playTitle', { title: f.snapshot.title })}
+                  onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
+                  channel={snapshotChannel(f.ref, f.snapshot)}
+                />
+              );
+            }}
+          />
+        )}
+
+        {visible('recentlyWatchedLive') && (
+          <DashboardRail<RecentEntry>
+            id="recent-live"
+            title={t('railRecentLive')}
+            items={recentLive}
+            loading={recent.isPending}
+            loaded={recent.isSuccess}
+            error={railError(recent.error)}
+            errorHint={t('dashboardLocalDataHint')}
+            onRetry={() => void recent.refetch()}
+            seeAll={{ to: '/recent' }}
+            getKey={(r) => itemKey(r.ref)}
+            cardWidth={232}
+            skeletonAspect={16 / 9}
+            renderCard={(r, rail) => (
+              <ChannelCard
+                rail={rail}
+                name={r.snapshot.title}
+                logoUrl={r.snapshot.posterUrl}
+                sourceName={sourceById.get(r.ref.sourceId)?.name}
+                isRadio={r.ref.contentType === 'radio'}
+                ariaLabel={t('playTitle', { title: r.snapshot.title })}
+                onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
+                channel={snapshotChannel(r.ref, r.snapshot)}
+              />
+            )}
+          />
+        )}
+
+        {visible('favoriteMoviesAndSeries') && (
+          <DashboardRail<FavoriteEntry>
+            id="favorite-vod"
+            title={t('railFavoriteVod')}
+            items={vodFavorites}
+            loading={favorites.isPending}
+            loaded={favorites.isSuccess}
+            // Both favorites rails read one query: only one of them shows its error.
+            error={show('liveFavorites') ? undefined : railError(favorites.error)}
+            errorHint={t('dashboardLocalDataHint')}
+            onRetry={() => void favorites.refetch()}
+            seeAll={{ to: '/favorites' }}
+            getKey={(f) => itemKey(f.ref)}
+            cardWidth={168}
+            skeletonAspect={2 / 3}
+            renderCard={(f, rail) => {
+              const subtitle = f.snapshot.subtitle ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
+              return (
+                <PosterCard
+                  rail={rail}
+                  title={f.snapshot.title}
+                  subtitle={subtitle}
+                  posterUrl={f.snapshot.posterUrl}
+                  to={itemPath(f.ref)}
+                  ariaLabel={joinList([f.snapshot.title, subtitle], i18n.language)}
+                  myList={{ itemRef: f.ref, snapshot: f.snapshot }}
+                />
+              );
+            }}
+          />
+        )}
+
+        {visible('recentSources') && (
+          <DashboardRail<Source>
+            id="recent-sources"
+            title={t('railRecentSources')}
+            items={rankedSources}
+            loading={sources.isPending}
+            seeAll={{ to: '/sources', label: t('manageSources') }}
+            getKey={(s) => s.id}
+            cardWidth={232}
+            skeletonAspect={16 / 9}
+            renderCard={(s, rail) => <SourceCard rail={rail} source={s} />}
+          />
+        )}
+
+        {visible('recentlyAdded') && (
+          <DashboardRail<VodItem | SeriesItem>
+            id="recently-added"
+            title={t('railRecentlyAdded')}
+            items={recentlyAdded}
+            loading={addedMovies.isPending || addedSeries.isPending}
+            loaded={addedMovies.isSuccess && addedSeries.isSuccess}
+            error={railError(addedMovies.error ?? addedSeries.error)}
+            errorHint={t('dashboardLocalDataHint')}
+            onRetry={() => {
+              void addedMovies.refetch();
+              void addedSeries.refetch();
+            }}
+            getKey={(v) => itemKey(v.ref)}
+            cardWidth={168}
+            skeletonAspect={2 / 3}
+            renderCard={(v, rail) => {
+              const rating = v.rating ? v.rating.toFixed(1) : undefined;
+              return (
+                <PosterCard
+                  rail={rail}
+                  title={v.title}
+                  subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, v.year], i18n.language)}
+                  posterUrl={v.posterUrl}
+                  backdropUrl={v.backdropUrl}
+                  badge={rating ? <Badge variant="neutral">{rating}</Badge> : undefined}
+                  to={itemPath(v.ref)}
+                  // Name first: the rating badge sits before the caption in the DOM.
+                  ariaLabel={joinList(
+                    [v.title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
+                    i18n.language,
+                  )}
+                  myList={myListTarget(v)}
+                />
+              );
+            }}
+          />
+        )}
+
+        {visible('tmdbTrending') && tmdbEnabled && (
+          <DashboardRail<TmdbBrief>
+            id="tmdb-trending"
+            title={t('railTrending')}
+            items={trending.data}
+            loading={trending.isPending}
+            loaded={trending.isSuccess}
+            error={railError(trending.error)}
+            onRetry={() => void trending.refetch()}
+            getKey={(b) => `${b.mediaType}-${b.tmdbId}`}
+            cardWidth={168}
+            skeletonAspect={2 / 3}
+            renderCard={(b, rail) => (
+              <PosterCard
+                rail={rail}
+                title={b.title}
+                subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
+                posterUrl={b.posterUrl}
+                badge={b.rating ? <Badge variant="neutral">{b.rating.toFixed(1)}</Badge> : undefined}
+                to={`/search?q=${encodeURIComponent(b.title)}`}
+                ariaLabel={t('findTitle', { title: b.title })}
+              />
+            )}
+          />
+        )}
+
+        {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && (
+            <EmptyState
+              size="inline"
+              icon={<Play size={22} />}
+              title={t('dashboardQuietTitle')}
+              description={t('dashboardQuietBody')}
+              action={
+                <Button variant="primary" onClick={() => navigate(`/s/${encodeURIComponent(rankedSources[0]!.id)}/live`)}>
+                  {t('browseLive')}
+                </Button>
+              }
+            />
+          )}
+      </div>
+    </SourceKindContext.Provider>
   );
 }

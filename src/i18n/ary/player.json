@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "لتحت خالص",
   "subtitleStyle.positionValue": "طالعة بـ {{value}}%",
   "subtitleStyle.preview": "معاينة الترجمة",
-  "subtitleStyle.previewText": "آخر تران كيمشي مع العشرة.\nخاصنا نمشيو دابا."
+  "subtitleStyle.previewText": "آخر تران كيمشي مع العشرة.\nخاصنا نمشيو دابا.",
+  "screenshot": "صوّر الشاشة",
+  "screenshotSaved": "تصويرة الشاشة تحفظات",
+  "screenshotDownloaded": "تحفظات فالتحميلات ديالك",
+  "screenshotOpen": "حل",
+  "screenshotOpenFailed": "ما قدرناش نحلّو تصويرة الشاشة",
+  "screenshotFailed": "تصويرة الشاشة ما تحفظاتش",
+  "screenshotCors": "السيرفر ديال البث ما كيسمحش بنسخ التصويرة ديالو (ما كاينش إذن CORS).",
+  "screenshotCorsMpv": "MPV المدمج يقدر يصوّرها: ختارو فالإعدادات > المشغلات.",
+  "screenshotNotReady": "باقي ما كايناش التصويرة. عاود جرّب ملي يبدا الفيديو.",
+  "screenshotNoVideo": "الراديو ما فيهش تصويرة باش تصوّرها.",
+  "screenshotExternal": "هادشي خدام فمشغل خارجي. استعمل الزر ديال تصوير الشاشة ديالو."
 }

@@ -6,7 +6,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useRpcQuery } from '@/api/query';
-import { itemKey, type CoverSize, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
+import { itemKey, type CoverSize, type ItemRef, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 
 import { useMyListMenuItem } from '@/features/mylist/hooks/useMyListMenuItem';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
@@ -16,6 +16,7 @@ import { useShortcut } from '@/shell';
 
 import { PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
 import { VodFilterBar } from '../components/VodFilterBar';
+import { usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
@@ -79,11 +80,13 @@ interface GridCellProps {
   index: number;
   pageSize: number;
   active: boolean;
+  /** The listbox has focus, so `active` is a live keyboard cursor. */
+  gridFocused: boolean;
   resume: Map<string, number>;
 }
 
 /** One grid cell: subscribes to the page that contains `index`, so only pages near the viewport stay loaded. */
-function GridCell({ input, index, pageSize, active, resume }: GridCellProps) {
+function GridCell({ input, index, pageSize, active, gridFocused, resume }: GridCellProps) {
   const page = pageOf(index, pageSize);
   const q = useVodPage(input, page);
   const item = q.data?.items[index - page * pageSize];
@@ -93,20 +96,40 @@ function GridCell({ input, index, pageSize, active, resume }: GridCellProps) {
     if (q.isError && !q.isFetching) return <GridCellError />;
     return <PosterCardSkeleton />;
   }
-  return <GridPoster item={item} active={active} resume={resume} watched={watched.has(itemKey(item.ref))} />;
+  return (
+    <GridPoster
+      item={item}
+      sourceKind={input.sourceKind}
+      active={active}
+      gridFocused={gridFocused}
+      resume={resume}
+      watched={watched.has(itemKey(item.ref))}
+    />
+  );
 }
 
 function GridPoster({
   item,
+  sourceKind,
   active,
+  gridFocused,
   resume,
   watched,
 }: {
   item: VodItem | SeriesItem;
+  sourceKind: SourceKind;
   active: boolean;
+  gridFocused: boolean;
   resume: Map<string, number>;
   watched: boolean;
 }) {
+  const prefetch = useMemo<PrefetchTarget>(
+    () => ({ ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }),
+    [item, sourceKind],
+  );
+  // C4: the keyboard cursor moves aria-activedescendant, not focus, so a cursor that rests on a
+  // poster for 120 ms warms its detail page the way a resting pointer does.
+  usePrefetchOnRest(active && gridFocused ? prefetch : null);
   return (
     <PosterCard
       interactive={false}
@@ -122,6 +145,7 @@ function GridPoster({
       language={itemLanguage(item.title, item.categoryName)}
       // C3: the saved marker and pointer toggle on the corner; S toggles it from the keyboard.
       myList={myListTarget(item)}
+      prefetch={prefetch}
     />
   );
 }
@@ -291,6 +315,11 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const gridWrapRef = useRef<HTMLDivElement>(null);
   const getListbox = () => gridWrapRef.current?.querySelector<HTMLElement>('[role="listbox"]') ?? null;
   const gridShown = firstReady && total > 0;
+  // The cursor keys below (S, W, the poster menu) act on the keyboard cursor, so they are bound
+  // only while the listbox has focus. The registry claims a key before its handler runs: bound
+  // all the time, S would swallow the player's screenshot key on this page (amendment 15:19).
+  const [gridFocused, setGridFocused] = useState(false);
+  const cursorKeys = gridShown && gridFocused;
   useScrollMemory({
     key: memoryKey,
     getScroller: getListbox,
@@ -331,7 +360,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
       const { itemRef, snapshot } = myListTarget(item);
       void toggleMyList(itemRef, snapshot);
     },
-    { description: t('shortcutMyList'), area: 'Vod', enabled: gridShown },
+    { description: t('shortcutMyList'), area: 'Vod', enabled: cursorKeys },
   );
   // C4: W marks the title under the cursor watched (or unwatched); Shift+W hides or shows watched titles.
   const toggleWatched = useToggleWatched();
@@ -342,7 +371,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
       const item = at ? itemAt(at.index) : undefined;
       if (item) void toggleWatched(item.ref);
     },
-    { description: t('shortcutWatched'), area: 'Vod', enabled: gridShown },
+    { description: t('shortcutWatched'), area: 'Vod', enabled: cursorKeys },
   );
   useShortcut('shift+w', () => setHideWatched(!hideWatched), { description: t('shortcutHideWatched'), area: 'Vod', enabled: !!input });
 
@@ -371,8 +400,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     const r = at.cell.getBoundingClientRect();
     setMenu({ pos: { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 120) }, item, index: at.index });
   };
-  useShortcut('shift+f10', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: gridShown });
-  useShortcut('contextmenu', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: gridShown });
+  useShortcut('shift+f10', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
+  useShortcut('contextmenu', openCursorMenu, { description: t('shortcutPosterMenu'), area: 'Vod', enabled: cursorKeys });
 
   // Escape on the grid returns to the category list.
   useEscapeBack(true, () => navigate(backHref));
@@ -454,8 +483,16 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         </div>
       )}
 
-      {/* Right clicks bubble here from the grid's options. */}
-      <div ref={gridWrapRef} className="min-h-0 flex-1 px-4 pt-4 md:px-8" onContextMenu={onGridContextMenu}>
+      {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
+      <div
+        ref={gridWrapRef}
+        className="min-h-0 flex-1 px-4 pt-4 md:px-8"
+        onContextMenu={onGridContextMenu}
+        onFocus={(e) => setGridFocused(e.target.getAttribute('role') === 'listbox')}
+        onBlur={(e) => {
+          if (e.target.getAttribute('role') === 'listbox') setGridFocused(false);
+        }}
+      >
         {source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
           <ErrorState
             error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
@@ -532,7 +569,14 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             initialActiveIndex={restoredIndex}
             getKey={(item) => item.ref.itemId}
             render={(item, _index, state) => (
-              <GridPoster item={item} active={state.active} resume={resume} watched={watchedPages.keys.has(itemKey(item.ref))} />
+              <GridPoster
+                item={item}
+                sourceKind={input.sourceKind}
+                active={state.active}
+                gridFocused={gridFocused}
+                resume={resume}
+                watched={watchedPages.keys.has(itemKey(item.ref))}
+              />
             )}
             onEndReached={() => {
               if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
@@ -556,7 +600,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             label={categoryName}
             testId="vod-grid"
             initialActiveIndex={restoredIndex}
-            render={(i, _index, state) => <GridCell input={input} index={i} pageSize={pageSize} active={state.active} resume={resume} />}
+            render={(i, _index, state) => (
+              <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} />
+            )}
             onSelect={(i) => {
               const item = queryItem(i);
               // A cell whose page failed: selecting it retries that page.

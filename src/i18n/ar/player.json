@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "في الأسفل تمامًا",
   "subtitleStyle.positionValue": "أعلى بنسبة {{value}}%",
   "subtitleStyle.preview": "معاينة الترجمة",
-  "subtitleStyle.previewText": "القطار الأخير يغادر في العاشرة.\nعلينا أن نذهب الآن."
+  "subtitleStyle.previewText": "القطار الأخير يغادر في العاشرة.\nعلينا أن نذهب الآن.",
+  "screenshot": "التقاط صورة للشاشة",
+  "screenshotSaved": "تم حفظ لقطة الشاشة",
+  "screenshotDownloaded": "تم الحفظ في التنزيلات",
+  "screenshotOpen": "فتح",
+  "screenshotOpenFailed": "تعذّر فتح لقطة الشاشة",
+  "screenshotFailed": "لم تُحفظ لقطة الشاشة",
+  "screenshotCors": "خادم البث لا يسمح بنسخ صورته (لا يوجد إذن CORS).",
+  "screenshotCorsMpv": "يمكن لـ MPV المدمج التقاطها: اختره من الإعدادات > المشغلات.",
+  "screenshotNotReady": "لا توجد صورة بعد. أعد المحاولة بعد بدء تشغيل الفيديو.",
+  "screenshotNoVideo": "لا توجد صورة في الراديو لالتقاطها.",
+  "screenshotExternal": "يعمل هذا في مشغل خارجي. استخدم مفتاح لقطة الشاشة الخاص به."
 }

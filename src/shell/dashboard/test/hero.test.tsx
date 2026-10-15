@@ -240,23 +240,62 @@ describe('HeroCarousel', () => {
     expect(screen.getByRole('tabpanel').getAttribute('aria-label')).toBe('3 of 3');
   });
 
-  it('draws the backdrop when there is one and a tint when there is no artwork', () => {
+  it('draws the backdrop through the image cache at high priority, and a tint when there is no artwork', () => {
+    vi.useFakeTimers();
     const { hero } = renderHero([slide('a', { backdropUrl: 'https://img.test/a-wide.jpg' }), slide('b')]);
     const withArt = hero.querySelector('[data-hero-backdrop="s1|movie|a"]')!;
-    expect(withArt.querySelector('img')!.getAttribute('src')).toBe('https://img.test/a-wide.jpg');
-    // The next slide's layer is mounted ahead of its turn; with no artwork it is only a tint.
+    const img = withArt.querySelector('img')!;
+    expect(img.getAttribute('src')).toBe(`/api/img?${new URLSearchParams({ url: 'https://img.test/a-wide.jpg', sourceId: 's1' })}`);
+    expect(img.getAttribute('fetchpriority')).toBe('high');
+    expect(img.getAttribute('loading')).toBe('eager');
+    // The next slide's layer waits for an idle moment, then mounts ahead of its turn; with no artwork it is only a tint.
+    expect(hero.querySelector('[data-hero-backdrop="s1|movie|b"]')).toBeNull();
+    tick(500);
     const bare = hero.querySelector<HTMLElement>('[data-hero-backdrop="s1|movie|b"]')!;
+    expect(bare).not.toBeNull();
     expect(bare.querySelector('img')).toBeNull();
     expect(bare.style.background).toContain('gradient');
   });
 
-  it('falls back from a broken backdrop to the poster, then to the tint', () => {
+  it('preloads the next slide at idle at low priority', () => {
+    vi.useFakeTimers();
+    const { hero } = renderHero([slide('a'), slide('b', { backdropUrl: 'https://img.test/b-wide.jpg' })]);
+    tick(500);
+    const next = hero.querySelector('[data-hero-backdrop="s1|movie|b"]')!;
+    const img = next.querySelector('img')!;
+    expect(img.getAttribute('src')).toContain('/api/img?url=https%3A%2F%2Fimg.test%2Fb-wide.jpg');
+    expect(img.getAttribute('fetchpriority')).toBe('low');
+    expect(next.getAttribute('data-active')).toBeNull();
+  });
+
+  it('retries a broken backdrop directly, then falls back to the poster (also retried), then to the tint', () => {
     const { hero } = renderHero([slide('a', { backdropUrl: 'https://img.test/broken.jpg', posterUrl: 'https://img.test/a.jpg' })]);
     const layer = hero.querySelector('[data-hero-backdrop]')!;
+    const src = () => layer.querySelector('img')?.getAttribute('src');
+    expect(src()).toBe(`/api/img?${new URLSearchParams({ url: 'https://img.test/broken.jpg', sourceId: 's1' })}`);
     fireEvent.error(layer.querySelector('img')!);
-    expect(layer.querySelector('img')!.getAttribute('src')).toBe('https://img.test/a.jpg');
+    expect(src()).toBe('https://img.test/broken.jpg');
+    fireEvent.error(layer.querySelector('img')!);
+    expect(src()).toBe(`/api/img?${new URLSearchParams({ url: 'https://img.test/a.jpg', sourceId: 's1' })}`);
+    // A poster standing in for the backdrop is the cheap quarter-size blur, never a full-size one.
+    expect(layer.querySelector('img')!.getAttribute('data-hero-image')).toBe('poster');
+    expect(layer.querySelector('img')!.className).toContain('scale-[4.4]');
+    expect(layer.querySelector('img')!.className).not.toMatch(/blur-(2xl|3xl|xl|lg)/);
+    fireEvent.error(layer.querySelector('img')!);
+    expect(src()).toBe('https://img.test/a.jpg');
     fireEvent.error(layer.querySelector('img')!);
     expect(layer.querySelector('img')).toBeNull();
+  });
+
+  it('frosts the copy with a tint over a cheaply blurred copy of the backdrop, not a backdrop filter', () => {
+    const { hero } = renderHero([slide('a', { backdropUrl: 'https://img.test/a-wide.jpg' })]);
+    const layer = hero.querySelector('[data-hero-backdrop]')!;
+    expect(layer.querySelector('[data-hero-frost-art]')).toBeNull();
+    fireEvent.load(layer.querySelector('img')!);
+    const art = layer.querySelector('[data-hero-frost-art] img')!;
+    expect(art.getAttribute('src')).toBe(layer.querySelector('img')!.getAttribute('src'));
+    expect(art.className).toContain('blur-md');
+    expect(hero.innerHTML).not.toMatch(/backdrop-blur|glass-blur/);
   });
 
   it('a single slide shows no slide controls and does not rotate', () => {

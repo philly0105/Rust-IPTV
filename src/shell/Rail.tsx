@@ -39,6 +39,8 @@ interface PrimaryLink {
   labelKey: string;
   icon: LucideIcon;
   end?: boolean;
+  /** First-run tour anchor (Run 3 C7, `src/features/onboarding/tour/steps.ts`). */
+  tour?: 'vod';
 }
 
 // Home is a house, not a layout glyph: collapsed, the rail is icons only, and a
@@ -49,7 +51,9 @@ const PRIMARY: PrimaryLink[] = [
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
   { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
-  { to: '/my-list', labelKey: 'navMyList', icon: Bookmark },
+  // The tour's "Movies and series" step points here: unlike a source's Movies link, it is always
+  // on screen, also in the collapsed rail.
+  { to: '/my-list', labelKey: 'navMyList', icon: Bookmark, tour: 'vod' },
   // Run 2: custom channel lists and watch stats reuse their pages' titles.
   { to: '/lists', labelKey: 'lists:title', icon: ListOrdered },
   { to: '/recent', labelKey: 'navRecent', icon: History },
@@ -75,13 +79,14 @@ const itemClass = (active: boolean, collapsed: boolean) =>
     active ? 'tuning-tick bg-surface-2 text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
   );
 
-function RailNavLink({ to, labelKey, icon: Icon, collapsed, end }: PrimaryLink & { collapsed: boolean }) {
+function RailNavLink({ to, labelKey, icon: Icon, collapsed, end, tour }: PrimaryLink & { collapsed: boolean }) {
   const { t } = useTranslation('shell');
   const label = t(labelKey);
   return (
     <NavLink
       to={to}
       end={end}
+      data-tour={tour}
       title={collapsed ? label : undefined}
       aria-label={collapsed ? label : undefined}
       className={({ isActive }) => itemClass(isActive, collapsed)}
@@ -114,7 +119,7 @@ function SourceMark({ source, size = 'sm', errorDot }: { source: Source; size?: 
   );
 }
 
-function SourceEntry({ source, collapsed, active }: { source: Source; collapsed: boolean; active: boolean }) {
+function SourceEntry({ source, collapsed, active, tour }: { source: Source; collapsed: boolean; active: boolean; tour?: 'live' }) {
   const { t } = useTranslation('shell');
   const [expanded, setExpanded] = useState(active);
   useEffect(() => {
@@ -135,6 +140,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
       <li>
         <Link
           to={`${sourceBasePath(source.id)}/live`}
+          data-tour={tour}
           title={source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name}
           aria-label={source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name}
           className={cn(itemClass(active, true))}
@@ -151,6 +157,7 @@ function SourceEntry({ source, collapsed, active }: { source: Source; collapsed:
         type="button"
         aria-expanded={expanded}
         aria-controls={listId}
+        data-tour={tour}
         onClick={() => setExpanded((v) => !v)}
         className={cn(
           'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
@@ -279,8 +286,15 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
             </div>
           ) : sources.data && sources.data.length > 0 ? (
             <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
-              {sources.data.map((s) => (
-                <SourceEntry key={s.id} source={s} collapsed={collapsed} active={activeSourceId === encodeURIComponent(s.id) || activeSourceId === s.id} />
+              {sources.data.map((s, i) => (
+                <SourceEntry
+                  key={s.id}
+                  source={s}
+                  collapsed={collapsed}
+                  active={activeSourceId === encodeURIComponent(s.id) || activeSourceId === s.id}
+                  // The tour's "Live TV" step points at the first source: its channels live under it.
+                  tour={i === 0 ? 'live' : undefined}
+                />
               ))}
             </ul>
           ) : (

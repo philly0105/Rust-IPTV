@@ -265,7 +265,8 @@
 
   /* UI scale (C1). theme.tsx sets --ui-scale inline on <html>; px chrome sizes follow it. */
   --ui-scale: 1;
-  --blur-glass: 14px;
+  /* Backdrop blur for the glass-blur utility (C5): 10px at most, src/perf-budget.test.ts. */
+  --blur-glass: 10px;
 
   --rail-width: calc(248px * var(--ui-scale));
   --rail-width-collapsed: calc(72px * var(--ui-scale));

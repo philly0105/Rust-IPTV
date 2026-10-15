@@ -281,6 +281,8 @@
   "aboutActionFailed": "Couldn't open that folder",
   "aboutServerNote": "Running as a server. Folders are on the host machine.",
   "aboutCredits": "Built on ideas from IPTVnator. Movie and series data from TMDB.",
+  "aboutWhatsNew": "What's new",
+  "aboutTakeTour": "Take the tour",
 
   "errorRequired": "Required.",
   "errorUrlInvalid": "Enter a full address, like http://example.com/guide.xml.",
@@ -423,5 +425,19 @@
   "reminderActionNotify": "Notify me",
   "reminderActionSwitch": "Switch channel",
   "reminderActionNotifyHint": "Shows a notification with a Watch now button.",
-  "reminderActionSwitchHint": "Tunes to the channel and brings the app forward. You can undo it."
+  "reminderActionSwitchHint": "Tunes to the channel and brings the app forward. You can undo it.",
+  "imageCache": "Image cache",
+  "imageCacheHint": "Posters, logos and backdrops are kept on this device, so pages you've seen fill in at once. When the cache reaches its limit, the pictures used longest ago make room.",
+  "imageCacheUsage": "{{used}} of {{limit}}",
+  "imageCachePictures_one": "{{count, number}} picture",
+  "imageCachePictures_other": "{{count, number}} pictures",
+  "imageCacheEmpty": "Empty. Pictures are saved as you browse.",
+  "imageCacheLimit": "Limit",
+  "imageCacheClear": "Clear cache",
+  "imageCacheClearTitle": "Clear the image cache?",
+  "imageCacheClearBody": "This removes {{size}} of saved pictures. Each one downloads again the next time it's shown.",
+  "imageCacheCleared": "Image cache cleared",
+  "imageCacheClearFailed": "Couldn't clear the image cache",
+  "imageCacheLoadFailed": "Couldn't read the image cache: {{message}}",
+  "imageCacheUnavailable": "This server has no image cache, so pictures load straight from each provider."
 }

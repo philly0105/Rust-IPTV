@@ -286,6 +286,8 @@
   "aboutActionFailed": "Impossible d'ouvrir ce dossier",
   "aboutServerNote": "Exécuté en tant que serveur. Les dossiers se trouvent sur la machine hôte.",
   "aboutCredits": "Inspiré d'IPTVnator. Données des films et séries fournies par TMDB.",
+  "aboutWhatsNew": "Nouveautés",
+  "aboutTakeTour": "Faire la visite",
 
   "errorRequired": "Obligatoire.",
   "errorUrlInvalid": "Saisissez une adresse complète, comme http://example.com/guide.xml.",
@@ -428,5 +430,20 @@
   "reminderActionNotify": "M'avertir",
   "reminderActionSwitch": "Changer de chaîne",
   "reminderActionNotifyHint": "Affiche une notification avec un bouton Regarder.",
-  "reminderActionSwitchHint": "Passe sur la chaîne et met l'app au premier plan. Vous pouvez annuler."
+  "reminderActionSwitchHint": "Passe sur la chaîne et met l'app au premier plan. Vous pouvez annuler.",
+  "imageCache": "Cache d'images",
+  "imageCacheHint": "Les affiches, logos et arrière-plans sont conservés sur cet appareil pour que les pages déjà vues s'affichent aussitôt. Quand le cache atteint sa limite, les images inutilisées depuis le plus longtemps laissent la place.",
+  "imageCacheUsage": "{{used}} sur {{limit}}",
+  "imageCachePictures_one": "{{count, number}} image",
+  "imageCachePictures_many": "{{count, number}} d'images",
+  "imageCachePictures_other": "{{count, number}} images",
+  "imageCacheEmpty": "Vide. Les images sont enregistrées au fil de la navigation.",
+  "imageCacheLimit": "Limite",
+  "imageCacheClear": "Vider le cache",
+  "imageCacheClearTitle": "Vider le cache d'images ?",
+  "imageCacheClearBody": "Cela supprime {{size}} d'images enregistrées. Chacune sera de nouveau téléchargée la prochaine fois qu'elle s'affichera.",
+  "imageCacheCleared": "Cache d'images vidé",
+  "imageCacheClearFailed": "Impossible de vider le cache d'images",
+  "imageCacheLoadFailed": "Impossible de lire le cache d'images : {{message}}",
+  "imageCacheUnavailable": "Ce serveur n'a pas de cache d'images : les images se chargent directement depuis chaque fournisseur."
 }

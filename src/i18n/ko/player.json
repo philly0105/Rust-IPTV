@@ -268,5 +268,16 @@
   "subtitleStyle.positionBottom": "맨 아래",
   "subtitleStyle.positionValue": "{{value}}% 위로",
   "subtitleStyle.preview": "자막 미리 보기",
-  "subtitleStyle.previewText": "막차가 10시에 떠나.\n이제 가야 해."
+  "subtitleStyle.previewText": "막차가 10시에 떠나.\n이제 가야 해.",
+  "screenshot": "스크린샷 찍기",
+  "screenshotSaved": "스크린샷이 저장되었습니다",
+  "screenshotDownloaded": "다운로드 폴더에 저장되었습니다",
+  "screenshotOpen": "열기",
+  "screenshotOpenFailed": "스크린샷을 열지 못했습니다",
+  "screenshotFailed": "스크린샷이 저장되지 않았습니다",
+  "screenshotCors": "스트림 서버가 화면 복사를 허용하지 않습니다(CORS 권한 없음).",
+  "screenshotCorsMpv": "내장 MPV로는 캡처할 수 있습니다. 설정 > 플레이어에서 선택하세요.",
+  "screenshotNotReady": "아직 화면이 없습니다. 동영상이 재생되면 다시 시도하세요.",
+  "screenshotNoVideo": "라디오에는 캡처할 화면이 없습니다.",
+  "screenshotExternal": "외부 플레이어에서 재생 중입니다. 해당 플레이어의 스크린샷 키를 사용하세요."
 }

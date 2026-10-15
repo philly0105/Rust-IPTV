@@ -493,7 +493,7 @@ function UnavailableEntries({
             return (
               <li key={itemKey(e.ref)} className="flex items-center gap-2 rounded-md px-1 py-1 text-fg-subtle">
                 <span className="opacity-60 grayscale">
-                  <ChannelLogo src={e.snapshot.posterUrl} name={name} size={28} />
+                  <ChannelLogo src={e.snapshot.posterUrl} name={name} size={28} sourceId={e.ref.sourceId} />
                 </span>
                 <span dir="auto" className="min-w-0 flex-1 truncate text-sm line-through decoration-fg-subtle/50">
                   {name}

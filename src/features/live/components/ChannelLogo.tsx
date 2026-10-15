@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useImageChain } from '@/ui';
 
 function initials(name: string): string {
   const words = name
@@ -11,14 +11,17 @@ function initials(name: string): string {
   return (second.length > 0 ? `${first[0]}${second[0]}` : first.slice(0, 2).join('')).toUpperCase();
 }
 
-/** Channel logo with a lettered fallback; logos sit on a neutral plate so transparent PNGs read in both themes. */
-export function ChannelLogo({ src, name, size = 36 }: { src?: string; name: string; size?: number }) {
-  // Keyed by address: virtual rows are reused for other channels, and one broken logo must not
+/**
+ * Channel logo with a lettered fallback; logos sit on a neutral plate so transparent PNGs read in both themes.
+ * Remote logos load through the image cache; when the cache route errors the original URL is tried once
+ * before the letters show (C3). Pass `sourceId` so the cache applies that source's network rules.
+ */
+export function ChannelLogo({ src, name, size = 36, sourceId }: { src?: string; name: string; size?: number; sourceId?: string }) {
+  // The chain is keyed by address: virtual rows are reused for other channels, and one broken logo must not
   // stick to the slot and hide the next channel's good one.
-  const [failedSrc, setFailedSrc] = useState<string | undefined>(undefined);
-  const failed = !!src && failedSrc === src;
+  const image = useImageChain([src], sourceId);
   const style = { width: size, height: size };
-  if (!src || failed) {
+  if (!image.url) {
     return (
       <span
         aria-hidden
@@ -32,12 +35,13 @@ export function ChannelLogo({ src, name, size = 36 }: { src?: string; name: stri
   return (
     <span aria-hidden style={style} className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-2">
       <img
-        src={src}
+        key={image.url}
+        src={image.url}
         alt=""
         loading="lazy"
         decoding="async"
         draggable={false}
-        onError={() => setFailedSrc(src)}
+        onError={image.onError}
         className="max-h-full max-w-full object-contain p-0.5"
       />
     </span>

@@ -134,7 +134,7 @@ pub fn take_pending_deep_links(s: &AppState) -> Vec<String> {
     std::mem::take(&mut g.1)
 }
 
-fn ensure_desktop(s: &AppState) -> Result<(), RpcError> {
+pub(crate) fn ensure_desktop(s: &AppState) -> Result<(), RpcError> {
     if s.is_desktop {
         Ok(())
     } else {
@@ -229,7 +229,7 @@ fn is_within(path: &Path, root: &Path) -> bool {
 }
 
 /// Opens a file or directory with the OS default handler (detached).
-fn open_with_os(path: &Path) -> Result<(), RpcError> {
+pub(crate) fn open_with_os(path: &Path) -> Result<(), RpcError> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = std::process::Command::new("explorer");

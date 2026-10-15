@@ -78,6 +78,8 @@ import type {
   WatchStats,
   YearFacet,
 } from './types';
+// Run 3: image cache, screenshot.
+import type { ImageCacheStats, ScreenshotResult } from './types';
 
 /** One command: payload and resolved value. */
 interface Cmd<A, R> {
@@ -696,6 +698,25 @@ export interface RpcMap {
    */
   'stats.summary': Cmd<{ days: 7 | 30; today: string; top?: number }, WatchStats>;
   'stats.clear': Cmd<void, void>;
+
+  // imagecache: disk image cache (Run 3 C2). No event; `images.clear` and a cap change refetch `images.stats`.
+  /** Bytes and files on disk against the cap; also evicts down to the cap. */
+  'images.stats': Cmd<void, ImageCacheStats>;
+  /** Deletes every cached image; resolves the (empty) stats. */
+  'images.clear': Cmd<void, ImageCacheStats>;
+
+  // screenshot: player frames to Pictures\Tsrust IPTV (Run 3 C6). Desktop only; server mode -> unsupported.
+  /** Decoded 1 B..=25 MB, magic bytes must match format, else invalid. */
+  'screenshot.save': Cmd<{ dataBase64: string; format: 'png' | 'jpeg'; title?: string }, ScreenshotResult>;
+  /**
+   * Needs an attached embedded mpv session else conflict. Runs `screenshot-to-file <path> video|subtitles`
+   * on the IPC client directly (the mpv.command allowlist stays unchanged).
+   */
+  'screenshot.mpv': Cmd<{ title?: string; withSubtitles?: boolean }, ScreenshotResult>;
+  /** Path must be inside the screenshot folder and end in .png/.jpg/.jpeg, else invalid. Opens it in the OS default app. */
+  'screenshot.open': Cmd<{ path: string }, void>;
+  /** Opens the folder, selecting the file when given. */
+  'screenshot.reveal': Cmd<{ path?: string }, void>;
 }
 
 /** Every command name, for runtime checks and tests. Kept in sync with `RpcMap` by the type below. */
@@ -889,6 +910,12 @@ export const RPC_COMMANDS = [
   'stats.record',
   'stats.summary',
   'stats.clear',
+  'images.stats',
+  'images.clear',
+  'screenshot.save',
+  'screenshot.mpv',
+  'screenshot.open',
+  'screenshot.reveal',
 ] as const satisfies readonly (keyof RpcMap)[];
 
 // Compile-time check that RPC_COMMANDS lists every RpcMap key.

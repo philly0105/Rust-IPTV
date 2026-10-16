@@ -1,19 +1,24 @@
-import { Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Layers, Lock, Play, RotateCcw, MonitorPlay } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useNavigate, useParams } from 'react-router';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef, VodItem } from '@/api/types';
+import { MyListButton } from '@/features/mylist/components/MyListButton';
+import { useLockMenuItems } from '@/features/parental/lockMenu';
 
 import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
 import { OtherSourcesDialog } from '../components/detail/OtherSourcesDialog';
+import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
+import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { WatchStage } from '../components/detail/WatchStage';
 import { SimilarSection } from '../components/SimilarSection';
+import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import {
   useIsFavorite,
   useMovieDetail,
@@ -26,8 +31,10 @@ import {
   useTwinProbe,
 } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useSourcePin } from '../hooks/useSourcePin';
+import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { formatClock, isResumable, isWatched } from '../lib/format';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
@@ -38,6 +45,7 @@ export function MovieDetailPage() {
   const { t } = useTranslation('vod');
   const navigate = useNavigate();
   const { sourceId = '', itemId = '' } = useParams();
+  const detailScrollRef = useRef<HTMLDivElement>(null);
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'movie', itemId }), [sourceId, itemId]);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
@@ -56,15 +64,29 @@ export function MovieDetailPage() {
   const twin = useTwinProbe(source.data, ref, probeTwin);
   const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
+  // C2: in Ask mode a locked movie shows nothing until the PIN is entered. Stalker titles are not
+  // in the local catalog, so the core learns their group only from the details: wait for them.
+  const stalkerSource = source.data?.kind === 'stalker';
+  const gate = useOpenGate(ref, {
+    categoryId: stalkerSource ? item?.categoryId : undefined,
+    waitForCategory: source.isPending || (stalkerSource && detail.isPending),
+  });
   const tmdb = useTmdbMovie(item, tmdbOn);
-  const model = useMemo(() => (detail.data ? mergeMovieDetail(detail.data, tmdb.data) : undefined), [detail.data, tmdb.data]);
+  // A disabled query still returns what it cached while TMDB was on: merge it only while TMDB is on.
+  const model = useMemo(
+    () => (detail.data ? mergeMovieDetail(detail.data, tmdbOn ? tmdb.data : undefined) : undefined),
+    [detail.data, tmdb.data, tmdbOn],
+  );
   const similarFallback = useTmdbSimilar('movie', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 
   const position = useRpcQuery('positions.get', { ref }, { staleTime: 5_000 });
   const watched = isWatched(position.data);
   const isFavorite = useIsFavorite(ref);
-  const sameTitle = useRpcQuery('catalog.sameTitle', { ref }, { enabled: !!item, staleTime: 5 * 60_000 });
+  // Stalker VOD is paged live from the portal, not stored in the local catalog, so the core's
+  // same-title lookup has nothing to match (it answers not_found); no "other sources" there.
+  const inLocalCatalog = !!source.data && source.data.kind !== 'stalker';
+  const sameTitle = useRpcQuery('catalog.sameTitle', { ref }, { enabled: !!item && inLocalCatalog, staleTime: 5 * 60_000 });
   const others = useMemo(() => (sameTitle.data ?? []).filter((o) => o.ref.sourceId !== sourceId || o.ref.itemId !== itemId), [sameTitle.data, sourceId, itemId]);
   const { pin, setPin, pinnedOther } = useSourcePin(item, others);
 
@@ -72,12 +94,15 @@ export function MovieDetailPage() {
   const [othersOpen, setOthersOpen] = useState(false);
 
   const ownTarget = useMemo<PlayTarget | undefined>(
-    () => (item && source.data ? { ref, sourceKind: source.data.kind, title: model?.title ?? item.title, posterUrl: model?.posterUrl } : undefined),
-    [item, source.data, ref, model?.title, model?.posterUrl],
+    () =>
+      item && source.data
+        ? { ref, sourceKind: source.data.kind, title: model?.titleBase ?? model?.title ?? item.title, posterUrl: model?.posterUrl, categoryId: item.categoryId }
+        : undefined,
+    [item, source.data, ref, model?.titleBase, model?.title, model?.posterUrl],
   );
   const targetFor = (copy: VodItem): PlayTarget | undefined => {
     const kind = sources.get(copy.ref.sourceId)?.kind;
-    return kind ? { ref: copy.ref, sourceKind: kind, title: model?.title ?? copy.title, posterUrl: model?.posterUrl ?? copy.posterUrl } : undefined;
+    return kind ? { ref: copy.ref, sourceKind: kind, title: model?.titleBase ?? model?.title ?? copy.title, posterUrl: model?.posterUrl ?? copy.posterUrl } : undefined;
   };
   const pinnedTarget = pinnedOther ? targetFor(pinnedOther) : undefined;
   const playback = usePlayback(ownTarget);
@@ -87,9 +112,19 @@ export function MovieDetailPage() {
   const pinnedWatch = useWatchState(pinnedOther?.ref ?? ref);
   const watching = ownWatch.active || (!!pinnedOther && pinnedWatch.active);
   useEscapeToClose(watching, playback.stop);
+  useDetailEscapeBack(!watching, `/s/${encodeURIComponent(sourceId)}/movies`);
+  // Back from an actor or a similar title: the page opens where you left it.
+  const { pathname } = useLocation();
+  useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
+  // L2-vod-9: opened from a grid or a rail, focus lands on Play (or Resume).
+  const playRef = useRef<HTMLButtonElement>(null);
+  useFocusOnOpen(gate.state === 'open' && !!model && !!item && !watching, () => playRef.current);
 
-  // Until the title is known, the page (sr-only h1) and the shell header both read the section name.
-  const pageTitle = model?.title ?? t('movies');
+  // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
+  const pageTitle = (gate.state === 'open' ? (model?.titleBase ?? model?.title) : undefined) ?? t('movies');
+  const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'movie', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
+    categoryId: item?.categoryId,
+  });
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
 
   const resumable = isResumable(position.data);
@@ -108,6 +143,33 @@ export function MovieDetailPage() {
   }
   if (twin.data) {
     return <Navigate replace to={detailHref(twin.data) ?? '/'} />;
+  }
+  if (gate.state !== 'open') {
+    return (
+      <div className="h-full overflow-y-auto" data-testid="vod-movie-detail">
+        <h1 className="sr-only">{pageTitle}</h1>
+        {gate.state === 'checking' ? (
+          <DetailHeroSkeleton />
+        ) : (
+          <ParentalLocked
+            itemRef={ref}
+            categoryId={stalkerSource ? item?.categoryId : undefined}
+            title={model?.titleBase ?? model?.title}
+            failed={gate.state === 'failed'}
+            onRetry={gate.retry}
+            fallbackHref={`/s/${encodeURIComponent(sourceId)}/movies`}
+          />
+        )}
+      </div>
+    );
+  }
+  if (source.isError && isSourceMissing(source.error)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <h1 className="sr-only">{pageTitle}</h1>
+        <SourceMissing />
+      </div>
+    );
   }
   if (source.isError || (detail.isError && !(probeTwin && twin.isPending))) {
     return (
@@ -136,9 +198,19 @@ export function MovieDetailPage() {
   const download = downloads.get('');
   const sourceName = source.data?.name ?? sourceId;
 
+  // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
+  // (My List saves what a poster card saves, myListTarget).
+  const snapshot = {
+    title: model.titleBase ?? model.title,
+    posterUrl: model.posterUrl,
+    contentType: 'movie' as const,
+    ...(model.year ? { subtitle: String(model.year) } : {}),
+  };
+  const listSnapshot = snapshot;
   const secondary = (
     <>
-      <FavoriteButton itemRef={ref} snapshot={{ title: model.title, posterUrl: model.posterUrl, contentType: 'movie' }} isFavorite={isFavorite} compact={watching} />
+      <MyListButton itemRef={ref} snapshot={listSnapshot} size={watching ? 'sm' : 'lg'} />
+      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact={watching} />
       <WatchedButton itemRef={ref} watched={watched} compact={watching} />
       {playback.canDownload && (
         <DownloadButton
@@ -153,17 +225,23 @@ export function MovieDetailPage() {
           {t('otherSourcesCount', { count: others.length })}
         </Button>
       )}
+      {/* C2: lock or remove the lock (only while parental controls are on). */}
+      {lockItems.map((a) => (
+        <Button key={a.id} size={watching ? 'sm' : 'lg'} variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
+          {a.label}
+        </Button>
+      ))}
     </>
   );
 
   return (
-    <div className="isolate h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
+    <div ref={detailScrollRef} className="isolate h-full overflow-y-auto pb-12" data-testid="vod-movie-detail">
       {watching ? (
         <>
-          <WatchStage title={model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
+          <WatchStage title={model.titleBase ?? model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
           <section className="mx-auto mt-6 flex w-full max-w-[1800px] flex-col gap-3 px-4 md:px-8" aria-label={t('about')}>
             <div className="flex flex-wrap items-center gap-2">{secondary}</div>
-            {model.plot && <p dir="auto" className="max-w-[72ch] text-[15px] leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
+            {model.plot && <p dir="auto" className="max-w-[72ch] text-[calc(15rem/15)] leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
           </section>
         </>
       ) : (
@@ -174,7 +252,14 @@ export function MovieDetailPage() {
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           actions={
             <>
-              <Button size="lg" variant="primary" icon={<Play aria-hidden size={18} className="fill-current" />} onClick={() => play(false)}>
+              <Button
+                ref={playRef}
+                size="lg"
+                variant="primary"
+                icon={<Play aria-hidden size={18} className="fill-current" />}
+                aria-describedby="vod-detail-title"
+                onClick={() => play(false)}
+              >
                 {resumable && position.data && !pinnedTarget
                   ? t('resumeAt', { time: formatClock(position.data.positionSeconds) })
                   : t('play')}
@@ -212,7 +297,7 @@ export function MovieDetailPage() {
         )}
       </div>
 
-      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.title} />}
+      {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}
       {others.length > 0 && (
         <OtherSourcesDialog
           open={othersOpen}

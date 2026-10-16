@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { invalidate } from '@/api/query';
+import { invalidate, queryClient } from '@/api/query';
 import type { DownloadStartArgs } from '@/api/rpc';
 import { RpcError, rpc } from '@/api/transport';
-import { sameRef, type Download, type ItemRef, type SourceKind } from '@/api/types';
+import { sameRef, type Download, type ItemRef, type PlaybackPosition, type SourceKind } from '@/api/types';
 import { playItem, usePlayerStore } from '@/features/player';
 
 import { downloadFileName } from '../lib/format';
@@ -17,6 +17,8 @@ export interface PlayTarget {
   sourceKind: SourceKind;
   title: string;
   posterUrl?: string;
+  /** The title's group, so the parental gate can check group locks (C2). */
+  categoryId?: string;
 }
 
 export interface PlayOptions {
@@ -54,6 +56,7 @@ export function usePlayback(target: PlayTarget | undefined) {
         if (opts.episodeId) args.episodeId = opts.episodeId;
         if (opts.subtitle) args.subtitle = opts.subtitle;
         if (tgt.posterUrl) args.posterUrl = tgt.posterUrl;
+        if (tgt.categoryId) args.categoryId = tgt.categoryId;
         await playItem(args);
       } catch (err) {
         toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' });
@@ -63,8 +66,17 @@ export function usePlayback(target: PlayTarget | undefined) {
   );
 
   const stop = useCallback(() => {
-    void invalidate('positions.');
+    const final = finalPosition();
     usePlayerStore.getState().stop();
+    if (!final) {
+      void invalidate('positions.');
+      return;
+    }
+    // The stop's own `positions.set` is still in flight: a refetch now raced it and brought back
+    // the previous save (or none), so the page offered Play instead of Resume (L4-hf-vod-1).
+    // Show the position being saved, and only mark the rest stale for their next mount.
+    writeFinalPosition(final);
+    void queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'none' });
   }, []);
 
   const canDownload = target?.sourceKind === 'xtream' || target?.sourceKind === 'stalker';
@@ -108,6 +120,39 @@ export function usePlayback(target: PlayTarget | undefined) {
   );
 
   return { play, stop, download, canDownload, pendingDownload };
+}
+
+const isPositionsKey = (key: readonly unknown[]) => typeof key[0] === 'string' && key[0].startsWith('positions.');
+
+/** The VOD position the player's stop is about to save, as the core will store it. */
+function finalPosition(): PlaybackPosition | undefined {
+  const { source, positionSeconds, durationSeconds } = usePlayerStore.getState();
+  const ref = source?.ref;
+  if (!ref || source?.isLive || (ref.contentType !== 'movie' && ref.contentType !== 'series')) return undefined;
+  const pos = Math.floor(positionSeconds);
+  if (!(pos > 0)) return undefined;
+  const row: PlaybackPosition = { ref, positionSeconds: pos, updatedAt: new Date().toISOString(), watched: false };
+  if (source.episodeId) row.episodeId = source.episodeId;
+  if (durationSeconds && Number.isFinite(durationSeconds)) row.durationSeconds = Math.floor(durationSeconds);
+  return row;
+}
+
+/** Writes `final` into the cached `positions.get` / `positions.forSeries` answers for its title. */
+function writeFinalPosition(final: PlaybackPosition): void {
+  const merge = (old: PlaybackPosition | null | undefined): PlaybackPosition => ({ ...final, watched: old?.watched ?? false });
+  for (const q of queryClient.getQueryCache().findAll({ predicate: (q) => isPositionsKey(q.queryKey) })) {
+    const [cmd, args] = q.queryKey as [string, { ref?: ItemRef; episodeId?: string } | null];
+    if (!args?.ref || !sameRef(args.ref, final.ref)) continue;
+    if (cmd === 'positions.get' && (args.episodeId ?? undefined) === final.episodeId) {
+      queryClient.setQueryData<PlaybackPosition | null>(q.queryKey, (old) => merge(old));
+    } else if (cmd === 'positions.forSeries' && final.episodeId) {
+      queryClient.setQueryData<PlaybackPosition[]>(q.queryKey, (old) => {
+        const list = old ?? [];
+        const at = list.findIndex((p) => p.episodeId === final.episodeId);
+        return at < 0 ? [...list, merge(undefined)] : list.map((p, i) => (i === at ? merge(p) : p));
+      });
+    }
+  }
 }
 
 /** Download rows for this item, keyed by episode id ('' for the movie itself). */

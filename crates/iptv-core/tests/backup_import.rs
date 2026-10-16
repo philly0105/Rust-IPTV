@@ -192,6 +192,7 @@ impl Importer for MockCatalogImporter {
             channels: 40,
             movies: 35,
             series: 10,
+            unchanged: false,
         })
     }
 }
@@ -226,6 +227,41 @@ async fn app(xtream_live: bool) -> (tempfile::TempDir, Arc<AppState>) {
         register_importer(&state, Arc::new(MockCatalogImporter));
     }
     (dir, state)
+}
+
+/// L1-settings-2: every source a backup import loads ends its progress with
+/// `done`, so the UI's progress toast closes.
+#[tokio::test]
+async fn backup_import_ends_each_source_progress_with_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sink, mut rx) = BroadcastSink::channel(4096);
+    let st = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    iptv_core::m3u::init(st.clone()).await.unwrap();
+    iptv_core::xtream::init(st.clone()).await.unwrap();
+    iptv_core::stalker::init(st.clone()).await.unwrap();
+    register_importer(&st, Arc::new(MockCatalogImporter));
+    let r = router();
+    import(&r, &st, &inline_manifest(), "merge").await;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut last: std::collections::HashMap<String, String> = Default::default();
+    loop {
+        match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Ok(Ok(ev)) if ev.kind == "import.progress" => {
+                let id = ev.payload["sourceId"].as_str().unwrap_or("").to_string();
+                let phase = ev.payload["phase"].as_str().unwrap_or("").to_string();
+                last.insert(id, phase);
+                if !last.is_empty() && last.values().all(|p| p == "done") {
+                    break;
+                }
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) | Err(_) => break,
+        }
+    }
+    assert!(!last.is_empty(), "the import reported progress");
+    assert!(last.values().all(|p| p == "done"), "{last:?}");
 }
 
 fn router() -> RpcRouter {
@@ -828,6 +864,7 @@ impl Importer for HangingImporter {
             channels: 0,
             movies: 0,
             series: 0,
+            unchanged: false,
         })
     }
 }
@@ -998,6 +1035,56 @@ async fn watched_positions_and_app_settings_round_trip() {
     assert_eq!(watched, 1);
 }
 
+/// One app setting this build refuses (a scale out of range, an accent from a
+/// later version) skips only that key, each with its own warning; the rest of
+/// the backup's settings are restored.
+#[tokio::test]
+async fn a_refused_app_setting_skips_only_that_key() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "settings": { "englishOnly": true, "uiScale": 1.3, "accent": "plum", "density": "compact" },
+        "playlists": [{
+            "portalType": "xtream",
+            "exportedId": "xt-s",
+            "title": "Settings Xtream",
+            "connection": { "serverUrl": "http://127.0.0.1:9/xtream", "username": "s", "password": "p" },
+            "userState": { "favorites": [], "recentlyViewed": [], "hiddenCategories": [] }
+        }]
+    })
+    .to_string();
+    let report = import(&r, &st, &manifest, "merge").await;
+    let warnings: Vec<&str> = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|w| w.contains("App setting"))
+        .collect();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("App setting uiScale"))
+            && warnings.iter().any(|w| w.starts_with("App setting accent")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().all(|w| !w.contains("invalid:")),
+        "{warnings:?}"
+    );
+    let s = st.settings_snapshot();
+    assert!(s.english_only, "the other keys are restored");
+    assert_eq!(s.ui_scale, 1.0, "the refused key keeps its value");
+    assert_eq!(
+        serde_json::to_value(&s).unwrap()["density"],
+        "compact",
+        "{s:?}"
+    );
+}
+
 /// A restored playlist over `RAW_INLINE_MAX` is stored like an imported large
 /// file: `m3u_raw.raw = ''` plus `playlists/<id>.m3u`, and it still parses,
 /// refreshes, exports, and re-imports unchanged.
@@ -1117,14 +1204,14 @@ async fn stalker_restore_records_totals_and_plain_errors() {
     import(&r, &state, &manifest, "merge").await;
 
     let check = |sources: Vec<Source>| {
-        let good = sources.iter().find(|s| s.id == "stk-good").unwrap();
+        let good = sources.iter().find(|s| s.name == "Good portal").unwrap();
         assert_eq!(
             (good.channel_count, good.movie_count, good.series_count),
             (30, 30, 10),
             "{good:?}"
         );
         assert_eq!(good.last_error, None);
-        let bad = sources.iter().find(|s| s.id == "stk-bad").unwrap();
+        let bad = sources.iter().find(|s| s.name == "Wrong MAC").unwrap();
         assert_eq!(
             bad.last_error.as_deref(),
             Some("This MAC address is not registered on the portal. Check the MAC or contact your provider. Portal message: Your STB is not registered. Call the provider."),
@@ -1133,17 +1220,532 @@ async fn stalker_restore_records_totals_and_plain_errors() {
     };
     check(iptv_core::sources::list(&state).await.unwrap());
 
-    // A row remembered for the id must not survive a replace that
-    // re-creates the id (possibly against another portal).
+    // A row remembered for the id must not survive a replace (the old
+    // source is removed; the new one may point at another portal).
     let rt = iptv_core::stalker::Runtime::get(&state);
     rt.items.insert(
         "stk-good|movie|5005".into(),
         iptv_core::stalker::CachedItem {
             raw: json!({"id": "5005", "cmd": "http://old-portal.invalid/5005.mp4"}),
             category_name: None,
+            category_id: None,
         },
     );
     import(&r, &state, &manifest, "replace").await;
     assert!(!rt.items.contains_key("stk-good|movie|5005"));
-    check(iptv_core::sources::list(&state).await.unwrap());
+    let after = iptv_core::sources::list(&state).await.unwrap();
+    assert_eq!(after.len(), 2, "{after:?}");
+    check(after);
+}
+
+/// B9: merging a backup made without secrets into the install it came from
+/// keeps the saved password instead of blanking it.
+#[tokio::test]
+async fn merge_without_secrets_keeps_saved_passwords() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let text = inline_manifest().replace("{mock}", &mock.base);
+    let r = router();
+    let (_d, st) = app(false).await;
+    import(&r, &st, &text, "merge").await;
+    let exported = export(&r, &st, false).await.to_string();
+    assert!(!exported.contains("\"password\""));
+    let rep = import(&r, &st, &exported, "merge").await;
+    assert!(
+        !rep["warnings"].to_string().contains("no password"),
+        "{rep}"
+    );
+    let cfg: String = st
+        .db_call(|c| {
+            Ok(c.query_row(
+                "SELECT config_json FROM sources WHERE id = 'xt-one'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let cfg: Value = serde_json::from_str(&cfg).unwrap();
+    assert_eq!(cfg["password"], "secret", "{cfg}");
+    drop(mock);
+}
+
+fn m3u_entry(id: Value, position: Value) -> Value {
+    json!({
+        "portalType": "m3u",
+        "exportedId": id,
+        "title": format!("T {id}"),
+        "position": position,
+        "source": { "kind": "text", "rawM3u": INLINE_M3U },
+    })
+}
+
+/// B9: hostile ids cannot name files outside the data folder, and a huge
+/// position cannot break later `sources.add`.
+#[tokio::test]
+async fn hostile_ids_and_positions_are_neutralized() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let text = json!({
+        "kind": "iptvnator-playlist-backup", "version": 1,
+        "playlists": [
+            m3u_entry(json!("C:evil"), json!(i64::MAX)),
+            m3u_entry(json!("x:stream"), json!(-5)),
+            m3u_entry(json!(".."), Value::Null),
+        ]
+    })
+    .to_string();
+    // Same playlist text: two entries are duplicates; make them differ.
+    let text = text.replacen("Sport One", "Sport A", 1);
+    let rep = import(&r, &st, &text, "merge").await;
+    assert!(rep["imported"].as_i64().unwrap() >= 1, "{rep}");
+    let rows: Vec<(String, i64)> = st
+        .db_call(|c| {
+            let mut stmt = c.prepare("SELECT id, position FROM sources")?;
+            let v = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap();
+    for (id, pos) in &rows {
+        assert!(!id.contains(':') && !id.starts_with('.'), "{id}");
+        assert!((0..=1_000_000).contains(pos), "{id}: {pos}");
+    }
+    // A later add still computes MAX(position) + 1.
+    let added = iptv_core::rpc::build_router()
+        .dispatch(
+            st.clone(),
+            "sources.add",
+            json!({"kind": "m3u", "name": "After", "m3u": {"origin": "text", "text": INLINE_M3U}}),
+        )
+        .await;
+    assert!(added.is_ok(), "{added:?}");
+}
+
+/// B9: Replace refuses a backup none of whose playlists can be read, and
+/// leaves the existing sources alone.
+#[tokio::test]
+async fn replace_with_no_usable_entry_changes_nothing() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let text = inline_manifest().replace("{mock}", &mock.base);
+    let r = router();
+    let (_d, st) = app(false).await;
+    import(&r, &st, &text, "merge").await;
+    let count = |st: Arc<AppState>| async move {
+        st.db_call(|c| Ok(c.query_row("SELECT COUNT(*) FROM sources", [], |r| r.get::<_, i64>(0))?))
+            .await
+            .unwrap()
+    };
+    let before = count(st.clone()).await;
+    assert!(before >= 3);
+    let bad = json!({
+        "kind": "iptvnator-playlist-backup", "version": 1,
+        "playlists": [ { "portalType": "m3u", "title": "Broken", "source": {} }, { "portalType": "nope" } ]
+    })
+    .to_string();
+    let err = r
+        .dispatch(
+            st.clone(),
+            "backup.import",
+            json!({ "json": bad, "mode": "replace" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, iptv_core::RpcErrorCode::Invalid);
+    assert!(err.message.contains("nothing was replaced"), "{err:?}");
+    assert_eq!(count(st.clone()).await, before);
+    drop(mock);
+}
+
+/// B9 (review round 1): Replace with an empty playlist list, or with only an
+/// M3U whose text holds no channel, is refused and keeps every source.
+#[tokio::test]
+async fn replace_with_empty_or_unparseable_backup_changes_nothing() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let text = inline_manifest().replace("{mock}", &mock.base);
+    let r = router();
+    let (_d, st) = app(false).await;
+    import(&r, &st, &text, "merge").await;
+    let count = |st: Arc<AppState>| async move {
+        st.db_call(|c| Ok(c.query_row("SELECT COUNT(*) FROM sources", [], |r| r.get::<_, i64>(0))?))
+            .await
+            .unwrap()
+    };
+    let before = count(st.clone()).await;
+    assert!(before >= 3);
+    let empty = json!({ "kind": "iptvnator-playlist-backup", "version": 1, "playlists": [] });
+    let junk = json!({
+        "kind": "iptvnator-playlist-backup", "version": 1,
+        "playlists": [ { "portalType": "m3u", "title": "Junk",
+                         "source": { "kind": "text", "rawM3u": "this is not a playlist" } } ]
+    });
+    for bad in [empty, junk] {
+        let err = r
+            .dispatch(
+                st.clone(),
+                "backup.import",
+                json!({ "json": bad.to_string(), "mode": "replace" }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, iptv_core::RpcErrorCode::Invalid, "{bad}");
+        assert!(err.message.contains("nothing was replaced"), "{err:?}");
+        assert_eq!(count(st.clone()).await, before, "{bad}");
+    }
+    drop(mock);
+}
+
+/// B9 (review round 2): Replace keeps every existing source until a new
+/// catalog actually loaded. A header-only M3U whose URL 404s and an Xtream
+/// account without a password load nothing, so the old sources, settings
+/// and pins stay; adding one good playlist makes the replace go through.
+#[tokio::test]
+async fn replace_keeps_old_sources_until_a_new_catalog_loads() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let text = inline_manifest().replace("{mock}", &mock.base);
+    let r = router();
+    let (_d, st) = app(false).await;
+    import(&r, &st, &text, "merge").await;
+    let ids = |st: Arc<AppState>| async move {
+        st.db_call(|c| {
+            Ok(c.prepare("SELECT id FROM sources ORDER BY id")?
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap()
+    };
+    let before = ids(st.clone()).await;
+    assert!(before.len() >= 3, "{before:?}");
+    let epg_before = st.settings_snapshot().epg_urls;
+    assert!(!epg_before.is_empty());
+
+    let empty_m3u = json!({ "portalType": "m3u", "exportedId": "empty", "title": "Empty",
+        "source": { "kind": "url", "url": format!("{}/missing/404.m3u", mock.base), "rawM3u": "#EXTM3U\n" } });
+    let no_password = json!({ "portalType": "xtream", "exportedId": "nopw", "title": "No password",
+        "connection": { "serverUrl": mock.base, "username": "someone" } });
+    let failing = json!({ "kind": "iptvnator-playlist-backup", "version": 1,
+        "settings": { "epgUrls": [] },
+        "playlists": [empty_m3u.clone(), no_password.clone()] });
+    let err = r
+        .dispatch(
+            st.clone(),
+            "backup.import",
+            json!({ "json": failing.to_string(), "mode": "replace" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, iptv_core::RpcErrorCode::Invalid, "{err:?}");
+    assert!(err.message.contains("nothing was replaced"), "{err:?}");
+    // Review round 3: the reason is the import's own failure, not the
+    // "source was kept ... will be restored" tail of its warning.
+    assert!(err.message.contains("\"Empty\": "), "{err:?}");
+    assert!(
+        !err.message.contains("was kept") && !err.message.contains("will be restored"),
+        "{err:?}"
+    );
+    assert_eq!(ids(st.clone()).await, before, "old sources must stay");
+    assert_eq!(
+        st.settings_snapshot().epg_urls,
+        epg_before,
+        "settings must stay"
+    );
+
+    let good = json!({ "portalType": "m3u", "exportedId": "good", "title": "Good",
+        "source": { "kind": "text", "rawM3u": INLINE_M3U } });
+    let mixed = json!({ "kind": "iptvnator-playlist-backup", "version": 1,
+        "playlists": [empty_m3u, no_password, good] });
+    let rep = import(&r, &st, &mixed.to_string(), "replace").await;
+    assert_eq!(rep["imported"], 3, "{rep}");
+    let after = ids(st.clone()).await;
+    assert_eq!(after.len(), 3, "{after:?}");
+    assert!(after.iter().all(|id| !before.contains(id)), "{after:?}");
+    assert!(after.contains(&"good".to_string()), "{after:?}");
+    assert!(
+        st.settings_snapshot().epg_urls.is_empty(),
+        "replace restores settings"
+    );
+    drop(mock);
+}
+
+/// Review round 2: merging an older backup never rolls back newer progress.
+/// Dated rows lose to newer stored rows; undated rows only fill gaps.
+#[tokio::test]
+async fn merge_of_an_older_backup_keeps_newer_progress() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "xtream",
+            "exportedId": "xt-p",
+            "title": "Progress",
+            "connection": { "serverUrl": "http://127.0.0.1:9/xtream", "username": "p", "password": "p" },
+            "userState": {
+                "favorites": [], "recentlyViewed": [], "hiddenCategories": [],
+                "playbackPositions": [
+                    { "contentXtreamId": 201, "contentType": "vod", "positionSeconds": 600, "durationSeconds": 6000, "updatedAt": "2026-09-07T00:00:00.000Z" },
+                    { "contentXtreamId": 202, "contentType": "vod", "positionSeconds": 30, "durationSeconds": 6000 }
+                ]
+            }
+        }]
+    })
+    .to_string();
+    let rows = |st: Arc<AppState>| async move {
+        st.db_call(|c| {
+            let mut s = c.prepare(
+                "SELECT item_id, position_seconds FROM playback_positions ORDER BY item_id",
+            )?;
+            let rows = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap()
+    };
+    import(&r, &st, &manifest, "merge").await;
+    // An undated row fills the gap when nothing is stored.
+    assert_eq!(
+        rows(st.clone()).await,
+        vec![("201".to_string(), 600), ("202".to_string(), 30)]
+    );
+    // The user keeps watching after the backup was made.
+    st.db_call(|c| {
+        c.execute_batch(
+            "UPDATE playback_positions SET position_seconds = 3000, updated_at = '2026-10-01T00:00:00.000Z' WHERE item_id = '201';
+             UPDATE playback_positions SET position_seconds = 2000, updated_at = '2026-10-01T00:00:00.000Z' WHERE item_id = '202';",
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    import(&r, &st, &manifest, "merge").await;
+    assert_eq!(
+        rows(st.clone()).await,
+        vec![("201".to_string(), 3000), ("202".to_string(), 2000)],
+        "an older backup must not roll back progress"
+    );
+}
+
+/// Review round 3 (R3-sources F1): a backup carries manual EPG mappings (every
+/// kind), M3U and Stalker playback positions and Stalker hidden categories as
+/// Tsrust extensions, and a Replace with that backup restores them under the
+/// new source ids.
+#[tokio::test]
+async fn round_trip_keeps_epg_mappings_positions_and_stalker_hidden_categories() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let text = inline_manifest().replace("{mock}", &mock.base);
+    let r = router();
+    let (_d, st) = app(false).await;
+    import(&r, &st, &text, "merge").await;
+    let (m3u_item, stk_cat) = st
+        .db_call(|c| {
+            let m3u = source_id(c, "m3u", "Inline M3U");
+            let xt = source_id(c, "xtream", "Inline Xtream");
+            let stk = source_id(c, "stalker", "Inline Stalker");
+            let m3u_item: String = c.query_row(
+                "SELECT item_id FROM items WHERE source_id = ?1 AND content_type = 'live' ORDER BY item_id LIMIT 1",
+                [&m3u],
+                |r| r.get(0),
+            )?;
+            let stk_cat: (String, String) = c.query_row(
+                "SELECT content_type, category_id FROM categories WHERE source_id = ?1 ORDER BY content_type, category_id LIMIT 1",
+                [&stk],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            for (sid, ct, item, epg) in [
+                (&m3u, "live", m3u_item.as_str(), Some("news.override")),
+                (&xt, "live", "101", None),
+                (&stk, "live", "1", Some("stalker.one")),
+            ] {
+                c.execute(
+                    "INSERT INTO epg_channel_map(source_id, content_type, item_id, epg_channel_id) VALUES (?1, ?2, ?3, ?4)",
+                    params![sid, ct, item, epg],
+                )?;
+            }
+            for (sid, ct, item, ep, pos, watched) in [
+                (&m3u, "live", m3u_item.as_str(), "", 120, 0),
+                (&stk, "movie", "55", "", 900, 1),
+                (&stk, "series", "7", "7:1:2", 50, 0),
+            ] {
+                c.execute(
+                    "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 5400, '2026-10-02T00:00:00.000Z', '{\"title\":\"Saved\"}', ?6)",
+                    params![sid, ct, item, ep, pos, watched],
+                )?;
+            }
+            c.execute(
+                "UPDATE categories SET hidden = 1 WHERE source_id = ?1 AND content_type = ?2 AND category_id = ?3",
+                params![stk, stk_cat.0, stk_cat.1],
+            )?;
+            Ok((m3u_item, stk_cat))
+        })
+        .await
+        .unwrap();
+
+    let exported = export(&r, &st, true).await;
+    let rep = import(&r, &st, &exported.to_string(), "replace").await;
+    assert_eq!(rep["skipped"], 0, "{rep}");
+
+    st.db_call(move |c| {
+        let m3u = source_id(c, "m3u", "Inline M3U");
+        let xt = source_id(c, "xtream", "Inline Xtream");
+        let stk = source_id(c, "stalker", "Inline Stalker");
+        let map = |sid: &str, ct: &str, item: &str| -> rusqlite::Result<Option<Option<String>>> {
+            c.query_row(
+                "SELECT epg_channel_id FROM epg_channel_map WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+                params![sid, ct, item],
+                |r| r.get(0),
+            )
+            .optional()
+        };
+        assert_eq!(
+            map(&m3u, "live", &m3u_item)?,
+            Some(Some("news.override".into()))
+        );
+        assert_eq!(map(&xt, "live", "101")?, Some(None), "explicitly unmapped");
+        assert_eq!(map(&stk, "live", "1")?, Some(Some("stalker.one".into())));
+        let pos = |sid: &str,
+                   ct: &str,
+                   item: &str,
+                   ep: &str|
+         -> rusqlite::Result<Option<(i64, bool, String)>> {
+            c.query_row(
+                "SELECT position_seconds, watched, snapshot_json FROM playback_positions
+                 WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4",
+                params![sid, ct, item, ep],
+                |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get(2)?)),
+            )
+            .optional()
+        };
+        let p = pos(&m3u, "live", &m3u_item, "")?.expect("m3u position");
+        assert_eq!((p.0, p.1), (120, false));
+        assert!(p.2.contains("Saved"), "{}", p.2);
+        assert_eq!(
+            pos(&stk, "movie", "55", "")?.map(|p| (p.0, p.1)),
+            Some((900, true))
+        );
+        assert_eq!(pos(&stk, "series", "7", "7:1:2")?.map(|p| p.0), Some(50));
+        let hidden: i64 = c.query_row(
+            "SELECT hidden FROM categories WHERE source_id = ?1 AND content_type = ?2 AND category_id = ?3",
+            params![stk, stk_cat.0, stk_cat.1],
+            |r| r.get(0),
+        )?;
+        assert_eq!(hidden, 1, "stalker hidden category");
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    // The extension keys travel in Tsrust exports; IPTVnator ignores them,
+    // and backups without them (every other test here) still import.
+    let us = &exported["playlists"][0]["userState"];
+    assert!(us.get("tsrustEpgMappings").is_some(), "{us}");
+    drop(mock);
+}
+
+/// Review round 3 (R3-sources F6): an M3U URL source whose first import
+/// failed exports `rawM3u: ""`; one with only the header carries no
+/// channels. Both import from their URL instead of being dropped or left
+/// empty.
+#[tokio::test]
+async fn url_entries_without_channel_text_import_from_the_url() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let r = router();
+    let (_d, st) = app(false).await;
+    let url = format!("{}/m3u/sample.m3u", mock.base);
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [
+            { "portalType": "m3u", "exportedId": "empty-raw", "title": "Empty raw",
+              "source": { "kind": "url", "url": url, "rawM3u": "" } },
+            { "portalType": "m3u", "exportedId": "header-only", "title": "Header only",
+              "source": { "kind": "url", "url": format!("{url}?second=1"), "rawM3u": "#EXTM3U\n" } }
+        ]
+    })
+    .to_string();
+    let rep = import(&r, &st, &manifest, "replace").await;
+    assert_eq!(
+        (rep["imported"].as_i64(), rep["skipped"].as_i64()),
+        (Some(2), Some(0)),
+        "{rep}"
+    );
+    let sources = iptv_core::sources::list(&st).await.unwrap();
+    assert_eq!(sources.len(), 2);
+    for s in sources {
+        assert!(s.channel_count > 0, "{s:?}");
+        let cfg = s.m3u.as_ref().unwrap();
+        assert_eq!(cfg.origin, iptv_core::model::M3uOrigin::Url, "{s:?}");
+        assert!(cfg.url.as_deref().unwrap().starts_with(&url), "{s:?}");
+    }
+    drop(mock);
+}
+
+/// Review round 3: the Tsrust position extension (M3U and Stalker) follows
+/// the same rules as the Xtream positions: an older dated row and an undated
+/// row never overwrite newer stored progress; an undated row fills a gap.
+#[tokio::test]
+async fn merged_extension_positions_never_roll_back_progress() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let manifest = |positions: Value| {
+        json!({
+            "kind": "iptvnator-playlist-backup",
+            "version": 1,
+            "playlists": [{
+                "portalType": "m3u", "exportedId": "m3u-p", "title": "Progress M3U",
+                "source": { "kind": "text", "rawM3u": INLINE_M3U },
+                "userState": { "favorites": [], "recentlyViewed": [], "tsrustPlaybackPositions": positions }
+            }]
+        })
+        .to_string()
+    };
+    import(&r, &st, &manifest(json!([])), "merge").await;
+    let items: Vec<String> = st
+        .db_call(|c| {
+            Ok(c.prepare(
+                "SELECT item_id FROM items WHERE source_id = 'm3u-p' ORDER BY item_id LIMIT 3",
+            )?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap();
+    let (a, b, gap) = (items[0].clone(), items[1].clone(), items[2].clone());
+    {
+        let (a, b) = (a.clone(), b.clone());
+        st.db_call(move |c| {
+            for item in [&a, &b] {
+                c.execute(
+                    "INSERT INTO playback_positions(source_id, content_type, item_id, position_seconds, updated_at)
+                     VALUES ('m3u-p', 'live', ?1, 3000, '2026-10-01T00:00:00.000Z')",
+                    [item],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+    let older = manifest(json!([
+        { "contentType": "live", "itemId": a, "positionSeconds": 10, "updatedAt": "2026-09-01T00:00:00.000Z" },
+        { "contentType": "live", "itemId": b, "positionSeconds": 20 },
+        { "contentType": "live", "itemId": gap, "positionSeconds": 30 }
+    ]));
+    import(&r, &st, &older, "merge").await;
+    let rows = st
+        .db_call(|c| {
+            let mut s = c.prepare(
+                "SELECT item_id, position_seconds FROM playback_positions WHERE source_id = 'm3u-p' ORDER BY item_id",
+            )?;
+            let rows = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap();
+    let mut want = vec![(a, 3000), (b, 3000), (gap, 30)];
+    want.sort();
+    assert_eq!(rows, want);
 }

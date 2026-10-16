@@ -46,6 +46,13 @@ pub async fn update(state: Arc<AppState>, a: UpdateArgs) -> Result<Source, RpcEr
 }
 
 pub async fn remove(state: Arc<AppState>, a: IdArgs) -> Result<(), RpcError> {
+    // C2: removing a source drops its parental locks, so a locked session needs the PIN first.
+    crate::parental::require_unlocked_to_drop_locks(
+        &state,
+        Some(a.id.clone()),
+        "remove a source with locked content",
+    )
+    .await?;
     Ok(super::remove(&state, &a.id).await?)
 }
 
@@ -54,7 +61,14 @@ pub async fn reorder(state: Arc<AppState>, a: ReorderArgs) -> Result<(), RpcErro
 }
 
 pub async fn refresh(state: Arc<AppState>, a: IdArgs) -> Result<Source, RpcError> {
-    Ok(super::refresh(state, &a.id).await?)
+    super::refresh(state, &a.id)
+        .await
+        .map_err(super::cancel_aware_rpc_error)
+}
+
+/// `sources.cancelImport` (C8).
+pub async fn cancel_import(state: Arc<AppState>, a: IdArgs) -> Result<bool, RpcError> {
+    Ok(super::cancel_import(&state, &a.id))
 }
 
 pub async fn refresh_all(state: Arc<AppState>, _a: NoArgs) -> Result<RefreshAllResult, RpcError> {
@@ -62,6 +76,12 @@ pub async fn refresh_all(state: Arc<AppState>, _a: NoArgs) -> Result<RefreshAllR
 }
 
 pub async fn remove_all(state: Arc<AppState>, _a: NoArgs) -> Result<(), RpcError> {
+    crate::parental::require_unlocked_to_drop_locks(
+        &state,
+        None,
+        "remove sources with locked content",
+    )
+    .await?;
     Ok(super::remove_all(&state).await?)
 }
 
@@ -81,4 +101,12 @@ pub fn register(r: &mut RpcRouter) {
     r.add("sources.refresh", refresh);
     r.add("sources.refreshAll", refresh_all);
     r.add("sources.counts", counts);
+    r.add("sources.cancelImport", cancel_import);
+    // account:
+    r.add(
+        "sources.schedule",
+        |s: Arc<AppState>, _a: NoArgs| async move {
+            Ok::<super::schedule::ScheduleView, RpcError>(super::schedule::view(&s).await?)
+        },
+    );
 }

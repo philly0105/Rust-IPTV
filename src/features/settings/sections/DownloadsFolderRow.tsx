@@ -73,7 +73,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
       error={error}
       stack
     >
-      {({ id, describedBy }) =>
+      {({ id, describedBy, invalid }) =>
         dir.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : dir.isError ? (
@@ -111,6 +111,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
             <CommitInput
               id={id}
               describedBy={describedBy}
+              invalid={invalid}
               mono
               value={path}
               placeholder="D:\Videos"

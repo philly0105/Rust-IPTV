@@ -155,7 +155,11 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
     let episode_id = req.episode_id.clone().filter(|e| !e.is_empty());
 
     let (id, fresh) = state
-        .db_call(move |c| -> CoreResult<(i64, bool)> {
+        .db_call(move |conn| -> CoreResult<(i64, bool)> {
+            // One transaction: when reserving the destination fails (disk
+            // full, permissions) the row is not left queued with no file.
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let c: &rusqlite::Connection = &tx;
             let new = store::NewDownload {
                 item_ref: &item_ref,
                 episode_id: episode_id.as_deref(),
@@ -177,7 +181,10 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                         DownloadStatus::Failed | DownloadStatus::Canceled => false,
                     };
                     if keep {
-                        return Ok((d.id, false));
+                        // A queued row the manager does not hold (an earlier
+                        // start failed after writing it) is queued again;
+                        // enqueue ignores rows it already tracks.
+                        return Ok((d.id, d.status == DownloadStatus::Queued));
                     }
                     if d.status != DownloadStatus::Completed {
                         if let Some(p) = d.file_path.as_deref() {
@@ -204,6 +211,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
             );
             let r = naming::reserve(&dir, &name)?;
             store::set_destination(c, id, &r.file_name, &r.final_path.to_string_lossy())?;
+            tx.commit()?;
             Ok((id, true))
         })
         .await?;
@@ -315,7 +323,8 @@ async fn requeue(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         })
         .await?;
     if claimed {
-        manager::enqueue(state, id);
+        // Ahead of downloads queued since it was paused or failed.
+        manager::enqueue_front(state, id);
         notify(state);
     }
     Ok(())
@@ -366,9 +375,12 @@ async fn cleanup_part(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
     Ok(())
 }
 
-/// Removes a download row. Unfinished rows always lose their `.part`;
-/// completed rows delete the media file only when `delete_file` is set. When
-/// a file cannot be deleted (locked), the row stays so the user can retry.
+/// Removes a download row. `delete_file` deletes the row's file: the `.part`
+/// of an unfinished row, the media file of a completed one. Without it an
+/// unfinished row's `.part` stays on disk (a new download reserves its own
+/// `.part`, so the kept one is never reused or overwritten); a completed
+/// row's leftover `.part` is always cleared. When a file cannot be deleted
+/// (locked), the row stays so the user can retry.
 pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreResult<()> {
     let mut d = get(state, id).await?;
     if let Stopped::Running(rx) = manager::manager(state).stop(id, StopReason::Detach) {
@@ -381,7 +393,9 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
     let completed = d.status == DownloadStatus::Completed;
     tokio::task::spawn_blocking(move || -> CoreResult<()> {
         if let Some(p) = path.as_deref().map(Path::new) {
-            naming::remove_regular_file(&naming::part_path(p))?;
+            if delete_file || completed {
+                naming::remove_regular_file(&naming::part_path(p))?;
+            }
             if completed && delete_file {
                 naming::remove_regular_file(p)?;
             }
@@ -555,7 +569,7 @@ pub async fn reveal(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     open_folder(&dir, select.as_deref())
 }
 
-fn open_folder(dir: &Path, select: Option<&Path>) -> CoreResult<()> {
+pub(crate) fn open_folder(dir: &Path, select: Option<&Path>) -> CoreResult<()> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = std::process::Command::new("explorer");

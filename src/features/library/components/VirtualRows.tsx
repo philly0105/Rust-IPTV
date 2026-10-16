@@ -24,6 +24,12 @@ export interface RowBase {
 export interface RowRenderInfo {
   index: number;
   active: boolean;
+  /**
+   * The row holds the list's single Tab stop (roving focus). Rows pass this to
+   * their action buttons so Tab from the row reaches them; buttons in other
+   * rows stay out of the Tab order.
+   */
+  tabStop: boolean;
 }
 
 export interface VirtualRowsProps<R extends RowBase> {
@@ -81,6 +87,11 @@ export function VirtualRows<R extends RowBase>({
   const activeIndex = activeKey !== undefined ? rows.findIndex((r) => r.key === activeKey) : -1;
   const tabStop = activeIndex >= 0 && rows[activeIndex] && isFocusable(rows[activeIndex] as R) ? activeIndex : firstFocusable;
 
+  // Where keyboard focus last sat in the list. When that row goes away (Delete,
+  // a remove button, a finished download) focus would drop to <body>; it moves
+  // to the row that took its place instead.
+  const lastFocus = useRef<{ key: string; index: number } | null>(null);
+
   const focusIndex = useCallback(
     (index: number) => {
       const row = rows[index];
@@ -110,6 +121,40 @@ export function VirtualRows<R extends RowBase>({
     },
     [rows, isFocusable],
   );
+
+  useEffect(() => {
+    const last = lastFocus.current;
+    if (!last) return;
+    const still = rows.findIndex((r) => r.key === last.key);
+    if (still >= 0) {
+      last.index = still;
+      return;
+    }
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || !active.isConnected;
+    if (!lost) {
+      // Focus already moved somewhere on purpose (a dialog, another control).
+      lastFocus.current = null;
+      return;
+    }
+    // The row now at the same place, else the nearest one above it.
+    const from = Math.min(last.index, rows.length);
+    let target = -1;
+    for (let i = from; i < rows.length; i += 1) {
+      const r = rows[i];
+      if (r && isFocusable(r)) {
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) {
+      const above = step(from, -1);
+      if (above !== from) target = above;
+    }
+    lastFocus.current = null;
+    if (target >= 0) focusIndex(target);
+    // Runs when the row set changes; the helpers are recreated with it.
+  }, [rows]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>, index: number) => {
     if (e.target !== e.currentTarget) {
@@ -156,7 +201,16 @@ export function VirtualRows<R extends RowBase>({
   const items = virtualizer.getVirtualItems();
 
   return (
-    <div ref={scrollRef} className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)} data-testid={testId}>
+    <div
+      ref={scrollRef}
+      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)}
+      data-testid={testId}
+      onBlur={(e) => {
+        // Focus that leaves for another control is a deliberate move; forget the row.
+        const next = e.relatedTarget;
+        if (next instanceof Node && !e.currentTarget.contains(next)) lastFocus.current = null;
+      }}
+    >
       {header}
       <div role="list" aria-label={label} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {items.map((vi) => {
@@ -169,12 +223,19 @@ export function VirtualRows<R extends RowBase>({
               role="listitem"
               data-row-index={vi.index}
               tabIndex={focusable ? (vi.index === tabStop ? 0 : -1) : undefined}
-              onFocus={focusable ? () => setActiveKey(row.key) : undefined}
+              onFocus={
+                focusable
+                  ? () => {
+                      setActiveKey(row.key);
+                      lastFocus.current = { key: row.key, index: vi.index };
+                    }
+                  : undefined
+              }
               onKeyDown={focusable ? (e) => onKeyDown(e, vi.index) : undefined}
               className="absolute start-0 top-0 w-full rounded-md focus-visible:outline-offset-[-2px]"
               style={{ height: vi.size, transform: `translateY(${vi.start - headerHeight}px)` }}
             >
-              {renderRow(row, { index: vi.index, active: vi.index === activeIndex })}
+              {renderRow(row, { index: vi.index, active: vi.index === activeIndex, tabStop: focusable && vi.index === tabStop })}
             </div>
           );
         })}

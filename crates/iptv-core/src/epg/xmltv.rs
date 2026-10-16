@@ -13,8 +13,11 @@
 //!   `Z`, `UTC` or `GMT` offset, plus RFC 3339 as a fallback;
 //! - programmes without `stop`: the stop is inferred from the next programme
 //!   on the same channel, or start + 1 h when none follows;
-//! - mismatched end tags, unclosed tags (`<br>` inside a description) and a
-//!   truncated tail (data read so far is kept).
+//! - mismatched end tags and unclosed tags (`<br>` inside a description).
+//!
+//! A document that opens `<tv>` but ends (cleanly or with an error, a cut
+//! gzip stream included) before its `</tv>` is a cut-off download: parsing
+//! fails with [`CUT_OFF_MESSAGE`] so the stored guide is kept.
 //!
 //! Hostile input is bounded: the document stops with an `Invalid` error once
 //! more than [`MAX_DOCUMENT_BYTES`] (decompressed) were read, a text, CDATA or
@@ -75,6 +78,8 @@ pub const MAX_URL_BYTES: usize = 4096;
 pub const MAX_PENDING: usize = 100_000;
 /// Approximate bytes of held stop-less programmes (see [`MAX_PENDING`]).
 pub const MAX_PENDING_BYTES: usize = 64 << 20;
+/// `Invalid` message of a document that ends before its `</tv>`.
+pub const CUT_OFF_MESSAGE: &str = "The guide download was cut off; kept the previous guide.";
 
 /// A `<channel>` element.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,8 +122,8 @@ impl Window {
     /// The ingestion window: 2 days back, 14 days ahead of `now`.
     pub fn around(now: i64) -> Self {
         Self {
-            min_stop: now - KEEP_PAST_SECS,
-            max_start: now + KEEP_FUTURE_SECS,
+            min_stop: now.saturating_sub(KEEP_PAST_SECS),
+            max_start: now.saturating_add(KEEP_FUTURE_SECS),
         }
     }
 
@@ -149,7 +154,8 @@ pub struct ParseStats {
     pub skipped_invalid: u64,
     /// Programmes whose stop was inferred.
     pub inferred_stop: u64,
-    /// Set when the document ended with an XML error after some data was read.
+    /// Set when an XML error followed the closing `</tv>` (the guide itself
+    /// is complete).
     pub truncated: Option<String>,
 }
 
@@ -242,6 +248,8 @@ struct Parser<'s> {
     pending_seq: u64,
     stats: ParseStats,
     saw_tv: bool,
+    /// The last `<tv>` opened was closed (`</tv>` or `<tv/>`).
+    tv_closed: bool,
     sink: &'s mut dyn FnMut(XmltvItem) -> CoreResult<()>,
 }
 
@@ -249,9 +257,12 @@ struct Parser<'s> {
 /// programme inside `window`. The sink may return an error to abort.
 ///
 /// Errors: `Invalid` when the input is not XMLTV or holds neither channels nor
-/// programmes; whatever the sink or the reader returns. An XML syntax error
-/// after at least one channel or programme was read ends parsing early and is
-/// reported in [`ParseStats::truncated`] instead.
+/// programmes, and `Invalid(`[`CUT_OFF_MESSAGE`]`)` when it opens `<tv>` but
+/// ends before `</tv>` (the sink has then seen only part of the feed, so the
+/// caller must not keep it); whatever the sink or the reader returns. An XML
+/// syntax error after at least one channel or programme was read ends parsing
+/// early; past `</tv>` (or in a document without `<tv>`) it is reported in
+/// [`ParseStats::truncated`] instead.
 pub fn parse<R: BufRead>(
     reader: R,
     window: Window,
@@ -293,6 +304,7 @@ pub fn parse_with_limits<R: BufRead>(
         pending_seq: 0,
         stats: ParseStats::default(),
         saw_tv: false,
+        tv_closed: false,
         sink,
     };
     let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
@@ -308,13 +320,18 @@ pub fn parse_with_limits<R: BufRead>(
                     }
                 }
                 let pos = pos_base + xml.buffer_position();
-                if p.stats.channels + p.stats.programmes + p.stats.skipped_window > 0 {
-                    let msg = format!("XMLTV ended early at byte {pos}: {err}");
-                    tracing::warn!(%msg, "keeping data parsed before the error");
-                    p.stats.truncated = Some(msg);
+                // Inside `<tv>` the read error (often a cut gzip stream) is a
+                // cut-off download, even before the first programme.
+                if p.saw_tv || p.stats.channels + p.stats.programmes + p.stats.skipped_window > 0 {
+                    // Checked against `</tv>` after the loop.
+                    p.stats.truncated = Some(format!("XMLTV ended early at byte {pos}: {err}"));
                     break;
                 }
                 if let quick_xml::Error::Io(io) = &err {
+                    // A gzip stream cut before its first decoded byte.
+                    if io.kind() == std::io::ErrorKind::UnexpectedEof {
+                        return Err(CoreError::Invalid(CUT_OFF_MESSAGE.into()));
+                    }
                     return Err(CoreError::Io(std::io::Error::new(
                         io.kind(),
                         io.to_string(),
@@ -395,7 +412,21 @@ pub fn parse_with_limits<R: BufRead>(
             "XMLTV text nodes larger than {max_node} bytes were cut"
         );
     }
-    // A programme still open at EOF (truncated file) is finished with what it has.
+    // A download cut mid-file (proxy, flaky link, truncated gzip) ends before
+    // `</tv>`: storing it would replace the full guide with its first part.
+    if p.saw_tv && !p.tv_closed {
+        tracing::warn!(
+            detail = p.stats.truncated.as_deref().unwrap_or("end of input"),
+            channels = p.stats.channels,
+            programmes = p.stats.programmes,
+            "XMLTV document ended before </tv>"
+        );
+        return Err(CoreError::Invalid(CUT_OFF_MESSAGE.into()));
+    }
+    if let Some(msg) = &p.stats.truncated {
+        tracing::warn!(%msg, "keeping data parsed before the error");
+    }
+    // A programme still open at EOF (no `<tv>` root) is finished with what it has.
     if let Ctx::Programme(_) = p.ctx {
         p.on_end(b"programme")?;
     }
@@ -462,7 +493,10 @@ impl Parser<'_> {
         let name = e.local_name();
         let name = name.as_ref();
         match name {
-            b"tv" => self.saw_tv = true,
+            b"tv" => {
+                self.saw_tv = true;
+                self.tv_closed = empty;
+            }
             b"channel" => {
                 self.capture = None;
                 let id = self.attr(e, b"id", MAX_ID_BYTES);
@@ -572,6 +606,7 @@ impl Parser<'_> {
                     self.finish_programme(p)?;
                 }
             }
+            b"tv" => self.tv_closed = true,
             _ => {}
         }
         Ok(())
@@ -1166,9 +1201,69 @@ pub fn parse_xmltv_date(s: &str) -> Option<i64> {
     Some(days_from_civil(year, month, day) * DAY + hour * 3600 + minute * 60 + second - offset)
 }
 
-/// Offset in seconds east of UTC.
+/// Offset in seconds east of UTC: a numeric offset, optionally followed by a
+/// zone name (`+0100 CET`, `+0530 (IST)`; the number wins), or a common zone
+/// abbreviation alone (`EST`). Anything else is `None`, and the programme is
+/// counted in `skipped_invalid`.
 fn parse_offset(rest: &str) -> Option<i64> {
     let r = rest.trim();
+    if let Some(off) = numeric_offset(r) {
+        return Some(off);
+    }
+    if let Some((num, name)) = r.split_once(char::is_whitespace) {
+        let name = name.trim().trim_start_matches('(').trim_end_matches(')');
+        if !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphabetic()) {
+            if let Some(off) = numeric_offset(num) {
+                return Some(off);
+            }
+        }
+    }
+    zone_abbreviation(r.trim_start_matches('(').trim_end_matches(')'))
+}
+
+/// Offsets of the zone abbreviations seen in XMLTV feeds. Ambiguous names
+/// take their most common meaning in IPTV guides: CST is US Central, IST is
+/// India (+05:30), BST is British Summer Time, and AST is Atlantic Standard
+/// Time (-04:00, its standard meaning; not Arabia Standard Time, +03:00).
+fn zone_abbreviation(name: &str) -> Option<i64> {
+    const H: i64 = 3600;
+    let off = match name.to_ascii_uppercase().as_str() {
+        "UTC" | "GMT" | "Z" | "UT" | "WET" => 0,
+        "BST" | "CET" | "WEST" => H,
+        "CEST" | "EET" | "SAST" | "CAT" => 2 * H,
+        "EEST" | "MSK" | "EAT" => 3 * H,
+        "GST" => 4 * H,
+        "PKT" => 5 * H,
+        "IST" => 5 * H + 1800,
+        "WIB" | "ICT" => 7 * H,
+        "HKT" | "SGT" | "PHT" | "AWST" => 8 * H,
+        "JST" | "KST" => 9 * H,
+        "ACST" => 9 * H + 1800,
+        "AEST" => 10 * H,
+        "AEDT" => 11 * H,
+        "NZST" => 12 * H,
+        "NZDT" => 13 * H,
+        "EST" => -5 * H,
+        // AST: Atlantic, see above.
+        "EDT" | "AST" => -4 * H,
+        "BRT" | "ART" => -3 * H,
+        "AKST" => -9 * H,
+        "HST" => -10 * H,
+        "CST" => -6 * H,
+        "CDT" => -5 * H,
+        "MST" => -7 * H,
+        "MDT" => -6 * H,
+        "PST" => -8 * H,
+        "PDT" => -7 * H,
+        _ => return None,
+    };
+    Some(off)
+}
+
+/// A numeric offset (`±HHMM`, `±HH:MM`, `±HH`, one-digit hours, an optional
+/// `UTC`/`GMT` prefix), `Z`, `UTC`, `GMT` or nothing.
+fn numeric_offset(r: &str) -> Option<i64> {
+    let r = r.trim();
     if r.is_empty()
         || r.eq_ignore_ascii_case("z")
         || r.eq_ignore_ascii_case("utc")
@@ -1176,22 +1271,30 @@ fn parse_offset(rest: &str) -> Option<i64> {
     {
         return Some(0);
     }
-    let r = r
-        .strip_prefix("UTC")
-        .or_else(|| r.strip_prefix("GMT"))
-        .unwrap_or(r)
-        .trim_start();
+    // `utc+0100` / `Gmt-5` appear in the wild; the prefix is ASCII, so
+    // slicing three bytes off is safe once it matched.
+    let r = match r.get(..3) {
+        Some(p) if p.eq_ignore_ascii_case("utc") || p.eq_ignore_ascii_case("gmt") => &r[3..],
+        _ => r,
+    }
+    .trim_start();
     let b = r.as_bytes();
     let sign = match b.first()? {
         b'+' => 1,
         b'-' => -1,
         _ => return None,
     };
-    let hh = two(b, 1)?;
-    let mm = match b.len() {
-        3 => 0,
-        5 => two(b, 3)?,
-        6 if b[3] == b':' => two(b, 4)?,
+    let one = |i: usize| -> Option<i64> {
+        let c = *b.get(i)?;
+        c.is_ascii_digit().then(|| i64::from(c - b'0'))
+    };
+    // `±HH`, `±HHMM`, `±HH:MM`, and the one-digit-hour forms `±H`, `±H:MM`.
+    let (hh, mm) = match b.len() {
+        2 => (one(1)?, 0),
+        3 => (two(b, 1)?, 0),
+        5 if b[2] == b':' => (one(1)?, two(b, 3)?),
+        5 => (two(b, 1)?, two(b, 3)?),
+        6 if b[3] == b':' => (two(b, 1)?, two(b, 4)?),
         _ => return None,
     };
     if hh > 18 || mm > 59 {
@@ -1264,6 +1367,133 @@ mod tests {
         assert_eq!(parse_xmltv_date(""), None);
         assert_eq!(parse_xmltv_date("tomorrow"), None);
         assert_eq!(parse_xmltv_date("20240101120000 +01x0"), None);
+    }
+
+    /// Review R1-9: a zone name after the offset, or a zone abbreviation
+    /// alone, made the whole programme invalid.
+    #[test]
+    fn zone_names_are_accepted() {
+        let noon_utc = parse_xmltv_date("20261012120000 +0000").unwrap();
+        let h = 3600;
+        for (s, off) in [
+            ("20261012120000 EST", -5 * h),
+            ("20261012120000 edt", -4 * h),
+            ("20261012120000 PST", -8 * h),
+            ("20261012120000 CEST", 2 * h),
+            ("20261012120000 BST", h),
+            ("20261012120000 IST", 5 * h + 1800),
+            ("20261012120000 +0100 CET", h),
+            ("20261012120000 +0530 IST", 5 * h + 1800),
+            ("20261012120000 +0530 (IST)", 5 * h + 1800),
+            // The number wins over a contradicting name.
+            ("20261012120000 -0300 CET", -3 * h),
+            ("20261012120000 +01:00 Europe", h),
+            // Review R2-5: Asia-Pacific names.
+            ("20261012120000 JST", 9 * h),
+            ("20261012120000 KST", 9 * h),
+            ("20261012120000 AEST", 10 * h),
+            ("20261012120000 AEDT", 11 * h),
+            ("20261012120000 ACST", 9 * h + 1800),
+            ("20261012120000 AWST", 8 * h),
+            ("20261012120000 HKT", 8 * h),
+            ("20261012120000 SGT", 8 * h),
+            ("20261012120000 PHT", 8 * h),
+            ("20261012120000 WIB", 7 * h),
+            ("20261012120000 ICT", 7 * h),
+            ("20261012120000 NZST", 12 * h),
+            ("20261012120000 NZDT", 13 * h),
+            // Review R3-3: Gulf, Africa, Pakistan, South America, US Pacific.
+            ("20261012120000 GST", 4 * h),
+            ("20261012120000 SAST", 2 * h),
+            ("20261012120000 CAT", 2 * h),
+            ("20261012120000 EAT", 3 * h),
+            ("20261012120000 PKT", 5 * h),
+            ("20261012120000 BRT", -3 * h),
+            ("20261012120000 ART", -3 * h),
+            ("20261012120000 HST", -10 * h),
+            ("20261012120000 AKST", -9 * h),
+            // AST stays Atlantic.
+            ("20261012120000 AST", -4 * h),
+        ] {
+            assert_eq!(parse_xmltv_date(s), Some(noon_utc - off), "{s}");
+        }
+        // Still rejected: unknown names alone, a name with junk, a bad number.
+        for s in [
+            "20261012120000 XYZ",
+            "20261012120000 +0100 C3T",
+            "20261012120000 +01x0 CET",
+            "20261012120000 CET +0100 extra",
+        ] {
+            assert_eq!(parse_xmltv_date(s), None, "{s}");
+        }
+    }
+
+    /// B8-parsers: offset spellings seen in real feeds, half-hour zones,
+    /// a DST switch and a programme crossing midnight.
+    #[test]
+    fn offsets_dst_and_midnight() {
+        let utc = |s| parse_xmltv_date(s).unwrap();
+        let noon = 1_704_110_400; // 2024-01-01 12:00 UTC
+        assert_eq!(utc("20240101173000 +0530"), noon);
+        assert_eq!(utc("20240101173000 +05:30"), noon);
+        assert_eq!(utc("20240101173000 utc+0530"), noon);
+        assert_eq!(utc("20240101173000 UTC +05:30"), noon);
+        assert_eq!(utc("20240101170000 GMT+5"), noon);
+        assert_eq!(utc("20240101170000 gmt+5:00"), noon);
+        assert_eq!(utc("20240101070000 -5"), noon);
+        assert_eq!(utc("20240101034500 -0815"), noon);
+        assert_eq!(utc("20240101120000Z"), noon);
+        // Missing offset is UTC (XMLTV's default).
+        assert_eq!(utc("20240101120000"), noon);
+        // Out-of-range or malformed offsets reject the whole date.
+        for bad in [
+            "+1900", "+05:60", "+5:6", "+", "+123456", "UTCé", "+0é", "+٠٥",
+        ] {
+            assert_eq!(
+                parse_xmltv_date(&format!("20240101120000 {bad}")),
+                None,
+                "{bad}"
+            );
+        }
+        // Europe/Paris DST start 2024-03-31: 01:59 +0100 then 03:00 +0200 is
+        // one minute later.
+        assert_eq!(
+            utc("20240331030000 +0200") - utc("20240331015900 +0100"),
+            60
+        );
+        // Midnight crossing with an offset: 23:30 to 00:30 next day.
+        let xml = r#"<tv>
+<programme start="20241231233000 +0530" stop="20250101003000 +0530" channel="c"><title>NYE</title></programme>
+<programme start="20241231233000 +0530" stop="20250101003000 +0530" channel="c"><title>NYE</title></programme>
+</tv>"#;
+        let (items, _) = collect(xml);
+        let progs: Vec<_> = items
+            .iter()
+            .filter_map(|i| match i {
+                XmltvItem::Programme(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        // The parser keeps duplicates; the store's unique index drops them.
+        assert_eq!(progs.len(), 2);
+        assert_eq!(progs[0].stop - progs[0].start, 3600);
+        assert_eq!(progs[0].start, utc("20241231180000 +0000"));
+    }
+
+    /// Extreme but valid dates stay in range for the stop inference math.
+    #[test]
+    fn extreme_dates_do_not_overflow() {
+        let xml = r#"<tv>
+<programme start="99991231235959 -1800" channel="a"><title>Max</title></programme>
+<programme start="00000101000000 +1800" channel="a"><title>Min</title></programme>
+<programme start="+262143-12-31T23:59:59Z" channel="b"><title>Chrono max</title></programme>
+<programme start="-262143-01-01T00:00:00Z" channel="b"><title>Chrono min</title></programme>
+</tv>"#;
+        let (_, stats) = collect(xml);
+        assert!(stats.programmes + stats.skipped_invalid >= 2);
+        // B8-parsers: `now - KEEP_PAST_SECS` overflowed for extreme clocks.
+        assert_eq!(Window::around(i64::MIN).min_stop, i64::MIN);
+        assert_eq!(Window::around(i64::MAX).max_start, i64::MAX);
     }
 
     #[test]

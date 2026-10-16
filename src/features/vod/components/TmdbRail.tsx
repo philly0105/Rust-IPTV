@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import type { TmdbBrief } from '@/api/types';
 
+import { useSearchPrefetchIntent } from '../hooks/prefetch';
 import { PosterCard } from './PosterCard';
 import { PosterRail } from './PosterRail';
 
@@ -31,9 +32,24 @@ export function TmdbRail({
       items={items}
       loading={loading}
       empty={empty}
-      render={(b, i) => (
-        <PosterCard index={i} title={b.title} href={searchHref(b.title, sourceId)} posterUrl={b.posterUrl} year={b.year} rating={b.rating} />
-      )}
+      render={(b, i, rail) => <TmdbCard brief={b} index={i} sourceId={sourceId} tabIndex={rail.tabIndex} />}
+    />
+  );
+}
+
+/** One TMDB title; resting on it warms the search page it links to (C4). */
+function TmdbCard({ brief, index, sourceId, tabIndex }: { brief: TmdbBrief; index: number; sourceId: string | undefined; tabIndex: number }) {
+  const intent = useSearchPrefetchIntent({ title: brief.title, sourceId });
+  return (
+    <PosterCard
+      index={index}
+      tabIndex={tabIndex}
+      title={brief.title}
+      href={searchHref(brief.title, sourceId)}
+      posterUrl={brief.posterUrl}
+      year={brief.year}
+      rating={brief.rating}
+      intent={intent}
     />
   );
 }

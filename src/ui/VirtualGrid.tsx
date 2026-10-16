@@ -1,7 +1,8 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { scalePx, useDensity, useUiScale } from './scale';
 import type { VirtualItemState } from './VirtualList';
 
 export type GridAspect = number | 'poster' | 'wide' | 'square';
@@ -11,6 +12,15 @@ export function aspectRatio(aspect: GridAspect): number {
   return aspect === 'poster' ? 2 / 3 : aspect === 'wide' ? 16 / 9 : 1;
 }
 
+/** True when `el` shows keyboard focus; engines without `:focus-visible` count every focus as keyboard focus. */
+function focusVisible(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
 /** Column count and cell width for a container width. */
 export function gridLayout(width: number, minColumnWidth: number, gap: number): { columns: number; cellWidth: number } {
   const columns = Math.max(1, Math.floor((width + gap) / (minColumnWidth + gap)));
@@ -18,9 +28,51 @@ export function gridLayout(width: number, minColumnWidth: number, gap: number): 
   return { columns, cellWidth: Math.max(0, cellWidth) };
 }
 
+interface GridSlotProps {
+  item: unknown;
+  index: number;
+  id: string;
+  active: boolean;
+  selected: boolean;
+  setSize: number;
+  render: (item: unknown, index: number, state: VirtualItemState) => ReactNode;
+  onPick: (index: number) => void;
+  onPress: (index: number) => void;
+}
+
+/**
+ * One cell. Memoised with primitive props and a stable click handler, so a scroll that only
+ * moves the window re-renders the rows that enter it, not every cell already on screen.
+ */
+const GridSlot = memo(function GridSlot({ item, index, id, active, selected, setSize, render, onPick, onPress }: GridSlotProps) {
+  return (
+    <div
+      id={id}
+      role="option"
+      aria-selected={active || selected}
+      aria-posinset={index + 1}
+      aria-setsize={setSize}
+      data-index={index}
+      data-active={active || undefined}
+      className="min-w-0"
+      // The cursor follows a press (any button, before the grid takes focus) and a context menu,
+      // so the menu and the keyboard shortcuts act on the title under the pointer (L3-visual-1).
+      onPointerDown={() => onPress(index)}
+      onContextMenu={() => onPress(index)}
+      onClick={() => onPick(index)}
+    >
+      {render(item, index, { active, selected })}
+    </div>
+  );
+});
+
 export interface VirtualGridProps<T> {
   items: readonly T[];
-  /** Minimum cell width in px; columns are derived from the container width. */
+  /**
+   * Minimum cell width in px; columns are derived from the container width.
+   * Like `gap` and `captionHeight`, given at 100 % UI scale and comfortable
+   * density: the grid applies the active scale (and density, for width and gap).
+   */
   minColumnWidth: number;
   /** Artwork aspect (width / height) or a named aspect. */
   aspect: GridAspect;
@@ -40,6 +92,17 @@ export interface VirtualGridProps<T> {
   footer?: ReactNode;
   initialRect?: { width: number; height: number };
   testId?: string;
+  /**
+   * Keyboard cursor on first mount (e.g. the title that was open before going
+   * back). Read once; does not scroll (restore the scroll offset separately).
+   */
+  initialActiveIndex?: number;
+  /**
+   * For a grid that stays mounted while its items are replaced (a new sort or filter): when this
+   * changes, the keyboard cursor goes back to the first title if the grid has keyboard focus, and
+   * to none otherwise, so it never points at whatever title now holds the old index.
+   */
+  resetKey?: string | number;
 }
 
 /**
@@ -49,13 +112,13 @@ export interface VirtualGridProps<T> {
  */
 export function VirtualGrid<T>({
   items,
-  minColumnWidth,
+  minColumnWidth: baseMinColumnWidth,
   aspect,
   render,
   onEndReached,
   endThresholdRows = 2,
-  captionHeight = 52,
-  gap = 16,
+  captionHeight: baseCaptionHeight = 52,
+  gap: baseGap = 16,
   overscan = 3,
   className,
   onSelect,
@@ -65,11 +128,21 @@ export function VirtualGrid<T>({
   footer,
   initialRect = { width: 960, height: 720 },
   testId,
+  initialActiveIndex,
+  resetKey,
 }: VirtualGridProps<T>) {
+  const uiScale = useUiScale();
+  const density = useDensity();
+  const minColumnWidth = scalePx(baseMinColumnWidth, uiScale, density, true);
+  const gap = scalePx(baseGap, uiScale, density, true);
+  // The caption holds text, which density does not shrink.
+  const captionHeight = scalePx(baseCaptionHeight, uiScale, density);
   const parentRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const [width, setWidth] = useState(initialRect.width);
-  const [active, setActive] = useState(-1);
+  const [active, setActive] = useState(() =>
+    initialActiveIndex !== undefined && initialActiveIndex >= 0 && initialActiveIndex < items.length ? initialActiveIndex : -1,
+  );
 
   useLayoutEffect(() => {
     const el = parentRef.current;
@@ -95,6 +168,9 @@ export function VirtualGrid<T>({
     estimateSize: () => rowHeight + gap,
     overscan,
     initialRect,
+    // A scroll event renders in the next frame with the others, not synchronously inside the
+    // event (L2-vod-1: flushSync per event made a fast scroll a string of 50-100 ms tasks).
+    useFlushSync: false,
   });
 
   useEffect(() => {
@@ -116,6 +192,16 @@ export function VirtualGrid<T>({
   useEffect(() => {
     if (active >= items.length) setActive(items.length - 1);
   }, [items.length, active]);
+
+  // Before paint, so the ring never shows on the old index for a frame (L3-ui-data-x1).
+  const shownResetKey = useRef(resetKey);
+  useLayoutEffect(() => {
+    if (shownResetKey.current === resetKey) return;
+    shownResetKey.current = resetKey;
+    const el = parentRef.current;
+    const keyboard = !!el && document.activeElement === el && focusVisible(el);
+    setActive(keyboard && items.length > 0 ? 0 : -1);
+  }, [resetKey]);
 
   const moveTo = (i: number) => {
     if (items.length === 0) return;
@@ -166,6 +252,16 @@ export function VirtualGrid<T>({
   };
 
   const cellId = (i: number) => `${baseId}-cell-${i}`;
+  // The latest items and onSelect for the cells' shared, stable click handler.
+  const latest = useRef({ items, onSelect });
+  latest.current = { items, onSelect };
+  const onPick = useCallback((index: number) => {
+    const { items: list, onSelect: select } = latest.current;
+    setActive(index);
+    if (index < list.length) select?.(list[index]!, index);
+  }, []);
+  const onPress = useCallback((index: number) => setActive(index), []);
+  const renderCell = render as GridSlotProps['render'];
 
   return (
     <div
@@ -177,7 +273,10 @@ export function VirtualGrid<T>({
       aria-activedescendant={active >= 0 && active < items.length ? cellId(active) : undefined}
       onKeyDown={onKeyDown}
       onFocus={(e) => {
-        if (e.target === e.currentTarget && active < 0 && items.length > 0) setActive(0);
+        // Keyboard focus (Tab, or a key that moved focus here) starts the cursor on the first
+        // title. A pointer press puts it on the pressed title instead (GridSlot), so a press
+        // between cards or a click never paints the ring on card 0.
+        if (e.target === e.currentTarget && active < 0 && items.length > 0 && focusVisible(e.currentTarget)) setActive(0);
       }}
       data-testid={testId}
       data-columns={columns}
@@ -205,25 +304,19 @@ export function VirtualGrid<T>({
             >
               {cells.map((item, j) => {
                 const index = start + j;
-                const state = { active: index === active, selected: index === selectedIndex };
                 return (
-                  <div
+                  <GridSlot
                     key={getKey ? getKey(item, index) : index}
+                    item={item}
+                    index={index}
                     id={cellId(index)}
-                    role="option"
-                    aria-selected={state.active || state.selected}
-                    aria-posinset={index + 1}
-                    aria-setsize={items.length}
-                    data-index={index}
-                    data-active={state.active || undefined}
-                    className="min-w-0"
-                    onClick={() => {
-                      setActive(index);
-                      onSelect?.(item, index);
-                    }}
-                  >
-                    {render(item, index, state)}
-                  </div>
+                    active={index === active}
+                    selected={index === selectedIndex}
+                    setSize={items.length}
+                    render={renderCell}
+                    onPick={onPick}
+                    onPress={onPress}
+                  />
                 );
               })}
             </div>

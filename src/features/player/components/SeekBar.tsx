@@ -2,7 +2,7 @@ import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } 
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '../cn';
-import { formatTime } from '../format';
+import { formatTime, positionReadout, SEEK_STEP, SEEK_STEP_LARGE } from '../format';
 import type { TimeRange } from '../media';
 
 export interface SeekBarProps {
@@ -13,15 +13,26 @@ export interface SeekBarProps {
   buffered: TimeRange[];
   /** Live streams mark the live edge at `max`. */
   live?: boolean;
+  /** Seconds behind the live edge that still read as "Live" (see `LIVE_EDGE_SLACK`). */
+  edgeSlack?: number;
   onSeek(seconds: number): void;
   className?: string;
+}
+
+/** Half the width of the widest preview label ("1:02:03"), in px. */
+const TIP_HALF = 28;
+
+/** Centre of the preview label: under the pointer, but never past either end of the bar. */
+export function clampTip(x: number, width: number): number {
+  if (width <= TIP_HALF * 2) return width / 2;
+  return Math.min(width - TIP_HALF, Math.max(TIP_HALF, x));
 }
 
 /**
  * The tuner dial: a thin track with buffered segments, an amber played fill and a
  * needle thumb. Scrubbing previews locally and commits one seek on release.
  */
-export function SeekBar({ min, max, value, buffered, live, onSeek, className }: SeekBarProps) {
+export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, className }: SeekBarProps) {
   const { t } = useTranslation('player');
   const trackRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<number | null>(null);
@@ -43,7 +54,10 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setPreview(timeAt(e.clientX).time);
+    const at = timeAt(e.clientX);
+    // Touch has no hover: the press itself shows the preview time.
+    setHover(at);
+    setPreview(at.time);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>): void => {
     const at = timeAt(e.clientX);
@@ -55,11 +69,12 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
     e.currentTarget.releasePointerCapture(e.pointerId);
     const target = timeAt(e.clientX).time;
     setPreview(null);
+    if (e.pointerType === 'touch') setHover(null);
     if (Number.isFinite(target)) onSeek(target);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    const step = e.shiftKey ? 30 : 5;
+    const step = e.shiftKey ? SEEK_STEP_LARGE : SEEK_STEP;
     let next: number | null = null;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = value - step;
     else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = value + step;
@@ -73,12 +88,7 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
     onSeek(Math.min(max, Math.max(min, next)));
   };
 
-  const behind = live ? Math.max(0, max - shown) : 0;
-  const valueText = live
-    ? behind < 3
-      ? t('live')
-      : t('behindLive', { time: formatTime(behind) })
-    : `${formatTime(shown)} / ${formatTime(max)}`;
+  const valueText = positionReadout(t, { position: shown, duration: max, liveEnd: live ? max : undefined, edgeSlack });
 
   return (
     <div
@@ -99,6 +109,14 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
       onKeyDown={onKeyDown}
     >
       <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/20 motion-safe:transition-[height] group-hover/seek:h-1.5 group-focus-visible/seek:h-1.5">
+        {live && buffered.length === 0 && (
+          // Live rewind without buffered ranges (mpv's cache): everything up to the edge is cached.
+          <div
+            data-testid="rewind-cached"
+            className="absolute inset-y-0 bg-white/30"
+            style={{ left: `${pct(shown)}%`, width: `${Math.max(0, 100 - pct(shown))}%` }}
+          />
+        )}
         {buffered.map((r) => (
           <div
             key={`${r.start}-${r.end}`}
@@ -115,16 +133,29 @@ export function SeekBar({ min, max, value, buffered, live, onSeek, className }: 
         style={{ left: `${pct(shown)}%`, opacity: preview !== null ? 1 : undefined }}
       />
       {live && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live"
-        />
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live"
+          />
+          {/* How far back the rewind window reaches, at its start (shown with the needle). */}
+          <div
+            aria-hidden
+            data-testid="rewind-depth"
+            className="player-glass-strong player-on-glass-muted pointer-events-none absolute bottom-6 left-0 rounded-sm border px-1.5 py-0.5 font-display text-xs tabular-nums opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
+            style={{ opacity: hover && hover.x < 64 ? 0 : undefined }}
+          >
+            -{formatTime(span)}
+          </div>
+        </>
       )}
       {hover && (
         <div
           aria-hidden
-          className="pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm bg-black/85 px-1.5 py-0.5 font-display text-xs text-white tabular-nums"
-          style={{ left: hover.x }}
+          data-testid="seek-preview"
+          className="player-glass-strong pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm border px-1.5 py-0.5 font-display text-xs tabular-nums"
+          // Kept inside the bar so the ends never clip at the player's edge.
+          style={{ left: clampTip(hover.x, trackRef.current?.getBoundingClientRect().width ?? 0) }}
         >
           {live ? `-${formatTime(Math.max(0, max - hover.time))}` : formatTime(hover.time)}
         </div>

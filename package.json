@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "size:check": "node tools/check-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc-rs --noEmit -p tsconfig.json",
     "typecheck:tsc": "tsc --noEmit -p tsconfig.json",
@@ -24,6 +25,7 @@
     "tauri:build:mpv": "tauri build --config crates/iptv-tauri/tauri.mpv.conf.json",
     "server": "cargo run -p iptv-server -- --port 7180 --data-dir ./.data --static ./dist",
     "mock": "cargo run -p iptv-mock -- --port 7290",
+    "clean:rust": "cargo clean --profile dev",
     "check": "pnpm typecheck && pnpm test && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all -- --check"
   },
   "dependencies": {

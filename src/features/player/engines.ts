@@ -5,7 +5,9 @@
  * hls.js, shaka and mpegts.js are code-split; a direct mp4 never loads any of them.
  */
 
-import type { PlayerSource } from '@/api/types';
+import type { MpvStats, PlayerSource } from '@/api/types';
+
+import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
 
 export interface TrackOption {
   id: string;
@@ -48,6 +50,8 @@ export interface Engine {
    * pipeline restarts the element clock at 0, the shown position must not jump back.
    */
   timeOffset?(): number;
+  /** What the library knows about the stream now (stream info overlay); the element adds the rest. */
+  stats?(): Partial<MpvStats>;
   destroy(): void;
 }
 
@@ -238,6 +242,16 @@ export function withReason(fallback: string, reason: string | null, status?: num
  * Never contacts anything but our own server; null on 2xx, network failure or timeout.
  */
 export async function fetchFailureReason(url: string): Promise<{ status: number; reason: string } | null> {
+  const r = await fetchFailureStatus(url);
+  return r?.reason ? { status: r.status, reason: r.reason } : null;
+}
+
+/**
+ * `fetchFailureReason` that also answers without a reason: the status of a non-2xx answer from
+ * our own server, and its reason when the body has one. Null on 2xx, failure, timeout, or any
+ * URL that is not our own server's.
+ */
+export async function fetchFailureStatus(url: string): Promise<{ status: number; reason: string | null } | null> {
   if (!isOwnServerUrl(url)) return null;
   try {
     const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(5000) : undefined;
@@ -246,8 +260,7 @@ export async function fetchFailureReason(url: string): Promise<{ status: number;
       void res.body?.cancel().catch(() => undefined);
       return null;
     }
-    const reason = reasonFromBody(await res.text());
-    return reason ? { status: res.status, reason } : null;
+    return { status: res.status, reason: reasonFromBody(await res.text()) };
   } catch {
     return null;
   }
@@ -260,9 +273,38 @@ export async function fetchFailureReason(url: string): Promise<{ status: number;
 /** Which engine last attached to an element; a stale native engine must not reset it on destroy. */
 const nativeOwner = new WeakMap<HTMLMediaElement, object>();
 
+/**
+ * The CORS mode the element loads `url` in. Without one, a frame from another origin taints a
+ * canvas and a screenshot of it is refused (C6), so the app's own cross-origin routes, which
+ * answer with CORS for the app's window, load as `anonymous`:
+ * - Tauri's asset protocol (`http://asset.localhost/...`, `asset://localhost/...`): downloads
+ *   and recordings on the desktop;
+ * - the desktop loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`).
+ *
+ * Anything else gets null. A third-party server without CORS refuses a CORS request outright,
+ * so a direct stream keeps the plain load: it plays, and only a screenshot of it is refused.
+ * Same-origin URLs (server mode's `/api/proxy` and `/api/files`) are readable either way.
+ */
+export function mediaCrossOrigin(url: string): 'anonymous' | null {
+  let u: URL;
+  try {
+    u = new URL(url, window.location.href);
+  } catch {
+    return null;
+  }
+  if (u.origin === window.location.origin) return null;
+  if (u.protocol === 'asset:' || u.hostname === 'asset.localhost') return 'anonymous';
+  if (u.hostname === '127.0.0.1' && /^\/[^/]+\/api\/proxy$/.test(u.pathname)) return 'anonymous';
+  return null;
+}
+
 function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): Engine {
   const owner = {};
   nativeOwner.set(el, owner);
+  // Before `src`: the mode is fixed when the load starts.
+  const cors = mediaCrossOrigin(url);
+  if (cors) el.crossOrigin = cors;
+  else el.removeAttribute('crossorigin');
   el.src = url;
   const emitTracks = (): void => {
     const audio: TrackOption[] = [];
@@ -276,8 +318,10 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
     const text: TrackOption[] = [];
     for (let i = 0; i < el.textTracks.length; i++) {
       const t = el.textTracks[i];
-      if (t && (t.kind === 'subtitles' || t.kind === 'captions')) {
-        text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: t.mode === 'showing' });
+      // Loaded subtitle files are listed by the player as `ext:<n>` (subtitles/tracks.ts).
+      if (t && !isExternalTrack(t) && (t.kind === 'subtitles' || t.kind === 'captions')) {
+        // A track the player draws itself is `hidden` while on screen (subtitles/inline.ts).
+        text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: isShownTrack(t) });
       }
     }
     cb.onTracks({ qualities: [], qualityAuto: true, audio, text });
@@ -299,7 +343,13 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
     setText(id) {
       for (let i = 0; i < el.textTracks.length; i++) {
         const t = el.textTracks[i];
-        if (t) t.mode = String(i) === id ? 'showing' : 'disabled';
+        if (!t) continue;
+        if (String(i) === id) {
+          t.mode = 'showing';
+        } else {
+          releaseTrack(t);
+          t.mode = 'disabled';
+        }
       }
       emitTracks();
     },
@@ -315,6 +365,7 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
       if (nativeOwner.get(el) !== owner) return;
       nativeOwner.delete(el);
       el.removeAttribute('src');
+      el.removeAttribute('crossorigin');
       el.load();
     },
   };
@@ -367,6 +418,8 @@ async function hlsEngine(
   });
 
   let manualLevel = -1;
+  // Subtitles on: hls.subtitleDisplay turns false when the overlay hides the track it draws.
+  let textOn = wantCaptions;
   let mediaRecoveries = 0;
   let destroyed = false;
   const emit = (): void => {
@@ -387,7 +440,7 @@ async function hlsEngine(
     const text: TrackOption[] = hls.subtitleTracks.map((t, i) => ({
       id: String(i),
       label: langLabel(t.lang, t.name, `Subtitle ${i + 1}`),
-      selected: hls.subtitleDisplay && hls.subtitleTrack === i,
+      selected: textOn && hls.subtitleTrack === i,
     }));
     cb.onTracks({ qualities, qualityAuto: manualLevel < 0, audio, text });
   };
@@ -397,7 +450,12 @@ async function hlsEngine(
   hls.on(Hls.Events.LEVEL_SWITCHED, emit);
   hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, emit);
   hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, emit);
-  hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, emit);
+  hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+    // A new track group starts hidden once the overlay has hidden the last one (subtitleDisplay
+    // false): turn subtitles back on so the overlay takes the new track over.
+    if (textOn && !hls.subtitleDisplay) hls.subtitleDisplay = true;
+    emit();
+  });
   hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, emit);
   hls.on(Hls.Events.ERROR, (_evt, data) => {
     if (!data.fatal) return;
@@ -443,6 +501,7 @@ async function hlsEngine(
       hls.audioTrack = Number(id);
     },
     setText(id) {
+      textOn = id !== null;
       if (id === null) {
         hls.subtitleDisplay = false;
         hls.subtitleTrack = -1;
@@ -456,6 +515,21 @@ async function hlsEngine(
       mediaRecoveries = 0;
       hls.startLoad();
       hls.recoverMediaError();
+    },
+    stats() {
+      const level = hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel];
+      const out: Partial<MpvStats> = {};
+      if (level?.videoCodec) out.videoCodec = level.videoCodec;
+      if (level?.audioCodec) out.audioCodec = level.audioCodec;
+      if (level?.width && level.height) {
+        out.width = level.width;
+        out.height = level.height;
+      }
+      if (level?.frameRate) out.fps = level.frameRate;
+      if (level?.bitrate) out.videoBitrate = level.bitrate;
+      const channels = Number.parseInt(hls.audioTracks[hls.audioTrack]?.channels ?? '', 10);
+      if (channels > 0) out.audioChannels = channels;
+      return out;
     },
     destroy() {
       destroyed = true;
@@ -504,8 +578,14 @@ async function shakaEngine(
   const player = new shaka.Player();
   let destroyed = false;
   let manual = false;
+  // Subtitles on. The overlay hides the track it draws, which shaka reads as "text not visible";
+  // alwaysStreamText keeps the cues coming anyway (subtitles/inline.ts).
+  let textOn = false;
   player.configure({
-    streaming: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
+    streaming: {
+      alwaysStreamText: true,
+      retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 },
+    },
     manifest: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
   });
   const route = proxyRoute(url);
@@ -542,7 +622,7 @@ async function shakaEngine(
             selected: active?.language === l.language && (!l.role || active?.roles.includes(l.role)),
           }))
         : [];
-    const visible = player.isTextTrackVisible();
+    const visible = textOn;
     const text: TrackOption[] = player.getTextTracks().map((t) => ({
       id: String(t.id),
       label: langLabel(t.language, t.label ?? undefined, t.language),
@@ -567,7 +647,10 @@ async function shakaEngine(
   await player.attach(el as HTMLMediaElement);
   try {
     await player.load(url, !source.isLive && source.resumeSeconds ? source.resumeSeconds : null);
-    if (wantCaptions) await player.setTextTrackVisibility(true);
+    if (wantCaptions) {
+      textOn = true;
+      await player.setTextTrackVisibility(true);
+    }
     emit();
   } catch (err) {
     if (!destroyed) {
@@ -598,16 +681,34 @@ async function shakaEngine(
       player.selectAudioLanguage(lang, role || undefined);
     },
     setText(id) {
+      textOn = id !== null;
       if (id === null) {
         void player.setTextTrackVisibility(false);
+        // Off only hides shaka's track, and a hidden track is the one the overlay draws.
+        hideDrawnTracks(el);
       } else {
         const t = player.getTextTracks().find((x) => String(x.id) === id);
         if (t) player.selectTextTrack(t);
         void player.setTextTrackVisibility(true);
       }
+      emit();
     },
     recover() {
       void player.retryStreaming();
+    },
+    stats() {
+      const active = player.getVariantTracks().find((v) => v.active);
+      const st = player.getStats();
+      const out: Partial<MpvStats> = {};
+      if (active?.videoCodec) out.videoCodec = active.videoCodec;
+      if (active?.audioCodec) out.audioCodec = active.audioCodec;
+      if (active?.frameRate) out.fps = active.frameRate;
+      if (active?.channelsCount) out.audioChannels = active.channelsCount;
+      if (active?.videoBandwidth) out.videoBitrate = active.videoBandwidth;
+      else if (st.streamBandwidth > 0) out.videoBitrate = st.streamBandwidth;
+      if (active?.audioBandwidth) out.audioBitrate = active.audioBandwidth;
+      if (Number.isFinite(st.droppedFrames) && st.droppedFrames >= 0) out.droppedFrames = st.droppedFrames;
+      return out;
     },
     destroy() {
       destroyed = true;
@@ -693,6 +794,8 @@ async function mpegtsEngine(
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stableTimer: ReturnType<typeof setTimeout> | null = null;
   let loadComplete = false;
+  /** The stream produced media once: only then is a dropped connection restarted here. */
+  let hadMedia = false;
   /** Live only: element time lost to reconnects, so the displayed position keeps running. */
   let offset = 0;
   /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
@@ -745,16 +848,19 @@ async function mpegtsEngine(
       const http = info?.code && info.code > 0 ? ` (HTTP ${info.code})` : '';
       const message = `${detail || type}${http}`;
       if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
-        // A 4xx will not fix itself; anything else gets bounded restarts.
-        if (info?.code && info.code >= 400 && info.code < 500) {
+        // An HTTP answer (404, 503, ...) is the provider's verdict: it goes up at once, and the
+        // player's reconnect decides whether a retry is worth it (`reconnect.ts`, one layer
+        // owning retries). Restarts here are for a stream that played and then dropped.
+        if (info?.code && info.code > 0) {
           const status = info.code;
-          // mpegts.js drops the body; our own server (proxy guard, relayed 4xx) is asked once for the reason.
+          // mpegts.js drops the body; our own server (proxy guard, relayed status) is asked once for the reason.
           if (isOwnServerUrl(absolute)) {
             void fetchFailureReason(absolute).then((r) => {
               if (player === p) fail({ message: withReason(message, r?.reason ?? null, r?.status ?? status), fatal: true, kind: 'network' });
             });
           } else fail({ message, fatal: true, kind: 'network' });
-        } else restart({ message, fatal: true, kind: 'network' });
+        } else if (hadMedia) restart({ message, fatal: true, kind: 'network' });
+        else fail({ message, fatal: true, kind: 'network' });
         return;
       }
       if (type === mpegts.ErrorTypes.MEDIA_ERROR) {
@@ -811,9 +917,13 @@ async function mpegtsEngine(
     anchor = null;
   };
   // Listener order does not matter: until rebased, `timeOffset()` holds the display at the anchor.
+  const onData = (): void => {
+    hadMedia = true;
+  };
   el.addEventListener('timeupdate', rebase);
   el.addEventListener('loadedmetadata', rebase);
   el.addEventListener('timeupdate', markStable);
+  el.addEventListener('loadeddata', onData);
   start();
 
   return {
@@ -826,6 +936,29 @@ async function mpegtsEngine(
       if (restartTimer) clearTimeout(restartTimer);
       restartTimer = null;
       restart({ message: 'Recovery failed', fatal: true, kind: 'other' });
+    },
+    stats() {
+      const info = (player as { mediaInfo?: Record<string, unknown> } | null)?.mediaInfo;
+      const out: Partial<MpvStats> = {};
+      if (!info) return out;
+      const num = (k: string): number | undefined => {
+        const v = info[k];
+        return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+      };
+      const vCodec = info['videoCodec'];
+      if (typeof vCodec === 'string' && vCodec) out.videoCodec = vCodec;
+      const aCodec = info['audioCodec'];
+      if (typeof aCodec === 'string' && aCodec) out.audioCodec = aCodec;
+      const fps = num('fps');
+      if (fps) out.fps = fps;
+      const channels = num('audioChannelCount');
+      if (channels) out.audioChannels = channels;
+      // mpegts.js reports data rates in kbit/s.
+      const vRate = num('videoDataRate');
+      if (vRate) out.videoBitrate = vRate * 1000;
+      const aRate = num('audioDataRate');
+      if (aRate) out.audioBitrate = aRate * 1000;
+      return out;
     },
     timeOffset() {
       // While reconnecting the display holds at the anchor whatever the element reports.
@@ -840,6 +973,7 @@ async function mpegtsEngine(
       el.removeEventListener('timeupdate', markStable);
       el.removeEventListener('timeupdate', rebase);
       el.removeEventListener('loadedmetadata', rebase);
+      el.removeEventListener('loadeddata', onData);
       if (player) teardown(player);
       player = null;
       el.removeAttribute('src');

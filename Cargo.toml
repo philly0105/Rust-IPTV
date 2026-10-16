@@ -24,9 +24,11 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-updater = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-window-state = "2"
+# recording: native reminder notifications
+tauri-plugin-notification = "2"
 
 # Storage
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 
@@ -34,7 +36,8 @@ r2d2_sqlite = "0.25"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "brotli"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
-tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+# compression-*: gzip/brotli for server-mode RPC replies and the built UI.
+tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip", "compression-br"] }
 tower = { version = "0.5", features = ["util"] }
 futures = "0.3"
 bytes = "1"
@@ -51,6 +54,8 @@ flate2 = "1"
 memchr = "2"
 regex = "1"
 base64 = "0.22"
+# imagecache: downscaled poster/logo variants (JPEG and PNG only).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 hex = "0.4"
 
 # Errors / logging
@@ -73,6 +78,9 @@ parking_lot = "0.12"
 once_cell = "1"
 strsim = "0.11"
 clap = { version = "4", features = ["derive", "env"] }
+# remote: LAN remote control (interface addresses, pairing QR code)
+if-addrs = "0.15"
+qrcodegen = "1.8"
 
 # Windows (iptv-tauri, cfg windows)
 windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
@@ -84,5 +92,11 @@ opt-level = "s"
 panic = "unwind"
 strip = true
 
+# Debug builds keep line tables for our crates (readable backtraces) and no
+# debug info for dependencies. Full PDBs for every test binary filled tens of GB.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 opt-level = 1
+debug = false

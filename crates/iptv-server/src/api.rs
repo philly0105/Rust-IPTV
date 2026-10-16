@@ -65,7 +65,12 @@ pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) 
         return error_response(e);
     }
     let started = Instant::now();
-    let result = s.rpc.dispatch(s.app.clone(), &cmd, args).await;
+    let result = if cancels_on_disconnect(&cmd) {
+        // Read-only: a superseded query the UI aborted stops its SQL.
+        iptv_core::state::cancel_on_drop(s.rpc.dispatch(s.app.clone(), &cmd, args)).await
+    } else {
+        dispatch_detached(&s, cmd.clone(), args).await
+    };
     let ms = started.elapsed().as_millis() as u64;
     match result {
         Ok(v) => {
@@ -76,6 +81,54 @@ pub async fn rpc(State(s): State<Server>, Path(cmd): Path<String>, body: Bytes) 
             // The message is safe to log; args (which may hold passwords) are not.
             tracing::info!(%cmd, ms, code = ?e.code, message = %e.message, "rpc error");
             error_response(e)
+        }
+    }
+}
+
+/// Read-only queries the UI supersedes and aborts while the user scrolls or
+/// types (the guide grid above all). They run inline under
+/// [`iptv_core::state::cancel_on_drop`]: when the client goes away, axum
+/// drops the call and its SQLite statement is interrupted instead of running
+/// on for nobody (L2-perf-desktop-6). Every other command, and every write,
+/// runs detached ([`dispatch_detached`]).
+pub const CANCEL_ON_DISCONNECT: &[&str] = &[
+    "epg.grid",
+    "epg.programs",
+    "epg.search",
+    "epg.nowNext",
+    "epg.channelsSearch",
+    "catalog.search",
+    "catalog.channels",
+    "catalog.movies",
+    "catalog.series",
+    "catalog.categories",
+    "catalog.yearFacets",
+];
+
+/// True for a command in [`CANCEL_ON_DISCONNECT`].
+pub fn cancels_on_disconnect(cmd: &str) -> bool {
+    CANCEL_ON_DISCONNECT.contains(&cmd)
+}
+
+/// Runs one RPC on its own task and waits for it. Axum drops a handler's
+/// future when the client goes away (a reload, Back, a closed tab); a call
+/// awaited inline would stop at its next await point, so `sources.add` or
+/// `sources.refresh` left a source with no catalog, no `lastError` and no
+/// final progress event (L1-sources-home-3). On its own task the call
+/// finishes (and emits its events) whatever the client does, as it does on
+/// the desktop.
+async fn dispatch_detached(
+    s: &Server,
+    cmd: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let (rpc, app) = (s.rpc.clone(), s.app.clone());
+    let task = tokio::spawn(async move { rpc.dispatch(app, &cmd, args).await });
+    match task.await {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::error!(%err, "rpc task failed");
+            Err(RpcError::internal("the request failed inside the server"))
         }
     }
 }

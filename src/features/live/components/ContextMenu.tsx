@@ -1,10 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
+import { documentIsRtl } from '../lib/rtl';
+
 export interface MenuItem {
   id: string;
-  label: string;
+  label: ReactNode;
   icon?: ReactNode;
   disabled?: boolean;
+  /** Key hint shown at the inline end, e.g. `F2`. Display only (hidden from the accessible name). */
+  hint?: ReactNode;
   onSelect(): void;
 }
 
@@ -28,7 +32,9 @@ export function ContextMenu({
     if (!pos || !ref.current) return;
     restoreFocus.current = document.activeElement as HTMLElement | null;
     const r = ref.current.getBoundingClientRect();
-    const left = Math.min(pos.x, window.innerWidth - r.width - 8);
+    // In RTL the menu grows from the pointer toward the inline end (leftward), like native menus.
+    const want = documentIsRtl() ? pos.x - r.width : pos.x;
+    const left = Math.min(want, window.innerWidth - r.width - 8);
     const top = pos.y + r.height > window.innerHeight - 8 ? Math.max(8, pos.y - r.height) : pos.y;
     setPlace({ left: Math.max(8, left), top });
     ref.current.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
@@ -89,10 +95,20 @@ export function ContextMenu({
             finish();
             it.onSelect();
           }}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-start outline-none hover:bg-surface-2 focus-visible:bg-surface-2 disabled:opacity-40"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-start outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-40"
         >
           <span className="inline-flex size-4 items-center justify-center text-fg-muted">{it.icon}</span>
-          {it.label}
+          {it.hint ? (
+            <>
+              <span className="min-w-0 flex-1">{it.label}</span>
+              {/* Out of the accessible name: the item is named by its label alone. */}
+              <span className="ms-4 text-xs text-fg-subtle" aria-hidden>
+                {it.hint}
+              </span>
+            </>
+          ) : (
+            it.label
+          )}
         </button>
       ))}
     </div>

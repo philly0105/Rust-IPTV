@@ -6,6 +6,7 @@ use crate::model::{ContentType, M3uOrigin, Source, SourceKind};
 use crate::state::AppState;
 use rusqlite::{params, Connection};
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -134,26 +135,74 @@ pub fn build_manifest(
     epg_urls: &[String],
     include_secrets: bool,
 ) -> CoreResult<Value> {
+    // parental / watchlist: per-source rows for the `userState` extensions.
+    let mut locks = crate::parental::backup_locks(conn)?;
+    let mut watch: HashMap<String, Vec<Value>> = HashMap::new();
+    for e in crate::watchlist::export_entries(conn)? {
+        let sid = e.source_id.clone();
+        watch.entry(sid).or_default().push(serde_json::to_value(e)?);
+    }
     let mut playlists = Vec::new();
     for s in load_sources(conn)? {
-        let entry = match s.kind {
+        let mut entry = match s.kind {
             SourceKind::M3u => m3u_entry(conn, data_dir, &s)?,
             SourceKind::Xtream => xtream_entry(conn, &s, include_secrets)?,
             SourceKind::Stalker => stalker_entry(conn, &s, include_secrets)?,
         };
+        add_user_state_ext(&mut entry, super::EXT_PARENTAL_LOCKS, locks.remove(&s.id));
+        add_user_state_ext(&mut entry, super::EXT_WATCHLIST, watch.remove(&s.id));
+        // Run 2: channel edits, recording rules and the watch log (C8).
+        add_user_state_ext(
+            &mut entry,
+            super::EXT_CHANNEL_EDITS,
+            Some(to_values(crate::channeledit::export_edits(conn, &s.id)?)?),
+        );
+        add_user_state_ext(
+            &mut entry,
+            super::EXT_RECORDING_RULES,
+            Some(to_values(crate::recording::export_rules(conn, &s.id)?)?),
+        );
+        add_user_state_ext(
+            &mut entry,
+            super::EXT_WATCH_LOG,
+            Some(to_values(crate::stats::export_log(conn, &s.id)?)?),
+        );
         playlists.push(entry);
     }
+    // lists: custom lists cross sources, so they sit at the top level.
+    let lists = to_values(crate::lists::export_lists(conn)?)?;
     let mut m = Map::new();
     m.insert("kind".into(), json!(BACKUP_KIND));
     m.insert("version".into(), json!(BACKUP_VERSION));
     m.insert("exportedAt".into(), json!(crate::userstate::now_ts()));
     m.insert("includeSecrets".into(), json!(include_secrets));
     let urls: Vec<&String> = epg_urls.iter().filter(|u| !u.trim().is_empty()).collect();
-    if !urls.is_empty() {
-        m.insert("settings".into(), json!({ "epgUrls": urls }));
-    }
+    // parental: the options always go in `settings` (with the empty
+    // `epgUrls` IPTVnator requires); the PIN, its hash and salt never do.
+    let mut settings = json!({ "epgUrls": urls });
+    settings[super::EXT_PARENTAL_SETTINGS] = crate::parental::backup_options(conn)?;
+    m.insert("settings".into(), settings);
     m.insert("playlists".into(), Value::Array(playlists));
+    if !lists.is_empty() {
+        m.insert(super::EXT_CUSTOM_LISTS.into(), Value::Array(lists));
+    }
     Ok(Value::Object(m))
+}
+
+fn to_values<T: serde::Serialize>(rows: Vec<T>) -> CoreResult<Vec<Value>> {
+    rows.into_iter()
+        .map(|r| Ok(serde_json::to_value(r)?))
+        .collect()
+}
+
+/// Adds a Tsrust extension array to an entry's `userState` when it has rows.
+fn add_user_state_ext(entry: &mut Value, key: &str, rows: Option<Vec<Value>>) {
+    let Some(rows) = rows.filter(|r| !r.is_empty()) else {
+        return;
+    };
+    if let Some(us) = entry.get_mut("userState").and_then(Value::as_object_mut) {
+        us.insert(key.into(), Value::Array(rows));
+    }
 }
 
 /// Adds [`super::APP_SETTING_KEYS`] to the manifest's `settings` object
@@ -228,6 +277,10 @@ fn m3u_entry(conn: &Connection, data_dir: &Path, s: &Source) -> CoreResult<Value
         put_str(&mut source, "referrer", c.headers.referrer.as_deref());
         put_str(&mut source, "origin", c.headers.origin.as_deref());
         put_str(&mut source, "filePathHint", c.file_path.as_deref());
+        // guide: the source-wide catch-up override.
+        if let Some(o) = &c.catchup {
+            source.insert("catchupOverride".into(), serde_json::to_value(o)?);
+        }
     }
 
     // Favorites are channel URLs (the old app's `favorites: string[]`).
@@ -295,12 +348,12 @@ fn m3u_entry(conn: &Connection, data_dir: &Path, s: &Source) -> CoreResult<Value
         rows.collect::<Result<_, _>>()?
     };
 
+    let mut us =
+        json!({ "favorites": favorites, "recentlyViewed": recent, "hiddenGroupTitles": hidden });
+    add_tsrust_state(conn, &s.id, &mut us, true, false)?;
     let mut m = base(s, "m3u");
     m.insert("source".into(), Value::Object(source));
-    m.insert(
-        "userState".into(),
-        json!({ "favorites": favorites, "recentlyViewed": recent, "hiddenGroupTitles": hidden }),
-    );
+    m.insert("userState".into(), us);
     Ok(Value::Object(m))
 }
 
@@ -483,18 +536,18 @@ fn xtream_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRes
         }
     }
 
+    let mut us = json!({
+        "hiddenCategories": hidden,
+        "favorites": favorites,
+        "recentlyViewed": recent,
+        "playbackPositions": positions,
+        "sourcePins": pins,
+    });
+    // Xtream positions and hidden categories travel in the IPTVnator fields.
+    add_tsrust_state(conn, &s.id, &mut us, false, false)?;
     let mut m = base(s, "xtream");
     m.insert("connection".into(), Value::Object(connection));
-    m.insert(
-        "userState".into(),
-        json!({
-            "hiddenCategories": hidden,
-            "favorites": favorites,
-            "recentlyViewed": recent,
-            "playbackPositions": positions,
-            "sourcePins": pins,
-        }),
-    );
+    m.insert("userState".into(), us);
     Ok(Value::Object(m))
 }
 
@@ -564,13 +617,114 @@ fn stalker_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRe
         &s.id,
     )?;
 
+    let mut us = json!({ "favorites": favorites, "recentlyViewed": recent });
+    add_tsrust_state(conn, &s.id, &mut us, true, true)?;
     let mut m = base(s, "stalker");
     m.insert("connection".into(), Value::Object(connection));
-    m.insert(
-        "userState".into(),
-        json!({ "favorites": favorites, "recentlyViewed": recent }),
-    );
+    m.insert("userState".into(), us);
     Ok(Value::Object(m))
+}
+
+// ---------------------------------------------------------------------------
+// Tsrust extensions
+// ---------------------------------------------------------------------------
+
+/// User state the IPTVnator format has no field for, as Tsrust extensions in
+/// `userState` (IPTVnator ignores unknown keys; backups without them still
+/// import): manual EPG mappings for every kind, and with `positions` /
+/// `hidden` the playback positions and hidden categories by catalog id
+/// (M3U and Stalker positions, Stalker hidden categories). Each key is
+/// written only when it has rows.
+fn add_tsrust_state(
+    conn: &Connection,
+    source_id: &str,
+    us: &mut Value,
+    positions: bool,
+    hidden: bool,
+) -> CoreResult<()> {
+    let Value::Object(us) = us else {
+        return Ok(());
+    };
+    let mut maps = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT content_type, item_id, epg_channel_id FROM epg_channel_map WHERE source_id = ?1
+             ORDER BY content_type, item_id",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok(json!({
+                "contentType": r.get::<_, String>(0)?,
+                "itemId": r.get::<_, String>(1)?,
+                "epgChannelId": r.get::<_, Option<String>>(2)?,
+            }))
+        })?;
+        for row in rows {
+            maps.push(row?);
+        }
+    }
+    if !maps.is_empty() {
+        us.insert(super::EXT_EPG_MAPPINGS.into(), Value::Array(maps));
+    }
+    if positions {
+        let mut out = Vec::new();
+        let mut stmt = conn.prepare(
+            "SELECT content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, snapshot_json, watched
+             FROM playback_positions WHERE source_id = ?1 ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, i64>(7)? != 0,
+            ))
+        })?;
+        for row in rows {
+            let (ct, item, ep, pos, dur, updated_at, snap, watched) = row?;
+            let mut m = Map::new();
+            m.insert("contentType".into(), json!(ct));
+            m.insert("itemId".into(), json!(item));
+            if !ep.is_empty() {
+                m.insert("episodeId".into(), json!(ep));
+            }
+            m.insert("positionSeconds".into(), json!(pos));
+            if let Some(d) = dur {
+                m.insert("durationSeconds".into(), json!(d));
+            }
+            m.insert("updatedAt".into(), json!(ts(&updated_at)));
+            if watched {
+                m.insert("watched".into(), json!(true));
+            }
+            if let Some(v) = snap.and_then(|j| serde_json::from_str::<Value>(&j).ok()) {
+                m.insert("snapshot".into(), v);
+            }
+            out.push(Value::Object(m));
+        }
+        if !out.is_empty() {
+            us.insert(super::EXT_POSITIONS.into(), Value::Array(out));
+        }
+    }
+    if hidden {
+        let mut stmt = conn.prepare(
+            "SELECT content_type, category_id FROM categories WHERE source_id = ?1 AND hidden = 1
+             ORDER BY content_type, position",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok(json!({
+                "contentType": r.get::<_, String>(0)?,
+                "categoryId": r.get::<_, String>(1)?,
+            }))
+        })?;
+        let out = rows.collect::<Result<Vec<_>, _>>()?;
+        if !out.is_empty() {
+            us.insert(super::EXT_HIDDEN_CATEGORIES.into(), Value::Array(out));
+        }
+    }
+    Ok(())
 }
 
 /// Rebuilds `StalkerPortalItem`s: the original portal object when the row

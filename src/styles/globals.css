@@ -16,19 +16,41 @@
   --color-surface: #131c2d;
   --color-surface-2: #1a2539;
   --color-surface-3: #233049;
-  --color-border: #2f3d57;
+  --color-border: #6b7b99;
+  --color-divider: #2f3d57;
   --color-fg: #e9edf5;
   --color-fg-muted: #a9b3c6;
-  --color-fg-subtle: #8692a9;
+  --color-fg-subtle: #8f9bb2;
   --color-accent: #f5b544;
   --color-accent-hover: #ffc865;
+  --color-accent-pressed: #e09a26;
+  --color-pressed: #2c3b58;
   --color-accent-fg: #1b1204;
   --color-danger: #ff7a7a;
   --color-success: #4fd49b;
   --color-warning: #eccb5c;
-  --color-live: #ff5a61;
+  --color-live: #ff6a70;
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
+  --color-glow: rgb(245 181 68 / 0.28);
+
+  /*
+   * Glass (C8): bg-glass, bg-glass-strong, border-glass-border, text-on-glass.
+   * Blur behind glass only through the glass-blur utility below (C5); --blur-glass
+   * stays at or under 10px (src/perf-budget.test.ts).
+   */
+  --color-glass: rgb(12 19 32 / 0.72);
+  --color-glass-strong: rgb(12 19 32 / 0.88);
+  --color-glass-border: rgb(255 255 255 / 0.14);
+  --color-on-glass: #f4f6fa;
+  --color-on-glass-muted: #c8cfdc;
+  --color-glass-accent: #f5b544;
+  --color-glass-accent-fg: #1b1204;
+  --blur-glass: 10px;
+
+  /* 10px at 100 % UI scale; rem so it follows the scale like the stock sizes. */
+  --text-2xs: calc(10rem / 15);
+  --text-2xs--line-height: 1.4;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -41,12 +63,45 @@
   --font-display: Bahnschrift, 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, 'SF Mono', monospace;
 
-  --animate-shimmer: shimmer 1.6s linear infinite;
   --animate-toast-in: toast-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-fade-in: fade-in 160ms ease-out;
   --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  --animate-live-pulse: live-pulse 2s ease-in-out infinite;
+  /*
+   * Three pulses as a live dot appears, then it holds still: an endless pulse kept the compositor
+   * drawing frames at the display rate wherever a LIVE badge showed (L3-ui-data-x3). The player's
+   * dot uses the same count (LIVE_PULSES in Controls.tsx).
+   */
+  --animate-live-pulse: live-pulse 2s ease-in-out 3;
   --animate-indeterminate: indeterminate 1.2s ease-in-out infinite;
+  --animate-hero-in: hero-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-hero-copy: hero-copy 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Hero backdrop: fades up while settling from a slight zoom. */
+  @keyframes hero-in {
+    from {
+      opacity: 0;
+      transform: scale(1.04);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes hero-copy {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /*
+   * No dial-fill keyframes: the hero dial's fill is a transform HeroCarousel sets a few times a
+   * second. A running animation, however small, made the page draw a frame per display refresh
+   * (an idle dashboard at 38 % of a core on 240 Hz, L3-perf-desktop-1).
+   */
 
   @keyframes indeterminate {
     from {
@@ -57,14 +112,6 @@
     }
   }
 
-  @keyframes shimmer {
-    from {
-      background-position: 200% 0;
-    }
-    to {
-      background-position: -200% 0;
-    }
-  }
   @keyframes toast-in {
     from {
       opacity: 0;
@@ -109,7 +156,8 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
-    font-size: 15px;
+    /* UI scale (C1): rem-based sizes and the Tailwind spacing scale follow --ui-scale. */
+    font-size: calc(15px * var(--ui-scale, 1));
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -196,7 +244,9 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }
@@ -205,8 +255,23 @@ html[data-reduced-motion='true'] *::before,
 html[data-reduced-motion='true'] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
   transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
   scroll-behavior: auto !important;
+}
+
+/* Pressed controls nudge down a pixel under motion-safe; the in-app reduced-motion switch stops that too. */
+html[data-reduced-motion='true'] *:active {
+  translate: none !important;
+  scale: none !important;
+}
+
+/* Set for two frames while the theme flips (theme.tsx), so colours swap at once. */
+html[data-theme-switching='true'] *,
+html[data-theme-switching='true'] *::before,
+html[data-theme-switching='true'] *::after {
+  transition: none !important;
 }
 
 /*
@@ -235,16 +300,103 @@ html[data-reduced-motion='true'] *::after {
   font-variant-numeric: tabular-nums;
 }
 
-/* Skeleton shimmer surface (animate with motion-safe:animate-shimmer). */
+/* Skeleton surface: the resting placeholder colour (animate with motion-safe:animate-shimmer). */
 @utility skeleton-surface {
   background-color: var(--color-surface-2);
-  background-image: linear-gradient(
-    90deg,
-    var(--color-surface-2) 0%,
-    var(--color-surface-3) 50%,
-    var(--color-surface-2) 100%
-  );
-  background-size: 200% 100%;
+}
+
+/*
+ * The shimmer: a soft band sweeping across the element on a ::after layer.
+ * It animates transform only, so the compositor runs it without style or
+ * paint work on the main thread (a background-position sweep cost a style
+ * recalc and repaint per placeholder per frame, L1-perf-2). Paint containment
+ * clips the band to the element and anchors it without changing the
+ * element's own position.
+ */
+@utility animate-shimmer {
+  contain: paint;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: linear-gradient(90deg, transparent 0%, var(--color-surface-3) 50%, transparent 100%);
+    transform: translateX(-100%);
+    animation: shimmer 1.6s linear infinite;
+  }
+}
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/*
+ * Loops nobody can see stop (src/ui/offscreen.ts): an out-of-view placeholder
+ * or live dot carries data-offscreen, and a hidden page pauses every loop.
+ */
+[data-offscreen][class*='animate-shimmer']::after,
+[data-offscreen][class*='animate-live-pulse'] {
+  animation: none;
+}
+html[data-page-hidden] :is([class*='animate-live-pulse'], [class*='animate-indeterminate']),
+html[data-page-hidden] [class*='animate-shimmer']::after {
+  animation-play-state: paused;
+}
+
+/*
+ * Glass panel (C8) for chrome laid over video or artwork: the strong glass
+ * surface with its text and border colours, and no blur. It is cheap enough
+ * for chrome that is on screen all the time (the hero's slide controls, the
+ * multi-view toolbar) and reads on any frame without one.
+ */
+@utility glass {
+  background-color: var(--color-glass-strong);
+  color: var(--color-on-glass);
+  border-color: var(--color-glass-border);
+}
+
+/*
+ * The one way to blur what is behind an element (C5, src/perf-budget.test.ts).
+ * A backdrop filter re-samples everything under the element on every frame
+ * that changes beneath it, so it belongs on small, short-lived overlays over
+ * video or artwork (menus, chips on hover, the player's control pane), never
+ * on chrome that is always on screen. Pair it with bg-glass (or another
+ * translucent surface): without backdrop-filter support that surface stands
+ * alone, and the contrast test holds on-glass text to 4.5:1 on it unblurred.
+ * With reduced transparency the surface turns strong and the blur goes.
+ */
+@utility glass-blur {
+  @supports (backdrop-filter: blur(1px)) {
+    backdrop-filter: blur(var(--blur-glass));
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--color-glass-strong) !important;
+    backdrop-filter: none !important;
+  }
+}
+
+/*
+ * The dashboard hero's frost: a glass tint (and, under it, a cheaply blurred
+ * copy of the artwork) that is solid behind the text column and clears toward
+ * the inline end, so the artwork shows beside the copy. On
+ * narrow screens the copy runs edge to edge, so the whole frame is frosted.
+ * --hero-solid covers padding, poster (lg+) and the 28rem text column.
+ */
+@utility hero-frost {
+  --hero-solid: 32rem;
+  @media (width >= 40rem) {
+    mask-image: linear-gradient(to right, #000 0, #000 var(--hero-solid), transparent calc(var(--hero-solid) + 16rem));
+    &:where(:dir(rtl)) {
+      mask-image: linear-gradient(to left, #000 0, #000 var(--hero-solid), transparent calc(var(--hero-solid) + 16rem));
+    }
+  }
+  @media (width >= 64rem) {
+    --hero-solid: 44rem;
+  }
 }
 
 /* The tuning tick: a short amber bar marking the active rail item or selected row. */
@@ -269,12 +421,17 @@ html[data-reduced-motion='true'] *::after {
   background: var(--color-surface-3);
   color: var(--color-fg);
 }
+/* Pressed: the hovered item is also the selected one, so this must outrank the rule above. */
+[cmdk-item][data-selected='true']:active {
+  background: var(--color-pressed);
+}
 [cmdk-item][data-disabled='true'] {
   opacity: 0.5;
 }
 [cmdk-group-heading] {
-  padding: 10px 14px 4px;
-  font-size: 12px;
+  /* 10px 14px 4px and 12px at 100 % UI scale; rem so the palette follows the scale. */
+  padding: calc(10rem / 15) calc(14rem / 15) calc(4rem / 15);
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--color-fg-subtle);
 }

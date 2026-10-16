@@ -1,17 +1,22 @@
-import { Command as CommandIcon, Moon, PanelRight, Search, Sun } from 'lucide-react';
+import { ListTree, Moon, Search, SquareChevronRight, Sun } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { IconButton, Kbd, SearchInput, cn } from '@/ui';
 
+import { openSearch } from './focusSearch';
 import { useShellStore } from './store';
 import { useTheme } from './theme';
 
-export function Header({ panelInline }: { panelInline: boolean }) {
+/**
+ * `narrow`: below lg, where the rail is auto-collapsed. The tour's search anchor (Run 3 C7) then
+ * moves to the rail's Search link, since the "Search everything" button folds away there.
+ */
+export function Header({ panelInline, narrow = false }: { panelInline: boolean; narrow?: boolean }) {
   const { t } = useTranslation('shell');
   const header = useShellStore((s) => s.header);
-  const hasPanel = useShellStore((s) => s.contextPanel !== null);
+  const hasPanel = useShellStore((s) => s.contextPanel !== null && s.panelDrawer);
   const panelOpen = useShellStore((s) => s.panelOpen);
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
@@ -28,19 +33,36 @@ export function Header({ panelInline }: { panelInline: boolean }) {
   return (
     <header
       data-testid="shell-header"
-      className="flex h-(--header-height) shrink-0 items-center gap-4 border-b border-border bg-bg/90 px-5 backdrop-blur"
+      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/95 px-4 sm:gap-4 sm:px-5"
     >
-      <div className="flex min-w-0 flex-1 items-baseline gap-3">
+      {/* Below sm the title gives way to the page search while it is in use (focused or holding a query). */}
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 items-baseline gap-3',
+          // The title keeps a few letters' room however wide the page's header actions are.
+          header?.title && 'min-w-[min(8ch,30%)]',
+          'max-sm:group-has-[[data-shell-search]:focus]/header:hidden max-sm:group-has-[[data-shell-search]:not(:placeholder-shown)]/header:hidden',
+        )}
+      >
         {header?.title ? (
           <>
             {/*
               Not a heading: each page owns its single <h1> (C16), so the
-              header title stays a styled paragraph to avoid two h1s.
+              header title stays a styled paragraph to avoid two h1s. A long
+              title truncates; hovering it shows the whole name.
             */}
-            <p className="truncate font-display text-xl font-semibold" data-testid="page-title">
+            <p dir="auto" title={header.title} className="truncate font-display text-xl font-semibold" data-testid="page-title">
               {header.title}
             </p>
-            {header.subtitle && <p className="hidden truncate text-sm text-fg-muted md:block">{header.subtitle}</p>}
+            {/*
+              The subtitle only takes the room the title leaves (flex-basis 0), so it truncates
+              first and the title keeps its whole name for as long as it fits.
+            */}
+            {header.subtitle && (
+              <p dir="auto" title={header.subtitle} className="hidden min-w-0 flex-1 basis-0 truncate text-sm text-fg-muted md:block" data-testid="page-subtitle">
+                {header.subtitle}
+              </p>
+            )}
           </>
         ) : (
           <span aria-hidden />
@@ -49,21 +71,38 @@ export function Header({ panelInline }: { panelInline: boolean }) {
 
       {header?.search ? (
         <SearchInput
-          className="w-[clamp(180px,28vw,380px)]"
+          className={cn(
+            'sm:w-[clamp(12rem,28vw,25rem)]',
+            /*
+              Below sm a fixed-width field would squeeze the page title to its first
+              letter, so the search folds into a search-icon button: the same input,
+              only narrow and borderless, so a click, Tab or Ctrl+F still lands in it.
+              Focused or holding a query, it unfolds over the title's space.
+            */
+            'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0',
+            'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
+            'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
+            'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',
+            'max-sm:[&:not(:focus-within)>input:placeholder-shown:hover]:bg-surface-2 max-sm:[&:not(:focus-within)>input::placeholder]:text-transparent',
+          )}
           size="sm"
           value={header.search.value}
           onChange={header.search.onChange}
           onSubmit={header.search.onSubmit}
+          onKeyDown={header.search.onKeyDown}
           placeholder={header.search.placeholder}
           data-shell-search=""
+          data-tour={narrow ? undefined : 'search'}
         />
       ) : (
         <button
           type="button"
-          onClick={() => navigate('/search')}
+          // Lands in the search field, as Ctrl+F does, so the user can type at once.
+          onClick={() => openSearch(navigate)}
+          data-tour={narrow ? undefined : 'search'}
           className={cn(
-            'hidden h-8 w-[clamp(160px,22vw,300px)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
-            'hover:border-fg-subtle hover:text-fg-muted',
+            'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
+            'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-2 motion-safe:transition-colors',
           )}
         >
           <Search aria-hidden size={15} />
@@ -72,13 +111,23 @@ export function Header({ panelInline }: { panelInline: boolean }) {
         </button>
       )}
 
-      {header?.actions && <div className="flex shrink-0 items-center gap-2">{header.actions}</div>}
+      {/*
+        Page actions give way before the shell's own buttons: on a phone (worst in Arabic) a
+        labelled action used to push the palette and theme buttons off the screen. The wrapper
+        shrinks and clips sideways only; the clip margin keeps the actions' focus rings.
+      */}
+      {header?.actions && (
+        <div data-testid="header-actions" className="flex min-w-0 items-center gap-2 overflow-x-clip [overflow-clip-margin:0.25rem]">
+          {header.actions}
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center gap-1">
         {hasPanel && !panelInline && (
           <IconButton
             label={panelOpen ? t('hideDetails') : t('showDetails')}
-            icon={<PanelRight size={18} />}
+            // A list glyph, so it never reads as the palette's square-and-chevron next to it.
+            icon={<ListTree size={18} className="rtl:-scale-x-100" />}
             aria-expanded={panelOpen}
             aria-haspopup="dialog"
             onClick={() => setPanelOpen(!panelOpen)}
@@ -88,7 +137,8 @@ export function Header({ panelInline }: { panelInline: boolean }) {
         <IconButton
           label={t('openPalette')}
           title={`${t('openPalette')} (Ctrl+K)`}
-          icon={<CommandIcon size={18} />}
+          // A command-prompt glyph, not the Mac ⌘ key: this is a Windows app and the shortcut is Ctrl+K.
+          icon={<SquareChevronRight size={18} className="rtl:-scale-x-100" />}
           onClick={() => setPaletteOpen(true)}
           data-testid="open-palette"
         />

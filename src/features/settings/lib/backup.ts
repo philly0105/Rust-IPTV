@@ -7,6 +7,42 @@ export interface BackupSummary {
   playlists: number;
   byKind: { m3u: number; xtream: number; stalker: number };
   epgUrls: number;
+  /** Entries the import will skip: not an object, or an unknown `portalType`. */
+  skipped: number;
+  /** Parental options (`settings.tsrustParental`); the core applies them only while controls are unlocked. */
+  parental?: BackupParentalOptions;
+}
+
+export interface BackupParentalOptions {
+  mode?: string;
+  autoAdult?: boolean;
+  unlockMinutes?: number;
+}
+
+/**
+ * True when importing `opts` would change the parental options `current` has.
+ * Only then does a locked session matter: the same options need no PIN.
+ */
+export function parentalOptionsDiffer(
+  opts: BackupParentalOptions | undefined,
+  current: { mode: string; autoAdult: boolean; unlockMinutes: number },
+): boolean {
+  if (!opts) return false;
+  return (
+    (opts.mode !== undefined && opts.mode !== current.mode) ||
+    (opts.autoAdult !== undefined && opts.autoAdult !== current.autoAdult) ||
+    (opts.unlockMinutes !== undefined && opts.unlockMinutes !== current.unlockMinutes)
+  );
+}
+
+function parentalOf(v: unknown): BackupParentalOptions | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  const out: BackupParentalOptions = {};
+  if (typeof o.mode === 'string') out.mode = o.mode;
+  if (typeof o.autoAdult === 'boolean') out.autoAdult = o.autoAdult;
+  if (typeof o.unlockMinutes === 'number' && Number.isInteger(o.unlockMinutes)) out.unlockMinutes = o.unlockMinutes;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export type BackupCheck = { ok: true; summary: BackupSummary } | { ok: false; error: string };
@@ -14,22 +50,42 @@ export type BackupCheck = { ok: true; summary: BackupSummary } | { ok: false; er
 /** 50 MB: anything larger is not a playlist backup. */
 export const MAX_BACKUP_BYTES = 50 * 1024 * 1024;
 
+/** Integer from a number or numeric string, as the core reads `version`. */
+function intOf(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v.trim()) : Number.NaN;
+  return Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+
+/**
+ * Mirrors the core's manifest checks (`backup/import.rs` `parse_manifest`)
+ * so a file is accepted or refused here for the same reasons, with a
+ * specific message: a leading BOM is ignored, `version` may be a numeric
+ * string, and a bare array is an old-style export the import cannot read.
+ */
 export function inspectBackup(text: string): BackupCheck {
+  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  if (body.trim() === '') return { ok: false, error: 'backupEmptyFile' };
   let data: unknown;
   try {
-    data = JSON.parse(text);
+    data = JSON.parse(body);
   } catch {
     return { ok: false, error: 'backupNotJson' };
   }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, error: 'backupWrongFormat' };
+  if (Array.isArray(data)) return { ok: false, error: 'backupLegacyArray' };
+  if (!data || typeof data !== 'object') return { ok: false, error: 'backupWrongFormat' };
   const o = data as Record<string, unknown>;
   if (o.kind !== 'iptvnator-playlist-backup') return { ok: false, error: 'backupWrongFormat' };
-  if (o.version !== 1) return { ok: false, error: 'backupWrongVersion' };
+  const version = intOf(o.version);
+  // Newer than this app reads, or older (or missing): each gets its own advice.
+  if (version !== undefined && version > 1) return { ok: false, error: 'backupWrongVersion' };
+  if (version !== 1) return { ok: false, error: 'backupOldVersion' };
   if (!Array.isArray(o.playlists)) return { ok: false, error: 'backupWrongFormat' };
   const byKind = { m3u: 0, xtream: 0, stalker: 0 };
+  let skipped = 0;
   for (const p of o.playlists) {
-    const kind = p && typeof p === 'object' ? (p as Record<string, unknown>).portalType : undefined;
+    const kind = p && typeof p === 'object' && !Array.isArray(p) ? (p as Record<string, unknown>).portalType : undefined;
     if (kind === 'm3u' || kind === 'xtream' || kind === 'stalker') byKind[kind] += 1;
+    else skipped += 1;
   }
   const settings = o.settings && typeof o.settings === 'object' ? (o.settings as Record<string, unknown>) : undefined;
   return {
@@ -41,6 +97,8 @@ export function inspectBackup(text: string): BackupCheck {
       playlists: o.playlists.length,
       byKind,
       epgUrls: Array.isArray(settings?.epgUrls) ? settings.epgUrls.length : 0,
+      skipped,
+      parental: parentalOf(settings?.tsrustParental),
     },
   };
 }

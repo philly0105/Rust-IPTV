@@ -1,0 +1,170 @@
+import { act, cleanup } from '@testing-library/react';
+import { Outlet } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { queryClient, rpcKey } from '@/api/query';
+import type { AppEvent, Settings } from '@/api/types';
+import { useToastStore } from '@/ui';
+
+import { renderRoutes, rpcMock, settings } from './harness';
+
+type ConnState = 'connecting' | 'open' | 'closed';
+
+/** A fake event bus that dispatches like api/events: every onAnyAppEvent handler first, then the typed ones. */
+const bus = vi.hoisted(() => ({
+  any: new Set<(e: AppEvent) => void>(),
+  typed: new Map<string, Set<(p: unknown) => void>>(),
+  state: new Set<(s: ConnState) => void>(),
+  current: 'connecting' as ConnState,
+}));
+
+vi.mock('@/api/transport', async (orig) => ({
+  ...(await orig<typeof import('@/api/transport')>()),
+  rpc: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
+  isDesktop: false,
+}));
+vi.mock('@/api/events', () => ({
+  onAppEvent: (type: string, h: (p: unknown) => void) => {
+    const set = bus.typed.get(type) ?? new Set();
+    bus.typed.set(type, set);
+    set.add(h);
+    return () => set.delete(h);
+  },
+  onAnyAppEvent: (h: (e: AppEvent) => void) => {
+    bus.any.add(h);
+    return () => bus.any.delete(h);
+  },
+  onConnectionState: (h: (s: ConnState) => void) => {
+    bus.state.add(h);
+    h(bus.current);
+    return () => bus.state.delete(h);
+  },
+}));
+
+const { EVENT_INVALIDATION, useShellEvents } = await import('../effects');
+
+function emit(type: string, payload: unknown): void {
+  act(() => {
+    for (const h of bus.any) h({ type, payload } as AppEvent);
+    for (const h of bus.typed.get(type) ?? []) h(payload);
+  });
+}
+
+function setConnection(s: ConnState): void {
+  act(() => {
+    bus.current = s;
+    for (const h of bus.state) h(s);
+  });
+}
+
+function Layout() {
+  useShellEvents();
+  return <Outlet />;
+}
+
+function mount(): void {
+  renderRoutes([{ path: '/', element: <Layout />, children: [{ index: true, element: <div>home</div> }] }], '/');
+}
+
+const connectionToast = () => useToastStore.getState().toasts.find((t) => t.id === 'connection');
+const scheduleKey = rpcKey('sources.schedule');
+const scheduleInvalidated = () => queryClient.getQueryState(scheduleKey)?.isInvalidated ?? false;
+
+beforeEach(() => {
+  rpcMock.reset();
+  bus.current = 'connecting';
+  useToastStore.getState().clear();
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe('settings.changed: refresh interval', () => {
+  it('no longer refetches the schedule on every settings.changed', () => {
+    expect(EVENT_INVALIDATION['settings.changed']).toBeUndefined();
+  });
+
+  it('invalidates sources.schedule only when the refresh interval changed', () => {
+    mount();
+    queryClient.setQueryData(rpcKey('settings.get'), settings({ sourceRefreshIntervalHours: 12 }));
+    queryClient.setQueryData(scheduleKey, { sources: [] });
+
+    // A lastRoute write: the payload reaches the cache first (bindEventInvalidation), the interval did not move.
+    emit('settings.changed', settings({ sourceRefreshIntervalHours: 12, lastRoute: '/live' }));
+    expect(queryClient.getQueryData<Settings>(rpcKey('settings.get'))?.lastRoute).toBe('/live');
+    expect(scheduleInvalidated()).toBe(false);
+
+    emit('settings.changed', settings({ sourceRefreshIntervalHours: 24, lastRoute: '/live' }));
+    expect(scheduleInvalidated()).toBe(true);
+  });
+
+  it('takes the first settings.changed before settings load as the baseline', () => {
+    mount();
+    queryClient.setQueryData(scheduleKey, { sources: [] });
+
+    emit('settings.changed', settings({ sourceRefreshIntervalHours: 24 }));
+    expect(scheduleInvalidated()).toBe(false);
+
+    emit('settings.changed', settings({ sourceRefreshIntervalHours: 0 }));
+    expect(scheduleInvalidated()).toBe(true);
+  });
+});
+
+describe('downloads.update (XB2-33)', () => {
+  it('refetches the download and My videos lists, not the download folder', async () => {
+    expect(EVENT_INVALIDATION['downloads.update']).toBeUndefined();
+    mount();
+    const stale = (cmd: 'downloads.list' | 'downloads.dir' | 'myvideos.list') => queryClient.getQueryState(rpcKey(cmd))?.isInvalidated ?? false;
+    queryClient.setQueryData(rpcKey('downloads.list'), []);
+    queryClient.setQueryData(rpcKey('downloads.dir'), { path: 'D:/Videos' });
+    queryClient.setQueryData(rpcKey('myvideos.list'), []);
+
+    emit('downloads.update', {});
+    // Events are batched into one refetch round per burst.
+    await vi.waitFor(() => expect(stale('downloads.list')).toBe(true));
+    expect(stale('myvideos.list')).toBe(true);
+    expect(stale('downloads.dir')).toBe(false);
+  });
+});
+
+describe('connection lost toast (web)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+
+  it('shows after 3 s when the page never connected, and goes once it opens', () => {
+    mount();
+    setConnection('closed');
+    act(() => vi.advanceTimersByTime(2999));
+    expect(connectionToast()).toBeUndefined();
+    act(() => vi.advanceTimersByTime(1));
+    expect(connectionToast()?.variant).toBe('error');
+
+    setConnection('open');
+    expect(connectionToast()).toBeUndefined();
+  });
+
+  it('stays quiet when the socket opens within 3 s', () => {
+    mount();
+    setConnection('closed');
+    act(() => vi.advanceTimersByTime(2000));
+    setConnection('open');
+    act(() => vi.advanceTimersByTime(5000));
+    expect(connectionToast()).toBeUndefined();
+  });
+
+  it('shows once per outage: reconnect attempts do not bring a dismissed toast back', () => {
+    mount();
+    setConnection('open');
+    setConnection('closed');
+    act(() => vi.advanceTimersByTime(3000));
+    expect(connectionToast()).toBeDefined();
+    act(() => useToastStore.getState().dismiss('connection'));
+
+    setConnection('connecting');
+    setConnection('closed');
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(connectionToast()).toBeUndefined();
+  });
+});

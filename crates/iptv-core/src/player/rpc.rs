@@ -23,6 +23,9 @@ pub const COMMANDS: &[&str] = &[
     "mpv.detach",
     "mpv.state",
     "mpv.record",
+    "mpv.stats",
+    // subtitles: external subtitle files in embedded mpv (Run 2 C6).
+    "mpv.addSubtitle",
 ];
 
 /// External and embedded players run on the user's machine, so only the
@@ -99,6 +102,12 @@ struct SetPropertyArgs {
     name: String,
     #[serde(default)]
     value: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddSubtitleArgs {
+    path: String,
 }
 
 /// Registers this module's commands.
@@ -182,5 +191,18 @@ pub fn register(r: &mut RpcRouter) {
     r.add("mpv.record", |state, a: RecordArgs| async move {
         ensure_desktop(&state)?;
         Ok::<_, RpcError>(embedded::record(&state, a.start).await?)
+    });
+
+    // player: stream info overlay (polled while its panel is open).
+    r.add("mpv.stats", |state, _: ()| async move {
+        ensure_desktop(&state)?;
+        Ok::<_, RpcError>(embedded::stats(&state).await?)
+    });
+
+    // subtitles: an external subtitle file for the playing item (Run 2 C6).
+    r.add("mpv.addSubtitle", |state, a: AddSubtitleArgs| async move {
+        ensure_desktop(&state)?;
+        embedded::add_subtitle(&state, &a.path).await?;
+        Ok::<_, RpcError>(())
     });
 }

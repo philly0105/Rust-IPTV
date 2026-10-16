@@ -315,8 +315,10 @@ async fn unreachable_portal_says_so_plainly() {
     let port = closed_port();
     let url = format!("http://127.0.0.1:{port}/c/");
     let e = env_at(Some(url.clone()), MAC).await;
+    // A refused connection keeps its own next step (L1-sources-home-7: it
+    // is final, so the importer no longer retries it).
     let want = format!(
-        "Could not reach the portal at 127.0.0.1:{port}. Check the URL and your connection, then try again."
+        "Could not reach the portal at 127.0.0.1:{port}. The server refused the connection. Check the address and port, and that the server is running, then try again."
     );
 
     let res = e

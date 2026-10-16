@@ -549,3 +549,183 @@ async fn live_hls_is_continuous() {
         prev = Some((n, pts));
     }
 }
+
+/// B8: the `/fail/...` routes answer with the failure they document.
+#[tokio::test]
+async fn failure_routes_answer_as_documented() {
+    use iptv_mock::failures::{LOGIN_HTML, MALFORMED_M3U};
+    let m = spawn().await;
+    let c = client();
+    let get = |p: &str| c.get(format!("{}{p}", m.base)).send();
+    for (path, code) in [
+        ("/fail/401.m3u", 401),
+        ("/fail/403.m3u", 403),
+        ("/fail/404.m3u", 404),
+        ("/fail/503.m3u", 503),
+        ("/fail/status/410", 410),
+        ("/fail/status/429", 429),
+    ] {
+        let r = get(path).await.unwrap();
+        assert_eq!(r.status().as_u16(), code, "{path}");
+        assert_eq!(
+            r.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*",
+            "{path}"
+        );
+    }
+    let r = get("/fail/401.m3u").await.unwrap();
+    assert!(r.headers().contains_key(header::WWW_AUTHENTICATE));
+    assert_eq!(get("/fail/status/9999").await.unwrap().status(), 400);
+
+    assert_eq!(
+        get("/fail/empty.m3u").await.unwrap().text().await.unwrap(),
+        ""
+    );
+    assert_eq!(
+        get("/fail/malformed.m3u")
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        MALFORMED_M3U
+    );
+    assert_eq!(
+        get("/fail/login.m3u").await.unwrap().text().await.unwrap(),
+        LOGIN_HTML
+    );
+    let broken = get("/fail/broken.m3u").await.unwrap().text().await.unwrap();
+    assert!(broken.starts_with("#EXTM3U") && broken.contains("garbage line"));
+    let hls = get("/fail/hls.m3u8").await.unwrap().text().await.unwrap();
+    assert!(hls.contains("#EXT-X-TARGETDURATION"));
+    let xml = get("/fail/malformed.xml")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(xml.starts_with("<?xml") && !xml.contains("</tv>"));
+
+    // The endless stream starts with MPEG-TS sync bytes.
+    let mut r = get("/fail/stream.ts").await.unwrap();
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp2t");
+    let first = r.chunk().await.unwrap().unwrap();
+    assert_eq!(first[0], 0x47);
+    assert_eq!(first[188], 0x47);
+    drop(r);
+
+    // Slow answers wait for the requested delay.
+    let started = std::time::Instant::now();
+    let body = get("/fail/slow.m3u?ms=300")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_millis(300));
+    assert!(body.starts_with("#EXTM3U"));
+
+    // A stalled body sends its first line, then nothing.
+    let mut r = get("/fail/stall.m3u").await.unwrap();
+    assert_eq!(&r.chunk().await.unwrap().unwrap()[..], b"#EXTM3U\n");
+    let next = tokio::time::timeout(std::time::Duration::from_millis(300), r.chunk()).await;
+    assert!(next.is_err(), "stall.m3u kept sending");
+}
+
+/// B8: `/m3u/10k.m3u` is the 10 000-entry fixture.
+#[tokio::test]
+async fn ten_k_playlist_has_ten_thousand_entries() {
+    let m = spawn().await;
+    let text = client()
+        .get(format!("{}/m3u/10k.m3u", m.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(
+        text.matches("#EXTINF").count(),
+        iptv_mock::playlists::TEN_K_CHANNELS
+    );
+}
+
+/// B9: slow large playlist, hung headers, Xtream failure panels, non-ASCII.
+#[tokio::test]
+async fn b9_failure_routes_answer_as_documented() {
+    use iptv_mock::failures::UNICODE_CHANNELS;
+    use std::time::{Duration, Instant};
+    let m = spawn().await;
+    let c = client();
+    let get = |p: &str| c.get(format!("{}{p}", m.base)).send();
+
+    // The slow large playlist is paced chunk by chunk but complete.
+    let started = Instant::now();
+    let text = get("/fail/slow-large.m3u?channels=2000&ms=50")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(text.matches("#EXTINF").count(), 2000);
+    let chunks = gen::M3uGen::new(&m.base, 2000, 20).count() as u32;
+    assert!(chunks > 1, "the test playlist should span several chunks");
+    assert!(started.elapsed() >= Duration::from_millis(50) * (chunks - 1));
+
+    // A hung server never sends its status line.
+    let hung = tokio::time::timeout(Duration::from_millis(300), get("/fail/hang.m3u")).await;
+    assert!(hung.is_err(), "hang.m3u answered");
+
+    for (mode, code) in [("401", 401), ("403", 403), ("404", 404), ("503", 503)] {
+        for file in ["player_api.php", "get.php", "xmltv.php"] {
+            let r = get(&format!(
+                "/fail/xtream/{mode}/{file}?username=demo&password=secret"
+            ))
+            .await
+            .unwrap();
+            assert_eq!(r.status().as_u16(), code, "{mode}/{file}");
+        }
+    }
+    let html = get("/fail/xtream/html/player_api.php").await.unwrap();
+    assert!(html.headers()[header::CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .starts_with("text/html"));
+    let bad = get("/fail/xtream/badjson/player_api.php")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(serde_json::from_str::<Value>(&bad).is_err());
+    assert_eq!(
+        get("/fail/xtream/nope/player_api.php")
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    let hung = tokio::time::timeout(
+        Duration::from_millis(300),
+        get("/fail/xtream/hang/player_api.php"),
+    )
+    .await;
+    assert!(hung.is_err(), "the hung panel answered");
+
+    let bytes = get("/fail/unicode.m3u")
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert!(bytes.starts_with(b"\xEF\xBB\xBF#EXTM3U\r\n"));
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert_eq!(text.matches("#EXTINF").count(), UNICODE_CHANNELS.len());
+    for (group, name) in UNICODE_CHANNELS {
+        assert!(
+            text.contains(&format!("group-title=\"{group}\",{name}\r\n")),
+            "{name}"
+        );
+    }
+    assert!(!text.is_ascii());
+}

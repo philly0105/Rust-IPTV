@@ -1,7 +1,7 @@
 /**
  * i18n (SPEC C9). Keys are flat camelCase per namespace. English is bundled
- * eagerly as the fallback; every other `./<lang>/<ns>.json` is a lazy chunk
- * loaded on demand (`loadLanguage`) before i18next switches to it, so the
+ * eagerly as the fallback; every other language is one lazy chunk
+ * (`locale-<lang>`, all its namespaces) loaded on demand (`loadLanguage`) before i18next switches to it, so the
  * main bundle carries one locale instead of nineteen.
  *
  * Importing this module initializes i18next once and starts loading the
@@ -19,7 +19,26 @@
 import i18next, { type Resource } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-export const NAMESPACES = ['common', 'shell', 'sources', 'settings', 'live', 'vod', 'player', 'library'] as const;
+export const NAMESPACES = [
+  'common',
+  'shell',
+  'sources',
+  'settings',
+  'live',
+  'vod',
+  'player',
+  'library',
+  'multiview',
+  'parental',
+  'mylist',
+  // Run 2: custom lists, channel editing, guide search, watch stats.
+  'lists',
+  'channels',
+  'guide',
+  'stats',
+  // Run 3: first-run tour and What's new.
+  'onboarding',
+] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 export interface LanguageInfo {
@@ -66,6 +85,36 @@ export function i18nextLng(code: string): string {
   return LANGUAGES.find((l) => l.code === code)?.bcp47 ?? code;
 }
 
+/**
+ * Language keys whose tag has no CLDR plural rules of its own, mapped to the
+ * locale whose rules they use. `Intl.PluralRules('ary')` resolves to the
+ * machine's default locale, so without this pin Moroccan Arabic would pick
+ * English forms on one machine and Arabic forms on another. Its files carry
+ * all six Arabic forms (`_zero/_one/_two/_few/_many/_other`).
+ */
+const PLURAL_RULE_LOCALES: Readonly<Record<string, string>> = { ary: 'ar' };
+
+/** The locale whose plural rules an i18next language key uses (`ary` -> `ar`, else itself). */
+export function pluralLocale(lng: string): string {
+  return PLURAL_RULE_LOCALES[lng] ?? lng;
+}
+
+type RuleGetter = (code: string, options?: { ordinal?: boolean }) => Intl.PluralRules | undefined;
+const pinnedResolvers = new WeakSet<object>();
+
+/**
+ * Routes i18next's plural rule lookup through `pluralLocale`, so every
+ * plural suffix (`getSuffix`, `getSuffixes`, `needsPlural`) of `ary` follows
+ * Arabic rules on every machine. Idempotent per resolver instance.
+ */
+function pinPluralRules(): void {
+  const resolver = i18next.services.pluralResolver as { getRule?: RuleGetter } | undefined;
+  if (!resolver || typeof resolver.getRule !== 'function' || pinnedResolvers.has(resolver)) return;
+  const getRule = resolver.getRule.bind(resolver);
+  resolver.getRule = (code, options) => getRule(pluralLocale(code), options);
+  pinnedResolvers.add(resolver);
+}
+
 /** Builds `{ [bcp47]: { [ns]: json } }` from glob results keyed `./<folder>/<ns>.json`. */
 export function buildResources(modules: Record<string, unknown>): Resource {
   const out: Resource = {};
@@ -85,28 +134,30 @@ export const resources: Resource = buildResources(
   import.meta.glob('./en/*.json', { eager: true }) as Record<string, unknown>,
 );
 
-/** Lazy loaders for every non-English `./<folder>/<ns>.json`, one chunk each. */
-const lazyModules = import.meta.glob(['./*/*.json', '!./en/*.json']) as Record<string, () => Promise<unknown>>;
-
 const loading = new Map<string, Promise<void>>();
 
 /**
  * Loads every namespace of a language folder into i18next (under its BCP 47
  * key). Cached per folder; a failed load is forgotten so a later call retries.
- * English and unknown codes resolve immediately.
+ * English resolves immediately; unknown codes load nothing. The loader map
+ * itself is a lazy chunk (`lazyLocales.ts`), so it stays out of the entry.
  */
 export function loadLanguage(code: string): Promise<void> {
   if (code === DEFAULT_LANGUAGE) return Promise.resolve();
   const cached = loading.get(code);
   if (cached) return cached;
   const prefix = `./${code}/`;
-  const entries = Object.entries(lazyModules).filter(([path]) => path.startsWith(prefix));
-  const job = Promise.all(entries.map(async ([path, load]) => [path, await load()] as const)).then((mods) => {
-    const res = buildResources(Object.fromEntries(mods));
-    for (const [lng, bundles] of Object.entries(res)) {
-      for (const [ns, data] of Object.entries(bundles)) i18next.addResourceBundle(lng, ns, data, true, true);
-    }
-  });
+  const job = import('./lazyLocales')
+    .then(({ lazyModules }) => {
+      const entries = Object.entries(lazyModules).filter(([path]) => path.startsWith(prefix));
+      return Promise.all(entries.map(async ([path, load]) => [path, await load()] as const));
+    })
+    .then((mods) => {
+      const res = buildResources(Object.fromEntries(mods));
+      for (const [lng, bundles] of Object.entries(res)) {
+        for (const [ns, data] of Object.entries(bundles)) i18next.addResourceBundle(lng, ns, data, true, true);
+      }
+    });
   loading.set(code, job);
   job.catch(() => loading.delete(code));
   return job;
@@ -189,6 +240,8 @@ if (!i18next.isInitialized) {
   syncDocument(DEFAULT_LANGUAGE);
   ready = activate(storedLanguage());
 }
+// Also when another import initialised i18next first (tests, HMR).
+pinPluralRules();
 
 /**
  * Resolves when i18next is ready to render: the remembered language (or

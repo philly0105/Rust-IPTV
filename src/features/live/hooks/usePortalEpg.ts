@@ -15,7 +15,7 @@ export function usePortalEpg(
 ): UseQueryResult<RpcResult<'stalker.epg'>, RpcError> {
   return useQuery<RpcResult<'stalker.epg'>, RpcError>({
     queryKey: rpcKey('stalker.epg', args),
-    queryFn: async () => (await rpcRaw('stalker.epg', args)) as RpcResult<'stalker.epg'>,
+    queryFn: async ({ signal }) => (await rpcRaw('stalker.epg', args, { signal })) as RpcResult<'stalker.epg'>,
     enabled: opts.enabled,
     staleTime: opts.staleTime,
     retry: false,

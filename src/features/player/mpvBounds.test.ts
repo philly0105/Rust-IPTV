@@ -1,6 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { boundsClear, computeMpvBounds, computeMpvOverlay, intersect, measureMpvBounds, measureMpvLayout, rectOf, subtract, type Rect } from './mpvBounds';
+import {
+  boundsClear,
+  computeMpvBounds,
+  computeMpvLayout,
+  computeMpvOverlay,
+  dimOverlayCommand,
+  intersect,
+  LAYOUT_WATCH_SELECTOR,
+  measureMpvBounds,
+  measureMpvLayout,
+  measureScrim,
+  modalCovers,
+  parseRgb,
+  rectOf,
+  subtract,
+  type Rect,
+} from './mpvBounds';
 
 const R = (left: number, top: number, width: number, height: number): Rect => rectOf({ left, top, width, height });
 
@@ -242,5 +258,177 @@ describe('measureMpvLayout in picture-in-picture', () => {
     // A hidden layer (PiP off) is ignored: the bar is subtracted as when docked.
     document.getElementById('layer')!.hidden = true;
     expect(measureMpvLayout(surface)).toEqual({ bounds: { x: 0, y: 0, width: 480, height: 220 }, holes: [] });
+  });
+});
+
+describe('computeMpvLayout: overlays over the docked video (L2-desktop-3, L2-desktop-7)', () => {
+  const surface = { left: 0, top: 0, right: 1000, bottom: 600 };
+  const bar = { left: 0, top: 560, right: 1000, bottom: 600 };
+
+  it('shrinks by reserved chrome and cuts floating overlays out as holes', () => {
+    const tooltip = { left: 400.5, top: 100, right: 520, bottom: 130.2 };
+    expect(computeMpvLayout(surface, { reserved: [bar], overlays: [tooltip] })).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 400, y: 100, width: 120, height: 31 }],
+    });
+  });
+
+  it('keeps the video around a small dialog and hides it under one that covers most of it', () => {
+    const small = { left: 300, top: 150, right: 700, bottom: 400 };
+    expect(computeMpvLayout(surface, { overlays: [small], modals: [small] })).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 600 },
+      holes: [{ x: 300, y: 150, width: 400, height: 250 }],
+    });
+    const big = { left: -50, top: -50, right: 900, bottom: 700 };
+    expect(computeMpvLayout(surface, { overlays: [big], modals: [big] })).toEqual({ bounds: null, holes: [] });
+  });
+
+  it('measures the share a modal covers against the visible video only', () => {
+    const b = { x: 0, y: 0, width: 100, height: 100 };
+    expect(modalCovers(b, [])).toBe(false);
+    expect(modalCovers(b, [R(0, 0, 49, 100)])).toBe(false);
+    expect(modalCovers(b, [R(0, 0, 50, 100)])).toBe(true);
+    // Most of this dialog lies outside the video.
+    expect(modalCovers(b, [R(80, 0, 900, 900)])).toBe(false);
+  });
+});
+
+describe('measureMpvLayout: menus, tooltips and dialogs anywhere in the document', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function layout(extra: string, rects: Record<string, { left: number; top: number; width: number; height: number }>): Element {
+    document.body.innerHTML = `
+      <div data-player-host="" id="host">
+        <div data-mpv-surface="" id="surface"></div>
+        <div data-player-controls="" id="controls"></div>
+      </div>${extra}`;
+    const all = {
+      surface: { left: 0, top: 0, width: 1000, height: 560 },
+      controls: { left: 0, top: 560, width: 1000, height: 40 },
+      ...rects,
+    };
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1280);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const r = all[this.id as keyof typeof all] ?? { left: 0, top: 0, width: 1280, height: 800 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    });
+    return document.getElementById('surface')!;
+  }
+
+  it('cuts holes for a body-portalled menu and tooltip instead of covering them', () => {
+    const surface = layout('<div role="menu" id="menu"></div><div role="tooltip" id="tip"></div>', {
+      menu: { left: 600, top: 300, width: 225, height: 283 },
+      tip: { left: 100, top: 20, width: 80, height: 24 },
+    });
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [
+        { x: 600, y: 300, width: 225, height: 260 },
+        { x: 100, y: 20, width: 80, height: 24 },
+      ],
+    });
+  });
+
+  // L3-desktop-8: this pinned the bug. The playback options menu (and its track and sleep
+  // views) shrank the docked video from 396 to 222 px; it is cut out as a hole now.
+  it('cuts a menu inside the player host out as a hole and keeps the video its size', () => {
+    const surface = layout('', { menu: { left: 700, top: 360, width: 300, height: 200 } });
+    document.getElementById('host')!.insertAdjacentHTML('beforeend', '<div role="menu" id="menu"></div>');
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 700, y: 360, width: 300, height: 200 }],
+    });
+  });
+
+  it('a menu that pops up from the docked control bar is a hole, while the bar stays reserved', () => {
+    const surface = layout('', { menu: { left: 700, top: 320, width: 300, height: 236 } });
+    document.getElementById('controls')!.insertAdjacentHTML('beforeend', '<div role="menu" id="menu"></div>');
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 700, y: 320, width: 300, height: 236 }],
+    });
+  });
+
+  it("treats the player's own popover (data-mpv-overlay) as a hole even inside the host", () => {
+    const surface = layout('', { ctx: { left: 400, top: 380, width: 225, height: 283 } });
+    document.getElementById('host')!.insertAdjacentHTML('beforeend', '<div role="menu" data-mpv-overlay="" id="ctx"></div>');
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 400, y: 380, width: 225, height: 180 }],
+    });
+  });
+
+  it('keeps the video around a small modal and hides it under a large one', () => {
+    const surface = layout('<div role="dialog" aria-modal="true" id="dlg"></div>', {
+      dlg: { left: 350, top: 150, width: 300, height: 200 },
+    });
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 350, y: 150, width: 300, height: 200 }],
+    });
+    vi.restoreAllMocks();
+    const covered = layout('<div role="dialog" aria-modal="true" id="dlg"></div>', {
+      dlg: { left: 0, top: 0, width: 1280, height: 800 },
+    });
+    expect(measureMpvLayout(covered)).toEqual({ bounds: null, holes: [] });
+  });
+
+  it('skips an overlay that is laid out hidden before it is placed', () => {
+    const surface = layout('<div role="menu" id="menu" style="visibility: hidden"></div>', {
+      menu: { left: 600, top: 300, width: 225, height: 283 },
+    });
+    expect(measureMpvLayout(surface).holes).toEqual([]);
+  });
+});
+
+// L3-desktop-10: a dialog's backdrop cannot cover the native video, so mpv dims itself to match.
+describe('scrim dim', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('reads computed rgb colours in both syntaxes', () => {
+    expect(parseRgb('rgba(4, 8, 16, 0.72)')).toEqual({ r: 4, g: 8, b: 16, a: 0.72 });
+    expect(parseRgb('rgb(18 26 42 / 0.45)')).toEqual({ r: 18, g: 26, b: 42, a: 0.45 });
+    expect(parseRgb('rgb(0 0 0 / 78%)')).toEqual({ r: 0, g: 0, b: 0, a: 0.78 });
+    expect(parseRgb('rgb(1, 2, 3)')).toEqual({ r: 1, g: 2, b: 3, a: 1 });
+    expect(parseRgb('transparent')).toBeNull();
+  });
+
+  it("finds an open dialog's scrim over the video, and nothing once it closes", () => {
+    document.body.innerHTML = `
+      <div data-player-host=""><div data-mpv-surface="" id="surface"></div></div>
+      <div data-dialog-layer=""><div aria-hidden="true" class="fixed inset-0 bg-scrim" style="background-color: rgba(4, 8, 16, 0.72)"></div><div role="dialog" aria-modal="true"></div></div>`;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600, x: 0, y: 0, right: 800, bottom: 600, toJSON: () => ({}) } as DOMRect);
+    const surface = document.getElementById('surface')!;
+    expect(measureScrim(surface)).toEqual({ r: 4, g: 8, b: 16, a: 0.72 });
+    document.querySelector('[data-dialog-layer]')!.remove();
+    expect(measureScrim(surface)).toBeNull();
+  });
+
+  it('finds a scrim marked data-scrim whatever its classes (L3-cross-XB-6)', () => {
+    document.body.innerHTML = `
+      <div data-player-host=""><div data-mpv-surface="" id="surface"></div></div>
+      <div data-dialog-layer=""><div aria-hidden="true" data-scrim="" class="absolute bg-black/50" style="background-color: rgba(0, 0, 0, 0.5)"></div><div role="dialog" aria-modal="true"></div></div>`;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600, x: 0, y: 0, right: 800, bottom: 600, toJSON: () => ({}) } as DOMRect);
+    const surface = document.getElementById('surface')!;
+    expect(measureScrim(surface)).toEqual({ r: 0, g: 0, b: 0, a: 0.5 });
+    // Its arrival re-measures the layout too.
+    expect(document.querySelector('[data-scrim]')!.matches(LAYOUT_WATCH_SELECTOR)).toBe(true);
+  });
+
+  it('draws the scrim colour over the whole mpv window as an ASS rectangle, and removes it', () => {
+    const [name, id, format, data, ...sizes] = dimOverlayCommand({ r: 4, g: 8, b: 16, a: 0.72 });
+    expect([name, id, format, sizes]).toEqual(['osd-overlay', 63, 'ass-events', [0, 720, 0]]);
+    // BGR colour; ASS alpha counts transparency: 0.72 opaque is 0x47.
+    expect(data).toContain('\\1c&H100804&');
+    expect(data).toContain('\\1a&H47&');
+    expect(data).toMatch(/^\{\\an7\\pos\(0,0\)[^}]*\\p1\}m -10 -10 l 10000 -10 10000 10000 -10 10000\{\\p0\}$/);
+    expect(dimOverlayCommand(null)).toEqual(['osd-overlay', 63, 'none', '']);
   });
 });

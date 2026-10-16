@@ -33,11 +33,14 @@ function EpisodeRowImpl({
   episode: ep,
   playing,
   busy,
+  tabbable = false,
   onAction,
 }: {
   episode: EpisodeEntry;
   playing: boolean;
   busy: boolean;
+  /** The row is the list's tab stop: its buttons join the Tab order after it. */
+  tabbable?: boolean;
   onAction: (a: EpisodeAction, d: Download) => void;
 }) {
   const { t, i18n } = useTranslation('library');
@@ -48,7 +51,7 @@ function EpisodeRowImpl({
     <div
       className={cn(
         'flex h-full items-center gap-4 rounded-md px-3 hover:bg-surface-2',
-        playing && 'bg-surface-2 shadow-[inset_3px_0_0_var(--color-accent)]',
+        playing && 'bg-surface-2 shadow-[inset_3px_0_0_var(--color-accent)] rtl:shadow-[inset_-3px_0_0_var(--color-accent)]',
       )}
       data-testid="episode-row"
       data-missing={ep.missing || undefined}
@@ -83,7 +86,7 @@ function EpisodeRowImpl({
               title={t(k('episode', a))}
               icon={<Icon size={16} aria-hidden />}
               disabled={busy}
-              tabIndex={-1}
+              tabIndex={tabbable ? 0 : -1}
               data-action={a}
               onClick={() => onAction(a, d)}
             />

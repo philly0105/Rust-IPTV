@@ -1,6 +1,7 @@
 /** Opening a favorite / recent entry: live and radio play, movies and series open their detail page. */
 
-import type { ItemRef, ItemSnapshot, Source } from '@/api/types';
+import type { ItemRef, ItemSnapshot, PlaybackPosition, Source } from '@/api/types';
+import { queueSeriesFrom } from '@/features/vod/lib/episodeQueue';
 
 import { playItem } from '../deps';
 
@@ -45,6 +46,27 @@ export async function openEntry(
   if (snapshot.subtitle) args.subtitle = snapshot.subtitle;
   if (snapshot.posterUrl) args.posterUrl = snapshot.posterUrl;
   await playItem(args);
+}
+
+/**
+ * Continue watching: resumes the saved title in the player (the player picks
+ * up the saved position). A series episode also gets the series queue, so the
+ * next episode follows on its own, as it does when started from the detail page.
+ * Throws `SourceGoneError` when the owning source no longer exists.
+ */
+export async function resumePosition(p: PlaybackPosition, source: Source | undefined): Promise<void> {
+  if (!source) throw new SourceGoneError();
+  const title = p.snapshot?.title ?? p.ref.itemId;
+  const args: Parameters<typeof playItem>[0] = { ref: p.ref, title, isLive: false, isRadio: false, sourceKind: source.kind };
+  if (p.episodeId) args.episodeId = p.episodeId;
+  if (p.snapshot?.subtitle) args.subtitle = p.snapshot.subtitle;
+  if (p.snapshot?.posterUrl) args.posterUrl = p.snapshot.posterUrl;
+  await playItem(args);
+  if (p.ref.contentType === 'series' && p.episodeId) {
+    const queue: Parameters<typeof queueSeriesFrom>[0] = { ref: p.ref, sourceKind: source.kind, title, episodeId: p.episodeId };
+    if (p.snapshot?.posterUrl) queue.posterUrl = p.snapshot.posterUrl;
+    await queueSeriesFrom(queue);
+  }
 }
 
 /** "3 min ago", "yesterday", "2 weeks ago". */

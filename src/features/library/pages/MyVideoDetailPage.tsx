@@ -7,12 +7,13 @@
 import { ArrowLeft, FileWarning, FolderOpen, Play, RotateCcw, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { RpcError, isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
+import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 
 import { Button, EmptyState, ErrorState, PlayerStage, Poster, Skeleton, Toggle, useShortcut, useToast, usePlayerStore } from '../deps';
 import { ConfirmDialog, PageTitle, SectionHeading, SourceBadge } from '../components/bits';
@@ -22,7 +23,7 @@ import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useMyVideos, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes, formatClock } from '../lib/format';
-import { findEntry, groupBySeason, buildLibrary, type EpisodeEntry, type LibraryEntry } from '../lib/myvideos';
+import { entryTargetId, findEntry, groupBySeason, buildLibrary, type EpisodeEntry, type LibraryEntry } from '../lib/myvideos';
 import { playDownload } from '../lib/playDownload';
 
 type EpisodeListRow = { kind: 'header'; key: string; season?: number; count: number } | { kind: 'item'; key: string; episode: EpisodeEntry };
@@ -62,6 +63,15 @@ export function MyVideoDetailPage() {
   const { id: idParam } = useParams();
   const id = Number(idParam);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Opened from My Videos, Back steps back to it: same tab and search (?filter, ?q).
+  // Opened from anywhere else (a link, a reload), Back goes to the library.
+  const fromLibrary = (location.state as { back?: unknown } | null)?.back;
+  const back = typeof fromLibrary === 'string' && fromLibrary.startsWith('/my-videos') ? fromLibrary : '/my-videos';
+  const goBack = useCallback(() => {
+    if (typeof fromLibrary === 'string') navigate(-1);
+    else navigate(back);
+  }, [back, fromLibrary, navigate]);
   const { toast } = useToast();
   const query = useMyVideos();
   const { byId: sources } = useSourcesById();
@@ -85,10 +95,17 @@ export function MyVideoDetailPage() {
     if (playing?.url && playerUrl !== playing.url) setPlaying(null);
   }, [playerUrl, playing]);
 
-  // An entry that vanished because the user removed its last file returns to the library.
+  // The URL names one download. Removing that episode from a series must not
+  // strand the page: it follows the series to another of its episodes. An
+  // entry that vanished because its last file was removed returns to the library.
+  const entryKey = useRef<string | undefined>(undefined);
+  if (entry) entryKey.current = entry.key;
   useEffect(() => {
-    if (query.data && !entry && removedEntry.current) navigate('/my-videos', { replace: true });
-  }, [entry, navigate, query.data]);
+    if (!query.data || entry) return;
+    const same = entryKey.current ? library.find((e) => e.key === entryKey.current) : undefined;
+    if (same) navigate(`/my-videos/${entryTargetId(same)}`, { replace: true, state: location.state });
+    else if (removedEntry.current) navigate(back, { replace: true });
+  }, [back, entry, library, location.state, navigate, query.data]);
 
   const primary: Download | undefined = useMemo(() => {
     if (!entry) return undefined;
@@ -107,7 +124,7 @@ export function MyVideoDetailPage() {
       setStarting(true);
       setPlaying({ id: d.id });
       try {
-        await playDownload(fromStart ? { ...d, positionSeconds: 0 } : d);
+        await playDownload(d, { fromStart });
         setPlaying({ id: d.id, url: usePlayerStore.getState().source?.url ?? '' });
       } catch (err) {
         setPlaying(null);
@@ -132,6 +149,13 @@ export function MyVideoDetailPage() {
     [perform, play],
   );
 
+  // One toast for the whole series; failures still report per episode.
+  const redownloadSeries = async (downloads: Download[], title: string) => {
+    const results = await Promise.all(downloads.map((dl) => perform('redownload', dl, { quiet: true })));
+    const count = results.filter(Boolean).length;
+    if (count > 0) toast({ title: t('redownloadQueuedMany', { count, title }), variant: 'success' });
+  };
+
   const confirmRemove = async () => {
     if (!removeTarget) return;
     const target = removeTarget;
@@ -145,17 +169,24 @@ export function MyVideoDetailPage() {
 
   const backAction = useMemo(
     () => (
-      <Link to="/my-videos" className={buttonClass('ghost', 'sm')}>
+      <Link
+        to={back}
+        className={buttonClass('ghost', 'sm')}
+        onClick={(ev) => {
+          ev.preventDefault();
+          goBack();
+        }}
+      >
         <ArrowLeft size={16} aria-hidden className="rtl:rotate-180" />
         {t('backToLibrary')}
       </Link>
     ),
-    [t],
+    [back, goBack, t],
   );
   const pageTitle = entry?.title ?? t('myVideosTitle');
   usePageHeader(pageTitle, entry ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
 
-  useShortcut('backspace', () => navigate('/my-videos'), { description: t('backToLibrary'), area: t('myVideosTitle') });
+  useShortcut('backspace', goBack, { description: t('backToLibrary'), area: t('myVideosTitle') });
 
   if (query.isLoading)
     return (
@@ -194,7 +225,8 @@ export function MyVideoDetailPage() {
     );
   }
 
-  const source = sources.get((entry.kind === 'movie' ? entry.download : entry.latest).ref.sourceId);
+  const artSourceId = (entry.kind === 'movie' ? entry.download : entry.latest).ref.sourceId;
+  const source = sources.get(artSourceId);
   const movieMissing = entry.kind === 'movie' && entry.missing;
   const allMissing = entry.kind === 'series' && entry.missingCount === entry.episodes.length;
   const totalSize = (entry.kind === 'movie' ? [entry.download] : entry.episodes.map((e) => e.download)).reduce(
@@ -213,10 +245,10 @@ export function MyVideoDetailPage() {
           variant="primary"
           size="lg"
           icon={<RotateCcw size={18} aria-hidden />}
-          loading={entry.kind === 'movie' && pending.has(entry.download.id)}
+          loading={entry.kind === 'movie' ? pending.has(entry.download.id) : entry.episodes.some((ep) => pending.has(ep.download.id))}
           onClick={() => {
             if (entry.kind === 'movie') void perform('redownload', entry.download);
-            else for (const ep of entry.episodes) void perform('redownload', ep.download);
+            else void redownloadSeries(entry.episodes.map((ep) => ep.download), entry.title);
           }}
         >
           {t('redownload')}
@@ -266,7 +298,7 @@ export function MyVideoDetailPage() {
   );
 
   const facts = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-fg-muted">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[calc(13rem/15)] text-fg-muted">
       <SourceBadge source={source} />
       {entry.kind === 'series' && <span>{t('episodeCount', { count: entry.episodes.length })}</span>}
       {totalSize > 0 && <span className="font-display tabular-nums">{formatBytes(totalSize, i18n.language)}</span>}
@@ -293,7 +325,7 @@ export function MyVideoDetailPage() {
       rowHeight={(r) => (r.kind === 'header' ? SEASON_HEADER_HEIGHT : EPISODE_ROW_HEIGHT)}
       isFocusable={(r) => r.kind === 'item'}
       testId="episode-list"
-      renderRow={(r) =>
+      renderRow={(r, info) =>
         r.kind === 'header' ? (
           <SectionHeading title={r.season !== undefined ? t('seasonN', { season: r.season }) : t('otherEpisodes')} count={r.count} />
         ) : (
@@ -301,6 +333,7 @@ export function MyVideoDetailPage() {
             episode={r.episode}
             playing={watching && playing?.id === r.episode.download.id}
             busy={pending.has(r.episode.download.id)}
+            tabbable={info.tabStop}
             onAction={onEpisodeAction}
           />
         )
@@ -374,20 +407,13 @@ export function MyVideoDetailPage() {
       data-state="browse"
     >
       <div className="relative flex shrink-0 gap-6 lg:gap-10">
-        {entry.posterUrl && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -inset-x-6 -top-6 h-72 overflow-hidden opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)]"
-          >
-            <img src={entry.posterUrl} alt="" className="h-full w-full scale-110 object-cover blur-2xl" />
-          </div>
-        )}
+        {entry.posterUrl && <PosterGlow src={entry.posterUrl} sourceId={artSourceId} />}
         <div className={cn('relative w-32 shrink-0 md:w-44 xl:w-56', (movieMissing || allMissing) && 'opacity-60 grayscale')}>
-          <Poster src={entry.posterUrl} alt={entry.title} aspect="poster" />
+          <Poster src={entry.posterUrl} sourceId={artSourceId} alt={entry.title} aspect="poster" priority />
         </div>
         <div className="relative flex min-w-0 flex-1 flex-col justify-end gap-4 pb-1">
           <div className="flex min-w-0 flex-col gap-2">
-            <h1 className="text-2xl text-fg lg:text-[34px] lg:leading-tight">{pageTitle}</h1>
+            <h1 className="text-2xl text-fg lg:text-[calc(34rem/15)] lg:leading-tight">{pageTitle}</h1>
             {facts}
           </div>
           {missingPanel}
@@ -396,6 +422,25 @@ export function MyVideoDetailPage() {
       </div>
       {entry.kind === 'series' && <div className="flex min-h-0 flex-1 flex-col">{episodeList}</div>}
       {removeDialog}
+    </div>
+  );
+}
+
+/**
+ * The soft colour wash behind the header: the poster through the image cache,
+ * drawn quarter-size, blurred and scaled up (C5), fading out downward. Nothing
+ * at all when the picture fails, so no broken-image box shows through.
+ */
+function PosterGlow({ src, sourceId }: { src: string; sourceId: string }) {
+  const image = useImageChain([src], sourceId);
+  if (!image.url) return null;
+  return (
+    <div
+      aria-hidden
+      data-testid="myvideo-poster-glow"
+      className="pointer-events-none absolute -inset-x-6 -top-6 h-72 overflow-hidden opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)]"
+    >
+      <img key={image.url} src={image.url} alt="" draggable={false} decoding="async" referrerPolicy="no-referrer" onError={image.onError} className={QUARTER_BLUR} />
     </div>
   );
 }

@@ -1,16 +1,19 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CircleAlert, CircleCheck, Download, FileJson, Upload } from 'lucide-react';
+import { CircleAlert, CircleCheck, Download, FileJson, ShieldCheck, Upload } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { BackupImportResult } from '@/api/rpc';
 import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 
+import { requestPin } from '@/features/parental/gate';
+import { holdImportToasts } from '@/shell/effects';
+import { applyStatus, currentStatus } from '@/features/parental/status';
 import { Button, Dialog, useToast } from '@/ui';
 import { downloadText, readFileText } from '../../sources/lib/files';
 import { absoluteTime, formatCount } from '../../sources/lib/format';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import { MAX_BACKUP_BYTES, backupFileName, chooseBackupSavePath, inspectBackup, type BackupSummary } from '../lib/backup';
+import { MAX_BACKUP_BYTES, backupFileName, chooseBackupSavePath, inspectBackup, parentalOptionsDiffer, type BackupSummary } from '../lib/backup';
 import type { SectionProps } from './types';
 
 type Picked = { name: string; size: number; text: string; summary: BackupSummary };
@@ -27,6 +30,8 @@ export function BackupSection(_props: SectionProps) {
   const [pickError, setPickError] = useState<string | null>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [confirmReplace, setConfirmReplace] = useState(false);
+  // Merge of a file with new parental options while controls are locked: unlock first, or import without them.
+  const [askParental, setAskParental] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<BackupImportResult | null>(null);
   const [importError, setImportError] = useState<RpcError | null>(null);
@@ -93,23 +98,82 @@ export function BackupSection(_props: SectionProps) {
   const doImport = async () => {
     if (!picked) return;
     setConfirmReplace(false);
+    setAskParental(false);
     setImporting(true);
     setImportError(null);
+    // The section's toast and result card report the import, not one shell toast per restored source.
+    const release = holdImportToasts();
     try {
-      const r = await rpc('backup.import', { json: picked.text, mode });
+      // A merge returns once the sources are written; the ones that still need a catalog load afterwards.
+      const r = await rpc('backup.import', { json: picked.text, mode, background: mode === 'merge' });
       setResult(r);
       setPicked(null);
       // Everything may have changed: sources, catalog, favorites, settings.
       await queryClient.invalidateQueries();
-      toast({ variant: r.warnings.length ? 'info' : 'success', title: t('backupImported', { count: r.imported }) });
+      const refreshing = r.refreshing?.length ?? 0;
+      // `imported` counts sources added and sources merged into ones you have, so the copy claims neither.
+      const counts = t('backupResult', { imported: formatCount(r.imported, lang), skipped: formatCount(r.skipped, lang) });
+      toast({
+        variant: r.warnings.length ? 'info' : 'success',
+        title: t('backupImportDone'),
+        description: refreshing > 0 ? `${counts} ${t('backupRefreshing', { count: refreshing })}` : counts,
+      });
     } catch (e) {
-      setImportError(RpcError.from(e));
+      const err = RpcError.from(e);
+      // Replace removes every source and its parental locks, so the core wants an unlocked session.
+      // Ask for the PIN here and run the import again, rather than ending on an error with no way on.
+      if (mode === 'replace' && err.code === 'auth') {
+        const unlocked = await requestPin({
+          title: t('backupReplacePinTitle'),
+          description: t('backupReplacePinText'),
+          confirmLabel: t('backupReplaceConfirm'),
+          danger: true,
+          submit: async (pin) => {
+            applyStatus(await rpc('parental.unlock', { pin }));
+          },
+        });
+        if (unlocked) await doImport();
+        return;
+      }
+      setImportError(err);
     } finally {
+      release();
       setImporting(false);
     }
   };
 
-  const start = () => (mode === 'replace' ? setConfirmReplace(true) : void doImport());
+  /**
+   * Merge: the core applies the file's parental options only while controls are unlocked, and
+   * otherwise skips them with a warning (importing again re-downloads every source). So when the
+   * options would change something and the session is locked, ask first. Replace asks for the PIN
+   * on the core's refusal instead.
+   */
+  const startMerge = async () => {
+    if (!picked) return;
+    let locked = false;
+    try {
+      const s = await currentStatus();
+      locked = s.enabled && !s.unlocked && parentalOptionsDiffer(picked.summary.parental, s);
+    } catch {
+      // Unknown status: import, and the result says what was skipped.
+    }
+    if (locked) setAskParental(true);
+    else await doImport();
+  };
+
+  const unlockThenImport = async () => {
+    setAskParental(false);
+    const unlocked = await requestPin({
+      title: t('backupParentalPinTitle'),
+      confirmLabel: t('backupImportButton'),
+      submit: async (pin) => {
+        applyStatus(await rpc('parental.unlock', { pin }));
+      },
+    });
+    if (unlocked) await doImport();
+  };
+
+  const start = () => (mode === 'replace' ? setConfirmReplace(true) : void startMerge());
 
   return (
     <SettingsSection title={t('sectionBackup')} description={t('sectionBackupLead')} testId="settings-backup">
@@ -174,6 +238,13 @@ export function BackupSection(_props: SectionProps) {
               {picked.summary.exportedAt ? (
                 <p className="text-fg-muted">{t('backupExportedAt', { when: absoluteTime(picked.summary.exportedAt, lang) })}</p>
               ) : null}
+              {picked.summary.skipped > 0 ? (
+                <p className="text-warning" data-testid="backup-skipped">
+                  {picked.summary.skipped === picked.summary.playlists
+                    ? t('backupNoPlaylists')
+                    : t('backupSkippedEntries', { count: picked.summary.skipped })}
+                </p>
+              ) : null}
               {!picked.summary.includeSecrets && picked.summary.byKind.xtream + picked.summary.byKind.stalker > 0 ? (
                 <p className="text-warning">{t('backupNoSecrets')}</p>
               ) : null}
@@ -208,12 +279,17 @@ export function BackupSection(_props: SectionProps) {
       </SettingsGroup>
 
       {importError ? (
-        <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-4 text-sm">
+        <div role="alert" className="flex flex-wrap items-start gap-3 rounded-md border border-danger/50 bg-danger/10 p-4 text-sm" data-testid="backup-import-error">
           <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-medium text-fg">{t('backupImportFailed')}</p>
             <p className="text-fg-muted">{importError.message}</p>
           </div>
+          {picked ? (
+            <Button size="sm" variant="secondary" loading={importing} onClick={start} data-testid="backup-import-retry">
+              {t('retry')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -235,6 +311,26 @@ export function BackupSection(_props: SectionProps) {
           ) : null}
         </div>
       ) : null}
+
+      <Dialog
+        open={askParental}
+        onClose={() => setAskParental(false)}
+        title={t('backupParentalTitle')}
+        size="sm"
+        testId="backup-parental"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => void doImport()} data-testid="backup-parental-skip">
+              {t('backupParentalSkip')}
+            </Button>
+            <Button variant="primary" icon={<ShieldCheck aria-hidden className="size-4" />} onClick={() => void unlockThenImport()} data-autofocus="" data-testid="backup-parental-unlock">
+              {t('backupParentalUnlock')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-fg-muted">{t('backupParentalBody')}</p>
+      </Dialog>
 
       <Dialog
         open={confirmReplace}

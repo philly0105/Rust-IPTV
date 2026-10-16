@@ -33,14 +33,14 @@ export function OtherSourcesDialog({ open, onClose, current, currentSourceName, 
   ];
   return (
     <Dialog open={open} onClose={onClose} size="lg" title={t('otherSourcesTitle')} description={t('otherSourcesHint', { count: rows.length })}>
-      <ul className="flex flex-col divide-y divide-border">
+      <ul className="flex flex-col divide-y divide-divider">
         {rows.map(({ item, sourceName, isCurrent }) => {
           const pinned = isPinned(pin, item.ref);
           const rating = formatRating(item.rating, i18n.language);
           return (
             <li key={`${item.ref.sourceId}|${item.ref.itemId}`} className={cn('flex items-center gap-3 py-3', pinned && 'tuning-tick ps-3')}>
               <div className="w-10 shrink-0 overflow-hidden rounded-sm">
-                <Poster src={item.posterUrl} alt="" label={item.title} aspect="poster" />
+                <Poster src={item.posterUrl} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-fg">{sourceName}</div>

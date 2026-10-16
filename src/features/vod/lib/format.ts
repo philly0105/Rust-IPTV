@@ -1,7 +1,9 @@
 import type { PlaybackPosition } from '@/api/types';
+import { isWatchedReplay, MIN_RESUME_SECONDS } from '@/features/player/store';
 import { formatDurationParts, resetDurationFormatCache, type DurationFormatOptions } from '@/lib/duration';
 
-type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched'>>;
+type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> &
+  Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>;
 
 /** True when the row was marked watched (`userstate.setWatched`). */
 export function isWatched(pos: Partial<Pick<PlaybackPosition, 'watched'>> | undefined | null): boolean {
@@ -42,9 +44,16 @@ export function progressFraction(pos: ProgressInput | undefined | null): number 
   return Math.min(1, Math.max(0, pos.positionSeconds / pos.durationSeconds));
 }
 
-/** A saved position worth offering "Resume" for (past 10 s, before 95 %). */
+/**
+ * A saved position worth offering "Resume" for: past the player's own resume
+ * threshold (`MIN_RESUME_SECONDS`, so the label matches what playback does)
+ * and before 95 %. A watched row is not, except a watched movie replayed
+ * part-way to between 5 % and 95 % (`isWatchedReplay`, the player's rule):
+ * it resumes there and keeps its watched tick.
+ */
 export function isResumable(pos: ProgressInput | undefined | null): boolean {
-  if (!pos || isWatched(pos) || pos.positionSeconds < 10) return false;
+  if (!pos || !(pos.positionSeconds > MIN_RESUME_SECONDS)) return false;
+  if (isWatched(pos)) return isWatchedReplay(pos);
   if (!pos.durationSeconds) return true;
   return pos.positionSeconds < pos.durationSeconds * 0.95;
 }
@@ -86,6 +95,22 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// One shared pattern pair instead of three RegExps compiled per episode (L2-vod-10): a series'
+// first render cleans every season's titles, about 40 ms per 1000 episodes before.
+/** Any episode code; groups: 1 season and 2 episode of `S01E02`, 3 the season digit run and 4 the episode of `1x02`. */
+const ANY_CODE = String.raw`(?:S0*(\d+)\s*[.\-_ ]?\s*E0*(\d+)|(\d+)x0*(\d+))(?![0-9])`;
+const LEADING_CODE = new RegExp(`^${ANY_CODE}${SEP}`, 'i');
+const TRAILING_CODE = new RegExp(`${SEP}${ANY_CODE}$`, 'i');
+
+/** The last series-name prefix pattern: a season page cleans many titles of one series in a row. */
+let seriesPrefix: { series: string; re: RegExp } | undefined;
+
+/** The per-episode patterns, for numbers the shared ones do not cover (negative or fractional). */
+function cleanCodeSlow(t: string, season: number, episode: number): string {
+  const code = String.raw`(?:S0*${season}\s*[.\-_ ]?\s*E0*${episode}|0*${season}x0*${episode})(?![0-9])`;
+  return t.replace(new RegExp(`^${code}${SEP}`, 'i'), '').replace(new RegExp(`${SEP}${code}$`, 'i'), '');
+}
+
 /**
  * Episode title without the noise Xtream panels wrap around it:
  * `Captain Kindling - S01E02 - Last Call` -> `Last Call`. Strips a leading
@@ -97,10 +122,33 @@ export function cleanEpisodeTitle(title: string | undefined, seriesTitle: string
   const series = seriesTitle?.trim();
   if (series) {
     if (t.toLowerCase() === series.toLowerCase()) return '';
-    t = t.replace(new RegExp(`^${escapeRegExp(series)}${PREFIX_SEP}`, 'i'), '');
+    if (seriesPrefix?.series !== series) seriesPrefix = { series, re: new RegExp(`^${escapeRegExp(series)}${PREFIX_SEP}`, 'i') };
+    t = t.replace(seriesPrefix.re, '');
   }
-  const code = String.raw`(?:S0*${season}\s*[.\-_ ]?\s*E0*${episode}|0*${season}x0*${episode})(?![0-9])`;
-  t = t.replace(new RegExp(`^${code}${SEP}`, 'i'), '').replace(new RegExp(`${SEP}${code}$`, 'i'), '');
+  if (!Number.isInteger(season) || !Number.isInteger(episode) || season < 0 || episode < 0) return cleanCodeSlow(t, season, episode).trim();
+  const lead = LEADING_CODE.exec(t);
+  if (lead) {
+    const [s, e] = lead[1] !== undefined ? [lead[1], lead[2]] : [lead[3], lead[4]];
+    if (Number(s) === season && Number(e) === episode) t = t.slice(lead[0].length);
+  }
+  const trail = TRAILING_CODE.exec(t);
+  if (trail) {
+    if (trail[1] !== undefined) {
+      if (Number(trail[1]) === season && Number(trail[2]) === episode) t = t.slice(0, trail.index);
+    } else if (Number(trail[4]) === episode) {
+      // A trailing `1x02` may start inside a longer digit run ("102x05" holds season 2's "02x05").
+      const run = trail[3] ?? '';
+      const s = String(season);
+      if (run.endsWith(s)) {
+        let start = run.length - s.length;
+        while (start > 0 && run[start - 1] === '0') start--;
+        // Separators hold no digits, so the run starts at the match's first digit.
+        const runAt = trail.index + trail[0].search(/\d/);
+        // The whole run is the code: the separators before it go too. Otherwise the code starts mid-run.
+        t = start === 0 ? t.slice(0, trail.index) : t.slice(0, runAt + start);
+      }
+    }
+  }
   return t.trim();
 }
 

@@ -123,7 +123,7 @@ pub async fn list_page(
     }
     let first_page = pages[0].0;
     let total = total.unwrap_or_else(|| (first_page - 1) * ps + pages[0].1.len() as i64);
-    let last_needed = ((offset + limit - 1) / ps + 1).min(((total - 1).max(0)) / ps + 1);
+    let last_needed = last_needed_page(offset, limit, ps, total);
 
     if last_needed > first_page {
         let rest: Vec<(i64, Vec<Value>)> = stream::iter((first_page + 1)..=last_needed)
@@ -154,6 +154,16 @@ pub async fn list_page(
         offset,
         limit,
     })
+}
+
+/// Last 1-based portal page `list_page` must read for `[offset, offset +
+/// limit)` with `ps` items per page and `total` items. Saturating (D9):
+/// `total_items` comes from the portal and the offset from the UI.
+fn last_needed_page(offset: i64, limit: i64, ps: i64, total: i64) -> i64 {
+    let ps = ps.max(1);
+    let wanted = (offset.saturating_add(limit.saturating_sub(1)) / ps + 1).max(1);
+    let available = total.saturating_sub(1).max(0) / ps + 1;
+    wanted.min(available)
 }
 
 /// Category names of a source/content type, from the catalog.
@@ -199,9 +209,13 @@ pub async fn remember_rows(
             raw["__kind"] = Value::from("series");
         }
         let r = ItemRef::new(source_id, ct, id);
+        // `*` is the all-categories listing of a row that names none.
+        let category_id = (!row.category_id.is_empty() && row.category_id != "*")
+            .then(|| row.category_id.clone());
         let item = CachedItem {
             raw,
             category_name: names.get(&row.category_id).cloned(),
+            category_id,
         };
         runtime.remember(&r, item.clone());
         persisted.push((r, item));
@@ -342,9 +356,11 @@ fn season_number_from_name(name: &str) -> Option<i64> {
         .find("season")
         .map(|i| i + 6)
         .or_else(|| lower.find("сезон").map(|i| i + "сезон".len()));
+    // Slice `lower`, not `name`: lowercasing can change byte lengths
+    // ('İ' is 2 bytes, "i̇" is 3), so `lower`'s indexes are not `name`'s.
     let tail = match idx {
-        Some(i) => &name[i..],
-        None => name,
+        Some(i) => &lower[i..],
+        None => lower.as_str(),
     };
     let digits: String = tail
         .chars()
@@ -488,8 +504,7 @@ async fn vod_series_plan(
                             title: s(&e, "name").unwrap_or_else(|| format!("Episode {number}")),
                             plot: s(&e, "description"),
                             duration_seconds: n(&e, "time")
-                                .filter(|m| *m > 0)
-                                .map(|m| m * 60)
+                                .and_then(p::minutes_to_seconds)
                                 .or_else(|| n(&e, "duration").filter(|d| *d > 0)),
                             poster_url: ["cover", "screenshot_uri"].iter().find_map(|k| {
                                 absolutize(endpoint, e.get(*k).and_then(Value::as_str))
@@ -658,6 +673,18 @@ mod tests {
         assert_eq!(season_number_from_name("Specials"), None);
     }
 
+    /// B8-parsers: indexes found in `to_lowercase()` were used to slice the
+    /// original name; 'İ' lowercases to 3 bytes from 2, so this panicked.
+    #[test]
+    fn season_numbers_survive_length_changing_lowercase() {
+        assert_eq!(season_number_from_name("İİİİ Season 5"), Some(5));
+        assert_eq!(season_number_from_name("İ Сезон 7"), Some(7));
+        assert_eq!(season_number_from_name("ΣİSeasonİ"), None);
+        for name in ["İSEASON", "ẞİİİİİİİİİİİİ season", "Ⱥ season 2", "İ"] {
+            let _ = season_number_from_name(name);
+        }
+    }
+
     #[test]
     fn regular_season_plan() {
         let v = json!({"id": "12:2", "name": "Season 2", "cmd": "/media/12.mpg", "series": [1, "2", 3]});
@@ -676,5 +703,24 @@ mod tests {
         let plans = vec![plan];
         assert!(find_episode(&plans, "s|12:2|3").is_some());
         assert!(find_episode(&plans, "s|12:2|9").is_none());
+    }
+
+    /// D9: `total - 1` and `offset + limit - 1` overflowed on a hostile
+    /// `total_items` or an offset near i64::MAX.
+    #[test]
+    fn paging_math_saturates() {
+        // Normal: items 20..40 of 100 at 14 per page are on pages 2..=3.
+        assert_eq!(last_needed_page(20, 20, 14, 100), 3);
+        // Capped by the total.
+        assert_eq!(last_needed_page(0, 500, 14, 30), 3);
+        // Hostile totals and offsets: no overflow, sane answers.
+        assert_eq!(last_needed_page(0, 20, 14, i64::MIN), 1);
+        assert_eq!(last_needed_page(0, 20, 14, i64::MAX), 2);
+        assert_eq!(last_needed_page(i64::MAX, 20, 14, 100), 8);
+        assert_eq!(
+            last_needed_page(i64::MAX, i64::MAX, 14, i64::MAX),
+            i64::MAX / 14 + 1
+        );
+        assert_eq!(last_needed_page(0, i64::MIN, 0, 10), 1);
     }
 }

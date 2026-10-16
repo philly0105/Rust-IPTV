@@ -49,6 +49,27 @@ const MAX_WINDOW_COORD: i32 = 100_000;
 pub const EPG_OFFSET_RANGE: std::ops::RangeInclusive<i32> = -720..=720;
 /// Accepted `vodMinRating` range.
 pub const VOD_RATING_RANGE: std::ops::RangeInclusive<f64> = 0.0..=10.0;
+// account:
+/// Largest accepted `sourceRefreshIntervalHours` (one week).
+pub const MAX_REFRESH_INTERVAL_HOURS: u32 = 168;
+/// Largest accepted `accountExpiryWarnDays`.
+pub const MAX_EXPIRY_WARN_DAYS: u32 = 60;
+// appearance:
+/// Accepted `uiScale` range (90 % to 125 % of the base font size).
+pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f64> = 0.9..=1.25;
+/// `uiScale` is rounded to this many decimal places before validation, so
+/// floating-point noise from slider arithmetic (`0.8999999999999999`,
+/// `1.2500000000000002`) neither fails the range check nor gets stored.
+const UI_SCALE_DECIMALS: i32 = 4;
+// subtitles:
+/// Accepted `subtitlePosition` range: percent of the picture height subtitles
+/// are raised from the bottom (mpv `sub-pos = 100 - position`).
+pub const SUBTITLE_POSITION_RANGE: std::ops::RangeInclusive<u32> = 0..=40;
+// Run 3:
+/// Accepted `imageCacheMaxMb` range: the on-disk image cache cap in MB.
+pub const IMAGE_CACHE_MAX_MB_RANGE: std::ops::RangeInclusive<u32> = 50..=5000;
+/// Longest accepted `lastSeenVersion` (characters of `[0-9A-Za-z.+-]`).
+pub const LAST_SEEN_VERSION_MAX_LEN: usize = 32;
 
 /// Fields only the desktop app may change: they name executables, their
 /// arguments, and folders on the machine running the core. In server (PWA)
@@ -73,6 +94,45 @@ fn write_lock(state: &AppState) -> Arc<tokio::sync::Mutex<()>> {
     state.ext_or_insert_with(LOCK_KEY, || Arc::new(tokio::sync::Mutex::new(())))
 }
 
+/// Start of a masked secret; the UI's `maskSecret` uses the same form.
+pub const SECRET_MASK: &str = "\u{2022}\u{2022}\u{2022}\u{2022}";
+
+/// The mask plus the last 4 characters (only the mask for 4 or fewer).
+fn mask_secret(secret: &str) -> String {
+    let n = secret.chars().count();
+    if n <= 4 {
+        return SECRET_MASK.to_string();
+    }
+    let tail: String = secret.chars().skip(n - 4).collect();
+    format!("{SECRET_MASK}{tail}")
+}
+
+/// Settings as an RPC client or `settings.changed` sees them. In server
+/// mode the TMDB key is masked: a browser on the network never gets it back.
+/// The desktop app sees it unchanged.
+pub fn for_client(state: &AppState, mut s: Settings) -> Settings {
+    if !state.is_desktop {
+        s.tmdb.api_key = s.tmdb.api_key.as_deref().map(mask_secret);
+    }
+    s
+}
+
+/// Server mode: a patch that sends back the masked key (the UI resends the
+/// whole `tmdb` object, and an Undo after [`reset`] the pre-reset settings)
+/// keeps the stored key instead of overwriting it.
+fn unmask_key(patch: &mut Value) {
+    let Some(tmdb) = patch.get_mut("tmdb").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let masked = tmdb
+        .get("apiKey")
+        .and_then(Value::as_str)
+        .is_some_and(|k| k.trim().starts_with(SECRET_MASK));
+    if masked {
+        tmdb.remove("apiKey");
+    }
+}
+
 /// Current settings (from the cache).
 pub fn get(state: &AppState) -> Settings {
     state.settings_snapshot()
@@ -81,7 +141,7 @@ pub fn get(state: &AppState) -> Settings {
 /// Applies `patch` (a partial camelCase Settings object) over the current
 /// settings, validates, persists, refreshes the cache, and emits
 /// `settings.changed`. Returns the new settings.
-pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings> {
+pub async fn update(state: &Arc<AppState>, mut patch: Value) -> CoreResult<Settings> {
     if !patch.is_object() {
         return Err(CoreError::invalid("settings patch must be a JSON object"));
     }
@@ -89,6 +149,9 @@ pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings>
     let _guard = lock.lock().await;
 
     let current = state.settings_snapshot();
+    if !state.is_desktop {
+        unmask_key(&mut patch);
+    }
     let merged = merge(&current, &patch)?;
     if !state.is_desktop {
         // Before validation, so a server client cannot probe which paths exist.
@@ -110,11 +173,40 @@ pub async fn update(state: &Arc<AppState>, patch: Value) -> CoreResult<Settings>
     store(state, next).await
 }
 
-/// Restores the defaults, persists them, and emits `settings.changed`.
+/// Restores the defaults, persists them, and emits `settings.changed`. In
+/// server mode the [`DESKTOP_ONLY_FIELDS`] keep their values: a server
+/// client cannot set them, so an Undo that resent them would be refused and
+/// leave every setting reset (review round 3).
+///
+/// `tourCompleted` and `lastSeenVersion` also keep their values everywhere:
+/// they record what the user has already seen, not a preference, so a reset
+/// must not replay the first-run tour or show "What's new" for a version
+/// that did not change (Run 3 C7).
+///
+/// The added guide addresses (`epgUrls`) and the TMDB key (`tmdb.apiKey`)
+/// are kept everywhere too: like sources, they are data the user entered,
+/// not preferences, and a lost key or guide list cannot be restored from a
+/// default (L2-settings-9). `tmdb.enabled` and `tmdb.language` reset.
 pub async fn reset(state: &Arc<AppState>) -> CoreResult<Settings> {
     let lock = write_lock(state);
     let _guard = lock.lock().await;
-    store(state, Settings::default()).await
+    let current = state.settings_snapshot();
+    let mut next = Settings {
+        tour_completed: current.tour_completed,
+        last_seen_version: current.last_seen_version.clone(),
+        epg_urls: current.epg_urls.clone(),
+        ..Settings::default()
+    };
+    next.tmdb.api_key = current.tmdb.api_key.clone();
+    if !state.is_desktop {
+        next.mpv_path = current.mpv_path;
+        next.vlc_path = current.vlc_path;
+        next.mpv_args = current.mpv_args;
+        next.vlc_args = current.vlc_args;
+        next.downloads_dir = current.downloads_dir;
+        next.recordings_dir = current.recordings_dir;
+    }
+    store(state, next).await
 }
 
 /// Replaces the whole settings document (for modules that change one field,
@@ -158,13 +250,32 @@ pub fn check_desktop_only(current: &Settings, next: &Settings, fields: &[&str]) 
     Ok(())
 }
 
+/// Persists `next` (a user write: through the write gate), refreshes the
+/// cache, and emits `settings.changed`, except when only `lastRoute` changed:
+/// that is one window's navigation state, and broadcasting it made every
+/// window refetch and re-render its settings readers on each navigation.
+/// The caller gets the new settings in its reply.
 async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
     let json = serde_json::to_string(&next)?;
-    state.db_call(move |conn| persist_json(conn, &json)).await?;
-    *state.settings.write() = next.clone();
+    state
+        .db_write(move |conn| persist_json(conn, &json))
+        .await?;
+    let previous = std::mem::replace(&mut *state.settings.write(), next.clone());
     tracing::info!("settings updated");
-    state.emit("settings.changed", &next);
+    if !only_last_route_changed(&previous, &next) {
+        state.emit("settings.changed", for_client(state, next.clone()));
+    }
     Ok(next)
+}
+
+/// True when `a` and `b` differ in `lastRoute` alone.
+fn only_last_route_changed(a: &Settings, b: &Settings) -> bool {
+    a.last_route != b.last_route
+        && *a
+            == Settings {
+                last_route: a.last_route.clone(),
+                ..b.clone()
+            }
 }
 
 /// Merges `patch` over `current` and returns validated, normalized settings.
@@ -208,8 +319,22 @@ fn trim_opt(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Trims strings, maps empty optional strings to `None`, and de-duplicates EPG URLs.
+/// Rounds `v` to [`UI_SCALE_DECIMALS`] places. NaN and infinities pass through
+/// unchanged, so [`validate`] still rejects them.
+fn round_ui_scale(v: f64) -> f64 {
+    let factor = 10f64.powi(UI_SCALE_DECIMALS);
+    let rounded = (v * factor).round() / factor;
+    if rounded.is_finite() {
+        rounded
+    } else {
+        v
+    }
+}
+
+/// Trims strings, maps empty optional strings to `None`, de-duplicates EPG
+/// URLs, and strips floating-point noise from `uiScale`.
 pub fn normalize(mut s: Settings) -> Settings {
+    s.ui_scale = round_ui_scale(s.ui_scale);
     s.language = s.language.trim().to_ascii_lowercase();
     s.last_route = trim_opt(s.last_route);
     s.mpv_path = trim_opt(s.mpv_path);
@@ -261,6 +386,66 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
     if !next.vod_min_rating.is_finite() || !VOD_RATING_RANGE.contains(&next.vod_min_rating) {
         return Err(CoreError::invalid("vodMinRating must be between 0 and 10"));
     }
+    // account:
+    if next.source_refresh_interval_hours > MAX_REFRESH_INTERVAL_HOURS {
+        return Err(CoreError::invalid(format!(
+            "sourceRefreshIntervalHours must be between 0 and {MAX_REFRESH_INTERVAL_HOURS}"
+        )));
+    }
+    if next.account_expiry_warn_days > MAX_EXPIRY_WARN_DAYS {
+        return Err(CoreError::invalid(format!(
+            "accountExpiryWarnDays must be between 0 and {MAX_EXPIRY_WARN_DAYS}"
+        )));
+    }
+    // recording:
+    for (field, value, max) in [
+        (
+            "recordingPaddingBeforeMinutes",
+            next.recording_padding_before_minutes,
+            60,
+        ),
+        (
+            "recordingPaddingAfterMinutes",
+            next.recording_padding_after_minutes,
+            120,
+        ),
+        ("reminderLeadMinutes", next.reminder_lead_minutes, 60),
+    ] {
+        if value > max {
+            return Err(CoreError::invalid(format!(
+                "{field} must be between 0 and {max}"
+            )));
+        }
+    }
+    // appearance:
+    if !next.ui_scale.is_finite() || !UI_SCALE_RANGE.contains(&next.ui_scale) {
+        return Err(CoreError::invalid(format!(
+            "uiScale must be between {} and {}",
+            UI_SCALE_RANGE.start(),
+            UI_SCALE_RANGE.end()
+        )));
+    }
+    // subtitles:
+    if !SUBTITLE_POSITION_RANGE.contains(&next.subtitle_position) {
+        return Err(CoreError::invalid(format!(
+            "subtitlePosition must be a whole number between {} and {}",
+            SUBTITLE_POSITION_RANGE.start(),
+            SUBTITLE_POSITION_RANGE.end()
+        )));
+    }
+    // Run 3:
+    if !IMAGE_CACHE_MAX_MB_RANGE.contains(&next.image_cache_max_mb) {
+        return Err(CoreError::invalid(format!(
+            "imageCacheMaxMb must be a whole number between {} and {}",
+            IMAGE_CACHE_MAX_MB_RANGE.start(),
+            IMAGE_CACHE_MAX_MB_RANGE.end()
+        )));
+    }
+    if !is_valid_version_marker(&next.last_seen_version) {
+        return Err(CoreError::invalid(format!(
+            "lastSeenVersion must be empty or 1 to {LAST_SEEN_VERSION_MAX_LEN} letters, digits, '.', '+' or '-'"
+        )));
+    }
     let changed = |a: &Option<String>, b: &Option<String>| a != b;
     if changed(&current.mpv_path, &next.mpv_path) {
         check_file("mpvPath", next.mpv_path.as_deref())?;
@@ -275,6 +460,14 @@ pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
         check_dir("recordingsDir", next.recordings_dir.as_deref())?;
     }
     Ok(next)
+}
+
+/// `lastSeenVersion`: `''`, or 1..=[`LAST_SEEN_VERSION_MAX_LEN`] ASCII
+/// characters of `[0-9A-Za-z.+-]` (a semver such as `0.1.0` or `1.2.0-beta.1+42`).
+fn is_valid_version_marker(v: &str) -> bool {
+    v.len() <= LAST_SEEN_VERSION_MAX_LEN
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'+' | b'-'))
 }
 
 fn check_dir(field: &str, dir: Option<&str>) -> CoreResult<()> {
@@ -430,6 +623,333 @@ mod tests {
         let n = apply_patch(&cur, &json!({"mpvPath": "  ", "theme": "dark"})).unwrap();
         assert!(n.mpv_path.is_none());
         assert_eq!(n.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn appearance_fields_validate() {
+        use crate::model::{Accent, Density};
+        let cur = Settings::default();
+        let n = apply_patch(
+            &cur,
+            &json!({"accent": "violet", "oledBlack": true, "density": "compact", "zapBanner": false}),
+        )
+        .unwrap();
+        assert_eq!(n.accent, Accent::Violet);
+        assert!(n.oled_black);
+        assert_eq!(n.density, Density::Compact);
+        assert!(!n.zap_banner);
+        for accent in Accent::ALL {
+            let n = apply_patch(&cur, &json!({ "accent": accent.as_str() })).unwrap();
+            assert_eq!(n.accent, *accent);
+        }
+        assert!(apply_patch(&cur, &json!({"accent": "neon"})).is_err());
+        assert!(apply_patch(&cur, &json!({"accent": "Amber"})).is_err());
+        assert!(apply_patch(&cur, &json!({"density": "cozy"})).is_err());
+        assert!(apply_patch(&cur, &json!({"oledBlack": "yes"})).is_err());
+        assert!(apply_patch(&cur, &json!({"zapBanner": 1})).is_err());
+        // Removing a key falls back to its default.
+        let back = apply_patch(&n, &json!({"accent": null, "density": null})).unwrap();
+        assert_eq!(back.accent, Accent::Amber);
+        assert_eq!(back.density, Density::Comfortable);
+        let rails = apply_patch(&cur, &json!({"dashboardRails": {"myList": false}})).unwrap();
+        assert!(!rails.dashboard_rails.my_list);
+        assert!(rails.dashboard_rails.hero, "siblings keep their values");
+    }
+
+    #[test]
+    fn ui_scale_range_and_rounding() {
+        let cur = Settings::default();
+        let scale = |v: Value| apply_patch(&cur, &json!({ "uiScale": v })).map(|s| s.ui_scale);
+        assert_eq!(scale(json!(0.9)).unwrap(), 0.9);
+        assert_eq!(scale(json!(1.25)).unwrap(), 1.25);
+        assert_eq!(scale(json!(1)).unwrap(), 1.0, "integers are accepted");
+        assert_eq!(scale(json!(1.1)).unwrap(), 1.1);
+        // Slider arithmetic noise at both ends is accepted and cleaned.
+        assert_eq!(scale(json!(0.8999999999999999)).unwrap(), 0.9);
+        assert_eq!(scale(json!(1.2500000000000002)).unwrap(), 1.25);
+        assert_eq!(scale(json!(1.1500000000000001)).unwrap(), 1.15);
+        for bad in [
+            json!(0.85),
+            json!(0.895),
+            json!(1.26),
+            json!(1.3),
+            json!(0),
+            json!(-1),
+        ] {
+            let err = scale(bad.clone()).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("uiScale must be between 0.9 and 1.25"),
+                "{bad}: {err}"
+            );
+        }
+        assert!(scale(json!("1.1")).is_err(), "strings are rejected");
+        // NaN and infinities cannot travel in JSON; Rust callers of `save` are
+        // caught by `validate`.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let next = normalize(Settings {
+                ui_scale: bad,
+                ..Settings::default()
+            });
+            assert!(validate(&cur, next).is_err(), "{bad}");
+        }
+        assert_eq!(
+            round_ui_scale(f64::MAX),
+            f64::MAX,
+            "overflow keeps the value"
+        );
+    }
+
+    /// Run 2 C1: subtitle style enums, the 0..=40 position and Hide watched.
+    #[test]
+    fn subtitle_and_vod_fields_validate() {
+        use crate::model::{SubtitleBackground, SubtitleColor, SubtitleSize};
+        let cur = Settings::default();
+        let n = apply_patch(
+            &cur,
+            &json!({
+                "subtitleSize": "large",
+                "subtitleColor": "cyan",
+                "subtitleBackground": "shadow",
+                "subtitlePosition": 40,
+                "vodHideWatched": true
+            }),
+        )
+        .unwrap();
+        assert_eq!(n.subtitle_size, SubtitleSize::Large);
+        assert_eq!(n.subtitle_color, SubtitleColor::Cyan);
+        assert_eq!(n.subtitle_background, SubtitleBackground::Shadow);
+        assert_eq!(n.subtitle_position, 40);
+        assert!(n.vod_hide_watched);
+        for size in SubtitleSize::ALL {
+            let n = apply_patch(&cur, &json!({ "subtitleSize": size.as_str() })).unwrap();
+            assert_eq!(n.subtitle_size, *size);
+        }
+        for color in SubtitleColor::ALL {
+            let n = apply_patch(&cur, &json!({ "subtitleColor": color.as_str() })).unwrap();
+            assert_eq!(n.subtitle_color, *color);
+        }
+        for bg in SubtitleBackground::ALL {
+            let n = apply_patch(&cur, &json!({ "subtitleBackground": bg.as_str() })).unwrap();
+            assert_eq!(n.subtitle_background, *bg);
+        }
+        assert_eq!(
+            apply_patch(&cur, &json!({"subtitlePosition": 0}))
+                .unwrap()
+                .subtitle_position,
+            0
+        );
+        let err = apply_patch(&cur, &json!({"subtitlePosition": 41})).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("subtitlePosition must be a whole number between 0 and 40"),
+            "{err}"
+        );
+        for bad in [
+            json!({"subtitlePosition": -1}),
+            json!({"subtitlePosition": 12.5}),
+            json!({"subtitlePosition": "10"}),
+            json!({"subtitleSize": "huge"}),
+            json!({"subtitleSize": "x-large"}),
+            json!({"subtitleColor": "red"}),
+            json!({"subtitleColor": "#FFFFFF"}),
+            json!({"subtitleBackground": "none"}),
+            json!({"vodHideWatched": "yes"}),
+        ] {
+            assert!(apply_patch(&cur, &bad).is_err(), "{bad} should be invalid");
+        }
+        // Removing a key falls back to its default.
+        let back =
+            apply_patch(&n, &json!({"subtitleSize": null, "subtitlePosition": null})).unwrap();
+        assert_eq!(back.subtitle_size, SubtitleSize::Medium);
+        assert_eq!(back.subtitle_position, 0);
+        assert_eq!(back.subtitle_color, SubtitleColor::Cyan, "others are kept");
+        // A Rust caller of `save` is caught by `validate` too.
+        let next = normalize(Settings {
+            subtitle_position: 41,
+            ..Settings::default()
+        });
+        assert!(validate(&cur, next).is_err());
+        // None of the five is desktop-only.
+        for key in [
+            "subtitleSize",
+            "subtitleColor",
+            "subtitleBackground",
+            "subtitlePosition",
+            "vodHideWatched",
+        ] {
+            assert!(!DESKTOP_ONLY_FIELDS.contains(&key), "{key}");
+        }
+    }
+
+    /// Run 3 C1: the image cache cap (whole MB, 50..=5000) and the
+    /// onboarding markers.
+    #[test]
+    fn run3_fields_validate() {
+        let cur = Settings::default();
+        let n = apply_patch(
+            &cur,
+            &json!({"imageCacheMaxMb": 2000, "tourCompleted": true, "lastSeenVersion": "0.1.0"}),
+        )
+        .unwrap();
+        assert_eq!(n.image_cache_max_mb, 2000);
+        assert!(n.tour_completed);
+        assert_eq!(n.last_seen_version, "0.1.0");
+
+        let cap = |v: Value| apply_patch(&cur, &json!({ "imageCacheMaxMb": v }));
+        for ok in [50, 250, 500, 1000, 5000] {
+            assert_eq!(cap(json!(ok)).unwrap().image_cache_max_mb, ok);
+        }
+        for bad in [0, 49, 5001, 100_000] {
+            let err = cap(json!(bad)).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("imageCacheMaxMb must be a whole number between 50 and 5000"),
+                "{bad}: {err}"
+            );
+        }
+        for bad in [json!(-1), json!(250.5), json!("500"), json!(true)] {
+            assert!(cap(bad.clone()).is_err(), "{bad} should be invalid");
+        }
+
+        let version = |v: &str| {
+            apply_patch(&n, &json!({ "lastSeenVersion": v })).map(|s| s.last_seen_version)
+        };
+        for ok in [
+            "",
+            "0.1.0",
+            "1.2.0-beta.1+42",
+            "v2",
+            "A.b-C+d",
+            "12345678901234567890123456789012",
+        ] {
+            assert_eq!(version(ok).unwrap(), ok, "{ok:?}");
+        }
+        for bad in [
+            " 0.1.0",
+            "0.1.0 ",
+            "0 1",
+            "0.1.0_beta",
+            "1/2",
+            "<script>",
+            "ver\u{e9}",
+            "123456789012345678901234567890123",
+        ] {
+            let err = version(bad).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("lastSeenVersion must be empty or 1 to 32"),
+                "{bad:?}: {err}"
+            );
+        }
+        assert!(apply_patch(&cur, &json!({"lastSeenVersion": 1})).is_err());
+        assert!(apply_patch(&cur, &json!({"tourCompleted": "yes"})).is_err());
+
+        // Removing a key falls back to its default.
+        let back = apply_patch(
+            &n,
+            &json!({"imageCacheMaxMb": null, "lastSeenVersion": null}),
+        )
+        .unwrap();
+        assert_eq!(back.image_cache_max_mb, 500);
+        assert_eq!(back.last_seen_version, "");
+        assert!(back.tour_completed, "others are kept");
+        // A Rust caller of `save` is caught by `validate` too.
+        for next in [
+            Settings {
+                image_cache_max_mb: 10,
+                ..Settings::default()
+            },
+            Settings {
+                last_seen_version: "x".repeat(33),
+                ..Settings::default()
+            },
+        ] {
+            assert!(validate(&cur, normalize(next)).is_err());
+        }
+        // Server mode may change all three (the cap sizes the server's cache).
+        for key in ["imageCacheMaxMb", "tourCompleted", "lastSeenVersion"] {
+            assert!(!DESKTOP_ONLY_FIELDS.contains(&key), "{key}");
+        }
+    }
+
+    /// `settings.reset` restores every preference, including the image cache
+    /// cap, but keeps the onboarding markers so neither the tour nor "What's
+    /// new" comes back for a version the user has already seen.
+    #[tokio::test]
+    async fn reset_keeps_onboarding_markers() {
+        for desktop in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new(
+                dir.path().to_path_buf(),
+                Arc::new(crate::events::NoopSink),
+                desktop,
+            )
+            .await
+            .unwrap();
+            update(
+                &state,
+                json!({
+                    "theme": "dark",
+                    "imageCacheMaxMb": 1000,
+                    "tourCompleted": true,
+                    "lastSeenVersion": "0.1.0"
+                }),
+            )
+            .await
+            .unwrap();
+            let after = reset(&state).await.unwrap();
+            assert_eq!(after.theme, Settings::default().theme, "desktop={desktop}");
+            assert_eq!(after.image_cache_max_mb, 500, "desktop={desktop}");
+            assert!(after.tour_completed, "desktop={desktop}");
+            assert_eq!(after.last_seen_version, "0.1.0", "desktop={desktop}");
+            assert_eq!(get(&state), after, "the cache holds what was stored");
+        }
+    }
+
+    /// L2-settings-9: the guide addresses and the TMDB key are user data and
+    /// survive a reset in both modes; the rest of `tmdb` resets.
+    #[tokio::test]
+    async fn reset_keeps_epg_urls_and_the_tmdb_key() {
+        for desktop in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new(
+                dir.path().to_path_buf(),
+                Arc::new(crate::events::NoopSink),
+                desktop,
+            )
+            .await
+            .unwrap();
+            update(
+                &state,
+                json!({
+                    "epgUrls": ["http://a/guide.xml"],
+                    "tmdb": {"enabled": true, "apiKey": "abcdefghijklmnop1234", "language": "de-DE"}
+                }),
+            )
+            .await
+            .unwrap();
+            let after = reset(&state).await.unwrap();
+            assert_eq!(
+                after.epg_urls,
+                vec!["http://a/guide.xml"],
+                "desktop={desktop}"
+            );
+            assert_eq!(
+                after.tmdb.api_key.as_deref(),
+                Some("abcdefghijklmnop1234"),
+                "desktop={desktop}"
+            );
+            let defaults = Settings::default();
+            assert_eq!(
+                after.tmdb.enabled, defaults.tmdb.enabled,
+                "desktop={desktop}"
+            );
+            assert_eq!(
+                after.tmdb.language, defaults.tmdb.language,
+                "desktop={desktop}"
+            );
+        }
     }
 
     #[test]

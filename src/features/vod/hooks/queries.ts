@@ -4,11 +4,12 @@
  * reaches them.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useMemo } from 'react';
+import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef } from 'react';
 
+import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
 import { onAppEvent } from '@/api/events';
-import { invalidate, useRpcQuery } from '@/api/query';
+import { invalidate, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type {
   ItemRef,
@@ -26,38 +27,123 @@ import type {
 import { DEFAULT_SETTINGS } from '@/api/types';
 
 import { buildPageRequest, type GridQueryInput } from '../lib/paging';
+import { invalidateWatched } from '../lib/watchedQueries';
 
-/** Grid pages stay cached for a minute after their cells scroll away. */
-const PAGE_CACHE_MS = 60_000;
+/**
+ * Grid pages, SQLite or portal, use the catalog row of the C4 table (2 min fresh, 10 min
+ * cached), so going back to a grid within that time shows the pages without a refetch.
+ * Explicit here so portal commands (`stalker.movies`) get the same timing.
+ */
+const PAGE_TIMING = queryDefaultsFor('catalog.movies');
 
+/** Detail data stays fresh for 5 minutes, so a hover prefetch is still good when the page opens. */
+export const DETAIL_STALE_MS = 5 * 60_000;
+
+// Timing comes from queryDefaultsFor (C4): events and setSettingsCache keep settings fresh.
 export function useSettings(): Settings {
-  const q = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const q = useRpcQuery('settings.get', undefined);
   return q.data ?? DEFAULT_SETTINGS;
 }
 
+/** How many continue-watching entries a grid reads to mark resumable posters. */
+const RESUME_LOOKUP_LIMIT = 500;
+
+/** `sourceId|contentType|itemId` for matching saved positions to grid items. */
+export function resumeKey(ref: ItemRef): string {
+  return `${ref.sourceId}|${ref.contentType}|${ref.itemId}`;
+}
+
+/**
+ * Watched fraction per title for one source and kind, from continue watching
+ * (newest first, so a series shows the episode you were last in). Grids draw
+ * it as the thin progress bar on the poster.
+ */
+export function useResumeMap(sourceId: string, kind: 'movie' | 'series'): Map<string, number> {
+  return useResumeLookup(!!sourceId, (ref) => ref.sourceId === sourceId && ref.contentType === kind, `${sourceId}|${kind}`);
+}
+
+/**
+ * Watched fraction per title across every source (search results, rails that
+ * mix sources), keyed by `resumeKey`. `accept` narrows which refs count;
+ * `filterKey` names what `accept` checks, so a new filter recomputes the map.
+ */
+export function useResumeLookup(enabled = true, accept?: (ref: ItemRef) => boolean, filterKey = ''): Map<string, number> {
+  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { enabled });
+  const acceptRef = useRef(accept);
+  acceptRef.current = accept;
+  return useMemo(() => {
+    const out = new Map<string, number>();
+    for (const p of q.data ?? []) {
+      if (p.watched || (p.ref.contentType !== 'movie' && p.ref.contentType !== 'series')) continue;
+      if (acceptRef.current && !acceptRef.current(p.ref)) continue;
+      if (!p.durationSeconds || !Number.isFinite(p.durationSeconds) || p.durationSeconds <= 0) continue;
+      const key = resumeKey(p.ref);
+      if (out.has(key)) continue;
+      const f = Math.min(1, Math.max(0, p.positionSeconds / p.durationSeconds));
+      if (f > 0) out.set(key, f);
+    }
+    return out;
+  }, [q.data, filterKey]);
+}
+
+/**
+ * One source. Seeded from the cached `sources.list` (the sidebar loads it at startup), so a VOD
+ * page knows the source's name and kind in its first frame instead of after a `sources.get`
+ * round trip: its shelves and toolbars mount at once and nothing shifts when the record arrives
+ * (L2-vod-5). The seed counts as old as the list, so the usual staleness rules still refetch it.
+ */
 export function useSource(sourceId: string | undefined): UseQueryResult<Source, RpcError> {
-  return useRpcQuery('sources.get', { id: sourceId ?? '' }, { enabled: !!sourceId, staleTime: 60_000 });
+  const qc = useQueryClient();
+  const args = { id: sourceId ?? '' };
+  const listKey = rpcKey('sources.list', undefined);
+  return useQuery<Source, RpcError>({
+    queryKey: rpcKey('sources.get', args),
+    queryFn: async ({ signal }) => (await rpcRaw('sources.get', args, { signal })) as Source,
+    enabled: !!sourceId,
+    initialData: () => (sourceId ? qc.getQueryData<Source[]>(listKey)?.find((s) => s.id === sourceId) : undefined),
+    initialDataUpdatedAt: () => qc.getQueryState(listKey)?.dataUpdatedAt,
+  });
 }
 
 export function useSourcesList(): UseQueryResult<Source[], RpcError> {
-  return useRpcQuery('sources.list', undefined, { staleTime: 60_000 });
+  return useRpcQuery('sources.list', undefined);
 }
 
-/** One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected. */
+/**
+ * True when two page-query keys ask for the same slot of the same grid: the same command, source,
+ * category, offset and page size. Sort, search, rating, years and Hide watched may differ.
+ */
+export function sameGridSlot(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a[0] !== b[0]) return false;
+  const slot = (k: unknown) => {
+    if (typeof k !== 'object' || k === null) return k;
+    const { sourceId, categoryId, query } = k as { sourceId?: unknown; categoryId?: unknown; query?: { offset?: unknown; limit?: unknown } };
+    return { sourceId, categoryId, offset: query?.offset, limit: query?.limit };
+  };
+  return JSON.stringify(slot(a[1])) === JSON.stringify(slot(b[1]));
+}
+
+/**
+ * One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected.
+ * A new sort, search, rating, year range or Hide watched keeps each page's previous titles on
+ * screen until the new page answers (L2-vod-8, L3-vod-3), so the grid stays mounted and its cells
+ * refill, instead of the whole grid dropping to skeletons and every cell being built again.
+ */
 export function useVodPage(
   input: GridQueryInput | undefined,
   pageIndex: number,
 ): UseQueryResult<Page<VodItem | SeriesItem>, RpcError> {
   const req = input ? buildPageRequest(input, pageIndex) : undefined;
+  const queryKey = req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'];
   return useQuery<Page<VodItem | SeriesItem>, RpcError>({
-    queryKey: req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'],
-    queryFn: async () => {
+    queryKey,
+    queryFn: async ({ signal }) => {
       if (!req) throw new RpcError('invalid', 'No source');
-      return (await rpcRaw(req.cmd, req.args)) as Page<VodItem | SeriesItem>;
+      return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
     enabled: !!req,
-    staleTime: PAGE_CACHE_MS,
-    gcTime: PAGE_CACHE_MS,
+    placeholderData: (prev, prevQuery) => (prev && prevQuery && sameGridSlot(prevQuery.queryKey, queryKey) ? prev : undefined),
+    ...PAGE_TIMING,
   });
 }
 
@@ -72,41 +158,43 @@ export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: b
   return useInfiniteQuery<Page<VodItem | SeriesItem>, RpcError>({
     queryKey: first ? [first.cmd, { ...first.args, query: { ...first.args.query, offset: undefined }, inOrder: true }] : ['catalog.movies', 'disabled-in-order'],
     initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }) => {
       if (!input) throw new RpcError('invalid', 'No source');
       const req = buildPageRequest(input, pageParam as number);
-      return (await rpcRaw(req.cmd, req.args)) as Page<VodItem | SeriesItem>;
+      return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
     getNextPageParam: (last, pages) => {
       const loaded = pages.reduce((n, p) => n + p.items.length, 0);
       return last.items.length > 0 && loaded < last.total ? pages.length : undefined;
     },
     enabled: enabled && !!input,
-    staleTime: PAGE_CACHE_MS,
-    gcTime: PAGE_CACHE_MS,
+    ...PAGE_TIMING,
   });
 }
 
-/** Recently added rail. Stalker VOD is not in SQLite, so it reads the portal's first page sorted by added. */
+/**
+ * Recently added rail. Stalker VOD is not in SQLite, so it reads the portal's first page sorted by added.
+ * The SQLite args come from {@link recentlyAddedArgs}, which the boot prefetch asks with too (L3-ui-data-x7).
+ */
 export function useRecentlyAdded(
   source: Source | undefined,
   kind: 'movie' | 'series',
-  limit = 24,
+  limit = RECENTLY_ADDED_LIMIT,
 ): UseQueryResult<(VodItem | SeriesItem)[], RpcError> {
   return useQuery<(VodItem | SeriesItem)[], RpcError>({
     queryKey: source?.kind === 'stalker'
       ? [kind === 'movie' ? 'stalker.movies' : 'stalker.series', { sourceId: source.id, query: { offset: 0, limit: 28, sort: 'added', dir: 'desc' } }]
-      : ['catalog.recentlyAdded', { sourceId: source?.id ?? '', contentType: kind, limit }],
-    queryFn: async () => {
+      : ['catalog.recentlyAdded', recentlyAddedArgs(source?.id ?? '', kind, limit)],
+    queryFn: async ({ signal }) => {
       if (!source) return [];
       if (source.kind === 'stalker') {
         const page = (await rpcRaw(kind === 'movie' ? 'stalker.movies' : 'stalker.series', {
           sourceId: source.id,
           query: { offset: 0, limit: 28, sort: 'added', dir: 'desc' },
-        })) as Page<VodItem | SeriesItem>;
+        }, { signal })) as Page<VodItem | SeriesItem>;
         return page.items.slice(0, limit);
       }
-      return (await rpcRaw('catalog.recentlyAdded', { sourceId: source.id, contentType: kind, limit })) as (VodItem | SeriesItem)[];
+      return (await rpcRaw('catalog.recentlyAdded', recentlyAddedArgs(source.id, kind, limit), { signal })) as (VodItem | SeriesItem)[];
     },
     enabled: !!source,
     staleTime: 60_000,
@@ -119,36 +207,59 @@ function detailCommand(sourceKind: SourceKind, kind: 'movie' | 'series'): string
   return 'catalog.item';
 }
 
-/** Movie detail: provider detail for portals; for m3u the catalog row wrapped as a detail. */
-export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
-  const cmd = source ? detailCommand(source.kind, 'movie') : 'catalog.item';
-  return useQuery<VodDetail, RpcError>({
-    queryKey: [cmd, { ref }],
-    queryFn: async () => {
-      const res = await rpcRaw(cmd, { ref });
-      if (cmd === 'catalog.item') return { item: res as VodItem, cast: [], backdrops: [], providerDetailsUnavailable: false };
-      return res as VodDetail;
-    },
-    enabled: !!source,
-    staleTime: 5 * 60_000,
+/** Only the ItemRef fields, so a ref carrying extra properties still hits the same cache entry. */
+function plainRef(ref: ItemRef): ItemRef {
+  return { sourceId: ref.sourceId, contentType: ref.contentType, itemId: ref.itemId };
+}
+
+/**
+ * An m3u playlist has no provider detail: the detail query caches the bare `catalog.item` row
+ * under `['catalog.item', { ref }]`, the key flat `useRpcQuery('catalog.item')` readers (the
+ * player, live pages) share, so the two never hold different shapes for one ref; `select`
+ * wraps it as a detail (L2 XB2-34).
+ */
+function toMovieDetail(data: VodDetail | VodItem): VodDetail {
+  return 'item' in data ? data : { item: data, cast: [], backdrops: [], providerDetailsUnavailable: false };
+}
+
+/** As {@link toMovieDetail}; m3u playlists have no series metadata, so the row has no episodes. */
+function toSeriesDetail(data: SeriesDetail | SeriesItem): SeriesDetail {
+  return 'item' in data ? data : { item: data, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
+}
+
+/**
+ * Movie detail query: provider detail for portals; for m3u the catalog row, wrapped as a detail
+ * by `select`. Shared by useMovieDetail and the hover prefetch (C4), so both use one key and fn.
+ */
+export function movieDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
+  const cmd = sourceKind ? detailCommand(sourceKind, 'movie') : 'catalog.item';
+  const args = { ref: plainRef(ref) };
+  return queryOptions<VodDetail | VodItem, RpcError, VodDetail>({
+    queryKey: [cmd, args],
+    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal })) as VodDetail | VodItem,
+    select: toMovieDetail,
+    staleTime: DETAIL_STALE_MS,
   });
 }
 
-export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<SeriesDetail, RpcError> {
-  const cmd = source ? detailCommand(source.kind, 'series') : 'xtream.seriesDetail';
-  return useQuery<SeriesDetail, RpcError>({
-    queryKey: [cmd, { ref }],
-    queryFn: async () => {
-      if (cmd === 'catalog.item') {
-        // m3u playlists have no series metadata; show the row with no episodes.
-        const item = (await rpcRaw(cmd, { ref })) as SeriesItem;
-        return { item, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
-      }
-      return (await rpcRaw(cmd, { ref })) as SeriesDetail;
-    },
-    enabled: !!source,
-    staleTime: 5 * 60_000,
+/** Series detail query, shared by useSeriesDetail and the hover prefetch (C4). */
+export function seriesDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
+  const cmd = sourceKind ? detailCommand(sourceKind, 'series') : 'xtream.seriesDetail';
+  const args = { ref: plainRef(ref) };
+  return queryOptions<SeriesDetail | SeriesItem, RpcError, SeriesDetail>({
+    queryKey: [cmd, args],
+    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal })) as SeriesDetail | SeriesItem,
+    select: toSeriesDetail,
+    staleTime: DETAIL_STALE_MS,
   });
+}
+
+export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
+  return useQuery({ ...movieDetailQuery(source?.kind, ref), enabled: !!source });
+}
+
+export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<SeriesDetail, RpcError> {
+  return useQuery({ ...seriesDetailQuery(source?.kind, ref), enabled: !!source });
 }
 
 interface TmdbLookup {
@@ -168,16 +279,16 @@ function lookupArgs(item: Pick<VodItem, 'title' | 'titleBase' | 'year' | 'tmdbId
 /** TMDB movie lookup, only when enrichment is on. Provider tmdbId goes first (the server tries it before the title). */
 export function useTmdbMovie(item: VodItem | undefined, enabled: boolean): UseQueryResult<TmdbMovie | null, RpcError> {
   const args = lookupArgs(item);
-  return useRpcQuery('tmdb.movie', args ?? { title: '' }, { enabled: enabled && !!args, staleTime: Infinity });
+  return useRpcQuery('tmdb.movie', args ?? { title: '' }, { enabled: enabled && !!args });
 }
 
 export function useTmdbTv(item: SeriesItem | undefined, enabled: boolean): UseQueryResult<TmdbTv | null, RpcError> {
   const args = lookupArgs(item);
-  return useRpcQuery('tmdb.tv', args ?? { title: '' }, { enabled: enabled && !!args, staleTime: Infinity });
+  return useRpcQuery('tmdb.tv', args ?? { title: '' }, { enabled: enabled && !!args });
 }
 
 export function useTmdbSimilar(mediaType: 'movie' | 'tv', tmdbId: number | undefined, enabled: boolean) {
-  return useRpcQuery('tmdb.similar', { mediaType, tmdbId: tmdbId ?? 0 }, { enabled: enabled && !!tmdbId, staleTime: Infinity });
+  return useRpcQuery('tmdb.similar', { mediaType, tmdbId: tmdbId ?? 0 }, { enabled: enabled && !!tmdbId });
 }
 
 export function useIsFavorite(ref: ItemRef): boolean {
@@ -225,11 +336,11 @@ export function useTwinProbe(source: Source | undefined, ref: ItemRef, enabled: 
   const twin: ItemRef = { ...ref, contentType: ref.contentType === 'movie' ? 'series' : 'movie' };
   return useQuery<ItemRef | null, RpcError>({
     queryKey: ['vod.twin', { ref: twin, kind: source?.kind }],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!source) return null;
       const cmd = source.kind === 'stalker' ? detailCommand('stalker', twin.contentType === 'movie' ? 'movie' : 'series') : 'catalog.item';
       try {
-        await rpcRaw(cmd, { ref: twin });
+        await rpcRaw(cmd, { ref: twin }, { signal });
         return twin;
       } catch {
         return null;
@@ -251,7 +362,7 @@ export function useTmdbKeyMissing(settings: Settings): boolean {
   const inSettings = !!settings.tmdb.apiKey?.trim();
   const q = useQuery<{ ok: boolean; message?: string }, RpcError>({
     queryKey: ['tmdb.testKey', { apiKey: '' }],
-    queryFn: async () => (await rpcRaw('tmdb.testKey', { apiKey: '' })) as { ok: boolean; message?: string },
+    queryFn: async ({ signal }) => (await rpcRaw('tmdb.testKey', { apiKey: '' }, { signal })) as { ok: boolean; message?: string },
     enabled: on && !inSettings,
     staleTime: Infinity,
     retry: false,
@@ -263,6 +374,8 @@ export interface SetWatchedArgs {
   ref: ItemRef;
   episodeIds?: string[];
   watched: boolean;
+  /** With `episodeIds`: also set the series-level row, after the episodes (L1-vod-1, `lib/seriesWatched`). */
+  series?: boolean;
 }
 
 /**
@@ -272,17 +385,21 @@ export interface SetWatchedArgs {
 export function useSetWatched() {
   const qc = useQueryClient();
   return useMutation<void, RpcError, SetWatchedArgs>({
-    mutationFn: async ({ ref, episodeIds, watched }) => {
+    mutationFn: async ({ ref, episodeIds, watched, series }) => {
       if (!episodeIds) {
         await rpcRaw('userstate.setWatched', { ref, watched });
         return;
       }
       await Promise.all(episodeIds.map((episodeId) => rpcRaw('userstate.setWatched', { ref, episodeId, watched })));
+      if (series) await rpcRaw('userstate.setWatched', { ref, watched });
     },
-    onSettled: async () => {
-      await qc.invalidateQueries({
-        predicate: (q) => typeof q.queryKey[0] === 'string' && (q.queryKey[0].startsWith('positions.') || q.queryKey[0].startsWith('userstate.')),
-      });
-    },
+    onSettled: () => invalidateWatched(qc),
   });
 }
+
+/**
+ * Refreshes what a watched mark changes: positions, user state, My List, and
+ * the grid pages that "Hide watched" filters in the core (C4). Lives in
+ * `lib/watchedQueries` so the player store can use it after a finishing save.
+ */
+export { invalidateWatched };

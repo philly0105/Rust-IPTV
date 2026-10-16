@@ -28,6 +28,11 @@ pub const FALLBACK_EXTENSION: &str = "bin";
 /// Stem length cap in characters. Leaves room for ` (999)`, the extension, and
 /// `.part` inside the 255-character component limit of NTFS and ext4.
 pub const MAX_STEM_CHARS: usize = 150;
+/// Stem length cap in UTF-8 bytes. ext4 limits a name to 255 bytes and NTFS
+/// to 255 UTF-16 units (never more than the UTF-8 byte count), so 200 bytes
+/// plus ` (10000)`, a dot, an 8-character extension and `.part` always fit:
+/// 150 emoji or CJK characters would not.
+pub const MAX_STEM_BYTES: usize = 200;
 /// Highest numbered suffix tried before giving up.
 const MAX_SUFFIX: u32 = 10_000;
 
@@ -67,6 +72,10 @@ pub fn sanitize_stem(raw: &str) -> String {
         .trim_start_matches(' ')
         .chars()
         .take(MAX_STEM_CHARS)
+        .scan(0usize, |bytes, c| {
+            *bytes += c.len_utf8();
+            (*bytes <= MAX_STEM_BYTES).then_some(c)
+        })
         .collect();
     s = s.trim_end_matches(['.', ' ']).to_string();
     if s.is_empty() {
@@ -325,8 +334,16 @@ mod tests {
         assert_eq!(sanitize_stem("tab\there\nnew"), "tab here new");
         let long = "x".repeat(400);
         assert_eq!(sanitize_stem(&long).chars().count(), MAX_STEM_CHARS);
+        // Two-byte characters: the byte cap wins (100 characters).
         let multi = "é".repeat(400);
-        assert_eq!(sanitize_stem(&multi).chars().count(), MAX_STEM_CHARS);
+        assert_eq!(sanitize_stem(&multi).len(), MAX_STEM_BYTES);
+        // Four-byte emoji (two UTF-16 units each) and three-byte CJK.
+        for wide in ["😀".repeat(150), "中".repeat(150)] {
+            let s = sanitize_stem(&wide);
+            assert!(s.len() <= MAX_STEM_BYTES, "{}", s.len());
+            let full = format!("{s} (10000).mkv.part");
+            assert!(full.len() <= 255 && full.encode_utf16().count() <= 255);
+        }
     }
 
     #[test]

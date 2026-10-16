@@ -41,6 +41,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 const { useWindowStatePersistence, WINDOW_SAVE_DEBOUNCE_MS } = await import('../effects');
+const { usePipStore } = await import('@/features/player/pip');
 
 async function flush(ms = 0) {
   await act(async () => {
@@ -54,6 +55,7 @@ afterEach(() => {
   win.listeners.length = 0;
   win.state = { maximized: false, minimized: false, fullscreen: false, x: 40, y: 60, width: 1400, height: 900 };
   vi.useRealTimers();
+  usePipStore.setState({ active: false });
 });
 
 describe('desktop window state', () => {
@@ -96,4 +98,35 @@ describe('desktop window state', () => {
     const save = rpcMock.calls.find((c) => c.cmd === 'window.setState');
     expect(save?.args).toEqual({ state: { x: 5, y: 6, width: 1280, height: 800, maximized: true } });
   });
+
+  it('records nothing while picture-in-picture is on, then resumes with the pre-PiP size', async () => {
+    vi.useFakeTimers();
+    rpcMock.handlers['window.getState'] = () => null;
+    rpcMock.handlers['window.setState'] = () => undefined;
+    renderHook(() => useWindowStatePersistence());
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    rpcMock.calls.length = 0;
+
+    usePipStore.setState({ active: true });
+    win.state = { ...win.state, x: 1500, y: 800, width: 480, height: 270 };
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([]);
+
+    // A resize queued just before PiP started is dropped too.
+    usePipStore.setState({ active: false });
+    for (const l of win.listeners) l();
+    usePipStore.setState({ active: true });
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([]);
+
+    usePipStore.setState({ active: false });
+    win.state = { ...win.state, x: 40, y: 60, width: 1400, height: 900 };
+    for (const l of win.listeners) l();
+    await flush(WINDOW_SAVE_DEBOUNCE_MS + 10);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'window.setState')).toEqual([
+      { cmd: 'window.setState', args: { state: { x: 40, y: 60, width: 1400, height: 900, maximized: false } } },
+    ]);
+  });
 });
+

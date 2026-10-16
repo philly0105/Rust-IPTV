@@ -6,7 +6,7 @@ use super::meta::{
     self, added_to_rfc3339, duration_to_seconds, parse_instant, parse_server_datetime,
     unix_to_rfc3339, year_from_date, ServerMeta,
 };
-use super::raw::{RawEpgListing, RawSeriesInfo, RawShortEpg, RawVodInfo};
+use super::raw::{RawAccount, RawEpgListing, RawSeriesInfo, RawShortEpg, RawVodInfo};
 use super::sync::{load_source, XtreamSourceRow};
 use super::url::{catchup_stamp, clean_extension, episode_url, live_url, movie_url, timeshift_url};
 use crate::catalog::{self, NamedRow};
@@ -163,18 +163,32 @@ async fn resume_seconds(
     let r = r.clone();
     let ep = episode_id.unwrap_or_default().to_string();
     state
-        .db_call(move |c| {
-            Ok(c.query_row(
-                "SELECT position_seconds FROM playback_positions WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4",
-                rusqlite::params![r.source_id, r.content_type.as_str(), r.item_id, ep],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?)
-        })
+        .db_call(move |c| stored_resume(c, &r, &ep))
         .await
         .ok()
         .flatten()
-        .filter(|s| *s > 0)
+}
+
+/// The stored position to resume from, or `None` when there is none or the
+/// row is finished: C13 keeps a finished episode as a watched row with the
+/// position at the end, and resuming there would start at the credits.
+fn stored_resume(c: &rusqlite::Connection, r: &ItemRef, ep: &str) -> CoreResult<Option<i64>> {
+    let row = c
+        .query_row(
+            "SELECT position_seconds, duration_seconds, watched FROM playback_positions WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3 AND episode_id = ?4",
+            rusqlite::params![r.source_id, r.content_type.as_str(), r.item_id, ep],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, i64>(2)? != 0,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(row.and_then(|(pos, duration, watched)| {
+        (pos > 0 && !watched && !crate::userstate::is_complete(pos, duration)).then_some(pos)
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +623,35 @@ pub async fn stream_url(
     }
 }
 
+/// Rejects a catch-up start older than the channel's archive window.
+/// `archive_hours` comes from the catalog row; rows stored by older builds
+/// may hold any provider value, so it is clamped before the time math.
+fn check_catchup_window(
+    start_at: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    archive_hours: Option<i64>,
+) -> CoreResult<()> {
+    let Some(hours) = archive_hours.filter(|h| *h > 0) else {
+        return Err(CoreError::invalid("This channel has no catch-up."));
+    };
+    let hours = meta::clamp_archive_hours(hours);
+    let oldest = now
+        .checked_sub_signed(chrono::Duration::hours(hours))
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC);
+    if start_at < oldest {
+        let days = (hours + 23) / 24;
+        let window = if days == 1 {
+            "day".to_string()
+        } else {
+            format!("{days} days")
+        };
+        return Err(CoreError::invalid(format!(
+            "That programme is older than this channel's catch-up window (the last {window})."
+        )));
+    }
+    Ok(())
+}
+
 pub async fn catchup_url(
     state: &Arc<AppState>,
     r: &ItemRef,
@@ -629,20 +672,7 @@ pub async fn catchup_url(
     let duration = (duration_minutes.round() as i64).clamp(1, MAX_CATCHUP_MINUTES);
     let mut cx = ctx(state, r).await?;
     if let Some(n) = &cx.item {
-        let Some(hours) = n.row.archive_hours.filter(|h| *h > 0) else {
-            return Err(CoreError::invalid("This channel has no catch-up."));
-        };
-        if start_at < chrono::Utc::now() - chrono::Duration::hours(hours) {
-            let days = (hours + 23) / 24;
-            let window = if days == 1 {
-                "day".to_string()
-            } else {
-                format!("{days} days")
-            };
-            return Err(CoreError::invalid(format!(
-                "That programme is older than this channel's catch-up window (the last {window})."
-            )));
-        }
+        check_catchup_window(start_at, chrono::Utc::now(), n.row.archive_hours)?;
     }
     if cx.meta.is_none() {
         // First contact since install: learn the server clock, best effort.
@@ -687,9 +717,16 @@ pub async fn catchup_url(
 // ---------------------------------------------------------------------------
 
 /// Decodes a base64 EPG field; returns the input when it is not base64 text.
+///
+/// Line breaks inside the value are ignored (some panels wrap long base64 at
+/// 76 columns); spaces are not, so a plain title is never read as base64.
 pub fn decode_b64_text(s: &str) -> String {
     let t = s.trim();
-    match B64.decode(t) {
+    let compact: String = t
+        .chars()
+        .filter(|c| !matches!(c, '\n' | '\r' | '\t'))
+        .collect();
+    match B64.decode(compact.as_bytes()) {
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(text)
                 if !text.trim().is_empty()
@@ -714,10 +751,12 @@ pub fn map_short_epg(
     limit: usize,
 ) -> Vec<EpgProgram> {
     let to_utc = |ts: Option<i64>, local: Option<&str>| -> Option<(i64, String)> {
+        // A few panels send milliseconds; no programme airs in the year 5138.
+        let ts = ts.map(|t| if t > 100_000_000_000 { t / 1000 } else { t });
         let secs = ts.filter(|t| *t > 0).or_else(|| {
             local
                 .and_then(parse_server_datetime)
-                .map(|d| d.and_utc().timestamp() - offset_seconds)
+                .and_then(|d| d.and_utc().timestamp().checked_sub(offset_seconds))
         })?;
         Some((secs, unix_to_rfc3339(secs)?))
     };
@@ -725,7 +764,11 @@ pub fn map_short_epg(
         .into_iter()
         .filter_map(|l| {
             let (start_secs, start) = to_utc(l.start_timestamp, l.start.as_deref())?;
-            let (_, end) = to_utc(l.stop(), l.end.as_deref())?;
+            let (end_secs, end) = to_utc(l.stop(), l.end.as_deref())?;
+            // An empty or backwards slot would draw nothing and confuse now/next.
+            if end_secs <= start_secs {
+                return None;
+            }
             let title = l
                 .title
                 .as_deref()
@@ -793,6 +836,36 @@ pub async fn short_epg(
     ))
 }
 
+/// Most programmes kept from one `get_simple_data_table` answer (a panel
+/// with a two-week archive lists a few thousand).
+pub const DATA_TABLE_MAX: usize = 5000;
+
+/// guide: the panel's full archive table for a live channel
+/// (`get_simple_data_table`), decoded like the short EPG.
+pub async fn simple_data_table(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Vec<EpgProgram>> {
+    expect_type(r, &[ContentType::Live], "catchup.programs")?;
+    let cx = ctx(state, r).await?;
+    let raw: RawShortEpg = cx
+        .client
+        .get(
+            Some("get_simple_data_table"),
+            &[("stream_id", r.item_id.clone())],
+        )
+        .await?;
+    let fallback = cx
+        .item
+        .as_ref()
+        .and_then(|n| n.row.epg_channel_id.clone())
+        .unwrap_or_else(|| r.item_id.clone());
+    let offset = cx.meta.as_ref().map_or(0, |m| m.offset_seconds);
+    Ok(map_short_epg(
+        raw.epg_listings.items,
+        &fallback,
+        offset,
+        DATA_TABLE_MAX,
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Account and test
 // ---------------------------------------------------------------------------
@@ -835,16 +908,21 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
     let client = XtreamClient::new(http, &source.config)?;
     let acc = client.account().await?;
     let m = ServerMeta::from_account(&acc);
-    let allowed_output_formats = m.allowed_output_formats.clone();
     let rt = meta::runtime(state);
     let sid = source_id.to_string();
     state
         .db_call(move |c| meta::store_meta(c, &rt, &sid, &m))
         .await?;
+    Ok(info_from_raw(acc))
+}
 
+/// `xtream.accountInfo` fields of a `player_api.php` account reply (also
+/// used by the sync to refresh the cached account status).
+pub fn info_from_raw(acc: RawAccount) -> XtreamAccountInfo {
+    let allowed_output_formats = ServerMeta::from_account(&acc).allowed_output_formats;
     let u = acc.user_info.unwrap_or_default();
     let s = acc.server_info.unwrap_or_default();
-    Ok(XtreamAccountInfo {
+    XtreamAccountInfo {
         status: non_empty(u.status).unwrap_or_else(|| "Active".into()),
         exp_date: u.exp_date.and_then(unix_to_rfc3339),
         active_cons: u.active_cons.unwrap_or(0).max(0),
@@ -854,7 +932,7 @@ pub async fn account_info(state: &Arc<AppState>, source_id: &str) -> CoreResult<
         server_time: server_time(s.timestamp_now, s.time_now, s.timezone.as_deref()),
         timezone: non_empty(s.timezone),
         allowed_output_formats,
-    })
+    }
 }
 
 /// `serverTime` of `xtream.accountInfo`: RFC 3339 from `timestamp_now`, or
@@ -873,7 +951,9 @@ fn server_time(
     let wall = non_empty(time_now)?;
     let utc = parse_server_datetime(&wall).and_then(|naive| {
         let offset = timezone.and_then(fixed_offset_seconds)?;
-        let at = naive.and_utc() - chrono::Duration::seconds(offset);
+        let at = naive
+            .and_utc()
+            .checked_sub_signed(chrono::Duration::seconds(offset))?;
         Some(at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
     });
     Some(utc.unwrap_or(wall))
@@ -915,10 +995,16 @@ fn fixed_offset_seconds(tz: &str) -> Option<i64> {
     };
     let (h, m) = match digits.split_once(':') {
         Some((h, m)) => (h, m),
-        None if digits.len() == 4 => digits.split_at(2),
+        // `is_ascii` keeps byte 2 on a char boundary ("1é1" is 4 bytes).
+        None if digits.len() == 4 && digits.is_ascii() => digits.split_at(2),
         None => (digits, "0"),
     };
     if h.is_empty() || h.len() > 2 || m.len() > 2 {
+        return None;
+    }
+    // ASCII digits only: `parse` would take "+5", and the length checks above
+    // count bytes, so a multi-byte char must never reach `split_at`.
+    if !h.bytes().chain(m.bytes()).all(|b| b.is_ascii_digit()) {
         return None;
     }
     let h: i64 = h.parse().ok()?;
@@ -940,12 +1026,17 @@ pub fn test_message(err: &CoreError) -> String {
         CoreError::Timeout(_) => {
             "The server did not answer in time. Check the URL and port, then try again.".into()
         }
-        // Transport failures already name the host (http::transport_error).
-        CoreError::Network(m) if m.starts_with("Could not reach ") => m.clone(),
+        // Transport failures already name the host (http::transport_error),
+        // and status errors (429 is Network) already say what to do.
+        CoreError::Network(m) if m.starts_with("Could not reach ") || m.contains(": HTTP ") => {
+            m.clone()
+        }
         CoreError::Network(m) => format!(
             "Could not reach the server ({m}). Check the URL and your connection, then try again."
         ),
-        other => other.to_string(),
+        // 5xx: the status message as is, without the "server: " kind prefix.
+        CoreError::Server(m) => m.clone(),
+        other => crate::sources::error_text(other),
     }
 }
 
@@ -1001,12 +1092,97 @@ mod tests {
         ItemRef::new("s", ct, id)
     }
 
+    /// Review R2-2: a finished episode (C13 keeps it as a watched row at
+    /// position = duration) resumed at the end.
+    #[test]
+    fn finished_rows_do_not_resume() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut c).unwrap();
+        c.execute(
+            "INSERT INTO sources (id, kind, name, config_json) VALUES ('s', 'xtream', 'S', '{}')",
+            [],
+        )
+        .unwrap();
+        let put = |ep: &str, pos: i64, dur: Option<i64>, watched: i64| {
+            c.execute(
+                "INSERT INTO playback_positions(source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, watched) VALUES ('s', 'series', 'show', ?1, ?2, ?3, ?4)",
+                rusqlite::params![ep, pos, dur, watched],
+            )
+            .unwrap();
+        };
+        put("done", 1000, Some(1000), 1);
+        put("watched-early", 300, Some(1000), 1);
+        put("near-end", 960, Some(1000), 0);
+        put("half", 500, Some(1000), 0);
+        put("no-duration", 500, None, 0);
+        put("zero", 0, Some(1000), 0);
+        let show = r(ContentType::Series, "show");
+        let get = |ep: &str| stored_resume(&c, &show, ep).unwrap();
+        assert_eq!(get("done"), None);
+        assert_eq!(get("watched-early"), None);
+        assert_eq!(get("near-end"), None);
+        assert_eq!(get("zero"), None);
+        assert_eq!(get("missing"), None);
+        assert_eq!(get("half"), Some(500));
+        assert_eq!(get("no-duration"), Some(500));
+    }
+
     #[test]
     fn base64_titles() {
         assert_eq!(decode_b64_text("TW9ybmluZyBOZXdz"), "Morning News");
         assert_eq!(decode_b64_text("TW9ybmluZyBOZXdz\n"), "Morning News");
         assert_eq!(decode_b64_text("Q2Fmw6k"), "Café"); // unpadded
         assert_eq!(decode_b64_text("Plain title!"), "Plain title!");
+        // guide: wrapped base64, plain words, and garbage that decodes to binary.
+        assert_eq!(decode_b64_text("TW9ybmlu\r\nZyBOZXdz"), "Morning News");
+        assert_eq!(decode_b64_text("Morning News"), "Morning News");
+        assert_eq!(decode_b64_text("AAEC"), "AAEC");
+        assert_eq!(decode_b64_text("  "), "");
+    }
+
+    #[test]
+    fn short_epg_drops_bad_slots_and_reads_milliseconds() {
+        let listings: RawShortEpg = serde_json::from_value(json!({"epg_listings": [
+            {"title": "QmFja3dhcmRz", "start_timestamp": 1700007200, "stop_timestamp": 1700003600},
+            {"title": "RW1wdHk=", "start_timestamp": 1700003600, "stop_timestamp": 1700003600},
+            {"title": "TWlsbGlz", "start_timestamp": 1700003600000_i64, "stop_timestamp": "1700007200000"},
+            {"title": "Tm8gZW5k", "start_timestamp": 1700010000},
+            {"title": "QmFkIGRhdGU=", "start": "not a date", "end": "2023-11-15 00:13:20"},
+            "garbage",
+            {"title": 42, "start_timestamp": -5, "stop_timestamp": 10}
+        ]}))
+        .unwrap();
+        let p = map_short_epg(listings.epg_listings.items, "f", 0, 10);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].title, "Millis");
+        assert_eq!(p[0].start, "2023-11-14T23:13:20Z");
+        assert_eq!(p[0].end, "2023-11-15T00:13:20Z");
+    }
+
+    #[test]
+    fn short_epg_offset_applies_to_local_strings_only() {
+        let listings: RawShortEpg = serde_json::from_value(json!({"epg_listings": [
+            {"title": "TG9jYWw=", "start": "2023-11-15 01:00:00", "end": "2023-11-15 02:00:00"},
+            {"title": "U3RhbXA=", "start": "2023-11-15 05:00:00", "end": "2023-11-15 06:00:00",
+             "start_timestamp": 1700024400, "stop_timestamp": 1700028000}
+        ]}))
+        .unwrap();
+        // Server two hours east of UTC: 01:00 local is 23:00 UTC the day before.
+        let p = map_short_epg(listings.epg_listings.items, "f", 7200, 10);
+        assert_eq!(p[0].title, "Local");
+        assert_eq!(p[0].start, "2023-11-14T23:00:00Z");
+        // Timestamps win over the local strings and ignore the offset.
+        assert_eq!(p[1].title, "Stamp");
+        assert_eq!(p[1].start, "2023-11-15T05:00:00Z");
+        // A limit cuts after sorting.
+        let one: RawShortEpg = serde_json::from_value(json!({"epg_listings": [
+            {"title": "Qg==", "start_timestamp": 1700010000, "stop_timestamp": 1700013600},
+            {"title": "QQ==", "start_timestamp": 1700000000, "stop_timestamp": 1700003600}
+        ]}))
+        .unwrap();
+        let p = map_short_epg(one.epg_listings.items, "f", 0, 1);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].title, "A");
     }
 
     #[test]
@@ -1124,6 +1300,22 @@ mod tests {
         assert!(test_message(&CoreError::NotFound("x".into())).contains("server URL"));
     }
 
+    /// Review R3-1: 503 and 429 showed a "server: " kind prefix (or a
+    /// "Could not reach" wrapper) in Test connection.
+    #[test]
+    fn test_messages_have_no_kind_prefix() {
+        use reqwest::StatusCode as S;
+        for status in [S::SERVICE_UNAVAILABLE, S::BAD_GATEWAY, S::TOO_MANY_REQUESTS] {
+            let err = crate::http::status_error(status, "Xtream account");
+            let m = test_message(&err);
+            assert!(m.starts_with("Xtream account: HTTP "), "{status}: {m}");
+            assert!(
+                !m.contains("server:") && !m.contains("Could not reach"),
+                "{m}"
+            );
+        }
+    }
+
     /// R2 r3 F3: without `timestamp_now`, `time_now` is converted with a
     /// fixed-offset zone and passed through verbatim (no offset, so never
     /// read as UTC or as the viewer's local time) with a named zone.
@@ -1171,5 +1363,49 @@ mod tests {
         assert_eq!(fixed_offset_seconds("America/New_York"), None);
         assert_eq!(fixed_offset_seconds("+0530"), Some(19_800));
         assert_eq!(fixed_offset_seconds("UTC+99"), None);
+    }
+
+    /// B8-parsers: provider timezones with multi-byte characters used to
+    /// panic in `split_at(2)`; signed parts used to parse.
+    #[test]
+    fn fixed_offset_rejects_non_ascii_and_signed_parts() {
+        for tz in [
+            "UTC+1é1",
+            "+1é1",
+            "GMT-é",
+            "UTC+٠٥٣٠",
+            "UTC++5",
+            "UTC+-5",
+            "UTC+05:+3",
+            "+🙂",
+        ] {
+            assert_eq!(fixed_offset_seconds(tz), None, "{tz}");
+        }
+        assert_eq!(fixed_offset_seconds("GMT-03:30"), Some(-12_600));
+        let wall = Some("2026-10-11 18:00:00".to_string());
+        assert_eq!(
+            server_time(None, wall, Some("UTC+1é1")).as_deref(),
+            Some("2026-10-11 18:00:00")
+        );
+    }
+
+    /// B8-parsers: a garbage `archive_hours` in a stored row used to panic in
+    /// `chrono::Duration::hours`.
+    #[test]
+    fn catchup_window_survives_absurd_archive_hours() {
+        let now = chrono::Utc::now();
+        let recent = now - chrono::Duration::hours(2);
+        let ancient = now - chrono::Duration::days(500);
+        for hours in [i64::MAX, i64::MAX / 3600 + 1, 1 << 40] {
+            assert!(check_catchup_window(recent, now, Some(hours)).is_ok());
+            let err = check_catchup_window(ancient, now, Some(hours)).unwrap_err();
+            assert!(err.to_string().contains("366 days"), "{err}");
+        }
+        assert!(check_catchup_window(recent, now, Some(0)).is_err());
+        assert!(check_catchup_window(recent, now, None).is_err());
+        assert!(check_catchup_window(recent, now, Some(24)).is_ok());
+        let err =
+            check_catchup_window(now - chrono::Duration::hours(30), now, Some(24)).unwrap_err();
+        assert!(err.to_string().contains("the last day"), "{err}");
     }
 }

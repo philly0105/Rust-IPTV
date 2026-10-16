@@ -9,13 +9,13 @@ Code: `crates/iptv-core/src/settings/`. Tests: `crates/iptv-core/tests/settings_
 | Command | Behaviour |
 | --- | --- |
 | `settings.get` | Current settings. |
-| `settings.update {patch}` | RFC 7396 merge patch over the current JSON: objects merge recursively, `null` removes a key (so the field falls back to its default or `None`), anything else replaces. The result is deserialized, normalized and validated, then persisted, cached in `state.settings`, and announced with `settings.changed` (payload: the full settings). A patch that changes nothing writes nothing and emits nothing. |
-| `settings.reset` | Writes `Settings::default()` and emits `settings.changed`. |
+| `settings.update {patch}` | RFC 7396 merge patch over the current JSON: objects merge recursively, `null` removes a key (so the field falls back to its default or `None`), anything else replaces. The result is deserialized, normalized and validated, then persisted, cached in `state.settings`, and announced with `settings.changed` (payload: the full settings). A patch that changes nothing writes nothing and emits nothing. A change to `lastRoute` alone is saved and returned but not announced: it is one window's navigation state, and broadcasting it made every window refetch and re-render its settings readers on each navigation. The caller writes the reply into its own `settings.get` cache (`useLastRoutePersistence` in `src/shell/effects.ts`, `StartupRedirect.tsx`). Any other change, alone or with `lastRoute`, is announced as before. |
+| `settings.reset` | Writes `Settings::default()` and emits `settings.changed`. `tourCompleted` and `lastSeenVersion` keep their values: they record what the user has already seen, so a reset neither replays the first-run tour nor shows What's new for an unchanged version (the tour can still be replayed by hand). `epgUrls` and `tmdb.apiKey` keep their values too: they are data the user entered, and no default can restore them; `tmdb.enabled` and `tmdb.language` reset. `imageCacheMaxMb` resets to 500 like any preference. |
 | `settings.detectPlayers` | `crate::player::detect(&settings)` on the blocking pool. Returns `{mpvPath?, vlcPath?}`. |
 | `window.getState` | `app_state` key `window_state`, or `null`. Unreadable JSON reads as `null`. |
 | `window.setState {state}` | Validates and stores `{x?, y?, width, height, maximized}`. |
 
-Writers are serialized by a `tokio::sync::Mutex` stored in `state.extensions["settings_write_lock"]`, so two concurrent patches cannot lose each other's fields.
+Writers are serialized by a `tokio::sync::Mutex` stored in `state.extensions["settings_write_lock"]`, so two concurrent patches cannot lose each other's fields. The row is then written through `AppState::db_write`, the gate that admits one user write at a time to the database pool (lock order: the settings lock, then the gate). While an import holds SQLite's write lock, a burst of `lastRoute` writes, favourite toggles and position saves waits at the gate instead of taking every pooled connection from the readers.
 
 ## Normalization
 
@@ -28,14 +28,20 @@ Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `download
 - `mpvPath` and `vlcPath` must be existing files, and `downloadsDir` and `recordingsDir` existing folders. These are checked only when the value changes, so a setting that pointed at a since-removed path does not block unrelated updates.
 - `epgOffsetMinutes` must be in -720..=720 (an integer), and `vodMinRating` a number in 0..=10.
 - `lastRoute` must start with `/` and be at most 2048 characters.
+- `sourceRefreshIntervalHours` 0..=168, `accountExpiryWarnDays` 0..=60.
+- `recordingPaddingBeforeMinutes` 0..=60, `recordingPaddingAfterMinutes` 0..=120, `reminderLeadMinutes` 0..=60.
+- `uiScale` is rounded to 4 decimal places first (slider noise such as `1.2500000000000002`), then must be finite and in 0.9..=1.25 (`UI_SCALE_RANGE`).
+- `subtitlePosition` must be a whole number in 0..=40 (`SUBTITLE_POSITION_RANGE`); a fraction or a negative number fails deserialization.
+- `imageCacheMaxMb` must be a whole number in 50..=5000 (`IMAGE_CACHE_MAX_MB_RANGE`).
+- `lastSeenVersion` must be `''` or 1..=32 characters of `[0-9A-Za-z.+-]` (a version such as `0.1.0` or `1.2.0-beta.1+42`).
 - Unknown enum values or wrong types fail deserialization.
 - Window state: width and height 1..=32768 px, and |x|, |y| <= 100000.
 
-`settings::save(state: &AppState, next: Settings) -> CoreResult<Settings>` is the Rust entry point for modules that change a field directly (for example `downloads.setDir`). It normalizes, validates against the current settings, persists, refreshes the cache and emits `settings.changed`, under the same lock. Empty strings for `mpvPath`, `vlcPath`, `downloadsDir` and `lastRoute` are normalized to unset before validation, so the UI clears a path by sending `""`.
+`settings::save(state: &AppState, next: Settings) -> CoreResult<Settings>` is the Rust entry point for modules that change a field directly (for example `downloads.setDir`). It normalizes, validates against the current settings, persists, refreshes the cache and emits `settings.changed` (with the same `lastRoute`-only exception), under the same lock. Empty strings for `mpvPath`, `vlcPath`, `downloadsDir` and `lastRoute` are normalized to unset before validation, so the UI clears a path by sending `""`.
 
 ## Desktop-only fields (server mode)
 
-When `state.is_desktop` is false (the PWA server), `settings.update` refuses with `Unsupported` ("player and folder settings apply only to the desktop app") any patch that changes `mpvPath`, `vlcPath`, `mpvArgs`, `vlcArgs`, `downloadsDir` or `recordingsDir`. Any browser on the network can reach the server, and these fields name programs, their arguments and folders on the host. The check runs before validation, so a refused patch reveals nothing about which paths exist. Sending the current values back unchanged (a full-document patch) is allowed. `settings::save` applies the same rule except for `downloadsDir`, whose only caller (`downloads.setDir`) enforces its own server rule. `settings.reset` is allowed: it only restores defaults.
+When `state.is_desktop` is false (the PWA server), `settings.update` refuses with `Unsupported` ("player and folder settings apply only to the desktop app") any patch that changes `mpvPath`, `vlcPath`, `mpvArgs`, `vlcArgs`, `downloadsDir` or `recordingsDir`. Any browser on the network can reach the server, and these fields name programs, their arguments and folders on the host. The check runs before validation, so a refused patch reveals nothing about which paths exist. Sending the current values back unchanged (a full-document patch) is allowed. `settings::save` applies the same rule except for `downloadsDir`, whose only caller (`downloads.setDir`) enforces its own server rule. `settings.reset` is allowed and keeps these six fields as they are: a server client cannot set them, so an Undo that sent them back would be refused.
 
 ## Fields added after wave 1
 
@@ -46,8 +52,38 @@ When `state.is_desktop` is false (the PWA server), `settings.update` refuses wit
 | `playerReuseInstance` | `true` | External launch closes the previous external player first. |
 | `showExternalBar` | `true` | External-playback footer visible. |
 | `vodMinRating` | `0` | VOD grids hide items rated below this. |
+| `englishOnly` | `false` | Channel lists, VOD grids, categories, search, neighbours, recently added and `allLiveChannels` drop items whose title or category clearly marks another language (`catalog::language`). The verdict is stored with each item (`items.non_english`, migration 0018) and readers filter on it (`AND i.non_english = 0`). Catalogs written before the migration are listed in `english_pending` until a background pass at boot (`language::backfill_pending`) stores their verdicts; meanwhile readers of one such source and type use a per-connection cached temp table of hidden rowids (`language::hidden_rowids`), and cross-source search and recently added test each row with the SQL function `non_english`. catalog.md has the details. Items without a clear language, multi-subtitle and African groups stay. Categories left empty are dropped and `itemCount` counts what remains. Stalker VOD grids filter loaded pages in the UI. |
 | `recordingsDir` | `null` | `null` = `<downloadsDir>/recordings`. Serialized as `null`, not omitted. |
+| `sourceRefreshIntervalHours` | `12` | Hours between scheduled refreshes of `autoRefresh` sources; 0 = only at startup. 0..168, else `Invalid`. See sources.md. |
+| `accountExpiryWarnDays` | `7` | Days before a subscription's expiry date that the dashboard and source cards warn; 0 = off. 0..60, else `Invalid`. |
+| `liveFailover` | `true` | A live channel that fails switches to the same channel on another source. |
+| `streamReconnect` | `true` | A dropped or stalled stream is retried quietly before the error shows. |
+| `remoteLanEnabled` | `false` | The remote control also listens on private network addresses for paired phones. Desktop only: the server ignores it. |
+| `epgShortFallback` | `true` | Xtream channels without XMLTV programmes use the panel's short EPG. |
+| `recordingPaddingBeforeMinutes` | `1` | Minutes a scheduled recording starts early. 0..60, else `Invalid`. |
+| `recordingPaddingAfterMinutes` | `5` | Minutes a scheduled recording runs past the programme end. 0..120, else `Invalid`. |
+| `remindersEnabled` | `true` | Guide reminders fire while the app runs. |
+| `reminderLeadMinutes` | `2` | Minutes before the start a reminder fires. 0..60, else `Invalid`. |
+| `reminderAction` | `"notify"` | `"notify"` shows a notification; `"switch"` tunes to the channel. |
+| `accent` | `"amber"` | Accent colour: `amber`, `teal`, `violet`, `rose`, `lime`, `sky` or `coral`. Settings > Appearance; see appearance.md. |
+| `oledBlack` | `false` | Pure black surfaces whenever the dark theme is in effect. |
+| `density` | `"comfortable"` | `"compact"` tightens spacing in lists, rails and rows. |
+| `uiScale` | `1` | Interface size, 0.9..1.25 (the root font size is 15 px times it). |
+| `zapBanner` | `true` | The player shows the channel's logo, number and now/next for 5 s after each live channel change. Settings > Playback. |
+| `dashboardRails.myList` | `true` | The dashboard's My List rail (Settings > General, dashboard rails). |
+| `subtitleSize` | `"medium"` | Subtitle text size in mpv and the built-in player: `small`, `medium`, `large` or `xlarge` (0.8, 1.0, 1.25 and 1.5 times the base size; mpv `sub-scale`, the built-in player's `::cue`). Settings > Playback. |
+| `subtitleColor` | `"white"` | Subtitle text colour: `white`, `yellow`, `cyan` or `green`. |
+| `subtitleBackground` | `"box"` | Behind subtitle text: `shadow` (a text shadow only), `box` (a translucent box) or `solid` (an opaque black box). |
+| `subtitlePosition` | `0` | Percent of the picture height subtitles are raised from the bottom, a whole number 0..40 (`SUBTITLE_POSITION_RANGE`), else `Invalid`. |
+| `vodHideWatched` | `false` | The movie and series grids' Hide watched toggle (Shift+W): `catalog.movies` / `catalog.series` are asked with `hideWatched`. See vod-browsing.md. |
+| `imageCacheMaxMb` | `500` | Size cap of the poster and logo cache in MB, 50..5000, else `Invalid`. Applies in server mode too (to the server's cache). Settings > General, image cache row (250 MB to 5 GB); see image-cache.md. |
+| `tourCompleted` | `false` | The first-run tour was finished or skipped, so it does not start on its own again. Kept by `settings.reset`. See onboarding.md. |
+| `lastSeenVersion` | `""` | The app version whose What's new the user has seen; `''` on a fresh profile. Kept by `settings.reset`. See onboarding.md. |
+
+Parental controls are not part of `Settings`: their options and PIN live in the `parental_config` table and change only through the `parental.*` commands (see parental.md); Settings > Parental controls is their page.
+
+`backup::APP_SETTING_KEYS` lists the fields that round-trip through `backup.export` / `backup.import`: the general fields (`language`, `theme`, `showDashboard`, `dashboardRails`, `startupBehavior`, `openStreamOnDoubleClick`, `showCaptions`, `coverSize`, `epgViewMode`), the player and list fields (`streamFormat`, `playerAmbientMode`, `playerAutoplayNextEpisode`, `playerUpNextRail`, `fullscreenChannelPanel`, `vodAutoFailover`, `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`), `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, the five recording and reminder fields (`recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`), the five appearance and playback fields (`accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`), and Run 2's four subtitle fields and `vodHideWatched` (`subtitleSize`, `subtitleColor`, `subtitleBackground`, `subtitlePosition`, `vodHideWatched`): 39 keys. Every other field is in `backup::APP_SETTING_EXCLUDED` with its reason, and a test (`tests/l2_data_backup_settings.rs`) fails for a field in neither list; backup.md lists them. `epgUrls` travels as the manifest's own `settings.epgUrls`. The player choice, its paths and arguments, the folders, `lastRoute` and `tmdb` (it holds the API key) stay out. So do `remoteControl`, `remoteLanEnabled`, `liveFailover` and `streamReconnect`: they describe this machine's playback and network setup. Run 3's three fields (`imageCacheMaxMb`, `tourCompleted`, `lastSeenVersion`) are machine-local too and also left out: a cache cap belongs to this disk, and the onboarding markers to this install.
 
 Stored JSON from older builds reads with these defaults (struct-level `#[serde(default)]`).
 
-`settings.changed` carries the full document, including `tmdb.apiKey` when the user set one; the module never logs the document.
+`settings.changed` carries the full document; the module never logs the document. In the desktop app it includes `tmdb.apiKey` as stored. In server mode `settings.get`, `settings.update`, `settings.reset` and `settings.changed` all pass through `settings::for_client`, which masks the key as `••••` plus its last 4 characters (only `••••` for 4 or fewer), so a browser on the network never gets it back. A server-mode patch whose `tmdb.apiKey` starts with that mask (the UI resends the whole `tmdb` object, and Undo after a reset resends the old settings) keeps the stored key.

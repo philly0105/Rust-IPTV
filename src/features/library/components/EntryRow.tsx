@@ -6,6 +6,7 @@ import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
 import { IconButton, Poster } from '../deps';
@@ -43,6 +44,8 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
   const square = playable;
+  // Older movie and series snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
+  const title = snapshotTitle(entryRef, snapshot.title).title;
   return (
     <div
       className={cn(
@@ -75,11 +78,11 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       )}
       {/* Artwork is a mouse shortcut only: the title button beside it and the Play button carry the name for keyboard and AT. */}
       <div aria-hidden data-testid="entry-artwork" onClick={onOpen} className={cn('shrink-0 cursor-pointer overflow-hidden rounded-sm', square ? 'w-12' : 'w-9')}>
-        <Poster src={snapshot.posterUrl} alt="" label={snapshot.title} aspect={square ? 'square' : 'poster'} />
+        <Poster src={snapshot.posterUrl} sourceId={entryRef.sourceId} alt="" label={title} aspect={square ? 'square' : 'poster'} />
       </div>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start text-start">
         <span dir="auto" className="w-full truncate text-match-parent text-sm font-medium text-fg">
-          {snapshot.title}
+          {title}
         </span>
         <span className="flex w-full min-w-0 items-center gap-2 text-xs text-fg-muted">
           <ContentIcon type={type} size={13} className="shrink-0 text-fg-subtle" />
@@ -92,27 +95,31 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         </span>
       </button>
       {showSource && <SourceBadge source={source} className="hidden shrink-0 md:inline-flex" />}
-      <span className="hidden w-28 shrink-0 text-end text-xs text-fg-subtle sm:block">{time}</span>
+      {/* One line at any length ("Added 2 minutes ago"): rows keep one height, and the end-aligned
+          column still lines up with the actions beside it. */}
+      <span className="hidden min-w-28 shrink-0 whitespace-nowrap text-end text-xs text-fg-subtle sm:block" data-testid="entry-time">
+        {time}
+      </span>
       <div className="flex shrink-0 items-center gap-0.5">
         {reorder && (
           <>
             <IconButton
               size="sm"
               tabIndex={-1}
-              label={t('moveUp', { title: snapshot.title })}
+              label={t('moveUp', { title })}
               icon={<ArrowUp size={15} aria-hidden />}
               disabled={!reorder.canUp || busy}
               onClick={() => reorder.onMove(-1)}
-              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              className={REORDER_ARROW}
             />
             <IconButton
               size="sm"
               tabIndex={-1}
-              label={t('moveDown', { title: snapshot.title })}
+              label={t('moveDown', { title })}
               icon={<ArrowDown size={15} aria-hidden />}
               disabled={!reorder.canDown || busy}
               onClick={() => reorder.onMove(1)}
-              className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              className={REORDER_ARROW}
             />
           </>
         )}
@@ -120,7 +127,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           size="sm"
           tabIndex={-1}
           variant="secondary"
-          label={playable ? t('playTitle', { title: snapshot.title }) : t('openTitle', { title: snapshot.title })}
+          label={playable ? t('playTitle', { title }) : t('openTitle', { title })}
           icon={<Play size={15} aria-hidden />}
           onClick={onOpen}
           data-action="open"
@@ -130,5 +137,13 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
     </div>
   );
 }
+
+/**
+ * Move up/down arrows: shown on hover or focus only when they can move the row
+ * (a disabled arrow stays invisible, overriding the kit's disabled:opacity-50),
+ * and left out of the layout below sm so titles keep their width on a phone
+ * (drag and Alt+arrow still reorder there).
+ */
+const REORDER_ARROW = 'hidden sm:inline-flex opacity-0 disabled:opacity-0 enabled:group-hover:opacity-100 enabled:group-focus-within:opacity-100';
 
 export const EntryRow = memo(EntryRowImpl);

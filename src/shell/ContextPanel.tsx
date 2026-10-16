@@ -15,6 +15,7 @@ export function ContextPanel({ inline }: { inline: boolean }) {
   const node = useShellStore((s) => s.contextPanel);
   const open = useShellStore((s) => s.panelOpen);
   const setOpen = useShellStore((s) => s.setPanelOpen);
+  const drawer = useShellStore((s) => s.panelDrawer);
 
   if (node === null) return null;
 
@@ -23,12 +24,16 @@ export function ContextPanel({ inline }: { inline: boolean }) {
       <aside
         aria-label={t('contextPanel')}
         data-testid="context-panel"
-        className="w-(--panel-width) shrink-0 overflow-y-auto border-s border-border bg-surface"
+        // overscroll-contain: scrolling the panel to its end does not start scrolling the page behind it.
+        className="w-(--panel-width) shrink-0 overflow-y-auto overscroll-contain border-s border-divider bg-surface"
       >
         {node}
       </aside>
     );
   }
+
+  // The page shows this content itself at this width: no drawer (and no header toggle).
+  if (!drawer) return null;
 
   return (
     <Dialog

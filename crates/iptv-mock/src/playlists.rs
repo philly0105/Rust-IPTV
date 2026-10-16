@@ -4,6 +4,8 @@
 //!   rooted at this server.
 //! - `/m3u/large.m3u?channels=N&groups=G`: streamed from [`gen::M3uGen`]
 //!   (default 50 000 channels, 20 groups). Never built as one string.
+//! - `/m3u/10k.m3u`: [`TEN_K_CHANNELS`] channels in 50 groups (the SC7
+//!   big-list fixture).
 //! - `/m3u/protected.m3u`: the sample, but only with
 //!   `User-Agent: IPTVMockAgent/1.0` and `Referer: http://referer.mock/`;
 //!   403 otherwise.
@@ -32,6 +34,8 @@ pub const PROTECTED_USER_AGENT: &str = "IPTVMockAgent/1.0";
 pub const PROTECTED_REFERER: &str = "http://referer.mock/";
 /// Default channel count of `/m3u/large.m3u`.
 pub const LARGE_M3U_DEFAULT_CHANNELS: usize = 50_000;
+/// Channel count of `/m3u/10k.m3u`.
+pub const TEN_K_CHANNELS: usize = 10_000;
 /// Upper bounds so a typo cannot stream forever.
 const MAX_CHANNELS: usize = 2_000_000;
 const MAX_MB: usize = 2_048;
@@ -43,6 +47,7 @@ pub(crate) fn routes() -> Router<Arc<MockState>> {
     Router::new()
         .route("/m3u/sample.m3u", get(sample_m3u))
         .route("/m3u/large.m3u", get(large_m3u))
+        .route("/m3u/10k.m3u", get(ten_k_m3u))
         .route("/m3u/protected.m3u", get(protected_m3u))
         .route("/xmltv/sample.xml", get(sample_xml))
         .route("/xmltv/sample.xml.gz", get(sample_xml_gz))
@@ -95,6 +100,14 @@ async fn large_m3u(Base(base): Base, Query(q): Query<LargeM3u>) -> Response {
     (
         [(header::CONTENT_TYPE, M3U_CT)],
         stream_body(gen::M3uGen::new(&base, channels, groups)),
+    )
+        .into_response()
+}
+
+async fn ten_k_m3u(Base(base): Base) -> Response {
+    (
+        [(header::CONTENT_TYPE, M3U_CT)],
+        stream_body(gen::M3uGen::new(&base, TEN_K_CHANNELS, 50)),
     )
         .into_response()
 }

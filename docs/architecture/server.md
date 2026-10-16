@@ -21,32 +21,62 @@ iptv-server --port 7180 --data-dir ./data --static ./dist
 Logs go to stderr and to the rotating JSON log under `<data-dir>/logs`
 (`RUST_LOG` sets the filter). Ctrl-C (and SIGTERM on Unix) starts a graceful
 shutdown: event sockets get a close frame, new connections stop, and open
-requests get 10 s to finish.
+requests get 10 s to finish. Then running recordings are closed
+(`recording::shutdown`) and `db::note_clean_shutdown` removes the
+database's running marker, so the next start can skip the background check
+of a large database (SPEC C3).
 
 ## Layout
 
 | File | Role |
 | --- | --- |
 | `src/main.rs` | CLI (clap), boot (`logging::init`, `AppState::new` with a `BroadcastSink`, `rpc::init_all`), bind, shutdown |
-| `src/lib.rs` | `Server` (shared state), `ServerOptions`, `router()`, request tracing |
+| `src/lib.rs` | `Server` (shared state), `ServerOptions`, `router()`, request tracing, response compression (`compression()`) |
 | `src/api.rs` | `/api/rpc/{cmd}`, `/api/events`, `/api/health`, API 404 |
 | `src/guard.rs` | Origin / Host checks on `/api`, hardening headers |
 | `src/proxy/mod.rs` | `/api/proxy` handler, upstream client, redirects, streaming |
 | `src/proxy/target.rs` | SSRF rules, guarded DNS resolver |
 | `src/proxy/hls.rs` | Streaming HLS playlist rewriter |
 | `src/files.rs` | `/api/files/{downloadId}` |
+| `src/recordings.rs` | `/api/recordings/{id}` (recording slice) |
 | `src/static_files.rs` | Built UI, SPA fallback, cache headers |
 | `tests/server.rs` | End-to-end tests over real sockets |
+| `tests/l2_import_detached.rs` | A `sources.add` whose client goes away still finishes |
+| `tests/l2_cross_cancel.rs` | Which commands stop when the client goes away (`CANCEL_ON_DISCONNECT`); every write runs detached |
+| `tests/l3_serve_compression.rs` | Which replies are compressed; precompressed files win; Range and images stay plain |
 
 ## Routes
 
 ### `POST /api/rpc/{cmd}`
 Body is the JSON args; an empty body means `null`. 200 with the JSON result.
 Errors return the `RpcError` JSON with the C1 status: NotFound 404, Invalid 400,
-Auth 401, Timeout 504, Network 502, Unsupported 501, Conflict 409, else 500.
+Auth 401, Timeout 504, Network 502, Server 502, EngineMissing 503, Unsupported 501,
+Conflict 409, and Io, Db or Internal 500 (`RpcErrorCode::http_status` in error.rs).
 A body that is not JSON is 400 `invalid`. Limit 256 MiB (backup imports,
 pasted playlists). Errors are logged with the command name and message, never
 the args.
+
+Each call runs on its own task (`api::dispatch_detached`: `tokio::spawn`,
+then the handler awaits the `JoinHandle`). Axum drops a handler's future when
+the client goes away (a reload, Back, a closed tab), and a call awaited
+inline would stop at its next await point: `sources.add` or `sources.refresh`
+left a source with no catalog, no `lastError` and no final progress event.
+On its own task the call finishes and emits its events whatever the client
+does, as on the desktop. A task that panics or is cancelled is a 500
+`internal` ("the request failed inside the server"). The server-mode
+refusals (see Security) and the JSON check run before the task starts.
+
+The exceptions are the read-only queries the UI supersedes and aborts while the
+user scrolls or types, listed in `api::CANCEL_ON_DISCONNECT`: `epg.grid`,
+`epg.programs`, `epg.search`, `epg.nowNext`, `epg.channelsSearch`,
+`catalog.search`, `catalog.channels`, `catalog.movies`, `catalog.series`,
+`catalog.categories` and `catalog.yearFacets`. They run inline under
+`iptv_core::state::cancel_on_drop`. When the client goes away, axum drops the
+call, and `AppState::db_call` interrupts its SQLite statement (or skips it
+while it still waits for a pooled connection) instead of running it for
+nobody. Writes are never on the list, because an interrupted write rolls
+back; they finish as above. The desktop app does not use this path.
+`crates/iptv-core/tests/l2_cross_core.rs` covers the interrupt.
 
 ### `GET /api/events` (WebSocket)
 Each text frame is one `AppEvent` JSON (`{"type", "payload"}`) from the
@@ -60,6 +90,27 @@ core's broadcast channel (capacity 1024).
   that cannot take a single frame within 10 s is closed (1013) so it cannot pin
   memory; the UI reconnects with backoff.
 - Shutdown sends close 1001.
+
+The web UI (`startWeb` in `src/api/events.ts`) keeps one socket per page while
+anything is subscribed:
+
+- Reconnect backoff: 500 ms doubling, plus up to 30 % jitter, at most 4 s
+  between attempts. An open resets it.
+- A waiting socket skips the rest of its wait and connects at once (backoff
+  reset) on window `focus`, `online`, the page becoming visible, or an RPC the
+  server answered. The transport reports an answer through
+  `notifyServerAnswered` (`src/api/reachability.ts`) on a success or on one of
+  the core's own error payloads, not on a proxy's 502.
+- While the wait before the next attempt is longer than 1 s
+  (`HEALTH_POLL_MS`), the page asks `GET /api/health` every second, and an
+  ok answer connects at once, so a restarted server is noticed within about a
+  second without any other nudge.
+- Any open that follows a closed socket or a failed attempt dispatches a local
+  `events.lagged`, so every cached query is refetched: events sent while the
+  socket was down are lost, and RPCs made while the server was unreachable
+  failed. This includes the first successful open of a page whose first
+  attempt failed (a page opened during a server restart). The refetch goes
+  through the 50 ms event burst (performance.md).
 
 ### `GET /api/health`
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
@@ -148,14 +199,27 @@ audio and image types) or `attachment` (anything else) with an RFC 5987
 filename, plus the sandbox CSP and `nosniff`. Downloads whose extension is not
 a media/subtitle type are saved as `.bin`.
 
+### `GET /api/recordings/{id}`
+Serves a recording file for the web player (`recordings.playSource` returns
+`/api/recordings/{id}` in server mode). `id` is a `recordings.library` entry id;
+the core resolves it to a path inside the recordings folder, never taking a
+path from the request. Unknown id or missing file: 404. Range handling and
+headers as for `/api/files`.
+
 ### Everything else: the UI
-`ServeDir` over `--static` with precompressed `.br`/`.gz` support.
+`ServeDir` over `--static` (`precompressed_br`, `precompressed_gzip`). When
+the client accepts it and a file has a `.br` or `.gz` copy beside it (a web
+`pnpm build` writes them; see performance.md), that copy is sent as it is,
+with its `Content-Encoding`.
 
 - `/assets/*-<hash>.*` (Vite output): `Cache-Control: public, max-age=31536000, immutable`.
 - `index.html` and other root files (service worker, manifest): `no-cache`.
 - A miss on a path whose last segment has no extension and is outside
   `/assets/` returns `index.html` (client-side routes deep-link). Missing
-  assets stay 404, so a stale tab never gets HTML for a script.
+  assets stay 404, so a stale tab never gets HTML for a script. This
+  fallback (`serve_index`) serves `index.html` with `precompressed_br` and
+  `precompressed_gzip` too, so a deep link gets the build's
+  `index.html.br` or `.gz` like `/`.
 - If `index.html` is missing, a short 503 page says to run `pnpm build`; the
   API keeps working.
 - Only GET and HEAD; other methods 405.
@@ -164,6 +228,18 @@ a media/subtitle type are saved as `.bin`.
   only in the web build (never in Tauri). It serves `/assets/*` cache-first,
   page navigations network-first with the cached shell as the offline
   fallback, and never touches `/api/*`.
+
+### Compression
+`compression()` in `src/lib.rs` (tower-http `CompressionLayer`) wraps only
+`POST /api/rpc/{cmd}` and the UI fallback. It sends brotli or gzip at level
+4 (`COMPRESS_LEVEL`), as the client's `Accept-Encoding` allows, for bodies of
+at least 1 KiB (`COMPRESS_MIN_BYTES`), and adds `Vary: Accept-Encoding`. It
+leaves alone images other than SVG, `text/event-stream`, fonts (`font/*`,
+`application/font-woff`), and replies that already carry `Content-Encoding`
+(the precompressed UI files) or `Content-Range` (a Range request).
+`/api/events`, `/api/proxy`, `/api/img`, `/api/files` and `/api/recordings`
+are outside the layer: they are streams, byte ranges or media that is
+already compressed. The desktop loopback proxy does not use it.
 
 ## Security
 

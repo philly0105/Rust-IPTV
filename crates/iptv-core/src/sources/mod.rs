@@ -9,9 +9,11 @@
 //! `sources.changed`. See `docs/architecture/sources.md`.
 
 pub mod rpc;
+// account:
+pub mod schedule;
 pub mod store;
 
-use crate::error::{CoreError, CoreResult, RpcError};
+use crate::error::{CoreError, CoreResult, RpcError, RpcErrorCode};
 use crate::model::{
     EpgLinks, ImportSummary, M3uOrigin, M3uSourceConfig, RequestHeaders, Source, SourceKind,
     StalkerSourceConfig, XtreamSourceConfig,
@@ -19,6 +21,7 @@ use crate::model::{
 use crate::state::AppState;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use store::SourceConfig;
@@ -43,6 +46,8 @@ type CancelMap = DashMap<String, tokio_util::sync::CancellationToken>;
 tokio::task_local! {
     /// Cancel token of the import [`run_import`] is running in this task.
     static IMPORT_CANCEL: tokio_util::sync::CancellationToken;
+    /// The run itself, so errors raised inside it name the real cause.
+    static IMPORT_RUN: Arc<ActiveRun>;
 }
 
 /// Imports (or re-imports) one source's catalog. m3u is registered by B1,
@@ -73,13 +78,44 @@ pub fn importer(state: &AppState, kind: SourceKind) -> Option<Arc<dyn Importer>>
 #[serde(rename_all = "camelCase")]
 pub struct ImportProgress<'a> {
     pub source_id: &'a str,
-    /// `fetching` | `parsing` | `saving` | `done` | `error`
+    /// `connecting` | `fetching` | `parsing` | `saving` | `done` | `error` |
+    /// `cancelled`. `connecting` opens every run, before its first request;
+    /// `done` with the message `unchanged` means the catalog was kept as is.
     pub phase: &'a str,
     pub done: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<&'a str>,
+    /// Classified error code for `phase: "error"` (C10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<RpcErrorCode>,
+    /// What a `saving` event is doing (see [`SaveStep`]); absent while rows
+    /// are written. A client that does not know it keeps showing "Saving".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<&'a str>,
+}
+
+/// The long steps of a catalog save around the row writes, sent as
+/// `import.progress {phase: "saving", step}` so the progress never sits
+/// silent on "Saving N of N" (L3-perf-core-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveStep {
+    /// Waiting for the write lock and deleting the previous catalog
+    /// (`done` 0, no total: the bar is indeterminate).
+    Replacing,
+    /// Every row is written; building the indexes, the search index and
+    /// the counts before the commit (`done` = `total` = rows written).
+    Indexing,
+}
+
+impl SaveStep {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Replacing => "replacing",
+            Self::Indexing => "indexing",
+        }
+    }
 }
 
 /// Emits `import.progress` (C6). Importers call it at least every 2000 items.
@@ -99,13 +135,116 @@ pub fn progress(
             done,
             total,
             message,
+            code: None,
+            step: None,
         },
     );
 }
 
-/// Emits `sources.changed {}`.
-pub fn emit_changed(state: &AppState) {
-    state.emit("sources.changed", serde_json::json!({}));
+/// Emits `import.progress {phase: "saving", step}` (see [`SaveStep`]):
+/// `Replacing` before the writer deletes the previous catalog, `Indexing`
+/// once every row is written and the writer finishes.
+pub fn progress_step(state: &AppState, source_id: &str, step: SaveStep, written: u64) {
+    let (done, total) = match step {
+        SaveStep::Replacing => (0, None),
+        SaveStep::Indexing => (written, Some(written)),
+    };
+    state.emit(
+        "import.progress",
+        ImportProgress {
+            source_id,
+            phase: "saving",
+            done,
+            total,
+            message: None,
+            code: None,
+            step: Some(step.as_str()),
+        },
+    );
+}
+
+/// Emits `import.progress` with `phase: "error"`, the message and its
+/// classified code (C10).
+pub fn progress_error(state: &AppState, source_id: &str, message: &str, code: RpcErrorCode) {
+    state.emit(
+        "import.progress",
+        ImportProgress {
+            source_id,
+            phase: "error",
+            done: 0,
+            total: None,
+            message: Some(message),
+            code: Some(code),
+            step: None,
+        },
+    );
+}
+
+/// Message of the `done` progress of a run whose playlist had not changed
+/// ([`ImportSummary::unchanged`]). Clients refetch only `sources.*` for it.
+pub const UNCHANGED_MESSAGE: &str = "unchanged";
+
+/// Emits `import.progress` with `phase: "connecting"`: a run has the source's
+/// lock and is about to send its first request. Clients show "Connecting to
+/// <host>" until the first fetch progress arrives.
+pub fn progress_connecting(state: &AppState, source_id: &str) {
+    progress(state, source_id, "connecting", 0, None, None);
+}
+
+/// Emits `import.progress` with `phase: "cancelled"` (C8): the run stopped
+/// and the previous catalog is intact.
+pub fn progress_cancelled(state: &AppState, source_id: &str, message: &str) {
+    progress(state, source_id, "cancelled", 0, None, Some(message));
+}
+
+/// Why `sources.changed` fired. Clients refetch only what the reason can
+/// have changed (L3-perf-core-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeReason {
+    /// A new source row; it has no catalog yet.
+    Added,
+    /// The source's catalog (or the user state tied to it) was rewritten.
+    Catalog,
+    /// The source's settings (name, URL, guide links, order) changed.
+    Config,
+    /// The source and everything tied to it are gone.
+    Removed,
+    /// Only the source's import status changed (last error, next refresh);
+    /// its catalog is as it was.
+    Status,
+}
+
+impl ChangeReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Catalog => "catalog",
+            Self::Config => "config",
+            Self::Removed => "removed",
+            Self::Status => "status",
+        }
+    }
+}
+
+/// `sources.changed` payload. `sourceId` is absent when the change spans
+/// every source (remove all, reorder, a backup restore).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourcesChanged<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<&'a str>,
+    pub reason: &'static str,
+}
+
+/// Emits `sources.changed {sourceId?, reason}`.
+pub fn emit_changed(state: &AppState, source_id: Option<&str>, reason: ChangeReason) {
+    state.emit(
+        "sources.changed",
+        SourcesChanged {
+            source_id,
+            reason: reason.as_str(),
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +331,9 @@ pub struct SourceCounts {
 pub struct RefreshFailure {
     pub id: String,
     pub error: String,
+    /// Classified code of `error` (C10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<RpcErrorCode>,
 }
 
 /// `sources.refreshAll` result.
@@ -240,6 +382,8 @@ fn check_http_url(raw: &str, what: &str) -> CoreResult<url::Url> {
 /// Validates and normalizes an m3u config (without pasted text).
 pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
     let headers = clean_headers(cfg.headers);
+    // guide:
+    let catchup = crate::catchup::m3u::validate_override(cfg.catchup)?;
     match cfg.origin {
         M3uOrigin::Url => {
             let url = trimmed(cfg.url.as_deref())
@@ -259,6 +403,7 @@ pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
                 url: Some(url),
                 file_path: None,
                 headers,
+                catchup,
             })
         }
         M3uOrigin::File => {
@@ -278,6 +423,7 @@ pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
                 url: None,
                 file_path: Some(path),
                 headers,
+                catchup,
             })
         }
         M3uOrigin::Text => Ok(M3uSourceConfig {
@@ -285,6 +431,7 @@ pub fn validate_m3u(cfg: M3uSourceConfig) -> CoreResult<M3uSourceConfig> {
             url: None,
             file_path: None,
             headers,
+            catchup,
         }),
     }
 }
@@ -304,14 +451,15 @@ pub fn validate_xtream(cfg: XtreamSourceConfig) -> CoreResult<XtreamSourceConfig
     if username.is_empty() {
         return Err(CoreError::Invalid("enter the Xtream username".into()));
     }
-    let password = cfg.password.trim().to_string();
-    if password.is_empty() {
+    // The password is kept as typed: providers do issue passwords with a
+    // leading or trailing space.
+    if cfg.password.trim().is_empty() {
         return Err(CoreError::Invalid("enter the Xtream password".into()));
     }
     Ok(XtreamSourceConfig {
         server_url: server,
         username,
-        password,
+        password: cfg.password,
     })
 }
 
@@ -382,31 +530,74 @@ pub fn normalize_urls(urls: Vec<String>) -> Vec<String> {
     out
 }
 
-fn default_name(kind: SourceKind, cfg: &SourceConfig) -> String {
-    let from_url = |u: &str| -> Option<String> {
-        let parsed = url::Url::parse(u).ok()?;
-        let seg = parsed
-            .path_segments()
-            .and_then(|mut s| s.next_back().map(str::to_owned))
-            .filter(|s| !s.is_empty());
-        seg.or_else(|| parsed.host_str().map(str::to_owned))
+/// Last path parts that say nothing about the source: playlist and Xtream
+/// endpoints, and the stock Stalker/Ministra portal paths. Mirrors
+/// `GENERIC_STEM` in `src/features/sources/lib/validate.ts`.
+const GENERIC_STEMS: &[&str] = &[
+    "get",
+    "playlist",
+    "index",
+    "player_api",
+    "c",
+    "stalker_portal",
+    "portal",
+    "server",
+    "load",
+    "panel",
+];
+
+/// `name` without a trailing `.m3u` / `.m3u8` / `.txt` (and `.php` for URLs).
+fn strip_playlist_ext(name: &str, php: bool) -> &str {
+    let lower = name.to_ascii_lowercase();
+    let exts: &[&str] = if php {
+        &[".m3u8", ".m3u", ".php", ".txt"]
+    } else {
+        &[".m3u8", ".m3u", ".txt"]
     };
+    exts.iter()
+        .find(|e| lower.ends_with(*e))
+        .map_or(name, |e| &name[..name.len() - e.len()])
+}
+
+/// Readable name from a URL, as the UI's `suggestName` derives it: the
+/// percent-decoded last path part without its playlist extension, or the host
+/// (without `www.`) when that part is empty or a generic endpoint name.
+fn name_from_url(u: &str) -> Option<String> {
+    let parsed = url::Url::parse(u).ok()?;
+    let last = parsed
+        .path_segments()
+        .and_then(|mut s| s.rfind(|p| !p.is_empty()))
+        .unwrap_or("");
+    // A broken escape (invalid UTF-8) keeps the raw text, like `safeDecode`.
+    let decoded = percent_encoding::percent_decode_str(last)
+        .decode_utf8()
+        .map_or_else(|_| last.to_string(), |d| d.into_owned());
+    let stem = strip_playlist_ext(&decoded, true).trim();
+    if !stem.is_empty() && !GENERIC_STEMS.iter().any(|g| g.eq_ignore_ascii_case(stem)) {
+        return Some(stem.to_string());
+    }
+    let host = parsed.host_str()?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+fn default_name(kind: SourceKind, cfg: &SourceConfig) -> String {
     match cfg {
         SourceConfig::M3u(c) => match c.origin {
-            M3uOrigin::Url => c.url.as_deref().and_then(from_url),
+            M3uOrigin::Url => c.url.as_deref().and_then(name_from_url),
             M3uOrigin::File => c.file_path.as_deref().and_then(|p| {
-                std::path::Path::new(p)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
+                let file = std::path::Path::new(p).file_name()?.to_string_lossy();
+                let stem = strip_playlist_ext(&file, false).trim();
+                Some(if stem.is_empty() { file.as_ref() } else { stem }.to_string())
             }),
             M3uOrigin::Text => None,
         }
         .unwrap_or_else(|| "Pasted playlist".to_string()),
         SourceConfig::Xtream(c) => {
-            from_url(&c.server_url).unwrap_or_else(|| kind.as_str().to_string())
+            name_from_url(&c.server_url).unwrap_or_else(|| kind.as_str().to_string())
         }
         SourceConfig::Stalker(c) => {
-            from_url(&c.portal_url).unwrap_or_else(|| kind.as_str().to_string())
+            name_from_url(&c.portal_url).unwrap_or_else(|| kind.as_str().to_string())
         }
     }
 }
@@ -419,6 +610,8 @@ pub fn error_text(err: &CoreError) -> String {
         | CoreError::Network(m)
         | CoreError::Auth(m)
         | CoreError::Timeout(m)
+        | CoreError::Server(m)
+        | CoreError::EngineMissing(m)
         | CoreError::Conflict(m)
         | CoreError::Unsupported(m) => m.clone(),
         other => other.to_string(),
@@ -455,17 +648,210 @@ fn cancel_imports(state: &AppState, id: &str, removing: bool) {
 }
 
 /// Cancel token of the import running in the current task (set by
-/// [`run_import`]); importers stop their network reads when it fires.
+/// [`run_import`] and [`run_import_with`]); importers and the HTTP helpers
+/// stop their network reads when it fires.
 pub fn import_cancel() -> Option<tokio_util::sync::CancellationToken> {
     IMPORT_CANCEL.try_with(Clone::clone).ok()
 }
 
-/// The error a cancelled import ends with.
+/// True when the import running in the current task was cancelled.
+pub fn is_import_cancelled() -> bool {
+    IMPORT_CANCEL
+        .try_with(tokio_util::sync::CancellationToken::is_cancelled)
+        .unwrap_or(false)
+}
+
+const REMOVED_OR_CHANGED_MESSAGE: &str = "the import stopped because the source was removed or its settings changed. Refresh the source to import it again.";
+const USER_CANCELLED_MESSAGE: &str =
+    "import stopped: cancelled by user. Nothing from this run was saved; refresh the source to import it again.";
+
+/// The error a cancelled import ends with. Inside a run stopped by
+/// `sources.cancelImport` this is [`user_cancelled_error`], so code that
+/// only sees the token (HTTP helpers, importers) reports the real cause.
 pub fn import_cancelled_error() -> CoreError {
-    CoreError::Conflict(
-        "the import stopped because the source was removed or its settings changed. Refresh the source to import it again."
-            .into(),
-    )
+    let by_user = IMPORT_RUN
+        .try_with(|r| r.user_cancelled.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    if by_user {
+        user_cancelled_error()
+    } else {
+        CoreError::Conflict(REMOVED_OR_CHANGED_MESSAGE.into())
+    }
+}
+
+/// The error an import stopped by `sources.cancelImport` ends with (C8).
+pub fn user_cancelled_error() -> CoreError {
+    CoreError::Conflict(USER_CANCELLED_MESSAGE.into())
+}
+
+/// True for the errors of a cancelled import ([`import_cancelled_error`],
+/// [`user_cancelled_error`]); they are not import failures.
+pub fn is_cancelled_error(err: &CoreError) -> bool {
+    matches!(err, CoreError::Conflict(m) if m == REMOVED_OR_CHANGED_MESSAGE || m == USER_CANCELLED_MESSAGE)
+}
+
+/// How long a cancelled import may take to stop on its own (cooperative
+/// checks between fetch, parse and save) before [`run_import`] drops it.
+/// A catalog writer still running on the blocking pool then rolls back at
+/// its next check (see [`writer_cancel_token`]).
+pub const CANCEL_GRACE: Duration = Duration::from_secs(2);
+
+/// `AppState.extensions` key of the runs in progress (C8).
+pub const ACTIVE_KEY: &str = "sources.active";
+
+/// One import or refresh in progress for a source.
+#[derive(Debug)]
+pub struct ActiveRun {
+    pub token: tokio_util::sync::CancellationToken,
+    /// Set by `sources.cancelImport` (versus a remove or settings change).
+    pub user_cancelled: AtomicBool,
+    /// First partial failure of the run ([`note_import_warning`]).
+    pub warning: parking_lot::Mutex<Option<(String, RpcErrorCode)>>,
+}
+
+/// Notes a partial failure of the import running in this task: a content
+/// type that could not be loaded kept its previous rows (or its
+/// categories). The run still succeeds; [`run_import`] records the first
+/// warning as the source's `lastError`, so the source says what is missing
+/// instead of looking fully refreshed. No-op outside a run.
+pub fn note_import_warning(message: &str, code: RpcErrorCode) {
+    let _ = IMPORT_RUN.try_with(|r| {
+        let mut w = r.warning.lock();
+        if w.is_none() {
+            *w = Some((message.to_string(), code));
+        }
+    });
+}
+
+type ActiveMap = DashMap<String, Arc<ActiveRun>>;
+
+fn active(state: &AppState) -> Arc<ActiveMap> {
+    state.ext_or_insert_with::<ActiveMap>(ACTIVE_KEY, || Arc::new(DashMap::new()))
+}
+
+type WriterTokens = DashMap<String, Vec<Arc<tokio_util::sync::CancellationToken>>>;
+
+/// Cancel tokens of the runs in progress, for catalog writers on the
+/// blocking pool (no task-local there). Process-wide because a writer only
+/// has its connection and source id, so the key is the database file plus
+/// the source id ([`writer_key`]): two app states (tests, server plus
+/// desktop) with the same source id never see each other's cancel. A writer
+/// snapshots the newest token when it begins, so a newer run never sees an
+/// older run's cancel.
+static WRITER_TOKENS: std::sync::LazyLock<WriterTokens> = std::sync::LazyLock::new(DashMap::new);
+
+/// `WRITER_TOKENS` key: the canonical database path and the source id.
+fn writer_key(db_path: &std::path::Path, source_id: &str) -> String {
+    let db = std::fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf());
+    format!("{}\u{0}{source_id}", db.to_string_lossy())
+}
+
+/// Cancel token of the newest run in progress for `source_id` in the
+/// database `conn` is open on. Catalog writers take it when they begin and
+/// check it while inserting and before committing, so a cancelled run never
+/// commits a catalog.
+pub fn writer_cancel_token(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+) -> Option<tokio_util::sync::CancellationToken> {
+    let db = conn.path().unwrap_or_default();
+    WRITER_TOKENS
+        .get(&writer_key(std::path::Path::new(db), source_id))
+        .and_then(|v| v.last().map(|t| (**t).clone()))
+}
+
+/// Registers a run for [`cancel_import`] and the catalog writers; dropping it
+/// unregisters.
+struct RunGuard {
+    active: Arc<ActiveMap>,
+    id: String,
+    run: Arc<ActiveRun>,
+    writer_key: String,
+    writer_token: Arc<tokio_util::sync::CancellationToken>,
+    /// While the run lasts, user writes wait for its write transaction
+    /// instead of failing after the normal busy timeout (review round 3).
+    _long: crate::db::LongWrite,
+}
+
+impl RunGuard {
+    fn new(state: &AppState, id: &str, token: tokio_util::sync::CancellationToken) -> Self {
+        let run = Arc::new(ActiveRun {
+            token: token.clone(),
+            user_cancelled: AtomicBool::new(false),
+            warning: parking_lot::Mutex::new(None),
+        });
+        let active = active(state);
+        active.insert(id.to_string(), run.clone());
+        let writer_token = Arc::new(token);
+        let writer_key = writer_key(&state.db_path(), id);
+        WRITER_TOKENS
+            .entry(writer_key.clone())
+            .or_default()
+            .push(writer_token.clone());
+        Self {
+            active,
+            writer_key,
+            id: id.to_string(),
+            run,
+            writer_token,
+            _long: crate::db::long_write(),
+        }
+    }
+
+    fn user_cancelled(&self) -> bool {
+        self.run.user_cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Message of the cancel that stopped this run.
+    fn cancel_message(&self) -> &'static str {
+        if self.user_cancelled() {
+            USER_CANCELLED_MESSAGE
+        } else {
+            REMOVED_OR_CHANGED_MESSAGE
+        }
+    }
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.active
+            .remove_if(&self.id, |_, r| Arc::ptr_eq(r, &self.run));
+        if let dashmap::mapref::entry::Entry::Occupied(mut e) =
+            WRITER_TOKENS.entry(self.writer_key.clone())
+        {
+            e.get_mut().retain(|t| !Arc::ptr_eq(t, &self.writer_token));
+            if e.get().is_empty() {
+                e.remove();
+            }
+        }
+    }
+}
+
+/// True while an import or refresh of `id` is running (holding the
+/// per-source lock).
+pub fn is_import_running(state: &AppState, id: &str) -> bool {
+    active(state).contains_key(id)
+}
+
+/// `sources.cancelImport` (C8): cancels the import or refresh of `id` that is
+/// running. Returns true when one was running and is now cancelling (it ends
+/// with `import.progress` `phase: "cancelled"` and keeps the previous
+/// catalog), false when nothing was running. Runs queued behind it start
+/// normally.
+pub fn cancel_import(state: &AppState, id: &str) -> bool {
+    let Some(run) = active(state).get(id).map(|r| Arc::clone(r.value())) else {
+        return false;
+    };
+    let map = cancels(state);
+    // A remove in progress leaves a cancelled token for queued runs; keep it.
+    let removing = map.get(id).is_some_and(|t| t.is_cancelled());
+    run.user_cancelled.store(true, Ordering::SeqCst);
+    run.token.cancel();
+    if !removing {
+        map.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
+    }
+    tracing::info!(source_id = id, "import cancel requested");
+    true
 }
 
 /// Runs `fut` while holding the per-source import lock that [`run_import`]
@@ -473,17 +859,86 @@ pub fn import_cancelled_error() -> CoreError {
 /// `contentTypes` subset) never interleaves with a full refresh of the same
 /// source. `fut` must not call `run_import` / `remove` for that source itself
 /// (the lock is not reentrant).
-pub async fn run_import_with<T>(
+///
+/// The run is cancellable like [`run_import`] (`sources.cancelImport`, a
+/// remove, a settings change): `fut` sees the token through
+/// [`import_cancel`], and the HTTP helpers and catalog writers honour it.
+/// `fut` reports its own outcome; when the run was cancelled this also emits
+/// `import.progress` `phase: "cancelled"`. A cancelled `fut` that does not
+/// stop within [`CANCEL_GRACE`] is dropped, as in [`run_import`], and the
+/// result is [`CancelOutcome::cancelled`].
+pub async fn run_import_with<T: CancelOutcome>(
     state: &AppState,
     id: &str,
     fut: impl std::future::Future<Output = T>,
 ) -> T {
     let lock = lock_for(state, id);
     let _guard = lock.lock().await;
-    fut.await
+    let token = current_token(state, id);
+    if token.is_cancelled() {
+        // Queued behind a run that `remove` cancelled: the source is going.
+        return T::cancelled(import_cancelled_error());
+    }
+    let run = RunGuard::new(state, id, token.clone());
+    progress_connecting(state, id);
+    let fut = IMPORT_RUN.scope(run.run.clone(), IMPORT_CANCEL.scope(token.clone(), fut));
+    tokio::pin!(fut);
+    let out = tokio::select! {
+        out = &mut fut => out,
+        () = token.cancelled() => match tokio::time::timeout(CANCEL_GRACE, &mut fut).await {
+            Ok(out) => out,
+            Err(_) => {
+                tracing::warn!(source_id = id, "sync did not stop in time after cancel; dropped");
+                T::cancelled(if run.user_cancelled() {
+                    user_cancelled_error()
+                } else {
+                    import_cancelled_error()
+                })
+            }
+        },
+    };
+    if token.is_cancelled() {
+        progress_cancelled(state, id, run.cancel_message());
+    }
+    out
 }
 
-/// Every source ordered by position, with cached counts.
+/// Result of a [`run_import_with`] run that was dropped after a cancel.
+pub trait CancelOutcome {
+    fn cancelled(err: CoreError) -> Self;
+}
+
+impl CancelOutcome for () {
+    fn cancelled(_: CoreError) -> Self {}
+}
+
+impl<T> CancelOutcome for Option<T> {
+    fn cancelled(_: CoreError) -> Self {
+        None
+    }
+}
+
+impl<T> CancelOutcome for CoreResult<T> {
+    fn cancelled(err: CoreError) -> Self {
+        Err(err)
+    }
+}
+
+impl<T> CancelOutcome for Result<T, String> {
+    fn cancelled(err: CoreError) -> Self {
+        Err(error_text(&err))
+    }
+}
+
+fn current_token(state: &AppState, id: &str) -> tokio_util::sync::CancellationToken {
+    cancels(state)
+        .entry(id.to_string())
+        .or_default()
+        .value()
+        .clone()
+}
+
+// Every source ordered by position, with cached counts.
 pub async fn list(state: &AppState) -> CoreResult<Vec<Source>> {
     state.db_call(|c| store::list(c)).await
 }
@@ -495,10 +950,12 @@ pub async fn get(state: &AppState, id: &str) -> CoreResult<Source> {
 }
 
 /// Error of [`add`]: the id of the created source (when the failure happened
-/// during the import) and the cause.
+/// during the import), the id of the source that already uses the address
+/// (a refused duplicate), and the cause.
 #[derive(Debug)]
 pub struct AddError {
     pub source_id: Option<String>,
+    pub existing_source_id: Option<String>,
     pub error: CoreError,
 }
 
@@ -506,6 +963,7 @@ impl From<CoreError> for AddError {
     fn from(error: CoreError) -> Self {
         Self {
             source_id: None,
+            existing_source_id: None,
             error,
         }
     }
@@ -513,16 +971,76 @@ impl From<CoreError> for AddError {
 
 impl From<AddError> for RpcError {
     fn from(e: AddError) -> Self {
+        let cancelled = is_cancelled_error(&e.error);
         let mut err = RpcError::from(e.error);
-        if let Some(id) = e.source_id {
-            err = err.with_details(serde_json::json!({ "sourceId": id }));
+        // A refused duplicate: `details.existingSourceId`, never `sourceId`,
+        // which names a source this add created (the UI discards that one).
+        if let Some(id) = e.existing_source_id {
+            return err.with_details(serde_json::json!({ "existingSourceId": id }));
+        }
+        match (e.source_id, cancelled) {
+            (Some(id), true) => {
+                err = err.with_details(serde_json::json!({ "sourceId": id, "cancelled": true }))
+            }
+            (Some(id), false) => err = err.with_details(serde_json::json!({ "sourceId": id })),
+            (None, true) => err = err.with_details(serde_json::json!({ "cancelled": true })),
+            (None, false) => {}
         }
         err
     }
 }
 
+/// RPC error of a run that may have been cancelled: a cancelled run carries
+/// `details.cancelled = true` (C8) so callers can tell it from a failure.
+pub fn cancel_aware_rpc_error(err: CoreError) -> RpcError {
+    let cancelled = is_cancelled_error(&err);
+    let rpc = RpcError::from(err);
+    if cancelled {
+        rpc.with_details(serde_json::json!({ "cancelled": true }))
+    } else {
+        rpc
+    }
+}
+
+/// Held across the duplicate check and the write in [`add`] and [`update`],
+/// so two concurrent calls cannot both claim one address.
+fn identity_lock(state: &AppState) -> Arc<tokio::sync::Mutex<()>> {
+    state.ext_or_insert_with("sources_identity_lock", || {
+        Arc::new(tokio::sync::Mutex::new(()))
+    })
+}
+
+/// `Conflict` for a config whose address `existing` (a source name) already
+/// uses. The wording avoids "cancelled" / "import stopped", which mark a
+/// cancelled run's conflict.
+fn duplicate_error(config: &SourceConfig, existing: &str) -> CoreError {
+    let what = match config {
+        SourceConfig::M3u(c) if c.origin == M3uOrigin::File => "playlist file",
+        SourceConfig::M3u(_) => "playlist URL",
+        SourceConfig::Xtream(_) => "server and username",
+        SourceConfig::Stalker(_) => "portal and MAC address",
+    };
+    CoreError::Conflict(format!(
+        "this source already exists: \"{existing}\" uses the same {what}"
+    ))
+}
+
+/// The stored config of `s` (`None` when it could not be read).
+fn config_of(s: &Source) -> Option<SourceConfig> {
+    match s.kind {
+        SourceKind::M3u => s.m3u.clone().map(SourceConfig::M3u),
+        SourceKind::Xtream => s.xtream.clone().map(SourceConfig::Xtream),
+        SourceKind::Stalker => s.stalker.clone().map(SourceConfig::Stalker),
+    }
+}
+
 /// `sources.add`: validates, inserts, runs the importer. On importer failure
 /// the source stays (with `lastError`) and the error carries its id.
+///
+/// An address another source already uses (see [`store::identity`]; pasted
+/// text is never a duplicate) is refused with `Conflict` before anything is
+/// created; that error's `existing_source_id` (`details.existingSourceId` in
+/// the RPC error) is the existing source's id, and its `source_id` is `None`.
 pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, AddError> {
     let (config, raw_text) = match args.kind {
         SourceKind::M3u => {
@@ -551,6 +1069,7 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
                 url: input.url,
                 file_path: input.file_path,
                 headers: input.headers.unwrap_or_default(),
+                catchup: None,
             })?;
             (SourceConfig::M3u(cfg), text)
         }
@@ -581,63 +1100,126 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
     let id = uuid::Uuid::new_v4().to_string();
     let auto_refresh = args.auto_refresh.unwrap_or(false);
     {
+        let _same = identity_lock(&state).lock_owned().await;
         let id = id.clone();
         let data_dir = state.data_dir.clone();
-        state
+        let duplicate = state
             .db_call(move |c| {
+                if let Some((other_id, other_name)) = store::find_same(c, &config, None)? {
+                    return Ok(Some((other_id, duplicate_error(&config, &other_name))));
+                }
                 let raw = raw_text.as_deref().map(|t| (data_dir.as_path(), t));
-                store::insert(c, &id, &name, auto_refresh, &config, raw)
+                store::insert(c, &id, &name, auto_refresh, &config, raw)?;
+                Ok(None)
             })
             .await?;
+        // Nothing was created: the error names the source that already exists.
+        if let Some((other_id, error)) = duplicate {
+            return Err(AddError {
+                source_id: None,
+                existing_source_id: Some(other_id),
+                error,
+            });
+        }
     }
     tracing::info!(source_id = %id, kind = args.kind.as_str(), "source added");
-    emit_changed(&state);
-    match run_import(state.clone(), &id).await {
+    emit_changed(&state, Some(&id), ChangeReason::Added);
+    // User-initiated: an unreachable host fails after the short connect
+    // timeout instead of the background 10 s.
+    match crate::http::interactive(run_import(state.clone(), &id)).await {
         Ok((source, _)) => Ok(source),
         Err(error) => Err(AddError {
             source_id: Some(id),
+            existing_source_id: None,
             error,
         }),
     }
 }
 
 /// Runs the importer for one source (serialized per source), then records the
-/// outcome. A failed import leaves the previous catalog in place. [`remove`]
-/// and a settings change in [`update`] cancel it (see [`import_cancel`]); a
-/// cancelled import records no `lastError`.
+/// outcome. A failed import leaves the previous catalog in place and records
+/// `lastError` with its code (C10).
+///
+/// Cancellation (C8): `sources.cancelImport`, [`remove`] and a settings change
+/// in [`update`] cancel the run's token. The importer stops at its next
+/// cooperative check (HTTP sends and body reads, stage boundaries, catalog
+/// writer batches); one that does not stop within [`CANCEL_GRACE`] is
+/// dropped. Catalog writers check the token before committing, so a
+/// cancelled run leaves the previous catalog intact. It emits
+/// `import.progress` `phase: "cancelled"` and records no `lastError`.
 pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, ImportSummary)> {
-    let lock = lock_for(&state, id);
-    let guard = lock.lock().await;
-    let token = cancels(&state)
-        .entry(id.to_string())
-        .or_default()
-        .value()
-        .clone();
+    let guard = lock_for(&state, id).lock_owned().await;
+    run_import_locked(state, id, guard).await
+}
+
+/// [`run_import`] unless an import, refresh, partial sync or remove of `id`
+/// holds its lock right now; then `None` and nothing runs. The scheduled
+/// refresh uses it so it never queues behind (and then repeats) a manual
+/// refresh.
+pub async fn try_run_import(
+    state: Arc<AppState>,
+    id: &str,
+) -> Option<CoreResult<(Source, ImportSummary)>> {
+    let guard = lock_for(&state, id).try_lock_owned().ok()?;
+    Some(run_import_locked(state, id, guard).await)
+}
+
+async fn run_import_locked(
+    state: Arc<AppState>,
+    id: &str,
+    guard: tokio::sync::OwnedMutexGuard<()>,
+) -> CoreResult<(Source, ImportSummary)> {
+    let token = current_token(&state, id);
     if token.is_cancelled() {
         // Queued behind an import that `remove` cancelled.
         return Err(import_cancelled_error());
     }
+    let run = RunGuard::new(&state, id, token.clone());
     let source = get(&state, id).await?;
     let Some(imp) = importer(&state, source.kind) else {
         let err = CoreError::Unsupported(format!(
             "{} sources are not available in this build",
             source.kind.as_str()
         ));
-        record(&state, id, Some(&error_text(&err))).await;
+        record(&state, id, Some((&error_text(&err), err.code()))).await;
+        progress_error(&state, id, &error_text(&err), err.code());
         return Err(err);
     };
     let started = std::time::Instant::now();
-    let outcome = IMPORT_CANCEL
-        .scope(token.clone(), imp.import(state.clone(), &source))
-        .await;
+    progress_connecting(&state, id);
+    let fut = IMPORT_RUN.scope(
+        run.run.clone(),
+        IMPORT_CANCEL.scope(token.clone(), imp.import(state.clone(), &source)),
+    );
+    tokio::pin!(fut);
+    let outcome = tokio::select! {
+        r = &mut fut => r,
+        () = token.cancelled() => {
+            // Give the importer a moment to stop cleanly (temp files, logs).
+            match tokio::time::timeout(CANCEL_GRACE, &mut fut).await {
+                Ok(r) => r,
+                Err(_) => {
+                    tracing::warn!(source_id = id, "import did not stop in time after cancel; dropped");
+                    Err(import_cancelled_error())
+                }
+            }
+        }
+    };
     match outcome {
         Ok(summary) => {
+            // A cancel that arrived after the catalog was committed is too
+            // late to undo; the run is reported as done.
             let sid = id.to_string();
             let kind = source.kind;
             let (movies, series) = (summary.movies, summary.series);
+            let warning = run.run.warning.lock().take();
             state
                 .db_call(move |c| {
                     store::record_import(c, &sid, None)?;
+                    if let Some((msg, code)) = &warning {
+                        // A content type kept its previous rows: say so.
+                        store::record_import_error(c, &sid, msg, *code)?;
+                    }
                     if kind == SourceKind::Stalker {
                         // Portal VOD is not stored locally; keep its totals.
                         crate::catalog::set_remote_counts(c, &sid, movies, series)?;
@@ -645,41 +1227,67 @@ pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, I
                     Ok(())
                 })
                 .await?;
+            drop(run);
             // The backup import lock is never taken while this source's
             // import lock is held (lock order: backup, then source).
             drop(guard);
-            apply_parked_backup(&state, id).await;
+            let restored = apply_parked_backup(&state, id).await;
             let total = (summary.channels + summary.movies + summary.series).max(0) as u64;
-            progress(&state, id, "done", total, Some(total), None);
+            // Unchanged: only the source's import time moved, so clients
+            // refetch `sources.*` (on this message) and keep their catalog,
+            // list and guide queries; no `sources.changed`.
+            let message = summary.unchanged.then_some(UNCHANGED_MESSAGE);
+            progress(&state, id, "done", total, Some(total), message);
             tracing::info!(
                 source_id = id,
                 channels = summary.channels,
                 movies = summary.movies,
                 series = summary.series,
+                unchanged = summary.unchanged,
                 ms = started.elapsed().as_millis() as u64,
                 "source imported"
             );
-            emit_changed(&state);
+            if !summary.unchanged || restored {
+                emit_changed(&state, Some(id), ChangeReason::Catalog);
+            }
             let source = get(&state, id).await?;
             spawn_guide_refresh(&state, &source);
+            // account:
+            crate::account::after_import(&state, &source);
             Ok((source, summary))
+        }
+        Err(err) if token.is_cancelled() => {
+            let msg = run.cancel_message();
+            tracing::info!(
+                source_id = id,
+                by_user = run.user_cancelled(),
+                ms = started.elapsed().as_millis() as u64,
+                "source import cancelled; previous catalog kept"
+            );
+            if !is_cancelled_error(&err) {
+                tracing::debug!(source_id = id, error = %error_text(&err), "error after cancel");
+            }
+            progress_cancelled(&state, id, msg);
+            emit_changed(&state, Some(id), ChangeReason::Status);
+            Err(if run.user_cancelled() {
+                user_cancelled_error()
+            } else {
+                import_cancelled_error()
+            })
         }
         Err(err) => {
             let msg = error_text(&err);
-            if token.is_cancelled() {
-                tracing::info!(source_id = id, "source import cancelled");
-            } else {
-                tracing::warn!(source_id = id, error = %msg, "source import failed; previous catalog kept");
-                record(&state, id, Some(&msg)).await;
-            }
-            progress(&state, id, "error", 0, None, Some(&msg));
-            emit_changed(&state);
+            let code = err.code();
+            tracing::warn!(source_id = id, error = %msg, code = code.as_str(), "source import failed; previous catalog kept");
+            record(&state, id, Some((&msg, code))).await;
+            progress_error(&state, id, &msg, code);
+            emit_changed(&state, Some(id), ChangeReason::Status);
             Err(err)
         }
     }
 }
 
-/// Guide URLs of a source that a refresh should cover: detected and manual
+// Guide URLs of a source that a refresh should cover: detected and manual
 /// URLs minus the disabled ones, trimmed, blanks dropped, first occurrence kept.
 pub fn guide_urls(links: &EpgLinks) -> Vec<String> {
     let disabled: std::collections::HashSet<&str> =
@@ -766,7 +1374,7 @@ fn spawn_guide_refresh(state: &Arc<AppState>, source: &Source) {
 /// Only a source with a parked row (`backup_pending:<id>`) waits for the
 /// global backup import lock, so adding or refreshing an unrelated source never
 /// blocks behind a running `backup.import`.
-async fn apply_parked_backup(state: &Arc<AppState>, id: &str) {
+async fn apply_parked_backup(state: &Arc<AppState>, id: &str) -> bool {
     let key = format!("{}{id}", crate::backup::PENDING_PREFIX);
     let parked = state
         .db_call(move |c| {
@@ -776,39 +1384,48 @@ async fn apply_parked_backup(state: &Arc<AppState>, id: &str) {
         .await;
     match parked {
         Ok(true) => {}
-        Ok(false) => return,
+        Ok(false) => return false,
         Err(err) => {
             tracing::warn!(source_id = id, %err, "could not check for parked backup state");
-            return;
+            return false;
         }
     }
     match crate::backup::apply_pending_restore(state, id).await {
-        Ok(w) if !w.is_empty() => {
-            tracing::info!(
-                source_id = id,
-                warnings = w.len(),
-                "applied parked backup state"
-            )
+        Ok(w) => {
+            if !w.is_empty() {
+                tracing::info!(
+                    source_id = id,
+                    warnings = w.len(),
+                    "applied parked backup state"
+                );
+            }
+            true
         }
-        Ok(_) => {}
         Err(err) => {
-            tracing::warn!(source_id = id, %err, "parked backup state could not be applied")
+            tracing::warn!(source_id = id, %err, "parked backup state could not be applied");
+            false
         }
     }
 }
 
-async fn record(state: &AppState, id: &str, error: Option<&str>) {
+/// Records a failed import (message and code, C10), or a success when `error`
+/// is `None`. The message is redacted: it is shown on screen and exported.
+async fn record(state: &AppState, id: &str, error: Option<(&str, RpcErrorCode)>) {
     let sid = id.to_string();
-    let error = error.map(str::to_owned);
+    let error = error.map(|(m, c)| (crate::logging::redact_text(m).into_owned(), c));
     if let Err(err) = state
-        .db_call(move |c| store::record_import(c, &sid, error.as_deref()))
+        .db_call(move |c| match &error {
+            Some((msg, code)) => store::record_import_error(c, &sid, msg, *code),
+            None => store::record_import(c, &sid, None),
+        })
         .await
     {
         tracing::warn!(source_id = id, %err, "could not record import outcome");
     }
 }
 
-/// `sources.update`.
+/// `sources.update`. Moving a source to an address another source already
+/// uses is refused with `Conflict`; nothing is changed then.
 pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResult<Source> {
     let current = get(state, id).await?;
     let mut config: Option<SourceConfig> = None;
@@ -839,6 +1456,18 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             s, stored_mac,
         )?));
     }
+    // Only the M3U catch-up override changed: it applies when channels are
+    // read, so a running import of the same playlist carries on.
+    let catchup_only = match (&current.m3u, &config) {
+        (Some(old), Some(SourceConfig::M3u(new))) => {
+            let strip = |c: &M3uSourceConfig| M3uSourceConfig {
+                catchup: None,
+                ..c.clone()
+            };
+            strip(old) == strip(new)
+        }
+        _ => false,
+    };
     // Another portal (URL or MAC): rows listed by the old one must go.
     let portal_changed = match (&current.stalker, &config) {
         (Some(old), Some(SourceConfig::Stalker(new))) => {
@@ -847,6 +1476,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         }
         _ => false,
     };
+    // A new address (not the one this source already has) must not be
+    // another source's; checked under the lock, inside the write.
+    let claim = config.clone().filter(|cfg| {
+        let new = store::identity(cfg);
+        new.is_some() && new != config_of(&current).as_ref().and_then(store::identity)
+    });
     let name = match patch.name.as_deref().map(str::trim) {
         Some("") => return Err(CoreError::Invalid("the name cannot be empty".into())),
         Some(n) => Some(n.to_string()),
@@ -879,10 +1514,19 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
+    let _same = match claim {
+        Some(_) => Some(identity_lock(state).lock_owned().await),
+        None => None,
+    };
     let (updated, config_changed) = state
         .db_call(move |c| {
             let mut config_changed = false;
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some(cfg) = &claim {
+                if let Some((_, other)) = store::find_same(&tx, cfg, Some(&sid))? {
+                    return Err(duplicate_error(cfg, &other));
+                }
+            }
             if let Some(n) = &name {
                 tx.execute(
                     "UPDATE sources SET name = ?2 WHERE id = ?1",
@@ -924,15 +1568,17 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             Ok((store::get(c, &sid)?, config_changed))
         })
         .await?;
-    if config_changed {
+    if config_changed && !catchup_only {
         // An import still running fetches the old address (and may be stuck
         // on it); stop it so the next refresh uses the new settings.
         cancel_imports(state, id, false);
+        // Cached panel guide answers may belong to another server/account.
+        crate::catchup::forget_source(state, id);
     }
     if portal_changed {
         crate::stalker::forget_source(state, id).await;
     }
-    emit_changed(state);
+    emit_changed(state, Some(id), ChangeReason::Config);
     Ok(updated)
 }
 
@@ -949,11 +1595,16 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     deleted?;
     crate::m3u::remove_cached_playlist(state, id);
     crate::stalker::forget_source(state, id).await;
+    crate::catchup::forget_source(state, id);
+    // recording: drop its reminders, cancel or stop its recordings.
+    crate::recording::forget_source(state, id).await;
+    // lists: the cascade dropped the source's list items; announce `lists.changed`.
+    crate::lists::forget_source(state, id).await;
     if let Some(locks) = state.ext::<LockMap>(LOCKS_KEY) {
         locks.remove(id);
     }
     tracing::info!(source_id = id, "source removed");
-    emit_changed(state);
+    emit_changed(state, Some(id), ChangeReason::Removed);
     Ok(())
 }
 
@@ -969,20 +1620,25 @@ pub async fn remove_all(state: &AppState) -> CoreResult<()> {
         }
     }
     tracing::info!(count = ids.len(), "all sources removed");
-    emit_changed(state);
+    emit_changed(state, None, ChangeReason::Removed);
     Ok(())
 }
 
 /// `sources.reorder`.
 pub async fn reorder(state: &AppState, ids: Vec<String>) -> CoreResult<()> {
     state.db_call(move |c| store::reorder(c, &ids)).await?;
-    emit_changed(state);
+    emit_changed(state, None, ChangeReason::Config);
     Ok(())
 }
 
 /// `sources.refresh`: re-import one source.
+///
+/// User-initiated (a card's Refresh, the add dialog's Try again): an
+/// unreachable host fails after the short connect timeout, as in [`add`]
+/// (L4-settings-4). The startup pass ([`refresh_all`]) and the schedule
+/// call the importer directly and keep the background 10 s and retries.
 pub async fn refresh(state: Arc<AppState>, id: &str) -> CoreResult<Source> {
-    Ok(run_import(state, id).await?.0)
+    Ok(crate::http::interactive(run_import(state, id)).await?.0)
 }
 
 /// `sources.refreshAll`: re-imports every auto-refresh source, one at a time.
@@ -995,9 +1651,12 @@ pub async fn refresh_all(state: Arc<AppState>) -> CoreResult<RefreshAllResult> {
             Err(CoreError::NotFound(_)) if get(&state, &s.id).await.is_err() => {
                 // Removed while we were refreshing others; nothing to report.
             }
+            // Cancelled (cancelImport, remove, edit): not a failure.
+            Err(err) if is_cancelled_error(&err) => {}
             Err(err) => out.failed.push(RefreshFailure {
                 id: s.id,
-                error: error_text(&err),
+                code: Some(err.code()),
+                error: crate::logging::redact_text(&error_text(&err)).into_owned(),
             }),
         }
     }
@@ -1016,7 +1675,8 @@ pub async fn counts(state: &AppState, id: &str) -> CoreResult<SourceCounts> {
 }
 
 /// Schedules the startup refresh of auto-refresh sources 3 s after boot (in
-/// the background; boot does not wait for it).
+/// the background; boot does not wait for it), then the periodic refresh
+/// every `sourceRefreshIntervalHours` (see [`schedule`]; 0 = startup only).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     if state.ext::<()>("sources.started").is_some() {
         return Ok(());
@@ -1024,7 +1684,7 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     state.set_ext("sources.started", Arc::new(()));
     tokio::spawn(async move {
         tokio::time::sleep(STARTUP_REFRESH_DELAY).await;
-        match refresh_all(state).await {
+        match refresh_all(state.clone()).await {
             Ok(r) if r.refreshed.is_empty() && r.failed.is_empty() => {}
             Ok(r) => tracing::info!(
                 refreshed = r.refreshed.len(),
@@ -1033,6 +1693,10 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
             ),
             Err(err) => tracing::warn!(%err, "startup refresh failed"),
         }
+        // account: the periodic refresh. Weak: the loop ends when the app state is dropped.
+        let weak = Arc::downgrade(&state);
+        drop(state);
+        schedule::run(weak, schedule::TICK).await;
     });
     Ok(())
 }
@@ -1107,6 +1771,70 @@ mod tests {
         assert!(done.is_ok());
     }
 
+    /// L1-sources-home-6: names given to sources added without one follow the
+    /// UI's `suggestName` (no `c`, `get.php` or percent-encoded names).
+    #[test]
+    fn default_names_follow_the_ui_rules() {
+        let m3u = |origin, url: Option<&str>, file: Option<&str>| {
+            default_name(
+                SourceKind::M3u,
+                &SourceConfig::M3u(M3uSourceConfig {
+                    origin,
+                    url: url.map(str::to_string),
+                    file_path: file.map(str::to_string),
+                    headers: RequestHeaders::default(),
+                    catchup: None,
+                }),
+            )
+        };
+        let url = |u: &str| m3u(M3uOrigin::Url, Some(u), None);
+        assert_eq!(
+            url("http://www.example.com/get.php?username=u&password=p"),
+            "example.com"
+        );
+        assert_eq!(url("http://tv.example.com/My%20List.m3u8"), "My List");
+        assert_eq!(url("http://tv.example.com/lists/sports.M3U"), "sports");
+        assert_eq!(url("http://tv.example.com/lists/news.txt/"), "news");
+        assert_eq!(url("http://tv.example.com/Playlist.m3u"), "tv.example.com");
+        assert_eq!(url("http://tv.example.com/panel"), "tv.example.com");
+        assert_eq!(url("http://tv.example.com/"), "tv.example.com");
+        // A broken escape keeps the raw text.
+        assert_eq!(url("http://tv.example.com/bad%E0%A4.m3u"), "bad%E0%A4");
+        assert_eq!(
+            m3u(M3uOrigin::File, None, Some("C:/lists/family.m3u8")),
+            "family"
+        );
+        assert_eq!(m3u(M3uOrigin::Text, None, None), "Pasted playlist");
+
+        let xtream = |server: &str| {
+            default_name(
+                SourceKind::Xtream,
+                &SourceConfig::Xtream(XtreamSourceConfig {
+                    server_url: server.into(),
+                    username: "u".into(),
+                    password: "p".into(),
+                }),
+            )
+        };
+        assert_eq!(xtream("http://www.provider.tv:8080"), "provider.tv");
+        assert_eq!(xtream("http://provider.tv/player_api.php"), "provider.tv");
+        assert_eq!(xtream("not a url"), "xtream");
+
+        for portal in [
+            "http://portal.example.net/c",
+            "http://portal.example.net/c/",
+            "http://portal.example.net/stalker_portal/c/",
+            "http://portal.example.net/portal.php",
+            "http://portal.example.net/stalker_portal/server/load.php",
+        ] {
+            assert_eq!(
+                name_from_url(portal).as_deref(),
+                Some("portal.example.net"),
+                "{portal}"
+            );
+        }
+    }
+
     #[test]
     fn validation_normalizes() {
         assert_eq!(
@@ -1123,6 +1851,23 @@ mod tests {
         })
         .unwrap();
         assert_eq!(x.server_url, "http://h:8080");
+        // L1-core-20: the username is trimmed, the password is not.
+        let spaced = validate_xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: " u ".into(),
+            password: " p ".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            (spaced.username.as_str(), spaced.password.as_str()),
+            ("u", " p ")
+        );
+        assert!(validate_xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: "u".into(),
+            password: "   ".into(),
+        })
+        .is_err());
         assert!(validate_xtream(XtreamSourceConfig {
             server_url: "ftp://h".into(),
             username: "u".into(),

@@ -25,7 +25,7 @@ mod import;
 pub mod rpc;
 
 pub use export::{build_manifest, export};
-pub use import::{apply_pending_restore, import};
+pub use import::{apply_pending_restore, import, import_with};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
@@ -44,15 +44,126 @@ pub const BACKUP_KIND: &str = "iptvnator-playlist-backup";
 pub const BACKUP_VERSION: i64 = 1;
 /// `app_state` key prefix of parked user state.
 pub const PENDING_PREFIX: &str = "backup_pending:";
+
+/// Tsrust extension in an entry's `userState`: manual EPG mappings
+/// (`[{contentType, itemId, epgChannelId}]`, `null` = explicitly unmapped).
+pub const EXT_EPG_MAPPINGS: &str = "tsrustEpgMappings";
+/// Tsrust extension in an M3U or Stalker entry's `userState`: playback
+/// positions by catalog id (`[{contentType, itemId, episodeId?,
+/// positionSeconds, durationSeconds?, updatedAt, watched?, snapshot?}]`).
+pub const EXT_POSITIONS: &str = "tsrustPlaybackPositions";
+/// Tsrust extension in a Stalker entry's `userState`: hidden categories
+/// (`[{contentType, categoryId}]`).
+pub const EXT_HIDDEN_CATEGORIES: &str = "tsrustHiddenCategories";
+/// Tsrust extension in an entry's `userState`: parental locks of the source
+/// (`[{contentType, kind, targetId, name, createdAt}]`). Never PIN material.
+pub const EXT_PARENTAL_LOCKS: &str = "tsrustParentalLocks";
+/// Tsrust extension in an entry's `userState`: the source's My List rows
+/// (`[WatchlistBackupEntry]`, contract C3).
+pub const EXT_WATCHLIST: &str = "tsrustWatchlist";
+/// Tsrust extension in an entry's `userState`: hidden and renamed channels
+/// of the source (`[ChannelEditBackup]`, Run 2 contract C2).
+pub const EXT_CHANNEL_EDITS: &str = "tsrustChannelEdits";
+/// Tsrust extension in an entry's `userState`: series recording rules of
+/// the source (`[RecordingRuleBackup]`, Run 2 contract C5).
+pub const EXT_RECORDING_RULES: &str = "tsrustRecordingRules";
+/// Tsrust extension in an entry's `userState`: the source's daily watch log
+/// (`[WatchLogBackup]`, Run 2 contract C7).
+pub const EXT_WATCH_LOG: &str = "tsrustWatchLog";
+/// Tsrust extension at the manifest's top level, next to `playlists`: custom
+/// channel lists (`[CustomListBackup]`, Run 2 contract C3). Lists mix
+/// sources, so each item names its source by the entry's `exportedId`.
+pub const EXT_CUSTOM_LISTS: &str = "tsrustCustomLists";
+/// Tsrust extension in the manifest's `settings`: parental options
+/// (`{mode, autoAdult, unlockMinutes}`). Never the PIN, its hash or salt.
+pub const EXT_PARENTAL_SETTINGS: &str = "tsrustParental";
 /// App-level settings carried in the manifest's `settings` object next to
-/// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
-/// specific values (player paths, folders) are deliberately not exported.
-pub const APP_SETTING_KEYS: [&str; 5] = [
+/// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Every
+/// other settings field is in [`APP_SETTING_EXCLUDED`] with its reason; a
+/// test fails for a field in neither list.
+pub const APP_SETTING_KEYS: [&str; 39] = [
+    // general:
+    "language",
+    "theme",
+    "showDashboard",
+    "dashboardRails",
+    "startupBehavior",
+    "openStreamOnDoubleClick",
+    "showCaptions",
+    "coverSize",
+    "epgViewMode",
+    // player:
+    "streamFormat",
+    "playerAmbientMode",
+    "playerAutoplayNextEpisode",
+    "playerUpNextRail",
+    "fullscreenChannelPanel",
+    "vodAutoFailover",
     "stripCountryPrefix",
     "epgOffsetMinutes",
     "playerReuseInstance",
     "showExternalBar",
     "vodMinRating",
+    "englishOnly",
+    // account:
+    "sourceRefreshIntervalHours",
+    "accountExpiryWarnDays",
+    // guide:
+    "epgShortFallback",
+    // recording:
+    "recordingPaddingBeforeMinutes",
+    "recordingPaddingAfterMinutes",
+    "remindersEnabled",
+    "reminderLeadMinutes",
+    "reminderAction",
+    // appearance:
+    "accent",
+    "oledBlack",
+    "density",
+    "uiScale",
+    "zapBanner",
+    // subtitles:
+    "subtitleSize",
+    "subtitleColor",
+    "subtitleBackground",
+    "subtitlePosition",
+    // vod:
+    "vodHideWatched",
+];
+
+/// Settings fields a backup never carries, each with the reason. `epgUrls`
+/// travels on its own (IPTVnator's field) and is listed here only so the
+/// completeness test accounts for it.
+pub const APP_SETTING_EXCLUDED: [(&str, &str); 17] = [
+    ("epgUrls", "exported as the manifest's own settings.epgUrls"),
+    (
+        "player",
+        "depends on the players installed here; embedded mpv is desktop-only",
+    ),
+    ("mpvPath", "a path on this machine"),
+    ("vlcPath", "a path on this machine"),
+    ("mpvArgs", "tuned for this machine's player build"),
+    ("vlcArgs", "tuned for this machine's player build"),
+    ("downloadsDir", "a folder on this machine"),
+    ("recordingsDir", "a folder on this machine"),
+    ("lastRoute", "navigation state, not a preference"),
+    (
+        "tmdb",
+        "holds the TMDB API key, a secret; enabled and language need it",
+    ),
+    (
+        "remoteControl",
+        "network exposure: a restore must never open a port",
+    ),
+    (
+        "remoteLanEnabled",
+        "network exposure: a restore must never open the remote to the LAN",
+    ),
+    ("liveFailover", "describes this machine's playback setup"),
+    ("streamReconnect", "describes this machine's playback setup"),
+    ("imageCacheMaxMb", "sizes this machine's disk cache"),
+    ("tourCompleted", "records what this install has shown"),
+    ("lastSeenVersion", "records what this install has shown"),
 ];
 
 /// `backup.import` mode.
@@ -60,7 +171,9 @@ pub const APP_SETTING_KEYS: [&str; 5] = [
 #[serde(rename_all = "lowercase")]
 pub enum ImportMode {
     /// Keep existing sources; entries matching an existing source (same URL /
-    /// server + user / portal + MAC / identical M3U text) update it in place.
+    /// server + user / portal + MAC / identical M3U text) merge into it: the
+    /// source keeps its name, auto refresh, position and config, the backup
+    /// fills only what it lacks, and its user state is applied.
     #[default]
     Merge,
     /// Delete every existing source (and its user state) first.
@@ -77,6 +190,11 @@ pub struct ImportReport {
     pub skipped: i64,
     /// Human-readable notes: unmatched items, unreachable portals, ...
     pub warnings: Vec<String>,
+    /// Background merge: names of the sources whose catalogs load after the
+    /// call returned (`import.progress` reports each; their favorites and
+    /// history follow). Absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refreshing: Vec<String>,
 }
 
 /// `backup.export` result.
@@ -96,7 +214,7 @@ pub struct ExportResult {
 // depend on the sources module's internal API.
 // ---------------------------------------------------------------------------
 
-const SOURCE_COLS: &str = "id, kind, name, position, auto_refresh, created_at, updated_at, last_refresh_at, last_error, config_json, epg_json";
+const SOURCE_COLS: &str = "id, kind, name, position, auto_refresh, created_at, updated_at, last_refresh_at, last_error, config_json, epg_json, last_error_code";
 
 fn source_from_row(row: &Row<'_>) -> rusqlite::Result<(Source, String)> {
     let kind_s: String = row.get(1)?;
@@ -116,6 +234,11 @@ fn source_from_row(row: &Row<'_>) -> rusqlite::Result<(Source, String)> {
             updated_at: ts(row.get(6)?),
             last_refresh_at: ts(row.get(7)?),
             last_error: row.get(8)?,
+            last_error_code: row
+                .get::<_, Option<String>>(11)?
+                .as_deref()
+                .and_then(crate::error::RpcErrorCode::parse),
+            last_error_at: None,
             channel_count: 0,
             movie_count: 0,
             series_count: 0,

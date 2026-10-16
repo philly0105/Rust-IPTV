@@ -264,18 +264,7 @@ async fn proxy(
         }
     };
 
-    let status = resp.status();
-    if status.is_client_error() || status.is_server_error() {
-        let err = RpcError::from(status_error(status, "upstream"))
-            .with_details(serde_json::json!({ "upstreamStatus": status.as_u16() }));
-        // 4xx pass through so players see 404/403/416; 5xx become 502.
-        let code = if status.is_client_error() {
-            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
-        } else {
-            StatusCode::BAD_GATEWAY
-        };
-        return Err(Fail(code, err));
-    }
+    check_upstream_status(resp.status())?;
 
     let params = [
         ("sourceId", source_id.as_deref().unwrap_or("")),
@@ -283,8 +272,37 @@ async fn proxy(
         ("referer", q.referer.as_deref().unwrap_or("").trim()),
         ("origin", q.origin.as_deref().unwrap_or("").trim()),
     ];
+    let head = method == Method::HEAD;
     let rewriter = hls::HlsRewriter::with_params(current.clone(), &params);
-    respond(resp, current, rewriter, method == Method::HEAD).await
+    if let Some(out) = respond(resp, current.clone(), rewriter, head).await? {
+        return Ok(out);
+    }
+    // The client asked for a byte range of what turned out to be a playlist.
+    // A slice of a playlist cannot be rewritten, so fetch the whole of it
+    // (ignoring Range is allowed) and answer 200.
+    let resp = send(&client, &method, &current, &headers_out, headers, false).await?;
+    check_upstream_status(resp.status())?;
+    let rewriter = hls::HlsRewriter::with_params(current.clone(), &params);
+    respond(resp, current, rewriter, head).await?.ok_or_else(|| {
+        Fail::coded(RpcError::network(
+            "the stream server answered with part of a playlist although the whole one was requested",
+        ))
+    })
+}
+
+/// 4xx pass through so players see 404/403/416; 5xx become 502.
+fn check_upstream_status(status: reqwest::StatusCode) -> Result<(), Fail> {
+    if !(status.is_client_error() || status.is_server_error()) {
+        return Ok(());
+    }
+    let err = RpcError::from(status_error(status, "upstream"))
+        .with_details(serde_json::json!({ "upstreamStatus": status.as_u16() }));
+    let code = if status.is_client_error() {
+        StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
+    } else {
+        StatusCode::BAD_GATEWAY
+    };
+    Err(Fail(code, err))
 }
 
 /// Sends one request, retrying connect failures and timeouts with backoff.
@@ -419,12 +437,14 @@ fn is_generic_type(ct: &str) -> bool {
         || ct.starts_with("binary/octet-stream")
 }
 
+/// Builds the proxy response. `None` when the upstream answered 206 with a
+/// slice of a playlist: the caller refetches it whole.
 async fn respond(
     resp: reqwest::Response,
     final_url: Url,
     rewriter: hls::HlsRewriter,
     head: bool,
-) -> Result<Response, Fail> {
+) -> Result<Option<Response>, Fail> {
     let status = resp.status();
     let upstream = resp.headers().clone();
     let ct = upstream
@@ -469,6 +489,9 @@ async fn respond(
         false
     };
 
+    if playlist && status_code == StatusCode::PARTIAL_CONTENT {
+        return Ok(None);
+    }
     let mut builder = Response::builder();
     let out = if playlist {
         // Never echo the upstream type: `text/html; x=mpegurl` would render
@@ -505,7 +528,8 @@ async fn respond(
         };
         builder.body(body)
     };
-    out.map_err(|e| Fail::coded(RpcError::internal(format!("failed to build response: {e}"))))
+    out.map(Some)
+        .map_err(|e| Fail::coded(RpcError::internal(format!("failed to build response: {e}"))))
 }
 
 fn rewrite_stream(

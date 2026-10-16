@@ -168,8 +168,8 @@ describe('episodes', () => {
   it('replays a barely-started episode from the start (R2-r3 F2)', () => {
     const order = episodeOrder(seasons); // a1 a2 b1 b2 sp1
     const pos = (episodeId: string, positionSeconds: number, updatedAt: string, watched = false) => ({ ref: sref, episodeId, positionSeconds, durationSeconds: 1500, updatedAt, watched });
-    // Played S01E01 for 6 s: Play S01E01 again, not S01E02.
-    expect(resumeTarget(order, [pos('a1', 6, '2026-10-11')])).toEqual({ episode: order[0], resume: false });
+    // Played S01E01 for 4 s (at or under MIN_RESUME_SECONDS): Play S01E01 again, not S01E02.
+    expect(resumeTarget(order, [pos('a1', 4, '2026-10-11')])).toEqual({ episode: order[0], resume: false });
     // Same after an earlier finished episode.
     expect(resumeTarget(order, [pos('a1', 1500, '2026-10-10', true), pos('a2', 3, '2026-10-11')])).toEqual({ episode: order[1], resume: false });
     // At 0 s too.

@@ -26,6 +26,9 @@ pub const LONG_TIMEOUT: Duration = Duration::from_secs(90);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Attempts for one portal request (Network/Timeout only).
 const ATTEMPTS: u32 = 3;
+/// Largest portal answer accepted. `get_all_channels` of a big panel is tens
+/// of MB; past this the body is not a portal answer.
+pub const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
 
 /// `app_state` key of a source's cached session.
 pub fn token_key(source_id: &str) -> String {
@@ -323,7 +326,14 @@ impl StalkerClient {
                 if !status.is_success() {
                     return Err(status_error(status, &format!("Stalker {label}")));
                 }
-                let text = resp.text().await.map_err(CoreError::from)?;
+                // Capped read (was `resp.text()`, unbounded): the request
+                // timeout alone lets a fast hostile server fill memory.
+                // reqwest runs without its `charset` feature, so `text()`
+                // was UTF-8 lossy too.
+                let body =
+                    crate::http::read_capped(resp, &format!("Stalker {label}"), MAX_BODY_BYTES)
+                        .await?;
+                let text = String::from_utf8_lossy(&body);
                 match p::classify_body(&text) {
                     b @ (Body::Js(_) | Body::AuthFailure(_)) => Ok(b),
                     Body::Empty => Err(CoreError::network(format!(
@@ -460,7 +470,9 @@ impl StalkerClient {
                 "No Stalker portal answered at this address. Check the portal URL (it usually ends in /c/).".into(),
             ),
             // Nothing answered at all (refused, DNS): say so plainly.
-            Some(CoreError::Network(_)) => unreachable_error(&self.config.portal_url),
+            Some(CoreError::Network(m)) => {
+                send_error(CoreError::Network(m), &self.config.portal_url)
+            }
             // The host took the connection and then stayed silent.
             Some(CoreError::Timeout(_)) => slow_error(&self.config.portal_url),
             Some(other) => other,
@@ -634,11 +646,18 @@ const SLOW_PREFIX: &str = "The portal at ";
 
 /// Maps a failed send (no HTTP answer, from [`crate::http::send_within`]) to
 /// a portal-specific message; the URL is reduced to its host. A request the
-/// server-mode guard refused (`Invalid`) keeps its own explanation.
+/// server-mode guard refused (`Invalid`) keeps its own explanation. A
+/// refused connection, an unknown host or a bad certificate keeps its own
+/// next step, which also stops the retries ([`CoreError::is_retryable`]).
 fn send_error(err: CoreError, url: &str) -> CoreError {
     match err {
         CoreError::Timeout(_) => slow_error(url),
-        CoreError::Network(_) => unreachable_error(url),
+        CoreError::Network(m) => match crate::http::permanent_transport_hint(&m) {
+            Some(hint) => {
+                CoreError::network(format!("{UNREACHABLE_PREFIX}{}. {hint}", portal_host(url)))
+            }
+            None => unreachable_error(url),
+        },
         other => other,
     }
 }
@@ -795,6 +814,26 @@ mod tests {
     }
 
     #[test]
+    fn refused_portal_keeps_its_next_step_and_is_not_retried() {
+        let refused = CoreError::network(
+            "Could not reach 127.0.0.1:9. The server refused the connection. Check the address and port, and that the server is running, then try again. (os error 10061)",
+        );
+        let err = send_error(refused, "http://127.0.0.1:9/stalker/c/");
+        assert!(is_unreachable(&err), "{err}");
+        assert!(!err.is_retryable(), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "network: Could not reach the portal at 127.0.0.1:9. The server refused the connection. Check the address and port, and that the server is running, then try again."
+        );
+        // A reset or a closed connection stays retryable.
+        let reset = send_error(
+            CoreError::network("Could not reach 127.0.0.1:9. connection reset"),
+            "http://127.0.0.1:9/stalker/c/",
+        );
+        assert!(reset.is_retryable(), "{reset}");
+    }
+
+    #[test]
     fn unreachable_message_names_the_host() {
         let err = unreachable_error("http://127.0.0.1:9/stalker/c/");
         assert!(err.is_retryable());
@@ -842,5 +881,61 @@ mod tests {
         assert!(validate_config(&c).is_err());
         c.mac_address = "00:1A; x=1".into();
         assert!(validate_config(&c).is_err());
+    }
+
+    /// D5: the `raw` call site itself enforces MAX_BODY_BYTES (a declared
+    /// oversized body is refused before any read), not only `read_capped`.
+    #[tokio::test]
+    async fn raw_call_site_is_capped() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999999999999\r\n\r\n{\"js\":";
+                let _ = sock.write_all(head.as_bytes()).await;
+                // Keep the socket open; the client must refuse on its own.
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let config = StalkerSourceConfig {
+            portal_url: format!("http://127.0.0.1:{port}/c"),
+            mac_address: "00:1a:79:00:00:01".into(),
+            is_full_portal: true,
+            username: None,
+            password: None,
+            headers: Default::default(),
+            serial_number: None,
+            device_id1: None,
+            device_id2: None,
+            signature1: None,
+            signature2: None,
+        };
+        let client = StalkerClient::ephemeral(&state, config).unwrap();
+        let req = Req::new("itv", "get_genres").timeout(Duration::from_secs(10));
+        let started = std::time::Instant::now();
+        let err = client
+            .raw(
+                &format!("http://127.0.0.1:{port}/portal.php"),
+                &req,
+                None,
+                1,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("more than"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(8));
     }
 }

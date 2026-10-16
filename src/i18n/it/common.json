@@ -40,11 +40,16 @@
   "errorTechnicalDetails": "Dettagli tecnici",
   "errorHintTimeout": "Il fornitore potrebbe essere occupato. Riprova tra un momento.",
   "errorHintAuth": "Controlla nome utente, password o indirizzo MAC nelle impostazioni della sorgente.",
-  "errorHintNotFound": "Potrebbe essere stato rimosso dal fornitore. Aggiorna la sorgente per aggiornare l'elenco.",
+  "errorHintNotFound": "Potrebbe essere stato rimosso, oppure questo link non è più valido.",
   "errorHintInvalid": "Controlla i valori inseriti e riprova.",
   "errorHintUnsupported": "Questa sorgente o questo tipo di stream non supporta l'azione. Prova un lettore esterno.",
   "errorHintConflict": "Ricarica per vedere la versione più recente, poi riprova.",
   "errorHintIo": "Verifica che la cartella esista e di avere i permessi di scrittura.",
   "errorHintDb": "Riavvia l'app. Se il problema persiste, ripristina un backup dalle Impostazioni.",
-  "errorHintInternal": "Riprova. Se il problema persiste, riavvia l'app."
+  "errorHintInternal": "Riprova. Se il problema persiste, riavvia l'app.",
+  "errorCode": "Codice errore: {{code}}",
+  "errorTitleEngineMissing": "Impossibile avviare il motore del lettore",
+  "errorHintEngineMissing": "Il motore del lettore video (mpv) manca o non è riuscito ad avviarsi.",
+  "errorTitleServer": "Il server ha avuto un problema",
+  "errorHintServer": "Il server è occupato o ha dei problemi. Riprova più tardi."
 }

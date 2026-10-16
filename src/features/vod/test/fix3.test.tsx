@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { imageCandidates } from '@/api/images';
 import type { ItemRef, Page, PageQuery, SeriesDetail, TmdbMovie, TmdbTv, VodDetail, VodItem } from '@/api/types';
 
 import { CategoryGridPage } from '../pages/CategoryGridPage';
@@ -9,6 +10,7 @@ import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { isResumable, progressFraction } from '../lib/format';
 import { resumeTarget } from '../lib/merge';
 import { effectiveMinRating, filterByRating } from '../lib/paging';
+import { forgetSpots } from '../hooks/useScrollMemory';
 import { currentLocation, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -84,11 +86,14 @@ function useKind(kind: 'xtream' | 'stalker' | 'm3u') {
 
 beforeAll(installDomStubs);
 beforeEach(() => {
+  forgetSpots();
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;
   useKind('xtream');
   h['settings.get'] = () => settings({ tmdb: { enabled: true, apiKey: 'k' } });
+  // Parental controls off: detail pages open without a lock check (C2).
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['favorites.contains'] = () => [];
   h['downloads.list'] = () => [];
   h['catalog.sameTitle'] = () => [];
@@ -223,9 +228,18 @@ describe('U4-fix3: detail hero', () => {
     });
     renderAt('/s/src1/movie/m7', movieRoute);
     const frame = await screen.findByTestId('vod-detail-poster');
-    await waitFor(() => expect(within(frame).getByRole('img').getAttribute('src')).toBe('http://provider/bad.jpg'));
-    fireEvent.error(within(frame).getByRole('img'));
-    await waitFor(() => expect(within(frame).getByRole('img').getAttribute('src')).toBe('http://tmdb/poster.jpg'));
+    // The TMDB stand-in joins the chain once TMDB answers; fail the provider only after that.
+    await screen.findByTestId('tmdb-attribution');
+    const img = () => within(frame).getByRole('img');
+    // Run 3 C3: each picture is tried through the image cache, then directly, before the next one.
+    const [cachedProvider, provider, cachedTmdb] = imageCandidates(['http://provider/bad.jpg', 'http://tmdb/poster.jpg'], 'src1');
+    expect(provider).toBe('http://provider/bad.jpg');
+    await waitFor(() => expect(img().getAttribute('src')).toBe(cachedProvider));
+    fireEvent.error(img());
+    await waitFor(() => expect(img().getAttribute('src')).toBe(provider));
+    fireEvent.error(img());
+    await waitFor(() => expect(img().getAttribute('src')).toBe(cachedTmdb));
+    expect(cachedTmdb).toContain(encodeURIComponent('http://tmdb/poster.jpg'));
   });
 
   it('renders the row with an inline notice when provider details are unavailable', async () => {
@@ -271,11 +285,32 @@ describe('U4-fix3: watched state', () => {
     expect(callsOf('userstate.setWatched')[0]!.args).toEqual({ ref: mref, watched: true });
     cleanup();
 
-    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 754, durationSeconds: 9960, updatedAt: '2026-10-10T00:00:00Z', watched: true });
+    // Marked (or finished) with a known duration, the core stores the position at the end.
+    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 9960, durationSeconds: 9960, updatedAt: '2026-10-10T00:00:00Z', watched: true });
     renderAt('/s/src1/movie/m7', movieRoute);
     expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Resume/ })).toBeNull();
+  });
+
+  it('a watched movie replayed part-way offers Resume there and keeps its watched mark', async () => {
+    // Run 2: a partial replay of a watched movie keeps the flag and stores the replay position.
+    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 4980, durationSeconds: 9960, updatedAt: '2026-10-10T00:00:00Z', watched: true });
+    renderAt('/s/src1/movie/m7', movieRoute);
+    expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /Resume/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
+  });
+
+  it('isResumable: a watched movie resumes only between 5 % and 95 %; a watched episode never does', () => {
+    const movie = (positionSeconds: number, durationSeconds?: number) => ({ ref: mref, positionSeconds, durationSeconds, watched: true });
+    expect(isResumable(movie(4980, 9960))).toBe(true);
+    expect(isResumable(movie(498, 9960))).toBe(true); // exactly 5 %
+    expect(isResumable(movie(497, 9960))).toBe(false); // a few minutes into a rewatch is not worth a resume
+    expect(isResumable(movie(9462, 9960))).toBe(false); // 95 %: finished again
+    expect(isResumable(movie(4980))).toBe(false); // no duration: no share to check, the mark wins
+    expect(isResumable({ ref: sref, episodeId: 'e11', positionSeconds: 1500, durationSeconds: 3000, watched: true })).toBe(false);
+    expect(isResumable({ ref: sref, positionSeconds: 1500, durationSeconds: 3000, watched: true })).toBe(false);
   });
 
   it('checks watched episodes, marks one from its row menu, and marks a season', async () => {
@@ -291,12 +326,16 @@ describe('U4-fix3: watched state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'More actions for S01E02' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark S01E02 as watched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(1));
-    expect(callsOf('userstate.setWatched')[0]!.args).toEqual({ ref: sref, episodeId: 'e12', watched: true });
+    // L1-vod-1: e12 is the last unwatched episode, so the series row is marked too.
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
+    expect(callsOf('userstate.setWatched').map((c) => c.args)).toEqual([
+      { ref: sref, episodeId: 'e12', watched: true },
+      { ref: sref, watched: true },
+    ]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark season watched' }));
-    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(3));
-    expect(callsOf('userstate.setWatched').slice(1).map((c) => (c.args as { episodeId: string }).episodeId)).toEqual(['e11', 'e12']);
+    await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(5));
+    expect(callsOf('userstate.setWatched').slice(2).map((c) => (c.args as { episodeId?: string }).episodeId)).toEqual(['e11', 'e12', undefined]);
   });
 });
 
@@ -340,7 +379,7 @@ describe('U4-fix3: minimum rating filter', () => {
     const note = screen.getByTestId('vod-rating-filter');
     expect(note.textContent).toContain('Showing titles rated 7.0 or higher');
     // The core filters (50 of 150 pass): one request, exact count from the first page.
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50 titles')).toBeTruthy());
     const movieCalls = callsOf('catalog.movies');
     expect(movieCalls).toHaveLength(1);
     expect(movieCalls[0]!.args).toMatchObject({ sourceId: 'src1', minRating: 7, query: { offset: 0 } });
@@ -364,7 +403,7 @@ describe('U4-fix3: minimum rating filter', () => {
     renderAt('/s/src1/movies/c/all', gridRoute);
     await screen.findByText('Rated 1');
     expect(screen.queryByText('Rated 2')).toBeNull();
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50 titles')).toBeTruthy());
     expect(callsOf('stalker.movies').every((c) => !('minRating' in (c.args as object)))).toBe(true);
   });
 
@@ -372,5 +411,38 @@ describe('U4-fix3: minimum rating filter', () => {
     renderAt('/s/src1/movies/c/all', gridRoute);
     await screen.findByText('Rated 2');
     expect(screen.queryByTestId('vod-rating-filter')).toBeNull();
+  });
+});
+
+describe('English only on Stalker grids', () => {
+  // Even items are tagged French; the portal pages them unfiltered.
+  const item = (i: number): VodItem => ({
+    ref: { sourceId: 'src1', contentType: 'movie', itemId: `l${i}` },
+    title: i % 2 === 0 ? `FR - Film ${i}` : `Film ${i}`,
+    categoryId: 'c1',
+  });
+  beforeEach(() => {
+    useKind('stalker');
+    rpcMock.handlers['catalog.categories'] = () => [];
+    rpcMock.handlers['stalker.movies'] = (a) => {
+      const q = (a as { query: PageQuery }).query;
+      const all = Array.from({ length: 60 }, (_, i) => item(i));
+      return { items: all.slice(q.offset, q.offset + q.limit), total: all.length, offset: q.offset, limit: q.limit };
+    };
+  });
+  const gridRoute = [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }];
+
+  it('filters loaded pages when the setting is on', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ englishOnly: true });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    await screen.findByText('Film 1');
+    expect(screen.queryByText('FR - Film 0')).toBeNull();
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('30 titles')).toBeTruthy());
+  });
+
+  it('shows everything when the setting is off', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ englishOnly: false });
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    await screen.findByText('FR - Film 0');
   });
 });

@@ -2,6 +2,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { scaleRowPx, useDensity, useUiScale } from './scale';
 
 export interface VirtualItemState {
   /** Keyboard cursor is on this row. */
@@ -12,8 +13,15 @@ export interface VirtualItemState {
 
 export interface VirtualListProps<T> {
   items: readonly T[];
-  /** Fixed row height in px. */
+  /** Fixed row height in px at 100 % UI scale; the list multiplies it by the active scale (C1). */
   itemHeight: number;
+  /**
+   * The part of `itemHeight` (px at 100 %) that is Tailwind spacing: the row's
+   * vertical padding and the gaps between its lines. Compact density shrinks
+   * that part too, so denser rows fit more on screen. Default 0: the height
+   * follows the UI scale only (rows whose height is all text).
+   */
+  itemSpacing?: number;
   render: (item: T, index: number, state: VirtualItemState) => ReactNode;
   /** Called once per `items.length` when the last rows come into view. */
   onEndReached?: () => void;
@@ -31,6 +39,7 @@ export interface VirtualListProps<T> {
   label?: string;
   /** Extra rows rendered after the items (e.g. a loading skeleton for the next page). */
   footer?: ReactNode;
+  /** Footer height in px at 100 % UI scale. */
   footerHeight?: number;
   /** Initial viewport size used before layout (tests, SSR). */
   initialRect?: { width: number; height: number };
@@ -44,7 +53,8 @@ export interface VirtualListProps<T> {
  */
 export function VirtualList<T>({
   items,
-  itemHeight,
+  itemHeight: baseItemHeight,
+  itemSpacing = 0,
   render,
   onEndReached,
   endThreshold = 10,
@@ -56,10 +66,16 @@ export function VirtualList<T>({
   getKey,
   label,
   footer,
-  footerHeight = 0,
+  footerHeight: baseFooterHeight = 0,
   initialRect = { width: 0, height: 600 },
   testId,
 }: VirtualListProps<T>) {
+  // Row content is rem-based, so the slots grow and shrink with the UI scale too;
+  // the padding part (itemSpacing) also follows density, like the row's py-* classes.
+  const uiScale = useUiScale();
+  const density = useDensity();
+  const itemHeight = scaleRowPx(baseItemHeight, itemSpacing, uiScale, density);
+  const footerHeight = Math.round(baseFooterHeight * uiScale);
   const parentRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const [active, setActive] = useState(() => (selectedIndex !== undefined && selectedIndex >= 0 ? selectedIndex : -1));
@@ -71,7 +87,15 @@ export function VirtualList<T>({
     overscan,
     initialRect,
     getItemKey: getKey ? (i) => getKey(items[i]!, i) : undefined,
+    // As in VirtualGrid: a scroll event renders with the next frame, not synchronously inside the
+    // event, so a fast fling through the channel list is not a string of long tasks (L3-live-1).
+    useFlushSync: false,
   });
+
+  useEffect(() => {
+    virtualizer.measure();
+    // remeasure when the UI scale changes the row height
+  }, [itemHeight]);
 
   // Follow external selection (e.g. channel zap) and keep it in view.
   useEffect(() => {

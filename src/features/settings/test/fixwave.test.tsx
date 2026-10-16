@@ -49,7 +49,7 @@ describe('Section nav below the shell panel breakpoint', () => {
     expect(wrap.className).toContain('min-[1440px]:hidden');
     expect(wrap.className).not.toMatch(/(^|\s)lg:hidden/);
     const nav = within(wrap).getByTestId('settings-nav-inline');
-    expect(within(nav).getAllByRole('link')).toHaveLength(10);
+    expect(within(nav).getAllByRole('link')).toHaveLength(12);
     expect(within(nav).getByRole('link', { name: 'General' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(within(nav).getByRole('link', { name: 'About' }));
     await screen.findByTestId('settings-about');
@@ -73,6 +73,15 @@ describe('Parity settings', () => {
     expect(sw.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(sw);
     await waitFor(() => expect(patches()).toEqual([{ stripCountryPrefix: true }]));
+  });
+
+  it('Interface: English only', async () => {
+    renderAt(settingsRoutes, '/settings/general');
+    await screen.findByTestId('settings-general');
+    const sw = screen.getByTestId('toggle-englishOnly');
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(sw);
+    await waitFor(() => expect(patches()).toEqual([{ englishOnly: true }]));
   });
 
   it('VOD: minimum rating saves on release, clamped to half steps', async () => {
@@ -116,9 +125,13 @@ describe('Parity settings', () => {
     fireEvent.change(input, { target: { value: '1000' } });
     fireEvent.blur(input);
     expect(await screen.findByText('Use a shift between -720 and 720 minutes (12 hours).')).toBeTruthy();
+    // The field itself is marked, not only the message under it; its keypad has a minus sign.
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(input.getAttribute('inputmode')).toBe('text');
     fireEvent.change(input, { target: { value: '-30' } });
     fireEvent.blur(input);
     await waitFor(() => expect(patches()).toEqual([{ epgOffsetMinutes: -30 }]));
+    await waitFor(() => expect(input.getAttribute('aria-invalid')).toBeNull());
   });
 
   it('Guide: clear all guide data asks first, then calls epg.clearAll', async () => {

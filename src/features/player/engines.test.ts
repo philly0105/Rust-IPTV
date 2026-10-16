@@ -162,6 +162,52 @@ describe('engine selection', () => {
   });
 });
 
+describe('CORS mode of the element (screenshots of local files and proxied streams, C6)', () => {
+  const { mediaCrossOrigin } = engines;
+  const PROXY = 'http://127.0.0.1:51234/0123456789abcdef0123456789abcdef01234567/api/proxy?url=http%3A%2F%2Fh%2Fm.mp4';
+
+  it('loads the asset protocol and the desktop loopback proxy as anonymous', () => {
+    expect(mediaCrossOrigin(`http://asset.localhost/${encodeURIComponent('C:\\Downloads\\Film.mp4')}`)).toBe('anonymous');
+    expect(mediaCrossOrigin('https://asset.localhost/%2Fhome%2Fa%2Ffilm.mkv')).toBe('anonymous');
+    expect(mediaCrossOrigin('asset://localhost/%2FUsers%2Fa%2Ffilm.mp4')).toBe('anonymous');
+    expect(mediaCrossOrigin(PROXY)).toBe('anonymous');
+  });
+
+  it('leaves third-party and same-origin URLs alone', () => {
+    // A provider without CORS would refuse a CORS load: the stream must still play.
+    expect(mediaCrossOrigin('http://h/m.mp4')).toBeNull();
+    expect(mediaCrossOrigin('http://127.0.0.1:7290/movie/u/p/1.mp4')).toBeNull();
+    expect(mediaCrossOrigin('http://evil.example/x/api/proxy?url=y')).toBeNull();
+    expect(mediaCrossOrigin('/api/proxy?url=http%3A%2F%2Fh%2Fm.mp4')).toBeNull();
+    expect(mediaCrossOrigin('/api/files/abc')).toBeNull();
+    expect(mediaCrossOrigin('blob:http://localhost/1')).toBeNull();
+  });
+
+  it('sets the mode before the load, and drops it for the next direct stream and on destroy', async () => {
+    const el = video();
+    const seen: (string | null)[] = [];
+    const set = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')!.set!;
+    Object.defineProperty(el, 'src', {
+      configurable: true,
+      set(v: string) {
+        seen.push(el.getAttribute('crossorigin'));
+        set.call(el, v);
+      },
+    });
+    const file = 'http://asset.localhost/C%3A%5Cv%5Ca.mp4';
+    const local = await createEngine(el, src('C:\\v\\a.mp4', { kind: 'file', isLive: false }), file, cb(), { captions: false });
+    expect(local.kind).toBe('native');
+    expect(el.crossOrigin).toBe('anonymous');
+    await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', cb(), { captions: false });
+    expect(el.hasAttribute('crossorigin')).toBe(false);
+    const proxied = await createEngine(el, src('http://h/n.mp4', { isLive: false }), PROXY, cb(), { captions: false });
+    proxied.destroy();
+    expect(el.hasAttribute('crossorigin')).toBe(false);
+    // The attribute was in place when each `src` was set.
+    expect(seen).toEqual(['anonymous', null, 'anonymous']);
+  });
+});
+
 describe('mpegts.js engine recovery', () => {
   it('reconnects a live stream that closed, then reports after the restart budget', async () => {
     vi.useFakeTimers();
@@ -230,17 +276,18 @@ describe('mpegts.js engine recovery', () => {
     expect(FakeTsPlayer.created).toHaveLength(3);
   });
 
-  it('maps errors: 4xx fails at once, codec errors are unsupported, 5xx retries', async () => {
+  it('maps errors: any HTTP status fails at once (the player reconnect owns retries), codec errors are unsupported', async () => {
     vi.useFakeTimers();
     const callbacks = cb();
     await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
-    const p = FakeTsPlayer.created[0]!;
-    p.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 503 });
-    expect(callbacks.onError).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
-    const p2 = FakeTsPlayer.created[1]!;
-    p.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 404 }); // stale player: ignored
-    expect(callbacks.onError).not.toHaveBeenCalled();
+    const p2 = FakeTsPlayer.created[0]!;
+    // A 503 used to restart here as well, stacking on the player's own retries (L2-live-5).
+    p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 503 });
+    expect(callbacks.onError).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 503)' }),
+    );
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1) * 4);
+    expect(FakeTsPlayer.created).toHaveLength(1);
     p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 403 });
     expect(callbacks.onError).toHaveBeenLastCalledWith(
       expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 403)' }),
@@ -296,10 +343,31 @@ describe('mpegts.js engine recovery', () => {
     vi.useFakeTimers();
     const el = video();
     const engine = await createEngine(el, src('http://h/v.ts', { isLive: false }), 'http://h/v.ts', cb(), { captions: false });
+    el.dispatchEvent(new Event('loadeddata'));
     FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
     await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
     expect(FakeTsPlayer.created).toHaveLength(2);
     expect(engine.timeOffset?.()).toBe(0);
+  });
+
+  it('a connection error restarts only a stream that produced media; before that it fails at once', async () => {
+    vi.useFakeTimers();
+    const el = video();
+    const callbacks = cb();
+    await createEngine(el, src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
+    FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
+    expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'network', fatal: true }));
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1) * 4);
+    expect(FakeTsPlayer.created).toHaveLength(1);
+
+    const el2 = video();
+    const callbacks2 = cb();
+    await createEngine(el2, src('http://h/b.ts'), 'http://h/b.ts', callbacks2, { captions: false });
+    el2.dispatchEvent(new Event('loadeddata'));
+    FakeTsPlayer.created[1]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
+    expect(callbacks2.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
+    expect(FakeTsPlayer.created).toHaveLength(3);
   });
 
   it('destroy cancels a pending restart', async () => {
@@ -360,5 +428,69 @@ describe('server refusal reasons', () => {
     expect(callbacks.onError).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'network', fatal: true, message: 'blocked: private address (HTTP 403)' }),
     );
+  });
+});
+
+describe('subtitles drawn by the player (subtitles/inline.ts)', () => {
+  it('native: a track the overlay draws (hidden) still counts as on, an engine-hidden one does not', async () => {
+    const { drawTrack, isShownTrack } = await import('./subtitles/tracks');
+    const el = video();
+    const en = { kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' as TextTrackMode };
+    const fr = { kind: 'subtitles', label: 'French', language: 'fr', mode: 'hidden' as TextTrackMode };
+    Object.defineProperty(el, 'textTracks', { value: Object.assign([en, fr], { addEventListener() {}, removeEventListener() {} }) });
+    const callbacks = cb();
+    const engine = await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', callbacks, { captions: false });
+    const selected = (): boolean[] => {
+      el.dispatchEvent(new Event('loadedmetadata'));
+      const last = callbacks.onTracks.mock.calls.at(-1)?.[0] as { text: { selected: boolean }[] };
+      return last.text.map((x) => x.selected);
+    };
+
+    engine.setText('0');
+    expect([en.mode, fr.mode]).toEqual(['showing', 'disabled']);
+    // The overlay takes it over: hidden for the browser, still on for the menu.
+    drawTrack(en as unknown as TextTrack);
+    expect(en.mode).toBe('hidden');
+    expect(selected()).toEqual([true, false]);
+
+    engine.setText(null);
+    expect(en.mode).toBe('disabled');
+    // Hidden again later by someone else: not drawn, not on.
+    en.mode = 'hidden';
+    expect(isShownTrack(en as unknown as TextTrack)).toBe(false);
+    expect(selected()).toEqual([false, false]);
+  });
+  it('native: across picture-in-picture the track that is on stays on, and Off there stays off', async () => {
+    const { bindSubtitleOverlay } = await import('./subtitles/inline');
+    const el = video();
+    const en = Object.assign(new EventTarget(), { kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' as TextTrackMode, activeCues: [] });
+    const list = Object.assign(new EventTarget(), { 0: en, length: 1 });
+    Object.defineProperty(el, 'textTracks', { value: list });
+    const callbacks = cb();
+    const engine = await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', callbacks, { captions: false });
+    const box = document.createElement('div');
+    const stop = bindSubtitleOverlay(el, box);
+    const selected = (): boolean => {
+      el.dispatchEvent(new Event('loadedmetadata'));
+      const last = callbacks.onTracks.mock.calls.at(-1)?.[0] as { text: { selected: boolean }[] };
+      return last.text[0]!.selected;
+    };
+    const change = (): boolean => list.dispatchEvent(new Event('change'));
+
+    engine.setText('0');
+    change();
+    expect([en.mode, selected()]).toEqual(['hidden', true]);
+    el.dispatchEvent(new Event('enterpictureinpicture'));
+    expect([en.mode, selected(), box.hidden]).toEqual(['showing', true, true]);
+    el.dispatchEvent(new Event('leavepictureinpicture'));
+    expect([en.mode, selected(), box.hidden]).toEqual(['hidden', true, false]);
+
+    el.dispatchEvent(new Event('enterpictureinpicture'));
+    engine.setText(null);
+    change();
+    expect([en.mode, selected()]).toEqual(['disabled', false]);
+    el.dispatchEvent(new Event('leavepictureinpicture'));
+    expect([en.mode, selected()]).toEqual(['disabled', false]);
+    stop();
   });
 });

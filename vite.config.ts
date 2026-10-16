@@ -1,15 +1,115 @@
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 // Tauri dev on a device sets TAURI_DEV_HOST; desktop dev uses localhost.
 const host = process.env['TAURI_DEV_HOST'];
 // Web-mode dev: `/api` is proxied to a running iptv-server (default 7180).
 const apiTarget = process.env['IPTV_API'] ?? 'http://127.0.0.1:7180';
 
+/** node_modules package -> vendor chunk name (first match wins). */
+const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly string[]]> = [
+  ['vendor-react', ['react', 'react-dom', 'scheduler', 'react-router']],
+  ['vendor-query', ['@tanstack/query-core', '@tanstack/react-query', '@tanstack/virtual-core', '@tanstack/react-virtual']],
+  ['vendor-i18n', ['i18next', 'react-i18next']],
+  [
+    'vendor-ui',
+    ['cmdk', 'lucide-react', 'tailwind-merge', 'clsx', 'zustand', 'aria-hidden', 'react-remove-scroll', 'react-remove-scroll-bar', 'react-style-singleton', 'use-callback-ref', 'use-sidecar', 'tslib', 'get-nonce'],
+  ],
+  ['vendor-tauri', ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
+];
+
+/** `src/i18n/<folder>/*.json`; group 1 is the language folder. */
+const LOCALE = /[\\/]src[\\/]i18n[\\/]([^\\/]+)[\\/][^\\/]+\.json$/;
+
+function vendorChunk(id: string): string | undefined {
+  // English strings change on every copy edit; their own chunk keeps the app
+  // code cache warm and loads in parallel with the entry. Every other language
+  // gets one chunk too (`locale-de`): `loadLanguage` fetches all of a folder's
+  // namespaces at once, and a manual chunk stays out of the
+  // experimentalMinChunkSize merge, so no foreign strings end up in app chunks.
+  const locale = LOCALE.exec(id);
+  if (locale) return `locale-${locale[1]}`;
+  const at = id.lastIndexOf('node_modules');
+  if (at < 0) return undefined;
+  const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);
+  const pkg = parts[0]?.startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+  if (!pkg) return undefined;
+  if (pkg.startsWith('@radix-ui/')) return 'vendor-ui';
+  return VENDOR_CHUNKS.find(([, pkgs]) => pkgs.includes(pkg))?.[0];
+}
+
+/**
+ * Lazy chunks are named after their first module, so a feature barrel loaded with
+ * `import('@/features/player')` would also come out as `index-*.js`, next to the entry.
+ * Prefix those with their folder instead (`player-index-*.js`), so `dist/assets/index-*.js` is
+ * only the entry chunk that `pnpm size:check` budgets (C4, docs/architecture/performance.md).
+ */
+function chunkFileName(chunk: { name: string; facadeModuleId: string | null; moduleIds: readonly string[] }): string {
+  if (chunk.name !== 'index') return 'assets/[name]-[hash].js';
+  const id = chunk.facadeModuleId ?? chunk.moduleIds.at(-1) ?? '';
+  const dir = id.split(/[\\/]/).at(-2);
+  return `assets/${dir && dir !== 'src' ? dir : 'chunk'}-index-[hash].js`;
+}
+
+const brotli = promisify(brotliCompress);
+const gz = promisify(gzip);
+/** Text assets worth compressing; the small ones cost more in headers than they save. */
+const COMPRESSIBLE = /\.(?:js|css|html|svg|json|webmanifest|txt|xml)$/;
+const COMPRESS_MIN_BYTES = 1024;
+
+async function filesUnder(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((e) => (e.isDirectory() ? filesUnder(join(dir, e.name)) : [join(dir, e.name)])));
+  return nested.flat();
+}
+
+/**
+ * Server mode (L3-serve-ui-3): writes `.br` (quality 11) and `.gz` (level 9) next to every text
+ * asset of a web build. The server's file service sends them instead of compressing each response
+ * itself, which saved about 25 ms of CPU per cold UI load on loopback, and quality 11 is about 25 %
+ * smaller than the on-the-fly level. A desktop build (`TAURI_ENV_PLATFORM`, set by `tauri build`)
+ * skips it: Tauri embeds the dist folder and compresses it itself.
+ */
+function precompress(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'tsrust-precompress',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    async closeBundle() {
+      if (process.env['TAURI_ENV_PLATFORM']) return;
+      const files = (await filesUnder(outDir)).filter((f) => COMPRESSIBLE.test(f));
+      await Promise.all(
+        files.map(async (file) => {
+          const data = await readFile(file);
+          if (data.length < COMPRESS_MIN_BYTES) return;
+          const [br, gzipped] = await Promise.all([
+            brotli(data, {
+              params: {
+                [zlib.BROTLI_PARAM_QUALITY]: 11,
+                [zlib.BROTLI_PARAM_MODE]: zlib.BROTLI_MODE_TEXT,
+                [zlib.BROTLI_PARAM_SIZE_HINT]: data.length,
+              },
+            }),
+            gz(data, { level: 9 }),
+          ]);
+          await Promise.all([writeFile(`${file}.br`, br), writeFile(`${file}.gz`, gzipped)]);
+        }),
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), precompress()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
@@ -31,5 +131,31 @@ export default defineConfig({
     target: 'es2022',
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      // React's component wrappers have no side effects, but Rollup cannot prove it, so a module
+      // with a top-level `memo(...)` reached through a barrel (`@/ui`) was kept whole in the
+      // importer's chunk: VirtualGrid landed in the entry. With both marked pure the entry went
+      // from 162.7 kB to 143.8 kB (src/ui/test/bundlePurity.test.ts keeps this list complete).
+      treeshake: { manualPureFunctions: ['memo', 'lazy'] },
+      output: {
+        // SC8: split the always-needed vendors out of the entry chunk so the
+        // app code changes without busting the vendor cache, and the browser
+        // fetches several medium files in parallel instead of one 800 kB one.
+        // Player engines (hls.js, mpegts.js, shaka) are already dynamic
+        // imports and keep their own lazy chunks, so they are not listed.
+        manualChunks: vendorChunk,
+        chunkFileNames: chunkFileName,
+        // Merge app chunks under 4 kB into a neighbour (L2-perf-ui-7: 68 JS requests on a cold
+        // dashboard, 39 of them under 4 kB). Rollup merges a small chunk shared by several lazy
+        // pages into the entry, because the entry is always loaded: at 10 kB that put 40 kB of
+        // lazy-only code (subtitle style fields, Tabs, VirtualRows, the file pickers) in the
+        // entry. Measured on the loop 3 tree (L3 "need XB2 vite"): entry 162.0 kB at 10 kB,
+        // 143.0 kB at 4 kB, 141.0 kB with no merging; 84 / 117 / 160 JS chunks (1 / 22 / 75
+        // under 4 kB); every route visited in one session 59 / 88 requests; cold first paint on
+        // loopback the same within noise. Without per-language locale chunks merging cost +11 %
+        // bytes.
+        experimentalMinChunkSize: 4_000,
+      },
+    },
   },
 });

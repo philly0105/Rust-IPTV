@@ -14,12 +14,15 @@ pub mod ingest;
 pub mod query;
 pub mod resolve;
 pub mod rpc;
+// guide: programme search over an FTS5 index (Run 2 C5).
+pub mod search;
 pub mod store;
 pub mod xmltv;
 
 pub use ingest::{refresh_now, runtime, spawn_refresh, EpgRuntime, IngestStats};
 pub use query::ChannelMatch;
 pub use resolve::{Resolution, Via};
+pub use search::{GuideSearchHit, SearchRequest};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{EpgNowNext, EpgProgram, EpgSourceStatus, ItemRef};
@@ -37,8 +40,13 @@ pub const SEARCH_MAX_LIMIT: usize = 500;
 /// Starts the EPG runtime: cleans leftovers of an interrupted import, then
 /// refreshes never-fetched or stale (> 12 h) enabled urls 10 s after boot and
 /// keeps checking every 30 s (newly added urls, failed urls after 30 min).
+///
+/// A guide search index missing at startup (a database upgraded to
+/// migration 0015) is built in the background ([`search`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
-    ingest::start(state, ingest::BOOT_DELAY).await
+    ingest::start(state.clone(), ingest::BOOT_DELAY).await?;
+    search::spawn_startup_build(&state);
+    Ok(())
 }
 
 /// `epg.sources`: every configured url with its status.
@@ -81,15 +89,19 @@ fn check_refs(refs: &[ItemRef]) -> CoreResult<()> {
     Ok(())
 }
 
-/// Resolves each ref once, sharing the directory snapshot.
+/// Resolves each ref once, sharing the directory snapshot: its XMLTV
+/// channel id and `tvg-shift` in seconds ([`query::item_shift`]).
 fn resolve_many(
     conn: &rusqlite::Connection,
     rt: &EpgRuntime,
     refs: &[ItemRef],
-) -> CoreResult<Vec<Option<String>>> {
+) -> CoreResult<Vec<Option<(String, i64)>>> {
     let dir = resolve::directory(conn, rt)?;
     refs.iter()
-        .map(|r| Ok(resolve::resolve(conn, &dir, r)?.epg_channel_id))
+        .map(|r| match resolve::resolve(conn, &dir, r)?.epg_channel_id {
+            Some(id) => Ok(Some((id, query::item_shift(conn, r)?))),
+            None => Ok(None),
+        })
         .collect()
 }
 
@@ -106,11 +118,24 @@ pub async fn now_next(
 
 /// `epg.nowNext` with `offsetMinutes` (`settings.epgOffsetMinutes`): the UI shows every
 /// programme moved by the offset, so the one airing on screen is the one the raw guide has
-/// airing at `now - offset`. Programmes come back unshifted; the UI shifts them for display.
+/// airing at `now - offset`. Programmes come back without that offset; the UI shifts them for
+/// display. A channel's own `tvg-shift` is applied here, in nowNext, programs and grid alike.
 pub async fn now_next_with_offset(
     state: &AppState,
     refs: Vec<ItemRef>,
     offset_minutes: i32,
+) -> CoreResult<HashMap<String, EpgNowNext>> {
+    now_next_opts(state, refs, offset_minutes, true).await
+}
+
+/// [`now_next_with_offset`]; `with_description: false` leaves programme
+/// descriptions out (`epg.nowNext {withDescription: false}`: lists that never
+/// show them get about half the bytes).
+pub async fn now_next_opts(
+    state: &AppState,
+    refs: Vec<ItemRef>,
+    offset_minutes: i32,
+    with_description: bool,
 ) -> CoreResult<HashMap<String, EpgNowNext>> {
     check_refs(&refs)?;
     if !(-MAX_OFFSET_MINUTES..=MAX_OFFSET_MINUTES).contains(&offset_minutes) {
@@ -123,15 +148,15 @@ pub async fn now_next_with_offset(
     state
         .db_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;
-            let mut cache: HashMap<String, EpgNowNext> = HashMap::new();
+            let mut cache: HashMap<(String, i64), EpgNowNext> = HashMap::new();
             let mut out = HashMap::with_capacity(refs.len());
             for (r, id) in refs.iter().zip(ids) {
                 let nn = match id {
-                    Some(id) => match cache.get(&id) {
+                    Some(key) => match cache.get(&key) {
                         Some(v) => v.clone(),
                         None => {
-                            let v = query::now_next(c, &id, now)?;
-                            cache.insert(id, v.clone());
+                            let v = query::now_next_with(c, &key.0, now, key.1, with_description)?;
+                            cache.insert(key, v.clone());
                             v
                         }
                     },
@@ -159,7 +184,7 @@ pub async fn programs(
                 .pop()
                 .flatten();
             match id {
-                Some(id) => query::programs(c, &id, f, t),
+                Some((id, shift)) => query::programs(c, &id, f, t, shift),
                 None => Ok(Vec::new()),
             }
         })
@@ -173,21 +198,34 @@ pub async fn grid(
     from: &str,
     to: &str,
 ) -> CoreResult<HashMap<String, Vec<EpgProgram>>> {
+    grid_opts(state, refs, from, to, true).await
+}
+
+/// [`grid`]; `with_description: false` leaves programme descriptions out
+/// (`epg.grid {withDescription: false}`: the guide shows one description, the
+/// selected programme's, and fetches it with `epg.programs`).
+pub async fn grid_opts(
+    state: &AppState,
+    refs: Vec<ItemRef>,
+    from: &str,
+    to: &str,
+    with_description: bool,
+) -> CoreResult<HashMap<String, Vec<EpgProgram>>> {
     check_refs(&refs)?;
     let (f, t) = query::parse_range(from, to)?;
     let rt = runtime(state);
     state
         .db_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;
-            let mut cache: HashMap<String, Vec<EpgProgram>> = HashMap::new();
+            let mut cache: HashMap<(String, i64), Vec<EpgProgram>> = HashMap::new();
             let mut out = HashMap::with_capacity(refs.len());
             for (r, id) in refs.iter().zip(ids) {
                 let list = match id {
-                    Some(id) => match cache.get(&id) {
+                    Some(key) => match cache.get(&key) {
                         Some(v) => v.clone(),
                         None => {
-                            let v = query::programs(c, &id, f, t)?;
-                            cache.insert(id, v.clone());
+                            let v = query::programs_with(c, &key.0, f, t, key.1, with_description)?;
+                            cache.insert(key, v.clone());
                             v
                         }
                     },

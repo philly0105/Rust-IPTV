@@ -6,7 +6,7 @@ import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 're
 import { create } from 'zustand';
 
 import { rpc } from '@/api/transport';
-import type { ItemRef, PlayerSource, SourceKind } from '@/api/types';
+import type { Channel, ItemRef, PlayerSource, SourceKind } from '@/api/types';
 
 // ---------------------------------------------------------------------------
 // @/ui
@@ -100,7 +100,7 @@ export function Dialog({
       >
         <h2 className="px-5 pt-4 pb-2 text-lg font-semibold">{title}</h2>
         <div className="min-h-0 flex-1 overflow-auto px-5 pb-4">{children}</div>
-        {footer ? <div className="flex justify-end gap-2 border-t border-border px-5 py-3">{footer}</div> : null}
+        {footer ? <div className="flex justify-end gap-2 border-t border-divider px-5 py-3">{footer}</div> : null}
       </div>
     </div>
   );
@@ -254,9 +254,12 @@ export interface PlayerState {
   durationSeconds?: number;
   queue: PlayerSource[];
   zapContext?: { sourceId: string; categoryId?: string };
+  play(source: PlayerSource, opts?: PlayOpts): Promise<void>;
+  stop(): void;
 }
+type PlayOpts = { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc' };
 
-export const usePlayerStore = create<PlayerState>(() => ({
+export const usePlayerStore = create<PlayerState>((set) => ({
   mode: 'inline',
   status: 'idle',
   isFullscreen: false,
@@ -265,10 +268,30 @@ export const usePlayerStore = create<PlayerState>(() => ({
   muted: false,
   positionSeconds: 0,
   queue: [],
+  // As the real store: an external play opens the chosen player (MPV by default) and hands the stage to it.
+  async play(source, opts) {
+    recorded.play.push({ source, opts });
+    const mode = opts?.mode ?? 'inline';
+    set({ source, mode, queue: opts?.queue ?? [], status: 'loading', error: undefined, dock: mode === 'external' ? 'hidden' : 'stage' });
+    if (mode !== 'external') return;
+    try {
+      await rpc('player.openExternal', { player: opts?.externalPlayer ?? 'mpv', source });
+      set({ status: 'playing' });
+    } catch (err) {
+      set({ status: 'error', error: err instanceof Error ? err.message : String(err), dock: 'stage' });
+    }
+  },
+  stop() {
+    set({ source: undefined, status: 'idle', error: undefined, queue: [], dock: 'hidden', mode: 'inline' });
+  },
 }));
 
 /** Recorded calls, for assertions. */
-export const recorded = { playItem: [] as PlayItemArgs[], playSource: [] as PlayerSource[] };
+export const recorded = {
+  playItem: [] as PlayItemArgs[],
+  playSource: [] as PlayerSource[],
+  play: [] as { source: PlayerSource; opts?: PlayOpts }[],
+};
 
 export async function playSource(source: PlayerSource): Promise<void> {
   recorded.playSource.push(source);
@@ -284,6 +307,8 @@ type PlayItemArgs = {
   isLive: boolean;
   isRadio?: boolean;
   sourceKind: SourceKind;
+  categoryId?: string;
+  channel?: Channel;
 };
 
 export async function playItem(args: PlayItemArgs): Promise<void> {

@@ -1,7 +1,8 @@
-import type { ComponentPropsWithRef, ReactNode } from 'react';
+import { Children, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
+import { pauseWhenOffscreen } from './offscreen';
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
@@ -25,17 +26,40 @@ const KEY_LABELS: Record<string, string> = {
   tab: 'Tab',
   home: 'Home',
   end: 'End',
+  delete: 'Del',
+  contextmenu: 'Menu',
+  // Media keys show the symbol printed on the key. U+FE0E asks for the text glyph, so Windows
+  // does not swap in a colour emoji; KEY_NAMES gives each one a spoken name.
+  mediaplaypause: '⏯︎',
+  mediastop: '⏹︎',
+  mediatracknext: '⏭︎',
+  mediatrackprevious: '⏮︎',
 };
+
+/** Spoken names for keys whose label is a symbol a screen reader would read out by its Unicode name. */
+const KEY_NAMES: Record<string, string> = {
+  mediaplaypause: 'Play/Pause',
+  mediastop: 'Stop',
+  mediatracknext: 'Next track',
+  mediatrackprevious: 'Previous track',
+};
+
+const comboParts = (combo: string) =>
+  combo
+    .split('+')
+    .filter(Boolean)
+    .map((k) => k.trim().toLowerCase());
+
+const keyLabel = (key: string) => KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key[0]!.toUpperCase() + key.slice(1));
 
 /** Human labels for a combo string like `mod+shift+k`. */
 export function comboKeys(combo: string): string[] {
-  return combo
-    .split('+')
-    .filter(Boolean)
-    .map((k) => {
-      const key = k.trim().toLowerCase();
-      return KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key[0]!.toUpperCase() + key.slice(1));
-    });
+  return comboParts(combo).map(keyLabel);
+}
+
+/** The combo as a screen reader should say it: like {@link comboKeys}, with media keys by name. */
+function comboKeyNames(combo: string): string[] {
+  return comboParts(combo).map((key) => KEY_NAMES[key] ?? keyLabel(key));
 }
 
 export interface KbdProps {
@@ -50,10 +74,15 @@ export function Kbd({ combo, children, className }: KbdProps) {
     'inline-flex h-6 min-w-6 items-center justify-center rounded-sm border border-border border-b-2 bg-surface-2 px-1.5 font-mono text-xs text-fg-muted';
   if (combo) {
     const keys = comboKeys(combo);
+    const names = comboKeyNames(combo);
     return (
-      <span className={cn('inline-flex items-center gap-1', className)} aria-label={keys.join(' + ')}>
+      // A plain span cannot carry aria-label (prohibited on the generic role), so the
+      // spoken form is visually hidden text and the key caps are hidden from AT.
+      <span className={cn('inline-flex items-center gap-1', className)}>
+        <span className="sr-only">{names.join(' + ')}</span>
         {keys.map((k, i) => (
-          <kbd key={`${k}-${i}`} className={keyClass} aria-hidden>
+          // A symbol key also names itself on hover.
+          <kbd key={`${k}-${i}`} className={keyClass} title={names[i] !== k ? names[i] : undefined} aria-hidden>
             {k}
           </kbd>
         ))}
@@ -79,27 +108,56 @@ const badgeVariants: Record<BadgeVariant, string> = {
   outline: 'border border-border text-fg-muted',
 };
 
+/**
+ * Puts each run of text in a block that can shrink and truncate. Badge is inline-flex, so bare
+ * text under a caller's max-w would clip with no ellipsis. Icons and other elements stay flex
+ * items beside it (the gap keeps them apart). leading-normal: under the badge's leading-none the
+ * clip (overflow: hidden) would cut descenders (g, y, p) and Arabic marks; the line still fits h-5.
+ */
+function truncatingText(children: ReactNode): ReactNode[] {
+  const out: ReactNode[] = [];
+  let run: (string | number)[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    out.push(
+      <span key={`text-${out.length}`} className="min-w-0 truncate leading-normal">
+        {run.join('')}
+      </span>,
+    );
+    run = [];
+  };
+  for (const child of Children.toArray(children)) {
+    if (typeof child === 'string' || typeof child === 'number') run.push(child);
+    else {
+      flush();
+      out.push(child);
+    }
+  }
+  flush();
+  return out;
+}
+
 export function Badge({ variant = 'neutral', className, children, ...rest }: BadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex h-5 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] font-semibold tabular',
+        'inline-flex h-5 shrink-0 items-center gap-1 rounded-sm px-1.5 text-xs leading-none font-semibold tabular',
         badgeVariants[variant],
         className,
       )}
       {...rest}
     >
-      {children}
+      {truncatingText(children)}
     </span>
   );
 }
 
-/** Red LIVE pill with a slow pulse dot (pulse only under motion-safe). */
+/** Red LIVE pill with a slow pulse dot (pulse only under motion-safe, and only while on screen). */
 export function LiveBadge({ className }: { className?: string }) {
   const { t } = useTranslation('common');
   return (
     <Badge variant="live" className={className}>
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg motion-safe:animate-live-pulse" />
+      <span ref={pauseWhenOffscreen} aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg motion-safe:animate-live-pulse" />
       {t('live')}
     </Badge>
   );
@@ -113,7 +171,8 @@ export interface ProgressBarProps {
   className?: string;
   /** Unknown progress: animated stripe. */
   indeterminate?: boolean;
-  tone?: 'accent' | 'success' | 'danger' | 'fg';
+  /** `glass`: for bars drawn on glass over artwork or video (C8): a light track and the bright glass accent. */
+  tone?: 'accent' | 'success' | 'danger' | 'fg' | 'glass';
   size?: 'xs' | 'sm' | 'md';
 }
 
@@ -127,7 +186,7 @@ export function ProgressBar({
   size = 'sm',
 }: ProgressBarProps) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  const toneClass = { accent: 'bg-accent', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg' }[tone];
+  const toneClass = { accent: 'bg-accent', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg', glass: 'bg-glass-accent' }[tone];
   return (
     <div
       role="progressbar"
@@ -136,7 +195,8 @@ export function ProgressBar({
       aria-valuemax={indeterminate ? undefined : max}
       aria-valuenow={indeterminate ? undefined : Math.round(Math.min(value, max))}
       className={cn(
-        'relative w-full overflow-hidden rounded-full bg-surface-3',
+        'relative w-full overflow-hidden rounded-full',
+        tone === 'glass' ? 'bg-on-glass/20' : 'bg-surface-3',
         { xs: 'h-0.75', sm: 'h-1.5', md: 'h-2.5' }[size],
         className,
       )}

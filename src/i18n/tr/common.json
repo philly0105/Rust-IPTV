@@ -23,7 +23,7 @@
   "pageNotFound": "Sayfa bulunamadı",
   "pageNotFoundHint": "Bu adres hiçbir sayfayla eşleşmiyor. Kenar çubuğunu kullanın veya ana sayfaya dönün.",
 
-  "errorTitleNetwork": "Sunucuya ulaşılamıyor",
+  "errorTitleNetwork": "Sunucuya ulaşılamadı",
   "errorTitleTimeout": "İstek çok uzun sürdü",
   "errorTitleAuth": "Oturum açma reddedildi",
   "errorTitleNotFound": "Bulunamadı",
@@ -40,11 +40,16 @@
   "errorTechnicalDetails": "Teknik ayrıntılar",
   "errorHintTimeout": "Sağlayıcı yoğun olabilir. Biraz sonra tekrar deneyin.",
   "errorHintAuth": "Kaynak ayarlarındaki kullanıcı adını, parolayı veya MAC adresini kontrol edin.",
-  "errorHintNotFound": "Sağlayıcı tarafından kaldırılmış olabilir. Listeyi güncellemek için kaynağı yenileyin.",
+  "errorHintNotFound": "Kaldırılmış olabilir ya da bu bağlantı artık güncel değil.",
   "errorHintInvalid": "Girdiğiniz değerleri gözden geçirip tekrar deneyin.",
   "errorHintUnsupported": "Bu kaynak veya yayın türü bu işlemi desteklemiyor. Harici bir oynatıcı deneyin.",
   "errorHintConflict": "En son sürümü görmek için yeniden yükleyin, ardından tekrar deneyin.",
   "errorHintIo": "Klasörün var olduğunu ve klasöre yazma izniniz olduğunu kontrol edin.",
   "errorHintDb": "Uygulamayı yeniden başlatın. Sorun sürerse Ayarlar'dan bir yedeği geri yükleyin.",
-  "errorHintInternal": "Tekrar deneyin. Sorun sürerse uygulamayı yeniden başlatın."
+  "errorHintInternal": "Tekrar deneyin. Sorun sürerse uygulamayı yeniden başlatın.",
+  "errorCode": "Hata kodu: {{code}}",
+  "errorTitleEngineMissing": "Oynatıcı motoru başlatılamadı",
+  "errorHintEngineMissing": "Video oynatıcı motoru (mpv) eksik veya başlatılamadı.",
+  "errorTitleServer": "Sunucuda bir sorun oluştu",
+  "errorHintServer": "Sunucu meşgul veya sorun yaşıyor. Daha sonra tekrar deneyin."
 }

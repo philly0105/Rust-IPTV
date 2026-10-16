@@ -3,6 +3,8 @@
  * a normalized value or an i18n key (namespace `sources`) describing the problem.
  */
 
+import { REDACTED, redactUrl } from './redact';
+
 /** Infomir's OUI. The stock Stalker MAC filter only accepts this range. */
 export const INFOMIR_MAC_OUI = '00:1A:79';
 
@@ -44,11 +46,15 @@ export function looksLikeFullPortal(url: string): boolean {
 
 export type UrlCheck = { ok: true; url: string } | { ok: false; error: string };
 
-/** Accepts http(s) URLs only; trims; adds `http://` when the scheme is missing. */
+/**
+ * Accepts http(s) URLs only; trims; adds `http://` when the scheme is missing.
+ * A scheme typed with one slash (`http:/host`, `htp:/host`) is still a scheme:
+ * prefixing it would turn the scheme into the host name.
+ */
 export function checkHttpUrl(raw: string): UrlCheck {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, error: 'errorRequired' };
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   let parsed: URL;
   try {
     parsed = new URL(withScheme);
@@ -57,7 +63,8 @@ export function checkHttpUrl(raw: string): UrlCheck {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { ok: false, error: 'errorUrlScheme' };
   if (!parsed.hostname) return { ok: false, error: 'errorUrlInvalid' };
-  return { ok: true, url: withScheme };
+  // `http:/host` parses as `http://host/`; send the repaired form.
+  return { ok: true, url: /^[a-z][a-z0-9+.-]*:\/\//i.test(withScheme) ? withScheme : parsed.href };
 }
 
 /**
@@ -110,6 +117,12 @@ export function checkOrigin(value: string): string | null {
   }
 }
 
+/**
+ * Last path parts that say nothing about the source: playlist and Xtream endpoints, and the
+ * stock Stalker/Ministra portal paths (`/c/`, `/stalker_portal/`, `/portal.php`, `/server/load.php`).
+ */
+const GENERIC_STEM = /^(get|playlist|index|player_api|c|stalker_portal|portal|server|load|panel)$/i;
+
 /** Derives a readable default name from a URL or file path. */
 export function suggestName(input: string): string {
   const v = input.trim();
@@ -117,8 +130,8 @@ export function suggestName(input: string): string {
   try {
     const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `http://${v}`);
     const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
-    const stem = decodeURIComponent(last).replace(/\.(m3u8?|php|txt)$/i, '');
-    if (stem && !/^(get|playlist|index|player_api)$/i.test(stem)) return stem;
+    const stem = safeDecode(last).replace(/\.(m3u8?|php|txt)$/i, '');
+    if (stem && !GENERIC_STEM.test(stem)) return stem;
     return u.hostname.replace(/^www\./, '');
   } catch {
     const file = v.split(/[\\/]/).pop() ?? v;
@@ -126,13 +139,39 @@ export function suggestName(input: string): string {
   }
 }
 
-/** Host part of a URL for display, without credentials. */
+/** `decodeURIComponent` that keeps the raw text when it holds a broken escape (`%E0%A4`). */
+function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Host part of a URL for display, without credentials. Text that does not parse
+ * as a URL is shown with any userinfo, secret parameters or Xtream path removed.
+ */
+/** Host (and port) of an address as typed, for "Still trying to reach <host>"; undefined until it is a valid URL. */
+export function inputHost(raw: string): string | undefined {
+  const check = checkHttpUrl(raw);
+  return check.ok ? displayHost(check.url) : undefined;
+}
+
 export function displayHost(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
     const u = new URL(url);
     return u.port ? `${u.hostname}:${u.port}` : u.hostname;
   } catch {
-    return url;
+    return redactUrl(url).replace(/^[^@/]*@/, `${REDACTED}@`);
   }
+}
+
+/**
+ * A password with a leading or trailing space, the usual leftover of copying it from an email.
+ * Not an error (spaces can be real), so the form only hints at it.
+ */
+export function hasEdgeSpace(value: string): boolean {
+  return value.length > 0 && value !== value.trim();
 }

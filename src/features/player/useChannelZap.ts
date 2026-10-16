@@ -1,9 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
+import { preloadEngines } from './enginePreload';
 import { zap, zapToNumber } from './store';
 
 /** Channel up/down and number entry for the current live source (C8). */
 export function useChannelZap(): { up(): void; down(): void; selectNumber(n: number): void } {
+  // Live TV is where a play comes next: warm the engines while the page sits idle.
+  useEffect(() => preloadEngines(), []);
   return useMemo(
     () => ({
       up: () => void zap('up').catch(() => undefined),

@@ -8,14 +8,18 @@ import '../player.css';
 
 import { cn } from '../cn';
 import { bindExternalEvents } from '../external';
+import { bindRecovery } from '../reconnect';
 import { useMediaStore } from '../media';
 import { bindRemote } from '../remote';
+import { bindParentalGuard } from '../parentalGuard';
 import { exitPip, usePipStore } from '../pip';
 import { getLastStagePath, setRehome, useStageTarget } from '../stage';
 import { flushProgress, reportFullscreen, usePlayerStore } from '../store';
 import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
 import { PlayerSurface } from './PlayerSurface';
+import { SleepTimerHost, ZapHeaderLine } from './lazyParts';
+import { useZapBannerShown, useZapHover } from './zapHooks';
 
 const POS_KEY = 'player.mini.pos';
 const MARGIN = 16;
@@ -42,6 +46,17 @@ function clampPos(p: MiniPos, w: number, h: number): MiniPos {
   const maxRight = Math.max(MARGIN, window.innerWidth - w - MARGIN);
   const maxBottom = Math.max(MARGIN, window.innerHeight - h - MARGIN);
   return { right: Math.min(maxRight, Math.max(MARGIN, p.right)), bottom: Math.min(maxBottom, Math.max(MARGIN, p.bottom)) };
+}
+
+/**
+ * Moves the player host node. A DOM move blurs whatever was focused inside it (the PiP or
+ * expand button the user just pressed), so focus is put back on the same element afterwards.
+ */
+export function moveKeepingFocus(host: HTMLElement, target: Element): void {
+  const active = document.activeElement;
+  const had = active instanceof HTMLElement && host.contains(active) ? active : null;
+  target.appendChild(host);
+  if (had && document.activeElement !== had && had.isConnected) had.focus({ preventScroll: true });
 }
 
 function ExpandButton({ label }: { label: string }) {
@@ -107,9 +122,29 @@ export function PlayerDock() {
   const visible = !!source && mode !== 'external';
   const inStage = visible && dock === 'stage' && !!stageTarget;
   const inMini = visible && !inStage && dock !== 'hidden';
+  // Hovering the mini player's channel title brings up the zap banner over its video; leaving the
+  // mini player (no pointerleave comes then) lets go of that hold.
+  const titleHover = useZapHover(inMini);
+  // A zap in the mini player: its header gains the number and what airs now (no banner over the
+  // small picture, which would repeat the name the header already shows).
+  const zapShown = useZapBannerShown();
+  const miniZap = inMini && zapShown && mode !== 'radio';
   const channelPanelAvailable = !!source?.isLive && (settings?.fullscreenChannelPanel ?? true) && !!(zapContext ?? source?.ref);
 
   usePlaybackShortcuts({ channelPanelAvailable });
+  // Subtitle look (C6): player.css reads these variables in `video::cue`. The mapping loads
+  // on its own, outside the entry chunk; until then `video::cue` uses its fallbacks.
+  useEffect(() => {
+    if (!settings) return;
+    let live = true;
+    void import('../subtitles/style').then(({ cueCssVars, styleFromSettings }) => {
+      if (!live) return;
+      for (const [name, value] of Object.entries(cueCssVars(styleFromSettings(settings)))) host.style.setProperty(name, value);
+    });
+    return () => {
+      live = false;
+    };
+  }, [host, settings]);
 
   // One-time global bindings.
   useEffect(() => {
@@ -117,6 +152,11 @@ export function PlayerDock() {
     bindExternalEvents();
     return bindRemote();
   }, []);
+
+  // failover: smart reconnect and live failover follow the player from here.
+  useEffect(() => bindRecovery(), []);
+  // Parental controls locking again re-check what plays (Ask: PIN prompt; Hide: stop).
+  useEffect(() => bindParentalGuard(), []);
 
   useEffect(() => {
     const onHide = (): void => {
@@ -131,7 +171,7 @@ export function PlayerDock() {
     setRehome((removed, next) => {
       if (host.parentNode !== removed) return;
       const target = next ?? miniSlotRef.current;
-      target?.appendChild(host);
+      if (target) moveKeepingFocus(host, target);
     });
     return () => setRehome(null);
   }, [host]);
@@ -140,7 +180,7 @@ export function PlayerDock() {
   const inPip = pip && visible;
   useLayoutEffect(() => {
     const target = inPip ? pipSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
-    if (target && host.parentNode !== target) target.appendChild(host);
+    if (target && host.parentNode !== target) moveKeepingFocus(host, target);
   }, [inPip, inStage, stageTarget, host]);
 
   // Nothing left to show in the small window: give the app its window back.
@@ -228,10 +268,14 @@ export function PlayerDock() {
     <>
       {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
       {createPortal(<PlayerSurface compact={inMini && !isFullscreen && !inPip} channelPanelAvailable={channelPanelAvailable} />, host)}
+      {/* Sleep timer (C5): the one-minute warning toast. */}
+      <SleepTimerHost />
       <div
         ref={miniRef}
         role="region"
         aria-label={t('nowPlaying')}
+        // Toasts lift above the docked mini player instead of covering its controls (ui/Toast.tsx).
+        data-toast-avoid=""
         hidden={!inMini}
         className={cn(
           'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-2',
@@ -241,7 +285,7 @@ export function PlayerDock() {
         style={{ right: pos.right, bottom: pos.bottom }}
       >
         <div
-          className="flex h-9 shrink-0 cursor-grab items-center gap-1.5 border-b border-border pe-1 ps-2 active:cursor-grabbing"
+          className="flex h-9 shrink-0 cursor-grab items-center gap-1.5 border-b border-divider pe-1 ps-2 active:cursor-grabbing"
           onPointerDown={onDragStart}
           onPointerMove={onDragMove}
           onPointerUp={onDragEnd}
@@ -270,8 +314,13 @@ export function PlayerDock() {
             <GripHorizontal className="size-4" />
           </button>
           {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg" title={source?.title}>
-            {source?.title}
+          <span
+            className="flex min-w-0 flex-1 text-sm font-medium text-fg"
+            title={source?.title}
+            onPointerEnter={titleHover.onPointerEnter}
+            onPointerLeave={titleHover.onPointerLeave}
+          >
+            {miniZap && source ? <ZapHeaderLine title={source.title} /> : <span className="min-w-0 truncate">{source?.title}</span>}
           </span>
           <ExpandButton label={t('expand')} />
           <button

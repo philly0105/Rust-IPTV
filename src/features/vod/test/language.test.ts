@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { itemLanguage, languageName, type LanguageGroup } from '../lib/language';
+import { isNonEnglish, itemLanguage, languageName, type LanguageGroup } from '../lib/language';
 
 const group = (g: LanguageGroup) => `group:${g}`;
 const name = (title: string, category?: string, locale = 'en') => {
@@ -60,10 +60,37 @@ describe('itemLanguage', () => {
     expect(itemLanguage('The Matrix - Reloaded (2003)')).toBeUndefined();
     expect(itemLanguage('TOP - Film (1994)', 'VOD - TOP 500 IMDB')).toBeUndefined();
     expect(itemLanguage('D+ - Mickey Mouse Clubhouse (US)', 'SRS - DISNEY+ KIDS')).toBeUndefined();
+    expect(itemLanguage('It: Chapter Two (2019)', 'HORROR')).toBeUndefined();
+    expect(itemLanguage('Us - The Movie')).toBeUndefined();
+    expect(itemLanguage('ESPN 2', 'SPORTS')).toBeUndefined();
   });
 
   it('names the language in the UI locale', () => {
     expect(name('EN - Interstellar (2014)', undefined, 'fr')).toBe('EN|Anglais');
     expect(name('FR - Interstellar (2014)', undefined, 'de')).toBe('FR|Französisch');
+  });
+});
+
+describe('isNonEnglish', () => {
+  it('hides what is clearly another language', () => {
+    expect(isNonEnglish('FR - Le Film')).toBe(true);
+    expect(isNonEnglish('TF1', 'FRANCE')).toBe(true);
+    expect(isNonEnglish('Film', 'VOD - INDIA')).toBe(true);
+    expect(isNonEnglish('EX - Film', '[EXYU]')).toBe(true);
+    expect(isNonEnglish('Первый канал')).toBe(true);
+    expect(isNonEnglish('ZDF', '|DE| ALLGEMEIN')).toBe(true);
+  });
+
+  it('keeps English, unknown, multi-subtitle and African items', () => {
+    expect(isNonEnglish('EN - Interstellar')).toBe(false);
+    expect(isNonEnglish('US: CNN', 'ARABIC')).toBe(false);
+    expect(isNonEnglish('ENG - Interstellar', 'VOD - INDIA')).toBe(false);
+    expect(isNonEnglish('Interstellar (2014)')).toBe(false);
+    expect(isNonEnglish('ESPN', 'SPORTS')).toBe(false);
+    expect(isNonEnglish('NF - Show', 'NETFLIX [MULTISUB]')).toBe(false);
+    expect(isNonEnglish('Film', 'AF - NOLLYWOOD')).toBe(false);
+    expect(isNonEnglish('It: Chapter Two', 'HORROR')).toBe(false);
+    expect(isNonEnglish('Pokémon: Amélie')).toBe(false);
+    expect(isNonEnglish('')).toBe(false);
   });
 });

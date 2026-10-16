@@ -272,9 +272,15 @@ impl Tmdb {
 
     /// Validates a key with `GET /configuration`. Works while TMDB is
     /// disabled (the settings page checks a key before enabling). A blank
-    /// `api_key` tests the key resolved from settings / `.env`.
+    /// `api_key` tests the key resolved from settings / `.env`, and so does
+    /// the masked key server mode shows ([`crate::settings::SECRET_MASK`]).
     pub async fn test_key(&self, state: &AppState, api_key: &str) -> TestKeyResult {
-        let key = match ApiKey::new(api_key) {
+        let typed = if api_key.trim().starts_with(crate::settings::SECRET_MASK) {
+            ""
+        } else {
+            api_key
+        };
+        let key = match ApiKey::new(typed) {
             Some(k) => k,
             None => match resolve_api_key(&state.settings_snapshot(), &state.data_dir, self.search_cwd_env) {
                 Some((k, _)) => k,
@@ -298,10 +304,12 @@ impl Tmdb {
                         .into(),
                 ),
             },
-            Err(e @ (CoreError::Network(_) | CoreError::Timeout(_))) => TestKeyResult {
-                ok: false,
-                message: Some(error_text(&e)),
-            },
+            Err(e @ (CoreError::Network(_) | CoreError::Server(_) | CoreError::Timeout(_))) => {
+                TestKeyResult {
+                    ok: false,
+                    message: Some(error_text(&e)),
+                }
+            }
             Err(e) => TestKeyResult {
                 ok: false,
                 message: Some(format!("Could not verify the key: {}", error_text(&e))),

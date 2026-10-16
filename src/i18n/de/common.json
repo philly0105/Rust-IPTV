@@ -23,7 +23,7 @@
   "pageNotFound": "Seite nicht gefunden",
   "pageNotFoundHint": "Diese Adresse gehört zu keiner Seite. Nutzen Sie die Seitenleiste oder gehen Sie zurück zur Startseite.",
 
-  "errorTitleNetwork": "Server nicht erreichbar",
+  "errorTitleNetwork": "Server konnte nicht erreicht werden",
   "errorTitleTimeout": "Die Anfrage hat zu lange gedauert",
   "errorTitleAuth": "Anmeldung abgelehnt",
   "errorTitleNotFound": "Nicht gefunden",
@@ -40,11 +40,16 @@
   "errorTechnicalDetails": "Technische Details",
   "errorHintTimeout": "Der Anbieter ist möglicherweise ausgelastet. Versuchen Sie es gleich noch einmal.",
   "errorHintAuth": "Prüfen Sie Benutzername, Passwort oder MAC-Adresse in den Einstellungen der Quelle.",
-  "errorHintNotFound": "Der Anbieter hat es möglicherweise entfernt. Aktualisieren Sie die Quelle, um die Liste neu zu laden.",
+  "errorHintNotFound": "Möglicherweise wurde es entfernt, oder dieser Link ist veraltet.",
   "errorHintInvalid": "Prüfen Sie Ihre Eingaben und versuchen Sie es erneut.",
   "errorHintUnsupported": "Diese Quelle oder dieser Stream-Typ unterstützt diese Aktion nicht. Versuchen Sie es mit einem externen Player.",
   "errorHintConflict": "Laden Sie neu, um den aktuellen Stand zu sehen, und versuchen Sie es dann erneut.",
   "errorHintIo": "Prüfen Sie, ob der Ordner existiert und ob Sie darin schreiben dürfen.",
   "errorHintDb": "Starten Sie die App neu. Tritt der Fehler weiter auf, stellen Sie in den Einstellungen ein Backup wieder her.",
-  "errorHintInternal": "Versuchen Sie es erneut. Tritt der Fehler weiter auf, starten Sie die App neu."
+  "errorHintInternal": "Versuchen Sie es erneut. Tritt der Fehler weiter auf, starten Sie die App neu.",
+  "errorCode": "Fehlercode: {{code}}",
+  "errorTitleEngineMissing": "Die Player-Engine konnte nicht gestartet werden",
+  "errorHintEngineMissing": "Die Videoplayer-Engine (mpv) fehlt oder konnte nicht gestartet werden.",
+  "errorTitleServer": "Auf dem Server ist ein Problem aufgetreten",
+  "errorHintServer": "Der Server ist ausgelastet oder hat Probleme. Versuchen Sie es später erneut."
 }

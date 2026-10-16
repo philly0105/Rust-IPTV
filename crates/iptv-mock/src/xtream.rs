@@ -15,6 +15,13 @@
 //!   `timeshift/{u}/{p}/{dur}/{start}/{id}.ts|.m3u8`, `timeshift.php`.
 //!   Any numeric id plays, so generated playlists are playable too.
 //!
+//! Account modes (same password `secret`, same catalog as `demo`), picked by
+//! the username, for subscription warnings and connection limits:
+//! - `expiring`: trial, expires 3 days after `now`, 1 of 2 connections used.
+//! - `expired`: status `Expired`, expired 2 days before `now`.
+//! - `full`: 2 of 2 connections in use; stream, movie, episode and archive
+//!   requests answer `403 Max connections reached`.
+//!
 //! The payload builders are pure functions of `(params, base, now)`, so the
 //! `fixtures/xtream-*.json` samples are reproducible.
 
@@ -55,8 +62,41 @@ pub(crate) fn routes() -> Router<Arc<MockState>> {
         .route("/xtream/timeshift.php", get(timeshift_php))
 }
 
+/// Username of the expiring trial account (see the module docs).
+pub const USER_EXPIRING: &str = "expiring";
+/// Username of the expired account.
+pub const USER_EXPIRED: &str = "expired";
+/// Username of the account whose connections are all in use.
+pub const USER_FULL: &str = "full";
+
+/// Subscription state of a mock account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountMode {
+    Normal,
+    Expiring,
+    Expired,
+    Full,
+}
+
+/// The account mode of `user`, or `None` for an unknown user.
+pub fn account_mode(user: &str) -> Option<AccountMode> {
+    match user {
+        USERNAME => Some(AccountMode::Normal),
+        USER_EXPIRING => Some(AccountMode::Expiring),
+        USER_EXPIRED => Some(AccountMode::Expired),
+        USER_FULL => Some(AccountMode::Full),
+        _ => None,
+    }
+}
+
 fn authed(user: &str, pass: &str) -> bool {
-    user == USERNAME && pass == PASSWORD
+    account_mode(user).is_some() && pass == PASSWORD
+}
+
+/// Streams of a `full` account are refused the way panels do it.
+fn connection_limited(user: &str) -> Option<Response> {
+    (account_mode(user) == Some(AccountMode::Full))
+        .then(|| (StatusCode::FORBIDDEN, "Max connections reached").into_response())
 }
 
 fn p<'a>(params: &'a HashMap<String, String>, key: &str) -> &'a str {
@@ -90,7 +130,10 @@ pub fn api(params: &HashMap<String, String>, base: &str, now: i64) -> (StatusCod
         .map(String::as_str)
         .filter(|c| !c.is_empty() && *c != "*");
     match p(params, "action") {
-        "" | "get_account_info" | "get_user_info" => (StatusCode::OK, account(base, now)),
+        "" | "get_account_info" | "get_user_info" => (
+            StatusCode::OK,
+            account_for(p(params, "username"), base, now),
+        ),
         "get_live_categories" => (StatusCode::OK, categories(&catalog::LIVE_CATEGORIES)),
         "get_vod_categories" => (StatusCode::OK, categories(&catalog::VOD_CATEGORIES)),
         "get_series_categories" => (StatusCode::OK, categories(&catalog::SERIES_CATEGORIES)),
@@ -126,17 +169,34 @@ pub fn api(params: &HashMap<String, String>, base: &str, now: i64) -> (StatusCod
 
 /// Bare `player_api.php` response.
 pub fn account(base: &str, now: i64) -> Value {
+    account_for(USERNAME, base, now)
+}
+
+/// Bare `player_api.php` response for `user` (an [`account_mode`] name).
+pub fn account_for(user: &str, base: &str, now: i64) -> Value {
     let (host, port) = host_port(base);
+    let mode = account_mode(user).unwrap_or(AccountMode::Normal);
+    let (status, exp, trial, active) = match mode {
+        AccountMode::Normal => ("Active", catalog::EXPIRY, "0", "0"),
+        AccountMode::Expiring => ("Active", now + 3 * 86_400, "1", "1"),
+        AccountMode::Expired => ("Expired", now - 2 * 86_400, "0", "0"),
+        AccountMode::Full => ("Active", catalog::EXPIRY, "0", "2"),
+    };
+    let user = if mode == AccountMode::Normal {
+        USERNAME
+    } else {
+        user
+    };
     json!({
         "user_info": {
-            "username": USERNAME,
+            "username": user,
             "password": PASSWORD,
             "message": "Welcome to the iptv-mock Xtream panel",
             "auth": 1,
-            "status": "Active",
-            "exp_date": catalog::EXPIRY.to_string(),
-            "is_trial": "0",
-            "active_cons": "0",
+            "status": status,
+            "exp_date": exp.to_string(),
+            "is_trial": trial,
+            "active_cons": active,
             "created_at": (catalog::EPOCH - 365 * 86_400).to_string(),
             "max_connections": "2",
             "allowed_output_formats": ["m3u8", "ts"]
@@ -528,6 +588,9 @@ async fn live(
     if !authed(&user, &pass) {
         return forbidden();
     }
+    if let Some(r) = connection_limited(&user) {
+        return r;
+    }
     match split_id_ext(&file) {
         Some((_, "m3u8")) => media::m3u8_response(media::live_playlist(&base, catalog::now())),
         Some((_, "ts")) | Some((_, "")) => media::serve_owned(
@@ -560,6 +623,9 @@ async fn vod_file(
     if !authed(&user, &pass) {
         return forbidden();
     }
+    if let Some(r) = connection_limited(&user) {
+        return r;
+    }
     match split_id_ext(&file) {
         Some((_, "webm")) => serve_static(
             &headers,
@@ -588,12 +654,18 @@ async fn timeshift(
     if !authed(&user, &pass) {
         return forbidden();
     }
+    if let Some(r) = connection_limited(&user) {
+        return r;
+    }
     timeshift_body(&base, &headers, &file, &dur)
 }
 
 async fn timeshift_php(Base(base): Base, headers: HeaderMap, Params(params): Params) -> Response {
     if !authed(p(&params, "username"), p(&params, "password")) {
         return forbidden();
+    }
+    if let Some(r) = connection_limited(p(&params, "username")) {
+        return r;
     }
     let file = format!("{}.ts", p(&params, "stream"));
     timeshift_body(&base, &headers, &file, p(&params, "duration"))
@@ -728,6 +800,33 @@ mod tests {
             .unwrap()
             .iter()
             .all(|c| c["category_id"] == "2"));
+    }
+
+    #[test]
+    fn account_modes_report_expiry_and_connections() {
+        let now = catalog::EPOCH + 1_000;
+        let acc = |user: &str| {
+            let mut m = params(&[]);
+            m.insert("username".into(), user.into());
+            api(&m, "http://h:1", now).1["user_info"].clone()
+        };
+        let demo = acc(USERNAME);
+        assert_eq!(demo["status"], "Active");
+        assert_eq!(demo["active_cons"], "0");
+        let e = acc(USER_EXPIRING);
+        assert_eq!(e["exp_date"], (now + 3 * 86_400).to_string());
+        assert_eq!(e["is_trial"], "1");
+        let x = acc(USER_EXPIRED);
+        assert_eq!(x["status"], "Expired");
+        assert_eq!(x["exp_date"], (now - 2 * 86_400).to_string());
+        let f = acc(USER_FULL);
+        assert_eq!(
+            (f["active_cons"].clone(), f["max_connections"].clone()),
+            ("2".into(), "2".into())
+        );
+        assert_eq!(acc("nobody")["auth"], 0);
+        assert!(connection_limited(USER_FULL).is_some());
+        assert!(connection_limited(USERNAME).is_none());
     }
 
     #[test]

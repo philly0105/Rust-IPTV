@@ -6,7 +6,7 @@
 
 import { create } from 'zustand';
 
-import type { MpvState, PlayerExternalEvent, PlayerSource } from '@/api/types';
+import type { MpvState, PlayerExternalEvent, PlayerSource, RpcErrorCode } from '@/api/types';
 
 import { EMPTY_TRACKS, type EngineTracks } from './engines';
 
@@ -45,10 +45,21 @@ export interface MediaState {
   /** Embedded mpv: when the current `mpv.record` began (ms epoch), for the REC timer. */
   recordStartedAt?: number;
   upNext?: { source: PlayerSource; deadline: number };
-  osd?: { primary: string; secondary?: string; key: number };
+  /**
+   * `at`: when it was raised (ms epoch), so chrome that mounts a moment later still shows it.
+   * `locked`: a zap passing a locked channel (parental Ask mode); drawn with a lock glyph.
+   */
+  osd?: { primary: string; secondary?: string; key: number; at?: number; locked?: boolean };
   channelPanelOpen: boolean;
   externalRuns: ExternalRun[];
   commands: MediaCommands | null;
+  /** Shift+C asked the control bar to open its Subtitles submenu (ms epoch); the bar clears it. */
+  subtitleMenuAt?: number;
+  /**
+   * The RPC error code behind the current `status: 'error'`, when the failure came from the
+   * core (resolving a stream URL, `mpv.load`). Classifies the error copy before message matching.
+   */
+  errorCode?: RpcErrorCode;
 }
 
 export const useMediaStore = create<MediaState>()(() => ({
@@ -80,12 +91,16 @@ export function resetMedia(): void {
     inPip: false,
     waiting: false,
     upNext: undefined,
+    errorCode: undefined,
   });
 }
 
 let osdKey = 0;
-export function showOsd(primary: string, secondary?: string): void {
-  useMediaStore.setState({ osd: secondary ? { primary, secondary, key: ++osdKey } : { primary, key: ++osdKey } });
+export function showOsd(primary: string, secondary?: string, opts?: { locked?: boolean }): void {
+  const at = Date.now();
+  const osd: NonNullable<MediaState['osd']> = secondary ? { primary, secondary, key: ++osdKey, at } : { primary, key: ++osdKey, at };
+  if (opts?.locked) osd.locked = true;
+  useMediaStore.setState({ osd });
 }
 
 export const UP_NEXT_SECONDS = 10;

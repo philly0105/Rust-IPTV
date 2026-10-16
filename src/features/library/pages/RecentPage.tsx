@@ -2,23 +2,41 @@
 
 import { k } from '../lib/keys';
 import { History, Trash } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, SkeletonList, useToast } from '../deps';
-import { ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
+import { Button, EmptyState, ErrorState, SkeletonList, useMediaQuery, usePlayerStore, useToast } from '../deps';
+import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { usePending, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { SourceGoneError, detailPath, openEntry, relativeTime } from '../lib/open';
-import { buildRecentRows, continueForSource, type RecentRow } from '../lib/recent';
+import { useUrlSearch } from '../hooks/useUrlSearch';
+import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
+import {
+  buildRecentRows,
+  collectHistory,
+  continueForSource,
+  removeContinueCard,
+  restoreArgs,
+  restoreHistory,
+  restorePositions,
+  type PositionCalls,
+  type RecentRow,
+} from '../lib/recent';
+
+const positionCalls: PositionCalls = {
+  forSeries: (a) => rpc('positions.forSeries', a),
+  remove: (a) => rpc('positions.remove', a),
+  set: (a) => rpc('positions.set', a),
+};
 
 const HEADER_HEIGHT = 48;
 const RECENT_LIMIT = 500;
@@ -29,14 +47,27 @@ export function RecentPage() {
   const { sourceId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const args = useMemo(() => (sourceId ? { sourceId, limit: RECENT_LIMIT } : { limit: RECENT_LIMIT }), [sourceId]);
-  const query = useRpcQuery('recent.list', args);
-  const cont = useRpcQuery('positions.continueWatching', { limit: CONTINUE_LIMIT });
+  // Watching anything changes both lists, so they are read fresh on every visit.
+  const query = useRpcQuery('recent.list', args, { staleTime: 0 });
+  const cont = useRpcQuery('positions.continueWatching', { limit: CONTINUE_LIMIT }, { staleTime: 0 });
   const { pending, run } = usePending<string>();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useUrlSearch();
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+
+  // Playback in the mini player saves positions and history while this page is
+  // open; when it stops or switches title, refresh so progress and finished
+  // items are right.
+  const playingUrl = usePlayerStore((s) => s.source?.url);
+  const seenUrl = useRef(playingUrl);
+  useEffect(() => {
+    if (seenUrl.current === playingUrl) return;
+    seenUrl.current = playingUrl;
+    void invalidate('positions.');
+    void invalidate('recent.');
+  }, [playingUrl]);
 
   const rows = useMemo(() => buildRecentRows(query.data ?? [], search), [query.data, search]);
   const continuing = useMemo(() => continueForSource(cont.data ?? [], sourceId), [cont.data, sourceId]);
@@ -49,6 +80,19 @@ export function RecentPage() {
       void run(key, async () => {
         try {
           await rpc('recent.remove', { ref: e.ref });
+          toast({
+            title: t('recentRemoved', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
+            variant: 'info',
+            action: {
+              label: t('undo'),
+              onClick: () => {
+                // The original date goes back too (C7), so the entry returns to its old place.
+                void rpc('recent.add', restoreArgs(e))
+                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+                  .finally(() => invalidate('recent.'));
+              },
+            },
+          });
         } catch (err) {
           toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
         } finally {
@@ -63,7 +107,7 @@ export function RecentPage() {
     (e: { ref: RecentEntry['ref']; snapshot: RecentEntry['snapshot'] }) => {
       openEntry(e.ref, e.snapshot, sources.get(e.ref.sourceId), navigate).catch((err: unknown) => {
         toast({
-          title: t('openFailed', { title: e.snapshot.title }),
+          title: t('openFailed', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
           variant: 'error',
         });
@@ -72,15 +116,42 @@ export function RecentPage() {
     [navigate, sources, t, toast],
   );
 
+  // Continue means resume: play from the saved spot (the dashboard rail does
+  // the same). Without a snapshot to title it, the detail page is the way in.
   const openContinue = (p: PlaybackPosition) => {
     const path = detailPath(p.ref);
-    if (path) navigate(path);
-    else if (p.snapshot) open({ ref: p.ref, snapshot: p.snapshot });
+    if (!p.snapshot) {
+      if (path) navigate(path);
+      return;
+    }
+    const title = snapshotTitle(p.ref, p.snapshot.title).title;
+    resumePosition(p, sources.get(p.ref.sourceId)).catch((err: unknown) => {
+      toast({
+        title: t('openFailed', { title }),
+        description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
+        variant: 'error',
+      });
+    });
   };
 
   const removeContinue = async (p: PlaybackPosition) => {
     try {
-      await rpc('positions.remove', p.episodeId ? { ref: p.ref, episodeId: p.episodeId } : { ref: p.ref });
+      const removed = await removeContinueCard(p, positionCalls);
+      const label = p.snapshot ? snapshotTitle(p.ref, p.snapshot.title).title : '';
+      toast({
+        title: t('continueRemoved', { title: label }),
+        variant: 'info',
+        action: {
+          label: t('undo'),
+          onClick: () => {
+            void restorePositions(removed, positionCalls.set)
+              .then((n) => {
+                if (n < removed.length) toast({ title: t('undoFailed'), variant: 'error' });
+              })
+              .finally(() => invalidate('positions.'));
+          },
+        },
+      });
     } catch (err) {
       toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
     } finally {
@@ -88,11 +159,24 @@ export function RecentPage() {
     }
   };
 
+  const undoClear = async (entries: RecentEntry[]) => {
+    const restored = await restoreHistory(entries, (a) => rpc('recent.add', a));
+    await invalidate('recent.');
+    if (restored === entries.length) toast({ title: t('historyRestored'), variant: 'success' });
+    else toast({ title: t('undoFailed'), description: t('historyRestorePartial', { restored, total: entries.length }), variant: 'error' });
+  };
+
   const clearAll = async () => {
     setClearing(true);
     try {
+      // Kept in memory so Undo can put every entry back with its own date.
+      const before = await collectHistory((a) => rpc('recent.list', a), sourceId, sources.keys());
       await rpc('recent.clear', sourceId ? { sourceId } : {});
-      toast({ title: t('historyCleared'), variant: 'success' });
+      toast({
+        title: t('historyCleared'),
+        variant: 'success',
+        ...(before.length > 0 ? { action: { label: t('undo'), onClick: () => void undoClear(before) } } : {}),
+      });
     } catch (err) {
       toast({ title: t('clearFailed'), description: RpcError.from(err).message, variant: 'error' });
     } finally {
@@ -102,17 +186,21 @@ export function RecentPage() {
     }
   };
 
+  // On a phone the header has no room for Clear history beside the title and the search: even as an
+  // icon it cut "Recently watched" short (L3-visual-6). There it sits above the list, with the count
+  // the header's subtitle shows only on wider screens.
+  const phone = useMediaQuery('(width < 40rem)', false);
   const headerActions = useMemo(
     () =>
-      count > 0 ? (
+      count > 0 && !phone ? (
         <Button size="sm" variant="ghost" icon={<Trash size={15} aria-hidden />} onClick={() => setConfirmClear(true)}>
           {t('clearHistory')}
         </Button>
       ) : undefined,
-    [count, t],
+    [count, phone, t],
   );
   const title = source ? t('sourceRecentTitle', { source: source.name }) : t('recentTitle');
-  usePageHeader(title, query.data ? t('recentCount', { count }) : undefined, headerActions, {
+  usePageHeader(title, query.data && count > 0 ? t('recentCount', { count }) : undefined, headerActions, {
     value: search,
     onChange: setSearch,
     placeholder: t('searchRecent'),
@@ -132,7 +220,7 @@ export function RecentPage() {
         source={sources.get(e.ref.sourceId)}
         showSource={!sourceId}
         time={relativeTime(e.viewedAt, i18n.language)}
-        removeLabel={t('removeRecent', { title: e.snapshot.title })}
+        removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}
         busy={pending.has(key)}
         onOpen={() => open(e)}
         onRemove={() => remove(e)}
@@ -144,8 +232,25 @@ export function RecentPage() {
   if (query.isLoading) body = <SkeletonList rows={8} className="pt-2" />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (count === 0 && !rail)
-    body = <EmptyState icon={<History size={28} aria-hidden />} title={t('recentEmptyTitle')} description={t('recentEmptyBody')} />;
-  else if (rows.length === 0 && search) body = <EmptyState title={t('noMatchTitle')} description={t('noMatchSearch', { query: search })} />;
+    body = (
+      <EmptyState
+        icon={<History size={28} aria-hidden />}
+        title={t('recentEmptyTitle')}
+        description={!sourceId && sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('recentEmptyBody')}
+        action={<BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />}
+      />
+    );
+  else if (rows.length === 0 && search) body = (
+      <EmptyState
+        title={t('noMatchTitle')}
+        description={t('noMatchSearch', { query: search })}
+        action={
+          <Button onClick={() => setSearch('')} data-testid="library-clear-search">
+            {t('clearSearch')}
+          </Button>
+        }
+      />
+    );
   else
     body = (
       <VirtualRows
@@ -176,6 +281,14 @@ export function RecentPage() {
       data-testid="recent-page"
     >
       <PageTitle>{title}</PageTitle>
+      {phone && count > 0 && !query.isLoading && !query.isError ? (
+        <div className="mb-2 flex min-h-8 items-center justify-between gap-3" data-testid="recent-phone-bar">
+          <p className="min-w-0 truncate text-sm tabular-nums text-fg-muted">{t('recentCount', { count })}</p>
+          <Button size="sm" variant="ghost" icon={<Trash size={15} aria-hidden />} onClick={() => setConfirmClear(true)}>
+            {t('clearHistory')}
+          </Button>
+        </div>
+      ) : null}
       {body}
       <ConfirmDialog
         open={confirmClear}

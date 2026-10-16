@@ -4,10 +4,12 @@ import { DEFAULT_SETTINGS, type RecentEntry, type SeriesItem, type Source, type 
 
 import { mergeRecentlyAdded, minutesLeft, rankSources, watchedFraction } from '../dashboard/DashboardPage';
 import { deepLinkToPath, importToastPolicy, isRestorableRoute, isSourcesRoute } from '../effects';
+import { railFadeMask } from '../Rail';
 import { railLinks } from '../railLinks';
 import { groupShortcuts } from '../ShortcutOverlay';
 import { matches, normalizeCombo, parseCombo } from '../shortcuts';
-import { startupTarget } from '../StartupRedirect';
+import { titleEndsWithYear } from '../dashboard/heroSlides';
+import { routeSourceId, startupTarget } from '../StartupRedirect';
 import { resolveTheme } from '../theme';
 
 const ev = (key: string, init: Partial<KeyboardEventInit> = {}) => new KeyboardEvent('keydown', { key, ...init });
@@ -52,10 +54,41 @@ describe('startup target', () => {
   it('falls back to /sources when the dashboard is off', () => {
     expect(startupTarget({ ...DEFAULT_SETTINGS, startupBehavior: 'first-view', showDashboard: false })).toBe('/sources');
   });
+  it('does not restore a screen of a source that no longer exists', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/s/gone/live', showDashboard: true };
+    expect(startupTarget(s, [{ id: 'other' }])).toBe('/dashboard');
+    expect(startupTarget(s, [{ id: 'gone' }])).toBe('/s/gone/live');
+    // Unknown list (failed or not needed): restore as before.
+    expect(startupTarget(s)).toBe('/s/gone/live');
+    expect(routeSourceId('/s/a%20b/movies')).toBe('a b');
+    expect(routeSourceId('/epg')).toBeUndefined();
+  });
   it('never restores transient routes', () => {
     expect(isRestorableRoute('/sources?add=1')).toBe(false);
     expect(isRestorableRoute('/')).toBe(false);
     expect(isRestorableRoute('/s/a/live')).toBe(true);
+  });
+});
+
+describe('titleEndsWithYear', () => {
+  it('spots a year the title already carries', () => {
+    expect(titleEndsWithYear('Dune (2021)', 2021)).toBe(true);
+    expect(titleEndsWithYear('Dune [2021] ', '2021')).toBe(true);
+    expect(titleEndsWithYear('Dune - 2021', 2021)).toBe(true);
+    expect(titleEndsWithYear('Dune (2021)', 1984)).toBe(false);
+    expect(titleEndsWithYear('Blade Runner 2049', 2049)).toBe(false);
+    expect(titleEndsWithYear('Dune', 2021)).toBe(false);
+    expect(titleEndsWithYear(undefined, 2021)).toBe(false);
+    expect(titleEndsWithYear('Dune (2021)', undefined)).toBe(false);
+  });
+});
+
+describe('rail fade cues', () => {
+  it('fades only the edges that have more links', () => {
+    expect(railFadeMask(false, false)).toBeUndefined();
+    expect(railFadeMask(false, true)?.maskImage).toBe('linear-gradient(to bottom, #000, #000 calc(100% - 24px), transparent)');
+    expect(railFadeMask(true, false)?.maskImage).toBe('linear-gradient(to bottom, transparent, #000 24px, #000)');
+    expect(railFadeMask(true, true)?.WebkitMaskImage).toContain('transparent, #000 24px, #000 calc(100% - 24px), transparent');
   });
 });
 

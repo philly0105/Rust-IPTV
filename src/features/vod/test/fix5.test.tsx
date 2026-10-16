@@ -47,9 +47,15 @@ describe('F1: poster fallback tiles differ per title', () => {
         <PosterCard title="Dune Part Two" href="/d" posterUrl="http://img/broken.jpg" />
       </MemoryRouter>,
     );
-    const img = container.querySelector('img')!;
-    expect(img.getAttribute('alt')).toBe('');
-    fireEvent.error(img);
+    expect(container.querySelector('img')!.getAttribute('alt')).toBe('');
+    // Run 3 C3: the cache URL fails, then the original; only then do the initials show.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const img = container.querySelector('img');
+      if (!img) break;
+      expect(img.getAttribute('alt')).toBe('');
+      fireEvent.error(img);
+    }
+    expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText('DP')).toBeTruthy();
   });
 
@@ -60,7 +66,7 @@ describe('F1: poster fallback tiles differ per title', () => {
       title: 'Heat',
       missing: false,
       completedAt: '2026-10-01T00:00:00Z',
-      download: { positionSeconds: 0, bytesDownloaded: 0 },
+      download: { ref: { sourceId: 's1', contentType: 'movie', itemId: 'm1' }, positionSeconds: 0, bytesDownloaded: 0 },
     } as unknown as MovieEntry;
     render(<LibraryCard entry={entry} />);
     expect(screen.getByText('HE')).toBeTruthy();

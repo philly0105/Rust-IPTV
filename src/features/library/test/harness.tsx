@@ -63,8 +63,9 @@ export const playerModule = {
 };
 
 /** The shell header: pages push title and actions into it; tests render the actions. */
-const useFakeHeader = create<{ header: { title: string; actions?: React.ReactNode } | null }>(() => ({ header: null }));
-const setHeader = (header: { title: string; actions?: React.ReactNode } | null) => useFakeHeader.setState({ header });
+type FakeHeaderState = { title: string; subtitle?: string; actions?: React.ReactNode } | null;
+const useFakeHeader = create<{ header: FakeHeaderState }>(() => ({ header: null }));
+const setHeader = (header: FakeHeaderState) => useFakeHeader.setState({ header });
 export const shellModule = {
   useShell: () => ({ setHeader }),
   useShortcut: () => undefined,
@@ -75,6 +76,7 @@ function FakeHeader() {
     <header data-testid="fake-header">
       {/* Like the real shell header (C16): the title is a paragraph, never a heading; pages own their h1. */}
       <p data-testid="page-title">{header?.title}</p>
+      {header?.subtitle ? <p data-testid="page-subtitle">{header.subtitle}</p> : null}
       {header?.actions}
     </header>
   );
@@ -111,4 +113,9 @@ export function renderAt(path: string, routes: { path: string; element: React.Re
       </I18nextProvider>
     </QueryClientProvider>,
   );
+}
+
+/** i18n only, for rendering a single component outside a page. */
+export function I18nWrap({ children }: { children: React.ReactNode }) {
+  return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
 }

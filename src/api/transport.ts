@@ -5,34 +5,45 @@
 
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
+import { desktopAppInfo } from './bootInfo';
+import { notifyServerAnswered } from './reachability';
 import type { RpcMap } from './rpc';
-import type { PlayerSource, RpcErrorCode, RpcErrorPayload } from './types';
+import type { PlayerSource, RpcErrorCode, RpcErrorPayload, SourceRunErrorDetails } from './types';
 
 export type RpcName = keyof RpcMap;
 export type RpcArgs<K extends RpcName> = RpcMap[K]['args'];
 export type RpcResult<K extends RpcName> = RpcMap[K]['result'];
 
-const ERROR_CODES: readonly RpcErrorCode[] = [
-  'not_found',
-  'invalid',
-  'network',
-  'auth',
-  'timeout',
-  'io',
-  'db',
-  'unsupported',
-  'conflict',
-  'internal',
-];
+/**
+ * Every `RpcErrorCode`. `satisfies` makes the compiler reject this object when the union gains
+ * or loses a code, so a new core code is never turned into an "Unknown error" here.
+ */
+const ERROR_CODE_SET = {
+  not_found: true,
+  invalid: true,
+  network: true,
+  auth: true,
+  timeout: true,
+  io: true,
+  db: true,
+  unsupported: true,
+  conflict: true,
+  internal: true,
+  engine_missing: true,
+  server: true,
+} as const satisfies Record<RpcErrorCode, true>;
+
+/** All RPC error codes the core can send (C12). */
+export const RPC_ERROR_CODES = Object.keys(ERROR_CODE_SET) as RpcErrorCode[];
+
+function isErrorCode(v: unknown): v is RpcErrorCode {
+  return typeof v === 'string' && Object.hasOwn(ERROR_CODE_SET, v);
+}
 
 function isErrorPayload(v: unknown): v is RpcErrorPayload {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
-  return (
-    typeof o.code === 'string' &&
-    (ERROR_CODES as readonly string[]).includes(o.code) &&
-    typeof o.message === 'string'
-  );
+  return isErrorCode(o.code) && typeof o.message === 'string';
 }
 
 export class RpcError extends Error {
@@ -69,12 +80,44 @@ export class RpcError extends Error {
   }
 }
 
+/** The typed `details` of a rejected source import or refresh, when it has any (C8). */
+export function sourceRunDetails(err: unknown): SourceRunErrorDetails | undefined {
+  const d = err instanceof RpcError ? err.details : isErrorPayload(err) ? err.details : undefined;
+  if (typeof d !== 'object' || d === null) return undefined;
+  const o = d as Record<string, unknown>;
+  const out: SourceRunErrorDetails = {};
+  if (typeof o.sourceId === 'string') out.sourceId = o.sourceId;
+  if (o.cancelled === true) out.cancelled = true;
+  return out;
+}
+
+/** True when a rejected `sources.add` / `sources.refresh` was cancelled, not failed (`details.cancelled`, C8). */
+export function isCancelledRun(err: unknown): boolean {
+  return sourceRunDetails(err)?.cancelled === true;
+}
+
+/**
+ * True when `catalog.item` answered `not_found` because parental Hide mode
+ * locks the item (`details.parentalLocked`), not because the provider dropped
+ * it. The item is still in the catalog.
+ */
+export function isParentalLocked(err: unknown): boolean {
+  const d = err instanceof RpcError ? err.details : isErrorPayload(err) ? err.details : undefined;
+  return typeof d === 'object' && d !== null && (d as Record<string, unknown>).parentalLocked === true;
+}
+
 /** True inside the Tauri webview. */
 export const isDesktop: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 const API_BASE = '/api';
 
-async function callDesktop(cmd: string, args: unknown): Promise<unknown> {
+/** The rejection for a call whose signal was aborted: the signal's reason, as `fetch` rejects. */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+async function callDesktop(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
+  if (opts?.signal?.aborted) throw abortReason(opts.signal);
   try {
     return await invoke('rpc', { cmd, args: args ?? null });
   } catch (err) {
@@ -82,15 +125,35 @@ async function callDesktop(cmd: string, args: unknown): Promise<unknown> {
   }
 }
 
-async function callWeb(cmd: string, args: unknown): Promise<unknown> {
+/** Per-call transport options. */
+export interface CallOptions {
+  /**
+   * Web only: send with `keepalive`, so a call made while the page unloads
+   * (a `pagehide` flush) is not cancelled by the navigation. Small bodies only
+   * (64 kB across all keepalive requests in flight).
+   */
+  keepalive?: boolean;
+  /**
+   * Cancels the call (TanStack Query passes one to every `queryFn`). Web: the request is aborted,
+   * so a refetch that an invalidation replaced stops transferring. Desktop: a call not yet sent
+   * is skipped; one already sent runs to the end. Either way the call rejects with the signal's
+   * reason (an `AbortError`), not an RpcError.
+   */
+  signal?: AbortSignal;
+}
+
+async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/rpc/${encodeURIComponent(cmd)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args ?? null),
+      ...(opts?.keepalive ? { keepalive: true } : {}),
+      ...(opts?.signal ? { signal: opts.signal } : {}),
     });
   } catch (err) {
+    if (opts?.signal?.aborted) throw abortReason(opts.signal);
     const message = err instanceof Error ? err.message : 'Network request failed';
     // `details.transport` tells the UI the app's own server is unreachable (not a provider error).
     throw new RpcError('network', `Cannot reach the server: ${message}`, true, { transport: 'unreachable' });
@@ -106,6 +169,8 @@ async function callWeb(cmd: string, args: unknown): Promise<unknown> {
       body = text;
     }
   }
+  // A success or one of our own error payloads proves the server is up (a proxy's 502 does not).
+  if (res.ok || isErrorPayload(body)) notifyServerAnswered();
 
   if (!res.ok) {
     if (isErrorPayload(body)) throw RpcError.from(body);
@@ -118,8 +183,8 @@ async function callWeb(cmd: string, args: unknown): Promise<unknown> {
 }
 
 /** Untyped call; prefer `rpc()`. */
-export function rpcRaw(cmd: string, args?: unknown): Promise<unknown> {
-  return isDesktop ? callDesktop(cmd, args) : callWeb(cmd, args);
+export function rpcRaw(cmd: string, args?: unknown, opts?: CallOptions): Promise<unknown> {
+  return isDesktop ? callDesktop(cmd, args, opts) : callWeb(cmd, args, opts);
 }
 
 export function rpc<K extends RpcName>(
@@ -140,8 +205,8 @@ function hasHeaders(source: PlayerSource): boolean {
 
 /**
  * Desktop: base of the loopback media proxy inside the Tauri process
- * (`app.info.proxyBase`), fetched once at startup. Null until known or when
- * the proxy could not start.
+ * (`app.info.proxyBase`, from the launch's one `app.info` request in
+ * bootInfo.ts). Null until known or when the proxy could not start.
  */
 let desktopProxyBase: string | null = null;
 
@@ -151,12 +216,23 @@ export function setDesktopProxyBase(base: string | null): void {
 }
 
 if (isDesktop) {
-  callDesktop('app.info', null)
-    .then((info) => {
-      const base = (info as { proxyBase?: unknown } | null)?.proxyBase;
-      setDesktopProxyBase(typeof base === 'string' && base ? base : null);
-    })
-    .catch(() => undefined);
+  void desktopAppInfo.then((info) => {
+    const base = info?.proxyBase;
+    setDesktopProxyBase(typeof base === 'string' && base ? base : null);
+  });
+}
+
+/**
+ * True for URLs the desktop webview must load itself: Tauri's own
+ * `*.localhost` hosts (asset files, IPC) and the loopback proxy's own URLs.
+ */
+function desktopLoadsDirect(url: string, proxyBase: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname.endsWith('.localhost') || u.origin === new URL(proxyBase).origin;
+  } catch {
+    return true;
+  }
 }
 
 /** Query string for a proxy request: the target plus the per-item header overrides. */
@@ -172,16 +248,19 @@ function proxyParams(source: PlayerSource, url: string): URLSearchParams {
 
 /**
  * URL a player element should load.
- * Desktop: a local `file` path goes through the asset protocol; an http(s)
- * stream that needs request headers goes through the loopback proxy
- * (`app.info.proxyBase`), everything else loads directly.
+ * Desktop: a local `file` path goes through the asset protocol; every remote
+ * http(s) stream goes through the loopback proxy (`app.info.proxyBase`), so
+ * the source's request headers apply and a provider that sends no CORS
+ * headers still plays in the inline player (hls.js, mpegts.js and shaka
+ * fetch cross-origin from `http://tauri.localhost`). Until the proxy base is
+ * known, or when the proxy did not start, streams load directly.
  * Web: through `/api/proxy` when source headers are needed or the page would block mixed content.
  */
 export function proxiedUrl(source: PlayerSource): string {
   const { url } = source;
   if (isDesktop) {
     if (source.kind === 'file' && !/^(https?|asset):/i.test(url)) return convertFileSrc(url);
-    if (desktopProxyBase && /^https?:/i.test(url) && (hasHeaders(source) || isMixedContent(url))) {
+    if (desktopProxyBase && /^https?:/i.test(url) && !desktopLoadsDirect(url, desktopProxyBase)) {
       return `${desktopProxyBase}?${proxyParams(source, url).toString()}`;
     }
     return url;

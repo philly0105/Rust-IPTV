@@ -23,6 +23,7 @@
         "center": true,
         "dragDropEnabled": false,
         "visible": false,
+        "backgroundColor": "#0c1320",
         "additionalBrowserArgs": "--disable-features=msSmartScreenProtection,msWebOOUI,msPdfOOUI,msEdgeCollections,CalculateNativeWinOcclusion --renderer-process-limit=1 --disable-extensions --no-pre-read-main-dll --disable-background-networking"
       }
     ],

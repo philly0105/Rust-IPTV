@@ -231,6 +231,11 @@ describe('validators', () => {
     expect(checkHttpUrl('example.com/a')).toEqual({ ok: true, url: 'http://example.com/a' });
     expect(checkHttpUrl('')).toEqual({ ok: false, error: 'errorRequired' });
     expect(checkHttpUrl('http://')).toEqual({ ok: false, error: 'errorUrlInvalid' });
+    expect(checkHttpUrl('example.com:8080/get.php')).toEqual({ ok: true, url: 'http://example.com:8080/get.php' });
+    // L4-settings-1: a one-slash scheme was prefixed with http://, so `http:/x.com/a`
+    // went to the host "http" and `htp:/x.com` to the host "htp".
+    expect(checkHttpUrl('http:/example.com/a.m3u')).toEqual({ ok: true, url: 'http://example.com/a.m3u' });
+    expect(checkHttpUrl('htp:/example.com')).toEqual({ ok: false, error: 'errorUrlScheme' });
     expect(normalizeXtreamServer('https://xt.example.com/get.php?username=a')).toEqual({ ok: true, url: 'https://xt.example.com' });
   });
 

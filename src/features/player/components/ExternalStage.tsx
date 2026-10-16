@@ -7,6 +7,7 @@ import { stopExternalPlayback } from '../external';
 import { useMediaStore } from '../media';
 import { usePlayerStore } from '../store';
 import { usePlayerSettings } from '../useSettings';
+import { ScreenshotButton } from './lazyParts';
 
 export const PLAYER_NAMES = { mpv: 'MPV', vlc: 'VLC' } as const;
 
@@ -78,6 +79,8 @@ export function ExternalStage() {
           <Square className="size-3.5 fill-current" aria-hidden />
           {t('stop')}
         </button>
+        {/* Screenshot (C6): disabled here, with the reason (the external player has its own key). */}
+        <ScreenshotButton stage />
       </div>
       {!failed && <p className="text-xs text-white/50">{t('externalStopHint', { player: name })}</p>}
     </div>

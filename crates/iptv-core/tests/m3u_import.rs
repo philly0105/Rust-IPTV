@@ -76,7 +76,8 @@ async fn file_import_and_progress_events() {
         .await
         .map_err(|e| e.error)
         .unwrap();
-    assert_eq!(src.name, "big.m3u");
+    // L1-sources-home-6: default names drop the playlist extension, as the UI does.
+    assert_eq!(src.name, "big");
     assert_eq!(src.channel_count, 5_000);
     let events = drain(&mut env.events);
     let progress: Vec<_> = events
@@ -113,7 +114,7 @@ async fn url_import_sha_skip_and_failed_refresh_keeps_catalog() {
         .map_err(|e| e.error)
         .unwrap();
     assert_eq!(src.channel_count, 300);
-    assert_eq!(src.name, "list.m3u");
+    assert_eq!(src.name, "list");
     assert_eq!(
         stub.state.last_user_agent.lock().as_deref(),
         Some("B1Test/1.0")
@@ -146,6 +147,14 @@ async fn url_import_sha_skip_and_failed_refresh_keeps_catalog() {
     stub.set_body(&gen_m3u(450, 3));
     let changed = sources::refresh(env.state.clone(), &src.id).await.unwrap();
     assert_eq!(changed.channel_count, 450);
+    // The search ranking rows follow the rewrite (migration 0020).
+    env.state
+        .db_call(|c| {
+            assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
     let cats = r
         .dispatch(
             env.state.clone(),
@@ -194,6 +203,13 @@ async fn url_import_sha_skip_and_failed_refresh_keeps_catalog() {
     stub.set_fail(false);
     let ok = sources::refresh(env.state.clone(), &src.id).await.unwrap();
     assert!(ok.last_error.is_none());
+    env.state
+        .db_call(|c| {
+            assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
 
     // No temp files left behind.
     let tmp = env.dir.path().join("tmp");

@@ -4,14 +4,15 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
-import { invalidate, useRpcQuery } from '@/api/query';
+import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw } from '@/api/transport';
-import type { EpgProgressEvent, EpgSourceStatus, EpgViewMode } from '@/api/types';
+import type { EpgProgressEvent, EpgSourceStatus, EpgViewMode, Settings } from '@/api/types';
 
 import { Badge, Button, Dialog, ErrorState, IconButton, Input, SkeletonList, useToast } from '@/ui';
 import { absoluteTime, formatCount, relativeTime } from '../../sources/lib/format';
 import { redactText, redactUrl } from '../../sources/lib/redact';
 import { CommitInput, Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
+import { epgErrorText } from '../lib/epgError';
 import { addEpgUrl, validateEpgOffset } from '../lib/patch';
 import { parity, type SectionProps } from './types';
 
@@ -68,8 +69,33 @@ export function EpgSection({ settings, update }: SectionProps) {
     }
   };
 
-  const removeUrl = async (url: string) => {
-    if (await update({ epgUrls: settings.epgUrls.filter((u) => u !== url) })) void invalidate('epg.sources');
+  const removeUrl = async (url: string, from: HTMLElement) => {
+    const index = settings.epgUrls.indexOf(url);
+    // The row and its button go away; keep focus in the list (the next row's
+    // remove button, else the add field) instead of dropping it to the page.
+    const buttons = [...document.querySelectorAll<HTMLElement>('[data-epg-remove]')];
+    const at = buttons.indexOf(from);
+    const nextFocus = buttons[at + 1] ?? buttons[at - 1] ?? document.getElementById(addId);
+    if (!(await update({ epgUrls: settings.epgUrls.filter((u) => u !== url) }))) return;
+    void invalidate('epg.sources');
+    nextFocus?.focus();
+    toast({
+      variant: 'info',
+      title: t('epgUrlRemoved', { url: redactUrl(url) }),
+      action: {
+        label: t('undo'),
+        onClick: () => {
+          // Back into its old place in whatever the list is now.
+          const now = queryClient.getQueryData<Settings>(rpcKey('settings.get'))?.epgUrls ?? [];
+          if (now.includes(url)) return;
+          const list = [...now];
+          list.splice(Math.min(Math.max(index, 0), list.length), 0, url);
+          void update({ epgUrls: list }).then((ok) => {
+            if (ok) void invalidate('epg.sources');
+          });
+        },
+      },
+    });
   };
 
   const refresh = async (url?: string) => {
@@ -119,7 +145,12 @@ export function EpgSection({ settings, update }: SectionProps) {
               <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg" title={redactUrl(url)} data-testid="epg-global-url">
                 {redactUrl(url)}
               </span>
-              <IconButton label={t('epgRemoveUrl', { url: redactUrl(url) })} icon={<Trash2 aria-hidden className="size-4" />} onClick={() => void removeUrl(url)} />
+              <IconButton
+                label={t('epgRemoveUrl', { url: redactUrl(url) })}
+                icon={<Trash2 aria-hidden className="size-4" />}
+                onClick={(e) => void removeUrl(url, e.currentTarget)}
+                data-epg-remove=""
+              />
             </div>
           ))
         )}
@@ -180,7 +211,7 @@ export function EpgSection({ settings, update }: SectionProps) {
         ) : statuses.data.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-fg-muted">{t('epgStatusEmpty')}</p>
         ) : (
-          <ul className="flex flex-col divide-y divide-border" aria-label={t('epgStatus')}>
+          <ul className="flex flex-col divide-y divide-divider" aria-label={t('epgStatus')}>
             {statuses.data.map((s) => {
               const ev = live[s.url];
               const fetching = s.status === 'fetching' || (ev && ev.phase !== 'done' && ev.phase !== 'error');
@@ -215,7 +246,7 @@ export function EpgSection({ settings, update }: SectionProps) {
                   />
                   {s.error && !fetching ? (
                     <p role="alert" className="-mt-2 px-4 text-sm text-danger">
-                      {redactText(s.error)}
+                      {epgErrorText(s.error, t, lang)}
                     </p>
                   ) : null}
                   <div className="-mt-2 flex justify-end px-4 pb-2">
@@ -253,13 +284,15 @@ export function EpgSection({ settings, update }: SectionProps) {
           )}
         </SettingsRow>
         <SettingsRow label={t('epgOffset')} description={t('epgOffsetHint')} error={offsetError ? t(offsetError) : null}>
-          {({ id, describedBy }) => (
+          {({ id, describedBy, invalid }) => (
             <div className="flex items-center gap-2">
               <CommitInput
                 id={id}
                 describedBy={describedBy}
+                invalid={invalid}
                 type="text"
-                inputMode="numeric"
+                // Not "numeric": phone keypads for it have no minus sign, and the shift can be negative.
+                inputMode="text"
                 value={String(offset)}
                 className="w-24 text-end tabular-nums"
                 onError={setOffsetError}
@@ -277,6 +310,14 @@ export function EpgSection({ settings, update }: SectionProps) {
             </div>
           )}
         </SettingsRow>
+        {/* guide: Xtream short-EPG fallback. */}
+        <SwitchRow
+          label={t('epgShortFallback')}
+          description={t('epgShortFallbackHint')}
+          checked={settings.epgShortFallback !== false}
+          onChange={(epgShortFallback) => void update({ epgShortFallback })}
+          testId="toggle-epgShortFallback"
+        />
       </SettingsGroup>
 
       <SettingsGroup title={t('epgClearTitle')}>

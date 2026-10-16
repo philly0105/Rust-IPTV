@@ -6,7 +6,6 @@ mod support;
 
 use iptv_core::sources;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Instant;
 use support::*;
@@ -74,21 +73,20 @@ async fn large_paste_is_stored_on_disk_and_round_trips() {
         raw_len, 0,
         "pasted text over 8 MB must not be stored inline"
     );
-    assert_eq!(sha, hex::encode(Sha256::digest(text.as_bytes())));
+    assert_eq!(sha, iptv_core::m3u::importer::playlist_sha(text.as_bytes()));
     let path = cache(&env.state.data_dir, &src.id);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
 
-    // An unchanged refresh trusts the stored sha and reads nothing: even a
-    // damaged copy is not looked at.
-    std::fs::write(&path, "junk").unwrap();
+    // An unchanged refresh hashes the stored copy (so a parser change,
+    // IMPORT_VERSION, re-imports it once), finds it unchanged and keeps the
+    // catalog without parsing.
     let started = Instant::now();
     let again = sources::refresh(env.state.clone(), &src.id).await.unwrap();
     let ms = started.elapsed().as_millis();
     assert_eq!(again.channel_count, 2000);
     assert!(again.last_error.is_none());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "junk");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     assert!(ms < 2_000, "unchanged refresh took {ms} ms");
-    std::fs::write(&path, &text).unwrap();
 
     // m3u.raw and the backup export carry the on-disk text.
     let r = backup_router();

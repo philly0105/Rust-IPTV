@@ -3,7 +3,7 @@
  * store so `useShell()` works anywhere (pages, tests) without a provider.
  */
 
-import { useEffect, useId, useMemo, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, type KeyboardEvent, type ReactNode } from 'react';
 import { create } from 'zustand';
 
 export interface HeaderSearch {
@@ -12,6 +12,8 @@ export interface HeaderSearch {
   placeholder?: string;
   /** Enter in the header search box. */
   onSubmit?: (value: string) => void;
+  /** Every key in the header search box, before its own Enter and Escape handling (preventDefault skips those). */
+  onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
 }
 
 export interface HeaderState {
@@ -26,6 +28,11 @@ interface ShellStore {
   headerOwner: string | null;
   contextPanel: ReactNode | null;
   panelOwner: string | null;
+  /**
+   * Whether the panel also exists below 1440 px as a drawer behind the header toggle. A page that
+   * shows the same content inline at those widths (Settings' section list) turns it off.
+   */
+  panelDrawer: boolean;
   /** Narrow screens: context panel drawer open. */
   panelOpen: boolean;
   paletteOpen: boolean;
@@ -52,6 +59,7 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   headerOwner: null,
   contextPanel: null,
   panelOwner: null,
+  panelDrawer: true,
   panelOpen: false,
   paletteOpen: false,
   helpOpen: false,
@@ -73,8 +81,11 @@ export const useShellStore = create<ShellStore>((set, get) => ({
 export interface ShellApi {
   /** Sets the header (title, subtitle, actions, search slot). Call inside useEffect. */
   setHeader(h: HeaderState): void;
-  /** Sets the right-hand context panel; `null` removes it. */
-  setContextPanel(node: ReactNode | null): void;
+  /**
+   * Sets the right-hand context panel; `null` removes it. `drawer: false` shows it only where it
+   * fits inline (1440 px and up), for a page that lists the same content itself below that.
+   */
+  setContextPanel(node: ReactNode | null, opts?: { drawer?: boolean }): void;
 }
 
 /**
@@ -88,7 +99,7 @@ export function useShell(): ShellApi {
       const s = useShellStore.getState();
       const patch: Partial<ShellStore> = {};
       if (s.headerOwner === owner) Object.assign(patch, { header: null, headerOwner: null });
-      if (s.panelOwner === owner) Object.assign(patch, { contextPanel: null, panelOwner: null, panelOpen: false });
+      if (s.panelOwner === owner) Object.assign(patch, { contextPanel: null, panelOwner: null, panelOpen: false, panelDrawer: true });
       if (Object.keys(patch).length) useShellStore.setState(patch);
     },
     [owner],
@@ -96,11 +107,11 @@ export function useShell(): ShellApi {
   return useMemo<ShellApi>(
     () => ({
       setHeader: (h) => useShellStore.setState({ header: h, headerOwner: owner }),
-      setContextPanel: (node) =>
+      setContextPanel: (node, opts) =>
         useShellStore.setState(
           node === null
-            ? { contextPanel: null, panelOwner: null, panelOpen: false }
-            : { contextPanel: node, panelOwner: owner },
+            ? { contextPanel: null, panelOwner: null, panelOpen: false, panelDrawer: true }
+            : { contextPanel: node, panelOwner: owner, panelDrawer: opts?.drawer ?? true, ...(opts?.drawer === false ? { panelOpen: false } : {}) },
         ),
     }),
     [owner],

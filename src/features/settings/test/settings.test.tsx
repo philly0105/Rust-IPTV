@@ -73,6 +73,8 @@ describe('Settings page states', () => {
     renderAt(settingsRoutes, '/settings/playback');
     await screen.findByTestId('settings-playback');
     await waitFor(() => expect(useShellStore.getState().contextPanel).toBeTruthy());
+    // Below 1440 px the page lists the sections inline: no drawer (and no header toggle) repeats them.
+    expect(useShellStore.getState().panelDrawer).toBe(false);
   });
 });
 
@@ -145,11 +147,12 @@ describe('Language picker', () => {
     fireEvent.change(select, { target: { value: 'by' } });
     await waitFor(() => expect(rpcMock.callsOf('settings.update')).toEqual([{ patch: { language: 'by' } }]));
     // i18next runs on the BCP 47 tag, never on the folder name.
-    await waitFor(() => expect(i18n.language).toBe('be'));
+    // The first switch loads the locale chunks lazily; a loaded suite can take over 1 s.
+    await waitFor(() => expect(i18n.language).toBe('be'), { timeout: 5_000 });
     expect(document.documentElement.lang).toBe('be');
     fireEvent.change(select, { target: { value: 'zhtw' } });
     await waitFor(() => expect(rpcMock.callsOf('settings.update')[1]).toEqual({ patch: { language: 'zhtw' } }));
-    await waitFor(() => expect(i18n.language).toBe('zh-TW'));
+    await waitFor(() => expect(i18n.language).toBe('zh-TW'), { timeout: 5_000 });
     const { applyLanguage } = await import('@/i18n');
     await applyLanguage('en');
   });
@@ -219,7 +222,7 @@ describe('Guide settings never show an Xtream password', () => {
     ];
     renderAt(settingsRoutes, '/settings/epg');
     const row = await screen.findByTestId('epg-status-row');
-    expect(within(row).getByTestId('epg-status-url').textContent).toBe('http://xt.example.com/xmltv.php?username=alice&password=***');
+    expect(within(row).getByTestId('epg-status-url').textContent).toBe('http://xt.example.com/xmltv.php?username=***&password=***');
     const page = screen.getByTestId('settings-epg');
     expect(page.textContent).not.toContain('pw-secret');
     expect(page.textContent).not.toContain('hunter2');
@@ -255,5 +258,27 @@ describe('Section-level error states', () => {
     fail = false;
     fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.queryByTestId('remote-status-error')).toBeNull());
+  });
+});
+
+describe('Run 3 wiring', () => {
+  it('General shows the image cache row', async () => {
+    rpcMock.handlers['images.stats'] = () => ({ bytes: 3 * 1024 * 1024, files: 12, maxBytes: 500 * 1024 * 1024 });
+    renderAt(settingsRoutes, '/settings/general');
+    const row = await screen.findByTestId('image-cache-row');
+    expect(await within(row).findByTestId('image-cache-size')).toBeTruthy();
+  });
+
+  it("About opens What's new and the tour", async () => {
+    const { resetOnboardingStore, useOnboardingStore } = await import('@/features/onboarding/store');
+    resetOnboardingStore();
+    rpcMock.handlers['app.info'] = () => ({ version: '0.1.0', dataDir: 'C:/data', platform: 'windows', isDesktop: false, logFile: 'C:/data/log.txt' });
+    renderAt(settingsRoutes, '/settings/about');
+    fireEvent.click(await screen.findByTestId('about-whats-new'));
+    expect(useOnboardingStore.getState().overlay).toEqual({ kind: 'whatsNew', since: null, auto: false });
+    resetOnboardingStore();
+    fireEvent.click(screen.getByTestId('about-tour'));
+    expect(useOnboardingStore.getState().overlay).toEqual({ kind: 'tour', auto: false });
+    resetOnboardingStore();
   });
 });

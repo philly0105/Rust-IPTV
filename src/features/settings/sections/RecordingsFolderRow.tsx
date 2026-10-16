@@ -68,7 +68,7 @@ export function RecordingsFolderRow({ value, update }: { value: string | null; u
       error={error}
       stack
     >
-      {({ id, describedBy }) =>
+      {({ id, describedBy, invalid }) =>
         isDesktop ? (
           <div className="flex w-full flex-wrap items-center gap-2">
             <output
@@ -93,6 +93,7 @@ export function RecordingsFolderRow({ value, update }: { value: string | null; u
             <CommitInput
               id={id}
               describedBy={describedBy}
+              invalid={invalid}
               mono
               value={value ?? ''}
               placeholder={fallback || 'D:\\Videos\\recordings'}

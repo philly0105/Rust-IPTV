@@ -5,7 +5,41 @@ import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem } from '@/ap
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from './harness';
 
-const events = vi.hoisted(() => ({ handlers: new Map<string, (p: unknown) => void>() }));
+/** Matches toast text in the visible stack, not its copy in the screen-reader live region. */
+const VISIBLE_TOAST = { ignore: 'script, style, [data-toast-live] *' };
+
+/**
+ * The event bus: `handlers.get(type)` emits to every subscriber of that type, like the real
+ * bus (the shell and the parental hook both listen to `import.progress` and `sources.changed`).
+ */
+const events = vi.hoisted(() => {
+  const listeners = new Map<string, Set<(p: unknown) => void>>();
+  const handlers = new Map<string, (p: unknown) => void>();
+  const open = (type: string) => {
+    const subs = new Set<(p: unknown) => void>();
+    listeners.set(type, subs);
+    handlers.set(type, (p) => [...subs].forEach((fn) => fn(p)));
+    return subs;
+  };
+  return {
+    handlers,
+    subscribe(type: string, h: (p: unknown) => void): () => void {
+      const subs = listeners.get(type) ?? open(type);
+      subs.add(h);
+      return () => {
+        subs.delete(h);
+        if (subs.size === 0 && listeners.get(type) === subs) {
+          listeners.delete(type);
+          handlers.delete(type);
+        }
+      };
+    },
+    clear(): void {
+      listeners.clear();
+      handlers.clear();
+    },
+  };
+});
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -14,14 +48,14 @@ vi.mock('@/api/transport', async (orig) => ({
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({
-  onAppEvent: (type: string, h: (p: unknown) => void) => {
-    events.handlers.set(type, h);
-    return () => events.handlers.delete(type);
-  },
+  onAppEvent: (type: string, h: (p: unknown) => void) => events.subscribe(type, h),
   onAnyAppEvent: () => () => undefined,
   onConnectionState: () => () => undefined,
 }));
+/** What the mocked player store reports to F11 (L2-desktop-8). */
+const playerState = vi.hoisted(() => ({ source: null as unknown, mode: 'web', toggleFullscreen: () => {} }));
 vi.mock('@/features/player', () => ({
+  usePlayerStore: { getState: () => playerState },
   playItem: (...a: unknown[]) => (playerMock.playItem as (...x: unknown[]) => Promise<void>)(...a),
   restorePlayback: async () => false,
   PlayerDock: () => <div data-testid="player-dock" />,
@@ -33,7 +67,7 @@ const { shellRoutes } = await import('../routes');
 const { useShell, useShellStore } = await import('../store');
 const { sharedRailError } = await import('../dashboard/DashboardPage');
 const { RpcError } = await import('@/api/transport');
-const { useEffect } = await import('react');
+const { useEffect, useState } = await import('react');
 
 /** A page that fills the context panel with two links. */
 function PanelPage() {
@@ -51,7 +85,7 @@ function PanelPage() {
 const { useThemeStore } = await import('../theme');
 const { useToastStore } = await import('@/ui');
 
-function routes() {
+function routes(searchPage = <Page>search page</Page>) {
   return [
     {
       path: '/',
@@ -61,7 +95,7 @@ function routes() {
         { path: 'favorites', element: <Page>favorites page</Page> },
         { path: 'panel', element: <PanelPage /> },
         { path: 'recent', element: <Page>recent page</Page> },
-        { path: 'search', element: <Page>search page</Page> },
+        { path: 'search', element: searchPage },
         { path: 'sources', element: <Page>sources page</Page> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
       ],
@@ -78,6 +112,9 @@ function baseHandlers(opts: { sources?: number } = {}) {
   h['settings.get'] = () => settings();
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   h['sources.list'] = () => sources;
+  // An empty My List: its rail stays out of the way (mylist tests cover it).
+  h['watchlist.list'] = () => [];
+  h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['positions.continueWatching'] = (): PlaybackPosition[] => [
     { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('The Long Signal') },
   ];
@@ -99,7 +136,7 @@ beforeAll(installDomStubs);
 beforeEach(() => {
   baseHandlers();
   playerMock.playItem.mockClear();
-  events.handlers.clear();
+  events.clear();
   useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false });
   useThemeStore.setState({ theme: 'dark' });
   useToastStore.setState({ toasts: [] });
@@ -118,7 +155,11 @@ describe('ShellLayout', () => {
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     expect(await within(nav).findByText('Night Portal')).toBeTruthy();
     expect(within(nav).getByText('Backup 1')).toBeTruthy();
-    expect(screen.getByTestId('player-dock')).toBeTruthy();
+    // L3-perf-ui-6: the player chunks wait PLAYER_PREFETCH_DELAY_MS past the first route, so the
+    // dock is not there yet; the first press loads it at once.
+    expect(screen.queryByTestId('player-dock')).toBeNull();
+    fireEvent.pointerDown(window);
+    expect(await screen.findByTestId('player-dock')).toBeTruthy();
   });
 
   it('startup redirect sends / to the dashboard, or lastRoute when restoring', async () => {
@@ -141,6 +182,23 @@ describe('ShellLayout', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
     expect(screen.queryByTestId('command-palette')).toBeNull();
+  });
+
+  it('mod+f focuses the search field even when the search page mounts late (lazy chunk)', async () => {
+    function LateSearchPage() {
+      const [ready, setReady] = useState(false);
+      useEffect(() => {
+        const id = setTimeout(() => setReady(true), 300);
+        return () => clearTimeout(id);
+      }, []);
+      return ready ? <input data-page-search="" aria-label="late search" /> : <Page>loading search</Page>;
+    }
+    const { router } = renderRoutes(routes(<LateSearchPage />), '/favorites');
+    await screen.findByText('favorites page');
+    key('f', { ctrlKey: true });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    const field = await screen.findByLabelText('late search');
+    await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
   it('mod+k toggles the palette closed from inside its input, and Escape still closes it', async () => {
@@ -236,9 +294,12 @@ describe('ShellLayout', () => {
     await screen.findByText('Night Portal');
     await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
     const emit = events.handlers.get('import.progress')!;
-    act(() => emit({ sourceId: 's1', phase: 'parsing', done: 50, total: 200 }));
+    // Every run opens with `connecting`, before its first request.
+    act(() => emit({ sourceId: 's1', phase: 'connecting', done: 0 }));
     expect(await screen.findByText('Importing Night Portal')).toBeTruthy();
-    expect(screen.getByText('Reading the playlist: 50 of 200')).toBeTruthy();
+    expect(screen.getByText('Starting…')).toBeTruthy();
+    act(() => emit({ sourceId: 's1', phase: 'parsing', done: 50, total: 200 }));
+    expect(await screen.findByText('Reading the playlist: 50 of 200')).toBeTruthy();
     act(() => emit({ sourceId: 's1', phase: 'done', done: 200 }));
     expect(await screen.findByText('Night Portal is ready')).toBeTruthy();
     expect(screen.queryByText('Importing Night Portal')).toBeNull();
@@ -358,6 +419,13 @@ describe('DashboardPage', () => {
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
     expect(within(live).getByText('Harbor News')).toBeTruthy();
     expect(await within(live).findByText('Morning Bulletin')).toBeTruthy();
+    // The cards show titles and times only, so the programme descriptions stay off the wire (L3-serve-ui-8).
+    const nowNextArgs = rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext').map((c) => c.args as { withDescription?: boolean });
+    expect(nowNextArgs.length).toBeGreaterThan(0);
+    for (const a of nowNextArgs) expect(a.withDescription).toBe(false);
+    // A still LIVE pill per card: an infinite pulse on every card kept an idle dashboard compositing (L3-perf-desktop-1).
+    expect(within(live).getAllByText('Live').length).toBeGreaterThan(0);
+    expect(live.querySelector('[class*="animate-live-pulse"]')).toBeNull();
     expect(within(await screen.findByTestId('dashboard-rail-recent-live')).getByText('Metro Sport')).toBeTruthy();
     expect(within(await screen.findByTestId('dashboard-rail-favorite-vod')).getByText('Quiet Coast')).toBeTruthy();
     expect(within(await screen.findByTestId('dashboard-rail-recently-added')).getByText('Fresh Arrival')).toBeTruthy();
@@ -390,7 +458,31 @@ describe('DashboardPage', () => {
     baseHandlers({ sources: 0 });
     renderRoutes(routes(), '/dashboard');
     const welcome = await screen.findByTestId('dashboard-welcome');
-    expect(within(welcome).getByRole('link', { name: 'Add your first source' }).getAttribute('href')).toBe('/sources?add=1');
+    expect(within(welcome).getByRole('link', { name: 'Add your first source' }).getAttribute('href')).toBe('/sources?add=1&from=%2Fdashboard');
+  });
+
+  it('warms the playback engines at idle once there is something to play (XB2-14)', async () => {
+    const { __setEngineLoadersForTests } = await import('@/features/player/enginePreload');
+    const hls = vi.fn(async () => ({}));
+    const mpegts = vi.fn(async () => ({}));
+    __setEngineLoadersForTests({ hls, mpegts });
+    try {
+      baseHandlers({ sources: 0 });
+      renderRoutes(routes(), '/dashboard');
+      await screen.findByTestId('dashboard-welcome');
+      // jsdom has no requestIdleCallback: the preload falls back to a 300 ms timer.
+      await new Promise((r) => setTimeout(r, 400));
+      expect(hls).not.toHaveBeenCalled();
+      cleanup();
+      (await import('@/api/query')).queryClient.clear();
+      baseHandlers();
+      renderRoutes(routes(), '/dashboard');
+      await screen.findByTestId('dashboard-hero');
+      await waitFor(() => expect(hls).toHaveBeenCalledTimes(1));
+      expect(mpegts).toHaveBeenCalledTimes(1);
+    } finally {
+      __setEngineLoadersForTests(null);
+    }
   });
 
   it('shows a rail error with retry', async () => {
@@ -401,7 +493,8 @@ describe('DashboardPage', () => {
     };
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-live-favorites');
-    expect(await within(rail).findByText("Can't reach the server")).toBeTruthy();
+    expect(await within(rail).findByText("Couldn't reach the server")).toBeTruthy();
+    expect(within(rail).getByText(/stored on this computer/)).toBeTruthy();
     fail = false;
     fireEvent.click(within(rail).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull());
@@ -421,12 +514,24 @@ describe('DashboardPage', () => {
     renderRoutes(routes(), '/dashboard');
 
     const banner = await screen.findByTestId('dashboard-error');
-    expect(within(banner).getByText("Can't reach the server")).toBeTruthy();
-    expect(screen.getAllByText("Can't reach the server")).toHaveLength(1);
+    // Local-data copy, not the provider-network hint.
+    expect(within(banner).getByRole('heading', { name: "Couldn't load your dashboard" })).toBeTruthy();
+    expect(within(banner).getByText(/stored on this computer/)).toBeTruthy();
+    expect(within(banner).queryByText(/provider URL/)).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+    // Failed rails collapse; the card sits in the normal flow (never over live content) and
+    // shares a grid cell with an invisible hero skeleton, so it is at least the hero's height.
     for (const id of ['continue-watching', 'live-favorites', 'recent-live', 'favorite-vod', 'recently-added']) {
       expect(screen.queryByTestId(`dashboard-rail-${id}`)).toBeNull();
     }
+    expect(banner.className).not.toMatch(/absolute/);
+    const slot = screen.getByTestId('dashboard-error-slot');
+    expect(slot.className).toContain('grid');
+    const spacer = slot.querySelector('[data-hero-spacer]')!;
+    expect(spacer.className).toContain('invisible');
+    expect(spacer.getAttribute('aria-hidden')).toBe('true');
+    expect(banner.className).toContain('col-start-1');
+    expect(spacer.className).toContain('col-start-1');
     // Not "nothing to watch yet": the dashboard failed, it is not empty.
     expect(screen.queryByText('Nothing to show yet')).toBeNull();
     // Sources still loaded, so their rail stays.
@@ -448,7 +553,7 @@ describe('DashboardPage', () => {
     };
     renderRoutes(routes(), '/dashboard');
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
-    expect(await within(live).findByText("Can't reach the server")).toBeTruthy();
+    expect(await within(live).findByText("Couldn't reach the server")).toBeTruthy();
     expect(screen.queryByTestId('dashboard-error')).toBeNull();
   });
 
@@ -485,7 +590,7 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
       toast({ id: 'a', title: 'First', duration: 0 });
       toast({ id: 'b', title: 'Second', duration: 0, action: { label: 'Open', onClick: () => {} } });
     });
-    const second = await screen.findByText('Second');
+    const second = await screen.findByText('Second', VISIBLE_TOAST);
     key('F8');
     expect(document.activeElement?.textContent).toBe('Open');
 
@@ -493,13 +598,13 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     expect(document.activeElement?.closest('[data-toast-id]')?.getAttribute('data-toast-id')).toBe('a');
 
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByText('First')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('First', VISIBLE_TOAST)).toBeNull());
     // Focus moved to the surviving toast, not <body>.
     expect(document.activeElement?.closest('[data-toast-id]')?.getAttribute('data-toast-id')).toBe('b');
     expect(second.isConnected).toBe(true);
 
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByText('Second')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('Second', VISIBLE_TOAST)).toBeNull());
     expect(document.activeElement).toBe(origin);
   });
 
@@ -516,7 +621,7 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');
     act(() => void toast({ id: 'solo', title: 'Solo', duration: 0 }));
-    await screen.findByText('Solo');
+    await screen.findByText('Solo', VISIBLE_TOAST);
     key('F8');
     expect(document.activeElement?.closest('[data-toast-id]')).toBeTruthy();
     act(() => dismissToast('solo'));
@@ -542,5 +647,864 @@ describe('keyboard reach (theme, toasts, outlet)', () => {
     expect(overlay.querySelector('[data-combo="mod+shift+l"]')).toBeTruthy();
     expect(overlay.querySelector('[data-combo="f8"]')).toBeTruthy();
     expect(within(overlay).getByRole('region', { name: 'Shortcut list' }).tabIndex).toBe(0);
+  });
+});
+
+describe('polish pass (B7)', () => {
+  it('rail shows a retry when sources fail, and retrying recovers the list', async () => {
+    let fail = true;
+    const ok = rpcMock.handlers['sources.list']!;
+    rpcMock.handlers['sources.list'] = (a) => {
+      if (fail) throw new Error('boom');
+      return ok(a);
+    };
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const box = await within(nav).findByTestId('rail-sources-error');
+    expect(within(box).getByText("Sources didn't load")).toBeTruthy();
+    fail = false;
+    fireEvent.click(within(box).getByRole('button', { name: 'Try again' }));
+    expect(await within(nav).findByText('Night Portal')).toBeTruthy();
+    expect(within(nav).queryByTestId('rail-sources-error')).toBeNull();
+  });
+
+  it('palette matches titles and keywords, not internal ids', async () => {
+    const { paletteFilter } = await import('../CommandPalette');
+    const sep = '\u001f';
+    expect(paletteFilter(`Favorites${sep}nav.favorites`, 'nav')).toBe(0);
+    expect(paletteFilter(`Favorites${sep}nav.favorites`, 'fav')).toBeGreaterThan(0);
+    expect(paletteFilter(`Home${sep}nav.dashboard`, 'home')).toBeGreaterThan(0);
+    expect(paletteFilter(`Add source${sep}nav.addSource`, 'm3u', ['playlist', 'm3u'])).toBeGreaterThan(0);
+  });
+
+  it('palette shows the empty state with a search fallback for unmatched text', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'navx' } });
+    expect(await within(palette).findByText('Search for "navx"')).toBeTruthy();
+    expect(within(palette).queryByText('Favorites')).toBeNull();
+  });
+
+  it('palette reaches every settings section and the Scheduled page', async () => {
+    const { SETTINGS_SECTIONS } = await import('../CommandPalette');
+    const { SECTION_IDS } = await import('@/features/settings/sections/types');
+    expect([...SETTINGS_SECTIONS]).toEqual([...SECTION_IDS]);
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    const input = within(palette).getByPlaceholderText('Type a command or search');
+    fireEvent.change(input, { target: { value: 'recording' } });
+    expect(await within(palette).findByText('Settings: Recording')).toBeTruthy();
+    fireEvent.change(input, { target: { value: 'scheduled' } });
+    expect(await within(palette).findByText('Scheduled')).toBeTruthy();
+  });
+
+  it('overlay lists captions and channel zap, with labelled sections', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    act(() => useShellStore.getState().setHelpOpen(true));
+    const overlay = await screen.findByTestId('shortcut-overlay');
+    for (const combo of ['c', 'pageup', 'pagedown', 'mod+b', 'digit', '/']) expect(overlay.querySelector(`[data-combo="${combo}"]`), combo).toBeTruthy();
+    expect(within(overlay).getByText('Back 10 seconds')).toBeTruthy();
+    expect(within(overlay).getByText('Exit picture in picture')).toBeTruthy();
+    expect(within(overlay).getByText('Search channels')).toBeTruthy();
+    expect(within(overlay).getAllByText('In the search box: move to the list')).toHaveLength(2);
+    for (const section of overlay.querySelectorAll('section')) {
+      const ids = section.getAttribute('aria-labelledby')!.split(/\s+/);
+      expect(ids).toHaveLength(1);
+      expect(document.getElementById(ids[0]!)?.textContent).toBeTruthy();
+    }
+    expect(within(overlay).getByRole('region', { name: 'Live TV' })).toBeTruthy();
+  });
+});
+
+describe('startup without layout jumps (B7)', () => {
+  it('the pending startup frame uses the dashboard hero skeleton geometry', async () => {
+    rpcMock.handlers['settings.get'] = () => new Promise(() => {});
+    renderRoutes([{ path: '/', element: <StartupOnly /> }], '/');
+    const pending = await screen.findByTestId('startup-pending');
+    expect(pending.querySelector('[data-testid="hero-skeleton"]')).toBeTruthy();
+    expect(pending.className).toContain('gap-10');
+    expect(pending.className).toContain('pt-8');
+  });
+});
+
+function StartupOnly() {
+  const { StartupRedirect } = startupModule;
+  return <StartupRedirect />;
+}
+const startupModule = await import('../StartupRedirect');
+
+describe('B7 shell fixes', () => {
+  it('digit zap accepts Shift so AZERTY number rows work', async () => {
+    const { matches, parseCombo } = await import('../shortcuts');
+    const p = parseCombo('digit');
+    expect(matches(p, new KeyboardEvent('keydown', { key: '7', code: 'Digit7', shiftKey: true }))).toBe(true);
+    // Shift+7 on QWERTY is "&": still not a digit.
+    expect(matches(p, new KeyboardEvent('keydown', { key: '&', code: 'Digit7', shiftKey: true }))).toBe(false);
+    expect(matches(p, new KeyboardEvent('keydown', { key: '7', ctrlKey: true }))).toBe(false);
+  });
+
+  it('an older theme reply arriving last does not undo the newer choice', async () => {
+    const { persistTheme } = await import('../theme');
+    const { queryClient, rpcKey } = await import('@/api/query');
+    queryClient.setQueryData(rpcKey('settings.get'), settings({ theme: 'dark' }));
+    const pending: { theme: string; resolve: (s: unknown) => void }[] = [];
+    rpcMock.handlers['settings.update'] = (a) =>
+      new Promise((resolve) => pending.push({ theme: (a as { patch: { theme: string } }).patch.theme, resolve }));
+    const first = persistTheme('light');
+    const second = persistTheme('dark');
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]!.resolve(settings({ theme: 'dark' }));
+    await second;
+    pending[0]!.resolve(settings({ theme: 'light' }));
+    await first;
+    expect(queryClient.getQueryData<{ theme: string }>(rpcKey('settings.get'))?.theme).toBe('dark');
+    expect(useThemeStore.getState().theme).toBe('dark');
+  });
+
+  it('the quiet dashboard state waits for every visible rail', async () => {
+    const h = rpcMock.handlers;
+    h['positions.continueWatching'] = () => [];
+    h['favorites.list'] = () => [];
+    h['recent.list'] = () => [];
+    h['catalog.recentlyAdded'] = () => new Promise(() => {});
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-rail-recent-sources');
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(screen.queryByText('Nothing to show yet')).toBeNull();
+    cleanup();
+    h['catalog.recentlyAdded'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    expect(await screen.findByText('Nothing to show yet')).toBeTruthy();
+  });
+
+  it('rails the user switched off do not count as content', async () => {
+    const h = rpcMock.handlers;
+    h['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false, continueWatching: false } });
+    h['favorites.list'] = () => [];
+    h['recent.list'] = () => [];
+    h['catalog.recentlyAdded'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    expect(await screen.findByText('Nothing to show yet')).toBeTruthy();
+  });
+
+  it('poster cards are named once by their caption', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? ([{ ref: { sourceId: 's1', contentType: 'movie', itemId: '99' }, title: 'Fresh Arrival', posterUrl: 'http://x.test/p.jpg', added: '2026-10-09T00:00:00Z', categoryId: 'c' }] satisfies VodItem[])
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recently-added');
+    const link = await within(rail).findByRole('link', { name: /Fresh Arrival/ });
+    expect(link.querySelector('img')!.getAttribute('alt')).toBe('');
+    expect(within(rail).queryByRole('img', { name: 'Fresh Arrival' })).toBeNull();
+  });
+
+  it('recently added cards show the title without its year or provider tag, as the detail page does', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? ([
+            {
+              ref: { sourceId: 's1', contentType: 'movie', itemId: '98' },
+              title: 'Dune: Part Two (2024) [MULTI]',
+              titleBase: 'Dune: Part Two',
+              year: 2024,
+              added: '2026-10-09T00:00:00Z',
+              categoryId: 'c',
+            },
+          ] satisfies VodItem[])
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recently-added');
+    const link = await within(rail).findByRole('link', { name: /Dune: Part Two/ });
+    expect(link.getAttribute('aria-label')).not.toMatch(/MULTI|\(2024\)/);
+    expect(within(link).getByText('Dune: Part Two')).toBeTruthy();
+    expect(within(link).getByText(/2024/)).toBeTruthy();
+    expect(within(rail).queryByText(/MULTI/)).toBeNull();
+  });
+
+  it('rail source errors are spoken, and ids with spaces stay valid IDREFs', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('my source', { name: 'Broken One', lastError: 'boom' } as never)];
+    renderRoutes(routes(), '/favorites');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const btn = await within(nav).findByRole('button', { name: /Broken One.*The last refresh failed/ });
+    expect(nav.querySelector('span[aria-label]')).toBeNull();
+    const controls = btn.getAttribute('aria-controls')!;
+    expect(controls).not.toMatch(/\s/);
+    if (btn.getAttribute('aria-expanded') !== 'true') fireEvent.click(btn);
+    expect(document.getElementById(controls)).toBeTruthy();
+    cleanup();
+    act(() => useShellStore.setState({ railCollapsed: true }));
+    renderRoutes(routes(), '/favorites');
+    const nav2 = screen.getByRole('navigation', { name: 'Main navigation' });
+    // Collapsed, the monogram opens the source's links in a menu (L2-shell-2); the error rides on its name.
+    expect(await within(nav2).findByRole('button', { name: 'Broken One, The last refresh failed' })).toBeTruthy();
+  });
+
+  it('saves the last screen at once when the window hides inside the debounce', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'settings.get')).toBe(true));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(rpcMock.calls.some((c) => c.cmd === 'settings.update')).toBe(false);
+    act(() => void window.dispatchEvent(new Event('pagehide')));
+    expect(rpcMock.calls.some((c) => c.cmd === 'settings.update' && JSON.stringify(c.args).includes('"lastRoute":"/favorites"'))).toBe(true);
+  });
+  it('a cancelled import replaces the progress toast with a short notice that times out', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('Night Portal');
+    await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
+    const emit = events.handlers.get('import.progress')!;
+    act(() => emit({ sourceId: 's1', phase: 'parsing', done: 50, total: 200 }));
+    expect(await screen.findByText('Importing Night Portal', VISIBLE_TOAST)).toBeTruthy();
+    act(() => emit({ sourceId: 's1', phase: 'cancelled', done: 50 }));
+    expect(await screen.findByText('Import of Night Portal cancelled', VISIBLE_TOAST)).toBeTruthy();
+    const rec = useToastStore.getState().toasts.find((t) => t.id === 'import-s1')!;
+    expect(rec.progress).toBeUndefined();
+    expect(rec.duration).toBeGreaterThan(0);
+  });
+
+  it('passes the classified error code to the import summary', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('Night Portal');
+    await waitFor(() => expect(events.handlers.has('import.progress')).toBe(true));
+    const { importSummaryKey } = await import('@/features/sources/lib/errors');
+    const { default: i18n } = await import('i18next');
+    act(() => events.handlers.get('import.progress')!({ sourceId: 's1', phase: 'error', done: 0, message: 'something odd', code: 'auth' }));
+    const expected = i18n.t(`sources:${importSummaryKey('something odd', 'auth')}`);
+    await waitFor(() =>
+      expect(String(useToastStore.getState().toasts.find((t) => t.id === 'import-s1')?.description)).toContain(expected),
+    );
+  });
+
+  it('sources waiting out their delete-undo window leave the rail, dashboard and palette', async () => {
+    const { usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
+    act(() => usePendingRemovals.setState({ ids: new Set(['s2']) }));
+    try {
+      renderRoutes(routes(), '/dashboard');
+      const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+      await within(nav).findByText('Night Portal');
+      expect(within(nav).queryByText('Backup 1')).toBeNull();
+      const sourcesRail = await screen.findByTestId('dashboard-rail-recent-sources');
+      expect(within(sourcesRail).queryByText('Backup 1')).toBeNull();
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+      expect(await within(nav).findByText('Backup 1')).toBeTruthy();
+    } finally {
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+    }
+  });
+});
+
+
+describe('B7 review round 1', () => {
+  it('palette ranks a source named for the query above a keyword-only command', async () => {
+    const { paletteFilter } = await import('../CommandPalette');
+    const sep = '\u0000';
+    const named = paletteFilter(`Mock Xtream: Live TV${sep}source.m.live`, 'xtream', ['Mock Xtream', 'xtream', 'live']);
+    const keywordOnly = paletteFilter(`Add source${sep}nav.addSource`, 'xtream', ['playlist', 'm3u', 'xtream']);
+    expect(keywordOnly).toBeGreaterThan(0);
+    expect(named).toBeGreaterThan(keywordOnly);
+
+    rpcMock.handlers['sources.list'] = () => [makeSource('m', { name: 'Mock Xtream' })];
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    // Sources loaded (the rail shows it) before the palette filters.
+    await screen.findAllByText('Mock Xtream');
+    key('k', { ctrlKey: true });
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'xtream' } });
+    await waitFor(() => {
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('Mock Xtream');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+  });
+
+  it('header: page title follows its own script, and the palette button has no Mac-only glyph', async () => {
+    renderRoutes(routes(), '/dashboard');
+    expect((await screen.findByTestId('page-title')).getAttribute('dir')).toBe('auto');
+    const open = screen.getByTestId('open-palette');
+    expect(open.querySelector('svg.lucide-command')).toBeNull();
+    expect(open.querySelector('svg.lucide-square-chevron-right')).not.toBeNull();
+  });
+
+  it('rail links press darker', async () => {
+    renderRoutes(routes(), '/favorites');
+    const link = await screen.findByRole('link', { name: /Favorites/ });
+    expect(link.className).toContain('active:bg-surface-3');
+  });
+
+  it('joins card counts with the locale list format, and names carry dir="auto"', async () => {
+    const { joinList } = await import('../dashboard/cards');
+    const iso = (x: string) => `⁨${x}⁩`;
+    expect(joinList(['120 channels', '40 movies'], 'en')).toBe(`${iso('120 channels')}, ${iso('40 movies')}`);
+    for (const lng of ['ru', 'fr', 'ko', 'tr', 'de']) expect(joinList(['a', 'b'], lng)).toBe(`${iso('a')}, ${iso('b')}`);
+    expect(joinList(['a', false, undefined, '', 'b'], 'en')).toBe(`${iso('a')}, ${iso('b')}`);
+    expect(joinList(['a', 'b'], 'ja')).toBe(`${iso('a')}、${iso('b')}`);
+    expect(joinList(['a', 'b'], 'zh-TW')).toBe(`${iso('a')}、${iso('b')}`);
+    // Arabic: Arabic comma, no "و" conjunction, and the year isolated so it stays in place.
+    expect(joinList(['مصدر', 2019], 'ar')).toBe(`${iso('مصدر')}، ${iso('2019')}`);
+    expect(joinList([2019], 'ary')).toBe(iso('2019'));
+    // Parts with no letters or digits are left bare (PosterCard derives the separator this way).
+    expect(joinList(['', ''], 'en').slice(1, -1)).toBe(', ');
+    expect(joinList([], 'en')).toBe('');
+
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-sources');
+    const name = await within(rail).findByText('Night Portal');
+    expect(name.getAttribute('dir')).toBe('auto');
+    const counts = joinList(['120 channels', '40 movies'], 'en');
+    expect(within(rail).getAllByText(counts).length).toBeGreaterThan(0);
+  });
+});
+
+describe('B7 review round 2', () => {
+  const railsOff = (over: Record<string, boolean>) =>
+    settings({ dashboardRails: { ...settings().dashboardRails, ...over } as ReturnType<typeof settings>['dashboardRails'] });
+
+  it('with the hero off, the shared error sits in the flow with no hero spacer', async () => {
+    const h = rpcMock.handlers;
+    h['settings.get'] = () => railsOff({ hero: false, continueWatching: false, recentlyWatchedLive: false, favoriteMoviesAndSeries: false });
+    const fail = () => {
+      throw { code: 'db', message: 'database is locked' };
+    };
+    h['favorites.list'] = fail;
+    h['catalog.recentlyAdded'] = fail;
+    renderRoutes(routes(), '/dashboard');
+    const slot = await screen.findByTestId('dashboard-error-slot');
+    expect(slot.querySelector('[data-hero-spacer]')).toBeNull();
+    // The error slot comes before the sources rail in document order, both in flow.
+    const sources = screen.getByTestId('dashboard-rail-recent-sources');
+    expect(slot.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('dashboard-error').className).not.toMatch(/\babsolute\b/);
+  });
+
+  it('a rail error reserves its skeleton card height and lays out in a row', async () => {
+    rpcMock.handlers['recent.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-live');
+    const box = await within(rail).findByTestId('dashboard-rail-error');
+    const spacer = box.querySelector<HTMLElement>('[data-rail-error-spacer]')!;
+    expect(spacer.getAttribute('aria-hidden')).toBe('true');
+    expect(spacer.className).toContain('invisible');
+    // Same skeleton card as the loading state: the rail's card width and aspect.
+    expect((spacer.firstElementChild as HTMLElement).style.width).toBe('232px');
+    expect(within(box).getByRole('alert').className).toContain('flex-row');
+  });
+
+  it('a loading rail stands as tall as the loaded one (L3-visual-14)', async () => {
+    rpcMock.handlers['recent.list'] = () => new Promise(() => undefined);
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-live');
+    const busy = rail.querySelector<HTMLElement>('[aria-busy="true"]')!;
+    // The track's padding, then per card the art and two caption lines one text-sm line tall,
+    // the first after the cards' mt-2: no thinner bars that come up short and shift the page.
+    expect(busy.className).toMatch(/\bpt-1\b/);
+    expect(busy.className).toMatch(/\bpb-3\b/);
+    const card = busy.querySelector<HTMLElement>('[data-rail-skeleton-card]')!;
+    const title = card.children[1] as HTMLElement;
+    const subtitle = card.children[2] as HTMLElement;
+    for (const line of [title, subtitle]) expect(line.className).toMatch(/\bh-\[1lh\].*\btext-sm\b/);
+    expect(title.className).toMatch(/\bmt-2\b/);
+    expect(card.className).not.toMatch(/\bgap-/);
+  });
+
+  it('the one favorites query shows one error panel, not two', async () => {
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(await within(live).findByRole('alert')).toBeTruthy();
+    expect(screen.queryByTestId('dashboard-rail-favorite-vod')).toBeNull();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('the favorite-vod rail shows the favorites error when the live rail is off', async () => {
+    rpcMock.handlers['settings.get'] = () => railsOff({ liveFavorites: false });
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const vod = await screen.findByTestId('dashboard-rail-favorite-vod');
+    expect(await within(vod).findByRole('alert')).toBeTruthy();
+  });
+
+  it('a rail that loaded empty last time shows no skeleton while it loads', async () => {
+    const { readRailEmpty } = await import('../dashboard/railEmpty');
+    let resolve!: (v: unknown) => void;
+    rpcMock.handlers['favorites.list'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    await waitFor(() => expect(readRailEmpty('live-favorites')).toBe(true));
+    cleanup();
+    const { queryClient } = await import('@/api/query');
+    queryClient.clear();
+    rpcMock.handlers['favorites.list'] = () => new Promise((r) => (resolve = r));
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-rail-continue-watching');
+    expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull();
+    expect(screen.queryByTestId('dashboard-rail-favorite-vod')).toBeNull();
+    // Rails below the still-loading favorites wait for it (round 3 hold rule), then appear.
+    expect(screen.queryByTestId('dashboard-rail-recent-live')).toBeNull();
+    resolve([]);
+    expect(await screen.findByTestId('dashboard-rail-recent-live')).toBeTruthy();
+  });
+
+  it('rail source names follow their own script', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { name: 'مصدر عربي' })];
+    renderRoutes(routes(), '/favorites');
+    const name = (await screen.findAllByText('مصدر عربي')).find((el) => el.closest('nav'))!;
+    expect(name.getAttribute('dir')).toBe('auto');
+    expect(name.className).toContain('text-match-parent');
+  });
+
+  it('rail "See all" links and scroll arrows have pressed states', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, '..', 'dashboard', 'DashboardRail.tsx'), 'utf8');
+    expect(src.match(/active:text-accent-pressed/g)).toHaveLength(3);
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect((await within(live).findByRole('link', { name: 'See all' })).className).toContain('active:text-accent-pressed');
+  });
+
+  it('typing in the palette scrolls the list back to the selected top result', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    const palette = await screen.findByTestId('command-palette');
+    const list = palette.querySelector<HTMLElement>('[cmdk-list]')!;
+    // jsdom has no layout, so give the list a scroll position it keeps.
+    Object.defineProperty(list, 'scrollTop', { value: 284, writable: true, configurable: true });
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'mo' } });
+    await waitFor(() => expect(list.scrollTop).toBe(0));
+  });
+});
+
+describe('B7 review round 3', () => {
+  it('a failed rail, or one whose error is hidden, never writes the "loaded empty" flag', async () => {
+    const { readRailEmpty } = await import('../dashboard/railEmpty');
+    rpcMock.handlers['favorites.list'] = () => {
+      throw { code: 'db', message: 'locked' };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(await within(live).findByRole('alert')).toBeTruthy();
+    // favorite-vod reads the same failed query with its error hidden: still no flag.
+    expect(readRailEmpty('live-favorites')).toBe(false);
+    expect(readRailEmpty('favorite-vod')).toBe(false);
+  });
+
+  it('a shared failure of every rail writes no flags', async () => {
+    const { readRailEmpty } = await import('../dashboard/railEmpty');
+    const fail = () => {
+      throw { code: 'network', message: 'down' };
+    };
+    const h = rpcMock.handlers;
+    for (const c of ['positions.continueWatching', 'favorites.list', 'recent.list', 'catalog.recentlyAdded']) h[c] = fail;
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-error');
+    for (const id of ['continue-watching', 'live-favorites', 'recent-live', 'favorite-vod', 'recently-added']) {
+      expect(readRailEmpty(id), id).toBe(false);
+    }
+  });
+
+  it('maps query results to the rails they feed', async () => {
+    const { railsWithContent } = await import('../dashboard/railEmpty');
+    const live = { ref: { contentType: 'live' } };
+    const movie = { ref: { contentType: 'movie' } };
+    expect(railsWithContent('favorites.list', [live, movie])).toEqual(['live-favorites', 'favorite-vod']);
+    expect(railsWithContent('favorites.list', [movie])).toEqual(['favorite-vod']);
+    expect(railsWithContent('recent.list', [movie])).toEqual([]);
+    expect(railsWithContent('recent.list', [live])).toEqual(['recent-live']);
+    expect(railsWithContent('positions.continueWatching', [movie])).toEqual(['continue-watching']);
+    expect(railsWithContent('catalog.recentlyAdded', [movie])).toEqual(['recently-added']);
+    expect(railsWithContent('favorites.list', [])).toEqual([]);
+    expect(railsWithContent('sources.list', [movie])).toEqual([]);
+  });
+
+  it('content arriving anywhere in the query cache clears a stale flag', async () => {
+    const { QueryClient } = await import('@tanstack/react-query');
+    const { bindRailEmptySync, readRailEmpty, writeRailEmpty } = await import('../dashboard/railEmpty');
+    const client = new QueryClient();
+    const off = bindRailEmptySync(client);
+    writeRailEmpty('live-favorites', true);
+    writeRailEmpty('favorite-vod', true);
+    // E.g. the Favorites page after the first live favorite.
+    client.setQueryData(['favorites.list', null], [{ ref: { contentType: 'live' } }]);
+    expect(readRailEmpty('live-favorites')).toBe(false);
+    expect(readRailEmpty('favorite-vod')).toBe(true);
+    off();
+    client.setQueryData(['favorites.list', {}], [{ ref: { contentType: 'series' } }]);
+    expect(readRailEmpty('favorite-vod')).toBe(true);
+  });
+
+  it('nothing renders below the first section still loading', async () => {
+    let resolve!: () => void;
+    const recent = rpcMock.handlers['recent.list']!;
+    rpcMock.handlers['recent.list'] = (a) => new Promise((r) => (resolve = () => r(recent(a))));
+    renderRoutes(routes(), '/dashboard');
+    // Above the pending rail: settled content. The pending rail: its skeleton.
+    await screen.findByTestId('dashboard-rail-live-favorites');
+    expect(screen.getByTestId('dashboard-rail-recent-live')).toBeTruthy();
+    for (const id of ['favorite-vod', 'recent-sources', 'recently-added']) {
+      expect(screen.queryByTestId(`dashboard-rail-${id}`), id).toBeNull();
+    }
+    resolve();
+    expect(await screen.findByTestId('dashboard-rail-recent-sources')).toBeTruthy();
+    expect(screen.getByTestId('dashboard-rail-favorite-vod')).toBeTruthy();
+    expect(await screen.findByTestId('dashboard-rail-recently-added')).toBeTruthy();
+  });
+
+  it('card names follow their own script inside an RTL page', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const live = await screen.findByTestId('dashboard-rail-live-favorites');
+    const name = within(live).getByText('Harbor News');
+    expect(name.getAttribute('dir')).toBe('auto');
+    expect(name.className).toContain('text-match-parent');
+    expect((await within(live).findByText('Morning Bulletin')).className).toContain('text-match-parent');
+    const src = await screen.findByTestId('dashboard-rail-recent-sources');
+    const srcName = within(src).getByText('Night Portal');
+    expect(srcName.getAttribute('dir')).toBe('auto');
+    expect(srcName.className).toContain('text-match-parent');
+  });
+
+  it('source and recently-added cards read the name first', async () => {
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? ([
+            { ref: { sourceId: 's1', contentType: 'movie', itemId: '99' }, title: 'Fresh Arrival', year: 2024, rating: 7.46, added: '2026-10-09T00:00:00Z', categoryId: 'c' },
+          ] as VodItem[])
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const src = await screen.findByTestId('dashboard-rail-recent-sources');
+    // Monogram "NP" and the kind badge are decorative; the kind follows the name.
+    const link = within(src).getByRole('link', { name: /^Night Portal, Xtream/ });
+    expect(within(link).getByText('NP').getAttribute('aria-hidden')).toBe('true');
+    const added = await screen.findByTestId('dashboard-rail-recently-added');
+    const strip = (s: string | null) => (s ?? '').replace(/[⁨⁩]/g, '');
+    expect(strip(within(added).getByRole('link').getAttribute('aria-label'))).toBe('Fresh Arrival, Night Portal, 2024, rated 7.5');
+    const vod = await screen.findByTestId('dashboard-rail-favorite-vod');
+    expect(strip(within(vod).getByRole('link', { name: /Quiet Coast/ }).getAttribute('aria-label'))).toBe('Quiet Coast, Series');
+  });
+});
+
+describe('Run 3 onboarding wiring', () => {
+  const onboarding = () => import('@/features/onboarding/store');
+
+  afterEach(async () => (await onboarding()).resetOnboardingStore());
+
+  it('the rail and header carry one tour anchor per step', async () => {
+    renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await within(nav).findByText('Night Portal');
+    const live = nav.querySelectorAll('[data-tour="live"]');
+    expect(live).toHaveLength(1);
+    expect(live[0]!.textContent).toContain('Night Portal');
+    expect(within(nav).getByRole('link', { name: /My List/ }).getAttribute('data-tour')).toBe('vod');
+    // From lg up the header's "Search everything" button is the one search anchor: not the rail's
+    // Search link, and never the palette button (it opens commands, not search).
+    const search = document.querySelectorAll('[data-tour="search"]');
+    expect(search).toHaveLength(1);
+    expect(screen.getByTestId('shell-header').contains(search[0]!)).toBe(true);
+    expect(search[0]!.textContent).toContain('Search everything');
+    expect(screen.getByTestId('open-palette').hasAttribute('data-tour')).toBe(false);
+  });
+
+  describe('the search anchor follows the layout', () => {
+    /** A page with a header search field, like Live or Search. */
+    function SearchFieldPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({ title: 'Find', search: { value: '', onChange: () => {}, placeholder: 'Filter here' } });
+      }, [shell]);
+      return <Page>search field page</Page>;
+    }
+    // The harness stub (installed in beforeAll) matches nothing; this one matches the rail's auto-collapse query.
+    let stubbed: typeof window.matchMedia;
+    beforeEach(() => {
+      stubbed = window.matchMedia;
+    });
+    afterEach(() => {
+      window.matchMedia = stubbed;
+    });
+    const setNarrow = (narrow: boolean) => {
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: narrow && query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+    };
+
+    it('from lg up the page search field holds it', async () => {
+      setNarrow(false);
+      renderRoutes(routes(<SearchFieldPage />), '/search');
+      const field = await screen.findByPlaceholderText('Filter here');
+      const search = document.querySelectorAll('[data-tour="search"]');
+      expect(search).toHaveLength(1);
+      expect(search[0]!.contains(field) || search[0] === field).toBe(true);
+    });
+
+    it.each([
+      ['/favorites', 'favorites page'],
+      ['/search', 'search field page'],
+    ])('below lg the rail Search link holds it on %s', async (path, text) => {
+      setNarrow(true);
+      renderRoutes(routes(<SearchFieldPage />), path);
+      await screen.findByText(text);
+      const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+      const search = document.querySelectorAll('[data-tour="search"]');
+      expect(search).toHaveLength(1);
+      expect(search[0]).toBe(within(nav).getByRole('link', { name: 'Search' }));
+      expect(screen.getByTestId('open-palette').hasAttribute('data-tour')).toBe(false);
+    });
+  });
+
+  it('the palette starts the tour and opens What\'s new', async () => {
+    const { useOnboardingStore } = await onboarding();
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    for (const [query, kind] of [
+      ['take the tour', 'tour'],
+      ["what's new", 'whatsNew'],
+    ] as const) {
+      (await onboarding()).resetOnboardingStore();
+      act(() => useShellStore.getState().setPaletteOpen(true));
+      const palette = await screen.findByTestId('command-palette');
+      const input = within(palette).getByPlaceholderText('Type a command or search');
+      fireEvent.change(input, { target: { value: query } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(useOnboardingStore.getState().overlay?.kind).toBe(kind));
+      expect(useOnboardingStore.getState().overlay?.auto).toBe(false);
+      await waitFor(() => expect(screen.queryByTestId('command-palette')).toBeNull());
+    }
+  });
+});
+
+describe('L1 shell polish', () => {
+  it('Esc blurs a text field but leaves focus on a link', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const { isTextEntry } = await import('../ShellLayout');
+    const link = within(screen.getByRole('navigation', { name: 'Main navigation' })).getAllByRole('link')[0]!;
+    link.focus();
+    key('Escape');
+    expect(document.activeElement).toBe(link);
+    const input = document.createElement('input');
+    expect(isTextEntry(input)).toBe(true);
+    input.type = 'checkbox';
+    expect(isTextEntry(input)).toBe(false);
+    expect(isTextEntry(document.createElement('button'))).toBe(false);
+  });
+
+  it('palette opens with an empty query after Ctrl+K closed it', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    const input = (await screen.findByPlaceholderText('Type a command or search')) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'night' } });
+    key('k', { ctrlKey: true });
+    await waitFor(() => expect(screen.queryByPlaceholderText('Type a command or search')).toBeNull());
+    key('k', { ctrlKey: true });
+    expect(((await screen.findByPlaceholderText('Type a command or search')) as HTMLInputElement).value).toBe('');
+  });
+
+  it('palette lists Radio for a playlist source that has radio channels', async () => {
+    rpcMock.handlers['sources.list'] = () => [
+      makeSource('m1', { kind: 'm3u', name: 'Radio Box', radioCount: 3 }),
+      makeSource('m2', { kind: 'm3u', name: 'Plain List', position: 1, radioCount: 0 }),
+    ];
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    await screen.findByPlaceholderText('Type a command or search');
+    expect(await screen.findByText('Radio Box: Radio')).toBeTruthy();
+    expect(screen.queryByText('Plain List: Radio')).toBeNull();
+  });
+
+  it('navigation closes the palette and the shortcut help', async () => {
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    key('k', { ctrlKey: true });
+    await screen.findByPlaceholderText('Type a command or search');
+    act(() => useShellStore.setState({ helpOpen: true }));
+    await act(() => router.navigate('/recent'));
+    await screen.findByText('recent page');
+    expect(useShellStore.getState().paletteOpen).toBe(false);
+    expect(useShellStore.getState().helpOpen).toBe(false);
+  });
+
+  it('Back restores the outlet scroll offset; a new page opens at the top', async () => {
+    const { forgetShellScrollForTests, focusSelector } = await import('../scrollMemory');
+    forgetShellScrollForTests();
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const main = document.getElementById('main')!;
+    Object.defineProperty(main, 'scrollHeight', { value: 5000, configurable: true });
+    Object.defineProperty(main, 'clientHeight', { value: 500, configurable: true });
+    main.scrollTop = 800;
+    fireEvent.scroll(main);
+    await act(() => router.navigate('/recent'));
+    await screen.findByText('recent page');
+    expect(main.scrollTop).toBe(0);
+    await act(() => router.navigate(-1));
+    await screen.findByText('favorites page');
+    await waitFor(() => expect(main.scrollTop).toBe(800));
+    const a = document.createElement('a');
+    a.setAttribute('href', '/s/x y/live');
+    expect(focusSelector(a)).toMatch(/^a\[href="/);
+  });
+
+  it('a panel with drawer off has no header toggle below 1440 px', async () => {
+    renderRoutes(routes(), '/panel');
+    await screen.findByTestId('panel-toggle');
+    act(() => useShellStore.setState({ panelDrawer: false }));
+    await waitFor(() => expect(screen.queryByTestId('panel-toggle')).toBeNull());
+  });
+
+  it('the dashboard hides a pending-removal source in continue watching and favourites', async () => {
+    const { usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
+    act(() => usePendingRemovals.setState({ ids: new Set(['s1']) }));
+    try {
+      renderRoutes(routes(), '/dashboard');
+      expect(await screen.findByText('Metro Sport')).toBeTruthy();
+      expect(screen.queryByText('The Long Signal')).toBeNull();
+      expect(screen.queryByText('Harbor News')).toBeNull();
+      expect(screen.queryByText('Quiet Coast')).toBeNull();
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+      expect((await screen.findAllByText('Harbor News')).length).toBeGreaterThan(0);
+    } finally {
+      act(() => usePendingRemovals.setState({ ids: new Set() }));
+    }
+  });
+});
+
+describe('L2 shell header', () => {
+  it("the header's Search everything button lands in the search field, not on the leaving page's own filter (L2-shell-5)", async () => {
+    const shellRoute = routes()[0]!;
+    const tree = [
+      {
+        ...shellRoute,
+        children: [
+          ...shellRoutes,
+          // Distinct trees, so React mounts a new field rather than relabelling the old one.
+          { path: 'mine', element: <section><input data-page-search="" aria-label="My filter" /></section> },
+          { path: 'search', element: <Page><input data-page-search="" aria-label="Search field" /></Page> },
+        ],
+      },
+    ];
+    const { router } = renderRoutes(tree, '/mine');
+    await screen.findByLabelText('My filter');
+    fireEvent.click(screen.getByRole('button', { name: /Search everything/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    const field = await screen.findByLabelText('Search field');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  it('page actions sit in a shrinking wrapper, so the palette and theme buttons stay on screen (L2-visual-4)', async () => {
+    function ActionsPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({ title: 'My videos', subtitle: 'Recordings and downloads', actions: <button type="button">Open queue</button> });
+      }, [shell]);
+      return <Page>videos</Page>;
+    }
+    const shellRoute = routes()[0]!;
+    renderRoutes([{ ...shellRoute, children: [...shellRoutes, { path: 'videos', element: <ActionsPage /> }] }], '/videos');
+    const actions = await screen.findByTestId('header-actions');
+    // Shrinkable (min-w-0, no shrink-0) and clipped sideways only: the shell buttons never are.
+    expect(actions.className).toContain('min-w-0');
+    expect(actions.className).not.toContain('shrink-0');
+    expect(actions.className).toContain('overflow-x-clip');
+    expect(screen.getByTestId('open-palette').parentElement!.className).toContain('shrink-0');
+    // The subtitle gives way before the title (L2-visual-9) and shows its whole text on hover.
+    const subtitle = screen.getByTestId('page-subtitle');
+    expect(subtitle.className).toContain('basis-0');
+    expect(subtitle.getAttribute('title')).toBe('Recordings and downloads');
+  });
+
+  it("the header search passes keys to the page's onKeyDown, and a claimed key skips its own Escape (XB2-23)", async () => {
+    const keys: string[] = [];
+    const onChange = vi.fn();
+    function KeysPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({
+          title: 'Keys',
+          search: {
+            value: 'abc',
+            onChange,
+            onKeyDown: (e) => {
+              keys.push(e.key);
+              if (e.key === 'Escape') e.preventDefault();
+            },
+          },
+        });
+      }, [shell]);
+      return <Page>keys</Page>;
+    }
+    const shellRoute = routes()[0]!;
+    renderRoutes([{ ...shellRoute, children: [...shellRoutes, { path: 'keys', element: <KeysPage /> }] }], '/keys');
+    await screen.findByText('keys');
+    const field = document.querySelector<HTMLInputElement>('input[data-shell-search]')!;
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(keys).toEqual(['ArrowDown', 'Escape']);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('F11 (L2-desktop-8)', () => {
+  afterEach(() => {
+    playerState.source = null;
+    playerState.mode = 'web';
+  });
+
+  it('fills the screen with the app when nothing plays, and with the player while something does', async () => {
+    const request = vi.fn(async () => {});
+    document.documentElement.requestFullscreen = request as never;
+    const toggle = vi.fn();
+    playerState.toggleFullscreen = toggle;
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    // The player chunk loads on the first idle moment; F11 reads its store once it is in.
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    const e = new KeyboardEvent('keydown', { key: 'F11', bubbles: true, cancelable: true });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(toggle).not.toHaveBeenCalled();
+    playerState.source = { url: 'http://x' };
+    key('F11');
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
+    // External playback has no in-app fullscreen: the app takes it.
+    playerState.mode = 'external';
+    key('F11');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('dashboard base titles (L2-visual-3)', () => {
+  it('Continue watching and favourite VOD cards drop the provider tags an old snapshot still carries', async () => {
+    rpcMock.handlers['positions.continueWatching'] = (): PlaybackPosition[] => [
+      { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('|EN| 4K - Night Train [MULTI-SUB] (2019)') },
+    ];
+    rpcMock.handlers['favorites.list'] = (): FavoriteEntry[] => [
+      { ref: { sourceId: 's1', contentType: 'live', itemId: '1' }, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: snapshot('US: Harbor News', 'live') },
+      { ref: { sourceId: 's1', contentType: 'series', itemId: '7' }, addedAt: '2026-10-01T00:00:00Z', position: 1, snapshot: snapshot('EN: Quiet Coast - 2021', 'series') },
+    ];
+    renderRoutes(routes(), '/dashboard');
+    const cont = await screen.findByTestId('dashboard-rail-continue-watching');
+    expect(await within(cont).findByText('Night Train')).toBeTruthy();
+    expect(within(cont).queryByText(/MULTI-SUB|\|EN\|/)).toBeNull();
+    const vod = await screen.findByTestId('dashboard-rail-favorite-vod');
+    expect(within(vod).getByText('Quiet Coast')).toBeTruthy();
+    // The stripped year moves under the title.
+    expect(within(vod).getByText('2021')).toBeTruthy();
+    // A channel's prefix is part of its name and stays.
+    expect(within(await screen.findByTestId('dashboard-rail-live-favorites')).getByText('US: Harbor News')).toBeTruthy();
   });
 });

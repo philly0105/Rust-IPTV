@@ -11,6 +11,7 @@ export {
   type ZapContext,
 } from './store';
 export { useChannelZap } from './useChannelZap';
+export { preloadEngines } from './enginePreload';
 export { PlayerDock } from './components/PlayerDock';
 export { PlayerStage, type PlayerStageProps } from './components/PlayerStage';
 export { RadioPlayer } from './components/RadioPlayer';

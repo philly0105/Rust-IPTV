@@ -3,7 +3,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { ErrorState, Skeleton, cn } from '@/ui';
+import { ErrorState, Skeleton, cn, useScaledPx } from '@/ui';
+
+import { readRailEmpty, writeRailEmpty } from './railEmpty';
 
 /** Arrow scrolls jump instantly under prefers-reduced-motion, like the CSS animations. */
 export function railScrollBehavior(): ScrollBehavior {
@@ -35,16 +37,53 @@ export interface DashboardRailProps<T> {
   items: readonly T[] | undefined;
   getKey: (item: T) => string;
   renderCard: (item: T, props: RailCardProps) => ReactNode;
-  /** Card width in px (the rail scrolls horizontally). */
+  /**
+   * Card width in px at 100 % UI scale and comfortable density (the rail scrolls
+   * horizontally). The rail applies the active scale and density (C1).
+   */
   cardWidth: number;
   /** Placeholder card aspect while loading (width / height). */
   skeletonAspect: number;
   loading?: boolean;
   error?: unknown;
+  /**
+   * The rail's own query succeeded. Only then does an empty rail flag itself to skip its
+   * skeleton next time; a failed, hidden-error or shared-error rail has no items but
+   * proves nothing about emptiness.
+   */
+  loaded?: boolean;
+  /** Next-step hint for `error`, when the rail knows its data is local. */
+  errorHint?: string;
   onRetry?: () => void;
   seeAll?: { to: string; label?: string };
   /** Rendered next to the title (counts, badges). */
   meta?: ReactNode;
+}
+
+/**
+ * The track's padding (focus rings and shadows room), shared by the skeleton row and the error
+ * spacer so all three stand exactly as tall.
+ */
+const TRACK_PAD = 'pt-1 pb-3';
+
+/**
+ * One placeholder card, as tall as the cards it stands in for: the art at the rail's aspect,
+ * then two caption lines of the cards' text-sm line height (1lh), the first after their mt-2.
+ * Thinner bars with gap-2 between them came up 22 px short, so every rail grew as it loaded
+ * (a 0.166 layout shift on the Arabic dashboard, L3-visual-14).
+ */
+function SkeletonCard({ width, aspect }: { width: number; aspect: number }) {
+  return (
+    <div className="flex shrink-0 flex-col" style={{ width }} data-rail-skeleton-card="">
+      <div className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
+      <div className="mt-2 flex h-[1lh] items-center text-sm">
+        <Skeleton className="h-3.5 w-4/5" />
+      </div>
+      <div className="flex h-[1lh] items-center text-sm">
+        <Skeleton className="h-3 w-1/2 opacity-70" />
+      </div>
+    </div>
+  );
 }
 
 /** Moves focus to the card at `index` in the rail before/after `from` (ArrowUp/Down between rails). */
@@ -75,11 +114,14 @@ export function DashboardRail<T>({
   skeletonAspect,
   loading,
   error,
+  loaded = false,
+  errorHint,
   onRetry,
   seeAll,
   meta,
 }: DashboardRailProps<T>) {
   const { t } = useTranslation('shell');
+  const width = useScaledPx(cardWidth, true);
   const sectionRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLUListElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -88,6 +130,8 @@ export function DashboardRail<T>({
   const count = items?.length ?? 0;
   // Whether the track sat at its inline start before the last render.
   const atStartRef = useRef(true);
+  // The track element and item order the last commit showed.
+  const shownRef = useRef<{ el: HTMLUListElement | null; order: string }>({ el: null, order: '' });
   const orderKey = items?.map(getKey).join('\u0000') ?? '';
 
   // Scroll snapping keeps the previously snapped card snapped across layout
@@ -96,8 +140,15 @@ export function DashboardRail<T>({
   // its start stays at its start.
   useLayoutEffect(() => {
     const el = trackRef.current;
-    if (el && atStartRef.current && el.scrollLeft !== 0) el.scrollLeft = 0;
-  }, [orderKey]);
+    const shown = shownRef.current;
+    shownRef.current = { el, order: orderKey };
+    // Only the same track with new order can have moved. A track that just mounted (the
+    // rail's first items, or back from its skeleton or error) sits at 0: reading scrollLeft
+    // right after its DOM went in forced a layout of the whole page inside the commit, once
+    // per rail on a cold Home (L2-sources-home-2).
+    if (!el || el !== shown.el || orderKey === shown.order || !atStartRef.current) return;
+    if (el.scrollLeft !== 0) el.scrollLeft = 0;
+  });
 
   useEffect(() => {
     if (focusIndex >= count && count > 0) setFocusIndex(count - 1);
@@ -112,17 +163,29 @@ export function DashboardRail<T>({
       setCanPrev(edges.canPrev);
       setCanNext(edges.canNext);
     };
-    measure();
+    // No synchronous first measure: reading scroll sizes right after the rail's DOM went in
+    // forced a layout per rail on mount (most of a 100 ms task on a cold start). The
+    // ResizeObserver's first callback comes after layout and sets the arrows for free.
     el.addEventListener('scroll', measure, { passive: true });
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
     ro?.observe(el);
+    const raf = ro ? 0 : requestAnimationFrame(measure);
     return () => {
       el.removeEventListener('scroll', measure);
       ro?.disconnect();
+      cancelAnimationFrame(raf);
     };
   }, [count]);
 
-  if (!loading && !error && count === 0) return null;
+  // A rail that came back empty last time skips its skeleton (it would most likely
+  // just collapse again), so slow empty favorites don't flash and shift the page.
+  const [wasEmpty] = useState(() => readRailEmpty(id));
+  useEffect(() => {
+    if (count > 0) writeRailEmpty(id, false);
+    else if (loaded) writeRailEmpty(id, true);
+  }, [id, loaded, count]);
+
+  if (!error && count === 0 && (!loading || wasEmpty)) return null;
 
   const scrollBy = (dir: 1 | -1) => {
     const el = trackRef.current;
@@ -177,35 +240,40 @@ export function DashboardRail<T>({
       data-testid={`dashboard-rail-${id}`}
       className="group/rail relative flex flex-col gap-3"
     >
-      <div className="flex items-baseline justify-between gap-4 px-8">
+      <div className="flex items-baseline justify-between gap-4 px-4 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
-          <h2 id={headingId} className="truncate text-lg">
+          <h2 id={headingId} title={title} className="truncate text-lg">
             {title}
           </h2>
           {meta}
         </div>
         {seeAll && (
-          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent">
+          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent active:text-accent-pressed motion-safe:transition-colors">
             {seeAll.label ?? t('seeAll')}
           </Link>
         )}
       </div>
 
       {error ? (
-        <div className="mx-8 rounded-lg border border-border bg-surface">
-          <ErrorState error={error} onRetry={onRetry} size="inline" />
+        // One grid cell holds an invisible skeleton card and the error, so the error box is
+        // at least as tall as the skeleton it replaces; the row layout keeps it from being taller.
+        <div className="mx-4 grid rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-rail-error">
+          {/* -my-px: the box's 1px border plus this cell equal the bare skeleton row. */}
+          <div aria-hidden className={cn('invisible col-start-1 row-start-1 -my-px', TRACK_PAD)} data-rail-error-spacer="">
+            <SkeletonCard width={width} aspect={skeletonAspect} />
+          </div>
+          <ErrorState
+            error={error}
+            hint={errorHint}
+            onRetry={onRetry}
+            size="inline"
+            className="col-start-1 row-start-1 flex-row flex-wrap justify-start gap-x-4 gap-y-2 px-5 py-4 text-start sm:flex-nowrap"
+          />
         </div>
       ) : loading && count === 0 ? (
-        <div className="flex gap-4 overflow-hidden px-8" aria-busy="true" aria-label={t('loadingRail', { title })}>
+        <div className={cn('flex gap-4 overflow-hidden px-4 sm:px-8', TRACK_PAD)} aria-busy="true" aria-label={t('loadingRail', { title })}>
           {Array.from({ length: 8 }, (_, i) => (
-            <div key={i} className="flex shrink-0 flex-col gap-2" style={{ width: cardWidth }}>
-              <div
-                className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer"
-                style={{ aspectRatio: skeletonAspect }}
-              />
-              <Skeleton className="h-3.5 w-4/5" />
-              <Skeleton className="h-3 w-1/2 opacity-70" />
-            </div>
+            <SkeletonCard key={i} width={width} aspect={skeletonAspect} />
           ))}
         </div>
       ) : (
@@ -219,10 +287,13 @@ export function DashboardRail<T>({
               if (i >= 0 && i !== focusIndex) setFocusIndex(i);
             }}
             aria-labelledby={headingId}
-            className="flex snap-x snap-mandatory scroll-px-8 gap-4 overflow-x-auto overflow-y-visible px-8 pt-1 pb-3 scrollbar-none motion-safe:scroll-smooth"
+            className={cn(
+              'flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto overflow-y-visible px-4 scrollbar-none sm:scroll-px-8 sm:px-8 motion-safe:scroll-smooth',
+              TRACK_PAD,
+            )}
           >
             {items!.map((item, i) => (
-              <li key={getKey(item)} className="shrink-0 snap-start" style={{ width: cardWidth }}>
+              <li key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
                 {renderCard(item, { tabIndex: i === focusIndex ? 0 : -1, 'data-rail-card': '' })}
               </li>
             ))}
@@ -234,7 +305,7 @@ export function DashboardRail<T>({
               aria-label={t('scrollBack')}
               onClick={() => scrollBy(-1)}
               className={cn(
-                'absolute top-0 bottom-3 start-0 hidden w-12 items-center justify-center bg-gradient-to-r rtl:bg-gradient-to-l from-bg to-transparent text-fg',
+                'absolute top-0 bottom-3 start-0 hidden w-12 items-center justify-center bg-gradient-to-r rtl:bg-gradient-to-l from-bg to-transparent text-fg active:text-accent-pressed motion-safe:active:translate-x-px',
                 'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
               )}
             >
@@ -248,7 +319,7 @@ export function DashboardRail<T>({
               aria-label={t('scrollForward')}
               onClick={() => scrollBy(1)}
               className={cn(
-                'absolute top-0 end-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l rtl:bg-gradient-to-r from-bg to-transparent text-fg',
+                'absolute top-0 end-0 bottom-3 hidden w-12 items-center justify-center bg-gradient-to-l rtl:bg-gradient-to-r from-bg to-transparent text-fg active:text-accent-pressed motion-safe:active:-translate-x-px',
                 'opacity-0 group-hover/rail:opacity-100 motion-safe:transition-opacity [@media(hover:hover)]:flex',
               )}
             >

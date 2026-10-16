@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
@@ -167,30 +167,48 @@ impl MpvClient {
             }
             pending.insert(id, tx);
         }
-
-        let line = encode_command(id, &args);
-        let write = async {
-            let mut w = self.writer.lock().await;
-            w.write_all(&line).await?;
-            w.flush().await
+        // Removes the pending entry however this call ends (a caller's
+        // timeout drops the future), and closes the connection when the call
+        // stops part-way through writing its line: the rest of the stream
+        // would be misframed.
+        let mut guard = CallGuard {
+            client: self,
+            id,
+            writing: false,
         };
-        if let Err(e) = write.await {
-            self.shared.pending.lock().remove(&id);
-            tracing::debug!(error = %e, cmd = %name, "mpv ipc write failed");
-            return Err(not_running());
-        }
 
-        match tokio::time::timeout(self.reply_timeout, rx).await {
-            Ok(Ok(Ok(data))) => Ok(data),
-            Ok(Ok(Err(err))) if err == "connection closed" => Err(not_running()),
-            Ok(Ok(Err(err))) => Err(CoreError::invalid(format!("mpv rejected {name}: {err}"))),
-            Ok(Err(_)) => Err(not_running()),
-            Err(_) => {
-                self.shared.pending.lock().remove(&id);
-                Err(CoreError::Timeout(format!(
-                    "mpv did not answer {name} in time"
-                )))
+        // One deadline covers waiting for the writer, the write and the
+        // reply: an mpv that stops reading its pipe (hung core) fills the
+        // pipe buffer, and an unbounded write would hold the session's op
+        // lock forever, so detach and crash teardown could never run.
+        let line = encode_command(id, &args);
+        let call = async {
+            let mut w = self.writer.lock().await;
+            guard.writing = true;
+            let written = async {
+                w.write_all(&line).await?;
+                w.flush().await
             }
+            .await;
+            guard.writing = false;
+            drop(w);
+            if let Err(e) = written {
+                tracing::debug!(error = %e, cmd = %name, "mpv ipc write failed");
+                return Err(not_running());
+            }
+            match rx.await {
+                Ok(Ok(data)) => Ok(data),
+                Ok(Err(err)) if err == "connection closed" => Err(not_running()),
+                Ok(Err(err)) => Err(CoreError::invalid(format!("mpv rejected {name}: {err}"))),
+                Err(_) => Err(not_running()),
+            }
+        };
+        let result = tokio::time::timeout(self.reply_timeout, call).await;
+        match result {
+            Ok(r) => r,
+            Err(_) => Err(CoreError::Timeout(format!(
+                "mpv did not answer {name} in time"
+            ))),
         }
     }
 
@@ -236,6 +254,13 @@ impl MpvClient {
     /// Raw event stream (every `{"event": ...}` object).
     pub fn subscribe_events(&self) -> broadcast::Receiver<Value> {
         self.shared.events.subscribe()
+    }
+
+    /// Requests waiting for a reply (tests check that dropped calls do not
+    /// leak entries).
+    #[doc(hidden)]
+    pub fn pending_len(&self) -> usize {
+        self.shared.pending.lock().len()
     }
 
     /// True once the connection is gone.
@@ -291,6 +316,23 @@ impl Drop for MpvClient {
     }
 }
 
+/// See [`MpvClient::command`].
+struct CallGuard<'a> {
+    client: &'a MpvClient,
+    id: u64,
+    writing: bool,
+}
+
+impl Drop for CallGuard<'_> {
+    fn drop(&mut self) {
+        self.client.shared.pending.lock().remove(&self.id);
+        if self.writing {
+            tracing::warn!("mpv ipc write did not finish in time; closing the connection");
+            self.client.shutdown();
+        }
+    }
+}
+
 fn not_running() -> CoreError {
     CoreError::Conflict("embedded mpv is not running; start playback again".into())
 }
@@ -300,16 +342,17 @@ async fn read_loop<R: AsyncRead + Send + Unpin>(read_half: R, shared: Arc<Shared
     let mut buf = Vec::with_capacity(4096);
     loop {
         buf.clear();
-        match reader.read_until(b'\n', &mut buf).await {
-            Ok(0) => break,
-            Ok(_) => {}
+        match read_line_capped(&mut reader, &mut buf, MAX_LINE_BYTES).await {
+            Ok(None) => break,
+            Ok(Some(true)) => {}
+            Ok(Some(false)) => {
+                tracing::debug!("mpv ipc line over {MAX_LINE_BYTES} bytes skipped");
+                continue;
+            }
             Err(e) => {
                 tracing::debug!(error = %e, "mpv ipc read failed");
                 break;
             }
-        }
-        if buf.len() > MAX_LINE_BYTES {
-            continue;
         }
         let line = String::from_utf8_lossy(&buf);
         match parse_line(&line) {
@@ -337,4 +380,70 @@ async fn read_loop<R: AsyncRead + Send + Unpin>(read_half: R, shared: Arc<Shared
         }
     }
     shared.close();
+}
+
+/// Reads one `\n`-terminated line into `buf`, keeping at most `max` bytes in
+/// memory: an over-long line is consumed and dropped (`Some(false)`). `None`
+/// at end of stream; a final unterminated line is returned as a line.
+async fn read_line_capped<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    max: usize,
+) -> std::io::Result<Option<bool>> {
+    let mut read_any = false;
+    let mut fits = true;
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(read_any.then_some(fits));
+        }
+        read_any = true;
+        let (done, used) = match available.iter().position(|&b| b == b'\n') {
+            Some(i) => (true, i + 1),
+            None => (false, available.len()),
+        };
+        if fits {
+            if buf.len() + used > max {
+                fits = false;
+                buf.clear();
+                buf.shrink_to(4096);
+            } else {
+                buf.extend_from_slice(&available[..used]);
+            }
+        }
+        reader.consume(used);
+        if done {
+            return Ok(Some(fits));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn over_long_lines_are_skipped_without_buffering_them() {
+        let data = format!("{}\n{{\"a\":1}}\nlast", "x".repeat(100));
+        let mut r = BufReader::with_capacity(8, data.as_bytes());
+        let mut buf = Vec::new();
+        assert_eq!(
+            read_line_capped(&mut r, &mut buf, 16).await.unwrap(),
+            Some(false)
+        );
+        assert!(buf.capacity() <= 4096 && buf.is_empty());
+        assert_eq!(
+            read_line_capped(&mut r, &mut buf, 16).await.unwrap(),
+            Some(true)
+        );
+        assert_eq!(buf, b"{\"a\":1}\n");
+        buf.clear();
+        assert_eq!(
+            read_line_capped(&mut r, &mut buf, 16).await.unwrap(),
+            Some(true)
+        );
+        assert_eq!(buf, b"last");
+        buf.clear();
+        assert_eq!(read_line_capped(&mut r, &mut buf, 16).await.unwrap(), None);
+    }
 }

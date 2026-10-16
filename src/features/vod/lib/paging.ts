@@ -12,6 +12,7 @@
  */
 
 import type { PageQuery, SortDir, SortKey, SourceKind } from '@/api/types';
+import { readYearRange } from './years';
 
 export type VodKind = 'movie' | 'series';
 export type VodSortKey = Extract<SortKey, 'name' | 'added' | 'rating' | 'year'>;
@@ -33,6 +34,11 @@ export interface VodPageArgs {
   query: PageQuery;
   /** `catalog.*` only: SQLite keeps titles rated at least this, and `total` counts them. */
   minRating?: number;
+  /** `catalog.*` only: inclusive year bounds; titles without a year drop out. */
+  yearFrom?: number;
+  yearTo?: number;
+  /** `catalog.*` only: drops titles marked watched as a whole. */
+  hideWatched?: boolean;
 }
 
 export interface GridQueryInput {
@@ -46,6 +52,11 @@ export interface GridQueryInput {
   search?: string;
   /** Minimum rating (0 = off). Applied in SQLite for m3u/xtream; Stalker portals cannot filter, see {@link ratingFilterInCore}. */
   minRating?: number;
+  /** Inclusive year bounds from the URL (`yf`/`yt`). Filtered in SQLite, or on loaded pages for Stalker. */
+  yearFrom?: number;
+  yearTo?: number;
+  /** The "Hide watched" setting. Filtered in SQLite, or on loaded pages for Stalker. */
+  hideWatched?: boolean;
 }
 
 export function pageSizeFor(sourceKind: SourceKind): number {
@@ -79,6 +90,11 @@ export function buildPageRequest(
   const args: VodPageArgs = { sourceId: input.sourceId, query };
   if (input.categoryId && input.categoryId !== ALL_CATEGORIES) args.categoryId = input.categoryId;
   if (input.minRating && input.minRating > 0 && ratingFilterInCore(input.sourceKind)) args.minRating = input.minRating;
+  if (ratingFilterInCore(input.sourceKind)) {
+    if (input.yearFrom !== undefined) args.yearFrom = input.yearFrom;
+    if (input.yearTo !== undefined) args.yearTo = input.yearTo;
+    if (input.hideWatched) args.hideWatched = true;
+  }
   return { cmd: pageCommand(input.sourceKind, input.kind), args };
 }
 
@@ -87,15 +103,29 @@ export function pageOf(index: number, pageSize: number): number {
   return Math.floor(Math.max(0, index) / pageSize);
 }
 
+export interface GridParams {
+  sort: VodSortKey;
+  dir: SortDir;
+  search: string;
+  /** `yf`: first year shown (1900..2100), when set. */
+  yearFrom?: number;
+  /** `yt`: last year shown (1900..2100), when set. */
+  yearTo?: number;
+}
+
 /** Parses grid state from URL search params, falling back to defaults on junk. */
-export function readGridParams(params: URLSearchParams): { sort: VodSortKey; dir: SortDir; search: string } {
+export function readGridParams(params: URLSearchParams): GridParams {
   const rawSort = params.get('sort');
   const sort: VodSortKey = (VOD_SORT_KEYS as readonly string[]).includes(rawSort ?? '')
     ? (rawSort as VodSortKey)
     : 'added';
   const rawDir = params.get('dir');
   const dir: SortDir = rawDir === 'asc' || rawDir === 'desc' ? rawDir : defaultDir(sort);
-  return { sort, dir, search: params.get('q') ?? '' };
+  const out: GridParams = { sort, dir, search: params.get('q') ?? '' };
+  const years = readYearRange(params);
+  if (years.from !== undefined) out.yearFrom = years.from;
+  if (years.to !== undefined) out.yearTo = years.to;
+  return out;
 }
 
 /** Search param that switches the minimum-rating filter off for one grid. */

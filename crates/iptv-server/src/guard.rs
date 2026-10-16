@@ -5,7 +5,9 @@
 //!
 //! - State-changing requests and WebSocket upgrades carrying an `Origin` must
 //!   come from the same host (blocks CSRF via `text/plain` form posts and
-//!   cross-site WebSocket hijacking). `Sec-Fetch-Site: cross-site` is refused.
+//!   cross-site WebSocket hijacking). `Sec-Fetch-Site: cross-site` is refused
+//!   (except on the desktop loopback proxy, see
+//!   [`crate::ServerOptions::allow_cross_site`]).
 //! - The `Host` header must be an allowed name ([`AllowedHosts`]) whatever
 //!   the bind address, which defeats DNS rebinding (`evil.example` resolving
 //!   to 127.0.0.1 or to the server's LAN address). IP literals are always
@@ -109,16 +111,23 @@ pub async fn api_guard(State(s): State<Server>, req: Request, next: Next) -> Res
         );
     }
 
-    let state_changing = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    let upgrade = headers.contains_key(UPGRADE);
-    if state_changing || upgrade {
-        if headers
+    // Every method: GET routes (`/api/proxy`, `/api/files/{id}`) would
+    // otherwise let any web page embed them (`<video src=...>`) to probe the
+    // library or use the proxy as a relay. Browsers that predate
+    // Sec-Fetch-Site still get the Origin check below on state changes.
+    // The desktop loopback proxy opts out (`allow_cross_site`): its own
+    // webview is cross-site to 127.0.0.1, and its path token does this job.
+    if !s.opts.allow_cross_site
+        && headers
             .get("sec-fetch-site")
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("cross-site"))
-        {
-            return forbidden("cross-site requests are not allowed");
-        }
+    {
+        return forbidden("cross-site requests are not allowed");
+    }
+    let state_changing = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let upgrade = headers.contains_key(UPGRADE);
+    if state_changing || upgrade {
         if let Some(origin) = headers.get(ORIGIN).and_then(|v| v.to_str().ok()) {
             let forwarded = headers
                 .get("x-forwarded-host")

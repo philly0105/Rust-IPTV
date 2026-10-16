@@ -5,7 +5,7 @@ use super::manager::{DownloadManager, StopReason, TaskCtl};
 use super::naming::{self, Reservation};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
-use crate::http::{apply_source_headers, backoff_delay, status_error};
+use crate::http::{apply_source_headers, backoff_delay};
 use crate::model::SourceKind;
 use crate::state::AppState;
 use futures::StreamExt;
@@ -34,7 +34,7 @@ const WRITE_BUFFER: usize = 256 * 1024;
 const THROTTLE_SLICE: Duration = Duration::from_millis(200);
 
 /// How a run ended.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Outcome {
     Completed {
         file_name: String,
@@ -214,20 +214,53 @@ fn failed(message: String, bytes: i64, keep_part: bool, part: Option<PathBuf>) -
     }
 }
 
-/// Message stored in `error_message`: names the problem and the next action, never the URL.
+/// A non-success answer to the file request, as an error whose kind picks
+/// the advice [`user_message`] adds.
+fn http_status_error(status: reqwest::StatusCode) -> CoreError {
+    let code = status.as_u16();
+    match code {
+        401 | 403 => CoreError::Auth(format!("The provider refused the request (HTTP {code})")),
+        404 | 410 => CoreError::NotFound(format!(
+            "The provider no longer offers this file (HTTP {code})"
+        )),
+        408 | 504 => CoreError::Timeout(format!(
+            "The provider did not answer in time (HTTP {code}). Check the connection, then retry."
+        )),
+        429 | 500..=599 => CoreError::Server(format!(
+            "The provider could not send the file (HTTP {code})"
+        )),
+        _ => CoreError::Invalid(format!("The provider answered HTTP {code}")),
+    }
+}
+
+/// Message stored in `error_message`: names the problem and the next action,
+/// once, never the URL.
 fn user_message(err: &CoreError) -> String {
+    let plain = |m: &str| m.trim().trim_end_matches('.').to_string();
     match err {
-        CoreError::Auth(m) => format!(
-            "{m}. The provider refused the request; check the source's credentials, then retry."
-        ),
-        CoreError::NotFound(m) => format!("{m}. The file is no longer offered by the provider."),
-        CoreError::Timeout(m) | CoreError::Network(m) => {
-            format!("{m}. Check the connection, then retry.")
+        CoreError::Auth(m) => format!("{}. Check the source's credentials, then retry.", plain(m)),
+        CoreError::NotFound(m) => format!("{}.", plain(m)),
+        // Timeout and network messages already end with what to do.
+        CoreError::Timeout(m) | CoreError::Network(m) => m.trim().to_string(),
+        CoreError::Server(m) => format!("{}. Retry later.", plain(m)),
+        CoreError::Io(e) if e.kind() == std::io::ErrorKind::StorageFull => {
+            "The disk is full. Free some space or choose another downloads folder, then retry."
+                .to_string()
         }
         CoreError::Io(e) => format!(
-            "Disk error: {e}. Free some space or choose another downloads folder, then retry."
+            "Disk error: {}. Check the downloads folder, then retry.",
+            plain(&e.to_string())
         ),
-        other => format!("{other}. Retry, or start the download again."),
+        CoreError::Invalid(m)
+        | CoreError::Conflict(m)
+        | CoreError::Unsupported(m)
+        | CoreError::EngineMissing(m) => {
+            format!("{}. Retry, or start the download again.", plain(m))
+        }
+        other => format!(
+            "{}. Retry, or start the download again.",
+            plain(&other.to_string())
+        ),
     }
 }
 
@@ -251,6 +284,24 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
     let reservation = tokio::task::spawn_blocking(move || -> CoreResult<Reservation> {
         if let Some(final_path) = retained {
             let part = naming::part_path(&final_path);
+            let moved_folder = final_path.parent() != Some(default_dir.as_path());
+            if moved_folder {
+                if let Ok(Some(_)) = naming::regular_file_len(&part) {
+                    // The user chose another downloads folder (the advice for
+                    // a full disk): continue there. The partial moves along
+                    // when it can be renamed (same volume); otherwise the
+                    // transfer restarts there and the old partial is deleted
+                    // so it stops taking space on the full disk.
+                    std::fs::create_dir_all(&default_dir)?;
+                    let fresh = naming::reserve(&default_dir, &requested)?;
+                    if std::fs::rename(&part, &fresh.part_path).is_err() {
+                        if let Err(e) = naming::remove_regular_file(&part) {
+                            tracing::warn!(id, error = %e, "could not delete the old partial download");
+                        }
+                    }
+                    return Ok(fresh);
+                }
+            }
             if let Ok(Some(_)) = naming::regular_file_len(&part) {
                 let file_name = final_path
                     .file_name()
@@ -368,7 +419,15 @@ async fn attempt(
         _ = ctl.token.cancelled() => return AttemptEnd::Stopped(resume_from),
         r = req.send() => match r {
             Ok(r) => r,
-            Err(e) => return err(CoreError::from(e), resume_from),
+            // transport_error: a redirect the server-mode guard blocked is
+            // `invalid` (not retried), not a network failure.
+            Err(e) => {
+                let host = url::Url::parse(&row.download.url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(str::to_owned))
+                    .unwrap_or_else(|| "the server".into());
+                return err(crate::http::transport_error(&host, e), resume_from);
+            }
         },
     };
 
@@ -437,7 +496,7 @@ async fn attempt(
             .filter(|n| *n > 0);
         rep.validator = validator_of(&resp);
     } else {
-        return err(status_error(status, "download"), resume_from);
+        return err(http_status_error(status), resume_from);
     }
 
     let (total, validator) = (rep.total, rep.validator.clone());
@@ -683,6 +742,38 @@ impl Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failure_messages_name_the_problem_and_one_next_step() {
+        use reqwest::StatusCode as S;
+        let msg = |s: S| user_message(&http_status_error(s));
+        assert_eq!(
+            msg(S::NOT_FOUND),
+            "The provider no longer offers this file (HTTP 404)."
+        );
+        for s in [
+            S::NOT_FOUND,
+            S::FORBIDDEN,
+            S::GATEWAY_TIMEOUT,
+            S::SERVICE_UNAVAILABLE,
+            S::IM_A_TEAPOT,
+        ] {
+            let m = msg(s);
+            assert!(!m.starts_with("download"), "{m}");
+            assert!(!m.contains(".."), "{m}");
+            assert!(m.ends_with('.'), "{m}");
+            assert!(
+                m.matches("retry").count() + m.matches("Retry").count() <= 1,
+                "{m}"
+            );
+        }
+        let full = user_message(&CoreError::Io(std::io::ErrorKind::StorageFull.into()));
+        assert!(full.starts_with("The disk is full."), "{full}");
+        let net = user_message(&CoreError::Network(
+            "Could not reach x. Check the connection, then retry.".into(),
+        ));
+        assert_eq!(net.matches("retry").count(), 1, "{net}");
+    }
 
     #[test]
     fn parses_content_range() {

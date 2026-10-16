@@ -2,13 +2,13 @@
 
 use crate::catalog;
 use crate::db::{now_rfc3339, to_rfc3339};
-use crate::error::{CoreError, CoreResult};
+use crate::error::{CoreError, CoreResult, RpcErrorCode};
 use crate::model::{
     EpgLinks, M3uSourceConfig, Source, SourceKind, StalkerSourceConfig, XtreamSourceConfig,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
-const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio') FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
+const SELECT_SOURCE: &str = "SELECT s.id, s.kind, s.name, s.position, s.auto_refresh, s.created_at, s.updated_at, s.last_refresh_at, s.last_error, s.config_json, s.epg_json, COALESCE(sc.channel_count, 0), COALESCE(sc.movie_count, 0), COALESCE(sc.series_count, 0), (SELECT count(*) FROM items i WHERE i.source_id = s.id AND i.content_type = 'radio' AND NOT EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = i.source_id AND e.content_type = 'radio' AND e.item_id = i.item_id AND e.hidden = 1)), s.last_error_code, s.last_error_at FROM sources s LEFT JOIN source_counts sc ON sc.source_id = s.id";
 
 /// Kind-specific configuration of a source.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +53,18 @@ fn read_source(r: &Row<'_>) -> rusqlite::Result<(Source, String)> {
             updated_at: r.get::<_, Option<String>>(6)?.map(|s| to_rfc3339(&s)),
             last_refresh_at: r.get::<_, Option<String>>(7)?.map(|s| to_rfc3339(&s)),
             last_error: r.get(8)?,
+            // A code is only meaningful next to its message.
+            last_error_code: match r.get::<_, Option<String>>(8)? {
+                Some(_) => r
+                    .get::<_, Option<String>>(15)?
+                    .as_deref()
+                    .and_then(RpcErrorCode::parse),
+                None => None,
+            },
+            last_error_at: match r.get::<_, Option<String>>(8)? {
+                Some(_) => r.get::<_, Option<String>>(16)?.map(|s| to_rfc3339(&s)),
+                None => None,
+            },
             channel_count: r.get(11)?,
             radio_count: r.get(14)?,
             movie_count: r.get(12)?,
@@ -112,6 +124,83 @@ pub fn get(conn: &Connection, id: &str) -> CoreResult<Source> {
     find(conn, id)?.ok_or_else(|| CoreError::NotFound(format!("source {id} not found")))
 }
 
+/// Address a source is known by, for the duplicate check of `sources.add` /
+/// `sources.update`: the backup merge fingerprints (playlist URL, Xtream
+/// server + username, Stalker portal + MAC) and the resolved path of a
+/// playlist file. Pasted text has none: it has no address, and pasting the
+/// same lines twice can be deliberate.
+pub fn identity(config: &SourceConfig) -> Option<String> {
+    use crate::model::M3uOrigin;
+    match config {
+        SourceConfig::M3u(c) => match c.origin {
+            M3uOrigin::Url => c
+                .url
+                .as_deref()
+                .filter(|u| !u.trim().is_empty())
+                .map(crate::backup::fp_m3u_url),
+            M3uOrigin::File => c
+                .file_path
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .map(|p| format!("m3u|file|{}", file_identity(p))),
+            M3uOrigin::Text => None,
+        },
+        SourceConfig::Xtream(c) => Some(crate::backup::fp_xtream(&c.server_url, &c.username)),
+        SourceConfig::Stalker(c) => Some(crate::backup::fp_stalker(&c.portal_url, &c.mac_address)),
+    }
+}
+
+/// A playlist path as one key per file: resolved when it exists, and on
+/// Windows without case or separator differences.
+fn file_identity(path: &str) -> String {
+    let p = std::path::Path::new(path.trim());
+    let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let s = p.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('/', "\\").to_lowercase()
+    } else {
+        s.into_owned()
+    }
+}
+
+/// The first source other than `except` with the same [`identity`] as
+/// `config`, as `(id, name)`. `None` when `config` has no identity.
+pub fn find_same(
+    conn: &Connection,
+    config: &SourceConfig,
+    except: Option<&str>,
+) -> CoreResult<Option<(String, String)>> {
+    let Some(key) = identity(config) else {
+        return Ok(None);
+    };
+    let kind = config.kind();
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, name, config_json FROM sources WHERE kind = ?1 ORDER BY position, created_at, id",
+    )?;
+    let rows = stmt.query_map([kind.as_str()], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, name, json) = row?;
+        if except == Some(id.as_str()) {
+            continue;
+        }
+        let stored = match kind {
+            SourceKind::M3u => serde_json::from_str(&json).ok().map(SourceConfig::M3u),
+            SourceKind::Xtream => serde_json::from_str(&json).ok().map(SourceConfig::Xtream),
+            SourceKind::Stalker => serde_json::from_str(&json).ok().map(SourceConfig::Stalker),
+        };
+        if stored.as_ref().and_then(identity).as_deref() == Some(key.as_str()) {
+            return Ok(Some((id, name)));
+        }
+    }
+    Ok(None)
+}
+
 /// Inserts a new source at the end of the list. `raw_text` is pasted m3u
 /// text with the data dir: it is stored in `m3u_raw` in the same transaction,
 /// inline up to `m3u::RAW_INLINE_MAX` and otherwise in the playlist cache
@@ -128,8 +217,7 @@ pub fn insert(
     // not held during a large write; it is removed again if the insert fails.
     let raw = match raw_text {
         Some((data_dir, text)) => {
-            use sha2::{Digest, Sha256};
-            let sha = hex::encode(Sha256::digest(text.as_bytes()));
+            let sha = crate::m3u::importer::playlist_sha(text.as_bytes());
             Some((
                 crate::m3u::place_raw_text(data_dir, id, text)?,
                 sha,
@@ -177,23 +265,43 @@ fn insert_rows(
     Ok(())
 }
 
-/// Records the outcome of an import.
+/// Records the outcome of an import: `None` clears `last_error` /
+/// `last_error_code`, stamps `last_refresh_at` and refreshes the counts;
+/// `Some(message)` stores the message without a code (callers that know the
+/// code use [`record_import_error`]) and keeps the catalog.
 pub fn record_import(conn: &Connection, id: &str, error: Option<&str>) -> CoreResult<()> {
     match error {
         None => {
             conn.execute(
-                "UPDATE sources SET last_refresh_at = ?2, last_error = NULL WHERE id = ?1",
+                "UPDATE sources SET last_refresh_at = ?2, last_error = NULL, last_error_code = NULL, last_error_at = NULL WHERE id = ?1",
                 params![id, now_rfc3339()],
             )?;
             catalog::update_counts(conn, id)?;
         }
         Some(msg) => {
+            // Redacted here too: importers outside `sources` record errors
+            // directly, and lastError is shown and exported.
             conn.execute(
-                "UPDATE sources SET last_error = ?2 WHERE id = ?1",
-                params![id, msg],
+                "UPDATE sources SET last_error = ?2, last_error_code = NULL, last_error_at = ?3 WHERE id = ?1",
+                params![id, crate::logging::redact_text(msg), now_rfc3339()],
             )?;
         }
     }
+    Ok(())
+}
+
+/// Records a failed import with its classified code (C10); the catalog and
+/// `last_refresh_at` are kept.
+pub fn record_import_error(
+    conn: &Connection,
+    id: &str,
+    msg: &str,
+    code: RpcErrorCode,
+) -> CoreResult<()> {
+    conn.execute(
+        "UPDATE sources SET last_error = ?2, last_error_code = ?3, last_error_at = ?4 WHERE id = ?1",
+        params![id, crate::logging::redact_text(msg), code.as_str(), now_rfc3339()],
+    )?;
     Ok(())
 }
 
@@ -264,6 +372,13 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         "DELETE FROM app_state WHERE key = 'backup_pending:' || ?1",
         [id],
     )?;
+    // account: cached subscription status.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'account_status:' || ?1",
+        [id],
+    )?;
+    // xtream: per-type fingerprints of the last import (unchanged check).
+    tx.execute("DELETE FROM app_state WHERE key = 'xtream_fp:' || ?1", [id])?;
     tx.commit()?;
     Ok(())
 }

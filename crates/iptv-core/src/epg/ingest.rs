@@ -39,6 +39,8 @@ pub struct EpgRuntime {
     last_attempt: Mutex<HashMap<String, Instant>>,
     generation: AtomicU64,
     pub(crate) names: Mutex<Option<Arc<super::resolve::ChannelDirectory>>>,
+    /// Guide search: channel resolutions reused until the generation moves.
+    pub(crate) search_memo: Mutex<super::search::SearchMemo>,
 }
 
 impl Default for EpgRuntime {
@@ -49,6 +51,7 @@ impl Default for EpgRuntime {
             last_attempt: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(1),
             names: Mutex::new(None),
+            search_memo: Mutex::new(Default::default()),
         }
     }
 }
@@ -124,6 +127,11 @@ pub fn ingest_reader(
     etag: Option<&str>,
     on_progress: &mut dyn FnMut(&str, u64),
 ) -> CoreResult<IngestStats> {
+    // A large feed (millions of programmes) holds the write lock for long
+    // stretches, the final swap above all; user writes made meanwhile wait
+    // for it as they do for a catalog import (B9-D64) instead of failing
+    // with "database is locked" after the normal busy timeout.
+    let _long = crate::db::long_write();
     // Bulk-load tuning for this pooled connection only: a 64 MB page cache
     // keeps the (channel_id, start) index hot, and deferring WAL checkpoints
     // avoids copying pages back mid-load. Both are restored afterwards.
@@ -131,6 +139,9 @@ pub fn ingest_reader(
     let autockpt: i64 = conn.query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))?;
     conn.execute_batch("PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0;")?;
     let result = ingest_inner(conn, url, reader, window, etag, on_progress);
+    // Guide search (C5): the swap (or a discarded staging) marked the title
+    // index stale; rebuild it while the bulk-load cache is still large.
+    super::search::refresh_index(conn);
     let restore = conn.execute_batch(&format!(
         "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt};"
     ));
@@ -138,10 +149,9 @@ pub fn ingest_reader(
         tracing::warn!(error = %e, "could not restore connection pragmas after EPG ingest");
     }
     // Fold the bulk write back into the database file now rather than on the
-    // next unrelated commit.
-    if let Err(e) = conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(())) {
-        tracing::warn!(error = %e, "EPG post-ingest checkpoint failed");
-    }
+    // next unrelated commit, and truncate the WAL: a 100-250 MB guide grows it
+    // the most (L2-perf-core-12). Never waits on readers.
+    crate::db::checkpoint_truncate(conn);
     result
 }
 
@@ -174,13 +184,21 @@ fn ingest_inner(
         Ok((stats, channels, programs)) => {
             on_progress("saving", programs);
             store::commit_staging(conn, url, etag, channels, programs)?;
+            // Most programmes unreadable (often an unknown time zone): the
+            // status stays ok (the readable part was stored) but the source
+            // row and the done event carry the C15 code saying why the
+            // guide is empty or thin.
+            let unreadable = unreadable_warning(&stats);
+            if let Some(w) = &unreadable {
+                store::set_status(conn, url, EpgFetchStatus::Ok, Some(w))?;
+            }
             Ok(IngestStats {
                 channels,
                 programs,
                 skipped_window: stats.skipped_window,
                 skipped_invalid: stats.skipped_invalid,
                 not_modified: false,
-                warning: stats.truncated,
+                warning: unreadable.or(stats.truncated),
             })
         }
         Err(err) => {
@@ -190,6 +208,20 @@ fn ingest_inner(
             Err(err)
         }
     }
+}
+
+/// The C15 code `epg_unreadable:<skipped>:<seen>` when more than half of a
+/// feed's programmes were skipped as invalid (unreadable start or stop, no
+/// channel); `None` otherwise. Stored verbatim as the source's status error;
+/// the UI translates it (`epgUnreadable`).
+fn unreadable_warning(stats: &xmltv::ParseStats) -> Option<String> {
+    let skipped = stats.skipped_invalid;
+    let seen = stats
+        .programmes
+        .saturating_add(stats.skipped_window)
+        .saturating_add(skipped);
+    (skipped > 0 && skipped.saturating_mul(2) > seen)
+        .then(|| format!("epg_unreadable:{skipped}:{seen}"))
 }
 
 /// Looks up `url` among the configured urls; unknown urls are treated as
@@ -362,6 +394,10 @@ fn user_message(err: &CoreError) -> String {
         }
         // Server-mode guard refusals already say what to do.
         CoreError::Invalid(m) if m.contains(crate::http::ALLOW_PRIVATE_HINT) => m.clone(),
+        // A cut-off download: the URL is fine, the next refresh may succeed.
+        CoreError::Invalid(m) if m == xmltv::CUT_OFF_MESSAGE => {
+            format!("{m} Refresh to try again.")
+        }
         CoreError::Unsupported(m) => m.clone(),
         CoreError::Invalid(m) => format!(
             "{}. Check that the URL points to an XMLTV file.",
@@ -490,6 +526,9 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
     let (rows, pruned) = state
         .db_call(move |c| {
             let pruned = store::prune(c, &keep)?;
+            if pruned > 0 {
+                super::search::refresh_index(c);
+            }
             let mut rows = Vec::with_capacity(keep.len());
             for k in &keep {
                 rows.push((k.url.clone(), store::source_row(c, &k.url)?));
@@ -547,6 +586,161 @@ mod tests {
             last_fetch_at: last.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    /// Review R2-5: a feed whose programme times could not be read stored an
+    /// empty guide with status ok and no message.
+    #[test]
+    fn unreadable_feed_is_reported_on_the_source() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        let prog = |start: &str| {
+            format!(
+                r#"<programme channel="c" start="{start}" stop="20261012130000 +0000"><title>T</title></programme>"#
+            )
+        };
+        // Two readable, three in an unknown zone.
+        let xml = format!(
+            r#"<tv><channel id="c"><display-name>C</display-name></channel>{}{}{}{}{}</tv>"#,
+            prog("20261012120000 +0000"),
+            prog("20261012121000 +0000"),
+            prog("20261012120000 XYZ"),
+            prog("20261012121000 XYZ"),
+            prog("20261012122000 XYZ"),
+        );
+        let stats = ingest_reader(
+            &mut conn,
+            "u",
+            std::io::Cursor::new(xml.into_bytes()),
+            Window::unbounded(),
+            None,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(stats.programs, 2);
+        assert_eq!(stats.skipped_invalid, 3);
+        let w = stats.warning.expect("warning");
+        // C15: exactly the code, no other text.
+        assert_eq!(w, "epg_unreadable:3:5");
+        let (status, error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "ok");
+        assert_eq!(error.as_deref(), Some(w.as_str()));
+        // A mostly readable feed carries no warning.
+        let s = xmltv::ParseStats {
+            programmes: 10,
+            skipped_invalid: 4,
+            ..Default::default()
+        };
+        assert!(unreadable_warning(&s).is_none());
+    }
+
+    /// L1-core-6: a download cut before `</tv>` (here after the first
+    /// channel's programmes, then a cut gzip stream) failed nothing: it replaced
+    /// the full guide with its first part and stored the new ETag, so a later
+    /// 304 kept the partial guide.
+    #[test]
+    fn cut_off_feed_keeps_the_previous_guide_and_etag() {
+        use std::io::Write;
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        let mut full = String::from("<?xml version=\"1.0\"?>\n<tv>\n");
+        for ch in ["a", "b", "c"] {
+            for h in 12..15 {
+                full.push_str(&format!(
+                    "<programme channel=\"{ch}\" start=\"20261012{h}0000 +0000\" stop=\"20261012{}0000 +0000\"><title>{ch}{h}</title></programme>\n",
+                    h + 1
+                ));
+            }
+        }
+        full.push_str("</tv>");
+        let ingest = |conn: &mut rusqlite::Connection, body: &[u8], etag: &str| {
+            let reader = std::io::BufReader::new(body);
+            ingest_reader(
+                conn,
+                "u",
+                reader,
+                Window::unbounded(),
+                Some(etag),
+                &mut |_, _| {},
+            )
+        };
+        let stored = |conn: &rusqlite::Connection| -> (i64, Option<String>, String) {
+            conn.query_row(
+                "SELECT (SELECT count(*) FROM epg_programs WHERE epg_url = 'u'), etag, status FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            ingest(&mut conn, full.as_bytes(), "v1").unwrap().programs,
+            9
+        );
+        assert_eq!(stored(&conn), (9, Some("v1".into()), "ok".into()));
+
+        // Cut cleanly between two programmes, inside a title, inside a tag.
+        let cut_at = full.find("<programme channel=\"b\"").unwrap();
+        for cut in [cut_at, cut_at + 70, cut_at + 20] {
+            let err = ingest(&mut conn, &full.as_bytes()[..cut], "v2").unwrap_err();
+            assert!(
+                matches!(&err, CoreError::Invalid(m) if m == xmltv::CUT_OFF_MESSAGE),
+                "cut at {cut}: {err}"
+            );
+            assert_eq!(
+                stored(&conn),
+                (9, Some("v1".into()), "ok".into()),
+                "cut at {cut}"
+            );
+            assert!(
+                user_message(&err).contains("cut off"),
+                "{}",
+                user_message(&err)
+            );
+        }
+
+        // A gzip stream cut in the middle, through the real reader.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.xml.gz");
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        enc.write_all(full.as_bytes()).unwrap();
+        let gz = enc.finish().unwrap();
+        std::fs::write(&path, &gz[..gz.len() / 2]).unwrap();
+        let reader = super::fetch::open_reader(&path).unwrap();
+        let err = ingest_reader(
+            &mut conn,
+            "u",
+            reader,
+            Window::unbounded(),
+            Some("v3"),
+            &mut |_, _| {},
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CoreError::Invalid(m) if m == xmltv::CUT_OFF_MESSAGE),
+            "{err}"
+        );
+        assert_eq!(stored(&conn), (9, Some("v1".into()), "ok".into()));
+
+        // The whole file, with or without a trailing newline, still replaces it.
+        let mut with_nl = full.clone();
+        with_nl.push_str("\r\n\n");
+        assert_eq!(
+            ingest(&mut conn, with_nl.as_bytes(), "v4")
+                .unwrap()
+                .programs,
+            9
+        );
+        assert_eq!(stored(&conn), (9, Some("v4".into()), "ok".into()));
     }
 
     #[test]

@@ -12,15 +12,24 @@ import { useNavigate, useParams } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
-import type { FavoriteEntry, ItemRef } from '@/api/types';
+import { sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { EmptyState, ErrorState, SkeletonList, useShortcut, useToast } from '../deps';
-import { PageTitle, SectionHeading } from '../components/bits';
+import { Button, EmptyState, ErrorState, SkeletonList, useShortcut, useToast } from '../deps';
+import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { usePending, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { buildFavoriteRows, moveWithinGroup, reorderArgs, sortFavorites, withPositions, type FavoriteRow } from '../lib/favorites';
+import { useUrlSearch } from '../hooks/useUrlSearch';
+import {
+  buildFavoriteRows,
+  moveWithinGroup,
+  reinsertFavorite,
+  reorderArgs,
+  sortFavorites,
+  withPositions,
+  type FavoriteRow,
+} from '../lib/favorites';
 import { SourceGoneError, openEntry, relativeTime } from '../lib/open';
 
 const HEADER_HEIGHT = 48;
@@ -40,11 +49,11 @@ export function FavoritesPage() {
   const { sourceId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const args = useMemo(() => (sourceId ? { sourceId } : {}), [sourceId]);
   const query = useRpcQuery('favorites.list', args);
   const { pending, run } = usePending<string>();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useUrlSearch();
   const [drag, setDrag] = useState<{ key: string; over?: { key: string; where: 'before' | 'after' } } | null>(null);
 
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
@@ -79,6 +88,16 @@ export function FavoritesPage() {
 
   const remove = useCallback(
     (entry: FavoriteEntry) => {
+      const index = entries.findIndex((e) => sameRef(e.ref, entry.ref));
+      // Undo puts the favorite back in its old place. A toggle alone would add it
+      // at the end, or switch it off again if it was re-added meanwhile.
+      const restore = async () => {
+        const present = await rpc('favorites.contains', { refs: [entry.ref] });
+        if (!present.some((r) => sameRef(r, entry.ref))) await rpc('favorites.toggle', { ref: entry.ref, snapshot: entry.snapshot });
+        if (index < 0) return;
+        const current = await rpc('favorites.list', args);
+        await rpc('favorites.reorder', reorderArgs(reinsertFavorite(current, entry, index), sourceId));
+      };
       void run(refKey(entry.ref), async () => {
         try {
           await rpc('favorites.remove', { ref: entry.ref });
@@ -88,9 +107,11 @@ export function FavoritesPage() {
             action: {
               label: t('undo'),
               onClick: () => {
-                void rpc('favorites.toggle', { ref: entry.ref, snapshot: entry.snapshot }).then(() =>
-                  queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('favorites.') }),
-                );
+                void restore()
+                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+                  .finally(() =>
+                    queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('favorites.') }),
+                  );
               },
             },
           });
@@ -101,7 +122,7 @@ export function FavoritesPage() {
         }
       });
     },
-    [run, t, toast],
+    [args, entries, run, sourceId, t, toast],
   );
 
   const open = useCallback(
@@ -202,10 +223,21 @@ export function FavoritesPage() {
       <EmptyState
         icon={<Star size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
-        description={sourceId ? t('favoritesEmptySourceBody') : t('favoritesEmptyBody')}
+        description={sourceId ? t('favoritesEmptySourceBody') : sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
+        action={<BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />}
       />
     );
-  else if (rows.length === 0) body = <EmptyState title={t('noMatchTitle')} description={t('noMatchSearch', { query: search })} />;
+  else if (rows.length === 0) body = (
+      <EmptyState
+        title={t('noMatchTitle')}
+        description={t('noMatchSearch', { query: search })}
+        action={
+          <Button onClick={() => setSearch('')} data-testid="library-clear-search">
+            {t('clearSearch')}
+          </Button>
+        }
+      />
+    );
   else
     body = (
       <VirtualRows

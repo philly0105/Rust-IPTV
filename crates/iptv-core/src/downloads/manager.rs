@@ -176,6 +176,24 @@ pub fn enqueue(state: &Arc<AppState>, id: i64) {
     pump(state, &mgr);
 }
 
+/// [`enqueue`] at the head of the queue, for a download the user resumes or
+/// retries: it was queued before anything added since, so it takes the next
+/// free slot instead of waiting behind newer downloads. An id already queued
+/// moves to the front; a running one is left alone.
+pub fn enqueue_front(state: &Arc<AppState>, id: i64) {
+    let mgr = manager(state);
+    {
+        let mut inner = mgr.inner.lock();
+        if !inner.active.contains_key(&id) {
+            if let Some(pos) = inner.queue.iter().position(|q| *q == id) {
+                inner.queue.remove(pos);
+            }
+            inner.queue.push_front(id);
+        }
+    }
+    pump(state, &mgr);
+}
+
 fn pump(state: &Arc<AppState>, mgr: &Arc<DownloadManager>) {
     loop {
         let (id, ctl) = {
@@ -233,7 +251,25 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
     match claimed {
         Ok(true) => {
             state.emit("downloads.update", serde_json::json!({}));
-            let outcome = transfer::run(&state, id, &ctl, &mgr).await;
+            // A panic in the transfer must still free the concurrency slot
+            // and leave the row in a final state.
+            let outcome = match futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                transfer::run(&state, id, &ctl, &mgr),
+            ))
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(_) => {
+                    tracing::error!(id, "download task panicked");
+                    Outcome::Failed {
+                        message: "The download stopped because of an internal error. Retry it."
+                            .into(),
+                        bytes: 0,
+                        keep_part: true,
+                        part: None,
+                    }
+                }
+            };
             persist_outcome(&state, id, outcome).await;
         }
         Ok(false) => tracing::debug!(id, "download no longer queued; skipping"),
@@ -245,8 +281,39 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
     pump(&state, &mgr);
 }
 
+/// Attempts at saving a run's outcome before giving up (a busy database).
+const PERSIST_ATTEMPTS: u32 = 3;
+
 async fn persist_outcome(state: &Arc<AppState>, id: i64, outcome: Outcome) {
-    let result = state
+    for attempt in 1..=PERSIST_ATTEMPTS {
+        match persist_once(state, id, outcome.clone()).await {
+            Ok(()) => return,
+            Err(err) => {
+                tracing::warn!(id, attempt, error = %err, "could not persist download outcome");
+                tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+            }
+        }
+    }
+    // Never leave the row `downloading` with no task behind it: resume and
+    // retry treat that status as running and would do nothing.
+    let fallback = state
+        .db_call(move |c| {
+            store::finish(
+                c,
+                id,
+                DownloadStatus::Failed,
+                0,
+                Some("The download state could not be saved. Retry the download."),
+            )
+        })
+        .await;
+    if let Err(err) = fallback {
+        tracing::error!(id, error = %err, "could not persist download outcome");
+    }
+}
+
+async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreResult<()> {
+    state
         .db_call(move |c| {
             match outcome {
                 Outcome::Completed {
@@ -302,8 +369,5 @@ async fn persist_outcome(state: &Arc<AppState>, id: i64, outcome: Outcome) {
                 }
             }
         })
-        .await;
-    if let Err(err) = result {
-        tracing::error!(id, error = %err, "could not persist download outcome");
-    }
+        .await
 }

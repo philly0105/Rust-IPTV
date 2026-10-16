@@ -7,6 +7,7 @@ import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
 
 import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
+import { joinList } from '@/shell/dashboard/cards';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { displayChannelName } from '../lib/channelName';
@@ -23,7 +24,7 @@ export function mappingQuery(name: string): string {
 }
 
 export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null; onClose(): void }) {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
   const { toast } = useToast();
   const prefs = useDisplayPrefs();
   const open = !!channel;
@@ -124,12 +125,10 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
                   }
                   className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-start hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
                 >
-                  <ChannelLogo src={m.icon} name={m.displayName} size={28} />
+                  <ChannelLogo src={m.icon} name={m.displayName} size={28} sourceId={channel?.ref.sourceId} />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm text-fg">{m.displayName}</span>
-                    <span className="truncate text-xs text-fg-subtle">
-                      {m.channelId} · {hostOf(m.epgUrl)}
-                    </span>
+                    <span className="truncate text-xs text-fg-subtle">{joinList([m.channelId, hostOf(m.epgUrl)], i18n.language)}</span>
                   </span>
                   {selected ? <Check className="size-4 text-accent" aria-label={t('mappingSelected')} /> : null}
                 </button>

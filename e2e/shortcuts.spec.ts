@@ -109,6 +109,9 @@ test.describe.serial('keyboard shortcuts', () => {
     await expect.poll(async () => (await media()).paused).toBe(true);
     await page.keyboard.press('k');
     await expect.poll(async () => (await media()).paused).toBe(false);
+    // The player counts as playing from the media's 'playing' event, which can trail play();
+    // a k before it would ask to play again. Wait for the clock to move.
+    await expectPlaying(page, { advance: 0.2 });
     await page.keyboard.press('k');
     await expect.poll(async () => (await media()).paused).toBe(true);
 

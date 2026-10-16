@@ -44,12 +44,65 @@
   cursor: none;
 }
 
-/* hls.js native text tracks: readable captions over any frame. */
-[data-player-host] video::cue {
-  background: rgb(0 0 0 / 0.72);
-  color: #fff;
+/*
+ * Subtitles (engine tracks and loaded files) in the user's style (C6). The player draws them in
+ * this overlay (subtitles/inline.ts), because Edge and WebView2 force the Windows caption theme
+ * on native cues with a browser !important rule. PlayerDock sets the variables on the host from
+ * settings.subtitle* (subtitles/style.ts cueCssVars). The fallbacks are the defaults: medium white
+ * text on a translucent box. Above the video, below the controls, never in the way of a click.
+ */
+.player-subs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  container-type: inline-size;
+}
+/*
+ * While the control bar is up (PlayerSurface marks the host data-idle=false) the overlay ends
+ * above it, so the lower line of a two-line cue is not hidden behind the bar. A cue placed low
+ * rises by about the bar's height; one placed high hardly moves. The clearance is the floating
+ * bar (seek row, buttons, padding), capped by the player's height for the mini player's lower bar.
+ */
+[data-player-host][data-idle='false'] .player-subs {
+  bottom: min(5.5rem, 32%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion='true']) .player-subs {
+    transition: bottom 200ms ease-out;
+  }
+}
+.player-subs-line {
+  position: absolute;
+  inset-inline: 4%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  text-align: center;
+}
+.player-sub-cue {
+  display: inline;
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+  background: var(--sub-bg, rgb(0 0 0 / 0.72));
+  color: var(--sub-color, #fff);
+  text-shadow: var(--sub-shadow, none);
   font-family: var(--font-sans);
-  font-size: clamp(14px, 2.4vw, 28px);
+  font-size: calc(clamp(14px, 2.4cqw, 28px) * var(--sub-scale, 1));
+  line-height: 1.35;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* Before the overlay takes a track over (or if it cannot), native cues get what CSS can set. */
+[data-player-host] video::cue {
+  background: var(--sub-bg, rgb(0 0 0 / 0.72));
+  color: var(--sub-color, #fff);
+  text-shadow: var(--sub-shadow, none);
+  font-family: var(--font-sans);
+  font-size: calc(clamp(14px, 2.4vw, 28px) * var(--sub-scale, 1));
   line-height: 1.35;
 }
 
@@ -111,5 +164,81 @@ html[data-reduced-motion='true'] .player-osd {
 @media (prefers-reduced-motion: no-preference) {
   html:not([data-reduced-motion='true']) .player-radio-bar {
     animation: player-radio-bar 1.1s ease-in-out infinite;
+  }
+}
+
+/*
+ * Glass (C8) for chrome over the picture: control bar, menus, zap banner, notices. Tokens come
+ * from tokens.css; the fallbacks keep it readable if they are ever missing. Inside a glass
+ * surface `--color-white` follows `--color-on-glass`, so the white utilities the controls use
+ * (text-white, bg-white/10, ring-white/30) take the glass text colour.
+ */
+.player-glass,
+.player-glass-strong {
+  --color-white: var(--color-on-glass, #f4f6fa);
+  color: var(--color-on-glass, #f4f6fa);
+  border-color: var(--color-glass-border, rgb(255 255 255 / 0.14));
+  background-color: var(--color-glass-strong, rgb(12 19 32 / 0.88));
+}
+/*
+ * Blur behind glass is opt-in (Run 3 C5): only panes that come and go (the floating control
+ * bar, menus, the zap banner, popovers) add the `.glass-blur` utility from src/styles, which
+ * owns the one blur in the app. A blurred pane can take the lighter glass; with less
+ * transparency asked for, the utility drops the blur and restores the solid glass.
+ * Always-visible strips (the dock bar, the PiP bar) stay solid and unblurred.
+ */
+.player-glass.glass-blur {
+  background-color: var(--color-glass, rgb(12 19 32 / 0.72));
+}
+/*
+ * Glass stays dark in the light theme, where the page accent is a deep tone (2.9:1 on black):
+ * inside glass the accent utilities (bg-accent, the seek fill, focus rings) take the bright
+ * glass accent instead, and danger the bright tone the dark theme uses. Dark themes need none
+ * of this: their accent is the glass accent already.
+ */
+:root[data-theme='light'] :is(.player-glass, .player-glass-strong) {
+  --color-accent: var(--color-glass-accent, #f5b544);
+  --color-accent-hover: color-mix(in srgb, var(--color-glass-accent, #f5b544) 80%, var(--color-on-glass, #f4f6fa));
+  --color-accent-pressed: var(--color-glass-accent, #f5b544);
+  --color-accent-fg: var(--color-glass-accent-fg, #1b1204);
+  --color-focus: var(--color-glass-accent, #f5b544);
+  --color-glow: color-mix(in srgb, var(--color-glass-accent, #f5b544) 28%, transparent);
+  --color-danger: #ff7a7a;
+}
+/* Secondary text on glass (passes 4.5:1 on the glass surface over black or white). */
+.player-on-glass-muted {
+  color: var(--color-on-glass-muted, #c8cfdc);
+}
+/* A lit top edge and the raised shadow, so a floating pane reads as glass over bright frames. */
+.player-glass-edge {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-glass, #f4f6fa) 8%, transparent),
+    var(--shadow-2, 0 12px 32px rgb(0 0 0 / 0.5));
+}
+
+/*
+ * Scrims behind the floating chrome: just enough to lift it off a bright picture. Video is
+ * dark in every theme, so these stay black (like the captions) instead of following --color-scrim.
+ */
+.player-scrim-bottom {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.18) 55%, transparent);
+}
+.player-scrim-top {
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.6), transparent);
+}
+
+/* Sleep timer chip: a slow breath while the volume fades (motion only; the fade itself is audio). */
+@keyframes player-sleep-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion='true']) .player-sleep-fading {
+    animation: player-sleep-breathe 2.4s ease-in-out infinite;
   }
 }

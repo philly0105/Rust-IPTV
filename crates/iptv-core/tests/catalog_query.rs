@@ -126,6 +126,8 @@ fn q(source: &str, ct: ContentType, page: PageQuery) -> CatalogQuery {
         page,
         include_hidden: false,
         min_rating: None,
+        english_only: false,
+        vod: Default::default(),
     }
 }
 
@@ -601,4 +603,148 @@ async fn movies_min_rating_filters_in_sql_with_counts() {
         .await
         .unwrap();
     assert_eq!(res["total"], 0);
+}
+
+/// `englishOnly`: channel and movie lists, totals, categories (dropped when
+/// left empty, counts filtered), search and allLiveChannels drop items that
+/// are clearly in another language; items without a clear language stay.
+#[tokio::test]
+async fn english_only_setting_filters_lists_counts_and_categories() {
+    let env = env().await;
+    seed(&env).await;
+    bare_source(&env.state, "s3").await;
+    env.state
+        .db_call(|c| {
+            let mut items = vec![
+                live("s3", "1", "fr", "FR| TF1", 1),
+                live("s3", "2", "fr", "FR| France 2", 2),
+                live("s3", "3", "uk", "UK| BBC One", 3),
+                live("s3", "4", "mix", "AR: Al Jazeera News", 4),
+                live("s3", "5", "mix", "Sky News", 5),
+                live("s3", "6", "mix", "Новости 24", 6),
+            ]
+            .into_iter();
+            catalog::replace_catalog(
+                c,
+                "s3",
+                ContentType::Live,
+                &[
+                    cat("fr", "FRANCE | GENERAL", 0),
+                    cat("uk", "UK | NEWS", 1),
+                    cat("mix", "News", 2),
+                ],
+                &mut items,
+            )
+        })
+        .await
+        .unwrap();
+    let mut r = router();
+    iptv_core::settings::rpc::register(&mut r);
+    let channel_ids = |v: &serde_json::Value| -> Vec<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["ref"]["itemId"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let set = |on: bool| {
+        r.dispatch(
+            env.state.clone(),
+            "settings.update",
+            json!({ "patch": { "englishOnly": on } }),
+        )
+    };
+
+    let all = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.channels",
+            json!({"sourceId": "s3"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(all["total"], 6, "off by default");
+
+    set(true).await.unwrap();
+    let page = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.channels",
+            json!({"sourceId": "s3"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page["total"], 2, "{page}");
+    assert_eq!(channel_ids(&page), vec!["3", "5"]);
+
+    let cats = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.categories",
+            json!({"sourceId": "s3", "contentType": "live"}),
+        )
+        .await
+        .unwrap();
+    let cats: Vec<(String, i64)> = cats
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["id"].as_str().unwrap().to_string(),
+                c["itemCount"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(cats, vec![("uk".into(), 1), ("mix".into(), 1)]);
+
+    let hits = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.search",
+            json!({"query": "news"}),
+        )
+        .await
+        .unwrap();
+    let live_hits: Vec<_> = hits["live"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["ref"]["itemId"].as_str().unwrap().to_string())
+        .collect();
+    assert!(live_hits.contains(&"5".to_string()), "{hits}");
+    assert!(!live_hits.contains(&"4".to_string()), "{hits}");
+
+    let all_live = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.allLiveChannels",
+            json!({"sourceId": "s3"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(all_live.as_array().unwrap().len(), 2, "{all_live}");
+
+    // Movies: the |FR| title goes, the untagged one stays.
+    let movies = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.movies",
+            json!({"sourceId": "s2", "query": {}}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(channel_ids(&movies), vec!["x2"]);
+
+    set(false).await.unwrap();
+    let page = r
+        .dispatch(
+            env.state.clone(),
+            "catalog.channels",
+            json!({"sourceId": "s3"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page["total"], 6);
 }

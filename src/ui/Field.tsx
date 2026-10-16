@@ -36,11 +36,11 @@ function FieldFrame({
       )}
       {children}
       {error ? (
-        <p id={`${id}-error`} className="text-[13px] text-danger" role="alert">
+        <p id={`${id}-error`} className="text-sm text-danger" role="alert">
           {error}
         </p>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-[13px] text-fg-muted">
+        <p id={`${id}-hint`} className="text-sm text-fg-muted">
           {hint}
         </p>
       ) : null}
@@ -155,12 +155,32 @@ export function Select({
 }: SelectProps) {
   const autoId = useId();
   const id = idProp ?? autoId;
+  const selectClass = cn(fieldBase, 'h-10 appearance-none ps-3 pe-9 text-sm', className);
+  // `w-auto` asks for a select as wide as its longest option. Chrome's own width for an
+  // `appearance: none` select falls a few px short at some UI scales and densities, which cut
+  // "Recently added" to "Recently adde" (L1-visual-20). An invisible copy of every label, with
+  // the same padding, border and type, sizes a one-cell grid instead, and the select fills it.
+  const fit = selectClass.split(' ').includes('w-auto');
   return (
     <FieldFrame id={id} label={label} hint={hint} error={error} className={wrapperClassName}>
-      <div className={cn('relative', !label && !hint && !error && wrapperClassName)}>
+      <div className={cn('relative', fit && 'grid', !label && !hint && !error && wrapperClassName)}>
+        {fit && (
+          <span
+            aria-hidden
+            data-select-sizer=""
+            className={cn(
+              selectClass,
+              'pointer-events-none invisible col-start-1 row-start-1 flex h-0 min-h-0 flex-col overflow-hidden border-transparent py-0 whitespace-nowrap',
+            )}
+          >
+            {options.map((o) => (
+              <span key={o.value}>{o.label}</span>
+            ))}
+          </span>
+        )}
         <select
           id={id}
-          className={cn(fieldBase, 'h-10 appearance-none ps-3 pe-9 text-sm', className)}
+          className={cn(selectClass, fit && 'col-start-1 row-start-1 justify-self-stretch')}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy(id, { hint, error })}
           onChange={(e) => {
@@ -208,7 +228,7 @@ export function Toggle({ checked, onChange, label, description, disabled, id: id
           {label}
         </label>
         {description && (
-          <p id={`${id}-desc`} className="mt-0.5 text-[13px] text-fg-muted">
+          <p id={`${id}-desc`} className="mt-0.5 text-sm text-fg-muted">
             {description}
           </p>
         )}
@@ -292,7 +312,7 @@ export function SearchInput({
           type="button"
           aria-label={t('clearSearch')}
           onClick={() => onChange('')}
-          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg"
+          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
         >
           <X aria-hidden size={14} />
         </button>

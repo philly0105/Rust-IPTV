@@ -1,42 +1,19 @@
 /**
- * Data hooks shared by the library pages: downloads with live invalidation,
+ * Data hooks shared by the library pages: downloads (kept live by the shell's
+ * event binding: `downloads.update` refetches `downloads.list` and `myvideos.`),
  * the source lookup used for badges and playback, and a pending-id tracker
  * that blocks duplicate clicks until an action settles.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { onAppEvent } from '@/api/events';
-import { invalidate, useRpcQuery } from '@/api/query';
+import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
 
 import { progressStore } from '../lib/progress';
 
-/** Coalesces bursts of `downloads.update` into one refetch per 250 ms. */
-const UPDATE_COALESCE_MS = 250;
-
-/** Subscribes to `downloads.update` and refetches downloads and My Videos. */
-export function useDownloadsInvalidation(): void {
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = onAppEvent('downloads.update', () => {
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = null;
-        void invalidate('downloads.');
-        void invalidate('myvideos.');
-      }, UPDATE_COALESCE_MS);
-    });
-    return () => {
-      off();
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-}
-
 /** The full download list, live. */
 export function useDownloads() {
-  useDownloadsInvalidation();
   const query = useRpcQuery('downloads.list', undefined, { staleTime: 5_000 });
   const data = query.data;
   useEffect(() => {
@@ -47,7 +24,6 @@ export function useDownloads() {
 
 /** Completed downloads (with `fileAvailable`), live. */
 export function useMyVideos() {
-  useDownloadsInvalidation();
   return useRpcQuery('myvideos.list', undefined, { staleTime: 10_000 });
 }
 

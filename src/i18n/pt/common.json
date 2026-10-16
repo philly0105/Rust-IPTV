@@ -40,11 +40,16 @@
   "errorTechnicalDetails": "Detalhes técnicos",
   "errorHintTimeout": "O provedor pode estar sobrecarregado. Tente novamente em instantes.",
   "errorHintAuth": "Verifique o usuário, a senha ou o endereço MAC nas configurações da fonte.",
-  "errorHintNotFound": "O provedor pode ter removido este item. Atualize a fonte para renovar a lista.",
+  "errorHintNotFound": "Pode ter sido removido, ou este link está desatualizado.",
   "errorHintInvalid": "Revise os valores informados e tente novamente.",
   "errorHintUnsupported": "Esta fonte ou tipo de stream não permite essa ação. Tente um reprodutor externo.",
   "errorHintConflict": "Recarregue para ver a versão mais recente e tente novamente.",
   "errorHintIo": "Verifique se a pasta existe e se você tem permissão para gravar nela.",
   "errorHintDb": "Reinicie o aplicativo. Se continuar acontecendo, restaure um backup em Configurações.",
-  "errorHintInternal": "Tente novamente. Se continuar acontecendo, reinicie o aplicativo."
+  "errorHintInternal": "Tente novamente. Se continuar acontecendo, reinicie o aplicativo.",
+  "errorCode": "Código de erro: {{code}}",
+  "errorTitleEngineMissing": "Não foi possível iniciar o mecanismo do reprodutor",
+  "errorHintEngineMissing": "O mecanismo do reprodutor de vídeo (mpv) está ausente ou não conseguiu iniciar.",
+  "errorTitleServer": "O servidor teve um problema",
+  "errorHintServer": "O servidor está ocupado ou com problemas. Tente novamente mais tarde."
 }

@@ -13,6 +13,8 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="theme-color" content="#0c1320" />
+    <!-- Blocking on purpose: sets the saved theme before the first paint (after the theme-color meta it updates). -->
+    <script src="/theme-boot.js"></script>
     <title>Tsrust IPTV</title>
   </head>
   <body>

@@ -23,7 +23,8 @@ describe('queue', () => {
 
   it('drops completed rows and orders active then attention', () => {
     const { active, attention } = partitionQueue(all);
-    expect(active.map((d) => d.status)).toEqual(['downloading', 'queued', 'paused']);
+    // Active rows stay in the order they were added, whatever their status.
+    expect(active.map((d) => d.status)).toEqual(['queued', 'downloading', 'paused']);
     expect(attention.map((d) => d.status)).toEqual(['canceled', 'failed']);
   });
 
@@ -33,9 +34,18 @@ describe('queue', () => {
     expect(partitionQueue([a, b]).active.map((d) => d.id)).toEqual([2, 1]);
   });
 
+  it('keeps a row in place when it is paused or resumed', () => {
+    const rows = [1, 2, 3].map((id) => makeDownload({ id, status: 'downloading', createdAt: `2026-10-01T09:0${id}:00Z` }));
+    const before = partitionQueue(rows).active.map((d) => d.id);
+    const paused = rows.map((d) => (d.id === 2 ? { ...d, status: 'paused' as const } : d));
+    const resumed = rows.map((d) => (d.id === 3 ? { ...d, status: 'queued' as const } : d));
+    expect(partitionQueue(paused).active.map((d) => d.id)).toEqual(before);
+    expect(partitionQueue(resumed).active.map((d) => d.id)).toEqual(before);
+  });
+
   it('builds section headers with counts', () => {
     const rows = buildQueueRows(all);
-    expect(rows.map((r) => r.key)).toEqual(['h-active', 'd-101', 'd-100', 'd-102', 'h-attention', 'd-105', 'd-104']);
+    expect(rows.map((r) => r.key)).toEqual(['h-active', 'd-100', 'd-101', 'd-102', 'h-attention', 'd-105', 'd-104']);
     expect(rows[0]).toMatchObject({ kind: 'header', count: 3 });
     expect(buildQueueRows([makeDownload({ status: 'completed' })])).toEqual([]);
   });
@@ -44,7 +54,8 @@ describe('queue', () => {
     const o = { canReveal: true, hasFile: true };
     expect(actionsFor('downloading', o)).toEqual(['pause', 'cancel']);
     expect(actionsFor('queued', o)).toEqual(['pause', 'cancel']);
-    expect(actionsFor('paused', o)).toEqual(['resume', 'cancel', 'remove']);
+    // Two buttons in the same places as when downloading: Pause/Resume, then Cancel/Remove.
+    expect(actionsFor('paused', o)).toEqual(['resume', 'remove']);
     expect(actionsFor('failed', o)).toEqual(['retry', 'reveal', 'remove']);
     expect(actionsFor('failed', { canReveal: false, hasFile: true })).toEqual(['retry', 'remove']);
     expect(actionsFor('canceled', o)).toEqual(['retry', 'remove']);

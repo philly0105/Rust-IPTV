@@ -174,15 +174,17 @@ fn huge_single_line_file() {
 }
 
 #[test]
-fn truncated_document_keeps_what_was_read() {
+fn truncated_document_is_a_cut_off_download() {
     let xml = br#"<tv><channel id="a"><display-name>A</display-name></channel>
 <programme start="20240101120000" stop="20240101130000" channel="a"><title>Complete</title></programme>
 <programme start="20240101130000" stop="20240101140000" channel="a"><title>Cut off in the mid"#;
-    let (items, stats) = run(xml, Window::unbounded());
-    let p = programmes(&items);
-    assert!(p.iter().any(|p| p.title == "Complete"));
-    // Either a clean EOF inside the element or a syntax error; data before it survives.
-    assert!(stats.programmes >= 1);
+    // L1-core-6: a document that opens `<tv>` but ends before `</tv>` is
+    // rejected, so the stored guide is kept instead of its first part.
+    let err = parse(&xml[..], Window::unbounded(), &mut |_| Ok(())).unwrap_err();
+    assert!(
+        matches!(&err, iptv_core::CoreError::Invalid(m) if m == iptv_core::epg::xmltv::CUT_OFF_MESSAGE),
+        "{err}"
+    );
 }
 
 #[test]

@@ -9,11 +9,15 @@
 
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 
+import { invalidate, queryClient, rpcKey } from '@/api/query';
+import type { AccountStatus } from '@/api/rpc';
 import { isDesktop, rpc } from '@/api/transport';
+import { QUIT_FLUSH_EVENT, type QuitFlushDetail } from '@/api/window';
 import type {
   Channel,
   ItemRef,
   ItemSnapshot,
+  PlaybackPosition,
   PlayerKind,
   PlayerSource,
   Settings,
@@ -22,14 +26,22 @@ import type {
 } from '@/api/types';
 import { itemKey } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
+import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
+import { preloadEngineFor } from './enginePreload';
+import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
+import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNowNext } from './nowNext';
+import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
+import { hideModeNow, lockedNow, onPlaybackHidden } from './parentalLocks';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
 export interface ZapContext {
   sourceId: string;
   categoryId?: string;
+  /** Set when playback started from a custom list: zapping walks `lists.neighbors` (Run 2 C3). */
+  listId?: string;
 }
 
 export interface PlayerState {
@@ -48,7 +60,12 @@ export interface PlayerState {
 }
 
 export interface PlayerActions {
-  play(source: PlayerSource, opts?: { queue?: PlayerSource[]; mode?: PlayerMode }): Promise<void>;
+  /**
+   * `externalPlayer`: with `mode: 'external'`, the player to open it in (a menu's Play in MPV or
+   * VLC) instead of the one in the settings. A later play of the same item in external mode
+   * without one (the stage's Reopen) opens it in the same player again.
+   */
+  play(source: PlayerSource, opts?: { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc' }): Promise<void>;
   stop(): void;
   togglePlay(): void;
   seekBy(seconds: number): void;
@@ -89,6 +106,29 @@ let requestSeq = 0;
 let settingsCache: Settings | null = null;
 let settingsPromise: Promise<Settings | null> | null = null;
 const sourceKindCache = new Map<string, SourceKind>();
+/**
+ * The resolution that failed before anything could load (stream URL lookup, a queue entry):
+ * Retry runs it again, since there is no media URL for the surface to reload.
+ */
+let failedResolve: (() => Promise<void>) | null = null;
+/** The external player chosen for an item (`play`'s `externalPlayer`), which Reopen keeps using. */
+let externalChoice: { source: PlayerSource; player: 'mpv' | 'vlc' } | null = null;
+/**
+ * The item the parental gate last let through (`itemKey` of its ref). Entry points ask the
+ * gate before anything shows; `play` and queue advances only ask again when they switch to a
+ * different item, so a replay, a failover to the same item or the next episode of an allowed
+ * series never prompts twice.
+ */
+let allowedRefKey: string | null = null;
+/** Saved positions this close to the start are not worth a resume (and no "Resumed at 0:03"). */
+export const MIN_RESUME_SECONDS = 5;
+/**
+ * The double-click window: above the longest double-click time Windows allows (900 ms), so a
+ * slow double click still counts. A click on an ended item waits this long before it replays
+ * (a double click there only toggles fullscreen, C6), and a double click within it undoes its
+ * first click's pause toggle. Both video surfaces use it for both.
+ */
+export const DOUBLE_CLICK_MS = 1000;
 
 function readStoredVolume(): { volume: number; muted: boolean } {
   try {
@@ -102,6 +142,36 @@ function readStoredVolume(): { volume: number; muted: boolean } {
     // corrupt value: defaults
   }
   return { volume: 1, muted: false };
+}
+
+/**
+ * Told when the volume or mute changes through the store's actions (`setVolume`,
+ * `adjustVolume`, `toggleMute`), never for a surface echo (`reportVolume`): the sleep timer's
+ * fade tells a person's change apart from mpv reporting back the levels the fade set.
+ */
+const volumeIntentListeners = new Set<() => void>();
+
+export function subscribeVolumeIntent(fn: () => void): () => void {
+  volumeIntentListeners.add(fn);
+  return () => {
+    volumeIntentListeners.delete(fn);
+  };
+}
+
+function volumeIntent(): void {
+  for (const fn of volumeIntentListeners) fn();
+}
+
+/**
+ * Puts the volume level back and leaves mute as it is (the sleep timer restoring the level its
+ * fade lowered, after the person muted meanwhile). A restore, not a person's change: no intent.
+ */
+export function restoreVolumeLevel(v: number): void {
+  const volume = clamp01(v);
+  const { muted } = usePlayerStore.getState();
+  controller?.setVolume(volume);
+  usePlayerStore.setState({ volume });
+  storeVolume(volume, muted);
 }
 
 function storeVolume(volume: number, muted: boolean): void {
@@ -136,9 +206,35 @@ export function tracksPosition(source: PlayerSource | undefined): source is Play
   );
 }
 
+/**
+ * The queries that hold a movie or series row the core gave a `titleBase`: the detail pages'
+ * (`{ item }`, keyed as vod/hooks/queries.ts keys them) and the bare `catalog.item` row, which
+ * an m3u detail page shares (it caches the flat row and wraps it with `select`).
+ */
+const ITEM_ROW_QUERIES = ['xtream.vodDetail', 'xtream.seriesDetail', 'stalker.vodDetail', 'stalker.seriesDetail', 'catalog.item'] as const;
+
+type TitledRow = { title?: string; titleBase?: string };
+
+/**
+ * The title a saved row (Continue watching, Recent) keeps: for a movie or series the core's
+ * `titleBase` when this window already has the item (the provider's language tag stripped, as
+ * the detail pages show it), else the title the player shows.
+ */
+function snapshotTitle(source: PlayerSource & { ref: ItemRef }): string {
+  const { ref, title } = source;
+  if (ref.contentType !== 'movie' && ref.contentType !== 'series') return title;
+  const args = { ref: { sourceId: ref.sourceId, contentType: ref.contentType, itemId: ref.itemId } };
+  for (const cmd of ITEM_ROW_QUERIES) {
+    const data = queryClient.getQueryData<TitledRow & { item?: TitledRow }>([cmd, args]);
+    const row = data?.item ?? data;
+    if (row?.titleBase && (row.title === title || row.titleBase === title)) return row.titleBase;
+  }
+  return title;
+}
+
 export function snapshotOf(source: PlayerSource): ItemSnapshot | undefined {
   if (!source.ref) return undefined;
-  const snap: ItemSnapshot = { title: source.title, contentType: source.ref.contentType };
+  const snap: ItemSnapshot = { title: snapshotTitle({ ...source, ref: source.ref }), contentType: source.ref.contentType };
   if (source.subtitle) snap.subtitle = source.subtitle;
   if (source.posterUrl) snap.posterUrl = source.posterUrl;
   return snap;
@@ -183,10 +279,22 @@ export function sameSource(a: PlayerSource | undefined, b: PlayerSource | undefi
   return a.url === b.url;
 }
 
-/** Cached settings; refreshed by `settings.changed` (see `setSettingsCache`). */
+const SETTINGS_KEY = rpcKey('settings.get');
+
+/**
+ * Cached settings; refreshed by `settings.changed` (see `setSettingsCache`). Loaded through the
+ * query cache, so a `useRpcQuery('settings.get')` already in flight (the shell's first paint)
+ * is joined instead of asking the core a second time.
+ */
 export async function getSettings(): Promise<Settings | null> {
   if (settingsCache) return settingsCache;
-  settingsPromise ??= rpc('settings.get')
+  const known = queryClient.getQueryData<Settings>(SETTINGS_KEY);
+  if (known) {
+    setSettingsCache(known);
+    return known;
+  }
+  settingsPromise ??= queryClient
+    .fetchQuery({ queryKey: SETTINGS_KEY, queryFn: () => rpc('settings.get'), retry: false })
     .then((s) => {
       setSettingsCache(s);
       return s;
@@ -211,10 +319,18 @@ export function subscribeSettings(l: () => void): () => void {
 }
 
 export function peekSettings(): Settings | null {
+  // The query cache may already hold them (another reader loaded them first).
+  settingsCache ??= queryClient.getQueryData<Settings>(SETTINGS_KEY) ?? null;
   return settingsCache;
 }
 
-async function sourceKindOf(sourceId: string): Promise<SourceKind> {
+/** The kind of a source this session already looked up, without asking the core. */
+export function knownSourceKind(sourceId: string): SourceKind | undefined {
+  return sourceKindCache.get(sourceId);
+}
+
+/** The source's kind, looked up once per session (`sources.get`); rejects when that fails. */
+export async function sourceKindOf(sourceId: string): Promise<SourceKind> {
   const cached = sourceKindCache.get(sourceId);
   if (cached) return cached;
   const src = await rpc('sources.get', { id: sourceId });
@@ -268,8 +384,11 @@ function writeResume(): void {
   const state = usePlayerStore.getState();
   const { source, positionSeconds, mode } = state;
   try {
+    // A zap's placeholder names a channel it has not tuned yet: the record keeps what played.
+    if (isPendingZap(source)) return;
     // A finished item must not come back at its last frame after a reload.
-    if (!source || mode === 'external' || isEndedState(state)) {
+    // No url: a failed lookup, nothing a reload could replay.
+    if (!source?.url || mode === 'external' || isEndedState(state)) {
       sessionStorage.removeItem(RESUME_KEY);
       return;
     }
@@ -290,12 +409,23 @@ function clearResume(): void {
 
 /** Last position we pushed to the backend, so ticks without progress do not write. */
 let lastSavedPosition = -1;
+/**
+ * The source whose last landed save finished it (Run 2 C4), so the watched queries are refetched
+ * once per transition to finished, not on every later save past the end.
+ */
+let finishedSavedFor: PlayerSource | undefined;
 
-function savePosition(): void {
+const isPositionsKey = (key: readonly unknown[]) => typeof key[0] === 'string' && key[0].startsWith('positions.');
+
+/** The latest `positions.set` sent (settled once the core has it, or the send failed). */
+let lastSave: Promise<void> = Promise.resolve();
+
+/** Sends the VOD position; the promise settles when the core has it (or the send failed). */
+function savePosition(): Promise<void> {
   const { source, positionSeconds, durationSeconds } = usePlayerStore.getState();
-  if (!tracksPosition(source)) return;
+  if (!tracksPosition(source)) return Promise.resolve();
   const pos = Math.floor(positionSeconds);
-  if (pos <= 0 || pos === lastSavedPosition) return;
+  if (pos <= 0 || pos === lastSavedPosition) return Promise.resolve();
   lastSavedPosition = pos;
   const args: Parameters<typeof rpc<'positions.set'>>[1] = {
     ref: source.ref,
@@ -306,15 +436,40 @@ function savePosition(): void {
   if (dur && Number.isFinite(dur)) args.durationSeconds = Math.floor(dur);
   const snap = snapshotOf(source);
   if (snap) args.snapshot = snap;
-  rpc('positions.set', args).catch(() => {
-    lastSavedPosition = -1; // retry on next tick
-  });
+  return (lastSave = rpc('positions.set', args).then(
+    () => {
+      // C4 caches `positions.` for 15 s and no event follows a save: mark it stale so Continue
+      // Watching reads the new position on its next mount. No refetch now: this runs every 5 s.
+      void queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'none' });
+      // The save that finishes a title makes it watched in the core (handleEnded, or a stop
+      // past 95 %): refresh grid ticks, Hide watched pages and Continue Watching, which may
+      // stay mounted under the mini player.
+      if (!finishesTitle(pos, args.durationSeconds)) {
+        finishedSavedFor = undefined; // played again from earlier: the next finish is a new transition
+      } else if (finishedSavedFor !== source) {
+        finishedSavedFor = source;
+        void invalidateWatched();
+      }
+    },
+    () => {
+      lastSavedPosition = -1; // retry on next tick
+    },
+  ));
 }
 
 /** Persist now: resume record and VOD position. Called every 5 s, on stop, and on page hide. */
 export function flushProgress(): void {
   writeResume();
-  savePosition();
+  void savePosition();
+}
+
+/**
+ * Quit or window close (tray Quit, the window's X, Alt+F4): save like `pagehide` would, and let
+ * the quit wait for the position to land, up to the 2.5 s flush budget (`QUIT_FLUSH_BUDGET_MS`).
+ */
+function flushBeforeQuit(e: Event): void {
+  writeResume();
+  (e as CustomEvent<QuitFlushDetail>).detail?.waitUntil(savePosition());
 }
 
 function startSaver(): void {
@@ -336,6 +491,7 @@ function bindUnload(): void {
   unloadBound = true;
   window.addEventListener('pagehide', flushProgress);
   window.addEventListener('beforeunload', flushProgress);
+  window.addEventListener(QUIT_FLUSH_EVENT, flushBeforeQuit);
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +515,15 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   async play(source, opts) {
     const token = ++playToken;
     requestSeq++;
+    failedResolve = null;
+    // A pending Up next must not fire while this request resolves and replace it.
+    cancelUpNext();
+    // Direct callers (failover, a queue advance) that switch items pass the parental gate here;
+    // a refusal leaves whatever was playing as it was.
+    if (source.ref && !gatePassed(source.ref)) {
+      const allowed = await passGate({ ref: source.ref, title: source.title });
+      if (!allowed || token !== playToken) return;
+    }
     bindUnload();
     // Persist the outgoing item before switching.
     if (get().source) flushProgress();
@@ -369,6 +534,13 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     let mode = opts?.mode ?? modeForSettings(settings?.player, source);
     // Embedded mpv needs the desktop shell; everywhere else the built-in player takes over.
     if (mode === 'embedded-mpv' && !isDesktop) mode = 'inline';
+    if (mode === 'embedded-mpv') {
+      // So it does when mpv is known not to start this session (not found): no surface mounts to
+      // fail again. Loaded here, not imported: mpvExtras reaches back into this module as it loads.
+      const { mpvUnavailable } = await import('./mpvExtras');
+      if (token !== playToken) return;
+      if (mpvUnavailable()) mode = 'inline';
+    }
     const queue = opts?.queue ?? (get().queue.some((q) => sameSource(q, source)) ? get().queue : []);
 
     resetMedia();
@@ -385,13 +557,16 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
 
     if (source.ref) {
       const snapshot = snapshotOf(source);
-      if (snapshot) rpc('recent.add', { ref: source.ref, snapshot }).catch(() => undefined);
+      // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
+      if (snapshot) rpc('recent.add', { ref: source.ref, snapshot }).then(() => invalidate('recent.'), () => undefined);
     }
 
     if (mode === 'external') {
       stopSaver();
       clearResume();
-      const player = settings?.player === 'vlc' ? 'vlc' : 'mpv';
+      const chosen = opts?.externalPlayer ?? (externalChoice && sameSource(externalChoice.source, source) ? externalChoice.player : undefined);
+      externalChoice = chosen ? { source, player: chosen } : null;
+      const player = chosen ?? (settings?.player === 'vlc' ? 'vlc' : 'mpv');
       try {
         await rpc('player.openExternal', { player, source });
         if (token === playToken) set({ status: 'playing' });
@@ -408,7 +583,14 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   stop() {
     playToken++;
     requestSeq++;
-    if (get().source) flushProgress();
+    const stopped = get().source;
+    if (stopped) flushProgress();
+    // Once the stop's save (or a tick's still under way) has landed, refetch the positions a page
+    // still shows, such as a VOD detail page behind the mini player, so it offers the new resume
+    // point. The 5 s ticks only mark them stale.
+    if (tracksPosition(stopped)) {
+      void lastSave.then(() => queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'active' }));
+    }
     stopSaver();
     clearResume();
     lastSavedPosition = -1;
@@ -439,9 +621,11 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       return;
     }
     if (status === 'playing' || status === 'loading') {
+      noteUserPause(true);
       controller?.pause();
       if (!controller) set({ status: 'paused' });
     } else {
+      noteUserPause(false);
       controller?.play();
       if (!controller) set({ status: 'playing' });
     }
@@ -456,7 +640,15 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     const { source, durationSeconds } = get();
     if (!source || get().mode === 'external') return;
     let target = Math.max(0, seconds);
-    if (durationSeconds && Number.isFinite(durationSeconds)) target = Math.min(target, durationSeconds);
+    if (durationSeconds && Number.isFinite(durationSeconds)) {
+      target = Math.min(target, durationSeconds);
+      // Seeking back into a finished episode means "keep watching": no auto-advance now, and
+      // reaching the end again offers the next item again.
+      if (target < durationSeconds - ENDED_EPSILON) {
+        cancelUpNext();
+        upNextHandledFor = undefined;
+      }
+    }
     controller?.seekTo(target);
     set({ positionSeconds: target });
   },
@@ -468,6 +660,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     if (!muted) controller?.setMuted(false);
     set({ volume, muted });
     storeVolume(volume, muted);
+    volumeIntent();
   },
 
   adjustVolume(delta) {
@@ -479,6 +672,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     controller?.setMuted(muted);
     set({ muted });
     storeVolume(get().volume, muted);
+    volumeIntent();
   },
 
   toggleFullscreen() {
@@ -491,17 +685,18 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   },
 
   next() {
-    const { queue, source } = get();
-    const idx = queue.findIndex((q) => sameSource(q, source));
-    const nextSource = idx >= 0 ? queue[idx + 1] : undefined;
-    if (nextSource) void get().play(nextSource, { queue, mode: get().mode });
+    const nextSource = nextInQueue();
+    if (!nextSource) return;
+    // The countdown would otherwise start a second advance while this one resolves.
+    cancelUpNext();
+    void playQueued(nextSource);
   },
 
   prev() {
-    const { queue, source } = get();
-    const idx = queue.findIndex((q) => sameSource(q, source));
-    const prevSource = idx > 0 ? queue[idx - 1] : undefined;
-    if (prevSource) void get().play(prevSource, { queue, mode: get().mode });
+    const prevSource = prevInQueue();
+    if (!prevSource) return;
+    cancelUpNext();
+    void playQueued(prevSource);
   },
 }));
 
@@ -532,6 +727,12 @@ export function reportProgress(positionSeconds: number, durationSeconds?: number
 export function reportStatus(status: PlayerState['status'], error?: string): void {
   const s = usePlayerStore.getState();
   if (!s.source) return;
+  // No media yet (a failed lookup): the surface's events are about the media it just dropped,
+  // not this item. A zap waiting to tune keeps the last picture up under its banner: that
+  // media's events are not about the channel the placeholder names either.
+  if (isPendingZap(s.source)) return;
+  if (!s.source.url && status !== 'error' && status !== 'loading') return;
+  if (status !== 'error' && useMediaStore.getState().errorCode) useMediaStore.setState({ errorCode: undefined });
   if (s.status === status && s.error === error) return;
   usePlayerStore.setState(status === 'error' ? { status, error } : { status, error: undefined });
 }
@@ -557,14 +758,236 @@ export function handleEnded(): void {
   const patch: Partial<PlayerState> = { status: 'paused' };
   if (s.durationSeconds && Number.isFinite(s.durationSeconds)) patch.positionSeconds = s.durationSeconds;
   usePlayerStore.setState(patch);
-  // Mark as finished: positions.set deletes rows at >= 95 %.
-  if (tracksPosition(s.source) && s.durationSeconds) savePosition();
+  // Mark as finished: at >= 95 % the core keeps a movie as a watched row at position = duration
+  // (since Run 2; a partial replay of a watched movie keeps the flag too) and an episode as a
+  // watched row at its end (C13); `withSavedPosition` never resumes from a finished row. The save's
+  // success refreshes the watched queries (see `savePosition`).
+  if (tracksPosition(s.source) && s.durationSeconds) void savePosition();
   clearResume();
+  offerUpNext();
+}
+
+// ---------------------------------------------------------------------------
+// Up next: the countdown lives here, not in the card, so auto-advance happens even when no
+// card is mounted (hidden fullscreen chrome, a surface between layouts).
+// ---------------------------------------------------------------------------
+
+let upNextTimer: ReturnType<typeof setTimeout> | null = null;
+let upNextArmed: MediaUpNext | undefined;
+type MediaUpNext = NonNullable<ReturnType<typeof useMediaStore.getState>['upNext']>;
+/**
+ * The finished item whose Up next was already offered (then counted down, played or
+ * cancelled). The end can be reported more than once (a surface remount, a late duplicate
+ * event, the queue arriving after the end); each item advances at most once.
+ */
+let upNextHandledFor: PlayerSource | undefined;
+
+/** The dock shows a 10 s "Next episode" card; the store's timer (below) advances at zero. */
+function offerUpNext(): void {
+  const s = usePlayerStore.getState();
+  if (!s.source || upNextHandledFor === s.source || useMediaStore.getState().upNext) return;
   const next = nextInQueue();
-  if (next && (peekSettings()?.playerAutoplayNextEpisode ?? true)) {
-    // The dock shows a 10 s "Next episode" card; it calls next() at zero or on "Play now".
-    useMediaStore.setState({ upNext: { source: next, deadline: Date.now() + UP_NEXT_SECONDS * 1000 } });
+  if (!next || !(peekSettings()?.playerAutoplayNextEpisode ?? true)) return;
+  upNextHandledFor = s.source;
+  useMediaStore.setState({ upNext: { source: next, deadline: Date.now() + UP_NEXT_SECONDS * 1000 } });
+}
+
+/**
+ * The queue is owned by whoever plays a list (the series page rebuilds and refreshes it while
+ * an episode plays). Keep a pending Up next pointed at the queue's current next entry (a
+ * refreshed short-lived link replaces the old one), and offer it when the queue only arrives
+ * after the item already ended.
+ */
+usePlayerStore.subscribe((s, prev) => {
+  if (s.queue === prev.queue) return;
+  const pending = useMediaStore.getState().upNext;
+  if (pending) {
+    const next = nextInQueue();
+    if (next && next !== pending.source) useMediaStore.setState({ upNext: { source: next, deadline: pending.deadline } });
+    return;
   }
+  if (isEndedState(s)) offerUpNext();
+});
+
+/**
+ * Startup and stall watchdog. Some failures never reach the engine as an error: a stream that
+ * answers 401 with `WWW-Authenticate: Basic` leaves both WebView2 and mpv waiting with no
+ * event. Until the item's first frame, a timeout is raised after `LIVE_STARTUP_TIMEOUT_MS` (live)
+ * or `STARTUP_TIMEOUT_MS` (VOD), whether the surface says `loading` or `paused` (a stream with
+ * nothing to show can report a pause it never had); only a pause the user asked for stops it.
+ * Once the item played, a re-buffer in `loading` gets `STARTUP_TIMEOUT_MS`. The timeout goes to
+ * smart reconnect, which retries or switches before the error overlay shows its Retry. (The 401
+ * itself is not visible from here, so this is a timeout, not an auth error; streams whose 401
+ * the engine does report still classify as auth.)
+ */
+export const STARTUP_TIMEOUT_MS = 30_000;
+export const LIVE_STARTUP_TIMEOUT_MS = 10_000;
+let stallTimer: ReturnType<typeof setTimeout> | null = null;
+let stallFor: string | undefined;
+/** The media that showed its first frame (`playing` once), by `watchKey`. */
+let startedFor: string | undefined;
+/** The media the user paused (togglePlay, setPaused): its wait is not a hang. */
+let userPausedFor: string | undefined;
+
+/** The media a source plays (a title or subtitle patch is the same media); none for a zap's placeholder. */
+function watchKey(s: PlayerSource | undefined): string | undefined {
+  if (isPendingZap(s)) return undefined;
+  return s?.url ? `${s.url}|${s.ref ? itemKey(s.ref) : ''}|${s.episodeId ?? ''}` : undefined;
+}
+
+function clearStallTimer(): void {
+  if (stallTimer) clearTimeout(stallTimer);
+  stallTimer = null;
+  stallFor = undefined;
+}
+
+function noteUserPause(paused: boolean): void {
+  userPausedFor = paused ? watchKey(usePlayerStore.getState().source) : undefined;
+}
+
+/** Waiting on media that should be coming: loading, or a first frame that never came. */
+function waitingOnMedia(s: Pick<PlayerState, 'status' | 'mode'>, key: string): boolean {
+  if (s.mode === 'external') return false;
+  if (s.status === 'loading') return true;
+  return s.status === 'paused' && startedFor !== key && userPausedFor !== key;
+}
+
+usePlayerStore.subscribe((s) => {
+  const key = watchKey(s.source);
+  if (s.status === 'playing' && key) startedFor = key;
+  if (userPausedFor && userPausedFor !== key) userPausedFor = undefined;
+  const watching = !!key && waitingOnMedia(s, key);
+  if (watching && stallTimer && stallFor === key) return;
+  clearStallTimer();
+  if (!watching || !key) return;
+  stallFor = key;
+  const firstFrame = startedFor !== key;
+  stallTimer = setTimeout(
+    () => {
+      stallTimer = null;
+      stallFor = undefined;
+      const now = usePlayerStore.getState();
+      if (watchKey(now.source) !== key || !waitingOnMedia(now, key)) return;
+      useMediaStore.setState({ errorCode: 'timeout' });
+      reportStatus('error', 'Timed out waiting for the stream');
+    },
+    firstFrame && s.source?.isLive ? LIVE_STARTUP_TIMEOUT_MS : STARTUP_TIMEOUT_MS,
+  );
+});
+
+useMediaStore.subscribe((s) => {
+  if (s.upNext === upNextArmed) return;
+  upNextArmed = s.upNext;
+  if (upNextTimer) clearTimeout(upNextTimer);
+  upNextTimer = null;
+  const pending = s.upNext;
+  if (!pending) return;
+  upNextTimer = setTimeout(
+    () => {
+      upNextTimer = null;
+      if (useMediaStore.getState().upNext !== pending) return;
+      useMediaStore.setState({ upNext: undefined });
+      void playQueued(pending.source);
+    },
+    Math.max(0, pending.deadline - Date.now()),
+  );
+});
+
+/** "Play now" on the Up next card. */
+export function playUpNextNow(): void {
+  const pending = useMediaStore.getState().upNext;
+  if (!pending) return;
+  useMediaStore.setState({ upNext: undefined });
+  void playQueued(pending.source);
+}
+
+/** "Cancel" on the Up next card: stay on the finished item. */
+export function cancelUpNext(): void {
+  if (useMediaStore.getState().upNext) useMediaStore.setState({ upNext: undefined });
+}
+
+/**
+ * Play a queue entry, keeping the queue. Entries may be placeholders (a `ref` and `episodeId`
+ * with an empty `url`): those are resolved now, so short-lived links (Stalker) are fresh.
+ * Either way the entry picks up its saved position.
+ */
+async function playQueued(entry: PlayerSource): Promise<void> {
+  const { queue, mode } = usePlayerStore.getState();
+  // A queue of different items (not episodes of one series) asks the gate before the entry shows.
+  if (entry.ref && !gatePassed(entry.ref)) {
+    const seq = requestSeq;
+    if (!(await passGate({ ref: entry.ref, title: entry.title })) || seq !== requestSeq) return;
+  }
+  const run = async (): Promise<void> => {
+    const seq = ++requestSeq;
+    let resolved = entry;
+    try {
+      if (entry.ref && !entry.url) {
+        const sourceKind = await sourceKindOf(entry.ref.sourceId);
+        const args: PlayItemArgs = {
+          ref: entry.ref,
+          title: entry.title,
+          isLive: entry.isLive,
+          isRadio: entry.isRadio,
+          sourceKind,
+        };
+        if (entry.episodeId) args.episodeId = entry.episodeId;
+        if (entry.subtitle) args.subtitle = entry.subtitle;
+        if (entry.posterUrl) args.posterUrl = entry.posterUrl;
+        resolved = await resolveSource(args);
+        resolved = await withResume(resolved);
+      } else {
+        resolved = await freshResume(resolved);
+      }
+    } catch (err) {
+      if (seq !== requestSeq) return;
+      failResolve(err, { ...entry, url: '' }, run);
+      return;
+    }
+    if (seq !== requestSeq) return;
+    // The list owner may have rebuilt or refreshed the queue meanwhile: keep its newest copy.
+    const latest = usePlayerStore.getState().queue;
+    await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue, mode });
+  };
+  if (!entry.url) usePlayerStore.setState({ status: 'loading', error: undefined });
+  await run();
+}
+
+/** A resolution failed: show the error on the item it was for, and let Retry run it again. */
+function failResolve(err: unknown, placeholder: PlayerSource, again: () => Promise<void>): void {
+  failedResolve = again;
+  // The empty url makes the surfaces drop whatever played before (see InlinePlayer, MpvSurface).
+  const code = rpcErrorCode(err);
+  useMediaStore.setState({ errorCode: code });
+  usePlayerStore.setState({ status: 'error', error: errorMessage(err), source: placeholder });
+}
+
+/**
+ * Retry after a failure that happened before any media existed (no stream URL yet).
+ * Returns false when the surface should reload its media instead.
+ */
+export function retryResolve(): boolean {
+  const s = usePlayerStore.getState();
+  if (!failedResolve || !s.source || s.source.url) return false;
+  const again = failedResolve;
+  failedResolve = null;
+  usePlayerStore.setState({ status: 'loading', error: undefined });
+  useMediaStore.setState({ errorCode: undefined });
+  void again().catch(() => undefined);
+  return true;
+}
+
+/**
+ * Put the play state back to `paused` (the double click undoing its first click's toggle).
+ * Unlike `togglePlay` it does not read `status`, which lags the engine by an event.
+ */
+export function setPaused(paused: boolean): void {
+  const s = usePlayerStore.getState();
+  if (!s.source || s.mode === 'external') return;
+  noteUserPause(paused);
+  if (paused) controller?.pause();
+  else controller?.play();
+  if (!controller) usePlayerStore.setState({ status: paused ? 'paused' : 'playing' });
 }
 
 /** Start the current item again from the beginning (the dock's replay affordance). */
@@ -572,6 +995,7 @@ export function replay(): void {
   const s = usePlayerStore.getState();
   if (!s.source || s.mode === 'external') return;
   useMediaStore.setState({ upNext: undefined });
+  upNextHandledFor = undefined;
   lastSavedPosition = -1;
   if (!controller) {
     const { resumeSeconds: _drop, ...fresh } = s.source;
@@ -628,6 +1052,49 @@ export interface PlayItemArgs {
   isLive: boolean;
   isRadio?: boolean;
   sourceKind: SourceKind;
+  /** The item's category when the caller knows it; the parental gate looks it up otherwise. */
+  categoryId?: string;
+  /**
+   * The channel row the caller already holds (a zap's neighbour, a list click): an m3u channel
+   * with its URL in the row plays without asking the catalog for the item again.
+   */
+  channel?: Channel;
+}
+
+/** True when `ref` is the item playing now or the one the parental gate last let through. */
+function gatePassed(ref: ItemRef): boolean {
+  const key = itemKey(ref);
+  const current = usePlayerStore.getState().source?.ref;
+  return key === allowedRefKey || (!!current && itemKey(current) === key);
+}
+
+/** Ask the parental gate (`parentalHook`); a pass is remembered for the item. */
+async function passGate(item: PlaybackGateItem): Promise<boolean> {
+  let allowed: boolean;
+  try {
+    allowed = await ensurePlaybackAllowed(item);
+  } catch {
+    // The gate could not decide (its lookup failed): stay closed, like a cancelled prompt.
+    allowed = false;
+  }
+  if (allowed) allowedRefKey = itemKey(item.ref);
+  return allowed;
+}
+
+// Hide mode refused an item the player held on to: the resume record must not offer it again
+// on the next reload (restorePlayback replays its stored URL).
+onPlaybackHidden((item) => {
+  const kept = readResume()?.source.ref;
+  if (kept && itemKey(kept) === itemKey(item.ref)) clearResume();
+});
+
+/**
+ * Parental controls locked again (`parental.changed` with no unlock running: Lock now, the
+ * unlock ran out, a new lock). The last pass no longer counts, so a replay, failover or queue
+ * advance of that item asks again. Called by the player's parental guard.
+ */
+export function forgetGatePass(): void {
+  allowedRefKey = null;
 }
 
 /** Resolve a catalog item to a PlayerSource by source kind. Exported for tests. */
@@ -639,9 +1106,13 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
   } else if (args.sourceKind === 'stalker') {
     resolved = await rpc('stalker.streamUrl', episodeId ? { ref, episodeId } : { ref });
   } else {
+    const known = args.channel && itemKey(args.channel.ref) === itemKey(ref) && args.channel.url ? args.channel : undefined;
     const [item, src] = await Promise.all([
-      rpc('catalog.item', { ref }),
-      rpc('sources.get', { id: ref.sourceId }).catch(() => null),
+      known ?? rpc('catalog.item', { ref }),
+      // The source's own headers change only with an edit (`sources.changed` invalidates them).
+      queryClient
+        .fetchQuery({ queryKey: rpcKey('sources.get', { id: ref.sourceId }), queryFn: () => rpc('sources.get', { id: ref.sourceId }), retry: false })
+        .catch(() => null),
     ]);
     const url = 'url' in item ? item.url : undefined;
     if (!url) throw new Error('This item has no stream URL');
@@ -675,24 +1146,139 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
 }
 
 async function withResume(source: PlayerSource): Promise<PlayerSource> {
-  if (source.resumeSeconds !== undefined || !tracksPosition(source)) return source;
-  try {
-    const pos = await rpc(
-      'positions.get',
-      source.episodeId ? { ref: source.ref, episodeId: source.episodeId } : { ref: source.ref },
-    );
-    if (pos && pos.positionSeconds > 5) {
-      const dur = pos.durationSeconds;
-      if (!dur || pos.positionSeconds < dur * 0.95) return { ...source, resumeSeconds: pos.positionSeconds };
+  if (source.resumeSeconds !== undefined) {
+    const { resumeSeconds: given, ...rest } = source;
+    // The core fills it for Xtream from any saved row; a few seconds in is not a resume.
+    if (source.isLive || given <= MIN_RESUME_SECONDS) return rest;
+    if (!tracksPosition(source)) return source;
+    // A finished item is kept as a watched row at its end (C13): replaying it starts over.
+    try {
+      const saved = await savedPosition(source);
+      if (saved && (isFinished(saved) || isPastEnd(given, saved.durationSeconds))) return rest;
+    } catch {
+      // No saved row to check against: keep the given point.
     }
+    return source;
+  }
+  if (!tracksPosition(source)) return source;
+  try {
+    return withSavedPosition(source, await savedPosition(source));
   } catch {
     // no saved position
   }
   return source;
 }
 
+function savedPosition(source: PlayerSource & { ref: ItemRef }): Promise<PlaybackPosition | null> {
+  return rpc('positions.get', source.episodeId ? { ref: source.ref, episodeId: source.episodeId } : { ref: source.ref });
+}
+
+/** Share of the duration from which an item counts as finished (the core marks it watched there). */
+const FINISHED_RATIO = 0.95;
+
+function isPastEnd(seconds: number, duration: number | undefined): boolean {
+  return !!duration && seconds >= duration * FINISHED_RATIO;
+}
+
+/** Share of the duration a watched movie's replay must reach before it is a resume point again. */
+const REPLAY_RESUME_RATIO = 0.05;
+
+/**
+ * A watched movie replayed part-way (Run 2): the core keeps its watched flag on a partial save of
+ * an item-level row and stores the replay position. That position is a resume point when the
+ * duration is known and it lies between 5 % and 95 % of it; the watched tick stays. Episodes
+ * lose the flag on a partial save instead, so a watched episode row is always finished.
+ */
+export function isWatchedReplay(
+  pos: Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> & Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>,
+): boolean {
+  if (pos.watched !== true || pos.episodeId || pos.ref?.contentType === 'series') return false;
+  const d = pos.durationSeconds;
+  return !!d && d > 0 && pos.positionSeconds >= d * REPLAY_RESUME_RATIO && !isPastEnd(pos.positionSeconds, d);
+}
+
+/** A saved row for an item that was finished or marked watched: not a resume point (but see {@link isWatchedReplay}). */
+function isFinished(pos: PlaybackPosition): boolean {
+  if (isWatchedReplay(pos)) return false;
+  return pos.watched || isPastEnd(pos.positionSeconds, pos.durationSeconds);
+}
+
+/** The one resume rule: more than MIN_RESUME_SECONDS in, and not finished or watched (a watched movie's replay excepted). */
+function withSavedPosition(source: PlayerSource, pos: PlaybackPosition | null | undefined): PlayerSource {
+  if (pos && pos.positionSeconds > MIN_RESUME_SECONDS && !isFinished(pos)) {
+    return { ...source, resumeSeconds: pos.positionSeconds };
+  }
+  return source;
+}
+
+/**
+ * A queue entry's resume point was copied when the queue was built, so it can be stale: the
+ * episode was finished since (Prev back to it), or watched further in another session. Ask
+ * for the saved position now; only when that fails is the copied one used.
+ */
+async function freshResume(entry: PlayerSource): Promise<PlayerSource> {
+  if (!tracksPosition(entry)) return withResume(entry);
+  const { resumeSeconds: _copied, ...bare } = entry;
+  try {
+    return withSavedPosition(bare, await savedPosition(entry));
+  } catch {
+    return withResume(entry);
+  }
+}
+
 export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource[] }): Promise<void> {
+  await startItem(args, opts);
+}
+
+/**
+ * How a start request ended. `refused`: the parental gate said no (prompt cancelled, check
+ * failed, hidden), and what was playing is untouched. `superseded`: a newer request took over.
+ */
+export type StartOutcome = 'started' | 'refused' | 'superseded';
+
+/**
+ * A play that does not walk a channel list ends list zapping: the next zap follows the playing
+ * channel's own source, since a channel picked elsewhere may not be in the list (lists.neighbors
+ * would answer not_found). Playing from a list sets the list again afterwards (lists/lib/play.ts).
+ */
+function leaveListZap(ref: ItemRef): void {
+  if (usePlayerStore.getState().zapContext?.listId) usePlayerStore.setState({ zapContext: { sourceId: ref.sourceId } });
+}
+
+/**
+ * `playItem` with its outcome. `onAllowed` runs once the gate let the item through and before
+ * anything else, so a zap's tuner readout never shows a channel the PIN prompt then refuses.
+ * `keepList`: the play steps through the current channel list (a zap, the channel panel).
+ */
+export async function startItem(
+  args: PlayItemArgs,
+  opts?: {
+    queue?: PlayerSource[];
+    onAllowed?: () => void;
+    keepList?: boolean;
+    /** The subtitle, still on its way (asked in parallel with the gate and the stream lookup). */
+    subtitle?: Promise<string | undefined>;
+    /**
+     * Told the request numbers this start takes: its own (`onRequest`, first thing), then its
+     * play's (`onPlay`, as the play begins). A zap burst follows its own tune with them.
+     */
+    onRequest?: (seq: number) => void;
+    onPlay?: (seq: number) => void;
+  },
+): Promise<StartOutcome> {
   const seq = ++requestSeq;
+  opts?.onRequest?.(seq);
+  // The engine downloads while the gate and the stream lookup run.
+  preloadEngineFor(args.channel?.url);
+  // The user picked something: a countdown firing during the lookup must not override it.
+  cancelUpNext();
+  // Parental gate first, so a locked item's title never shows behind the PIN prompt.
+  const gate: PlaybackGateItem = args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title };
+  if (!(await passGate(gate))) return seq === requestSeq ? 'refused' : 'superseded';
+  if (seq !== requestSeq) return 'superseded';
+  opts?.onAllowed?.();
+  if (!opts?.keepList) leaveListZap(args.ref);
+  const queueOpts = opts?.queue ? { queue: opts.queue } : undefined;
   usePlayerStore.setState({
     status: 'loading',
     error: undefined,
@@ -711,16 +1297,32 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
     source = await withResume(await resolveSource(args));
   } catch (err) {
     // A newer request won the race: do not clobber it.
-    if (seq !== requestSeq) return;
-    usePlayerStore.setState({ status: 'error', error: errorMessage(err) });
+    if (seq !== requestSeq) return 'superseded';
+    const placeholder: PlayerSource = { url: '', kind: 'direct', title: args.title, isLive: args.isLive, isRadio: !!args.isRadio, ref: args.ref };
+    if (args.episodeId) placeholder.episodeId = args.episodeId;
+    if (args.subtitle) placeholder.subtitle = args.subtitle;
+    if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
+    failResolve(err, placeholder, () => playItem(args, queueOpts));
     throw err;
   }
-  if (seq !== requestSeq) return;
-  await usePlayerStore.getState().play(source, opts);
+  if (opts?.subtitle && !source.subtitle) {
+    const subtitle = await opts.subtitle;
+    if (subtitle) source = { ...source, subtitle };
+  }
+  if (seq !== requestSeq) return 'superseded';
+  const playing = usePlayerStore.getState().play(source, queueOpts);
+  // play() took its own request number before its first await.
+  opts?.onPlay?.(requestSeq);
+  await playing;
+  return 'started';
 }
 
 export async function playSource(source: PlayerSource): Promise<void> {
   const seq = ++requestSeq;
+  preloadEngineFor(source.url);
+  cancelUpNext();
+  if (source.ref && !(await passGate({ ref: source.ref, title: source.title }))) return;
+  if (seq !== requestSeq) return;
   const withPos = await withResume(source);
   if (seq !== requestSeq) return;
   await usePlayerStore.getState().play(withPos);
@@ -730,6 +1332,8 @@ export async function playSource(source: PlayerSource): Promise<void> {
 export async function restorePlayback(): Promise<boolean> {
   const rec = readResume();
   if (!rec || rec.mode === 'external') return false;
+  // A locked item from the last session asks again (its unlock did not survive the restart).
+  if (rec.source.ref && !(await passGate({ ref: rec.source.ref, title: rec.source.title }))) return false;
   const source: PlayerSource = { ...rec.source };
   if (!source.isLive && rec.positionSeconds > 0) source.resumeSeconds = rec.positionSeconds;
   else delete source.resumeSeconds;
@@ -741,14 +1345,23 @@ export async function restorePlayback(): Promise<boolean> {
 // Channel zapping
 // ---------------------------------------------------------------------------
 
-/** Title of the programme airing now on `ref` (shifted by `epgOffsetMinutes`), if the guide has one. */
-async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined): Promise<string | undefined> {
-  try {
-    const res = await rpc('epg.nowNext', offsetMinutes ? { refs: [ref], offsetMinutes } : { refs: [ref] });
-    return res[itemKey(ref)]?.now?.title || undefined;
-  } catch {
-    return undefined;
-  }
+/**
+ * Title of the programme airing now on `ref`, if the guide has one. Shares the player's one
+ * now/next cache (`nowNext.ts`) with the zap banner, so a zap asks the guide once.
+ */
+export async function nowTitle(ref: ItemRef): Promise<string | undefined> {
+  return (await fetchNowNext(ref))?.now?.title || undefined;
+}
+
+/** The airing title when the now/next cache already has it; `undefined` when it has to ask. */
+function peekNowTitle(ref: ItemRef): string | null | undefined {
+  const hit = peekNowNext(ref);
+  return hit === undefined ? undefined : hit?.now?.title || null;
+}
+
+/** The name the live views show for `channel` (`settings.stripCountryPrefix`). */
+function channelTitle(channel: Channel, settings: Settings | null): string {
+  return displayChannelName(channel.name, settings?.stripCountryPrefix) || channel.name;
 }
 
 /**
@@ -756,48 +1369,639 @@ async function nowTitle(ref: ItemRef, offsetMinutes: number | undefined): Promis
  * live views show (`settings.stripCountryPrefix`) and subtitles it with the airing programme,
  * like the list click path.
  */
-export async function playChannel(channel: Channel, sourceKind?: SourceKind): Promise<void> {
-  const settings = await getSettings();
-  const name = displayChannelName(channel.name, settings?.stripCountryPrefix) || channel.name;
-  // Tuner readout: number big, name below.
-  showOsd(channel.number !== undefined ? String(channel.number) : name, channel.number !== undefined ? name : undefined);
-  const [kind, subtitle] = await Promise.all([
-    sourceKind ?? sourceKindOf(channel.ref.sourceId),
-    nowTitle(channel.ref, settings?.epgOffsetMinutes),
-  ]);
+export async function playChannel(channel: Channel, sourceKind?: SourceKind, opts?: { keepList?: boolean }): Promise<void> {
+  await tuneChannel(channel, sourceKind, opts?.keepList ? { keepList: true } : {});
+}
+
+/**
+ * Channels this session learned from neighbour lookups and zaps, so the zap banner and the
+ * stream URL lookup do not ask the catalog for them again. Dropped on a channel edit. Each row
+ * also answers `catalog.item` for its channel in the query cache (the live page asks it for the
+ * playing channel), unless that holds a row already.
+ */
+const knownChannels = new Map<string, Channel>();
+const KNOWN_CHANNELS_MAX = 256;
+
+function rememberChannel(ch: Channel): void {
+  const key = itemKey(ch.ref);
+  knownChannels.delete(key);
+  knownChannels.set(key, ch);
+  const itemQuery = rpcKey('catalog.item', { ref: ch.ref });
+  if (queryClient.getQueryData(itemQuery) === undefined) queryClient.setQueryData(itemQuery, ch);
+  while (knownChannels.size > KNOWN_CHANNELS_MAX) {
+    const oldest = knownChannels.keys().next().value;
+    if (oldest === undefined) break;
+    knownChannels.delete(oldest);
+  }
+}
+
+/** A channel row this session already has (number, logo, name), without asking the catalog. */
+export function knownChannel(ref: ItemRef): Channel | undefined {
+  return knownChannels.get(itemKey(ref));
+}
+
+/** A channel edit on `sourceId` (or anywhere): the rows held for it are out of date. */
+export function forgetKnownChannels(sourceId?: string): void {
+  if (!sourceId) {
+    knownChannels.clear();
+    return;
+  }
+  for (const [key, ch] of knownChannels) if (ch.ref.sourceId === sourceId) knownChannels.delete(key);
+}
+
+/**
+ * A channel edit on `sourceId` (a rename): the playing channel's title follows, so the player's
+ * title and the zap banner stop showing the old name.
+ */
+export async function refreshPlayingChannel(sourceId?: string): Promise<void> {
+  const s = usePlayerStore.getState().source;
+  const ref = s?.ref;
+  if (!s || !ref || !s.isLive || (sourceId && ref.sourceId !== sourceId)) return;
+  if (ref.contentType !== 'live' && ref.contentType !== 'radio') return;
+  let name: string | undefined;
+  try {
+    const item = await queryClient.fetchQuery({
+      queryKey: rpcKey('catalog.item', { ref }),
+      queryFn: () => rpc('catalog.item', { ref }),
+      staleTime: 0,
+      retry: false,
+    });
+    name = 'name' in item && typeof item.name === 'string' ? item.name : undefined;
+  } catch {
+    return;
+  }
+  const cur = usePlayerStore.getState().source;
+  if (!name || !cur?.ref || itemKey(cur.ref) !== itemKey(ref)) return;
+  const title = displayChannelName(name, peekSettings()?.stripCountryPrefix) || name;
+  if (title !== cur.title) usePlayerStore.setState({ source: { ...cur, title } });
+}
+
+interface TuneOptions {
+  /** The play steps through the current channel list (a zap, the channel panel). */
+  keepList?: boolean;
+  /** Show the tuner readout once the gate lets the channel through (asked then); default yes. */
+  readout?: boolean | (() => boolean);
+  /** Settings already read (a zap reads them before it claims its request). */
+  settings?: Settings | null;
+  onRequest?: (seq: number) => void;
+  onPlay?: (seq: number) => void;
+}
+
+/** `playChannel` with its outcome: a zap steps past a channel the parental gate refused. */
+async function tuneChannel(channel: Channel, sourceKind?: SourceKind, opts: TuneOptions = {}): Promise<StartOutcome> {
+  preloadEngineFor(channel.url);
+  rememberChannel(channel);
+  const settings = opts.settings !== undefined ? opts.settings : (peekSettings() ?? (await getSettings()));
+  const name = channelTitle(channel, settings);
+  const kind = sourceKind ?? knownSourceKind(channel.ref.sourceId) ?? (await sourceKindOf(channel.ref.sourceId));
+  // The guide is asked alongside the gate and the stream lookup, not before them (a zap's
+  // press already asked it, so this is usually a cache hit).
+  const cached = peekNowTitle(channel.ref);
   const args: PlayItemArgs = {
     ref: channel.ref,
     title: name,
     isLive: true,
     isRadio: channel.isRadio,
     sourceKind: kind,
+    channel,
   };
+  if (channel.categoryId) args.categoryId = channel.categoryId;
   if (channel.logoUrl) args.posterUrl = channel.logoUrl;
-  if (subtitle) args.subtitle = subtitle;
-  await playItem(args);
+  if (cached) args.subtitle = cached;
+  // Tuner readout: number big, name below. Only once the gate let the channel through, so a
+  // cancelled PIN prompt leaves no locked channel's name on screen.
+  const { readout = true, keepList = false, onRequest, onPlay } = opts;
+  return startItem(args, {
+    onAllowed: () => {
+      passNowNext(channel.ref);
+      if (typeof readout === 'function' ? readout() : readout) showZapReadout(channel, name);
+    },
+    keepList,
+    ...(cached === undefined ? { subtitle: nowTitle(channel.ref) } : {}),
+    ...(onRequest ? { onRequest } : {}),
+    ...(onPlay ? { onPlay } : {}),
+  });
 }
 
-function currentLiveRef(): ItemRef | undefined {
+/** Tuner readout: number big, name below. `locked`: a locked channel the zap is passing. */
+function showZapReadout(channel: Channel, name: string, locked = false): void {
+  showOsd(
+    channel.number !== undefined ? String(channel.number) : name,
+    channel.number !== undefined ? name : undefined,
+    locked ? { locked: true } : undefined,
+  );
+}
+
+/**
+ * The channel a zap steps from: live TV, or catch-up of a live channel (a zap there leaves the
+ * archive for the neighbour's live stream).
+ */
+function currentZapRef(): ItemRef | undefined {
   const { source } = usePlayerStore.getState();
-  if (!source?.ref || !source.isLive) return undefined;
-  return source.ref;
+  if (!source?.ref) return undefined;
+  if (source.isLive || source.ref.contentType === 'live') return source.ref;
+  return undefined;
 }
 
-/** Move to the neighbor channel in the current list context. Returns the channel played, if any. */
-export async function zap(direction: 'up' | 'down'): Promise<Channel | undefined> {
-  const ref = currentLiveRef();
-  if (!ref) return undefined;
-  const ctx = usePlayerStore.getState().zapContext;
+/** Channel up/down applies to what plays now (live TV, or catch-up of a channel). */
+export function canZap(s: Pick<PlayerState, 'source'>): boolean {
+  return !!s.source?.ref && (s.source.isLive || s.source.ref.contentType === 'live');
+}
+
+/** Most neighbours one zap press looks at while stepping past refused or locked channels. */
+export const ZAP_SKIP_LIMIT = 50;
+/**
+ * Quiet time that ends a burst of channel up/down presses. A press on its own tunes at once
+ * (on a source that allows one connection it too waits for quiet); presses that follow within
+ * this time move the banner at once but wait for quiet to tune, so only the channel the burst
+ * stops on opens a stream.
+ */
+export const ZAP_SETTLE_MS = 250;
+/** Neighbour answers are reused this long (channel edits and imports invalidate them sooner). */
+const NEIGHBOURS_STALE_MS = 30_000;
+
+type Neighbours = { prev?: Channel | null; next?: Channel | null };
+
+function neighboursKey(ref: ItemRef, ctx: ZapContext | undefined): readonly unknown[] {
+  if (ctx?.listId) return rpcKey('lists.neighbors', { id: ctx.listId, ref });
   const args: { ref: ItemRef; categoryId?: string } = { ref };
   if (ctx?.categoryId && ctx.sourceId === ref.sourceId) args.categoryId = ctx.categoryId;
-  const res = await rpc('catalog.neighbors', args);
+  return rpcKey('catalog.neighbors', args);
+}
+
+/**
+ * The channels either side of `ref` in the zap context: a channel list's order (across
+ * sources), else the source's (or its category's). Answers sit in the query cache, where
+ * channel edits, list writes and imports invalidate them (`catalog.`, `lists.` prefixes).
+ */
+async function neighboursOf(ref: ItemRef): Promise<Neighbours> {
+  let ctx = usePlayerStore.getState().zapContext;
+  if (ctx?.listId) {
+    const listId = ctx.listId;
+    try {
+      return await queryClient.fetchQuery({
+        queryKey: neighboursKey(ref, ctx),
+        queryFn: () => rpc('lists.neighbors', { id: listId, ref }),
+        staleTime: NEIGHBOURS_STALE_MS,
+        retry: false,
+      });
+    } catch (err) {
+      if (rpcErrorCode(err) !== 'not_found') throw err;
+      // The list was deleted, or no longer holds this channel: zap through its source instead.
+      ctx = { sourceId: ref.sourceId };
+      if (usePlayerStore.getState().zapContext?.listId === listId) usePlayerStore.setState({ zapContext: ctx });
+    }
+  }
+  const key = neighboursKey(ref, ctx);
+  const args = key[1] as { ref: ItemRef; categoryId?: string };
+  return queryClient.fetchQuery({
+    queryKey: key,
+    queryFn: () => rpc('catalog.neighbors', args),
+    staleTime: NEIGHBOURS_STALE_MS,
+    retry: false,
+  });
+}
+
+/** After a tune: the next press either way finds its neighbour without a round trip. */
+function prefetchNeighbours(ref: ItemRef): void {
+  void neighboursOf(ref)
+    .then((res) => {
+      for (const ch of [res?.prev, res?.next]) if (ch) rememberChannel(ch);
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * After any live tune (a click on a row, a zap, the history, a remote), the channels either side
+ * are asked for as soon as the tune is done (and the page set its zap context), so the first
+ * channel up/down after it comes from the cache.
+ */
+let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function prefetchAfterTune(): void {
+  prefetchTimer = null;
+  const s = usePlayerStore.getState();
+  const src = s.source;
+  if (!src?.ref || !src.url || isPendingZap(src) || s.status === 'error' || !canZap(s)) return;
+  prefetchNeighbours(src.ref);
+  void prefetchConnectionLimit(src.ref.sourceId);
+}
+
+/** How long a known account status counts for the zap (the multi-view banner keeps it as long). */
+const ACCOUNT_STALE_MS = 60_000;
+
+/** `account.status` for a source: the multi-view's connection banner reads the same entry. */
+function accountKey(sourceId: string): readonly unknown[] {
+  return rpcKey('account.status', { sourceId });
+}
+
+/** How soon an empty or failed answer is asked again (the core is asking the panel meanwhile). */
+const ACCOUNT_RETRY_MS = 2_000;
+
+/**
+ * A zap on this source opens only the channel a burst stops on: it allows one connection at a
+ * time (an Xtream panel's `user_info.max_connections` of 1, the account status the core keeps),
+ * or it is an Xtream source whose status is not known yet. Other kinds report no limit.
+ */
+function holdsZapTune(sourceId: string): boolean {
+  const status = queryClient.getQueryData<AccountStatus | null>(accountKey(sourceId));
+  if (status) return status.maxConnections === 1;
+  return knownSourceKind(sourceId) === 'xtream';
+}
+
+/**
+ * Asks for an Xtream source's account status ahead of the next zap, so its presses know the
+ * connection limit. The core answers from its cache; it has none before its first check (which
+ * it starts then), so an empty answer is asked again on a tune or press ACCOUNT_RETRY_MS later.
+ * Resolves when the answer is in (joining the request under way, if any); undefined when none
+ * is asked.
+ */
+function prefetchConnectionLimit(sourceId: string): Promise<unknown> | undefined {
+  if (knownSourceKind(sourceId) !== 'xtream') return undefined;
+  const state = queryClient.getQueryState<AccountStatus | null>(accountKey(sourceId));
+  if (state && state.fetchStatus !== 'fetching') {
+    const now = Date.now();
+    if (state.data && now - state.dataUpdatedAt < ACCOUNT_STALE_MS) return undefined;
+    if (!state.data && now - Math.max(state.dataUpdatedAt, state.errorUpdatedAt) < ACCOUNT_RETRY_MS) return undefined;
+  }
+  return queryClient
+    .fetchQuery({ queryKey: accountKey(sourceId), queryFn: () => rpc('account.status', { sourceId }), staleTime: 0, retry: false })
+    .catch(() => undefined);
+}
+
+usePlayerStore.subscribe((s, prev) => {
+  if ((s.source === prev.source && s.zapContext === prev.zapContext) || prefetchTimer) return;
+  prefetchTimer = setTimeout(prefetchAfterTune, 0);
+});
+
+/** A run of channel up/down presses, up to the tune it settles on. */
+interface ZapBurst {
+  /** Where the burst started (the channel playing before the first press). */
+  origin: ItemRef;
+  direction: 'up' | 'down';
+  /** The channel the presses so far land on. */
+  target: Channel;
+  /** Presses so far: a placeholder or a tune belongs to the press it was made for. */
+  press: number;
+  /** The latest target put on screen (never a locked one): the fallback when the tune is refused. */
+  shown?: Channel;
+  /**
+   * `requestSeq` the burst holds: its latest press's, then its own tune's (a tune takes request
+   * numbers too). Any other request since (a click, Stop) ends the burst.
+   */
+  seq: number;
+  /** ZAP_SETTLE_MS passed without a press: the next press starts a new burst. */
+  quiet: boolean;
+  /** The press whose tune is under way. */
+  tuning: number | null;
+  /** The press whose tune began to play (or kept the picture that was up). */
+  tunedPress: number | null;
+  /** Where the latest finished tune landed, and for which press. */
+  landed?: { press: number; channel: Channel | undefined };
+  timer: ReturnType<typeof setTimeout> | null;
+  done: Promise<Channel | undefined>;
+  finish(ch: Channel | undefined): void;
+}
+
+let burst: ZapBurst | null = null;
+/** Presses step one after another, each from the channel the one before landed on. */
+let zapQueue: Promise<unknown> = Promise.resolve();
+/** Presses waiting in `zapQueue`: a press with more behind it does not tune on its own. */
+let queuedPresses = 0;
+/** Placeholders a zap shows while it waits to tune (not a visit or a play of their channel). */
+const pendingSources = new WeakSet<PlayerSource>();
+/** Placeholders that name a locked channel the zap is passing (parental Ask mode). */
+const lockedSources = new WeakSet<PlayerSource>();
+
+/** The item a placeholder took the place of (whose picture it keeps up, if it had one), as it was. */
+interface HeldItem {
+  source: PlayerSource;
+  status: PlayerState['status'];
+  error?: string;
+}
+const heldItems = new WeakMap<PlayerSource, HeldItem>();
+
+/** True for the placeholder a channel zap shows while its burst waits to tune. */
+export function isPendingZap(source: PlayerSource | undefined): boolean {
+  return !!source && pendingSources.has(source);
+}
+
+/**
+ * True for a zap placeholder that names a locked channel (parental Ask mode): its number and
+ * name show with a lock, without its logo or guide, until the PIN prompt lets it through.
+ */
+export function isLockedZap(source: PlayerSource | undefined): boolean {
+  return !!source && lockedSources.has(source);
+}
+
+function owns(b: ZapBurst): boolean {
+  return b.seq === requestSeq;
+}
+
+/** Press `press` is still the burst's latest, and nothing else took over. */
+function current(b: ZapBurst, press: number): boolean {
+  return burst === b && b.press === press && owns(b);
+}
+
+function newBurst(origin: ItemRef, direction: 'up' | 'down', target: Channel): ZapBurst {
+  let finish: (ch: Channel | undefined) => void = () => undefined;
+  const done = new Promise<Channel | undefined>((resolve) => {
+    finish = resolve;
+  });
+  return { origin, direction, target, press: 0, seq: 0, quiet: false, tuning: null, tunedPress: null, timer: null, done, finish };
+}
+
+function endBurst(b: ZapBurst, ch: Channel | undefined): void {
+  if (b.timer) clearTimeout(b.timer);
+  b.timer = null;
+  if (burst === b) burst = null;
+  b.finish(ch);
+}
+
+function gateItemOf(ch: Channel): PlaybackGateItem {
+  return ch.categoryId ? { ref: ch.ref, categoryId: ch.categoryId } : { ref: ch.ref };
+}
+
+/** The item on screen before the zap's placeholders: the current one, or the one they replaced. */
+function itemOnScreen(): HeldItem | undefined {
+  const { source, status, error } = usePlayerStore.getState();
+  if (!source) return undefined;
+  if (pendingSources.has(source)) return heldItems.get(source);
+  return error === undefined ? { source, status } : { source, status, error };
+}
+
+/** Put back the item the placeholder on screen took the place of. */
+function putBackHeld(): boolean {
+  const cur = usePlayerStore.getState().source;
+  const held = cur && pendingSources.has(cur) ? heldItems.get(cur) : undefined;
+  if (!held) return false;
+  usePlayerStore.setState({ source: held.source, status: held.status, error: held.error });
+  return true;
+}
+
+/**
+ * Put a burst's target on screen at once: the player's title, the zap banner and the tuner
+ * readout move to it, over the picture that was up. That picture plays on until the new
+ * channel is tuned, so there is no black gap, and zapping straight back keeps it. A locked
+ * channel (Ask mode) shows its number and name with a lock, without logo or guide; Hide mode
+ * never names it.
+ */
+async function showZapTarget(b: ZapBurst, target: Channel, press: number): Promise<void> {
+  const locked = await lockedNow(gateItemOf(target));
+  if (locked && (await hideModeNow())) return;
+  // A later press, another request, or this press's own tune got there first.
+  if (!current(b, press) || b.tunedPress === press) return;
+  if (!locked) b.shown = target;
+  const name = channelTitle(target, peekSettings());
+  const held = itemOnScreen();
+  // The picture to keep up: the item's stream, unless it failed (its error goes with it).
+  const media = held?.source.url && held.status !== 'error' ? held.source : undefined;
+  const placeholder: PlayerSource = {
+    url: media?.url ?? '',
+    kind: media?.kind ?? 'direct',
+    title: name,
+    isLive: true,
+    isRadio: !!target.isRadio,
+    ref: target.ref,
+  };
+  // The surfaces key their media on these: the same values keep the picture.
+  if (media?.headers) placeholder.headers = media.headers;
+  if (media?.episodeId) placeholder.episodeId = media.episodeId;
+  if (held) heldItems.set(placeholder, held);
+  if (locked) {
+    lockedSources.add(placeholder);
+  } else {
+    if (target.logoUrl) placeholder.posterUrl = target.logoUrl;
+    const subtitle = peekNowTitle(target.ref);
+    if (subtitle) placeholder.subtitle = subtitle;
+  }
+  pendingSources.add(placeholder);
+  failedResolve = null;
+  usePlayerStore.setState({
+    source: placeholder,
+    status: 'loading',
+    error: undefined,
+    positionSeconds: 0,
+    durationSeconds: undefined,
+    dock: stageCount > 0 ? 'stage' : usePlayerStore.getState().dock === 'hidden' ? 'mini' : usePlayerStore.getState().dock,
+  });
+  showZapReadout(target, name, locked);
+}
+
+/** One press: step from where the burst stands, show the new target, and tune or wait for quiet. */
+async function stepZap(direction: 'up' | 'down'): Promise<ZapBurst | undefined> {
+  queuedPresses = Math.max(0, queuedPresses - 1);
+  // A burst that went quiet may still be tuning; it ends itself when this press takes over.
+  const prior = burst && owns(burst) ? burst : null;
+  if (burst && !prior) endBurst(burst, undefined); // another request took over while it waited
+  let live = prior && !prior.quiet ? prior : null;
+  const from = live?.target.ref ?? currentZapRef();
+  if (!from) return undefined;
+  const seq = requestSeq;
+  const res = await neighboursOf(from);
+  // Only the burst's own tune may have moved requestSeq on meanwhile.
+  if (prior ? !owns(prior) : seq !== requestSeq) {
+    if (live) endBurst(live, undefined);
+    return undefined;
+  }
+  // It went quiet while the lookup ran (and tuned): this press starts a new burst from there.
+  if (live && (live.quiet || burst !== live)) live = null;
   const target = direction === 'up' ? res.prev : res.next;
-  if (target) await playChannel(target);
-  return target;
+  // The end of the list: earlier presses still land where they were.
+  if (!target) return live ?? undefined;
+  for (const ch of [res.prev, res.next]) if (ch) rememberChannel(ch);
+  const fresh = !live;
+  const b = live ?? newBurst(from, direction, target);
+  b.direction = direction;
+  b.target = target;
+  b.press++;
+  b.quiet = false;
+  // Supersedes the burst's own tune for an earlier press while that has not started playing.
+  b.seq = ++requestSeq;
+  burst = b;
+  cancelUpNext();
+  if (b.timer) clearTimeout(b.timer);
+  b.timer = setTimeout(() => onQuiet(b), ZAP_SETTLE_MS);
+  // A press on its own tunes at once, unless the source allows one connection: a press that
+  // follows within ZAP_SETTLE_MS would open a second stream while the provider still counts the
+  // first (panels keep a closed one counted for a while), so there the burst opens only the
+  // channel it stops on, after the quiet. An Xtream source whose limit is not known yet waits the
+  // same way while its status is asked; a press on its own tunes once the answer allows more than
+  // one (before the quiet, if no press came meanwhile). The guide answer the banner and the tune
+  // both use: one a view already holds, else asked now for a press that tunes at once, and for
+  // the others once the burst stops on them (not for each channel it passes).
+  const sourceId = target.ref.sourceId;
+  const alone = fresh && queuedPresses === 0;
+  const tunesNow = alone && !holdsZapTune(sourceId);
+  const limit = prefetchConnectionLimit(sourceId);
+  // Its guide is asked now too, as for a press that tunes at once.
+  const awaitsLimit = alone && !tunesNow && !!limit;
+  if (awaitsLimit) {
+    const press = b.press;
+    void limit.then(() => {
+      if (current(b, press) && !b.quiet && b.tuning === null && b.tunedPress === null && queuedPresses === 0 && !holdsZapTune(sourceId)) void runTune(b, press);
+    });
+  }
+  if (!tunesNow && !awaitsLimit && peekNowNext(target.ref) === undefined) holdNowNext(target.ref, ZAP_SETTLE_MS);
+  void fetchNowNext(target.ref);
+  // Nothing on screen moves when the parental lookup fails: the tune asks the gate itself.
+  void showZapTarget(b, target, b.press).catch(() => undefined);
+  preloadEngineFor(target.url);
+  // The next press in this burst steps from the target without a round trip.
+  prefetchNeighbours(target.ref);
+  // One with more presses queued behind it, and presses that follow it within ZAP_SETTLE_MS, wait
+  // for quiet: the channels passed never open a stream.
+  if (tunesNow) void runTune(b, b.press);
+  return b;
+}
+
+/** ZAP_SETTLE_MS without a press: tune where the burst stopped, unless its tune covers that already. */
+function onQuiet(b: ZapBurst): void {
+  b.timer = null;
+  b.quiet = true;
+  if (burst !== b || !owns(b)) return endBurst(b, undefined);
+  // That tune ends the burst when it is done.
+  if (b.tuning === b.press) return;
+  if (b.landed?.press === b.press) return endBurst(b, b.landed.channel);
+  void runTune(b, b.press);
+}
+
+/** A tune for press `press` is done (`channel`: where it started playing, if anywhere). */
+function landed(b: ZapBurst, press: number, channel: Channel | undefined): void {
+  b.landed = { press, channel };
+  if (b.quiet && b.press === press) endBurst(b, channel);
+}
+
+/** A tune gave way: to a later press of its burst (which carries on), or to another request. */
+function gaveWay(b: ZapBurst): void {
+  if (burst !== b || !owns(b)) endBurst(b, undefined);
+}
+
+/**
+ * Back on the channel whose picture the placeholder still shows (zapped away and straight
+ * back): that item comes back as it was, without a new stream or a Recent row.
+ */
+function keepHeld(b: ZapBurst, press: number, target: Channel): boolean {
+  const cur = usePlayerStore.getState().source;
+  const held = cur && pendingSources.has(cur) ? heldItems.get(cur) : undefined;
+  // Only while its picture is still up (a failed item's was dropped: that one tunes again).
+  if (!held?.source.ref || !cur?.url || itemKey(held.source.ref) !== itemKey(target.ref) || !current(b, press)) return false;
+  b.tunedPress = press;
+  return putBackHeld();
+}
+
+/**
+ * `tuneChannel` for a burst's press. The burst follows the tune's own request numbers, so it
+ * stays the burst (later presses still wait for quiet). Null: a later press or another request
+ * came first.
+ */
+async function tuneZapTarget(b: ZapBurst, press: number, target: Channel, readout: TuneOptions['readout']): Promise<StartOutcome | null> {
+  // Read first, so nothing runs between the check below and the tune's request.
+  const settings = peekSettings() ?? (await getSettings());
+  const kind = knownSourceKind(target.ref.sourceId) ?? (await sourceKindOf(target.ref.sourceId));
+  if (!current(b, press)) return null;
+  return tuneChannel(target, kind, {
+    // A zap walks the list it is in, so it keeps the list.
+    keepList: true,
+    readout,
+    settings,
+    onRequest: (seq) => {
+      if (b.seq === seq - 1) b.seq = seq;
+    },
+    onPlay: (seq) => {
+      if (b.seq !== seq - 1) return;
+      b.seq = seq;
+      b.tunedPress = press;
+    },
+  });
+}
+
+/**
+ * Tune the channel press `press` landed on. Back on the channel whose picture is still up, that
+ * picture stays. When the parental gate refuses the channel (its PIN prompt was cancelled), the
+ * zap goes on in the same direction, so a locked channel never walls off the rest of the list.
+ * Past that first refusal it steps over locked channels without asking again (one prompt per
+ * burst), and it stops when it comes round to a channel it already saw or after ZAP_SKIP_LIMIT
+ * steps.
+ */
+async function runTune(b: ZapBurst, press: number): Promise<void> {
+  b.tuning = press;
+  try {
+    let target = b.target;
+    if (keepHeld(b, press, target)) return landed(b, press, target);
+    const seen = new Set<string>([itemKey(b.origin), itemKey(target.ref)]);
+    for (let step = 0; step < ZAP_SKIP_LIMIT; step++) {
+      if (step > 0) {
+        const res = await neighboursOf(target.ref);
+        if (!current(b, press)) return gaveWay(b);
+        const next = b.direction === 'up' ? res.prev : res.next;
+        if (!next || seen.has(itemKey(next.ref))) break;
+        seen.add(itemKey(next.ref));
+        target = next;
+        const locked = await lockedNow(gateItemOf(target));
+        if (!current(b, press)) return gaveWay(b);
+        if (locked) continue;
+      }
+      // The burst already put this channel's readout up (and the banner took its place).
+      const tuned = target;
+      const outcome = await tuneZapTarget(b, press, tuned, () => !b.shown || itemKey(b.shown.ref) !== itemKey(tuned.ref));
+      if (outcome === 'started') return landed(b, press, tuned);
+      if (outcome !== 'refused') return gaveWay(b);
+    }
+    // Nothing started. The placeholder on screen is not tuned: tune the last channel shown (never
+    // a locked one), else put back what played, rather than leave the player waiting on nothing.
+    const shown = b.shown;
+    if (isPendingZap(usePlayerStore.getState().source) && current(b, press)) {
+      if (shown && keepHeld(b, press, shown)) return landed(b, press, shown);
+      const outcome = shown ? await tuneZapTarget(b, press, shown, false) : 'refused';
+      if (outcome === 'started' && shown) return landed(b, press, shown);
+      if (outcome !== 'refused') return gaveWay(b);
+      if (current(b, press)) putBackHeld();
+    }
+    landed(b, press, undefined);
+  } catch (err) {
+    if (!current(b, press)) return gaveWay(b);
+    landed(b, press, undefined);
+    // A lookup failed with the placeholder still up: show the error on it (without the picture it
+    // kept), and let Retry tune the channel it names. A failed stream lookup did this in startItem.
+    const s = usePlayerStore.getState().source;
+    const named = b.shown ?? b.target;
+    if (s && isPendingZap(s)) {
+      const { headers: _headers, episodeId: _episode, ...rest } = s;
+      failResolve(err, { ...rest, url: '', kind: 'direct' }, async () => {
+        await tuneChannel(named, undefined, { keepList: true });
+      });
+    }
+  } finally {
+    if (b.tuning === press) b.tuning = null;
+  }
+}
+
+/**
+ * Move to the neighbour channel in the current list context. Resolves with the channel the
+ * burst this press belongs to tuned, if any.
+ *
+ * Presses step at once, one after another (N presses land N channels away), and each one
+ * moves the title, banner and readout to its target over the picture still playing. A press on
+ * its own tunes at once (except on a one-connection source, or an Xtream one whose limit is not
+ * known yet: that one tunes once the answer allows more, or after the quiet); the presses that
+ * follow it within ZAP_SETTLE_MS tune only once they go quiet, so the channels passed on the way
+ * never open a stream or a Recent row.
+ */
+export function zap(direction: 'up' | 'down'): Promise<Channel | undefined> {
+  preloadEngineFor(usePlayerStore.getState().source?.url);
+  queuedPresses++;
+  const step = zapQueue.then(() => stepZap(direction));
+  zapQueue = step.catch(() => undefined);
+  return step.then((b) => (b ? b.done : undefined));
 }
 
 export async function zapToNumber(n: number): Promise<Channel | undefined> {
-  const sourceId = usePlayerStore.getState().zapContext?.sourceId ?? usePlayerStore.getState().source?.ref?.sourceId;
+  const { zapContext, source } = usePlayerStore.getState();
+  // A list spans sources: digits follow the playing channel's own source, not the list's first.
+  const sourceId = zapContext?.listId
+    ? (source?.ref?.sourceId ?? zapContext.sourceId)
+    : (zapContext?.sourceId ?? source?.ref?.sourceId);
   if (!sourceId || !Number.isFinite(n)) return undefined;
   const ch = await rpc('catalog.channelByNumber', { sourceId, number: n });
   if (ch) await playChannel(ch);
@@ -808,13 +2012,37 @@ export async function zapToNumber(n: number): Promise<Channel | undefined> {
 export function __resetPlayerForTests(): void {
   playToken = 0;
   requestSeq = 0;
+  externalChoice = null;
   stageCount = 0;
   controller = null;
   settingsCache = null;
   settingsPromise = null;
   lastSavedPosition = -1;
+  lastSave = Promise.resolve();
+  finishedSavedFor = undefined;
+  failedResolve = null;
+  allowedRefKey = null;
   sourceKindCache.clear();
   stopSaver();
+  if (upNextTimer) clearTimeout(upNextTimer);
+  upNextTimer = null;
+  upNextArmed = undefined;
+  upNextHandledFor = undefined;
+  clearStallTimer();
+  startedFor = undefined;
+  userPausedFor = undefined;
+  if (burst) endBurst(burst, undefined);
+  zapQueue = Promise.resolve();
+  queuedPresses = 0;
+  if (prefetchTimer) clearTimeout(prefetchTimer);
+  prefetchTimer = null;
+  knownChannels.clear();
+  queryClient.removeQueries({ queryKey: ['settings.get'] });
+  queryClient.removeQueries({ queryKey: ['catalog.neighbors'] });
+  queryClient.removeQueries({ queryKey: ['lists.neighbors'] });
+  queryClient.removeQueries({ queryKey: ['sources.get'] });
+  __resetNowNextForTests();
+  useMediaStore.setState({ upNext: undefined, errorCode: undefined });
   usePlayerStore.setState({
     source: undefined,
     mode: 'inline',

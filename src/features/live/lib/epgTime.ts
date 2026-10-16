@@ -8,9 +8,135 @@ export const DAY = 24 * HOUR;
 
 export type ProgramWhen = 'past' | 'now' | 'future';
 
-export function ms(iso: string): number {
+/** XMLTV's compact form: `20261012100000 +0545` (offset optional, UTC when missing). */
+const XMLTV_COMPACT = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*(?:([+-])(\d{2}):?(\d{2}))?$/;
+
+/** Epoch ms of a programme time; 0 when it cannot be read (see `isValidProgram`). */
+export function ms(iso: string | null | undefined): number {
+  if (!iso) return 0;
   const t = Date.parse(iso);
-  return Number.isNaN(t) ? 0 : t;
+  if (!Number.isNaN(t)) return t;
+  const m = XMLTV_COMPACT.exec(iso.trim());
+  if (!m) return 0;
+  const [, y, mo, d, h, mi, s, sign, oh, om] = m;
+  const utc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s ?? 0));
+  const offset = sign ? (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om)) * MINUTE : 0;
+  const out = utc - offset;
+  return Number.isFinite(out) ? out : 0;
+}
+
+/** Both times readable and the programme has a length. Unreadable times must never read as 1970. */
+export function isValidProgram(p: Pick<EpgProgram, 'start' | 'end'>): boolean {
+  const s = ms(p.start);
+  const e = ms(p.end);
+  return s > 0 && e > s;
+}
+
+// ---- local calendar (the viewer's time zone, DST and :30/:45 offsets included) ----
+
+/** Latest local `step`-minute boundary at or before `t` (10:52 -> 10:30 for 30; Nepal stays on its own :00/:30). */
+export function floorLocal(t: number, stepMinutes: number): number {
+  const d = new Date(t);
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  // Step back by the wall-clock distance, not by rebuilding the wall time: in the repeated hour
+  // of a DST fall-back, "01:30" names two instants and setHours may pick the wrong one.
+  const into = (minutes % stepMinutes) * MINUTE + d.getSeconds() * 1000 + d.getMilliseconds();
+  return t - into;
+}
+
+/** Same local wall time `days` calendar days later (a DST day is 23 or 25 h long). */
+export function addLocalDays(t: number, days: number): number {
+  const d = new Date(t);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  d.setDate(d.getDate() + days);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+
+/** Local calendar key `YYYY-M-D`, for "did the day change between these two instants". */
+export function localDayKey(t: number): string {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+// guide: jump to a date and time (Run 2 C5). Calendar days are built from local dates, never by
+// adding 24 h, so a 23 h or 25 h DST day still lands on the right midnight.
+
+/** First instant of the local calendar day holding `t` (01:00 where midnight does not exist). */
+export function localDayStart(t: number): number {
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** Start of each local day from `back` days before `now`'s day to `ahead` days after it. */
+export function jumpDays(now: number, back = 2, ahead = 13): number[] {
+  const d = new Date(now);
+  const out: number[] = [];
+  for (let i = -back; i <= ahead; i++) out.push(new Date(d.getFullYear(), d.getMonth(), d.getDate() + i).getTime());
+  return out;
+}
+
+/** Whole local days from `now`'s day to `t`'s day (0 today, -1 yesterday), counted on the calendar. */
+export function localDayDiff(t: number, now: number): number {
+  const a = new Date(t);
+  const b = new Date(now);
+  return Math.round((Date.UTC(a.getFullYear(), a.getMonth(), a.getDate()) - Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())) / DAY);
+}
+
+/** Minutes past local midnight on the wall clock (01:30 -> 90), whatever the DST state. */
+export function wallMinutes(t: number): number {
+  const d = new Date(t);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/**
+ * The 30-minute instants of the local day starting at `day`: 48 on most days, 46 on a
+ * spring-forward day (the skipped hour has no slots), 50 on a fall-back day (the repeated hour
+ * appears twice, as two different instants).
+ */
+export function daySlots(day: number, stepMinutes = 30): number[] {
+  const key = localDayKey(day);
+  const out: number[] = [];
+  // Step real time, re-snapped to the local grid, so :30 and :45 zones stay on local :00/:30.
+  for (let t = floorLocal(day, stepMinutes), guard = 0; localDayKey(t) === key && guard < 200; guard++) {
+    if (t >= day) out.push(t);
+    t = floorLocal(t + stepMinutes * MINUTE + MINUTE, stepMinutes);
+  }
+  return out;
+}
+
+/**
+ * The instant of wall time `minutes` (past midnight) on the local day starting at `day`: the
+ * first of the two in a repeated hour, the next slot that exists when a DST gap swallowed it.
+ */
+export function atWallTime(day: number, minutes: number, stepMinutes = 30): number {
+  const slots = daySlots(day, stepMinutes);
+  return slots.find((t) => wallMinutes(t) >= minutes) ?? slots[slots.length - 1] ?? day;
+}
+
+/** Earliest and latest window starts the `at` URL parameter accepts (2000-01-01 .. 2100-01-01 UTC). */
+const AT_MIN = Date.UTC(2000, 0, 1);
+const AT_MAX = Date.UTC(2100, 0, 1);
+
+/** Reads the guide's `at=<epoch ms>` URL parameter, floored to the local 30-minute slot; null when absent or unusable. */
+export function parseWindowAt(raw: string | null | undefined): number | null {
+  if (!raw || !/^\d{1,15}$/.test(raw)) return null;
+  const t = Number(raw);
+  if (!Number.isSafeInteger(t) || t < AT_MIN || t > AT_MAX) return null;
+  return floorLocal(t, 30);
+}
+
+/** Local whole-hour instants in (from, to): the ribbon's ticks. Skips the hour a DST jump removes. */
+export function localHourTicks(from: number, to: number): number[] {
+  const out: number[] = [];
+  // Each tick re-snaps to the local hour, so a half-hour DST change (Lord Howe) stays on :00.
+  let t = floorLocal(from + HOUR, 60);
+  for (let guard = 0; t < to && guard < 24 * 32; guard++) {
+    if (t > from) out.push(t);
+    t = floorLocal(t + HOUR + MINUTE, 60);
+  }
+  return out;
 }
 
 export function programWhen(p: EpgProgram, now: number): ProgramWhen {
@@ -50,8 +176,27 @@ export function formatClock(t: number, locale?: string): string {
   return f.format(t);
 }
 
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
 export function formatDay(t: number, locale?: string): string {
-  return new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' }).format(t);
+  const key = locale ?? '';
+  let f = dayFormatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+    dayFormatters.set(key, f);
+  }
+  return f.format(t);
+}
+
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+/** Clock time with the zone's short name ("01:30 GMT+1"): tells the two 01:30s of a fall-back night apart. */
+export function formatClockZone(t: number, locale?: string): string {
+  const key = locale ?? '';
+  let f = zoneFormatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    zoneFormatters.set(key, f);
+  }
+  return f.format(t);
 }
 
 export function formatRange(p: EpgProgram, locale?: string): string {
@@ -115,7 +260,7 @@ export function layoutBlocks(programs: EpgProgram[], from: number, to: number, p
   for (const p of sorted) {
     const s = ms(p.start);
     const e = ms(p.end);
-    if (e <= from || s >= to || e <= s) continue;
+    if (e <= from || s >= to || !isValidProgram(p)) continue;
     const start = Math.max(s, from, cursor);
     const end = Math.min(e, to);
     if (end <= start) continue;
@@ -130,6 +275,29 @@ export function layoutBlocks(programs: EpgProgram[], from: number, to: number, p
     });
   }
   return out;
+}
+
+/** Room a clipped cell keeps for its text before the cell's end pushes the text out. */
+export const CELL_TEXT_MIN_PX = 48;
+
+/**
+ * How far, in px, the text of a cell `left` px into a time track and `width` px wide is pushed
+ * past its own start with the track scrolled `scroll` px from its inline start: a show that began
+ * before the visible edge has its text moved just past the edge, until only
+ * {@link CELL_TEXT_MIN_PX} of it is left. A cell sits at left + 1 with a 1 px border and 8 px
+ * padding, so its text starts at left + 10 and should start 8 px past the edge. Guide cells and
+ * ribbon blocks pin their text there with `position: sticky`; this is the room the text gives up,
+ * so its box (and its ellipsis) ends where the cell does.
+ */
+export function cellTextPadPx(scroll: number, left: number, width: number): number {
+  const max = Math.max(0, width - 20 - CELL_TEXT_MIN_PX);
+  return Math.min(max, Math.max(0, scroll - (left + 2)));
+}
+
+/** Widest a cell's sticky text may be (see {@link cellTextPadPx}); undefined when the cell is not clipped. */
+export function cellTextMaxPx(scroll: number, left: number, width: number): number | undefined {
+  const pad = cellTextPadPx(scroll, left, width);
+  return pad > 0 ? width - 20 - pad : undefined;
 }
 
 /** Index of the programme covering `t`, else the first starting after it, else the last. */

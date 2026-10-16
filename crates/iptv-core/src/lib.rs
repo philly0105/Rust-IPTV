@@ -18,19 +18,42 @@ pub mod rpc;
 pub mod state;
 
 // Feature modules (wave 1). Each exposes `rpc::register` and `init`.
+// account:
+pub mod account;
 pub mod backup;
 pub mod catalog;
+// guide:
+pub mod catchup;
+// channeledit: hide and rename channels (Run 2 contract C2).
+pub mod channeledit;
 pub mod downloads;
 pub mod epg;
+// imagecache: posters, logos and backdrops on disk (Run 3 contract C2).
+pub mod imagecache;
+// lists: custom channel lists (Run 2 contract C3).
+pub mod lists;
 pub mod m3u;
+// parental: parental controls (contract C2).
+pub mod parental;
 pub mod player;
+// recording:
+pub mod recording;
 pub mod remote;
+// screenshot: player frames saved to Pictures\Tsrust IPTV (Run 3 contract C6).
+pub mod screenshot;
 pub mod settings;
 pub mod sources;
 pub mod stalker;
+// stats: watch log and statistics (Run 2 contract C7).
+pub mod stats;
 pub mod tmdb;
 pub mod userstate;
+// watchlist: My List (contract C3).
+pub mod watchlist;
 pub mod xtream;
+
+// failover: live channel alternates (`live.alternates`).
+pub mod live;
 
 pub use error::{CoreError, CoreResult, RpcError, RpcErrorCode};
 pub use events::{AppEvent, BroadcastSink, EventSink, NoopSink};

@@ -3,7 +3,7 @@
 //! records the header EPG URLs. A failure anywhere rolls the transaction back,
 //! so the previous catalog survives a failed refresh.
 
-use super::body::MinRate;
+use super::body::{sniff, too_large_error, MinRate, MAX_PLAYLIST_BYTES, SNIFF_BYTES};
 use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
@@ -110,6 +110,28 @@ pub fn stored_text(
     Ok(Some((raw, sha, fetched_at)))
 }
 
+/// Version of the parse + classify rules. It is hashed into every stored
+/// playlist sha ([`playlist_hasher`]), so bumping it makes the next refresh of
+/// every M3U source (URL, file and pasted text) re-import an unchanged
+/// playlist once and pick up parser and classifier fixes. Bump it whenever a
+/// change alters the rows an import writes.
+pub const IMPORT_VERSION: u32 = 2;
+
+/// sha256 state for a playlist body, seeded with [`IMPORT_VERSION`]. Every
+/// `m3u_raw.sha256` is computed this way (64 hex chars).
+pub fn playlist_hasher() -> Sha256 {
+    let mut h = Sha256::new();
+    h.update(format!("tsrust-m3u-import-v{IMPORT_VERSION}\n").as_bytes());
+    h
+}
+
+/// The stored sha of a playlist body (see [`playlist_hasher`]).
+pub fn playlist_sha(bytes: &[u8]) -> String {
+    let mut h = playlist_hasher();
+    h.update(bytes);
+    hex::encode(h.finalize())
+}
+
 /// First 16 hex chars of sha256(s).
 pub fn hash16(s: &str) -> String {
     let d = Sha256::digest(s.as_bytes());
@@ -130,11 +152,25 @@ pub fn group_id(group: &str) -> String {
     hash16(group)
 }
 
-/// Content type of an entry: `radio="true"` -> radio; a movie container URL in
-/// a group whose title mentions movie / vod / film -> movie; else live.
+/// Content type of an entry: `radio="true"` -> radio; an Xtream-style
+/// `/movie/` or `/series/` URL path (the `get.php?type=m3u_plus` shape) or a
+/// file-only container (`.mkv`, `.avi`, `.mov`, `.m4v`) -> movie, whatever the
+/// group; an `.mp4` URL in a group whose title mentions movie / vod / film ->
+/// movie (`.mp4` alone is ambiguous: looping live channels use it too); else
+/// live. Series episodes are movies until M3U series grouping exists.
 pub fn classify(e: &M3uEntry) -> ContentType {
     if e.radio {
         return ContentType::Radio;
+    }
+    let path = url_path_lower(&e.url);
+    if path.contains("/movie/") || path.contains("/series/") {
+        return ContentType::Movie;
+    }
+    if [".mkv", ".avi", ".mov", ".m4v"]
+        .iter()
+        .any(|ext| path.ends_with(ext))
+    {
+        return ContentType::Movie;
     }
     if has_movie_extension(&e.url) {
         let g = e.group.as_deref().unwrap_or("").to_lowercase();
@@ -143,6 +179,16 @@ pub fn classify(e: &M3uEntry) -> ContentType {
         }
     }
     ContentType::Live
+}
+
+/// The lowercased path of a stream URL (no scheme, host, query or fragment).
+fn url_path_lower(url: &str) -> String {
+    let no_query = url.split(['?', '#']).next().unwrap_or(url);
+    let after_scheme = no_query
+        .split_once("://")
+        .map_or(no_query, |(_, rest)| rest);
+    let path = after_scheme.find('/').map_or("", |i| &after_scheme[i..]);
+    path.to_ascii_lowercase()
 }
 
 /// Turns parser entries into catalog rows: stable ids (with a suffix for exact
@@ -272,7 +318,9 @@ impl RowBuilder {
             (None, None)
         };
         let archive_hours = if catchup_ok {
-            e.catchup_days.filter(|d| *d > 0).map(|d| d * 24)
+            // Clamped: `catchup-days="9223372036854775807"` overflowed `* 24`.
+            e.catchup_days
+                .and_then(crate::xtream::meta::archive_days_to_hours)
         } else {
             None
         };
@@ -330,6 +378,14 @@ impl RowBuilder {
                 )
             })
             .collect()
+    }
+
+    /// The categories of `ct` after the first `from`, in first-seen order.
+    pub fn categories_from(&self, ct: ContentType, from: usize) -> &[CategoryRow] {
+        self.categories
+            .get(&ct)
+            .and_then(|(v, _)| v.get(from..))
+            .unwrap_or_default()
     }
 }
 
@@ -432,24 +488,8 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                         .into(),
                 )
             };
-            // Pasted text changes only through sources.add or a restore, which
-            // store its sha (or '' when it still has to be imported): an
-            // imported text playlist with a sha is unchanged without reading it.
-            let sid = source_id.clone();
-            let stored_sha = state
-                .db_call(move |c| {
-                    Ok(c.query_row(
-                        "SELECT sha256 FROM m3u_raw WHERE source_id = ?1",
-                        [&sid],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()?)
-                })
-                .await?
-                .ok_or_else(missing)?;
-            if source.last_refresh_at.is_some() && !stored_sha.is_empty() {
-                return keep_unchanged(&state, &source_id).await;
-            }
+            // The text is hashed like a download (with IMPORT_VERSION), so the
+            // unchanged check below re-imports it once after a parser change.
             let sid = source_id.clone();
             let raw = state
                 .db_call(move |c| {
@@ -474,7 +514,7 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                     sha,
                 )
             } else {
-                let sha = hex::encode(Sha256::digest(raw.as_bytes()));
+                let sha = playlist_sha(raw.as_bytes());
                 (Payload::Text(raw), sha)
             }
         }
@@ -538,9 +578,16 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     let st = state.clone();
     let pool = state.db.clone();
     let origin = cfg.origin;
+    // This run's cancel token, taken here (task-local) before waiting for the
+    // write lock: if that wait outlasts CANCEL_GRACE, the run is dropped and
+    // its writer token unregistered, so a token looked up later would be
+    // missing and the cancelled import would commit. The DB-keyed writer
+    // token is only a fallback for callers outside a run.
+    let run_cancel = sources::import_cancel();
     tokio::task::spawn_blocking(move || -> CoreResult<ImportSummary> {
         let mut conn = pool.get()?;
-        write_catalog(&st, &mut conn, &source_id, payload, &sha, origin)
+        let cancel = run_cancel.or_else(|| sources::writer_cancel_token(&conn, &source_id));
+        write_catalog(&st, &mut conn, &source_id, payload, &sha, origin, cancel)
     })
     .await?
     .map_err(|e| state.note_db_error(e))
@@ -560,16 +607,28 @@ async fn keep_unchanged(state: &Arc<AppState>, source_id: &str) -> CoreResult<Im
         })
         .await?;
     tracing::info!(source_id, "playlist unchanged; catalog kept");
-    sources::progress(state, source_id, "saving", 0, None, Some("unchanged"));
+    sources::progress(
+        state,
+        source_id,
+        "saving",
+        0,
+        None,
+        Some(sources::UNCHANGED_MESSAGE),
+    );
     Ok(ImportSummary {
         channels,
         movies,
         series,
+        unchanged: true,
     })
 }
 
 /// Streams `payload` through the parser into the catalog inside one IMMEDIATE
 /// transaction, then stores the raw text and detected EPG URLs.
+///
+/// `cancel` is the import run's token, taken by the caller before the
+/// transaction: it is checked once the write lock is held, while parsing, and
+/// right before the commit, so a cancelled run never commits (C8).
 fn write_catalog(
     state: &AppState,
     conn: &mut Connection,
@@ -577,13 +636,28 @@ fn write_catalog(
     payload: Payload,
     sha: &str,
     origin: M3uOrigin,
+    cancel: Option<tokio_util::sync::CancellationToken>,
 ) -> CoreResult<ImportSummary> {
+    let check_cancel = || -> CoreResult<()> {
+        if cancel.as_ref().is_some_and(|t| t.is_cancelled()) {
+            return Err(sources::import_cancelled_error());
+        }
+        Ok(())
+    };
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    check_cancel()?;
     let mut builder = RowBuilder::new(source_id);
     let started = std::time::Instant::now();
 
+    // Read before the writer deletes the old rows: lets user state follow
+    // items whose id changed (token rotation) and tells a first import apart.
+    let mut remapper = super::remap::Remapper::before(&tx, source_id)?;
+    if remapper.old_rows > 0 {
+        // The writer deletes the previous rows first (L3-perf-core-4).
+        sources::progress_step(state, source_id, sources::SaveStep::Replacing, 0);
+    }
     let (header, stats, summary) = {
-        let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES)?;
+        let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES, cancel.clone())?;
         let reader: Box<dyn std::io::BufRead + '_> = match &payload {
             Payload::File { path: p, .. } => Box::new(BufReader::with_capacity(
                 READ_BUF,
@@ -593,11 +667,23 @@ fn write_catalog(
         };
         let mut parser = M3uReader::new(reader);
         let mut n = 0u64;
+        // Categories already declared to the writer, per type: a row's group
+        // is known before the row is written, so its verdict is final.
+        let mut declared: HashMap<ContentType, usize> = HashMap::new();
         for entry in parser.by_ref() {
             let row = builder.row(entry);
-            writer.insert(&row)?;
+            let seen = declared.entry(row.content_type).or_default();
+            let new = builder.categories_from(row.content_type, *seen);
+            if !new.is_empty() {
+                writer.declare_categories(row.content_type, new);
+                *seen += new.len();
+            }
+            if writer.insert(&row)? {
+                remapper.saw(&row);
+            }
             n += 1;
             if n % PROGRESS_EVERY == 0 {
+                check_cancel()?;
                 sources::progress(state, source_id, "parsing", n, None, None);
             }
         }
@@ -611,12 +697,26 @@ fn write_catalog(
                 "this is not an M3U playlist (no #EXTM3U header and no #EXTINF entries); check the URL or file".into(),
             ));
         }
-        sources::progress(state, source_id, "saving", n, Some(n), None);
+        // A bare `#EXTM3U` (panels answer that during maintenance or after an
+        // account lapses) must not wipe the catalog: returning here drops the
+        // transaction, so the previous rows stay.
+        if writer.inserted() == 0 {
+            return Err(CoreError::Invalid(if remapper.old_rows > 0 {
+                "The playlist came back empty; kept the previous channels. The provider may be down or the account may have expired; try again later.".into()
+            } else {
+                "The playlist is empty: it has no channels. Check the URL, or ask the provider whether the account is active.".into()
+            }));
+        }
+        remapper.apply(&tx, source_id)?;
+        // Every row is in: indexes, the search index and the counts follow.
+        // Clients without the step show "Saving n of n", as before.
+        sources::progress_step(state, source_id, sources::SaveStep::Indexing, n);
         let summary = ImportSummary {
             channels: (writer.inserted_of(ContentType::Live)
                 + writer.inserted_of(ContentType::Radio)) as i64,
             movies: writer.inserted_of(ContentType::Movie) as i64,
             series: writer.inserted_of(ContentType::Series) as i64,
+            unchanged: false,
         };
         writer.finish(&builder.categories())?;
         (header, stats, summary)
@@ -635,12 +735,21 @@ fn write_catalog(
             )?;
         }
         Payload::File { path: p, temp } => {
+            // The limit applies to the decoded text: a small gzip file can
+            // unpack far past it (L1-core-17). A file already over the limit
+            // is not read just to measure it.
             let size = std::fs::metadata(p).map_err(|e| file_error(p, e))?.len();
-            let raw = if size <= RAW_INLINE_MAX {
-                read_text_lossy(p)?
+            let text = if size <= RAW_INLINE_MAX {
+                Some(read_text_lossy(p)?)
             } else {
-                keep_copy = Some((p.clone(), *temp));
-                String::new()
+                None
+            };
+            let raw = match text {
+                Some(text) if text.len() as u64 <= RAW_INLINE_MAX => text,
+                _ => {
+                    keep_copy = Some((p.clone(), *temp));
+                    String::new()
+                }
             };
             tx.execute(
                 "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, ?3, ?4)
@@ -671,7 +780,12 @@ fn write_catalog(
             params![source_id, serde_json::to_string(&epg)?],
         )?;
     }
+    // Last check: a cancelled run never commits.
+    check_cancel()?;
     tx.commit()?;
+    // The catalog rewrite grew the WAL by about the catalog's size: fold it
+    // back so it does not stay hundreds of MB (never waits on a busy reader).
+    crate::db::checkpoint_truncate(conn);
     let cache = cached_playlist_path(&state.data_dir, source_id);
     match keep_copy {
         // Already the cached copy (a large text playlist): nothing to move.
@@ -733,21 +847,9 @@ fn read_text_lossy(p: &Path) -> CoreResult<String> {
     std::fs::File::open(p)
         .map_err(|e| file_error(p, e))?
         .read_to_end(&mut bytes)?;
-    let start = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        3
-    } else {
-        0
-    };
-    let text = match String::from_utf8(bytes) {
-        Ok(mut s) => {
-            if start > 0 {
-                s.drain(..start);
-            }
-            s
-        }
-        Err(e) => String::from_utf8_lossy(&e.into_bytes()[start..]).into_owned(),
-    };
-    Ok(text)
+    // Decoded like the parser reads it (UTF-16, UTF-8 BOM, Windows-1252
+    // lines), so the stored raw text matches the imported catalog.
+    Ok(crate::m3u::parser::decode_playlist_text(bytes))
 }
 
 /// sha256 of a file, streamed.
@@ -760,7 +862,7 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
                 path.display()
             )));
         }
-        let mut h = Sha256::new();
+        let mut h = playlist_hasher();
         let mut buf = vec![0u8; READ_BUF];
         loop {
             let n = f.read(&mut buf)?;
@@ -773,6 +875,13 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
     })
     .await?
 }
+
+/// Time a playlist server may take before the response head. Large provider
+/// playlists are often generated on request and take 20-60 s to start.
+#[cfg(not(test))]
+const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+#[cfg(test)]
+const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// Longest gap between two body chunks of a playlist download.
 #[cfg(not(test))]
@@ -789,13 +898,80 @@ fn playlist_status_error(status: reqwest::StatusCode, host: &str) -> CoreError {
         408 | 429 | 500..=599 => "The server is busy or down; try again later.",
         _ => "Check the playlist URL.",
     };
-    match crate::http::status_error(status, &format!("{host} answered the playlist download")) {
-        CoreError::Auth(m) => CoreError::Auth(format!("{m}. {hint}")),
-        CoreError::NotFound(m) => CoreError::NotFound(format!("{m}. {hint}")),
-        CoreError::Timeout(m) => CoreError::Timeout(format!("{m}. {hint}")),
-        CoreError::Network(m) => CoreError::Network(format!("{m}. {hint}")),
-        CoreError::Invalid(m) => CoreError::Invalid(format!("{m}. {hint}")),
+    crate::http::status_error_with_hint(
+        status,
+        &format!("{host} answered the playlist download"),
+        hint,
+    )
+}
+
+/// `import.progress` of a download retry: the C6 fields plus `attempt` (the
+/// 1-based try starting now) and `attempts` (tries allowed). Both are
+/// additive; other progress events do not carry them.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RetryProgress<'a> {
+    source_id: &'a str,
+    phase: &'static str,
+    done: u64,
+    message: &'a str,
+    attempt: u32,
+    attempts: u32,
+}
+
+/// Emits the `import.progress` of a retry (try `attempt` of `attempts`).
+/// Shared by the M3U download and the Xtream client.
+pub(crate) fn emit_retry(state: &AppState, source_id: &str, attempt: u32, attempts: u32) {
+    let message = format!("Retrying the download (try {attempt} of {attempts})");
+    state.emit(
+        "import.progress",
+        RetryProgress {
+            source_id,
+            phase: "fetching",
+            done: 0,
+            message: &message,
+            attempt,
+            attempts,
+        },
+    );
+}
+
+/// The last error of a download that was retried: says how many tries were
+/// made (the error itself only describes the last one). Same variant, so the
+/// same error code. Appended, not prefixed: the UI reads the host from the
+/// start of the message (`sourceError.ts` HOST_PATTERNS).
+pub(crate) fn after_tries(err: CoreError, tries: u32) -> CoreError {
+    if tries < 2 {
+        return err;
+    }
+    let say = |m: String| format!("{m} The download failed after {tries} tries.");
+    match err {
+        CoreError::Network(m) => CoreError::Network(say(m)),
+        CoreError::Timeout(m) => CoreError::Timeout(say(m)),
+        CoreError::Server(m) => CoreError::Server(say(m)),
         other => other,
+    }
+}
+
+/// How often download progress is reported: the first chunk at once (so a
+/// slow host never reads "Connecting…" while bytes flow), then at most
+/// every [`ProgressGate::EVERY`], however fast or slow the chunks arrive.
+#[derive(Debug, Default)]
+struct ProgressGate {
+    last: Option<std::time::Instant>,
+}
+
+impl ProgressGate {
+    const EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
+    fn due(&mut self, now: std::time::Instant) -> bool {
+        match self.last {
+            Some(t) if now.saturating_duration_since(t) < Self::EVERY => false,
+            _ => {
+                self.last = Some(now);
+                true
+            }
+        }
     }
 }
 
@@ -827,18 +1003,30 @@ async fn fetch_to_file(
     // Err((error, stalled)): `stalled` when the body stopped arriving.
     let attempt = || async {
         let req = crate::http::apply_source_headers(client.get(url), &cfg.headers);
-        let resp = crate::http::send(req).await.map_err(|e| (e, false))?;
+        let resp = crate::http::send_within(req, PLAYLIST_HEADER_TIMEOUT)
+            .await
+            .map_err(|e| (e, false))?;
         if !resp.status().is_success() {
             return Err((playlist_status_error(resp.status(), &host), false));
         }
         let total = resp.content_length();
+        if total.is_some_and(|n| n > MAX_PLAYLIST_BYTES) {
+            return Err((too_large_error(&host), false));
+        }
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let mut file = tokio::fs::File::create(dest)
             .await
             .map_err(|e| (e.into(), false))?;
-        let mut hasher = Sha256::new();
+        let mut hasher = playlist_hasher();
         let mut done: u64 = 0;
-        let mut last_report: u64 = 0;
+        let mut gate = ProgressGate::default();
         let mut rate = MinRate::standard();
+        // The first bytes, until judged by `sniff` (None once judged).
+        let mut head: Option<Vec<u8>> = Some(Vec::with_capacity(SNIFF_BYTES));
         let mut stream = resp.bytes_stream();
         loop {
             let chunk = match crate::http::next_body_chunk(&mut stream, &host, BODY_IDLE).await {
@@ -850,14 +1038,31 @@ async fn fetch_to_file(
                 }
             };
             rate.on_bytes(chunk.len(), &host).map_err(|e| (e, true))?;
+            if let Some(buf) = head.as_mut() {
+                let take = (SNIFF_BYTES - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+                if buf.len() >= SNIFF_BYTES {
+                    if let Some(err) = sniff(buf, content_type.as_deref(), &host) {
+                        return Err((err, false));
+                    }
+                    head = None;
+                }
+            }
+            if done + chunk.len() as u64 > MAX_PLAYLIST_BYTES {
+                return Err((too_large_error(&host), false));
+            }
             hasher.update(&chunk);
             file.write_all(&chunk)
                 .await
                 .map_err(|e| (e.into(), false))?;
             done += chunk.len() as u64;
-            if done - last_report >= 1024 * 1024 {
-                last_report = done;
+            if gate.due(std::time::Instant::now()) {
                 sources::progress(state, source_id, "fetching", done, total, None);
+            }
+        }
+        if let Some(buf) = head.as_ref() {
+            if let Some(err) = sniff(buf, content_type.as_deref(), &host) {
+                return Err((err, false));
             }
         }
         file.flush().await.map_err(|e| (e.into(), false))?;
@@ -889,14 +1094,20 @@ async fn fetch_to_file(
             Ok(sha) => return Ok(sha),
             Err((err, stalled)) => {
                 tracing::warn!(url = %safe_url, error = %err, attempt = n + 1, "playlist download failed");
-                if stalled || !err.is_retryable() || n + 1 >= FETCH_ATTEMPTS {
+                // A head that did not arrive within PLAYLIST_HEADER_TIMEOUT
+                // comes from a slow generator; it will be as slow again.
+                if stalled || !err.is_retryable() || matches!(err, CoreError::Timeout(_)) {
                     return Err(err);
+                }
+                if n + 1 >= FETCH_ATTEMPTS {
+                    return Err(after_tries(err, n + 1));
                 }
                 tokio::select! {
                     () = tokio::time::sleep(crate::http::backoff_delay(n)) => {}
                     () = cancel.cancelled() => return Err(sources::import_cancelled_error()),
                 }
                 n += 1;
+                emit_retry(state, source_id, n + 1, FETCH_ATTEMPTS);
             }
         }
     }
@@ -944,10 +1155,103 @@ mod tests {
             url: Some(url.into()),
             file_path: None,
             headers: Default::default(),
+            catchup: None,
         };
         let started = std::time::Instant::now();
         let r = fetch_to_file(&state, "s", url, &cfg, &tmp.path().join("x.part")).await;
         (r, started.elapsed())
+    }
+
+    /// L2-sources-home-8: progress is due on the first chunk, then at most
+    /// every 250 ms, however small or large the chunks are.
+    #[test]
+    fn download_progress_gate_reports_first_chunk_then_every_250ms() {
+        let t0 = std::time::Instant::now();
+        let ms = |n| t0 + std::time::Duration::from_millis(n);
+        let mut gate = ProgressGate::default();
+        assert!(gate.due(t0), "first chunk reported at once");
+        assert!(!gate.due(ms(100)));
+        assert!(!gate.due(ms(249)));
+        assert!(gate.due(ms(250)));
+        assert!(!gate.due(ms(300)));
+        assert!(gate.due(ms(600)));
+    }
+
+    /// L2-sources-home-8: a slow host (64 KiB every 150 ms) shows bytes
+    /// arriving from the first chunk on, not only after each full MiB.
+    #[tokio::test]
+    async fn slow_download_reports_progress_from_the_first_chunk() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            let chunk = {
+                let mut c = b"#EXTM3U\n".to_vec();
+                let line = b"#EXTINF:-1,Ch\nhttp://h/a.ts\n";
+                while c.len() + line.len() <= 64 * 1024 {
+                    c.extend_from_slice(line);
+                }
+                c
+            };
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/x-mpegurl\r\nContent-Length: {}\r\n\r\n",
+                chunk.len() * 6
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            for _ in 0..6 {
+                if sock.write_all(&chunk).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let (sink, mut rx) = crate::events::BroadcastSink::channel(256);
+        let state = AppState::new(tmp.path().to_path_buf(), Arc::new(sink), false)
+            .await
+            .unwrap();
+        let url = format!("http://127.0.0.1:{port}/slow.m3u");
+        let cfg = M3uSourceConfig {
+            origin: M3uOrigin::Url,
+            url: Some(url.clone()),
+            file_path: None,
+            headers: Default::default(),
+            catchup: None,
+        };
+        let started = std::time::Instant::now();
+        let first = tokio::spawn(async move {
+            loop {
+                let ev = rx.recv().await.unwrap();
+                if ev.kind == "import.progress"
+                    && ev.payload["phase"] == "fetching"
+                    && ev.payload["done"].as_u64().unwrap_or(0) > 0
+                {
+                    return (started.elapsed(), rx);
+                }
+            }
+        });
+        fetch_to_file(&state, "s", &url, &cfg, &tmp.path().join("x.part"))
+            .await
+            .unwrap();
+        let (at, mut rx) = first.await.unwrap();
+        assert!(
+            at < std::time::Duration::from_millis(500),
+            "first byte progress at {at:?}"
+        );
+        let mut more = 0;
+        while let Ok(ev) = rx.try_recv() {
+            if ev.payload["phase"] == "fetching" {
+                more += 1;
+            }
+        }
+        assert!(more >= 2, "progress kept coming while bytes flowed: {more}");
     }
 
     /// R7-r2 F4: a server that sends the head and then stalls fails once,
@@ -1011,6 +1315,75 @@ mod tests {
         );
     }
 
+    /// B8: a channel's stream URL pasted as the playlist URL fails at once
+    /// with a next step instead of downloading forever; no retries.
+    #[tokio::test]
+    async fn endless_video_stream_is_refused_early() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\n\r\n")
+                        .await;
+                    let mut packet = [0u8; 188];
+                    packet[0] = 0x47;
+                    loop {
+                        if sock.write_all(&packet).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        let (r, took) = fetch(&format!("http://127.0.0.1:{port}/live/1.ts")).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("MPEG-TS") && m.contains("playlist URL")),
+            "{err:?}"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "retried");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    /// B8: a login page served with 200 says so instead of "not an M3U".
+    #[tokio::test]
+    async fn web_page_instead_of_playlist_is_named() {
+        let (url, _) = raw_stub(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 46\r\nConnection: close\r\n\r\n<!DOCTYPE html><html><body>Login</body></html>",
+        )
+        .await;
+        let (r, _) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("web page") && m.contains("127.0.0.1")),
+            "{err:?}"
+        );
+    }
+
+    /// B8: a declared size over the cap is refused before downloading.
+    #[tokio::test]
+    async fn oversized_playlist_is_refused_up_front() {
+        let (url, _) =
+            raw_stub("HTTP/1.1 200 OK\r\nContent-Length: 5000000000\r\n\r\n#EXTM3U\n").await;
+        let (r, took) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(
+            matches!(err, CoreError::Invalid(ref m) if m.contains("too large")),
+            "{err:?}"
+        );
+        assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+    }
+
     /// An HTTP error status names the host and says what to do; 5xx retries.
     #[tokio::test]
     async fn http_status_failure_has_a_next_step() {
@@ -1020,7 +1393,7 @@ mod tests {
         .await;
         let (r, _) = fetch(&url).await;
         let err = r.unwrap_err();
-        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        assert!(matches!(err, CoreError::Server(_)), "{err:?}");
         let msg = err.to_string();
         assert!(
             msg.contains("127.0.0.1")
@@ -1036,6 +1409,115 @@ mod tests {
         assert!(
             matches!(err, CoreError::Auth(ref m) if m.contains("HTTP 403") && m.contains("User-Agent"))
         );
+    }
+
+    /// Review R1-6: retries were silent (the UI sat on "Downloading") and the
+    /// final message only described the last try.
+    #[tokio::test]
+    async fn retries_are_reported_and_counted_in_the_message() {
+        let (url, hits) = raw_stub(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        let tmp = tempfile::tempdir().unwrap();
+        let (sink, mut rx) = crate::events::BroadcastSink::channel(256);
+        let state = AppState::new(tmp.path().to_path_buf(), Arc::new(sink), false)
+            .await
+            .unwrap();
+        let cfg = M3uSourceConfig {
+            origin: M3uOrigin::Url,
+            url: Some(url.clone()),
+            file_path: None,
+            headers: Default::default(),
+            catchup: None,
+        };
+        let err = fetch_to_file(&state, "s", &url, &cfg, &tmp.path().join("x.part"))
+            .await
+            .unwrap_err();
+        let CoreError::Server(msg) = &err else {
+            panic!("code kept: {err:?}");
+        };
+        assert!(
+            msg.contains("after 3 tries") && msg.contains("HTTP 503"),
+            "{msg}"
+        );
+        assert!(
+            msg.starts_with("127.0.0.1"),
+            "host stays first for the UI: {msg}"
+        );
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 3);
+        let mut tries = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if ev.kind == "import.progress" && ev.payload.get("attempt").is_some() {
+                assert_eq!(ev.payload["phase"], "fetching");
+                assert_eq!(ev.payload["attempts"], FETCH_ATTEMPTS);
+                tries.push(ev.payload["attempt"].as_u64().unwrap());
+            }
+        }
+        assert_eq!(tries, [2, 3]);
+        // A single failed try is not reworded.
+        let one = after_tries(CoreError::Timeout("x".into()), 1);
+        assert!(matches!(one, CoreError::Timeout(ref m) if m == "x"));
+    }
+
+    /// Review R1-7: write_catalog looked up the writer token only after
+    /// opening its transaction. When the run was dropped meanwhile (lock wait
+    /// past CANCEL_GRACE) no token was registered any more and the cancelled
+    /// import committed. The run's own token is now passed in and checked.
+    #[tokio::test]
+    async fn cancelled_run_never_commits_without_a_registered_writer_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let mut conn = state.db.get().unwrap();
+        conn.execute(
+            "INSERT INTO sources (id, kind, name, config_json) VALUES ('s7', 'm3u', 'S', '{}')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            sources::writer_cancel_token(&conn, "s7").is_none(),
+            "no run registered"
+        );
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let text = "#EXTM3U\n#EXTINF:-1,A\nhttp://a\n".to_string();
+        let err = write_catalog(
+            &state,
+            &mut conn,
+            "s7",
+            Payload::Text(text.clone()),
+            "sha",
+            M3uOrigin::Url,
+            Some(token),
+        )
+        .unwrap_err();
+        assert!(sources::is_cancelled_error(&err), "{err:?}");
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM items WHERE source_id = 's7'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "nothing committed");
+        // A live token writes normally.
+        let s = write_catalog(
+            &state,
+            &mut conn,
+            "s7",
+            Payload::Text(text),
+            "sha",
+            M3uOrigin::Url,
+            Some(tokio_util::sync::CancellationToken::new()),
+        )
+        .unwrap();
+        assert_eq!(s.channels, 1);
     }
 
     #[test]
@@ -1068,5 +1550,94 @@ mod tests {
         assert_eq!(movie.year, Some(1995));
         assert_eq!(movie.container_extension.as_deref(), Some("mp4"));
         assert_eq!(movie.number, None);
+    }
+
+    /// L1-core-4: Xtream `m3u_plus` movies and episodes landed in Live TV
+    /// because only an `.mp4`-style URL in a "movie" group was a movie.
+    #[test]
+    fn xtream_m3u_plus_vod_is_classified_as_movies() {
+        let (e, _, _) = parse_str(
+            "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"EN | Action\",Dune (2021)\nhttp://h:8080/movie/u/p/1001.mkv\n\
+             #EXTINF:-1 group-title=\"EN | Drama\",Show S01 E01\nhttp://h:8080/series/u/p/5001.mp4\n\
+             #EXTINF:-1 group-title=\"EN | Action\",Film\nhttp://h/vod/f.avi?token=1\n\
+             #EXTINF:-1 group-title=\"News\",Live\nhttp://h:8080/u/p/7.ts\n\
+             #EXTINF:-1 group-title=\"News\",Loop\nhttp://h/loop.mp4\n\
+             #EXTINF:-1 group-title=\"News\",Movie host\nhttp://movie.example/live/1.m3u8\n",
+        );
+        let types: Vec<ContentType> = e.iter().map(classify).collect();
+        assert_eq!(
+            types,
+            [
+                ContentType::Movie,
+                ContentType::Movie,
+                ContentType::Movie,
+                ContentType::Live,
+                ContentType::Live,
+                ContentType::Live
+            ]
+        );
+    }
+
+    /// L1-core-13: a playlist generator that takes longer than the generic
+    /// 15 s head timeout to answer is waited for (PLAYLIST_HEADER_TIMEOUT),
+    /// and a head that never comes is not retried three times.
+    #[tokio::test]
+    async fn slow_playlist_head_is_tried_once() {
+        let (url, hits) = raw_stub("").await;
+        let (r, took) = fetch(&url).await;
+        let err = r.unwrap_err();
+        assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(took < PLAYLIST_HEADER_TIMEOUT * 2, "{took:?}");
+    }
+
+    /// B8-parsers: `catchup-days` * 24 overflowed (debug panic) on garbage.
+    #[test]
+    fn huge_catchup_days_are_clamped() {
+        let (e, _, _) = parse_str(
+            "#EXTM3U\n#EXTINF:-1 catchup=\"default\" catchup-days=\"9223372036854775807\",A\nhttp://a\n#EXTINF:-1 catchup=\"default\" timeshift=\"3\",B\nhttp://b\n",
+        );
+        let mut b = RowBuilder::new("s");
+        let rows: Vec<ItemRow> = e.into_iter().map(|e| b.row(e)).collect();
+        assert_eq!(
+            rows[0].archive_hours,
+            Some(crate::xtream::meta::MAX_ARCHIVE_DAYS * 24)
+        );
+        assert_eq!(rows[1].archive_hours, Some(72));
+    }
+
+    /// Review R2-3: a UTF-16 playlist added by URL was rejected as binary.
+    #[tokio::test]
+    async fn utf16_playlist_by_url_is_accepted() {
+        // BOM-less UTF-16 LE of ASCII text is valid UTF-8 (NUL-interleaved).
+        let body: String = "#EXTM3U\r\n#EXTINF:-1,A\r\nhttp://s/1.ts\r\n"
+            .chars()
+            .flat_map(|c| [c, '\0'])
+            .collect();
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (url, _) = raw_stub(Box::leak(head.into_boxed_str())).await;
+        let (r, _) = fetch(&url).await;
+        r.unwrap();
+    }
+
+    /// Review R2-8: the stored raw text of a UTF-16 file source was garbled
+    /// (read as UTF-8, lossy).
+    #[test]
+    fn raw_text_of_a_utf16_file_is_decoded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let text = "#EXTM3U\r\n#EXTINF:-1,Télé\r\nhttp://s/1.ts\r\n";
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in text.encode_utf16() {
+            bytes.extend(u.to_le_bytes());
+        }
+        let p = tmp.path().join("u16.m3u");
+        std::fs::write(&p, &bytes).unwrap();
+        assert_eq!(read_text_lossy(&p).unwrap(), text);
+        std::fs::write(&p, b"#EXTM3U\n#EXTINF:-1,Caf\xe9\n").unwrap();
+        assert_eq!(read_text_lossy(&p).unwrap(), "#EXTM3U\n#EXTINF:-1,Café\n");
     }
 }

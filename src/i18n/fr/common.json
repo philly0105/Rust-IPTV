@@ -40,11 +40,16 @@
   "errorTechnicalDetails": "Détails techniques",
   "errorHintTimeout": "Le fournisseur est peut-être occupé. Réessayez dans un instant.",
   "errorHintAuth": "Vérifiez le nom d'utilisateur, le mot de passe ou l'adresse MAC dans les paramètres de la source.",
-  "errorHintNotFound": "L'élément a peut-être été retiré par le fournisseur. Actualisez la source pour mettre à jour la liste.",
+  "errorHintNotFound": "Il a peut-être été supprimé, ou ce lien n'est plus à jour.",
   "errorHintInvalid": "Vérifiez les valeurs saisies et réessayez.",
   "errorHintUnsupported": "Cette source ou ce type de flux ne prend pas en charge cette action. Essayez un lecteur externe.",
   "errorHintConflict": "Rechargez pour voir la dernière version, puis réessayez.",
   "errorHintIo": "Vérifiez que le dossier existe et que vous avez le droit d'y écrire.",
   "errorHintDb": "Redémarrez l'application. Si le problème persiste, restaurez une sauvegarde depuis les Paramètres.",
-  "errorHintInternal": "Réessayez. Si le problème persiste, redémarrez l'application."
+  "errorHintInternal": "Réessayez. Si le problème persiste, redémarrez l'application.",
+  "errorCode": "Code d'erreur : {{code}}",
+  "errorTitleEngineMissing": "Impossible de démarrer le moteur de lecture",
+  "errorHintEngineMissing": "Le moteur de lecture vidéo (mpv) est absent ou n'a pas pu démarrer.",
+  "errorTitleServer": "Le serveur a rencontré un problème",
+  "errorHintServer": "Le serveur est occupé ou rencontre des difficultés. Réessayez plus tard."
 }

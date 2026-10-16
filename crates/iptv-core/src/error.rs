@@ -23,6 +23,10 @@ pub enum RpcErrorCode {
     Unsupported,
     Conflict,
     Internal,
+    /// The player engine (mpv) is missing or cannot run (C12).
+    EngineMissing,
+    /// The upstream server answered with HTTP 5xx (C12).
+    Server,
 }
 
 impl RpcErrorCode {
@@ -33,11 +37,51 @@ impl RpcErrorCode {
             Self::Invalid => 400,
             Self::Auth => 401,
             Self::Timeout => 504,
-            Self::Network => 502,
+            Self::Network | Self::Server => 502,
+            Self::EngineMissing => 503,
             Self::Unsupported => 501,
             Self::Conflict => 409,
             Self::Io | Self::Db | Self::Internal => 500,
         }
+    }
+
+    /// The snake_case wire name (`"not_found"`), also stored in
+    /// `sources.last_error_code` (C10).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::Invalid => "invalid",
+            Self::Network => "network",
+            Self::Auth => "auth",
+            Self::Timeout => "timeout",
+            Self::Io => "io",
+            Self::Db => "db",
+            Self::Unsupported => "unsupported",
+            Self::Conflict => "conflict",
+            Self::Internal => "internal",
+            Self::EngineMissing => "engine_missing",
+            Self::Server => "server",
+        }
+    }
+
+    /// Parses a wire name; `None` for anything unknown (an older or newer
+    /// build's value is dropped rather than failing the read).
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s.trim() {
+            "not_found" => Self::NotFound,
+            "invalid" => Self::Invalid,
+            "network" => Self::Network,
+            "auth" => Self::Auth,
+            "timeout" => Self::Timeout,
+            "io" => Self::Io,
+            "db" => Self::Db,
+            "unsupported" => Self::Unsupported,
+            "conflict" => Self::Conflict,
+            "internal" => Self::Internal,
+            "engine_missing" => Self::EngineMissing,
+            "server" => Self::Server,
+            _ => return None,
+        })
     }
 }
 
@@ -56,7 +100,10 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn new(code: RpcErrorCode, msg: impl Into<String>) -> Self {
-        let retryable = matches!(code, RpcErrorCode::Network | RpcErrorCode::Timeout);
+        let retryable = matches!(
+            code,
+            RpcErrorCode::Network | RpcErrorCode::Timeout | RpcErrorCode::Server
+        );
         Self {
             code,
             message: msg.into(),
@@ -115,6 +162,12 @@ pub enum CoreError {
     Auth(String),
     #[error("timeout: {0}")]
     Timeout(String),
+    /// Upstream HTTP 5xx (retryable, code `server`).
+    #[error("server: {0}")]
+    Server(String),
+    /// The player engine is missing or cannot run (code `engine_missing`).
+    #[error("engine missing: {0}")]
+    EngineMissing(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -131,9 +184,17 @@ pub enum CoreError {
 pub type CoreResult<T> = Result<T, CoreError>;
 
 impl CoreError {
-    /// True for errors `http::with_retry` retries (Network, Timeout).
+    /// True for errors `http::with_retry` retries (Network, Timeout, Server),
+    /// except transport failures a retry cannot fix: a refused connection, a
+    /// host name that does not exist, an invalid certificate
+    /// ([`crate::http::is_permanent_transport`]). The RPC `retryable` flag
+    /// is unchanged: the user may fix the cause and try again.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::Network(_) | Self::Timeout(_))
+        match self {
+            Self::Network(m) => !crate::http::is_permanent_transport(m),
+            Self::Timeout(_) | Self::Server(_) => true,
+            _ => false,
+        }
     }
 
     /// Shorthand constructors.
@@ -145,6 +206,31 @@ impl CoreError {
     }
     pub fn network(msg: impl Into<String>) -> Self {
         Self::Network(msg.into())
+    }
+
+    /// The RPC code this error crosses the boundary with (same mapping as
+    /// `RpcError::from(CoreError)`), without consuming it. Used for
+    /// `Source.lastErrorCode` and `import.progress` `code` (C10).
+    pub fn code(&self) -> RpcErrorCode {
+        match self {
+            Self::NotFound(_) => RpcErrorCode::NotFound,
+            Self::Invalid(_) => RpcErrorCode::Invalid,
+            Self::Network(_) => RpcErrorCode::Network,
+            Self::Auth(_) => RpcErrorCode::Auth,
+            Self::Timeout(_) => RpcErrorCode::Timeout,
+            Self::Server(_) => RpcErrorCode::Server,
+            Self::EngineMissing(_) => RpcErrorCode::EngineMissing,
+            Self::Io(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => RpcErrorCode::NotFound,
+                std::io::ErrorKind::TimedOut => RpcErrorCode::Timeout,
+                _ => RpcErrorCode::Io,
+            },
+            Self::Db(rusqlite::Error::QueryReturnedNoRows) => RpcErrorCode::NotFound,
+            Self::Db(_) => RpcErrorCode::Db,
+            Self::Conflict(_) => RpcErrorCode::Conflict,
+            Self::Unsupported(_) => RpcErrorCode::Unsupported,
+            Self::Other(_) => RpcErrorCode::Internal,
+        }
     }
 }
 
@@ -180,6 +266,12 @@ impl From<reqwest::Error> for CoreError {
                 CoreError::Auth(msg)
             }
             Some(s) if s == reqwest::StatusCode::NOT_FOUND => CoreError::NotFound(msg),
+            Some(s)
+                if s == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || (s.is_server_error() && s != reqwest::StatusCode::GATEWAY_TIMEOUT) =>
+            {
+                CoreError::Server(msg)
+            }
             _ if timeout => CoreError::Timeout(msg),
             _ => CoreError::Network(msg),
         }
@@ -205,13 +297,27 @@ impl From<tokio::task::JoinError> for CoreError {
 }
 
 impl From<CoreError> for RpcError {
+    /// Last line of defence for "messages must never contain secrets": the
+    /// message is passed through [`crate::logging::redact_text`].
     fn from(err: CoreError) -> Self {
+        let mut rpc = Self::from_unredacted(err);
+        if let std::borrow::Cow::Owned(clean) = crate::logging::redact_text(&rpc.message) {
+            rpc.message = clean;
+        }
+        rpc
+    }
+}
+
+impl RpcError {
+    fn from_unredacted(err: CoreError) -> Self {
         match err {
             CoreError::NotFound(m) => RpcError::not_found(m),
             CoreError::Invalid(m) => RpcError::invalid(m),
             CoreError::Network(m) => RpcError::network(m),
             CoreError::Auth(m) => RpcError::auth(m),
             CoreError::Timeout(m) => RpcError::timeout(m),
+            CoreError::Server(m) => RpcError::new(RpcErrorCode::Server, m),
+            CoreError::EngineMissing(m) => RpcError::new(RpcErrorCode::EngineMissing, m),
             CoreError::Io(e) => RpcError::from(e),
             CoreError::Db(e) => RpcError::from(e),
             CoreError::Conflict(m) => RpcError::conflict(m),
@@ -270,6 +376,12 @@ mod tests {
         assert_eq!(v["code"], "network");
         assert_eq!(v["retryable"], true);
         assert_eq!(v["details"]["host"], "x");
+        // B8: secrets in a core message never cross the RPC boundary.
+        let leaked = RpcError::from(CoreError::Network(
+            "upstream said: bad request ?username=bob&password=hunter2".into(),
+        ));
+        assert!(!leaked.message.contains("hunter2") && !leaked.message.contains("bob"));
+        assert_eq!(leaked.code, RpcErrorCode::Network);
         let nf = serde_json::to_value(RpcError::not_found("x")).unwrap();
         assert_eq!(nf["code"], "not_found");
         assert!(nf.get("details").is_none());
@@ -289,5 +401,50 @@ mod tests {
         let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope");
         assert_eq!(RpcError::from(CoreError::Io(io)).code, RpcErrorCode::Io);
         assert_eq!(RpcErrorCode::Unsupported.http_status(), 501);
+    }
+
+    /// C10: `CoreError::code` agrees with the RPC mapping, and wire names
+    /// round-trip through `as_str` / `parse` and serde.
+    #[test]
+    fn core_error_code_matches_rpc_mapping_and_names_roundtrip() {
+        let cases = vec![
+            CoreError::NotFound("x".into()),
+            CoreError::Invalid("x".into()),
+            CoreError::Network("x".into()),
+            CoreError::Auth("x".into()),
+            CoreError::Timeout("x".into()),
+            CoreError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "t")),
+            CoreError::Io(std::io::Error::other("o")),
+            CoreError::Db(rusqlite::Error::QueryReturnedNoRows),
+            CoreError::Db(rusqlite::Error::InvalidQuery),
+            CoreError::Conflict("x".into()),
+            CoreError::Unsupported("x".into()),
+            CoreError::Other(anyhow::anyhow!("x")),
+        ];
+        for e in cases {
+            let code = e.code();
+            assert_eq!(RpcError::from(e).code, code);
+            assert_eq!(RpcErrorCode::parse(code.as_str()), Some(code));
+            assert_eq!(serde_json::to_value(code).unwrap(), code.as_str());
+        }
+        assert_eq!(RpcErrorCode::parse("bogus"), None);
+    }
+
+    /// L1-sources-home-7: a refused, unknown-host or bad-certificate failure
+    /// is final for the retry loops but stays retryable for the user.
+    #[test]
+    fn permanent_transport_failures_are_not_retried() {
+        let refused = CoreError::Network(
+            "Could not reach h. The server refused the connection. Check the address and port, and that the server is running, then try again. (refused)".into(),
+        );
+        assert!(!refused.is_retryable());
+        assert!(RpcError::from(refused).retryable);
+        let reset = CoreError::Network(
+            "Could not reach h. Check the address and that the server is online, then try again. (connection reset)".into(),
+        );
+        assert!(reset.is_retryable());
+        assert!(CoreError::Timeout("t".into()).is_retryable());
+        assert!(CoreError::Server("s".into()).is_retryable());
+        assert!(!CoreError::Invalid("i".into()).is_retryable());
     }
 }

@@ -18,6 +18,9 @@ struct NowNextArgs {
     /// `settings.epgOffsetMinutes`; "now" is matched against `now - offset`.
     #[serde(default)]
     offset_minutes: Option<i32>,
+    /// False leaves programme descriptions out (default true).
+    #[serde(default)]
+    with_description: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +38,9 @@ struct GridArgs {
     refs: Vec<ItemRef>,
     from: String,
     to: String,
+    /// False leaves programme descriptions out (default true).
+    #[serde(default)]
+    with_description: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -78,9 +84,14 @@ pub fn register(r: &mut RpcRouter) {
         super::refresh(s, a.url).await.map_err(RpcError::from)
     });
     r.add("epg.nowNext", |s, a: NowNextArgs| async move {
-        super::now_next_with_offset(&s, a.refs, a.offset_minutes.unwrap_or(0))
-            .await
-            .map_err(RpcError::from)
+        super::now_next_opts(
+            &s,
+            a.refs,
+            a.offset_minutes.unwrap_or(0),
+            a.with_description.unwrap_or(true),
+        )
+        .await
+        .map_err(RpcError::from)
     });
     r.add("epg.programs", |s, a: ProgramsArgs| async move {
         super::programs(&s, a.item_ref, &a.from, &a.to)
@@ -88,9 +99,15 @@ pub fn register(r: &mut RpcRouter) {
             .map_err(RpcError::from)
     });
     r.add("epg.grid", |s, a: GridArgs| async move {
-        super::grid(&s, a.refs, &a.from, &a.to)
-            .await
-            .map_err(RpcError::from)
+        super::grid_opts(
+            &s,
+            a.refs,
+            &a.from,
+            &a.to,
+            a.with_description.unwrap_or(true),
+        )
+        .await
+        .map_err(RpcError::from)
     });
     r.add("epg.channelsSearch", |s, a: SearchArgs| async move {
         super::channels_search(&s, a.query, a.limit)
@@ -119,7 +136,12 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("epg.clearAll", |s, _a: ()| async move {
         let deleted = s
-            .db_call(super::store::clear_all)
+            .db_call(|c| {
+                let deleted = super::store::clear_all(c)?;
+                // Guide search (C5): re-index what is left (staging rows only).
+                super::search::refresh_index(c);
+                Ok(deleted)
+            })
             .await
             .map_err(RpcError::from)?;
         super::ingest::runtime(&s).bump();
@@ -127,4 +149,11 @@ pub fn register(r: &mut RpcRouter) {
         s.emit("epg.changed", serde_json::json!({}));
         Ok::<(), RpcError>(())
     });
+    // guide: programme search (Run 2 C5).
+    r.add(
+        "epg.search",
+        |s, a: super::search::SearchRequest| async move {
+            super::search::search(&s, a).await.map_err(RpcError::from)
+        },
+    );
 }

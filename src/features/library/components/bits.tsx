@@ -4,8 +4,10 @@ import { k } from '../lib/keys';
 import { Clapperboard, Film, Radio, Tv } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 
 import type { ContentType, DownloadStatus, Source, SourceKind } from '@/api/types';
+import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
 import { Badge, Button, Dialog } from '../deps';
@@ -18,12 +20,12 @@ export function SourceBadge({ source, className }: { source: Source | undefined;
   return (
     <span
       className={cn(
-        'inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-sm border border-border px-1.5 py-0.5 text-[11px] leading-4 text-fg-muted',
+        'inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-sm border border-border px-1.5 py-0.5 text-[calc(11rem/15)] leading-4 text-fg-muted',
         className,
       )}
       title={source?.name ?? t('sourceRemoved')}
     >
-      {source && <span className="font-display text-[10px] font-semibold tracking-wide text-fg-subtle">{KIND_LABEL[source.kind]}</span>}
+      {source && <span className="font-display text-2xs font-semibold tracking-wide text-fg-subtle">{KIND_LABEL[source.kind]}</span>}
       <span className="truncate">{source?.name ?? t('sourceRemoved')}</span>
     </span>
   );
@@ -102,9 +104,33 @@ export function PageTitle({ children }: { children: string }) {
 export function SectionHeading({ title, count, hint }: { title: string; count: number; hint?: string }) {
   return (
     <div className="flex h-full items-end gap-3 px-1 pb-2">
-      <h2 className="font-display text-[15px] font-semibold text-fg">{title}</h2>
-      <span className="font-display text-[13px] tabular-nums text-fg-subtle">{count}</span>
+      <h2 className="font-display text-[calc(15rem/15)] font-semibold text-fg">{title}</h2>
+      <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
       {hint && <span className="ms-auto truncate text-xs text-fg-subtle">{hint}</span>}
     </div>
+  );
+}
+
+/**
+ * Empty-state action for Favorites and History: points at where items come
+ * from. Inside a source (or when any source exists) it opens that source's
+ * channels; with no sources at all it leads to adding one. Renders nothing
+ * while sources are still loading so the button never flips.
+ */
+export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string | undefined; sources: ReadonlyMap<string, Source>; loading?: boolean }) {
+  const { t } = useTranslation('library');
+  if (loading && !sourceId) return null;
+  const target = sourceId ?? sources.keys().next().value;
+  if (target) {
+    return (
+      <Link to={`/s/${encodeURIComponent(target)}/live`} className={buttonClass('primary', 'md')} data-testid="library-empty-browse">
+        {t('browseChannels')}
+      </Link>
+    );
+  }
+  return (
+    <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="library-empty-add-source">
+      {t('addSourceAction')}
+    </Link>
   );
 }

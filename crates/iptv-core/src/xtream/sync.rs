@@ -1,16 +1,30 @@
-//! Catalog sync: account check, then live (+radio), movies, series one content
-//! type at a time through `catalog::replace_catalog`, then the XMLTV link.
+//! Catalog sync: account check, then live (+radio), movies and series are
+//! fetched and mapped one content type at a time, and all of them are written
+//! in ONE transaction ([`replace_catalogs`]), then the XMLTV link.
 //!
-//! Memory: each type's body is fetched as bytes, decoded into a
-//! `Vec<RawItem>` on the blocking pool, the bytes dropped, and the Vec fed to
-//! the writer as an iterator; nothing from the previous type is alive when the
-//! next one is fetched.
+//! Atomicity (C8): a cancel or failure anywhere before that commit leaves the
+//! previous catalog whole. Writing type by type used to leave live new and
+//! movies old when a cancel landed between types.
+//!
+//! Memory: each type's body is fetched as bytes, decoded and mapped to
+//! `ItemRow`s on the blocking pool, and the bytes dropped before the next type
+//! is fetched. The mapped rows of every type are held until the single write.
 //!
 //! Failure policy: `Auth`, `Network` and `Timeout` (after retries) abort the
-//! whole sync (the catalog of types not yet synced stays as it was). A type the
-//! panel does not serve (`NotFound`, unreadable JSON) is skipped with a warning
-//! and keeps its previous rows; the sync fails only if every requested type
-//! failed.
+//! whole sync and nothing is written. A type the panel does not serve
+//! (`NotFound`, unreadable JSON) is skipped with a warning and keeps its
+//! previous rows; the sync fails only if every requested type failed. A
+//! type whose categories come back unreadable (a login page) keeps its
+//! previous rows too, or, with none yet, lands under "Uncategorized". Both
+//! are noted with `sources::note_import_warning`, so the source's
+//! `lastError` says what is stale.
+//!
+//! Unchanged refresh (L2-perf-core-4): each type's answers (mapped
+//! categories plus the raw list body, with [`SYNC_VERSION`]) are hashed and
+//! the hash is stored per type in `app_state` (`xtream_fp:<id>`) with the
+//! commit. A type whose hash and row counts match is neither decoded nor
+//! written; when no type changed there is no write at all and the run
+//! reports `unchanged`.
 
 use super::client::XtreamClient;
 use super::meta::{self, added_to_rfc3339, year_from_date, ServerMeta};
@@ -19,11 +33,13 @@ use super::url::{clean_extension, is_xmltv_url_for, xmltv_url};
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgLinks, ImportSummary, XtreamSourceConfig};
-use crate::sources::progress;
+use crate::sources::{progress, progress_step, SaveStep};
 use crate::state::AppState;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 /// Progress is emitted at least this often while saving.
@@ -111,11 +127,14 @@ pub async fn sync_source(
     plan: SyncPlan,
 ) -> CoreResult<ImportSummary> {
     let http = crate::http::trusted_client(&state, &cfg.server_url);
-    let client = XtreamClient::new(http, cfg)?;
+    let client = XtreamClient::new(http, cfg)?.with_progress(&state, source_id);
     tracing::info!(source_id, server = %client.server, user = %client.masked_username(), ?plan, "xtream sync start");
     progress(&state, source_id, "fetching", 0, None, Some("account"));
     let account = client.account().await?;
     let server_meta = ServerMeta::from_account(&account);
+    // account: the reply doubles as a fresh subscription status.
+    crate::account::remember_xtream(&state, source_id, super::service::info_from_raw(account))
+        .await;
     let rt = meta::runtime(&state);
     {
         let rt = rt.clone();
@@ -125,9 +144,20 @@ pub async fn sync_source(
             .await?;
     }
 
-    let mut summary = ImportSummary::default();
+    // What the last write stored, and the rows there now (unchanged check).
+    let previous = {
+        let sid = source_id.to_string();
+        state.db_call(move |c| load_previous(c, &sid)).await?
+    };
+
+    let mut parts: Vec<CatalogPart> = Vec::new();
     let mut first_err: Option<CoreError> = None;
-    let mut attempted = 0;
+    // Kinds whose rows stay as they are (unchanged, or kept after their
+    // categories failed), and the new fingerprints of the kinds written.
+    let mut untouched: Vec<Kind> = Vec::new();
+    let mut written: Vec<(Kind, Option<String>)> = Vec::new();
+    // Kinds that failed without failing the sync: their rows stay too.
+    let mut failed: Vec<Kind> = Vec::new();
 
     let steps: [(bool, Kind); 3] = [
         (plan.live, Kind::Live),
@@ -138,18 +168,33 @@ pub async fn sync_source(
         if !enabled {
             continue;
         }
-        attempted += 1;
-        match sync_kind(&state, &client, source_id, kind).await {
-            Ok(n) => match kind {
-                Kind::Live => summary.channels = n as i64,
-                Kind::Movies => summary.movies = n as i64,
-                Kind::Series => summary.series = n as i64,
-            },
+        // A cancel between content types stops here, before anything is
+        // written (the HTTP helpers also stop a fetch in flight).
+        if crate::sources::is_import_cancelled() {
+            return Err(crate::sources::import_cancelled_error());
+        }
+        match fetch_kind(&state, &client, source_id, kind, &previous).await {
+            Ok(Fetched::Unchanged) => {
+                tracing::info!(
+                    source_id,
+                    kind = kind.label(),
+                    "xtream content type unchanged; rows kept"
+                );
+                untouched.push(kind);
+            }
+            Ok(Fetched::Kept) => untouched.push(kind),
+            Ok(Fetched::Parts { parts: p, hash }) => {
+                written.push((kind, hash));
+                parts.extend(p);
+            }
             Err(err)
                 if matches!(
                     err,
-                    CoreError::Auth(_) | CoreError::Network(_) | CoreError::Timeout(_)
-                ) =>
+                    CoreError::Auth(_)
+                        | CoreError::Network(_)
+                        | CoreError::Server(_)
+                        | CoreError::Timeout(_)
+                ) || crate::sources::is_cancelled_error(&err) =>
             {
                 return Err(err);
             }
@@ -163,16 +208,106 @@ pub async fn sync_source(
                     None,
                     Some(&format!("{} skipped: {err}", kind.label())),
                 );
+                // A panel that does not serve a type at all is normal; any
+                // other failure leaves that type stale, so say so.
+                if !matches!(err, CoreError::NotFound(_) | CoreError::Unsupported(_)) {
+                    crate::sources::note_import_warning(&kind.kept_message(), err.code());
+                }
+                failed.push(kind);
                 first_err.get_or_insert(err);
             }
         }
     }
-    if attempted > 0 && summary == ImportSummary::default() {
+    if untouched.is_empty() && parts.iter().all(|p| p.rows.is_empty()) {
         if let Some(err) = first_err {
-            // Every requested type failed.
+            // Every requested type failed (or the rest came back empty):
+            // keep the previous catalog untouched.
             return Err(err);
         }
     }
+    if crate::sources::is_import_cancelled() {
+        return Err(crate::sources::import_cancelled_error());
+    }
+
+    // Nothing to write: no write lock, no catalog rewrite, and clients keep
+    // their catalog queries (`done` carries UNCHANGED_MESSAGE).
+    let unchanged = parts.is_empty();
+    let counts = if unchanged {
+        progress(
+            &state,
+            source_id,
+            "saving",
+            0,
+            None,
+            Some(crate::sources::UNCHANGED_MESSAGE),
+        );
+        HashMap::new()
+    } else {
+        let total = parts.iter().map(|p| p.rows.len() as u64).sum::<u64>();
+        let state2 = state.clone();
+        let sid = source_id.to_string();
+        let prints = previous.prints.clone();
+        // The run's token, read here (task-local) before waiting on the pool
+        // or the write lock (C8; see `CatalogWriter::begin`).
+        let cancel = crate::sources::import_cancel();
+        // A refresh deletes the previous rows first (seconds on a large
+        // account): say so instead of leaving "parsing" up (L3-perf-core-4).
+        let replacing = parts.iter().any(|p| previous.rows(p.content_type) > 0);
+        state
+            .db_call(move |conn| {
+                if replacing {
+                    progress_step(&state2, &sid, SaveStep::Replacing, 0);
+                }
+                let mut done = 0u64;
+                // No message: the phase label already says "Saving"; a raw
+                // content type under the bar is not translated (L2-sources-home-7).
+                let mut on_row = |_: ContentType| {
+                    done += 1;
+                    if done % PROGRESS_EVERY == 0 || done == total {
+                        progress(&state2, &sid, "saving", done, Some(total), None);
+                    }
+                };
+                // Every row is written: the indexes, the search index and the
+                // counts follow before the commit.
+                let mut on_finish = |written: u64| {
+                    progress_step(&state2, &sid, SaveStep::Indexing, written);
+                };
+                let counts = replace_catalogs_with(
+                    conn,
+                    &sid,
+                    parts,
+                    cancel,
+                    &mut on_row,
+                    &mut on_finish,
+                    |tx, counts| store_prints(tx, &sid, prints, &written, counts),
+                )?;
+                // The rewrite grew the WAL by about the catalog's size.
+                crate::db::checkpoint_truncate(conn);
+                Ok(counts)
+            })
+            .await?
+    };
+    let enabled = |kind: Kind| match kind {
+        Kind::Live => plan.live,
+        Kind::Movies => plan.movies,
+        Kind::Series => plan.series,
+    };
+    let count = |ct: ContentType| -> i64 {
+        let kind = Kind::of(ct);
+        if !enabled(kind) {
+            0
+        } else if untouched.contains(&kind) || failed.contains(&kind) {
+            previous.rows(ct)
+        } else {
+            counts.get(&ct).copied().unwrap_or(0) as i64
+        }
+    };
+    let summary = ImportSummary {
+        channels: count(ContentType::Live) + count(ContentType::Radio),
+        movies: count(ContentType::Movie),
+        series: count(ContentType::Series),
+        unchanged,
+    };
 
     // XMLTV link + caches.
     let xmltv = xmltv_url(&client.server, &client.username, client.password());
@@ -215,16 +350,211 @@ impl Kind {
             Kind::Series => ("get_series_categories", "get_series"),
         }
     }
+    /// The content types one kind writes (live also carries radio).
+    fn content_types(self) -> &'static [ContentType] {
+        match self {
+            Kind::Live => &[ContentType::Live, ContentType::Radio],
+            Kind::Movies => &[ContentType::Movie],
+            Kind::Series => &[ContentType::Series],
+        }
+    }
+    fn of(ct: ContentType) -> Self {
+        match ct {
+            ContentType::Live | ContentType::Radio => Kind::Live,
+            ContentType::Movie => Kind::Movies,
+            ContentType::Series => Kind::Series,
+        }
+    }
+    /// `lastError` of a sync where this kind could not be loaded and kept
+    /// its previous rows.
+    fn kept_message(self) -> String {
+        let what = match self {
+            Kind::Live => "Channels",
+            Kind::Movies => "Movies",
+            Kind::Series => "Series",
+        };
+        format!("{what} could not be loaded from the server, so the previous {} were kept. Refresh the source to try again.", what.to_lowercase())
+    }
+    /// `lastError` when this kind's categories could not be loaded.
+    fn categories_message(self, kept: bool) -> String {
+        let what = match self {
+            Kind::Live => "channel",
+            Kind::Movies => "movie",
+            Kind::Series => "series",
+        };
+        let plural = match self {
+            Kind::Live => "channels",
+            Kind::Movies => "movies",
+            Kind::Series => "series",
+        };
+        if kept {
+            format!("The {what} categories could not be loaded from the server, so the previous {plural} were kept. Refresh the source to try again.")
+        } else {
+            format!("The {what} categories could not be loaded from the server, so every {what} is listed under Uncategorized for now. Refresh the source to try again.")
+        }
+    }
 }
 
-/// Fetches, parses and stores one content type. Returns the number of items
-/// written (live includes radio).
-async fn sync_kind(
+/// Version of the Xtream mapping rules, hashed into every stored fingerprint
+/// ([`kind_hash`]): bumping it makes the next refresh rewrite every
+/// unchanged catalog once. Bump it whenever a change alters the rows a sync
+/// writes (like `m3u::importer::IMPORT_VERSION`).
+pub const SYNC_VERSION: u32 = 1;
+
+/// `app_state` key of a source's per-kind fingerprints (dropped with the
+/// source, see `sources::store::delete`).
+fn prints_key(source_id: &str) -> String {
+    format!("xtream_fp:{source_id}")
+}
+
+/// What the last write of one kind stored: the hash of the panel's answers
+/// (categories and list) and the rows written per content type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct KindPrint {
+    hash: String,
+    rows: BTreeMap<String, i64>,
+}
+
+/// Fingerprints by [`Kind::label`].
+type Prints = BTreeMap<String, KindPrint>;
+
+/// The stored fingerprints and the rows in the catalog now, per content type.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Previous {
+    prints: Prints,
+    rows: HashMap<String, i64>,
+}
+
+impl Previous {
+    fn rows(&self, ct: ContentType) -> i64 {
+        self.rows.get(ct.as_str()).copied().unwrap_or(0)
+    }
+    fn has_rows(&self, kind: Kind) -> bool {
+        kind.content_types().iter().any(|ct| self.rows(*ct) > 0)
+    }
+    /// True when `hash` matches the last write of `kind` and the rows it
+    /// wrote are all still there.
+    fn unchanged(&self, kind: Kind, hash: &str) -> bool {
+        self.prints.get(kind.label()).is_some_and(|p| {
+            p.hash == hash
+                && kind
+                    .content_types()
+                    .iter()
+                    .all(|ct| p.rows.get(ct.as_str()).copied().unwrap_or(0) == self.rows(*ct))
+        })
+    }
+}
+
+fn load_previous(conn: &Connection, source_id: &str) -> CoreResult<Previous> {
+    let prints = conn
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            [prints_key(source_id)],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let mut st = conn.prepare_cached(
+        "SELECT content_type, count(*) FROM items WHERE source_id = ?1 GROUP BY content_type",
+    )?;
+    let rows = st
+        .query_map([source_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok(Previous { prints, rows })
+}
+
+/// Writes the fingerprints after a catalog write, inside its transaction:
+/// written kinds with a hash get a new one, written kinds without (their
+/// categories were missing) lose theirs so the next refresh writes them
+/// again, and every other kind keeps its own.
+fn store_prints(
+    conn: &Connection,
+    source_id: &str,
+    mut prints: Prints,
+    written: &[(Kind, Option<String>)],
+    counts: &HashMap<ContentType, u64>,
+) -> CoreResult<()> {
+    for (kind, hash) in written {
+        match hash {
+            Some(hash) => {
+                let rows = kind
+                    .content_types()
+                    .iter()
+                    .map(|ct| {
+                        (
+                            ct.as_str().to_string(),
+                            counts.get(ct).copied().unwrap_or(0) as i64,
+                        )
+                    })
+                    .collect();
+                prints.insert(
+                    kind.label().to_string(),
+                    KindPrint {
+                        hash: hash.clone(),
+                        rows,
+                    },
+                );
+            }
+            None => {
+                prints.remove(kind.label());
+            }
+        }
+    }
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        rusqlite::params![prints_key(source_id), serde_json::to_string(&prints)?],
+    )?;
+    Ok(())
+}
+
+/// sha256 (hex) of one kind's panel answers: [`SYNC_VERSION`], the kind, its
+/// mapped categories and the raw list body.
+fn kind_hash(kind: Kind, categories: &[CategoryRow], list: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(format!("tsrust-xtream-sync-v{SYNC_VERSION}\n{}\n", kind.label()).as_bytes());
+    for c in categories {
+        h.update(c.category_id.as_bytes());
+        h.update([0]);
+        h.update(c.name.as_bytes());
+        h.update([0]);
+        h.update(c.position.to_le_bytes());
+        h.update([b'\n']);
+    }
+    h.update([0xff]);
+    h.update(list);
+    hex::encode(h.finalize())
+}
+
+/// Outcome of [`fetch_kind`].
+enum Fetched {
+    /// The panel answered exactly what the last write stored, and those rows
+    /// are still there: nothing to write.
+    Unchanged,
+    /// The categories failed while the kind has rows: they are kept as they
+    /// were (and a warning is noted).
+    Kept,
+    /// New rows to write. `hash` is `None` when the categories were missing,
+    /// so no fingerprint is stored and the next refresh writes them again.
+    Parts {
+        parts: Vec<CatalogPart>,
+        hash: Option<String>,
+    },
+}
+
+/// Fetches and maps one content type (live yields a live and a radio part).
+/// Nothing is written here; see [`replace_catalogs`]. An answer identical
+/// to the last write is not even decoded ([`Fetched::Unchanged`]).
+async fn fetch_kind(
     state: &Arc<AppState>,
     client: &XtreamClient,
     source_id: &str,
     kind: Kind,
-) -> CoreResult<u64> {
+    previous: &Previous,
+) -> CoreResult<Fetched> {
     let (cat_action, list_action) = kind.actions();
     progress(state, source_id, "fetching", 0, None, Some(kind.label()));
     let (cats, list) = tokio::join!(
@@ -232,109 +562,91 @@ async fn sync_kind(
         client.get_bytes(list_action),
     );
     let categories = match cats {
-        Ok(c) => map_categories(c),
-        // Categories are cosmetic; items still land under "Uncategorized".
-        Err(err @ (CoreError::Auth(_) | CoreError::Network(_) | CoreError::Timeout(_))) => {
-            return Err(err)
-        }
+        Ok(c) => Some(map_categories(c)),
+        Err(
+            err @ (CoreError::Auth(_)
+            | CoreError::Network(_)
+            | CoreError::Server(_)
+            | CoreError::Timeout(_)),
+        ) => return Err(err),
         Err(err) => {
+            // A login page or an error body instead of the categories
+            // (L1-core-15): every item would land under "Uncategorized".
             tracing::warn!(source_id, action = cat_action, error = %err, "xtream categories unavailable");
-            Vec::new()
+            let kept = previous.has_rows(kind);
+            crate::sources::note_import_warning(&kind.categories_message(kept), err.code());
+            if kept {
+                // Keep the previous rows and categories of this kind whole.
+                return Ok(Fetched::Kept);
+            }
+            None
         }
     };
     let bytes = list?;
 
-    let state2 = state.clone();
+    progress(state, source_id, "parsing", 0, None, Some(kind.label()));
     let sid = source_id.to_string();
-    state
-        .db_call(move |conn| {
-            progress(&state2, &sid, "parsing", 0, None, Some(kind.label()));
-            match kind {
-                Kind::Live => {
-                    let parsed: LenientVec<RawLive> =
-                        super::client::decode(&bytes, "live streams")?;
-                    drop(bytes);
-                    log_skipped(&sid, kind, parsed.skipped);
-                    let rows: Vec<ItemRow> = parsed
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, r)| live_row(&sid, i as i64, r))
-                        .collect();
-                    let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) =
-                        rows.into_iter().partition(|r| r.is_radio);
-                    let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
-                    let total = (live.len() + radio.len()) as u64;
-                    let mut done = 0u64;
-                    let n_live = write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Live,
-                        &live_cats,
-                        live,
-                        total,
-                        &mut done,
-                    )?;
-                    let n_radio = write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Radio,
-                        &radio_cats,
-                        radio,
-                        total,
-                        &mut done,
-                    )?;
-                    Ok(n_live + n_radio)
-                }
-                Kind::Movies => {
-                    let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
-                    drop(bytes);
-                    log_skipped(&sid, kind, parsed.skipped);
-                    let total = parsed.items.len() as u64;
-                    let rows = parsed
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, r)| vod_row(&sid, i as i64, r));
-                    let mut done = 0;
-                    write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Movie,
-                        &categories,
-                        rows,
-                        total,
-                        &mut done,
-                    )
-                }
-                Kind::Series => {
-                    let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
-                    drop(bytes);
-                    log_skipped(&sid, kind, parsed.skipped);
-                    let total = parsed.items.len() as u64;
-                    let rows = parsed
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, r)| series_row(&sid, i as i64, r));
-                    let mut done = 0;
-                    write(
-                        conn,
-                        &state2,
-                        &sid,
-                        ContentType::Series,
-                        &categories,
-                        rows,
-                        total,
-                        &mut done,
-                    )
-                }
+    let previous = previous.clone();
+    let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
+        let hash = categories
+            .as_deref()
+            .map(|cats| kind_hash(kind, cats, &bytes));
+        if hash.as_deref().is_some_and(|h| previous.unchanged(kind, h)) {
+            return Ok(Fetched::Unchanged);
+        }
+        drop(previous);
+        let categories = categories.unwrap_or_default();
+        let part = |content_type, categories, rows| CatalogPart {
+            content_type,
+            categories,
+            rows,
+        };
+        let parts = match kind {
+            Kind::Live => {
+                let parsed: LenientVec<RawLive> = super::client::decode(&bytes, "live streams")?;
+                drop(bytes);
+                log_skipped(&sid, kind, parsed.skipped);
+                let (radio, live): (Vec<ItemRow>, Vec<ItemRow>) = parsed
+                    .items
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, r)| live_row(&sid, i as i64, r))
+                    .partition(|r| r.is_radio);
+                let (live_cats, radio_cats) = split_categories(&categories, &live, &radio);
+                vec![
+                    part(ContentType::Live, live_cats, live),
+                    part(ContentType::Radio, radio_cats, radio),
+                ]
             }
-        })
-        .await
+            Kind::Movies => {
+                let parsed: LenientVec<RawVod> = super::client::decode(&bytes, "movies")?;
+                drop(bytes);
+                log_skipped(&sid, kind, parsed.skipped);
+                let rows = parsed
+                    .items
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, r)| vod_row(&sid, i as i64, r))
+                    .collect();
+                vec![part(ContentType::Movie, categories, rows)]
+            }
+            Kind::Series => {
+                let parsed: LenientVec<RawSeries> = super::client::decode(&bytes, "series")?;
+                drop(bytes);
+                log_skipped(&sid, kind, parsed.skipped);
+                let rows = parsed
+                    .items
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, r)| series_row(&sid, i as i64, r))
+                    .collect();
+                vec![part(ContentType::Series, categories, rows)]
+            }
+        };
+        Ok(Fetched::Parts { parts, hash })
+    })
+    .await??;
+    Ok(fetched)
 }
 
 fn log_skipped(source_id: &str, kind: Kind, skipped: usize) {
@@ -348,29 +660,95 @@ fn log_skipped(source_id: &str, kind: Kind, skipped: usize) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write(
+/// The new catalog of one content type, written by [`replace_catalogs`].
+pub(crate) struct CatalogPart {
+    pub content_type: ContentType,
+    pub categories: Vec<CategoryRow>,
+    pub rows: Vec<ItemRow>,
+}
+
+/// Replaces the catalogs of several content types of one source in ONE
+/// transaction and returns the rows written per type (duplicates excluded).
+///
+/// Any error, or a cancel of the import run (C8) seen by the writer or right
+/// before the commit, rolls the whole transaction back: the previous catalog
+/// of every type stays as it was. Types not in `parts` are not touched.
+/// `on_row` is called once per row offered to the writer.
+///
+/// `cancel` is the run's token, taken by the caller before `db_call` (see
+/// [`catalog::CatalogWriter::begin`]); `None` falls back to the registered
+/// writer token.
+#[cfg(test)]
+pub(crate) fn replace_catalogs(
     conn: &mut Connection,
-    state: &AppState,
     source_id: &str,
-    ct: ContentType,
-    categories: &[CategoryRow],
-    rows: impl IntoIterator<Item = ItemRow>,
-    total: u64,
-    done: &mut u64,
-) -> CoreResult<u64> {
-    let label = ct.as_str();
-    let n = {
-        let mut iter = rows.into_iter().inspect(|_| {
-            *done += 1;
-            if *done % PROGRESS_EVERY == 0 {
-                progress(state, source_id, "saving", *done, Some(total), Some(label));
-            }
-        });
-        catalog::replace_catalog(conn, source_id, ct, categories, &mut iter)?
+    parts: Vec<CatalogPart>,
+    cancel: Option<tokio_util::sync::CancellationToken>,
+    on_row: &mut dyn FnMut(ContentType),
+) -> CoreResult<HashMap<ContentType, u64>> {
+    replace_catalogs_with(
+        conn,
+        source_id,
+        parts,
+        cancel,
+        on_row,
+        &mut |_| {},
+        |_, _| Ok(()),
+    )
+}
+
+/// [`replace_catalogs`], with `before_commit` run inside the same
+/// transaction after the rows are written (given the counts), so state that
+/// describes the catalog (the Xtream fingerprints) commits or rolls back
+/// with it. `on_finish` is called with the rows written once every row is
+/// in, before the writer builds its indexes and counts.
+pub(crate) fn replace_catalogs_with(
+    conn: &mut Connection,
+    source_id: &str,
+    parts: Vec<CatalogPart>,
+    cancel: Option<tokio_util::sync::CancellationToken>,
+    on_row: &mut dyn FnMut(ContentType),
+    on_finish: &mut dyn FnMut(u64),
+    before_commit: impl FnOnce(&Connection, &HashMap<ContentType, u64>) -> CoreResult<()>,
+) -> CoreResult<HashMap<ContentType, u64>> {
+    let cancel = cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id));
+    let check_cancel = || -> CoreResult<()> {
+        if cancel.as_ref().is_some_and(|t| t.is_cancelled()) {
+            return Err(crate::sources::import_cancelled_error());
+        }
+        Ok(())
     };
-    progress(state, source_id, "saving", *done, Some(total), Some(label));
-    Ok(n)
+    check_cancel()?;
+    let mut counts = HashMap::new();
+    if parts.is_empty() {
+        return Ok(counts);
+    }
+    let types: Vec<ContentType> = parts.iter().map(|p| p.content_type).collect();
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    {
+        let mut w = catalog::CatalogWriter::begin(&tx, source_id, &types, cancel.clone())?;
+        let mut categories = Vec::with_capacity(parts.len());
+        for part in &parts {
+            w.declare_categories(part.content_type, &part.categories);
+        }
+        for part in parts {
+            for row in &part.rows {
+                w.insert(row)?;
+                on_row(part.content_type);
+            }
+            categories.push((part.content_type, part.categories));
+        }
+        for ct in &types {
+            counts.insert(*ct, w.inserted_of(*ct));
+        }
+        on_finish(w.inserted());
+        w.finish(&categories)?;
+    }
+    before_commit(&tx, &counts)?;
+    // Last check: a cancelled run never commits.
+    check_cancel()?;
+    tx.commit()?;
+    Ok(counts)
 }
 
 /// Adds the account's XMLTV URL to `epg.detectedUrls`, replacing stale
@@ -524,8 +902,11 @@ pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
         epg_channel_id: r.epg_channel_id,
         is_radio,
         // Xtream reports archive depth in days; enabled archives with an
-        // unknown depth get one day so the UI offers catch-up.
-        archive_hours: archive.then(|| days.unwrap_or(1) * 24),
+        // unknown depth get one day so the UI offers catch-up. Clamped: a
+        // garbage depth must not overflow here or in the catch-up time math.
+        archive_hours: archive
+            .then(|| super::meta::archive_days_to_hours(days.unwrap_or(1)))
+            .flatten(),
         extra: Value::Object(extra),
         position,
         item_id: id,
@@ -648,6 +1029,22 @@ mod tests {
     }
 
     #[test]
+    fn huge_archive_duration_is_clamped_not_overflowed() {
+        // `9223372036854775807 * 24` used to overflow (debug panic).
+        for days in [json!(i64::MAX), json!("9223372036854775807"), json!(1e300)] {
+            let r: RawLive =
+                parse(json!({"stream_id": 1, "tv_archive": 1, "tv_archive_duration": days}));
+            let row = live_row("s", 0, r).unwrap();
+            assert!(
+                row.archive_hours
+                    .is_some_and(|h| (24..=366 * 24).contains(&h)),
+                "{:?}",
+                row.archive_hours
+            );
+        }
+    }
+
+    #[test]
     fn maps_vod_and_series_rows() {
         let v: RawVod = parse(json!({
             "name": "Film (2019)", "stream_id": "201", "stream_icon": "http://x/p.jpg",
@@ -696,5 +1093,170 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].name, "Radio");
+    }
+
+    fn catalog_db(sid: &str) -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO sources (id, kind, name, config_json) VALUES (?1, 'xtream', 'X', '{}')",
+            [sid],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn item(sid: &str, ct: ContentType, id: &str) -> ItemRow {
+        ItemRow {
+            source_id: sid.into(),
+            content_type: ct,
+            item_id: id.into(),
+            category_id: "c".into(),
+            title: id.into(),
+            ..ItemRow::default()
+        }
+    }
+
+    fn part(ct: ContentType, rows: Vec<ItemRow>) -> CatalogPart {
+        CatalogPart {
+            content_type: ct,
+            categories: vec![CategoryRow {
+                category_id: "c".into(),
+                name: "C".into(),
+                position: 0,
+            }],
+            rows,
+        }
+    }
+
+    fn item_ids(conn: &Connection, sid: &str, ct: ContentType) -> Vec<String> {
+        let mut st = conn
+            .prepare("SELECT item_id FROM items WHERE source_id = ?1 AND content_type = ?2 ORDER BY item_id")
+            .unwrap();
+        st.query_map(rusqlite::params![sid, ct.as_str()], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn replace_catalogs_writes_every_part() {
+        let sid = "s-ok";
+        let mut conn = catalog_db(sid);
+        let mut offered = 0;
+        let counts = replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(ContentType::Live, vec![item(sid, ContentType::Live, "l1")]),
+                part(
+                    ContentType::Movie,
+                    vec![
+                        item(sid, ContentType::Movie, "m1"),
+                        item(sid, ContentType::Movie, "m1"),
+                    ],
+                ),
+            ],
+            None,
+            &mut |_| offered += 1,
+        )
+        .unwrap();
+        assert_eq!(offered, 3);
+        assert_eq!(counts[&ContentType::Live], 1);
+        assert_eq!(counts[&ContentType::Movie], 1, "duplicate not counted");
+        assert_eq!(item_ids(&conn, sid, ContentType::Live), ["l1"]);
+        assert_eq!(item_ids(&conn, sid, ContentType::Movie), ["m1"]);
+    }
+
+    /// B9-D38: a failure in a later content type (here a row of the wrong
+    /// type; a cancel takes the same rollback path) used to leave the earlier
+    /// types committed. Now every type keeps its old catalog.
+    #[test]
+    fn replace_catalogs_rolls_back_every_part_on_error() {
+        let sid = "s-err";
+        let mut conn = catalog_db(sid);
+        replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(
+                    ContentType::Live,
+                    vec![item(sid, ContentType::Live, "old-l")],
+                ),
+                part(
+                    ContentType::Movie,
+                    vec![item(sid, ContentType::Movie, "old-m")],
+                ),
+            ],
+            None,
+            &mut |_| {},
+        )
+        .unwrap();
+        let err = replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(
+                    ContentType::Live,
+                    vec![item(sid, ContentType::Live, "new-l")],
+                ),
+                part(
+                    ContentType::Movie,
+                    vec![item(sid, ContentType::Series, "bad")],
+                ),
+            ],
+            None,
+            &mut |_| {},
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{err:?}");
+        assert_eq!(item_ids(&conn, sid, ContentType::Live), ["old-l"]);
+        assert_eq!(item_ids(&conn, sid, ContentType::Movie), ["old-m"]);
+    }
+
+    /// Review R2-1: the writer looked its cancel token up inside db_call. When
+    /// the pool or the write lock was slow, the run's registration was gone by
+    /// then (no token, or a newer run's), and a cancelled run committed. The
+    /// run's token is now passed in and honoured with nothing registered.
+    #[test]
+    fn replace_catalogs_honours_the_run_token_without_a_registered_writer() {
+        let sid = "s-tok";
+        let mut conn = catalog_db(sid);
+        replace_catalogs(
+            &mut conn,
+            sid,
+            vec![part(
+                ContentType::Live,
+                vec![item(sid, ContentType::Live, "old-l")],
+            )],
+            None,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(crate::sources::writer_cancel_token(&conn, sid).is_none());
+        // Cancelled mid-write: the writer's own check (taken at begin) and the
+        // pre-commit check both see it.
+        let token = tokio_util::sync::CancellationToken::new();
+        let fire = token.clone();
+        let err = replace_catalogs(
+            &mut conn,
+            sid,
+            vec![part(
+                ContentType::Live,
+                vec![item(sid, ContentType::Live, "new-l")],
+            )],
+            Some(token),
+            &mut |_| fire.cancel(),
+        )
+        .unwrap_err();
+        assert!(crate::sources::is_cancelled_error(&err), "{err:?}");
+        assert_eq!(item_ids(&conn, sid, ContentType::Live), ["old-l"]);
+        // The same token, checked by CatalogWriter itself.
+        let tx = conn.transaction().unwrap();
+        let w = catalog::CatalogWriter::begin(&tx, sid, &[ContentType::Live], Some(fire.clone()))
+            .unwrap();
+        assert!(crate::sources::is_cancelled_error(
+            &w.finish(&[(ContentType::Live, Vec::new())]).unwrap_err()
+        ));
     }
 }

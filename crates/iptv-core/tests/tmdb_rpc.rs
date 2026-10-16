@@ -806,3 +806,21 @@ async fn network_errors_never_echo_the_key() {
         "key leaked: {err:?}"
     );
 }
+
+/// B9 review round 1: server mode shows the key masked; testing the masked
+/// value tests the stored key, not the mask.
+#[tokio::test]
+async fn test_key_with_the_masked_value_uses_the_stored_key() {
+    let e = env().await;
+    e.stub
+        .route("/3/configuration", Route::ok(json!({"images": {}})));
+    e.enable(Some("storedkey1234567"));
+    let masked = format!("{}4567", iptv_core::settings::SECRET_MASK);
+    let ok = e.call("tmdb.testKey", json!({ "apiKey": masked })).await;
+    assert_eq!(ok, json!({"ok": true}));
+    let hit = &e.stub.hits("/3/configuration")[0];
+    assert_eq!(
+        hit.query.get("api_key").map(String::as_str),
+        Some("storedkey1234567")
+    );
+}

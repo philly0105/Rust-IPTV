@@ -118,7 +118,10 @@ export function matches(p: ParsedCombo, e: KeyboardEvent): boolean {
   if (e.ctrlKey !== wantCtrl || e.metaKey !== wantMeta || e.altKey !== p.alt) return false;
 
   if (p.key === 'digit') {
-    return !e.shiftKey && /^\d$/.test(e.key);
+    // Shift is not checked: AZERTY (French, Belgian) types digits on the top
+    // row only with Shift held. Shift+digit on QWERTY yields "!", "@"... and
+    // fails the test on e.key anyway.
+    return /^\d$/.test(e.key);
   }
   const keys = eventKeys(e);
   if (!keys.includes(p.key)) return false;

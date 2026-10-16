@@ -27,6 +27,22 @@ export interface M3uSourceConfig {
   url?: string;
   filePath?: string;
   headers: RequestHeaders;
+  // guide:
+  /** Source-wide catch-up override; absent = the playlist's own attributes. Applied by core to channel rows. */
+  catchup?: CatchupOverride;
+}
+
+// guide:
+/** `none` turns catch-up off; the others are the M3U catch-up types (see `features/live/lib/catchup.ts`). */
+export type CatchupOverrideType = 'default' | 'append' | 'shift' | 'flussonic' | 'xc' | 'none';
+
+// guide:
+export interface CatchupOverride {
+  type: CatchupOverrideType;
+  /** Replaces each channel's `catchup-source` (placeholders: {utc} {lutc} {utcend} {duration} {offset} {Y}{m}{d}{H}{M}{S}). */
+  template?: string;
+  /** Replaces each channel's `catchup-days` (1..366). */
+  days?: number;
 }
 
 export interface XtreamSourceConfig {
@@ -65,6 +81,11 @@ export interface Source {
   updatedAt?: string;
   lastRefreshAt?: string;
   lastError?: string;
+  /** Classified code for `lastError` (C10); absent when there is no error or it predates codes. */
+  lastErrorCode?: RpcErrorCode;
+  // account:
+  /** When `lastError` was recorded (RFC 3339); absent without an error. */
+  lastErrorAt?: string;
   /** Live channels only; radio stations are in `radioCount`. */
   channelCount: number;
   radioCount: number;
@@ -112,6 +133,11 @@ export interface Category {
   hidden: boolean;
   itemCount: number;
   position: number;
+  /**
+   * Only on `includeHidden` answers: true when the answer without `includeHidden` leaves this group
+   * out only because its channels are hidden. Absent from an older core.
+   */
+  emptiedByEdits?: boolean;
 }
 
 export interface ArchiveInfo {
@@ -260,6 +286,9 @@ export interface EpgProgram {
   description?: string;
   category?: string;
   icon?: string;
+  // guide:
+  /** UI only, never sent by core: the programme came from the provider's short EPG, not XMLTV. */
+  fromProvider?: boolean;
 }
 
 export interface EpgNowNext {
@@ -371,6 +400,58 @@ export type Theme = 'light' | 'dark' | 'system';
 export type StartupBehavior = 'first-view' | 'restore-last-view';
 export type EpgViewMode = 'timeline' | 'list';
 export type CoverSize = 'small' | 'medium' | 'large';
+// appearance:
+/** Accent color family (`settings.accent`); applied as `html[data-accent]`. */
+export type Accent = 'amber' | 'teal' | 'violet' | 'rose' | 'lime' | 'sky' | 'coral';
+/** Spacing density of lists, rails and rows (`settings.density`); applied as `html[data-density]`. */
+export type Density = 'comfortable' | 'compact';
+
+/** Every accent, in the order pickers show them (same order as `Accent::ALL` in model.rs). */
+export const ACCENTS = ['amber', 'teal', 'violet', 'rose', 'lime', 'sky', 'coral'] as const satisfies readonly Accent[];
+/** Every density (same order as `Density::ALL` in model.rs). */
+export const DENSITIES = ['comfortable', 'compact'] as const satisfies readonly Density[];
+// Compile-time checks that ACCENTS and DENSITIES list every value.
+const _allAccentsListed: [Exclude<Accent, (typeof ACCENTS)[number]>] extends [never] ? true : never = true;
+const _allDensitiesListed: [Exclude<Density, (typeof DENSITIES)[number]>] extends [never] ? true : never = true;
+void _allAccentsListed;
+void _allDensitiesListed;
+/** Smallest accepted `settings.uiScale` (`settings::UI_SCALE_RANGE` in the core). */
+export const UI_SCALE_MIN = 0.9;
+/** Largest accepted `settings.uiScale` (`settings::UI_SCALE_RANGE` in the core). */
+export const UI_SCALE_MAX = 1.25;
+// subtitles:
+/** Subtitle text size (`settings.subtitleSize`): 0.8, 1.0, 1.25 and 1.5 times the base size. */
+export type SubtitleSize = 'small' | 'medium' | 'large' | 'xlarge';
+/** Subtitle text colour (`settings.subtitleColor`). */
+export type SubtitleColor = 'white' | 'yellow' | 'cyan' | 'green';
+/** What sits behind subtitle text (`settings.subtitleBackground`): text shadow only, translucent box, opaque box. */
+export type SubtitleBackground = 'shadow' | 'box' | 'solid';
+/** Every subtitle size, in picker order (same order as `SubtitleSize::ALL` in model.rs). */
+export const SUBTITLE_SIZES = ['small', 'medium', 'large', 'xlarge'] as const satisfies readonly SubtitleSize[];
+/** Every subtitle colour, in picker order (same order as `SubtitleColor::ALL` in model.rs). */
+export const SUBTITLE_COLORS = ['white', 'yellow', 'cyan', 'green'] as const satisfies readonly SubtitleColor[];
+/** Every subtitle background, in picker order (same order as `SubtitleBackground::ALL` in model.rs). */
+export const SUBTITLE_BACKGROUNDS = ['shadow', 'box', 'solid'] as const satisfies readonly SubtitleBackground[];
+// Compile-time checks that the lists name every value.
+const _allSubtitleSizesListed: [Exclude<SubtitleSize, (typeof SUBTITLE_SIZES)[number]>] extends [never] ? true : never = true;
+const _allSubtitleColorsListed: [Exclude<SubtitleColor, (typeof SUBTITLE_COLORS)[number]>] extends [never] ? true : never = true;
+const _allSubtitleBackgroundsListed: [Exclude<SubtitleBackground, (typeof SUBTITLE_BACKGROUNDS)[number]>] extends [never]
+  ? true
+  : never = true;
+void _allSubtitleSizesListed;
+void _allSubtitleColorsListed;
+void _allSubtitleBackgroundsListed;
+/** Smallest accepted `settings.subtitlePosition` (`settings::SUBTITLE_POSITION_RANGE` in the core). */
+export const SUBTITLE_POSITION_MIN = 0;
+/** Largest accepted `settings.subtitlePosition` (`settings::SUBTITLE_POSITION_RANGE` in the core). */
+export const SUBTITLE_POSITION_MAX = 40;
+// Run 3:
+/** Smallest accepted `settings.imageCacheMaxMb` (`settings::IMAGE_CACHE_MAX_MB_RANGE` in the core). */
+export const IMAGE_CACHE_MAX_MB_MIN = 50;
+/** Largest accepted `settings.imageCacheMaxMb` (`settings::IMAGE_CACHE_MAX_MB_RANGE` in the core). */
+export const IMAGE_CACHE_MAX_MB_MAX = 5000;
+/** Longest accepted `settings.lastSeenVersion` (`settings::LAST_SEEN_VERSION_MAX_LEN` in the core). */
+export const LAST_SEEN_VERSION_MAX_LENGTH = 32;
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -385,6 +466,9 @@ export interface DashboardRails {
   recentSources: boolean;
   recentlyAdded: boolean;
   tmdbTrending: boolean;
+  // watchlist:
+  /** The My List rail (movies and series saved with `watchlist.toggle`). */
+  myList: boolean;
 }
 
 export interface TmdbSettings {
@@ -436,8 +520,81 @@ export interface Settings {
   showExternalBar: boolean;
   /** VOD grids hide items rated below this (0..10; 0 shows everything). */
   vodMinRating: number;
+  /**
+   * Lists, grids, categories and search hide items whose title or category
+   * clearly marks another language; items without a clear language stay.
+   */
+  englishOnly: boolean;
   /** `null` = `<downloadsDir>/recordings`. Desktop only. */
   recordingsDir: string | null;
+  // failover: smart reconnect and live failover.
+  /** Live channels switch to the same channel on another source when the stream fails. */
+  liveFailover: boolean;
+  /** Dropped or stalled streams are retried quietly before an error shows. */
+  streamReconnect: boolean;
+  // remote:
+  /** Remote control also listens on private network addresses for paired phones. Desktop only. */
+  remoteLanEnabled: boolean;
+  // account:
+  /** Hours between scheduled source refreshes (0 = only at startup; 0..168). */
+  sourceRefreshIntervalHours: number;
+  /** Warn this many days before a subscription expires (0 = off; 0..60). */
+  accountExpiryWarnDays: number;
+  // guide:
+  /** Xtream channels without XMLTV programmes show the provider's short EPG. */
+  epgShortFallback: boolean;
+  // recording:
+  /** Minutes a scheduled recording starts early (0..60). */
+  recordingPaddingBeforeMinutes: number;
+  /** Minutes a scheduled recording runs past the programme end (0..120). */
+  recordingPaddingAfterMinutes: number;
+  /** Guide reminders fire while the app runs. */
+  remindersEnabled: boolean;
+  /** Minutes before the start a reminder fires (0..60). */
+  reminderLeadMinutes: number;
+  reminderAction: ReminderAction;
+  // appearance:
+  /** Accent color family for focus rings, selection and primary actions. */
+  accent: Accent;
+  /** Pure-black surfaces whenever the dark theme is in effect (dark, or system resolving to dark). */
+  oledBlack: boolean;
+  /** Spacing density of lists, rails and rows. */
+  density: Density;
+  /**
+   * Root font scale, `html { font-size: calc(15px * uiScale) }`. The core
+   * accepts `UI_SCALE_MIN..=UI_SCALE_MAX` (0.9..1.25) and rounds to 4 decimals.
+   */
+  uiScale: number;
+  /** Now/next banner inside the player on every live channel change. */
+  zapBanner: boolean;
+  // subtitles:
+  /** Subtitle text size in mpv and the built-in player. */
+  subtitleSize: SubtitleSize;
+  /** Subtitle text colour. */
+  subtitleColor: SubtitleColor;
+  /** Shadow only, translucent box (`rgb(0 0 0 / .72)`) or opaque box behind subtitle text. */
+  subtitleBackground: SubtitleBackground;
+  /**
+   * Percent of the picture height subtitles are raised from the bottom: an
+   * integer in `SUBTITLE_POSITION_MIN..=SUBTITLE_POSITION_MAX` (0..40).
+   */
+  subtitlePosition: number;
+  // vod:
+  /** The VOD grid's "Hide watched" toggle (`hideWatched` on `catalog.movies` / `catalog.series`). */
+  vodHideWatched: boolean;
+  // Run 3 (machine-local: never in backups).
+  /**
+   * Size cap of the on-disk image cache in MB: an integer in
+   * `IMAGE_CACHE_MAX_MB_MIN..=IMAGE_CACHE_MAX_MB_MAX` (50..5000). Applies in server mode too.
+   */
+  imageCacheMaxMb: number;
+  /** The first-run tour was finished or skipped. `settings.reset` keeps it. */
+  tourCompleted: boolean;
+  /**
+   * App version whose "What's new" was last seen: '' (never) or 1..32 characters of
+   * `[0-9A-Za-z.+-]` (`LAST_SEEN_VERSION_MAX_LENGTH`). `settings.reset` keeps it.
+   */
+  lastSeenVersion: string;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -448,7 +605,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'en',
   theme: 'system',
   showDashboard: true,
-  startupBehavior: 'first-view',
+  startupBehavior: 'restore-last-view',
   mpvArgs: '',
   vlcArgs: '',
   openStreamOnDoubleClick: false,
@@ -463,6 +620,8 @@ export const DEFAULT_SETTINGS: Settings = {
     recentSources: true,
     recentlyAdded: true,
     tmdbTrending: true,
+    // watchlist:
+    myList: true,
   },
   remoteControl: { enabled: false, port: 7310 },
   playerAmbientMode: false,
@@ -477,7 +636,41 @@ export const DEFAULT_SETTINGS: Settings = {
   playerReuseInstance: true,
   showExternalBar: true,
   vodMinRating: 0,
+  englishOnly: false,
   recordingsDir: null,
+  // failover: smart reconnect and live failover.
+  liveFailover: true,
+  streamReconnect: true,
+  // remote:
+  remoteLanEnabled: false,
+  // account:
+  sourceRefreshIntervalHours: 12,
+  accountExpiryWarnDays: 7,
+  // guide:
+  epgShortFallback: true,
+  // recording:
+  recordingPaddingBeforeMinutes: 1,
+  recordingPaddingAfterMinutes: 5,
+  remindersEnabled: true,
+  reminderLeadMinutes: 2,
+  reminderAction: 'notify',
+  // appearance:
+  accent: 'amber',
+  oledBlack: false,
+  density: 'comfortable',
+  uiScale: 1,
+  zapBanner: true,
+  // subtitles:
+  subtitleSize: 'medium',
+  subtitleColor: 'white',
+  subtitleBackground: 'box',
+  subtitlePosition: 0,
+  // vod:
+  vodHideWatched: false,
+  // Run 3:
+  imageCacheMaxMb: 500,
+  tourCompleted: false,
+  lastSeenVersion: '',
 };
 
 export interface WindowState {
@@ -528,6 +721,29 @@ export interface MpvState {
   recordPath: string | null;
   /** What mpv's cache can seek in, on the timePos clock; for live TV, the rewind window. */
   seekable?: { start: number; end: number };
+  /** True while mpv is paused waiting for its cache to fill (buffering); omitted when unknown. */
+  buffering?: boolean;
+}
+
+// player: `mpv.stats` result (stream info overlay). Fields are omitted when mpv does not know them.
+export interface MpvStats {
+  videoCodec?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  /** Bits per second. */
+  videoBitrate?: number;
+  audioCodec?: string;
+  audioChannels?: number;
+  /** Bits per second. */
+  audioBitrate?: number;
+  /** Hardware decoder in use; omitted for software decoding. */
+  hwdec?: string;
+  /** True once mpv reported its decoder state. */
+  hwdecKnown: boolean;
+  droppedFrames?: number;
+  cacheSeconds?: number;
+  container?: string;
 }
 
 /** Child-window rectangle in CSS pixels (`mpv.attach`, `mpv.setBounds`). */
@@ -546,6 +762,8 @@ export interface ImportSummary {
   channels: number;
   movies: number;
   series: number;
+  /** The playlist had not changed since the last import; the catalog was kept. */
+  unchanged?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -660,7 +878,9 @@ export type RpcErrorCode =
   | 'db'
   | 'unsupported'
   | 'conflict'
-  | 'internal';
+  | 'internal'
+  | 'engine_missing'
+  | 'server';
 
 /** JSON body of an RPC error (Tauri rejection value or HTTP error body). */
 export interface RpcErrorPayload {
@@ -670,11 +890,31 @@ export interface RpcErrorPayload {
   details?: unknown;
 }
 
+/**
+ * `details` of a rejected `sources.add` / `sources.refresh` (C8, C10). `sourceId` is the
+ * row `sources.add` inserted before its importer failed (the source keeps `lastError`).
+ * `cancelled: true` marks a run stopped by `sources.cancelImport`, `sources.remove` or an
+ * edit: the code is `conflict`, and the previous catalog is intact. Use `isCancelledRun`.
+ */
+export interface SourceRunErrorDetails {
+  sourceId?: string;
+  cancelled?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // App events (C1). `type` -> payload.
 // ---------------------------------------------------------------------------
 
-export type ImportPhase = 'fetching' | 'parsing' | 'saving' | 'done' | 'error';
+/**
+ * `connecting` opens every run, before its first request. `done` with the message
+ * `unchanged` means the playlist had not changed and the catalog was kept as is.
+ * `cancelled` (C8): the run was stopped by `sources.cancelImport`; the source's
+ * previous catalog is left intact (no half-written data).
+ */
+export type ImportPhase = 'connecting' | 'fetching' | 'parsing' | 'saving' | 'done' | 'error' | 'cancelled';
+
+/** Sub-step of `phase: 'saving'`. An older core sends no step. */
+export type ImportSaveStep = 'replacing' | 'indexing';
 
 export interface ImportProgressEvent {
   sourceId: string;
@@ -682,6 +922,16 @@ export interface ImportProgressEvent {
   done: number;
   total?: number;
   message?: string;
+  /** Classified error code (C10); set for `phase: 'error'`. */
+  code?: RpcErrorCode;
+  /** Download attempt in progress (1-based) and how many are allowed; sent with `phase: 'fetching'`. */
+  attempt?: number;
+  attempts?: number;
+  /**
+   * Only with phase 'saving': 'replacing' while the old catalog is deleted (no total), 'indexing'
+   * while indexes and counts are rebuilt (done = total).
+   */
+  step?: ImportSaveStep;
 }
 
 export interface EpgProgressEvent {
@@ -720,6 +970,19 @@ export interface DeepLinkEvent {
 
 export type EmptyEvent = Record<string, never>;
 
+/**
+ * Why `sources.changed` fired. `added`: a new source, no catalog yet. `catalog`: an import replaced
+ * a catalog. `config`: settings of a source changed. `removed`: a source went. `status`: only the
+ * status moved (a failed or cancelled import, a schedule backoff); the catalog is as it was.
+ */
+export type SourcesChangeReason = 'added' | 'catalog' | 'config' | 'removed' | 'status';
+
+/** Both fields are optional: an older core sends `{}`. */
+export interface SourcesChangedEvent {
+  sourceId?: string;
+  reason?: SourcesChangeReason;
+}
+
 /** Server mode: the event socket fell behind and `skipped` events were dropped; refetch everything. */
 export interface EventsLaggedEvent {
   skipped: number;
@@ -727,7 +990,7 @@ export interface EventsLaggedEvent {
 
 export interface AppEventMap {
   'import.progress': ImportProgressEvent;
-  'sources.changed': EmptyEvent;
+  'sources.changed': SourcesChangedEvent;
   'epg.progress': EpgProgressEvent;
   'epg.changed': EmptyEvent;
   'downloads.update': EmptyEvent;
@@ -736,10 +999,34 @@ export interface AppEventMap {
   'mpv.state': MpvState;
   /** Left click on the embedded mpv video. */
   'mpv.click': EmptyEvent;
+  /** Double click on the embedded mpv video (follows an `mpv.click`). */
+  'mpv.dblclick': EmptyEvent;
+  /** Mouse wheel over the embedded mpv video; `delta` in notches, positive = away from the user. */
+  'mpv.wheel': { delta: number };
+  /** Right click released on the embedded mpv video, in CSS px relative to the webview. */
+  'mpv.contextmenu': { x: number; y: number };
+  /** The app is about to quit (tray Quit): save what must survive, then invoke `flush_done`. */
+  'app.flush': EmptyEvent;
   'settings.changed': Settings;
   'player.external': PlayerExternalEvent;
   'deeplink.open': DeepLinkEvent;
   'events.lagged': EventsLaggedEvent;
+  // recording:
+  'reminders.update': EmptyEvent;
+  'reminders.fire': ReminderFiredEvent;
+  'recordings.update': EmptyEvent;
+  'recordings.progress': RecordingProgressEvent;
+  // parental:
+  /** Every parental state change: PIN set or removed, configure, unlock, lock, lock-list change, unlock expiry. */
+  'parental.changed': ParentalStatus;
+  // watchlist:
+  /** After every My List write. */
+  'watchlist.changed': EmptyEvent;
+  // Run 2 (C10):
+  /** After every custom-list write, and when a source removal cascades list items away. */
+  'lists.changed': EmptyEvent;
+  /** After every channel edit (rename, hide, restore). */
+  'channels.changed': ChannelsChangedEvent;
 }
 
 export type AppEventType = keyof AppEventMap;
@@ -748,4 +1035,312 @@ export type AppEventType = keyof AppEventMap;
 export interface AppEvent<T = unknown> {
   type: string;
   payload: T;
+}
+
+// failover: `live.alternates` result (crates/iptv-core/src/live).
+/** Quality tier read from a channel name (HD, FHD, 4K...). */
+export type ChannelQuality = 'sd' | 'hd' | 'fhd' | 'uhd';
+
+/** The same channel on another source (or a duplicate in the same one). */
+export interface LiveAlternate {
+  channel: Channel;
+  sourceName: string;
+  sourceKind: SourceKind;
+  quality?: ChannelQuality;
+  matchedBy: 'epg' | 'name';
+}
+
+export interface LiveAlternates {
+  /** Normalized channel name ("sky sports 1"); source pins are keyed by it. */
+  key: string;
+  quality?: ChannelQuality;
+  /** Best first: same quality tier, then source order. */
+  alternates: LiveAlternate[];
+}
+
+// recording:
+/** What a due guide reminder does (`settings.reminderAction`). */
+export type ReminderAction = 'notify' | 'switch';
+
+export type ReminderStatus = 'pending' | 'fired' | 'missed';
+
+/** A guide reminder. `start`/`end` are RFC 3339 display times (EPG offset applied). */
+export interface Reminder {
+  id: string;
+  ref: ItemRef;
+  channelName: string;
+  title: string;
+  start: string;
+  end: string;
+  status: ReminderStatus;
+}
+
+export type RecordingStatus = 'scheduled' | 'recording' | 'completed' | 'failed' | 'missed' | 'cancelled';
+
+export type RecordingKind = 'programme' | 'channel';
+
+/** Code of a status message the core wrote on a recording (`Recording.errorCode`), for translation. */
+export type RecordingErrorCode =
+  | 'reconnecting'
+  | 'engineMissing'
+  | 'missedNotRunning'
+  | 'stoppedShutdown'
+  | 'closedEarly'
+  | 'closedNothing'
+  | 'nothingRecorded'
+  | 'stopped'
+  | 'sourceRemoved'
+  | 'streamDropped'
+  | 'streamGaps'
+  | 'streamNotFound'
+  | 'streamRejected'
+  | 'streamNoAnswer'
+  | 'streamServerError'
+  | 'notAStream'
+  | 'diskFull'
+  | 'ruleRemoved';
+
+/** A scheduled (or finished) recording. `start`/`end` exclude padding. */
+export interface Recording {
+  id: string;
+  ref: ItemRef;
+  channelName: string;
+  title?: string;
+  kind: RecordingKind;
+  start: string;
+  end: string;
+  paddingBeforeMinutes: number;
+  paddingAfterMinutes: number;
+  status: RecordingStatus;
+  error?: string;
+  /** Set when `error` is one of the core's own messages; free-text stream errors have none. */
+  errorCode?: RecordingErrorCode;
+  fileNames: string[];
+  bytes: number;
+  startedAt?: string;
+  endedAt?: string;
+  engine?: string;
+  /** Set when a series recording rule (`RecordingRule.id`) created it; absent for manual recordings. */
+  ruleId?: string;
+}
+
+/** `recordings.schedule`: a programme (`title`, `start`, `end`) or a channel for `durationMinutes`. */
+export interface ScheduleRecordingArgs {
+  ref: ItemRef;
+  channelName: string;
+  title?: string;
+  start?: string;
+  end?: string;
+  durationMinutes?: number;
+}
+
+export interface ScheduleRecordingResult {
+  recording: Recording;
+  /** More overlapping recordings on this account than it allows connections (not blocking). */
+  warning?: { maxConnections: number; overlapping: number };
+}
+
+export interface RecordingCapabilities {
+  supported: boolean;
+  mpv: boolean;
+  reason?: string;
+}
+
+/** A recording file in My Videos: a scheduled recording's file, or a loose file in the recordings folder. */
+export interface RecordingFile {
+  id: string;
+  fileName: string;
+  recordingId?: string;
+  channelName?: string;
+  title?: string;
+  part?: number;
+  sizeBytes: number;
+  date: string;
+  durationSeconds?: number;
+  fileAvailable: boolean;
+  status?: RecordingStatus;
+}
+
+export interface ReminderFiredEvent {
+  reminder: Reminder;
+  action: ReminderAction;
+  /** When it fired; with the reminder id, tells one firing from a later one of the same reminder. */
+  firedAt?: string;
+}
+
+export interface RecordingProgressEvent {
+  id: string;
+  bytes: number;
+  elapsedSeconds: number;
+}
+
+// parental: parental controls (contract C2; crates/iptv-core/src/parental).
+/** `hide` drops locked content from every list; `ask` shows it and asks for the PIN before it opens. */
+export type ParentalMode = 'hide' | 'ask';
+
+/** `parental.status` and the `parental.changed` payload. Never carries the PIN or its hash. */
+export interface ParentalStatus {
+  /** A PIN is set. */
+  enabled: boolean;
+  /** Default 'hide'. */
+  mode: ParentalMode;
+  /** Default true; categories whose name marks adult content count as locked. */
+  autoAdult: boolean;
+  /** 0 = until the app restarts; else 1..=720; default 15. */
+  unlockMinutes: number;
+  /** A session unlock is active now. */
+  unlocked: boolean;
+  /** RFC 3339; absent when locked or unlocked until restart. */
+  unlockedUntil?: string;
+  /** Consecutive wrong PINs. */
+  failedAttempts: number;
+  /** Present while the wrong-PIN lockout is active. */
+  retryAfterSeconds?: number;
+}
+
+export type ParentalLockKind = 'category' | 'item';
+
+export interface ParentalLock {
+  sourceId: string;
+  contentType: ContentType;
+  kind: ParentalLockKind;
+  /** Category id or item id. */
+  targetId: string;
+  /** Display name snapshot. */
+  name: string;
+  createdAt: string;
+}
+
+/** A lock to add or remove (`parental.setLocked`). */
+export type ParentalLockTarget = Omit<ParentalLock, 'createdAt'>;
+
+// watchlist: My List (contract C3; crates/iptv-core/src/watchlist).
+/** One My List entry (movies and series only). */
+export interface WatchlistEntry {
+  ref: ItemRef;
+  snapshot: ItemSnapshot;
+  addedAt: string;
+  watched: boolean;
+}
+
+// channeledit: hide and rename channels (Run 2 contract C2; crates/iptv-core/src/channeledit).
+/** One channel edit (live or radio). A row with `hidden: false` and no `name` does not exist. */
+export interface ChannelEdit {
+  ref: ItemRef;
+  hidden: boolean;
+  /** Custom name; absent = the provider name. */
+  name?: string;
+  /** Provider name when last edited (shown in the hidden-channels list). */
+  originalName: string;
+  /** RFC 3339 UTC. */
+  updatedAt: string;
+}
+
+/** `channels.changed` payload, emitted after every write. */
+export interface ChannelsChangedEvent {
+  sourceId: string;
+}
+
+// lists: custom channel lists (Run 2 contract C3; crates/iptv-core/src/lists).
+/** A user-named list of live/radio channels from any sources. */
+export interface CustomList {
+  id: string;
+  /** Trimmed, 1..60 chars, unique (case-insensitive). */
+  name: string;
+  position: number;
+  /** Shown as a dashboard rail. */
+  onDashboard: boolean;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One channel of a custom list (`lists.items`). */
+export interface CustomListEntry {
+  ref: ItemRef;
+  /** Stored title/logo, for items the provider dropped and for rails. */
+  snapshot: ItemSnapshot;
+  /** Present when the item is in the catalog now (custom name applied). */
+  channel?: Channel;
+  /** False when the provider dropped it (rendered greyed with Remove). */
+  available: boolean;
+  position: number;
+  addedAt: string;
+}
+
+// vod: VOD browsing (Run 2 contract C4).
+/** `catalog.yearFacets`: titles per year, newest first. */
+export interface YearFacet {
+  year: number;
+  count: number;
+}
+
+// guide: guide search and series recording rules (Run 2 contract C5).
+/** One `epg.search` hit: a programme on one of the source's channels. */
+export interface GuideSearchHit {
+  ref: ItemRef;
+  channelName: string;
+  channelNumber?: number;
+  logoUrl?: string;
+  categoryId?: string;
+  /** Raw guide times like `epg.programs` (the UI applies the EPG offset). */
+  program: EpgProgram;
+}
+
+/** A series recording rule: record every airing of `title` on one channel. */
+export interface RecordingRule {
+  id: string;
+  ref: ItemRef;
+  channelName: string;
+  title: string;
+  enabled: boolean;
+  createdAt: string;
+  /** Scheduled recordings this rule has made that have not started yet. */
+  upcoming: number;
+  /** Start of the next of those, RFC 3339. */
+  nextStart?: string;
+}
+
+// stats: watch statistics (Run 2 contract C7; crates/iptv-core/src/stats).
+/** One day of `stats.summary`; `seconds = liveSeconds + vodSeconds`. */
+export interface WatchStatsDay {
+  /** Client-local date, YYYY-MM-DD. */
+  day: string;
+  seconds: number;
+  liveSeconds: number;
+  vodSeconds: number;
+}
+
+/** One channel or title in a `stats.summary` top list. */
+export interface WatchStatsTop {
+  ref: ItemRef;
+  title: string;
+  posterUrl?: string;
+  seconds: number;
+  sourceName?: string;
+}
+
+/** `stats.summary`: `days` has exactly the asked number of entries ending at `today`, zero-filled. */
+export interface WatchStats {
+  days: WatchStatsDay[];
+  totalSeconds: number;
+  /** Live and radio. */
+  topChannels: WatchStatsTop[];
+  /** Movies and series. */
+  topTitles: WatchStatsTop[];
+}
+
+// imagecache: disk image cache (Run 3 contract C2; crates/iptv-core/src/imagecache).
+/** `images.stats` / `images.clear`: what the cache holds against its cap (`settings.imageCacheMaxMb` in bytes). */
+export interface ImageCacheStats {
+  bytes: number;
+  files: number;
+  maxBytes: number;
+}
+
+// screenshot: player frames (Run 3 contract C6; crates/iptv-core/src/screenshot). Desktop only.
+/** A saved screenshot: `path` is absolute (inside the screenshot folder); `fileName` is for the toast. */
+export interface ScreenshotResult {
+  path: string;
+  fileName: string;
 }

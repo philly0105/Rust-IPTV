@@ -7,6 +7,7 @@ import { rpc } from '@/api/transport';
 import type { ContentType } from '@/api/types';
 
 import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
+import { foldForFilter } from './CategorySidebar';
 
 const ROW = 36;
 
@@ -30,15 +31,36 @@ export function ManageCategoriesDialog({
   const [saving, setSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Seed the checkboxes once per opening: a background refetch (an import finishing) must not wipe
+  // the choices made so far. Groups that appear meanwhile start visible, as the core shows them.
+  const seeded = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (open && all.data) setVisibleIds(new Set(all.data.filter((c) => !c.hidden).map((c) => c.id)));
-    if (!open) setFilter('');
+    if (!open) {
+      setFilter('');
+      seeded.current = null;
+      return;
+    }
+    if (!all.data) return;
+    if (!seeded.current) {
+      seeded.current = new Set(all.data.map((c) => c.id));
+      setVisibleIds(new Set(all.data.filter((c) => !c.hidden).map((c) => c.id)));
+      return;
+    }
+    const known = seeded.current;
+    const fresh = all.data.filter((c) => !known.has(c.id));
+    if (fresh.length === 0) return;
+    for (const c of fresh) known.add(c.id);
+    setVisibleIds((prev) => {
+      const next = new Set(prev);
+      for (const c of fresh) if (!c.hidden) next.add(c.id);
+      return next;
+    });
   }, [open, all.data]);
 
   const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
+    const q = foldForFilter(filter.trim());
     const list = all.data ?? [];
-    return q ? list.filter((c) => c.name.toLowerCase().includes(q)) : list;
+    return q ? list.filter((c) => foldForFilter(c.name).includes(q)) : list;
   }, [all.data, filter]);
 
   const virtualizer = useVirtualizer({

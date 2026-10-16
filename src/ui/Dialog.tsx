@@ -1,10 +1,21 @@
 import { X } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { create } from 'zustand';
 
 import { cn } from './cn';
-import { focusableIn } from './focus';
+import { announceFocusAfterCommit, focusableIn } from './focus';
+import { portalContainer } from './portal';
 
 export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 /** `center`: floating card. `end`: full-height drawer on the inline-end edge (right in LTR, left in RTL). */
@@ -44,11 +55,94 @@ const sizes: Record<DialogSize, string> = {
   full: 'max-w-[min(1200px,calc(100vw-48px))] h-[calc(100vh-96px)]',
 };
 
-let openCount = 0;
+interface OpenDialog {
+  /** The `data-dialog-layer` element (scrim and panel). */
+  layer: HTMLElement | null;
+  panel: HTMLElement | null;
+  /** What had focus before the dialog opened. */
+  previous: HTMLElement | null;
+}
+
+/** Open dialogs, oldest first. */
+const openDialogs: OpenDialog[] = [];
+/** Dialogs closed in the current commit (a prompt and the dialog it guards); cleared on the next microtask. */
+let closedNow: OpenDialog[] = [];
+/** The page's own `overflow` before the first dialog locked scrolling. */
+let pageOverflow = '';
+
+/** Attached, outside every dialog closing in this commit, and inside an open dialog while one stays open. */
+function canHoldFocus(el: HTMLElement): boolean {
+  if (el === document.body || !el.isConnected) return false;
+  if (closedNow.some((d) => d.layer?.contains(el))) return false;
+  return openDialogs.length === 0 || openDialogs.some((d) => d.layer?.contains(el));
+}
 
 /**
- * Modal dialog: portal to body, focus trap, Escape and backdrop close,
- * focus restore, scroll lock, aria-modal with labelled title.
+ * Puts focus back after `self` closed. Dialogs closing together run their cleanups in either
+ * order, and a closing dialog's DOM can still be attached while its cleanup runs, so each
+ * target is checked with canHoldFocus. In order: the element focused before `self` opened,
+ * the nearest dialog still open, the openers of dialogs closed in the same commit, then #main
+ * (skipped when the dialog opened from <body>, e.g. at startup).
+ */
+function restoreFocus(self: OpenDialog): void {
+  const active = document.activeElement;
+  // A dialog that stays open (stacked over this one) holds focus: leave it there.
+  if (active && openDialogs.some((d) => d.layer?.contains(active))) return;
+  const candidates = [self.previous, openDialogs.at(-1)?.panel, ...closedNow.map((d) => d.previous).reverse()];
+  if (self.previous && self.previous !== document.body) candidates.push(document.getElementById('main'));
+  for (const el of candidates) {
+    if (!el || !canHoldFocus(el)) continue;
+    el.focus({ preventScroll: true });
+    if (document.activeElement === el) {
+      // This runs in a layout cleanup, inside React's commit, where React drops the focus event.
+      announceFocusAfterCommit(el);
+      return;
+    }
+  }
+}
+
+/**
+ * How many centred (floating card) dialogs are open. The toast viewport reads
+ * it: on a phone-width window a centred dialog spans the width, so a toast in
+ * its bottom corner would sit on the dialog's footer buttons. Drawers are not
+ * counted; they leave no free edge to move to.
+ */
+const useCenteredDialogs = create<{ count: number }>(() => ({ count: 0 }));
+
+/** True while at least one centred dialog is open. */
+export function useCenteredDialogOpen(): boolean {
+  return useCenteredDialogs((s) => s.count > 0);
+}
+
+/**
+ * Below sm the toast viewport moves to the top edge while a centred dialog is open (see
+ * Toast.tsx), and a toast is taller than the dialog layer's 8vh top gap (about 67 px on an
+ * 844 px phone). The viewport reports where its stack ends; the layer then starts the dialog
+ * below it, so a toast never covers the dialog's title or close button.
+ */
+const useToastReserve = create<{ px: number }>(() => ({ px: 0 }));
+
+/** Space between the bottom of the toast stack and a dialog moved below it. */
+export const TOAST_DIALOG_GAP = 8;
+
+/**
+ * The placement rule: the least top offset of a centred dialog, below sm, for a toast stack
+ * whose bottom edge is at `stackBottom` px from the top of the window (0: no toasts). The layer
+ * pads by the larger of this and its usual 8vh.
+ */
+export function toastReserveFor(stackBottom: number): number {
+  return stackBottom > 0 ? Math.ceil(stackBottom) + TOAST_DIALOG_GAP : 0;
+}
+
+/** The toast viewport reports its stack's bottom edge (0 when no toast shows over a dialog). */
+export function reportToastStackBottom(stackBottom: number): void {
+  const px = toastReserveFor(stackBottom);
+  if (useToastReserve.getState().px !== px) useToastReserve.setState({ px });
+}
+
+/**
+ * Modal dialog: portal to body (or the fullscreen element, see portalContainer), focus trap,
+ * Escape and backdrop close, focus restore, scroll lock, aria-modal with labelled title.
  */
 export function Dialog({
   open,
@@ -69,6 +163,7 @@ export function Dialog({
 }: DialogProps) {
   const drawer = placement === 'end';
   const { t } = useTranslation('common');
+  const toastReserve = useToastReserve((s) => s.px);
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const descId = useId();
@@ -82,8 +177,8 @@ export function Dialog({
   useLayoutEffect(() => {
     if (!open) return;
     closingRef.current = false;
-    const previous = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
+    const self: OpenDialog = { layer: panel?.parentElement ?? null, panel, previous: document.activeElement as HTMLElement | null };
     if (panel) {
       const target =
         initialFocus?.current ??
@@ -92,18 +187,36 @@ export function Dialog({
         panel;
       target.focus({ preventScroll: true });
     }
-    openCount += 1;
     const html = document.documentElement;
-    const prevOverflow = html.style.overflow;
-    html.style.overflow = 'hidden';
+    if (openDialogs.length === 0) {
+      pageOverflow = html.style.overflow;
+      html.style.overflow = 'hidden';
+    }
+    openDialogs.push(self);
     return () => {
       closingRef.current = true;
-      openCount -= 1;
-      if (openCount === 0) html.style.overflow = prevOverflow;
-      if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+      const i = openDialogs.indexOf(self);
+      if (i >= 0) openDialogs.splice(i, 1);
+      if (openDialogs.length === 0) html.style.overflow = pageOverflow;
+      if (closedNow.length === 0) {
+        queueMicrotask(() => {
+          closedNow = [];
+        });
+      }
+      closedNow.push(self);
+      // The opener may be gone (a menu item, a row that re-rendered), disabled, or inside a dialog
+      // closing with this one: restoreFocus falls back so focus never drops to <body>.
+      restoreFocus(self);
     };
     // initialFocus is a ref; it is read once on open.
   }, [open]);
+
+  // Counted for the toast viewport (useCenteredDialogOpen).
+  useEffect(() => {
+    if (!open || drawer) return;
+    useCenteredDialogs.setState((s) => ({ count: s.count + 1 }));
+    return () => useCenteredDialogs.setState((s) => ({ count: Math.max(0, s.count - 1) }));
+  }, [open, drawer]);
 
   // Keep focus inside when something outside steals it (e.g. click on body).
   useEffect(() => {
@@ -122,8 +235,12 @@ export function Dialog({
 
   if (!open) return null;
 
+  const hasBody = children !== undefined && children !== null && children !== false && children !== '';
+
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
+      // Escape that ends an IME composition (Japanese, Chinese, Korean input) cancels the candidate, not the dialog.
+      if (e.nativeEvent.isComposing) return;
       e.stopPropagation();
       e.nativeEvent.stopImmediatePropagation();
       onCloseRef.current();
@@ -155,14 +272,26 @@ export function Dialog({
       data-dialog-layer=""
       className={cn(
         'fixed inset-0 z-50 flex',
-        drawer ? 'items-stretch justify-end' : 'items-start justify-center overflow-y-auto p-6 pt-[8vh]',
+        drawer
+          ? 'items-stretch justify-end'
+          : // Below sm, start under the toast stack when it is taller than the 8vh gap (toastReserveFor).
+            'items-start justify-center overflow-y-auto p-6 pt-[8vh] max-sm:pt-[max(8vh,var(--toast-reserve,0px))] motion-safe:transition-[padding-top] motion-safe:duration-150',
       )}
+      style={drawer ? undefined : ({ '--toast-reserve': `${toastReserve}px` } as CSSProperties)}
       onKeyDown={onKeyDown}
     >
       <div
         aria-hidden
-        className="fixed inset-0 bg-scrim backdrop-blur-[2px] motion-safe:animate-fade-in"
-        onMouseDown={() => dismissible && onCloseRef.current()}
+        // Marks the dimming layer by role, not by class names, for code that has to find it
+        // (mpvBounds dims the native video to match).
+        data-scrim=""
+        className="fixed inset-0 bg-scrim motion-safe:animate-fade-in"
+        onMouseDown={(e) => {
+          // The press's default would move focus to <body> after the close put it back on the
+          // opener (or, when not dismissible, out of the dialog).
+          e.preventDefault();
+          if (dismissible) onCloseRef.current();
+        }}
       />
       {/* Plain divs for the title row and footer: a portaled <header>/<footer> would map to a second banner/contentinfo landmark. */}
       <div
@@ -174,10 +303,11 @@ export function Dialog({
         tabIndex={-1}
         data-testid={testId}
         className={cn(
-          'relative flex flex-col border-border bg-surface text-fg shadow-2',
+          // The panel itself only takes focus when it holds nothing focusable; a ring around the whole dialog would read as a stray highlight.
+          'relative flex flex-col border-border bg-surface text-fg shadow-2 focus-visible:shadow-2 focus-visible:outline-none',
           drawer
             ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-fade-in'
-            : 'w-full max-h-[calc(100vh-12vh-24px)] rounded-lg border motion-safe:animate-pop-in',
+            : 'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-lg border motion-safe:animate-pop-in',
           !drawer && sizes[size],
           className,
         )}
@@ -186,7 +316,7 @@ export function Dialog({
           className={cn(
             'flex gap-4',
             drawer
-              ? 'h-(--header-height) shrink-0 items-center border-b border-border ps-5 pe-3'
+              ? 'h-(--header-height) shrink-0 items-center border-b border-divider ps-5 pe-3'
               : cn('items-start px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4'),
           )}
         >
@@ -208,21 +338,22 @@ export function Dialog({
               onClick={() => onCloseRef.current()}
               className={cn(
                 drawer ? 'ms-auto' : '-me-2',
-                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg',
+                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
               )}
             >
               <X aria-hidden size={18} />
             </button>
           )}
         </div>
-        <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>
+        {/* No body, no empty band: a confirm with only a description sits straight on its footer. */}
+        {hasBody && <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>}
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-6 py-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-divider px-6 py-4">
             {footer}
           </div>
         )}
       </div>
     </div>,
-    document.body,
+    portalContainer(),
   );
 }

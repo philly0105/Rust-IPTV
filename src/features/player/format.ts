@@ -8,6 +8,77 @@ export function formatTime(seconds: number | undefined): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
+/** Seconds the arrow keys skip, both as global shortcuts and on a focused seek bar (Shift: 30 s). */
+export const SEEK_STEP = 10;
+export const SEEK_STEP_LARGE = 30;
+
+/** Seconds behind the end of the seekable window that still count as live (the element's buffer). */
+export const LIVE_EDGE_SLACK = 6;
+/** mpv's cache runs a few seconds ahead of playback even at the live edge. */
+export const LIVE_EDGE_SLACK_MPV = 10;
+
+/**
+ * "4:20 / 45:00" for VOD; for live "Live" at the edge or "1:20 behind live". The edge uses the
+ * same slack as the control bar's LIVE badge, so the readout and the badge never disagree.
+ */
+export function positionReadout(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  p: { position: number; duration?: number; liveEnd?: number; edgeSlack?: number | undefined },
+): string {
+  if (p.liveEnd !== undefined) {
+    const behind = Math.max(0, p.liveEnd - p.position);
+    return behind < (p.edgeSlack ?? LIVE_EDGE_SLACK) ? t('live') : t('behindLive', { time: formatTime(behind) });
+  }
+  return `${formatTime(p.position)} / ${formatTime(p.duration)}`;
+}
+
+let lastPointerAt = 0;
+let lastKeyAt = 0;
+let modalityBound = false;
+/** Input order counter (not time: fake timers freeze the clock). */
+let inputSeq = 0;
+
+/** Start tracking whether the latest input was a pointer press or a key press (idempotent). */
+export function bindInputModality(): void {
+  if (modalityBound || typeof document === 'undefined') return;
+  modalityBound = true;
+  document.addEventListener('pointerdown', () => (lastPointerAt = ++inputSeq), true);
+  document.addEventListener('mousedown', () => (lastPointerAt = ++inputSeq), true);
+  document.addEventListener('keydown', () => (lastKeyAt = ++inputSeq), true);
+}
+
+/**
+ * True when focus just arrived from a mouse or touch press rather than the keyboard.
+ * Player chrome stays pinned only for keyboard focus; a clicked button keeps focus but
+ * must not stop the controls from hiding.
+ */
+export function focusFromPointer(): boolean {
+  return lastPointerAt > lastKeyAt;
+}
+
+/** Test hook: forget the recorded modality. */
+export function __resetInputModality(): void {
+  lastPointerAt = 0;
+  lastKeyAt = 0;
+}
+
+/** True when nothing useful holds keyboard focus (it fell back to the document). */
+export function focusIsLost(): boolean {
+  const a = document.activeElement;
+  return !a || a === document.body || a === document.documentElement;
+}
+
+/**
+ * Focus `el` (an error's Retry, say) when keyboard focus is already inside the player or was
+ * lost to the document; never pull focus out of a list the user is working in.
+ */
+export function focusIfPlayerOwnsFocus(el: HTMLElement | null): void {
+  if (!el) return;
+  const host = el.closest('[data-player-host]') ?? el.closest('[data-pip-layer]');
+  const active = document.activeElement;
+  if (focusIsLost() || (host && active && host.contains(active))) el.focus({ preventScroll: true });
+}
+
 /** Only http(s) and data URLs may reach CSS/`img` for ambient art. */
 export function safeImageUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;

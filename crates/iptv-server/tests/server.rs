@@ -190,6 +190,28 @@ async fn spawn_stub() -> String {
         )
         .route("/bytes", get(serve_bytes))
         .route(
+            "/live/ranged-playlist",
+            get(|h: HeaderMap| async move {
+                // Honors Range like a static file server would.
+                let ct = [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")];
+                match h.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+                    Some(_) => (
+                        StatusCode::PARTIAL_CONTENT,
+                        [
+                            (header::CONTENT_TYPE, "application/vnd.apple.mpegurl"),
+                            (
+                                header::CONTENT_RANGE,
+                                &*format!("bytes 10-19/{}", PLAYLIST.len()),
+                            ),
+                        ],
+                        PLAYLIST[10..20].to_string(),
+                    )
+                        .into_response(),
+                    None => (ct, PLAYLIST).into_response(),
+                }
+            }),
+        )
+        .route(
             "/page.html",
             get(|| async {
                 (
@@ -711,6 +733,30 @@ async fn cross_origin_writes_are_refused() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
+    // B9: a cross-site page cannot embed the GET routes either.
+    for path in [
+        "/api/files/1",
+        "/api/proxy?url=http%3A%2F%2Fexample.com%2F",
+        "/api/img?url=http%3A%2F%2Fexample.com%2Fposter.png",
+        "/api/health",
+    ] {
+        let r = h
+            .http
+            .get(format!("{}{path}", h.base))
+            .header("sec-fetch-site", "cross-site")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 403, "{path}");
+    }
+    let r = h
+        .http
+        .get(format!("{}/api/health", h.base))
+        .header("sec-fetch-site", "same-origin")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
 }
 
 /// Minimal WebSocket client: handshake, then read one server text frame.
@@ -898,7 +944,11 @@ async fn proxy_and_files_never_serve_active_content() {
 
 #[tokio::test]
 async fn rebinding_host_is_refused_on_any_bind() {
-    // Bound to every interface, as in Docker.
+    // The Host guard does not look at the bind address. The only thing a
+    // non-loopback bind (0.0.0.0, as in Docker) changes is that main.rs adds
+    // the machine host name to the allowed hosts, so this test sets the
+    // options the same way and listens on loopback. Binding a wildcard address
+    // in a test pops a Windows Firewall prompt.
     let tmp = tempfile::tempdir().unwrap();
     let (tx, _) = broadcast::channel::<AppEvent>(8);
     let app = AppState::new(
@@ -909,9 +959,18 @@ async fn rebinding_host_is_refused_on_any_bind() {
     .await
     .unwrap();
     let mut opts = ServerOptions::new(tmp.path().join("dist"));
-    opts.allowed_hosts = iptv_server::guard::AllowedHosts::parse("tv.example.com");
+    let mut hosts = iptv_server::guard::AllowedHosts::parse("tv.example.com");
+    hosts.add_machine_hostname();
+    let machine = hosts
+        .names()
+        .iter()
+        .find(|n| n.as_str() != "tv.example.com")
+        .cloned();
+    opts.allowed_hosts = hosts;
     let server = Server::new(app, Arc::new(build_router()), tx, opts);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", 0)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let port = listener.local_addr().unwrap().port();
     let router = iptv_server::router(server);
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -934,6 +993,16 @@ async fn rebinding_host_is_refused_on_any_bind() {
     }
     let r = http.get(&url).send().await.unwrap();
     assert_eq!(r.status(), 200);
+    // The machine name added for a non-loopback bind is accepted.
+    if let Some(name) = machine {
+        let r = http
+            .get(&url)
+            .header(header::HOST, format!("{name}:7180"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "Host: {name}");
+    }
 }
 
 #[tokio::test]
@@ -1180,4 +1249,316 @@ async fn server_mode_refuses_server_paths() {
         .await
         .unwrap();
     assert_eq!(origin, "text");
+}
+
+// ---------------------------------------------------------------------------
+// B9: contracts C7, C8 and C10 over HTTP.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn http_exposes_cancel_import_viewed_at_and_error_codes() {
+    let h = start().await;
+    // C8: nothing running -> false.
+    let (status, v) = rpc(
+        &h,
+        "sources.cancelImport",
+        serde_json::json!({ "id": "none" }),
+    )
+    .await;
+    assert_eq!((status, v), (200, serde_json::json!(false)));
+    let (status, v) = rpc(&h, "sources.cancelImport", serde_json::json!({})).await;
+    assert_eq!(status, 400);
+    assert_eq!(v["code"], "invalid");
+
+    // C7: viewedAt restores the date; garbage is a 400 `invalid`.
+    h.add_source("s7", "m3u", serde_json::json!({ "origin": "text" }))
+        .await;
+    let entry = |viewed_at: serde_json::Value| {
+        serde_json::json!({
+            "ref": { "sourceId": "s7", "contentType": "live", "itemId": "c1" },
+            "snapshot": { "title": "Channel", "contentType": "live" },
+            "viewedAt": viewed_at,
+        })
+    };
+    let (status, _) = rpc(&h, "recent.add", entry("2026-02-03T04:05:06Z".into())).await;
+    assert_eq!(status, 200);
+    let (_, list) = rpc(&h, "recent.list", serde_json::json!({ "sourceId": "s7" })).await;
+    assert_eq!(list[0]["viewedAt"], "2026-02-03T04:05:06.000Z");
+    let (status, v) = rpc(&h, "recent.add", entry("not a date".into())).await;
+    assert_eq!(status, 400);
+    assert_eq!(v["code"], "invalid");
+
+    // C10: a source's recorded code is served as camelCase `lastErrorCode`.
+    h.server
+        .app
+        .db_call(|c| {
+            c.execute(
+                "UPDATE sources SET last_error = 'down', last_error_code = 'timeout' WHERE id = 's7'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (status, v) = rpc(&h, "sources.get", serde_json::json!({ "id": "s7" })).await;
+    assert_eq!(status, 200);
+    assert_eq!(v["lastError"], "down");
+    assert_eq!(v["lastErrorCode"], "timeout");
+}
+
+#[tokio::test]
+async fn proxy_never_serves_a_slice_of_a_playlist() {
+    let stub = spawn_stub().await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let r = h
+        .http
+        .get(h.proxy_url(&format!("{stub}/live/ranged-playlist"), Some("x-1")))
+        .header(header::RANGE, "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(
+        r.headers()[header::CONTENT_TYPE],
+        "application/vnd.apple.mpegurl"
+    );
+    assert!(r.headers().get(header::CONTENT_RANGE).is_none());
+    let body = r.text().await.unwrap();
+    assert!(body.starts_with("#EXTM3U"), "{body}");
+    assert!(body.contains("/api/proxy?url="), "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// /api/img: the image cache route (Run 3 C2, check 4).
+// ---------------------------------------------------------------------------
+
+impl Harness {
+    fn img_url(&self, target: &str, source_id: Option<&str>) -> String {
+        let mut u = url::Url::parse(&format!("{}/api/img", self.base)).unwrap();
+        u.query_pairs_mut().append_pair("url", target);
+        if let Some(id) = source_id {
+            u.query_pairs_mut().append_pair("sourceId", id);
+        }
+        u.to_string()
+    }
+}
+
+/// Upstream requests the mock has seen for `path`.
+async fn mock_hits(mock: &iptv_fixtures::MockHandle, path: &str) -> u64 {
+    let v: serde_json::Value = reqwest::get(mock.url("/__mock/stats"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    v["requests"][path].as_u64().unwrap_or(0)
+}
+
+/// Asserts the sandbox headers every `/api/img` response carries.
+fn assert_sandboxed(r: &reqwest::Response) {
+    assert_eq!(
+        r.headers()[header::CONTENT_SECURITY_POLICY],
+        iptv_server::proxy::SANDBOX_CSP,
+        "{}",
+        r.url()
+    );
+    assert_eq!(r.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+}
+
+#[tokio::test]
+async fn img_serves_svg_posters_from_the_cache_with_sandbox_headers() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let h = start_with(|o| o.allow_private_targets = true).await;
+    let path = "/img/poster/the-matrix.svg";
+    let url = h.img_url(&mock.url(path), None);
+
+    let mut bodies = Vec::new();
+    for expected in ["miss", "hit"] {
+        let r = h.http.get(&url).send().await.unwrap();
+        assert_eq!(r.status(), 200, "{expected}");
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "image/svg+xml");
+        assert_eq!(r.headers()["x-image-cache"], expected);
+        assert_eq!(
+            r.headers()[header::CACHE_CONTROL],
+            "private, max-age=604800"
+        );
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        assert_sandboxed(&r);
+        let body = r.bytes().await.unwrap();
+        assert!(body.starts_with(b"<svg"), "bytes as received");
+        bodies.push(body);
+    }
+    assert_eq!(bodies[0], bodies[1]);
+    assert_eq!(mock_hits(&mock, path).await, 1);
+
+    // The client's `gen=<n>` (added after Clear) is ignored: same stored file.
+    let r = h.http.get(format!("{url}&gen=2")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["x-image-cache"], "hit");
+    assert_eq!(r.bytes().await.unwrap(), bodies[0]);
+    assert_eq!(mock_hits(&mock, path).await, 1);
+
+    // HEAD answers the same headers without a body.
+    let r = h.http.head(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "image/svg+xml");
+    assert_eq!(r.headers()["x-image-cache"], "hit");
+    assert_eq!(
+        r.headers()[header::CONTENT_LENGTH],
+        bodies[0].len().to_string().as_str()
+    );
+    assert!(r.bytes().await.unwrap().is_empty());
+
+    // Revalidation after the week of browser caching: 304.
+    let last_modified =
+        h.http.get(&url).send().await.unwrap().headers()[header::LAST_MODIFIED].clone();
+    let r = h
+        .http
+        .get(&url)
+        .header(header::IF_MODIFIED_SINCE, last_modified)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 304);
+    assert_eq!(r.headers()["x-image-cache"], "hit");
+    assert_sandboxed(&r);
+
+    // images.stats sees the file; images.clear empties the cache, so the
+    // next request is a miss again.
+    let (status, stats) = rpc(&h, "images.stats", serde_json::Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(stats["files"], 1);
+    assert_eq!(stats["bytes"], bodies[0].len() as u64);
+    assert_eq!(stats["maxBytes"], 500u64 * 1024 * 1024);
+    let (status, cleared) = rpc(&h, "images.clear", serde_json::json!({})).await;
+    assert_eq!(status, 200);
+    assert_eq!(cleared["files"], 0);
+    assert_eq!(cleared["bytes"], 0);
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["x-image-cache"], "miss");
+    assert_eq!(mock_hits(&mock, path).await, 2);
+}
+
+#[tokio::test]
+async fn img_answers_400_404_415_and_502_with_json_errors() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let h = start_with(|o| o.allow_private_targets = true).await;
+    let cases: Vec<(String, u16, &str)> = vec![
+        (format!("{}/api/img", h.base), 400, "invalid"),
+        (format!("{}/api/img?url=", h.base), 400, "invalid"),
+        (h.img_url("not-a-url", None), 400, "invalid"),
+        (h.img_url("/img/poster/relative.svg", None), 400, "invalid"),
+        (
+            h.img_url("ftp://127.0.0.1/poster.png", None),
+            400,
+            "invalid",
+        ),
+        (
+            h.img_url("http://user:pw@127.0.0.1/poster.png", None),
+            400,
+            "invalid",
+        ),
+        // An expired panel's HTML login page instead of an image.
+        (
+            h.img_url(&mock.url("/fail/login.m3u"), None),
+            415,
+            "unsupported",
+        ),
+        (
+            h.img_url(&mock.url("/fail/404.m3u"), None),
+            404,
+            "not_found",
+        ),
+        (
+            h.img_url(&mock.url("/img/nope/x.svg"), None),
+            404,
+            "not_found",
+        ),
+        (
+            h.img_url(&mock.url("/fail/status/500"), None),
+            502,
+            "network",
+        ),
+        // 20 MiB of octet-stream: over the 10 MB limit, the upstream's fault
+        // (502) but mapped onto C2's `invalid`.
+        (
+            h.img_url(&mock.url("/files/video.bin"), None),
+            502,
+            "invalid",
+        ),
+    ];
+    for (url, status, code) in &cases {
+        let r = h.http.get(url).send().await.unwrap();
+        assert_eq!(r.status().as_u16(), *status, "{url}");
+        assert_sandboxed(&r);
+        assert_eq!(r.headers()[header::CACHE_CONTROL], "no-store", "{url}");
+        assert!(r.headers().get("x-image-cache").is_none(), "{url}");
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["code"], *code, "{url}: {v}");
+        assert!(v["message"].as_str().is_some_and(|m| !m.is_empty()));
+    }
+    // Failures are remembered: asking again does not refetch.
+    let r = h
+        .http
+        .get(h.img_url(&mock.url("/fail/login.m3u"), None))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 415);
+    assert_eq!(mock_hits(&mock, "/fail/login.m3u").await, 1);
+    // Nothing was stored, and the route sits before the catch-all.
+    let (_, stats) = rpc(&h, "images.stats", serde_json::Value::Null).await;
+    assert_eq!(stats["files"], 0);
+    let r = h
+        .http
+        .get(format!("{}/api/imgs", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404);
+}
+
+#[tokio::test]
+async fn img_refuses_private_targets_unless_a_source_trusts_them() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let h = start().await;
+    let path = "/img/logo/guarded.svg";
+    let target = mock.url(path);
+
+    let r = h.http.get(h.img_url(&target, None)).send().await.unwrap();
+    assert_eq!(r.status(), 403);
+    assert_sandboxed(&r);
+    let v: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(v["code"], "invalid");
+    assert_eq!(mock_hits(&mock, path).await, 0);
+
+    // The mock is this source's own server, so its host:port is trusted.
+    h.add_source(
+        "mock",
+        "m3u",
+        serde_json::json!({ "url": mock.url("/m3u/sample.m3u") }),
+    )
+    .await;
+    for expected in ["miss", "hit"] {
+        let r = h
+            .http
+            .get(h.img_url(&target, Some("mock")))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{expected}");
+        assert_eq!(r.headers()["x-image-cache"], expected);
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "image/svg+xml");
+    }
+    // Without the source it stays refused, cached or not.
+    let r = h.http.get(h.img_url(&target, None)).send().await.unwrap();
+    assert_eq!(r.status(), 403);
+    assert_eq!(mock_hits(&mock, path).await, 1);
 }

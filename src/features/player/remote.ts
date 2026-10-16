@@ -7,7 +7,12 @@ import { onAppEvent } from '@/api/events';
 import { rpc } from '@/api/transport';
 import type { RemoteStatus } from '@/api/types';
 
-import { playChannel, usePlayerStore, zap, zapToNumber } from './store';
+import { peekSettings, playChannel, subscribeSettings, usePlayerStore, zap, zapToNumber } from './store';
+
+/** The remote server is on (unknown settings count as on, so nothing is lost before they load). */
+function remoteOn(): boolean {
+  return peekSettings()?.remoteControl?.enabled !== false;
+}
 
 export function remoteStatusOf(s: ReturnType<typeof usePlayerStore.getState>): RemoteStatus {
   const status: RemoteStatus = {
@@ -82,6 +87,8 @@ export function bindRemote(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const push = (): void => {
     timer = null;
+    // Nobody listens while the remote server is off: no round trip per channel change.
+    if (!remoteOn()) return;
     const status = remoteStatusOf(usePlayerStore.getState());
     const json = JSON.stringify(status);
     if (json === last) return;
@@ -92,12 +99,23 @@ export function bindRemote(): () => void {
   };
   const unStore = usePlayerStore.subscribe((s, prev) => {
     if (s.source === prev.source && s.volume === prev.volume && s.muted === prev.muted && s.mode === prev.mode) return;
-    if (!timer) timer = setTimeout(push, 1000);
+    if (!timer && remoteOn()) timer = setTimeout(push, 1000);
+  });
+  // Turned on: it gets the current status without waiting for the next change.
+  let wasOn = remoteOn();
+  const unSettings = subscribeSettings(() => {
+    const on = remoteOn();
+    if (on && !wasOn) {
+      last = '';
+      if (!timer) timer = setTimeout(push, 0);
+    }
+    wasOn = on;
   });
 
   return () => {
     unCmd();
     unStore();
+    unSettings();
     if (timer) clearTimeout(timer);
   };
 }

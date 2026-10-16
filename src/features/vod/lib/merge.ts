@@ -27,6 +27,8 @@ import type {
   VodDetail,
 } from '@/api/types';
 
+import { MIN_RESUME_SECONDS } from '@/features/player/store';
+
 import { isResumable, isWatched } from './format';
 import { itemLanguage, type ItemLanguage } from './language';
 
@@ -268,17 +270,41 @@ export function episodeOrder(seasons: Season[]): Episode[] {
   return sortSeasons(seasons).flatMap((s) => s.episodes);
 }
 
-/** The episode after `episodeId` in play order, if any. */
+/**
+ * The episode after `episodeId` in play order, if any. Same rule as the
+ * player queue (`queueEpisodes`): a regular season never runs on into the
+ * specials (season 0, sorted last).
+ */
 export function nextEpisode(seasons: Season[], episodeId: string | undefined): Episode | undefined {
   if (!episodeId) return undefined;
   const order = episodeOrder(seasons);
   const i = order.findIndex((e) => e.id === episodeId);
-  return i >= 0 ? order[i + 1] : undefined;
+  const current = order[i];
+  const next = i >= 0 ? order[i + 1] : undefined;
+  if (!current || !next) return undefined;
+  if (next.season <= 0 && current.season > 0) return undefined;
+  return next;
+}
+
+/**
+ * The episode Previous goes back to, mirroring the player queue (`previousEpisodes` in
+ * episodeQueue.ts): the one before in the same season, else the previous season's last.
+ * Specials (season 0, sorted last) never lead back into a regular season, or the reverse.
+ */
+export function previousEpisode(seasons: Season[], episodeId: string | undefined): Episode | undefined {
+  if (!episodeId) return undefined;
+  const order = episodeOrder(seasons);
+  const i = order.findIndex((e) => e.id === episodeId);
+  const current = order[i];
+  const before = i > 0 ? order[i - 1] : undefined;
+  if (!current || !before) return undefined;
+  if ((before.season > 0) !== (current.season > 0)) return undefined;
+  return before;
 }
 
 /**
  * Where "Play" should start: the most recent unfinished episode (from the
- * start when it ran under 10 s); else, after the most recent finished one, the
+ * start when it ran under `MIN_RESUME_SECONDS`); else, after the most recent finished one, the
  * first episode not marked watched; else
  * the first unwatched episode of the series; else the first episode.
  */
@@ -292,8 +318,8 @@ export function resumeTarget(order: Episode[], positions: PlaybackPosition[]): {
     const ep = order[i];
     if (ep) {
       if (isResumable(latest)) return { episode: ep, resume: true };
-      // Not resumable: finished (watched, or past the resume window) moves on; barely started (under 10 s) replays it.
-      const finished = isWatched(latest) || latest.positionSeconds >= 10;
+      // Not resumable: finished (watched, or past the resume window) moves on; barely started (under `MIN_RESUME_SECONDS`) replays it.
+      const finished = isWatched(latest) || latest.positionSeconds > MIN_RESUME_SECONDS;
       const after = firstUnwatchedFrom(finished ? i + 1 : i);
       if (after) return { episode: after, resume: false };
     }

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import i18next from 'i18next';
 import type { ReactNode } from 'react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -42,6 +42,7 @@ interface FakePlayer {
   error?: string;
   positionSeconds: number;
   durationSeconds?: number;
+  queue: { ref?: ItemRef; episodeId?: string; url: string; resumeSeconds?: number }[];
   stop: () => void;
 }
 export const usePlayerStore = create<FakePlayer>((set) => ({
@@ -49,7 +50,8 @@ export const usePlayerStore = create<FakePlayer>((set) => ({
   mode: 'inline',
   status: 'idle',
   positionSeconds: 0,
-  stop: () => set({ source: undefined, status: 'idle' }),
+  queue: [],
+  stop: () => set({ source: undefined, status: 'idle', queue: [] }),
 }));
 export const played: unknown[] = [];
 export async function playItem(args: { ref: ItemRef; episodeId?: string }): Promise<void> {
@@ -88,6 +90,16 @@ export function installDomStubs(): void {
   Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
   Element.prototype.scrollTo ??= function scrollTo() {};
   Element.prototype.scrollIntoView ??= function scrollIntoView() {};
+}
+
+/**
+ * Focuses `el` the way Tab does. VirtualGrid starts its cursor on the first title only for
+ * keyboard focus (`:focus-visible`), and jsdom decides that from the last input event, which an
+ * earlier click (in this test or the one before) leaves as a mouse event.
+ */
+export function keyboardFocus(el: HTMLElement): void {
+  fireEvent.keyDown(document.documentElement, { key: 'Tab' });
+  act(() => el.focus());
 }
 
 export let currentLocation = '';

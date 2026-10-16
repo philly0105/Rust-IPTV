@@ -69,7 +69,13 @@ async fn serve_index(dir: &Path, method: Method, headers: axum::http::HeaderMap)
     *req.method_mut() = method;
     *req.uri_mut() = "/index.html".parse().expect("static uri");
     *req.headers_mut() = headers;
-    let res = match ServeFile::new(index).oneshot(req).await {
+    // Deep links get the build's index.html.br / .gz too, like `/`.
+    let res = match ServeFile::new(index)
+        .precompressed_br()
+        .precompressed_gzip()
+        .oneshot(req)
+        .await
+    {
         Ok(r) => r.map(Body::new),
         Err(e) => match e {},
     };

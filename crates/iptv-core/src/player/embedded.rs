@@ -2,8 +2,9 @@
 //!
 //! Windows only. `mpv.attach` asks the registered [`ChildWindowFactory`] for a
 //! child HWND inside the main window, starts `mpv.exe --wid=<hwnd>
-//! --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<pid> ...`, connects to the
-//! named pipe (retrying for up to 5 s), observes the playback properties, and
+//! --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<pid>-<session> ...` (a new
+//! session number per attach), connects to the named pipe (retrying for up
+//! to 5 s), observes the playback properties, and
 //! pushes throttled `mpv.state` events (4/s). A watcher task notices when mpv
 //! exits on its own (crash, killed) and turns that into `state.error` plus a
 //! full detach. Everything lives in one [`MpvManager`] stored in
@@ -16,6 +17,7 @@ use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name, validate_p
 use super::detect::{find_mpv, DetectEnv};
 use super::ipc::MpvClient;
 use super::mpv_state::OBSERVED_PROPERTIES;
+use super::stats::{MpvStats, STATS_PROPERTIES};
 use super::{embedded_unavailable_reason, window_factory, Bounds, ChildWindowFactory};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{MpvState, PlayerSource};
@@ -46,11 +48,20 @@ const QUIT_GRACE: Duration = Duration::from_secs(2);
 const CLICK_MESSAGE: &str = "tsrust-click";
 
 /// IPC commands `mpv.command` accepts besides [`PROPERTY_COMMANDS`]: what
-/// the player UI sends (`seek`) and read-only property queries. Everything
-/// else is refused, including mpv's command prefixes (`no-osd`, `async`,
+/// the player UI sends (`seek`, and `osd-overlay` for the dim under a
+/// dialog's backdrop, see [`validate_osd_overlay`]) and read-only property
+/// queries. Everything else is refused, including mpv's command prefixes (`no-osd`, `async`,
 /// `raw`, ...), which would otherwise smuggle any command in as an argument,
 /// and `keybind`, `run`, `loadfile`, `dump-cache`, `screenshot-to-file`.
-const ALLOWED_COMMANDS: &[&str] = &["seek", "get_property", "get_property_string"];
+/// `sub-add` is refused too: it reads any path, so it only runs through
+/// `mpv.addSubtitle`, which checks the file first.
+const ALLOWED_COMMANDS: &[&str] = &["seek", "get_property", "get_property_string", OSD_OVERLAY];
+
+/// mpv's `osd-overlay`: draws ASS over the whole window (letterbox included).
+const OSD_OVERLAY: &str = "osd-overlay";
+
+/// Longest `osd-overlay` text the UI may send (one ASS drawing).
+const OSD_OVERLAY_MAX: usize = 512;
 
 /// Properties `mpv.setProperty` (and property commands sent through
 /// `mpv.command`) may change: the playback controls the UI exposes. Anything
@@ -68,7 +79,32 @@ pub const SETTABLE_PROPERTIES: &[&str] = &[
     "sub-delay",
     "sub-visibility",
     "time-pos",
+    // subtitles:
+    "sub-scale",
+    "sub-color",
+    "sub-back-color",
+    "sub-border-style",
+    "sub-border-size",
+    "sub-shadow-offset",
+    "sub-pos",
+    "sub-ass-override",
 ];
+
+/// Subtitle style properties: their values are range-checked by
+/// [`validate_property_value`], so only plain `set` commands may change them.
+const STYLE_PROPERTIES: &[&str] = &[
+    "sub-scale",
+    "sub-color",
+    "sub-back-color",
+    "sub-border-style",
+    "sub-border-size",
+    "sub-shadow-offset",
+    "sub-pos",
+    "sub-ass-override",
+];
+
+/// Property commands that set a value outright (no relative change).
+const SET_COMMANDS: &[&str] = &["set", "set_property", "set_property_string"];
 
 /// IPC commands whose first argument names a property to change; accepted
 /// only for [`SETTABLE_PROPERTIES`].
@@ -94,6 +130,112 @@ pub fn validate_property(name: &str) -> CoreResult<()> {
         )));
     }
     Ok(())
+}
+
+/// A JSON number, or a string holding one (`set_property_string` sends
+/// strings); non-finite values are refused.
+fn number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|n| n.is_finite())
+}
+
+/// `#RRGGBB` or `#AARRGGBB`, the color forms mpv parses.
+fn is_hex_color(value: &Value) -> bool {
+    value.as_str().is_some_and(|s| {
+        s.strip_prefix('#').is_some_and(|hex| {
+            (hex.len() == 6 || hex.len() == 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+        })
+    })
+}
+
+/// Checks the value of a subtitle style property; other properties pass
+/// unchecked. Keeps the UI's sliders and pickers inside sane ranges.
+pub fn validate_property_value(name: &str, value: &Value) -> CoreResult<()> {
+    let in_range = |lo: f64, hi: f64| number(value).is_some_and(|n| (lo..=hi).contains(&n));
+    let one_of = |allowed: &[&str]| value.as_str().is_some_and(|s| allowed.contains(&s));
+    let (ok, expected) = match name.trim() {
+        "sub-scale" => (in_range(0.5, 3.0), "a number from 0.5 to 3"),
+        "sub-color" | "sub-back-color" => (
+            is_hex_color(value),
+            "a color in the form #RRGGBB or #AARRGGBB",
+        ),
+        "sub-border-style" => (
+            one_of(&["outline-and-shadow", "opaque-box", "background-box"]),
+            "outline-and-shadow, opaque-box, or background-box",
+        ),
+        "sub-border-size" | "sub-shadow-offset" => (in_range(0.0, 10.0), "a number from 0 to 10"),
+        "sub-pos" => (
+            in_range(0.0, 150.0) && number(value).is_some_and(|n| n.fract() == 0.0),
+            "a whole number from 0 to 150",
+        ),
+        "sub-ass-override" => (
+            one_of(&["no", "yes", "scale", "force", "strip"]),
+            "no, yes, scale, force, or strip",
+        ),
+        _ => return Ok(()),
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(CoreError::invalid(format!(
+            "mpv property {:?} must be {expected}.",
+            name.trim()
+        )))
+    }
+}
+
+/// Largest subtitle file `mpv.addSubtitle` accepts.
+pub const MAX_SUBTITLE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Subtitle file extensions `mpv.addSubtitle` accepts (compared ignoring case).
+pub const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "vtt", "ass", "ssa"];
+
+/// Checks a subtitle file for `mpv.addSubtitle`: an absolute path to an
+/// existing regular file with a subtitle extension, at most 5 MB. mpv's
+/// `sub-add` opens whatever it is given (URLs and protocols included), so
+/// only plain local files pass.
+pub fn validate_subtitle_path(path: &str) -> CoreResult<PathBuf> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(CoreError::invalid("Choose a subtitle file to add."));
+    }
+    let p = PathBuf::from(path);
+    if !p.is_absolute() {
+        return Err(CoreError::invalid(
+            "The subtitle path must be a full path to a file, including the drive or share.",
+        ));
+    }
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if !ext.is_some_and(|e| SUBTITLE_EXTENSIONS.contains(&e.as_str())) {
+        return Err(CoreError::invalid(
+            "Only .srt, .vtt, .ass, and .ssa subtitle files can be added.",
+        ));
+    }
+    let meta = std::fs::metadata(&p).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            CoreError::invalid("The subtitle file was not found. Check that it still exists.")
+        } else {
+            CoreError::invalid(format!("The subtitle file could not be read ({e})."))
+        }
+    })?;
+    if !meta.is_file() {
+        return Err(CoreError::invalid(
+            "The subtitle path is a folder, not a file. Choose a subtitle file.",
+        ));
+    }
+    if meta.len() > MAX_SUBTITLE_BYTES {
+        return Err(CoreError::invalid(
+            "The subtitle file is larger than 5 MB. Choose a smaller file.",
+        ));
+    }
+    Ok(p)
 }
 
 /// The single embedded mpv session holder.
@@ -205,14 +347,83 @@ pub async fn attach(
     ensure_platform()?;
     let mgr = manager(state);
     let _op = mgr.op.lock().await;
+    let result = attach_locked(state, &mgr, bounds, opts).await;
+    if let Err(e) = &result {
+        // Every failed attach is visible to `mpv.state` polls and listeners
+        // the same way (mpv missing, window or start failure, handshake).
+        if current(&mgr).is_none() {
+            let snapshot = {
+                let mut last = mgr.last.lock();
+                *last = detached_state(last.clone(), Some(e.to_string()));
+                last.clone()
+            };
+            state.emit("mpv.state", snapshot);
+        }
+    }
+    result
+}
 
-    if let Some(s) = current(&mgr) {
+/// How long the attach handshake (property observers) may take in total.
+const ATTACH_HANDSHAKE: Duration = Duration::from_secs(10);
+
+/// Windows loader and image failures, as exit codes: `STATUS_DLL_NOT_FOUND`
+/// (0xC0000135), `STATUS_INVALID_IMAGE_FORMAT` (0xC000007B, e.g. a 32-bit
+/// DLL), `STATUS_ENTRYPOINT_NOT_FOUND` (0xC0000139, a DLL of the wrong
+/// version), `STATUS_DLL_INIT_FAILED` (0xC0000142) and
+/// `STATUS_ILLEGAL_INSTRUCTION` (0xC000001D, a build for a newer CPU).
+const LOADER_FAILURES: [i32; 5] = [
+    0xC000_0135_u32 as i32,
+    0xC000_007B_u32 as i32,
+    0xC000_0139_u32 as i32,
+    0xC000_0142_u32 as i32,
+    0xC000_001D_u32 as i32,
+];
+
+/// Error for an mpv that exited before opening its control pipe. A loader
+/// failure means the mpv build itself is broken or incomplete
+/// (`engine_missing`); any other exit is a configuration problem the user can
+/// fix (Invalid), not an app bug.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn startup_exit_error(code: Option<i32>) -> CoreError {
+    if code.is_some_and(|c| LOADER_FAILURES.contains(&c)) {
+        return CoreError::EngineMissing(format!(
+            "mpv could not start: a library it needs is missing or does not match (exit code {:#X}). Reinstall the mpv build in vendor\\mpv, or pick a complete mpv in Settings > Players.",
+            code.unwrap_or_default() as u32
+        ));
+    }
+    let code = code
+        .map(|c| format!(" (exit code {c})"))
+        .unwrap_or_default();
+    CoreError::Invalid(format!(
+        "mpv exited during startup{code}. Check the mpv build in vendor\\mpv or the extra mpv arguments in Settings > Players."
+    ))
+}
+
+/// Registers the property observers, failing with a Timeout when mpv does
+/// not answer within `limit` (a wedged or half-started mpv).
+async fn handshake(client: &MpvClient, limit: Duration) -> CoreResult<()> {
+    tokio::time::timeout(limit, client.observe(OBSERVED_PROPERTIES))
+        .await
+        .unwrap_or_else(|_| {
+            Err(CoreError::Timeout(
+                "mpv did not finish starting in time".into(),
+            ))
+        })
+}
+
+async fn attach_locked(
+    state: &Arc<AppState>,
+    mgr: &MpvManager,
+    bounds: Bounds,
+    opts: AttachOptions,
+) -> CoreResult<MpvState> {
+    if let Some(s) = current(mgr) {
         if !s.exited() && !s.client.is_closed() {
             set_window_bounds(&s.factory, s.hwnd, bounds).await?;
             return Ok(s.state());
         }
         // A dead session the watcher has not reaped yet.
-        teardown(state, &mgr, &s, None, false).await;
+        teardown(state, mgr, &s, None, false).await;
     }
 
     let factory = window_factory(state).ok_or_else(|| {
@@ -224,7 +435,7 @@ pub async fn attach(
         tokio::task::spawn_blocking(move || find_mpv(configured.as_deref(), &DetectEnv::current()))
             .await?
             .ok_or_else(|| {
-                CoreError::NotFound(
+                CoreError::EngineMissing(
                     embedded_unavailable_reason(true, false, true).unwrap_or_default(),
                 )
             })?;
@@ -234,7 +445,10 @@ pub async fn attach(
         tokio::task::spawn_blocking(move || f.create(bounds)).await??
     };
 
-    let pipe = mpv_pipe_name(std::process::id());
+    // A fresh pipe name per session: an old mpv that survived its kill keeps
+    // its pipe, and reusing the name would connect us to that process.
+    let session_id = mgr.next_id.fetch_add(1, Ordering::Relaxed);
+    let pipe = format!("{}-{session_id}", mpv_pipe_name(std::process::id()));
     let (initial_volume, initial_muted) = {
         let mut last = mgr.last.lock();
         if let Some(v) = opts.volume.filter(|v| v.is_finite()) {
@@ -257,9 +471,6 @@ pub async fn attach(
         Ok(v) => v,
         Err(e) => {
             destroy_window(&factory, hwnd).await;
-            let mut last = mgr.last.lock();
-            last.attached = false;
-            last.error = Some(e.to_string());
             return Err(e);
         }
     };
@@ -276,7 +487,7 @@ pub async fn attach(
         },
     );
     let session = Arc::new(Session {
-        id: mgr.next_id.fetch_add(1, Ordering::Relaxed),
+        id: session_id,
         hwnd,
         factory,
         client: Arc::clone(&client),
@@ -289,10 +500,10 @@ pub async fn attach(
         title: Mutex::new(String::new()),
     });
 
-    if let Err(e) = client.observe(OBSERVED_PROPERTIES).await {
+    if let Err(e) = handshake(&client, ATTACH_HANDSHAKE).await {
         teardown(
             state,
-            &mgr,
+            mgr,
             &session,
             Some(format!("mpv did not accept property observers: {e}")),
             false,
@@ -399,7 +610,9 @@ pub async fn command(state: &Arc<AppState>, cmd: Vec<Value>) -> CoreResult<Value
 }
 
 /// Accepts only [`ALLOWED_COMMANDS`] and [`PROPERTY_COMMANDS`] aimed at
-/// [`SETTABLE_PROPERTIES`], with scalar arguments.
+/// [`SETTABLE_PROPERTIES`], with scalar arguments. Subtitle style properties
+/// take only a plain set with a checked value: `add`, `multiply`, and
+/// `cycle` would step past the allowed range.
 pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
     let Some(name) = cmd.first().and_then(Value::as_str) else {
         return Err(CoreError::invalid(
@@ -416,6 +629,9 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
             "mpv command arguments must be strings, numbers, or booleans",
         ));
     }
+    if name == OSD_OVERLAY {
+        return validate_osd_overlay(cmd);
+    }
     if PROPERTY_COMMANDS.contains(&name) {
         // `cycle-values` may lead with the `!reverse` flag.
         let prop = cmd[1..]
@@ -424,8 +640,53 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
             .and_then(Value::as_str)
             .unwrap_or("");
         validate_property(prop)?;
+        if STYLE_PROPERTIES.contains(&prop.trim()) {
+            if !SET_COMMANDS.contains(&name) {
+                return Err(CoreError::invalid(format!(
+                    "mpv property {:?} can only be set to a value, not changed with {name:?}",
+                    prop.trim()
+                )));
+            }
+            match cmd {
+                [_, _, value] => validate_property_value(prop, value)?,
+                _ => {
+                    return Err(CoreError::invalid(format!(
+                        "mpv command {name:?} needs exactly one value for {:?}",
+                        prop.trim()
+                    )))
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// `osd-overlay <id> <format> <data> [<res_x> <res_y> <z>]`, and nothing
+/// more: an overlay id mpv accepts (0-63), ASS events or `none` (remove it),
+/// one short line of ASS (no newline: a single event), and small integer
+/// sizes. It only draws on mpv's own window.
+fn validate_osd_overlay(cmd: &[Value]) -> CoreResult<()> {
+    let ok = match cmd {
+        [_, id, format, data, sizes @ ..] => {
+            id.as_u64().is_some_and(|i| i < 64)
+                && matches!(format.as_str(), Some("ass-events" | "none"))
+                && data
+                    .as_str()
+                    .is_some_and(|d| d.len() <= OSD_OVERLAY_MAX && !d.contains(['\n', '\r']))
+                && sizes.len() <= 3
+                && sizes
+                    .iter()
+                    .all(|v| v.as_i64().is_some_and(|n| (0..=16384).contains(&n)))
+        }
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(CoreError::invalid(
+            "osd-overlay takes an id (0-63), ass-events or none, one line of ASS, and up to three sizes",
+        ))
+    }
 }
 
 /// `mpv.record` result.
@@ -562,12 +823,141 @@ async fn stop_recording(s: &Session) {
     });
 }
 
+// screenshot:
+/// The IPC command that saves the frame on screen to `path` (mpv picks the
+/// format from the extension): `subtitles` includes the subtitles as shown,
+/// `video` is the bare frame. It runs on the session's IPC client directly
+/// ([`screenshot_to_file`]), never through `mpv.command`, whose allowlist
+/// keeps refusing `screenshot-to-file`: the path is chosen by the core
+/// (`crate::screenshot`), never by the caller.
+pub fn screenshot_command(path: &Path, with_subtitles: bool) -> Vec<Value> {
+    vec![
+        json!("screenshot-to-file"),
+        json!(path.display().to_string()),
+        json!(if with_subtitles { "subtitles" } else { "video" }),
+    ]
+}
+
+fn no_video_frame() -> CoreError {
+    CoreError::Conflict(
+        "There is no video frame to capture. Screenshots need a stream with video.".into(),
+    )
+}
+
+/// The attached session when it shows something to capture: Conflict when
+/// nothing is attached or loaded, or when mpv reports tracks but no selected
+/// video track (an audio-only stream).
+fn capturable_session(state: &AppState) -> CoreResult<Arc<Session>> {
+    ensure_platform()?;
+    let s = current(&manager(state)).ok_or_else(not_attached)?;
+    let st = s.client.state();
+    if !st.loaded {
+        return Err(CoreError::Conflict(
+            "Nothing is playing in the embedded player, so there is nothing to capture.".into(),
+        ));
+    }
+    let has_video = st
+        .tracks
+        .iter()
+        .any(|t| t.selected && t.track_type == crate::model::MpvTrackType::Video);
+    if !st.tracks.is_empty() && !has_video {
+        return Err(no_video_frame());
+    }
+    Ok(s)
+}
+
+/// Title of the item playing in the embedded player (names screenshots;
+/// may be empty). Unsupported off Windows; Conflict when no session is
+/// attached, nothing is loaded, or the stream has no video.
+pub fn playing_title(state: &AppState) -> CoreResult<String> {
+    let s = capturable_session(state)?;
+    let title = s.title.lock().clone();
+    Ok(title)
+}
+
+/// Saves the current frame to `path` with [`screenshot_command`]. Does not
+/// take the op lock (like `mpv.command`). mpv answers once the file is
+/// written; the IPC client gives up after its reply timeout (5 s), which the
+/// caller sees as Timeout while mpv may still finish the file. A failure mpv
+/// reports ("error running command": no decoded frame yet, no video) is a
+/// Conflict.
+pub async fn screenshot_to_file(
+    state: &AppState,
+    path: &Path,
+    with_subtitles: bool,
+) -> CoreResult<()> {
+    let s = capturable_session(state)?;
+    match s
+        .client
+        .command(screenshot_command(path, with_subtitles))
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(CoreError::Invalid(reason)) => {
+            tracing::warn!(%reason, "mpv could not take the screenshot");
+            Err(no_video_frame())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// `mpv.setProperty`.
 pub async fn set_property(state: &Arc<AppState>, name: &str, value: Value) -> CoreResult<()> {
     ensure_platform()?;
     validate_property(name)?;
+    validate_property_value(name, &value)?;
     let s = current(&manager(state)).ok_or_else(not_attached)?;
     s.client.set_property(name.trim(), value).await
+}
+
+/// `mpv.addSubtitle`: loads an external subtitle file into the playing item
+/// and selects it. The path is checked before the session so a bad file is
+/// Invalid even when nothing is attached.
+pub async fn add_subtitle(state: &Arc<AppState>, path: &str) -> CoreResult<()> {
+    ensure_platform()?;
+    let path = validate_subtitle_path(path)?;
+    let s = current(&manager(state)).ok_or_else(not_attached)?;
+    if !s.client.state().loaded {
+        return Err(CoreError::Conflict(
+            "Nothing is playing in the embedded player, so there is nothing to add subtitles to."
+                .into(),
+        ));
+    }
+    // The file name becomes the track title shown in the subtitle menu.
+    let title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    s.client
+        .command(vec![
+            json!("sub-add"),
+            json!(path.display().to_string()),
+            json!("select"),
+            json!(title),
+        ])
+        .await
+        .map(|_| ())
+}
+
+/// How long `mpv.stats` waits for all of its property reads.
+const STATS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// `mpv.stats`: reads [`STATS_PROPERTIES`] once (concurrently, outside the op
+/// lock, like `mpv.command`). A property mpv cannot give is left out.
+pub async fn stats(state: &Arc<AppState>) -> CoreResult<MpvStats> {
+    ensure_platform()?;
+    let s = current(&manager(state)).ok_or_else(not_attached)?;
+    let reads = STATS_PROPERTIES
+        .iter()
+        .map(|name| s.client.get_property(name));
+    let replies = tokio::time::timeout(STATS_TIMEOUT, futures::future::join_all(reads))
+        .await
+        .map_err(|_| CoreError::Timeout("mpv did not answer the stats request in time".into()))?;
+    if s.client.is_closed() {
+        return Err(not_attached());
+    }
+    let values: Vec<Option<Value>> = replies.into_iter().map(Result::ok).collect();
+    Ok(MpvStats::from_values(&values))
 }
 
 /// `mpv.setBounds`.
@@ -644,21 +1034,11 @@ async fn teardown(
             tracing::warn!(pid = s.pid, "embedded mpv did not exit after kill");
         }
     }
-    let mut final_state = s.client.state();
+    let final_state = detached_state(s.client.state(), error);
     s.client.shutdown();
     s.stop_tasks(from_watcher);
     destroy_window(&s.factory, s.hwnd).await;
 
-    final_state.attached = false;
-    final_state.loaded = false;
-    final_state.paused = true;
-    final_state.time_pos = 0.0;
-    final_state.duration = None;
-    final_state.tracks.clear();
-    final_state.fullscreen = false;
-    final_state.recording = false;
-    final_state.record_path = None;
-    final_state.error = error;
     *mgr.last.lock() = final_state.clone();
     {
         let mut cur = mgr.session.lock();
@@ -667,6 +1047,20 @@ async fn teardown(
         }
     }
     state.emit("mpv.state", final_state);
+}
+
+/// The state reported once a session is gone: only volume and mute carry
+/// over to the next attach; everything about the dead file (position,
+/// tracks, the rewind window, buffering) is cleared so the UI does not show
+/// a seek bar for a stream that no longer plays.
+pub fn detached_state(last: MpvState, error: Option<String>) -> MpvState {
+    MpvState {
+        attached: false,
+        volume: last.volume,
+        muted: last.muted,
+        error,
+        ..MpvState::default()
+    }
 }
 
 async fn wait_exit(s: &Session, limit: Duration) -> bool {
@@ -804,10 +1198,8 @@ mod platform {
             cmd.current_dir(dir);
         }
         let mut child = cmd.spawn().map_err(|e| {
-            CoreError::Io(std::io::Error::new(
-                e.kind(),
-                format!("could not start mpv ({}): {e}", mpv.display()),
-            ))
+            let msg = format!("could not start mpv ({}): {e}", mpv.display());
+            crate::player::spawn_error(e, msg)
         })?;
         if let Some(handle) = child.raw_handle() {
             if let Err(e) = job::assign(handle) {
@@ -840,13 +1232,7 @@ mod platform {
                 Err(e) => return Err(CoreError::Io(e)),
             }
             if let Ok(Some(status)) = child.try_wait() {
-                let code = status
-                    .code()
-                    .map(|c| format!(" (exit code {c})"))
-                    .unwrap_or_default();
-                return Err(CoreError::Other(anyhow::anyhow!(
-                    "mpv exited during startup{code}. Check the mpv build in vendor\\mpv or the extra mpv arguments in Settings > Players."
-                )));
+                return Err(super::startup_exit_error(status.code()));
             }
             if started.elapsed() >= limit {
                 return Err(CoreError::Timeout(
@@ -974,6 +1360,14 @@ mod platform {
     }
 }
 
+// recording:
+/// Puts a recording mpv into the kill-on-close job that holds embedded mpv,
+/// so it never outlives the app.
+#[cfg(windows)]
+pub fn job_assign(process: std::os::windows::io::RawHandle) -> std::io::Result<()> {
+    platform::job::assign(process)
+}
+
 #[cfg(not(windows))]
 mod platform {
     use crate::error::{CoreError, CoreResult};
@@ -989,5 +1383,117 @@ mod platform {
         Err(CoreError::Unsupported(
             "embedded mpv is only available on Windows".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn osd_overlay_takes_only_one_short_ass_drawing() {
+        use super::validate_command;
+        use serde_json::json;
+        let dim = "{\\an7\\pos(0,0)\\1c&H100804&\\1a&H47&\\p1}m -10 -10 l 10000 -10 10000 10000 -10 10000{\\p0}";
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(63),
+            json!("ass-events"),
+            json!(dim),
+            json!(0),
+            json!(720),
+            json!(0)
+        ])
+        .is_ok());
+        assert!(
+            validate_command(&[json!("osd-overlay"), json!(63), json!("none"), json!("")]).is_ok()
+        );
+        // Other formats (bitmaps read from a file or memory), ids past mpv's 64, a second
+        // event, oversized text, non-integer or extra arguments are refused.
+        assert!(
+            validate_command(&[json!("osd-overlay"), json!(63), json!("bgra"), json!("")]).is_err()
+        );
+        assert!(
+            validate_command(&[json!("osd-overlay"), json!(64), json!("none"), json!("")]).is_err()
+        );
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("a\nb")
+        ])
+        .is_err());
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("x".repeat(600))
+        ])
+        .is_err());
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("x"),
+            json!("720")
+        ])
+        .is_err());
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("x"),
+            json!(0),
+            json!(720),
+            json!(0),
+            json!(true)
+        ])
+        .is_err());
+        assert!(validate_command(&[json!("osd-overlay"), json!(1)]).is_err());
+    }
+
+    use super::*;
+
+    /// Review round 2: an mpv that dies in the Windows loader (missing or
+    /// mismatched DLL) is `engine_missing`; other startup exits stay Invalid.
+    #[test]
+    fn loader_failures_at_startup_are_engine_missing() {
+        for code in [
+            0xC000_0135_u32 as i32,
+            0xC000_007B_u32 as i32,
+            0xC000_0139_u32 as i32,
+            0xC000_0142_u32 as i32,
+            0xC000_001D_u32 as i32,
+        ] {
+            let err = startup_exit_error(Some(code));
+            assert!(matches!(err, CoreError::EngineMissing(_)), "{err:?}");
+            assert!(err.to_string().contains("0xC0000"), "{err}");
+        }
+        for code in [Some(1), Some(-1), None] {
+            let err = startup_exit_error(code);
+            assert!(
+                matches!(err, CoreError::Invalid(ref m) if m.contains("exited during startup")),
+                "{err:?}"
+            );
+        }
+    }
+
+    /// D14 (review round 1): an mpv that accepts the pipe but never answers
+    /// fails the attach with a Timeout instead of hanging.
+    #[tokio::test]
+    async fn handshake_times_out_when_mpv_never_answers() {
+        let (ours, _theirs) = tokio::io::duplex(64 * 1024);
+        let client = MpvClient::with_timeout(ours, MpvState::default(), Duration::from_secs(60));
+        let started = std::time::Instant::now();
+        let err = tokio::time::timeout(
+            Duration::from_secs(5),
+            handshake(&client, Duration::from_millis(200)),
+        )
+        .await
+        .expect("handshake must honor its limit")
+        .unwrap_err();
+        assert!(
+            matches!(err, CoreError::Timeout(ref m) if m.contains("did not finish starting")),
+            "{err:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

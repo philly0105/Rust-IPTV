@@ -23,6 +23,9 @@ pub struct TmdbClient {
     rate_limited_until: parking_lot::Mutex<Option<Instant>>,
 }
 
+/// Largest TMDB answer read into memory; real ones are a few hundred KB.
+pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+
 /// Parses `Retry-After` as delta-seconds or an HTTP date; capped.
 pub fn parse_retry_after(value: Option<&str>) -> Duration {
     let fallback = Duration::from_secs(1);
@@ -143,17 +146,14 @@ impl TmdbClient {
         }
         if !status.is_success() {
             return Err(match status.as_u16() {
-                401 => CoreError::Auth(
+                401 | 403 => CoreError::Auth(
                     "TMDB rejected the API key. Check it in Settings > TMDB.".into(),
                 ),
                 404 => CoreError::NotFound(format!("TMDB has no entry at {path}")),
                 _ => crate::http::status_error(status, "TMDB request failed"),
             });
         }
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| CoreError::from(e.without_url()))?;
+        let bytes = crate::http::read_capped(resp, "TMDB", MAX_RESPONSE_BYTES).await?;
         serde_json::from_slice(&bytes)
             .map_err(|e| CoreError::Invalid(format!("TMDB returned an unreadable response: {e}")))
     }

@@ -38,10 +38,5 @@ export function absoluteTime(iso: string | undefined, lang: string): string | un
   }
 }
 
-export function formatCount(n: number, lang: string): string {
-  try {
-    return new Intl.NumberFormat(lang).format(n);
-  } catch {
-    return String(n);
-  }
-}
+// Lives in @/lib/numbers so the shell's entry chunk can format counts without this whole module.
+export { formatCount } from '@/lib/numbers';

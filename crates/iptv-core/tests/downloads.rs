@@ -712,6 +712,35 @@ async fn remove_with_delete_file_deletes_media_and_part() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_without_delete_file_keeps_the_partial_file() {
+    let mut c = ctx().await;
+    iptv_core::downloads::set_rate_limit(&c.state, Some(2 * 1024 * 1024));
+    let p = c.start("1", "partial", "/files/video.bin").await;
+    let ppath = p.file_path.clone().unwrap();
+    c.wait_progress(p.id, 256 * 1024).await;
+    c.ok("downloads.pause", json!({"id": p.id})).await;
+    let kept = file_len(&part_of(&ppath)).unwrap();
+    assert!(kept > 0);
+    c.ok("downloads.remove", json!({"id": p.id, "deleteFile": false}))
+        .await;
+    assert_eq!(file_len(&part_of(&ppath)), Some(kept), ".part kept");
+    let err = c
+        .call("downloads.get", json!({"id": p.id}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::NotFound, "row removed");
+
+    // A new download of the same item reserves its own file.
+    let again = c.start("1", "partial", "/files/video.bin").await;
+    assert_ne!(again.file_path.as_deref(), Some(ppath.as_str()));
+    assert_eq!(
+        file_len(&part_of(&ppath)),
+        Some(kept),
+        "kept .part untouched"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn set_dir_persists_through_settings_save() {
     let mut c = ctx().await;
     let custom = c.data_dir.join("library");
@@ -994,4 +1023,81 @@ async fn cancel_after_timed_out_pause_ends_canceled() {
     let canceled = c.wait_status(d.id, DownloadStatus::Canceled).await;
     assert_eq!(canceled.file_path, None);
     assert!(!part_of(&file_path).exists(), ".part deleted on cancel");
+}
+
+/// B9: following the disk-full advice (choose another downloads folder, then
+/// retry) continues in the new folder instead of failing again in the old.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resume_after_changing_the_downloads_folder_continues_there() {
+    let mut c = ctx().await;
+    iptv_core::downloads::set_rate_limit(&c.state, Some(4 * 1024 * 1024));
+    let d = c.start("1", "video", "/files/video.bin").await;
+    let old_path = d.file_path.clone().unwrap();
+    c.wait_progress(d.id, 1024 * 1024).await;
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    assert!(part_of(&old_path).is_file());
+
+    let new_dir = c.data_dir.join("elsewhere");
+    c.state.settings.write().downloads_dir = Some(new_dir.to_string_lossy().into_owned());
+    iptv_core::downloads::set_rate_limit(&c.state, None);
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    let new_path = PathBuf::from(done.file_path.clone().unwrap());
+    assert!(new_path.starts_with(&new_dir), "{new_path:?}");
+    assert!(is_mock_content(&new_path), "byte-exact after the move");
+    assert!(!part_of(&old_path).exists(), "old partial moved or removed");
+}
+
+/// B9: a start that cannot reserve its file leaves no queued row behind, and
+/// the next start (after fixing the folder) runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn failed_start_leaves_no_stuck_row() {
+    let c = ctx().await;
+    // The downloads "folder" is a file: creating it fails.
+    let blocker = c.data_dir.join("not-a-dir");
+    std::fs::create_dir_all(&c.data_dir).unwrap();
+    std::fs::write(&blocker, b"x").unwrap();
+    c.state.settings.write().downloads_dir =
+        Some(blocker.join("sub").to_string_lossy().into_owned());
+    let args = json!({
+        "ref": {"sourceId": "src", "contentType": "movie", "itemId": "9"},
+        "title": "video",
+        "url": c.srv.url("/files/video.bin"),
+    });
+    let err = c.call("downloads.start", args.clone()).await.unwrap_err();
+    assert_eq!(err.code, iptv_core::RpcErrorCode::Io, "{err:?}");
+    let listed = c.ok("downloads.list", Value::Null).await;
+    assert_eq!(listed.as_array().map(Vec::len), Some(0), "{listed}");
+
+    c.state.settings.write().downloads_dir = None;
+    let d: Download = serde_json::from_value(c.ok("downloads.start", args).await).unwrap();
+    c.wait_status(d.id, DownloadStatus::Completed).await;
+}
+
+/// D8 (review round 1): two concurrent `downloads.start` calls for the same
+/// item both succeed with one row, and the download finishes (no "database
+/// is locked", no duplicate or stuck row).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_starts_of_one_item_make_one_row() {
+    let c = ctx().await;
+    for n in 0..8 {
+        let args = json!({
+            "ref": {"sourceId": "src", "contentType": "movie", "itemId": format!("c{n}")},
+            "title": format!("video {n}"),
+            "url": c.srv.url("/files/video.bin"),
+        });
+        let (a, b) = tokio::join!(
+            c.call("downloads.start", args.clone()),
+            c.call("downloads.start", args.clone())
+        );
+        let a: Download = serde_json::from_value(a.expect("first start")).unwrap();
+        let b: Download = serde_json::from_value(b.expect("second start")).unwrap();
+        assert_eq!(a.id, b.id, "one row per item");
+    }
+    let listed: Vec<Download> =
+        serde_json::from_value(c.ok("downloads.list", Value::Null).await).unwrap();
+    assert_eq!(listed.len(), 8, "{listed:?}");
+    for d in listed {
+        c.wait_status(d.id, DownloadStatus::Completed).await;
+    }
 }

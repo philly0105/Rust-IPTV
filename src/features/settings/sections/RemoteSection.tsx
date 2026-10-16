@@ -9,6 +9,7 @@ import { RpcError, isDesktop, rpc } from '@/api/transport';
 import { Button, IconButton, Skeleton, useToast } from '@/ui';
 import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { remotePatch, validatePort } from '../lib/patch';
+import { RemoteLanPanel } from './RemoteLanPanel';
 import type { SectionProps } from './types';
 
 export function RemoteSection({ settings, update }: SectionProps) {
@@ -81,10 +82,11 @@ export function RemoteSection({ settings, update }: SectionProps) {
       <SettingsGroup>
         <SwitchRow label={t('remoteEnabled')} description={t('remoteEnabledHint')} checked={enabled} disabled={busy} onChange={(v) => void setEnabled(v)} testId="toggle-remote" />
         <SettingsRow label={t('remotePort')} description={t('remotePortHint')} error={portError ? t(portError) : null}>
-          {({ id, describedBy }) => (
+          {({ id, describedBy, invalid }) => (
             <CommitInput
               id={id}
               describedBy={describedBy}
+              invalid={invalid}
               inputMode="numeric"
               className="w-28 text-end tabular-nums"
               value={String(settings.remoteControl.port)}
@@ -136,11 +138,14 @@ export function RemoteSection({ settings, update }: SectionProps) {
                   </Button>
                 </div>
               ) : null}
-              <p className="text-sm text-fg-muted">{t('remoteLoopbackNote')}</p>
+              <p className="text-sm text-fg-muted">{t(isDesktop ? 'remoteLoopbackNote' : 'remoteLoopbackNoteServer')}</p>
             </>
           )}
         </div>
       </SettingsGroup>
+
+      {/* remote: LAN mode and pairing */}
+      <RemoteLanPanel settings={settings} update={update} status={status.data} />
     </SettingsSection>
   );
 }

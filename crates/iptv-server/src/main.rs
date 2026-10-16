@@ -161,13 +161,14 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let server = Server::new(
-        app,
+        app.clone(),
         Arc::new(build_router()),
         tx,
         ServerOptions {
             static_dir: static_dir.clone(),
             allow_private_targets: args.allow_private_targets,
             allowed_hosts,
+            allow_cross_site: false,
         },
     );
 
@@ -204,6 +205,11 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             tokio::time::sleep(SHUTDOWN_GRACE).await;
         } => tracing::warn!(grace_secs = SHUTDOWN_GRACE.as_secs(), "open streams did not finish in time; exiting"),
     }
+    // Running recordings close their files and rows ("stopped: shutdown")
+    // instead of being left as "recording" for the next start to repair.
+    iptv_core::recording::shutdown(&app).await;
+    // Lets the next start skip the large-database background check.
+    iptv_core::db::note_clean_shutdown(&app.db_path());
     tracing::info!("iptv-server stopped");
     Ok(())
 }

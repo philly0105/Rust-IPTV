@@ -104,20 +104,27 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
     r.add("stalker.series", |s, a: ListArgs| async move {
         Ok::<Page<SeriesItem>, RpcError>(series(&s, a).await?)
     });
+    // parental (C2): hide mode refuses a hidden title here too, as catalog.item does.
     r.add("stalker.vodDetail", |s, a: RefArgs| async move {
         expect_type(&a.item_ref, &[ContentType::Movie])?;
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<VodDetail, RpcError>(vod::vod_detail(&s, &a.item_ref).await?)
     });
     r.add("stalker.seriesDetail", |s, a: RefArgs| async move {
         expect_type(&a.item_ref, &[ContentType::Series])?;
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<SeriesDetail, RpcError>(vod::series_detail(&s, &a.item_ref).await?)
     });
+    // So do the stream and catch-up URLs: a stale history or resume entry
+    // must not play a locked channel or title without the PIN.
     r.add("stalker.streamUrl", |s, a: StreamArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
             playback::stream_url(&s, &a.item_ref, a.episode_id.as_deref()).await?,
         )
     });
     r.add("stalker.catchupUrl", |s, a: CatchupArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
             playback::catchup_url(&s, &a.item_ref, &a.start, a.duration_minutes).await?,
         )
@@ -131,10 +138,14 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
         Ok::<Page<Value>, RpcError>(search(&s, a).await?)
     });
     r.add("stalker.accountInfo", |s, a: SourceArgs| async move {
-        Ok::<StalkerAccountInfo, RpcError>(playback::account_info(&s, &a.source_id).await?)
+        let info = playback::account_info(&s, &a.source_id).await?;
+        crate::account::remember_stalker(&s, &a.source_id, &info).await;
+        Ok::<StalkerAccountInfo, RpcError>(info)
     });
     r.add("stalker.test", |s, a: TestArgs| async move {
-        Ok::<ConnectionTestResult, RpcError>(playback::test(&s, a.config).await)
+        Ok::<ConnectionTestResult, RpcError>(
+            crate::http::interactive(playback::test(&s, a.config)).await,
+        )
     });
 }
 
@@ -175,7 +186,7 @@ async fn movies(state: &Arc<AppState>, a: ListArgs) -> Result<Page<VodItem>, Cor
     let names = vod::category_names(state, &a.source_id, ContentType::Movie).await;
     vod::remember_rows(state, &a.source_id, Kind::Vod, &page.items, &names).await;
     let sid = a.source_id.clone();
-    Ok(page
+    let page = page
         .map(|l| {
             super::mapping::vod_item(
                 &sid,
@@ -185,7 +196,11 @@ async fn movies(state: &Arc<AppState>, a: ListArgs) -> Result<Page<VodItem>, Cor
                 names.get(&l.category_id).cloned(),
             )
         })
-        .filter_some())
+        .filter_some();
+    drop_hidden(state, page, |v| {
+        (v.item_ref.clone(), Some(v.category_id.clone()))
+    })
+    .await
 }
 
 async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, CoreError> {
@@ -203,7 +218,7 @@ async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, 
     let names = vod::category_names(state, &a.source_id, ContentType::Series).await;
     vod::remember_rows(state, &a.source_id, Kind::Series, &page.items, &names).await;
     let sid = a.source_id.clone();
-    Ok(page
+    let page = page
         .map(|l| {
             super::mapping::series_item(
                 &sid,
@@ -213,7 +228,28 @@ async fn series(state: &Arc<AppState>, a: ListArgs) -> Result<Page<SeriesItem>, 
                 names.get(&l.category_id).cloned(),
             )
         })
-        .filter_some())
+        .filter_some();
+    drop_hidden(state, page, |v| {
+        (v.item_ref.clone(), Some(v.category_id.clone()))
+    })
+    .await
+}
+
+/// Hide mode (C2): drops the titles parental controls hide right now. Portal
+/// pages are not in the catalog, so their refs go through
+/// [`crate::parental::hidden`] instead of the catalog's SQL filter. `total`
+/// stays the portal's count, as for rows the mapping drops: the portal cannot
+/// say how many hidden titles later pages hold.
+async fn drop_hidden<T>(
+    state: &AppState,
+    mut page: Page<T>,
+    key: impl Fn(&T) -> (ItemRef, Option<String>),
+) -> Result<Page<T>, CoreError> {
+    let hidden = crate::parental::hidden(state, page.items.iter().map(&key).collect()).await?;
+    if !hidden.is_empty() {
+        page.items.retain(|it| !hidden.contains(&key(it).0));
+    }
+    Ok(page)
 }
 
 async fn search(state: &Arc<AppState>, a: SearchArgs) -> Result<Page<Value>, CoreError> {

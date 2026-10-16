@@ -13,6 +13,7 @@ pub const OBSERVED_PROPERTIES: &[(u64, &str)] = &[
     (6, "track-list"),
     (7, "fullscreen"),
     (8, "demuxer-cache-state"),
+    (9, "paused-for-cache"),
 ];
 
 /// Applies one `property-change` to `state`. `data` is `None` when mpv
@@ -59,6 +60,9 @@ pub fn apply_property(state: &mut MpvState, name: &str, data: Option<&Value>) ->
         }
         "demuxer-cache-state" => {
             state.seekable = data.and_then(|d| seekable_range(d, state.time_pos));
+        }
+        "paused-for-cache" => {
+            state.buffering = data.and_then(Value::as_bool);
         }
         _ => return false,
     }
@@ -108,16 +112,27 @@ pub fn parse_tracks(data: &Value) -> Vec<MpvTrack> {
                     .filter(|s| !s.is_empty())
                     .map(str::to_string)
             };
+            // An external subtitle without a title shows its file name.
+            let title = text("title").or_else(|| match track_type {
+                MpvTrackType::Sub => text("external-filename")
+                    .and_then(|f| f.rsplit(['/', '\\']).next().map(str::to_string))
+                    .filter(|n| !n.is_empty()),
+                _ => None,
+            });
             Some(MpvTrack {
                 id,
                 track_type,
-                title: text("title"),
+                title,
                 lang: text("lang"),
                 selected: t.get("selected").and_then(Value::as_bool).unwrap_or(false),
             })
         })
         .collect()
 }
+
+/// The error for a live stream that reached its end: the provider stopped
+/// sending it. The player's recovery retries it, then fails over.
+pub const LIVE_ENDED: &str = "The live stream stopped: the provider closed the connection.";
 
 /// Applies any IPC event object (`{"event": ...}`) to `state`. Handles
 /// `property-change`, `start-file`, `file-loaded`, and `end-file`.
@@ -138,24 +153,93 @@ pub fn apply_event(state: &mut MpvState, event: &Value) -> bool {
             state.loaded = false;
             state.error = None;
             state.seekable = None;
+            state.buffering = None;
         }
         "file-loaded" => {
             state.loaded = true;
             state.error = None;
         }
         "end-file" => {
+            let was_loaded = state.loaded;
             state.loaded = false;
-            if event.get("reason").and_then(Value::as_str) == Some("error") {
-                let detail = event
-                    .get("file_error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error");
-                state.error = Some(format!(
-                    "mpv could not play this stream ({detail}). Check the source or try another player."
-                ));
+            state.buffering = None;
+            match event.get("reason").and_then(Value::as_str) {
+                Some("error") => {
+                    let detail = event
+                        .get("file_error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown error");
+                    state.error = Some(format!(
+                        "mpv could not play this stream ({detail}). Check the source or try another player."
+                    ));
+                }
+                // Only live items end at EOF (`keep-open=no`, `args::loadfile_options`);
+                // everything else pauses on its last frame. A live stream that ends was
+                // dropped by the provider. `was_loaded`: the end of the file a new load
+                // just replaced (`embedded::load` clears `loaded` first) is not news.
+                Some("eof") if was_loaded => state.error = Some(LIVE_ENDED.to_string()),
+                _ => {}
             }
         }
         _ => return false,
     }
     *state != before
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn untitled_external_subtitle_is_named_after_its_file() {
+        let tracks = parse_tracks(&json!([
+            {"id": 1, "type": "sub", "external": true,
+             "external-filename": r"C:\Subs\Movie.en.srt", "selected": true},
+            {"id": 2, "type": "sub", "external-filename": "/home/u/a.ass", "title": "Signs"},
+            {"id": 3, "type": "sub", "external-filename": "C:/Subs/"},
+            {"id": 1, "type": "audio", "external-filename": r"C:\a.mka"}
+        ]));
+        assert_eq!(tracks[0].title.as_deref(), Some("Movie.en.srt"));
+        assert!(tracks[0].selected);
+        assert_eq!(tracks[1].title.as_deref(), Some("Signs"), "a title wins");
+        assert_eq!(tracks[2].title, None);
+        assert_eq!(tracks[3].title, None, "only subtitles get the fallback");
+    }
+
+    /// L2-desktop-2: a live stream that plays out its cache and ends (the
+    /// provider dropped it) is an error the player recovers from, not a pause.
+    #[test]
+    fn a_live_stream_that_ends_is_reported_as_dropped() {
+        let mut st = MpvState {
+            attached: true,
+            ..MpvState::default()
+        };
+        apply_event(&mut st, &json!({"event": "start-file"}));
+        apply_event(&mut st, &json!({"event": "file-loaded"}));
+        assert!(apply_event(
+            &mut st,
+            &json!({"event": "end-file", "reason": "eof"})
+        ));
+        assert!(!st.loaded);
+        assert_eq!(st.error.as_deref(), Some(LIVE_ENDED));
+        // The next load starts clean.
+        apply_event(&mut st, &json!({"event": "start-file"}));
+        assert_eq!(st.error, None);
+    }
+
+    #[test]
+    fn replacing_a_file_or_a_late_eof_after_a_new_load_is_not_an_error() {
+        let mut st = MpvState::default();
+        apply_event(&mut st, &json!({"event": "file-loaded"}));
+        // `loadfile replace` ends the old file with reason `stop`.
+        apply_event(&mut st, &json!({"event": "end-file", "reason": "stop"}));
+        assert_eq!(st.error, None);
+        // `embedded::load` clears `loaded` before it sends `loadfile`: the old
+        // file's EOF that was already in flight is not the new item's drop.
+        apply_event(&mut st, &json!({"event": "file-loaded"}));
+        st.loaded = false;
+        apply_event(&mut st, &json!({"event": "end-file", "reason": "eof"}));
+        assert_eq!(st.error, None);
+    }
 }

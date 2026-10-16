@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Dialog, Kbd, SearchInput } from '@/ui';
+import { comboKeys, Dialog, Kbd, SearchInput } from '@/ui';
 
 import { normalizeCombo, useShortcutList, type ShortcutInfo } from './shortcuts';
 import { useShellStore } from './store';
@@ -20,34 +20,200 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'escape', descKey: 'scEscape', area: 'Global' },
   { combo: 'mod+shift+l', descKey: 'scTheme', area: 'Global' },
   { combo: 'f8', descKey: 'scNotifications', area: 'Global' },
-  { combo: 'mod+b', descKey: 'scSidebar', area: 'Navigation' },
-  { combo: 'digit', descKey: 'scDigits', area: 'Navigation' },
+  { combo: 'f11', descKey: 'scFullscreen', area: 'Global' },
+  // Bound by useParentalEvents only while a session unlock is active.
+  { combo: 'mod+alt+l', descKey: 'parental:shortcutLockNow', area: 'Parental controls' },
+  { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
+  { combo: 'digit', descKey: 'scDigits', area: 'Live' },
+  { combo: '/', descKey: 'live:shortcutFocusSearch', area: 'Live' },
+  { combo: 'enter', descKey: 'scSearchToList', area: 'Live' },
+  { combo: 'arrowdown', descKey: 'scSearchToList', area: 'Live' },
+  { combo: 'escape', descKey: 'scSearchClear', area: 'Live' },
+  // Bound by the focused channel list (ChannelList.tsx onKeyDown).
+  { combo: 's', descKey: 'scChannelFavorite', area: 'Live' },
+  { combo: 'shift+f10', descKey: 'scItemMenu', area: 'Live' },
+  { combo: 'contextmenu', descKey: 'scItemMenu', area: 'Live' },
+  // Run 2 (C11): the focused channel row. `l` is a document listener (useAddToListShortcut); F2 and Shift+Delete are channel edits.
+  { combo: 'l', descKey: 'lists:shortcutAddToList', area: 'Live' },
+  { combo: 'f2', descKey: 'channels:shortcutRename', area: 'Live' },
+  { combo: 'shift+delete', descKey: 'channels:shortcutHide', area: 'Live' },
+  // Guide (EpgGridPage.tsx): search and jump to a date and time.
+  { combo: '/', descKey: 'guide:searchLabel', area: 'Guide' },
+  { combo: 't', descKey: 'guide:jumpTitle', area: 'Guide' },
+  // Only inside the Manage lists and Edit channels dialogs (SortableList.tsx onKeyDown); the list
+  // page and the Lists sidebar reorder through those dialogs, so the text names them.
+  { combo: 'alt+arrowup', descKey: 'scListsDialogMoveUp', area: 'Lists' },
+  { combo: 'alt+arrowdown', descKey: 'scListsDialogMoveDown', area: 'Lists' },
+  // Multi-view page (MultiviewPage.tsx); the focused-slot keys are bound by the wall (useWallKeyboard.ts).
+  { combo: 'digit', descKey: 'multiview:shortcutSound', area: 'Multi-view' },
+  { combo: 'f', descKey: 'multiview:shortcutFullscreen', area: 'Multi-view' },
+  { combo: 'm', descKey: 'multiview:shortcutMute', area: 'Multi-view' },
+  { combo: 'l', descKey: 'multiview:shortcutLayout', area: 'Multi-view' },
+  { combo: 'a', descKey: 'multiview:shortcutAdd', area: 'Multi-view' },
+  { combo: 'escape', descKey: 'multiview:shortcutSwapCancel', area: 'Multi-view' },
+  { combo: 'arrowleft', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'arrowright', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'arrowup', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'arrowdown', descKey: 'multiview:shortcutFocusMove', area: 'Multi-view' },
+  { combo: 'home', descKey: 'multiview:shortcutFocusEnds', area: 'Multi-view' },
+  { combo: 'end', descKey: 'multiview:shortcutFocusEnds', area: 'Multi-view' },
+  { combo: 'enter', descKey: 'multiview:shortcutGiveSound', area: 'Multi-view' },
+  { combo: 'space', descKey: 'multiview:shortcutGiveSound', area: 'Multi-view' },
+  { combo: 'delete', descKey: 'multiview:shortcutCloseTile', area: 'Multi-view' },
+  { combo: 'backspace', descKey: 'multiview:shortcutCloseTile', area: 'Multi-view' },
+  { combo: 'r', descKey: 'multiview:shortcutReplaceTile', area: 'Multi-view' },
+  { combo: 's', descKey: 'multiview:shortcutSwapTile', area: 'Multi-view' },
+  { combo: 'escape', descKey: 'scVodBack', area: 'Vod' },
+  // Bound by the movie and series grid (CategoryGridPage.tsx) while it shows posters.
+  { combo: 's', descKey: 'vod:shortcutMyList', area: 'Vod' },
+  { combo: 'shift+f10', descKey: 'vod:shortcutPosterMenu', area: 'Vod' },
+  { combo: 'contextmenu', descKey: 'vod:shortcutPosterMenu', area: 'Vod' },
+  { combo: 'w', descKey: 'vod:shortcutWatched', area: 'Vod' },
+  { combo: 'shift+w', descKey: 'vod:shortcutHideWatched', area: 'Vod' },
+  // The search page (SearchPage.tsx): the header field's onKeyDown and the first result's ArrowUp.
+  { combo: 'arrowdown', descKey: 'scSearchToResults', area: 'Search' },
+  { combo: 'arrowup', descKey: 'scResultsToSearch', area: 'Search' },
+  // My List page (MyListPage.tsx), acting on the focused row.
+  { combo: 'alt+arrowup', descKey: 'mylist:shortcutMoveUp', area: 'My List' },
+  { combo: 'alt+arrowdown', descKey: 'mylist:shortcutMoveDown', area: 'My List' },
+  { combo: 'delete', descKey: 'mylist:shortcutRemove', area: 'My List' },
+  { combo: 'w', descKey: 'mylist:shortcutWatched', area: 'My List' },
+  { combo: 'shift+n', descKey: 'sources:shortcutAddSource', area: 'Sources' },
+  { combo: 'alt+arrowup', descKey: 'library:shortcutMoveUp', area: 'Favorites' },
+  { combo: 'alt+arrowdown', descKey: 'library:shortcutMoveDown', area: 'Favorites' },
+  { combo: 'p', descKey: 'library:shortcutPause', area: 'Downloads' },
+  { combo: 'r', descKey: 'library:shortcutRetry', area: 'Downloads' },
+  { combo: 'x', descKey: 'library:shortcutCancel', area: 'Downloads' },
+  { combo: 'delete', descKey: 'library:shortcutRemove', area: 'Downloads' },
+  { combo: 'o', descKey: 'library:shortcutReveal', area: 'Downloads' },
+  { combo: 'backspace', descKey: 'library:backToLibrary', area: 'My videos' },
+  { combo: '7', descKey: 'stats:showWeek', area: 'Stats' },
+  { combo: '3', descKey: 'stats:showMonth', area: 'Stats' },
   { combo: 'space', descKey: 'scPlayPause', area: 'Playback' },
   { combo: 'k', descKey: 'scPlayPause', area: 'Playback' },
   { combo: 'f', descKey: 'scFullscreen', area: 'Playback' },
   { combo: 'arrowleft', descKey: 'scSeekBack', area: 'Playback' },
   { combo: 'arrowright', descKey: 'scSeekForward', area: 'Playback' },
+  { combo: 'n', descKey: 'scNextItem', area: 'Playback' },
+  // Bound app-wide by usePlaybackShortcuts (SEEK_STEP_LARGE), not only on the focused seek bar.
+  { combo: 'shift+arrowleft', descKey: 'scSeekBackLarge', area: 'Playback' },
+  { combo: 'shift+arrowright', descKey: 'scSeekForwardLarge', area: 'Playback' },
   { combo: 'arrowup', descKey: 'scVolumeUp', area: 'Playback' },
   { combo: 'arrowdown', descKey: 'scVolumeDown', area: 'Playback' },
   { combo: 'm', descKey: 'scMute', area: 'Playback' },
+  { combo: 'c', descKey: 'scCaptions', area: 'Playback' },
+  { combo: 'pageup', descKey: 'scChannelUp', area: 'Playback' },
+  { combo: 'pagedown', descKey: 'scChannelDown', area: 'Playback' },
+  // player: navigation, sync and stream info shortcuts (usePlaybackShortcuts.ts).
+  { combo: 'j', descKey: 'player:shortcutSeekBack10', area: 'Playback' },
+  { combo: 'l', descKey: 'player:shortcutSeekForward10', area: 'Playback' },
+  { combo: 'shift+p', descKey: 'player:shortcutPrevItem', area: 'Playback' },
+  { combo: 'b', descKey: 'player:shortcutPrevChannel', area: 'Playback' },
+  { combo: 'shift+b', descKey: 'player:shortcutChannelHistory', area: 'Playback' },
+  { combo: 'g', descKey: 'player:shortcutSubDelayDown', area: 'Playback' },
+  { combo: 'h', descKey: 'player:shortcutSubDelayUp', area: 'Playback' },
+  { combo: 'shift+g', descKey: 'player:shortcutAudioDelayDown', area: 'Playback' },
+  { combo: 'shift+h', descKey: 'player:shortcutAudioDelayUp', area: 'Playback' },
+  { combo: 'i', descKey: 'player:shortcutStreamInfo', area: 'Playback' },
+  { combo: 'shift+c', descKey: 'player:shortcutSubtitleMenu', area: 'Playback' },
+  { combo: 'z', descKey: 'scSleepTimer', area: 'Playback' },
+  // Run 3 C6: bound while a video plays in the app; a focused Live row or multi-view tile keeps its own `s`.
+  { combo: 's', descKey: 'player:screenshot', area: 'Playback' },
+  // Bound by pip.ts only while picture-in-picture is on.
+  { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
+  // The keyboard's media keys (usePlaybackShortcuts.ts, L3-desktop-5); they work in a text field too.
+  { combo: 'mediaplaypause', descKey: 'player:shortcutMediaPlayPause', area: 'Playback' },
+  { combo: 'mediastop', descKey: 'player:shortcutMediaStop', area: 'Playback' },
+  { combo: 'mediatracknext', descKey: 'player:shortcutMediaNext', area: 'Playback' },
+  { combo: 'mediatrackprevious', descKey: 'player:shortcutMediaPrevious', area: 'Playback' },
+  // Bound by the focused seek bar (SeekBar.tsx onKeyDown). Its own area: PgUp/PgDn mean channel up/down in Playback.
+  { combo: 'pageup', descKey: 'scSeekBarPageForward', area: 'Seek bar' },
+  { combo: 'pagedown', descKey: 'scSeekBarPageBack', area: 'Seek bar' },
+  { combo: 'home', descKey: 'scSeekBarStart', area: 'Seek bar' },
+  { combo: 'end', descKey: 'scSeekBarEnd', area: 'Seek bar' },
   { combo: 'arrowup', descKey: 'scListMove', area: 'Dialogs and lists' },
   { combo: 'arrowdown', descKey: 'scListMove', area: 'Dialogs and lists' },
   { combo: 'enter', descKey: 'scListRun', area: 'Dialogs and lists' },
   { combo: 'escape', descKey: 'scListClose', area: 'Dialogs and lists' },
+  { combo: 'home', descKey: 'scListJump', area: 'Dialogs and lists' },
+  { combo: 'end', descKey: 'scListJump', area: 'Dialogs and lists' },
+  { combo: 'pageup', descKey: 'scListPage', area: 'Dialogs and lists' },
+  { combo: 'pagedown', descKey: 'scListPage', area: 'Dialogs and lists' },
+  { combo: 'arrowleft', descKey: 'scGridMove', area: 'Dialogs and lists' },
+  { combo: 'arrowright', descKey: 'scGridMove', area: 'Dialogs and lists' },
+  // Favorites, Recent and My videos rows (onRowKeyDown); Downloads registers its own.
+  { combo: 'delete', descKey: 'scListRemove', area: 'Dialogs and lists' },
+  // Run 3 first-run tour (onboarding/tour/Tour.tsx): its own capture-phase key handler while it is
+  // open. The arrows follow the reading direction (mirrored in RTL), so one text covers both.
+  { combo: 'escape', descKey: 'scTourSkip', area: 'Tour' },
+  { combo: 'arrowleft', descKey: 'scTourStep', area: 'Tour' },
+  { combo: 'arrowright', descKey: 'scTourStep', area: 'Tour' },
+  // Replaying it: the palette's "Take the tour" command (CommandPalette.tsx, help.tour).
+  { combo: 'mod+k', descKey: 'scTourReplay', area: 'Tour' },
 ];
 
-const AREA_ORDER = ['Global', 'Navigation', 'Live', 'Playback', 'Dialogs and lists'];
-const AREA_KEYS: Record<string, string> = {
-  Global: 'areaGlobal',
-  Navigation: 'areaNavigation',
-  Live: 'areaLive',
-  Playback: 'areaPlayback',
-  'Dialogs and lists': 'areaDialogs',
+const AREA_ORDER = [
+  'Global',
+  'Parental controls',
+  'Navigation',
+  'Live',
+  'Guide',
+  'Lists',
+  'Multi-view',
+  'Vod',
+  'Search',
+  'My List',
+  'Sources',
+  'Favorites',
+  'Downloads',
+  'My videos',
+  'Stats',
+  'Playback',
+  'Seek bar',
+  'Dialogs and lists',
+  'Tour',
+];
+/**
+ * Area id -> fully namespaced i18n key of its display label. Feature areas
+ * reuse the label the feature registers under, so documented and registered
+ * entries merge. Usable with `t()` from any namespace; `shortcutReference`
+ * is the one place that reads it.
+ */
+export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
+  Global: 'shell:areaGlobal',
+  'Parental controls': 'shell:settingsParental',
+  Navigation: 'shell:areaNavigation',
+  Live: 'shell:areaLive',
+  Guide: 'guide:shortcutArea',
+  Lists: 'lists:title',
+  'Multi-view': 'multiview:shortcutArea',
+  Vod: 'shell:areaVod',
+  Search: 'shell:navSearch',
+  'My List': 'mylist:title',
+  Sources: 'sources:title',
+  Favorites: 'library:favoritesTitle',
+  Downloads: 'library:title',
+  'My videos': 'library:myVideosTitle',
+  Stats: 'stats:title',
+  Playback: 'shell:areaPlayback',
+  'Seek bar': 'shell:areaSeekBar',
+  'Dialogs and lists': 'shell:areaDialogs',
+  Tour: 'shell:areaTour',
 };
 
-/** Merges registered and documented shortcuts and groups them by area. */
-export function groupShortcuts(registered: ShortcutInfo[], documented: ShortcutInfo[]): [string, ShortcutInfo[]][] {
-  const areaOf = (a: string) => a.trim().toLowerCase();
+/**
+ * Merges registered and documented shortcuts and groups them by area.
+ * `label` maps an area id to its display name. Areas are compared by label,
+ * so a feature that registers under its own translated area name (Live TV
+ * uses `live:shortcutArea`) lands in the same group as the documented `Live`
+ * entries and replaces them instead of listing them twice.
+ */
+export function groupShortcuts(
+  registered: ShortcutInfo[],
+  documented: ShortcutInfo[],
+  label: (area: string) => string = (a) => a,
+): [string, ShortcutInfo[]][] {
+  const areaOf = (a: string) => label(a).trim().toLowerCase();
   const seen = new Set(registered.map((r) => `${areaOf(r.area)}|${normalizeCombo(r.combo)}`));
   const all = [...registered];
   for (const d of documented) {
@@ -57,40 +223,71 @@ export function groupShortcuts(registered: ShortcutInfo[], documented: ShortcutI
     all.push(d);
   }
   const map = new Map<string, ShortcutInfo[]>();
+  const rankOf = new Map<string, number>();
   for (const s of all) {
-    const list = map.get(s.area) ?? [];
+    const name = label(s.area);
+    const list = map.get(name) ?? [];
     list.push(s);
-    map.set(s.area, list);
+    map.set(name, list);
+    const i = AREA_ORDER.indexOf(s.area);
+    const r = i < 0 ? AREA_ORDER.length : i;
+    rankOf.set(name, Math.min(rankOf.get(name) ?? r, r));
   }
-  const rank = (a: string) => {
-    const i = AREA_ORDER.indexOf(a);
-    return i < 0 ? AREA_ORDER.length : i;
-  };
+  const rank = (a: string) => rankOf.get(a) ?? AREA_ORDER.length;
   return [...map.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
 }
 
+/**
+ * The full shortcut reference, as both the ? overlay and Settings > Shortcuts
+ * show it: the registered shortcuts merged with the documented ones, grouped
+ * under translated area names. `t` must resolve namespaced keys
+ * (`multiview:shortcutArea`), which any `useTranslation` t does. Sharing this
+ * keeps the two lists from drifting apart (an area missing from a second
+ * label map used to show its raw English id in Settings).
+ */
+export function shortcutReference(registered: ShortcutInfo[], t: (key: string) => string): [string, ShortcutInfo[]][] {
+  const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
+  const label = (area: string) => {
+    const key = SHORTCUT_AREA_KEYS[area];
+    return key ? t(key) : area;
+  };
+  return groupShortcuts(registered, documented, label);
+}
+
+/** Text the overlay filter matches: the description, the combo, and its printed keys ("Ctrl", "PgUp"). */
+export function shortcutHaystack(s: ShortcutInfo): string {
+  return `${s.description} ${s.combo} ${comboKeys(s.combo).join(' ')}`.toLowerCase();
+}
+
+/**
+ * The `?` overlay. While closed it reads only `helpOpen`: the registry subscription and the
+ * reference build live in the open dialog, so registrations (a page mounting, a shortcut whose
+ * `enabled` follows a held key) cost the closed overlay nothing (L2-perf-ui-8, L2-live-12).
+ */
 export function ShortcutOverlay() {
-  const { t } = useTranslation('shell');
   const open = useShellStore((s) => s.helpOpen);
+  return open ? <OpenShortcutOverlay /> : null;
+}
+
+/** Mounted only while open, so the filter starts empty each time. */
+function OpenShortcutOverlay() {
+  const { t } = useTranslation('shell');
   const setOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useShortcutList();
   const [filter, setFilter] = useState('');
+  const idBase = useId();
 
   const groups = useMemo(() => {
-    const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
     const q = filter.trim().toLowerCase();
-    return groupShortcuts(registered, documented)
-      .map(([area, list]) => [area, q ? list.filter((s) => `${s.description} ${s.combo}`.toLowerCase().includes(q)) : list] as const)
+    return shortcutReference(registered, t)
+      .map(([area, list]) => [area, q ? list.filter((s) => shortcutHaystack(s).includes(q)) : list] as const)
       .filter(([, list]) => list.length > 0);
   }, [registered, filter, t]);
 
   return (
     <Dialog
-      open={open}
-      onClose={() => {
-        setOpen(false);
-        setFilter('');
-      }}
+      open
+      onClose={() => setOpen(false)}
       title={t('keyboardShortcuts')}
       description={t('shortcutsIntro')}
       size="lg"
@@ -107,17 +304,18 @@ export function ShortcutOverlay() {
           tabIndex={0}
           className="grid gap-x-8 gap-y-6 rounded-md md:grid-cols-2"
         >
-          {groups.map(([area, list]) => (
-            <section key={area} aria-labelledby={`sc-area-${area}`}>
-              <h3 id={`sc-area-${area}`} className="mb-2 text-sm font-semibold text-accent">
-                {AREA_KEYS[area] ? t(AREA_KEYS[area]) : area}
+          {groups.map(([area, list], gi) => (
+            // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.
+            <section key={area} aria-labelledby={`${idBase}-area-${gi}`}>
+              <h3 id={`${idBase}-area-${gi}`} className="mb-2 text-sm font-semibold text-accent">
+                {area}
               </h3>
               <dl className="flex flex-col">
                 {list.map((s) => (
                   <div
                     key={`${s.combo}|${s.description}`}
                     data-combo={s.combo}
-                    className="flex items-center justify-between gap-4 border-b border-border/60 py-2 last:border-b-0"
+                    className="flex items-center justify-between gap-4 border-b border-divider py-2 last:border-b-0"
                   >
                     <dt className="text-sm text-fg">{s.description}</dt>
                     <dd className="shrink-0">

@@ -1,7 +1,9 @@
 /**
  * Virtualized responsive card grid. Columns follow the container width;
  * only visible rows of cards are rendered. Arrow keys move focus in two
- * dimensions, Home/End jump to the ends.
+ * dimensions, Home/End jump to the ends. With `restoreKey`, the scroll
+ * position and the focused card survive leaving the page: Back to the same
+ * history entry lands where the user was, with focus on the card they opened.
  */
 
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -28,6 +30,29 @@ export interface VirtualCardGridProps<T> {
   captionHeight?: number;
   className?: string;
   testId?: string;
+  /**
+   * Identifies this grid in this history entry (e.g. the location key), so
+   * returning to it restores scroll and focus. Omit to always start at the top.
+   */
+  restoreKey?: string;
+}
+
+interface SavedGrid {
+  offset: number;
+  active: number;
+  width: number;
+  /** The user left by opening a card: focus goes back to it on return. */
+  focus: boolean;
+}
+
+/** Last state per `restoreKey`. Bounded: only recent history entries can be returned to. */
+const saved = new Map<string, SavedGrid>();
+const SAVED_LIMIT = 20;
+
+function remember(key: string, state: SavedGrid): void {
+  saved.delete(key);
+  saved.set(key, state);
+  if (saved.size > SAVED_LIMIT) saved.delete(saved.keys().next().value as string);
 }
 
 export function VirtualCardGrid<T>({
@@ -44,10 +69,19 @@ export function VirtualCardGrid<T>({
   captionHeight = 64,
   className,
   testId,
+  restoreKey,
 }: VirtualCardGridProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(1024);
-  const [active, setActive] = useState(0);
+  // Read once: what this history entry looked like when the user left it.
+  const [restore] = useState(() => (restoreKey ? saved.get(restoreKey) : undefined));
+  const [width, setWidth] = useState(restore?.width ?? 1024);
+  const [active, setActive] = useState(restore?.active ?? 0);
+  const offsetRef = useRef(restore?.offset ?? 0);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  const openedRef = useRef(false);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -72,7 +106,10 @@ export function VirtualCardGrid<T>({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 3,
-    initialRect: { width: 1024, height: 800 },
+    // The saved width gives the first render the same row height as before, so the
+    // saved offset lands on the same rows.
+    initialRect: { width: restore?.width ?? 1024, height: 800 },
+    initialOffset: restore?.offset ?? 0,
   });
 
   useEffect(() => {
@@ -82,6 +119,27 @@ export function VirtualCardGrid<T>({
   useEffect(() => {
     if (active >= items.length) setActive(Math.max(0, items.length - 1));
   }, [items.length, active]);
+
+  // Remember where the user was when the grid goes away (opening a card, or any navigation).
+  useEffect(() => {
+    if (!restoreKey) return;
+    return () => remember(restoreKey, { offset: offsetRef.current, active: activeRef.current, width: widthRef.current, focus: openedRef.current });
+  }, [restoreKey]);
+
+  // Back on the same entry: settle the offset once rows have their real height, then
+  // put focus on the card that was opened (no scroll jump: the offset already shows it).
+  useEffect(() => {
+    if (!restore) return;
+    const frame = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      if (Math.abs(el.scrollTop - restore.offset) > 1) el.scrollTop = restore.offset;
+      if (!restore.focus) return;
+      const card = el.querySelector<HTMLElement>(`[data-card-index="${restore.active}"]`);
+      card?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [restore]);
 
   const focusIndex = useCallback(
     (i: number) => {
@@ -97,6 +155,13 @@ export function VirtualCardGrid<T>({
     },
     [columns, items.length, virtualizer],
   );
+
+  const open = (index: number, item: T) => {
+    openedRef.current = true;
+    activeRef.current = index;
+    setActive(index);
+    onActivate(item);
+  };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, index: number, item: T) => {
     if (e.target !== e.currentTarget) return;
@@ -118,14 +183,21 @@ export function VirtualCardGrid<T>({
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      onActivate(item);
+      open(index, item);
       return;
     }
     onCardKeyDown?.(item, e);
   };
 
   return (
-    <div ref={scrollRef} className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)} data-testid={testId}>
+    <div
+      ref={scrollRef}
+      onScroll={(e) => {
+        offsetRef.current = e.currentTarget.scrollTop;
+      }}
+      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)}
+      data-testid={testId}
+    >
       <div role="list" aria-label={label} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((vr) => {
           const start = vr.index * columns;
@@ -152,7 +224,7 @@ export function VirtualCardGrid<T>({
                     data-card-index={index}
                     onFocus={() => setActive(index)}
                     onKeyDown={(e) => onKeyDown(e, index, item)}
-                    onClick={() => onActivate(item)}
+                    onClick={() => open(index, item)}
                     className="group min-w-0 cursor-pointer rounded-lg"
                   >
                     {render(item, { index })}

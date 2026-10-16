@@ -1,39 +1,143 @@
-import { AlertTriangle, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, ChevronRight, Lock, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
 
 import { cn } from '../cn';
-import { formatTime } from '../format';
-import { UP_NEXT_SECONDS, useMediaStore } from '../media';
+import { bindInputModality, focusFromPointer, focusIfPlayerOwnsFocus, focusIsLost, formatTime } from '../format';
+import { showOsd, UP_NEXT_SECONDS, useMediaStore } from '../media';
 import { exitPip, usePipStore } from '../pip';
-import { replay, selectEnded, usePlayerStore } from '../store';
-import { Controls, CtlButton } from './Controls';
-import { FullscreenChannelPanel } from './FullscreenChannelPanel';
+import {
+  cancelUpNext,
+  DOUBLE_CLICK_MS,
+  MIN_RESUME_SECONDS,
+  playUpNextNow,
+  replay,
+  selectEnded,
+  setPaused,
+  usePlayerStore,
+} from '../store';
+import { useStreamInfoStore } from '../streamInfo';
+import { hideZapBanner } from '../zapBanner';
+import { useRetryWhenOnline, useStreamError } from '../useStreamError';
+import { BarReadout, Controls, CtlButton, InlineSpinner, retryPlayback } from './Controls';
 import { InlinePlayer } from './InlinePlayer';
+import { FullscreenChannelPanel, RadioPlayer, SleepPrompt, StreamInfoPanel, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
-import { RadioPlayer } from './RadioPlayer';
+import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
+import { SHORT_PLAYER_PX, useNarrow, useSmallPlayer } from './useNarrow';
+import { useZapBannerShown, useZapHover } from './zapHooks';
 
 const HIDE_AFTER_MS = 2600;
 /** How often fullscreen mpv checks whether the mouse moved over the native video window. */
 const CURSOR_POLL_MS = 200;
-const CLICK_DELAY_MS = 220;
+
+/**
+ * Keeps the chrome pinned while *keyboard* focus is inside it. Focus left on a button by a
+ * mouse click does not pin, or the controls would never hide again after one click.
+ */
+function useKeyboardFocusPin(): {
+  pinned: boolean;
+  onFocus(e: FocusEvent<HTMLElement>): void;
+  onBlur(e: FocusEvent<HTMLElement>): void;
+} {
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => bindInputModality(), []);
+  return {
+    pinned,
+    onFocus: (e) => {
+      // The root itself takes focus only as a fallback; that is not a control in use.
+      setPinned(e.target !== e.currentTarget && !focusFromPointer());
+    },
+    onBlur: (e) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPinned(false);
+    },
+  };
+}
+
+/** Space between the zap banner and a readout moved below it, px. */
+const OSD_BANNER_GAP = 8;
+
+/**
+ * The readout's top (px in the surface) while the zap banner sits over its column, else
+ * undefined (its usual place). Both use the surface's top corners, and in a small player the
+ * banner spans the width. Follows the banner as it mounts (a lazy part) and as it or the
+ * surface resizes. Layout boxes, not client rects: both pop in with a transform.
+ */
+function useTopClearOfZapBanner(ref: RefObject<HTMLElement | null>): number | undefined {
+  const shown = useZapBannerShown();
+  const [top, setTop] = useState<number>();
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const host = el?.parentElement;
+    if (!shown || !el || !host) {
+      setTop(undefined);
+      return;
+    }
+    let watched: HTMLElement | null = null;
+    const measure = (): void => {
+      const banner = host.querySelector<HTMLElement>('[data-zap-banner]');
+      if (banner !== watched) {
+        if (watched) resizes?.unobserve(watched);
+        if (banner) resizes?.observe(banner);
+        watched = banner;
+      }
+      // Only the readout's top moves, so its sides tell whether the two share a column.
+      const crosses =
+        !!banner && el.offsetLeft < banner.offsetLeft + banner.offsetWidth && banner.offsetLeft < el.offsetLeft + el.offsetWidth;
+      setTop(crosses ? banner.offsetTop + banner.offsetHeight + OSD_BANNER_GAP : undefined);
+    };
+    const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    resizes?.observe(host);
+    const mounts = new MutationObserver(measure);
+    mounts.observe(host, { childList: true });
+    measure();
+    return () => {
+      mounts.disconnect();
+      resizes?.disconnect();
+    };
+  }, [ref, shown]);
+  return top;
+}
 
 /** Big tuner readout after a zap or volume change. */
 function Osd() {
   const osd = useMediaStore((s) => s.osd);
   if (!osd) return null;
+  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} />;
+}
+
+/** `locked`: a zap passing a channel parental controls lock; a lock stands before its number. */
+function OsdReadout({ primary, secondary, locked = false }: { primary: string; secondary?: string | undefined; locked?: boolean }) {
+  const { t } = useTranslation('player');
+  const ref = useRef<HTMLDivElement>(null);
+  const digits = /^\d+$/.test(primary);
+  const top = useTopClearOfZapBanner(ref);
   return (
     <div
-      key={osd.key}
+      ref={ref}
       aria-live="polite"
-      className="player-osd pointer-events-none absolute top-5 end-6 z-20 text-end text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
+      // Within the player, whatever its size: long lines (file names, reasons) wrap, never clip.
+      className="player-osd pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end text-white [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
+      style={top === undefined ? undefined : { top }}
     >
-      <div className={cn('font-display leading-none tabular-nums', /^\d+$/.test(osd.primary) ? 'text-6xl text-accent-hover' : 'text-2xl')}>
-        {osd.primary}
+      <div
+        className={cn(
+          'font-display leading-none tabular-nums',
+          digits ? 'text-6xl text-accent-hover' : 'text-2xl',
+          locked && 'flex items-center justify-end gap-3',
+        )}
+      >
+        {locked && (
+          <span data-testid="osd-locked" className="contents">
+            <Lock aria-hidden className={cn('shrink-0 text-white', digits ? 'size-9' : 'size-5')} strokeWidth={2.25} />
+            <span className="sr-only">{t('zapLocked')}</span>
+          </span>
+        )}
+        {primary}
       </div>
-      {osd.secondary && <div className="mt-1 max-w-[50vw] truncate text-lg">{osd.secondary}</div>}
+      {secondary && <div className="mt-1 line-clamp-2 text-lg">{secondary}</div>}
     </div>
   );
 }
@@ -42,68 +146,107 @@ function Osd() {
  * "Next episode" card with a 10 s countdown; Play now or Cancel.
  * `strip` lays it out in flow (embedded mpv: nothing may float over the native window).
  */
-function UpNextCard({ variant = 'overlay' }: { variant?: 'overlay' | 'strip' }) {
+function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overlay' | 'strip'; compact?: boolean }) {
   const { t } = useTranslation('player');
   const upNext = useMediaStore((s) => s.upNext);
   const [now, setNow] = useState(() => Date.now());
+  // Display only: the store's timer advances at zero (see `playUpNextNow` / the up-next timer).
   useEffect(() => {
     if (!upNext) return;
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
   }, [upNext]);
+  // Play now takes focus only when the player has it: an episode ending in the mini player
+  // must not pull focus out of the list the user is browsing.
+  const playNowRef = useRef<HTMLButtonElement>(null);
+  const hasUpNext = !!upNext;
   useEffect(() => {
-    if (upNext && now >= upNext.deadline) {
-      useMediaStore.setState({ upNext: undefined });
-      usePlayerStore.getState().next();
-    }
-  }, [now, upNext]);
+    if (hasUpNext) focusIfPlayerOwnsFocus(playNowRef.current);
+  }, [hasUpNext]);
   if (!upNext) return null;
   const left = Math.max(0, Math.ceil((upNext.deadline - now) / 1000));
-  const progress = 1 - left / UP_NEXT_SECONDS;
-  const cancel = (): void => useMediaStore.setState({ upNext: undefined });
+  const progress = Math.min(1, Math.max(0, 1 - left / UP_NEXT_SECONDS));
+  // An episode's own line ("S01E02 · Low Tide") leads, the series name follows as a quieter one.
+  const episode = upNext.source.subtitle;
+  const series = episode ? upNext.source.title : undefined;
+  const lead = episode ?? upNext.source.title;
+  const name = series ? `${lead} · ${series}` : lead;
+  // The mini player is too narrow for the card: a bar across its bottom edge instead.
+  const tight = compact && variant === 'overlay';
   return (
     <div
       role="status"
       data-mpv-reserved=""
+      data-testid="up-next"
+      aria-label={t('nextEpisode')}
       className={cn(
-        'overflow-hidden text-white',
-        variant === 'overlay'
-          ? 'absolute end-4 bottom-24 z-30 w-72 rounded-lg border border-white/10 bg-[rgb(9_13_21/0.94)] shadow-2 motion-safe:animate-pop-in'
-          : 'shrink-0 border-t border-white/10 bg-[#070b12]',
+        'player-glass-strong overflow-hidden text-white',
+        tight
+          ? 'absolute inset-x-0 bottom-0 z-30 border-t'
+          : variant === 'overlay'
+            ? 'player-glass-edge glass-blur absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-xl border motion-safe:animate-pop-in'
+            : 'shrink-0 border-t',
       )}
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
-          cancel();
+          cancelUpNext();
         }
       }}
     >
       <div className="h-0.5 bg-white/10">
         <div className="h-full bg-accent motion-safe:transition-[width] motion-safe:duration-300" style={{ width: `${progress * 100}%` }} />
       </div>
-      <div className={variant === 'overlay' ? 'p-3' : 'flex items-center gap-3 px-3 py-2'}>
+      <div className={variant === 'overlay' && !tight ? 'p-3' : 'flex items-center gap-2 px-3 py-2'}>
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-white/70">{t('nextEpisodeIn', { count: left })}</p>
-          <p className="mt-0.5 truncate font-display text-base" title={upNext.source.title}>
-            {upNext.source.subtitle ? `${upNext.source.subtitle} ` : ''}
-            {upNext.source.title}
-          </p>
+          <p className="player-on-glass-muted text-xs">{t('nextEpisodeIn', { count: left })}</p>
+          {!tight && variant === 'overlay' && (
+            <>
+              <p data-testid="up-next-title" className="mt-0.5 truncate font-display text-base" title={name}>
+                {lead}
+              </p>
+              {series && (
+                <p data-testid="up-next-series" className="player-on-glass-muted truncate text-sm">
+                  {series}
+                </p>
+              )}
+            </>
+          )}
+          {!tight && variant === 'strip' && (
+            <p className="mt-0.5 truncate" title={name}>
+              <span data-testid="up-next-title" className="font-display text-base">
+                {lead}
+              </span>
+              {series && (
+                <span data-testid="up-next-series" className="player-on-glass-muted ms-2 text-sm">
+                  {series}
+                </span>
+              )}
+            </p>
+          )}
         </div>
-        <div className={cn('flex shrink-0 gap-2', variant === 'overlay' && 'mt-3')}>
+        <div className={cn('flex shrink-0 gap-2', variant === 'overlay' && !tight && 'mt-3')}>
           <button
+            ref={playNowRef}
             type="button"
-            autoFocus
-            onClick={() => {
-              cancel();
-              usePlayerStore.getState().next();
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+            onClick={playUpNextNow}
+            title={tight ? name : undefined}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md bg-accent font-medium text-accent-fg hover:bg-accent-hover',
+              tight ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm',
+            )}
           >
-            <Play className="size-4 fill-current" aria-hidden />
+            <Play className={cn('fill-current', tight ? 'size-3.5' : 'size-4')} aria-hidden />
             {t('playNow')}
           </button>
-          <button type="button" onClick={cancel} className="rounded-md px-3 py-1.5 text-sm text-white/80 hover:bg-white/10">
+          <button
+            type="button"
+            onClick={cancelUpNext}
+            className={cn('rounded-md text-white/80 hover:bg-white/10', tight ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm')}
+          >
             {t('cancel')}
           </button>
         </div>
@@ -149,31 +292,70 @@ function EndedOverlay({ compact }: { compact: boolean }) {
  * native surface and the control bar. Marked `data-mpv-reserved`, so the bounds sent to mpv
  * exclude it even if a layout change ever pushed it over the surface.
  */
-function MpvNotices({ compact }: { compact: boolean }) {
+/** "Buffering" with the bar-sized spinner: embedded mpv stalled mid-stream. */
+function BufferingLabel() {
+  const { t } = useTranslation('player');
+  return (
+    <span data-testid="mpv-buffering" className="inline-flex items-center gap-1.5 text-white/80">
+      <InlineSpinner />
+      {t('buffering')}
+    </span>
+  );
+}
+
+/** Embedded mpv has the stream loaded but is waiting for data (paused-for-cache). */
+function useMpvBuffering(): boolean {
+  const status = usePlayerStore((s) => s.status);
+  return useMediaStore((s) => !!s.mpv?.loaded && !!s.mpv.buffering) && (status === 'playing' || status === 'paused');
+}
+
+function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: boolean }) {
   const { t } = useTranslation('player');
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
   const mpv = useMediaStore((s) => s.mpv);
-  const commands = useMediaStore((s) => s.commands);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const buffering = useMpvBuffering();
+  const reconnecting = useReconnectLabel(); // failover:
+  const isError = status === 'error';
+  const view = useStreamError(null);
+  useRetryWhenOnline(isError ? view.cls : 'generic', retryPlayback);
+  useEffect(() => {
+    if (isError) focusIfPlayerOwnsFocus(retryRef.current);
+  }, [isError]);
 
   if (upNext && status !== 'error') return <UpNextCard variant="strip" />;
 
-  const strip = 'flex shrink-0 items-center gap-2 border-t border-white/10 bg-[#070b12] px-3 py-1.5 text-sm text-white';
+  const strip = 'player-glass-strong flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-sm text-white';
   if (status === 'error') {
     return (
-      <div role="alert" data-mpv-reserved="" className={strip}>
+      <div role="alert" data-mpv-reserved="" data-error-class={view.cls} className={cn(strip, 'flex-wrap')}>
         <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
-        <span className="min-w-0 flex-1 truncate" title={error}>
-          {error ?? t('errorGeneric')}
+        {/* What happened and what to do first; the hover also has mpv's own reason. */}
+        <span className="min-w-0 flex-1 truncate" title={`${view.title}. ${view.hint}${error ? `\n${error}` : ''}`}>
+          <span className="font-medium">{view.title}</span>
+          {!compact && <span className="ms-2 text-white/70">{view.hint}</span>}
         </span>
+        {!compact && error && (
+          // mpv's own reason (often a bare "HTTP 404" or "loading failed"), as InlinePlayer's
+          // overlay keeps it: closed until asked for, then on a row of its own under the strip.
+          <details className="group shrink-0 text-xs text-white/60 open:order-last open:basis-full">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+              {t('errorDetails')}
+            </summary>
+            <p data-testid="mpv-error-detail" className="mt-1 ps-4.5 pb-0.5 font-mono break-all select-all">
+              {error}
+            </p>
+          </details>
+        )}
         <button
+          ref={retryRef}
           type="button"
-          onClick={() => {
-            usePlayerStore.setState({ status: 'loading', error: undefined });
-            commands?.retry();
-          }}
+          data-ctl="retry"
+          onClick={retryPlayback}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
         >
           <RotateCcw className="size-3.5" aria-hidden />
@@ -206,10 +388,28 @@ function MpvNotices({ compact }: { compact: boolean }) {
       </div>
     );
   }
-  if (mpv?.attached && !mpv.loaded && status === 'loading') {
+  // failover: smart reconnect / failover progress replaces the plain loading line.
+  if (reconnecting && status === 'loading') {
+    return (
+      <div role="status" aria-live="polite" data-mpv-reserved="" data-testid="reconnect-notice" className={cn(strip, 'text-white/80')}>
+        <InlineSpinner />
+        <span className="min-w-0 truncate">{reconnecting}</span>
+      </div>
+    );
+  }
+  // Also right after Retry, while mpv still reports the failed load as loaded.
+  if (mpv?.attached && status === 'loading') {
     return (
       <div role="status" aria-live="polite" data-mpv-reserved="" className={cn(strip, 'text-white/70')}>
         {t('mpvLoading')}
+      </div>
+    );
+  }
+  // Docked: a strip like the loading one. Fullscreen and PiP show it in the bar readout instead.
+  if (buffering && !overlay) {
+    return (
+      <div role="status" aria-live="polite" data-mpv-reserved="" className={strip}>
+        <BufferingLabel />
       </div>
     );
   }
@@ -247,9 +447,21 @@ function MpvPlayer({ compact }: { compact: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [onBar, setOnBar] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const setRoot = useCallback((el: HTMLDivElement | null) => {
+    rootRef.current = el;
+    setRootEl(el);
+  }, []);
+  const smallPlayer = useSmallPlayer(rootEl);
   const overlay = (isFullscreen || pip) && !compact;
   const small = compact || pip;
+  const focusPin = useKeyboardFocusPin();
+  const buffering = useMpvBuffering();
+  /** Whether focus was last inside the player, and on which control (`data-ctl`). */
+  const focusInside = useRef(false);
+  const lastCtl = useRef<string | null>(null);
+  const statsOpen = useStreamInfoStore((x) => x.open);
 
   const poke = useCallback((): void => {
     setIdle(false);
@@ -285,7 +497,25 @@ function MpvPlayer({ compact }: { compact: boolean }) {
     };
   }, [overlay, poke]);
 
-  const chromeShown = !overlay || !idle || onBar || menuOpen || status !== 'playing';
+  // A stall keeps the chrome up, like a pause: its readout is the only sign of it over the video.
+  const chromeShown = !overlay || !idle || onBar || menuOpen || focusPin.pinned || buffering || status !== 'playing';
+  // The PiP bar's title, while it is drawn (hiding it sends no pointerleave).
+  const titleHover = useZapHover(overlay && pip && chromeShown && !buffering);
+
+  // Switching between docked, fullscreen and PiP layouts re-renders the chrome, and hiding it
+  // unmounts it: a focused control disappears and focus falls to <body>. Put it back on the
+  // same control when it still exists, else on the player itself, so keys keep working.
+  const layoutKey = `${overlay}|${pip}|${chromeShown}`;
+  const prevLayout = useRef(layoutKey);
+  useEffect(() => {
+    if (prevLayout.current === layoutKey) return;
+    const layoutChanged = prevLayout.current.split('|').slice(0, 2).join('|') !== layoutKey.split('|').slice(0, 2).join('|');
+    prevLayout.current = layoutKey;
+    const root = rootRef.current;
+    if (!root || !focusIsLost() || (!focusInside.current && !layoutChanged)) return;
+    const ctl = lastCtl.current ? root.querySelector<HTMLElement>(`[data-ctl="${lastCtl.current}"]`) : null;
+    (ctl ?? root).focus({ preventScroll: true });
+  }, [layoutKey]);
   const barEvents = {
     onPointerEnter: () => setOnBar(true),
     onPointerLeave: () => {
@@ -296,8 +526,38 @@ function MpvPlayer({ compact }: { compact: boolean }) {
   };
 
   return (
-    <div ref={rootRef} className={cn('h-full w-full bg-black', overlay ? 'relative' : 'flex flex-col')}>
+    <div
+      ref={setRoot}
+      tabIndex={-1}
+      data-testid="mpv-player"
+      className={cn('relative h-full w-full bg-black outline-none', !overlay && 'flex flex-col')}
+      onFocus={(e) => {
+        focusInside.current = true;
+        if (e.target !== e.currentTarget) lastCtl.current = e.target.closest('[data-ctl]')?.getAttribute('data-ctl') ?? null;
+        focusPin.onFocus(e);
+      }}
+      onBlur={(e) => {
+        const to = e.relatedTarget as Node | null;
+        if (to && !e.currentTarget.contains(to)) focusInside.current = false;
+        focusPin.onBlur(e);
+      }}
+    >
       <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
+      {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
+      <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
+      {/*
+        Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
+        mini player says it in its header instead; a small player gets the one-line chip.
+      */}
+      {!compact && (
+        <ZapBanner
+          compact={pip}
+          chip={smallPlayer && !pip}
+          className={pip ? 'inset-x-2 top-11' : smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
+        />
+      )}
+      {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+      {overlay && <SleepPrompt small={small} className={pip ? 'bottom-14' : 'bottom-28'} />}
       {overlay ? (
         chromeShown && (
           <>
@@ -307,16 +567,28 @@ function MpvPlayer({ compact }: { compact: boolean }) {
                 data-mpv-reserved=""
                 data-tauri-drag-region=""
                 data-testid="pip-bar"
-                className="absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-0.5 bg-[#070b12] ps-3 pe-1 text-white"
+                className="player-glass-strong absolute inset-x-0 top-0 z-10 flex h-9 items-center gap-0.5 border-b ps-3 pe-1 text-white"
                 {...barEvents}
               >
-                <span data-tauri-drag-region="" className="min-w-0 flex-1 truncate text-xs font-medium" title={title}>
-                  {title}
-                </span>
-                <CtlButton label={t('exitPip')} onClick={() => void exitPip()} className="size-8 [&_svg]:size-4">
+                {/* The PiP bar has no room for a readout of its own: volume and seek feedback replace the title briefly. */}
+                <BarReadout
+                  dragRegion
+                  className="me-0 flex-1 text-xs font-medium"
+                  fallback={
+                    buffering ? (
+                      <BufferingLabel />
+                    ) : (
+                      <span data-tauri-drag-region="" title={title} {...titleHover}>
+                        {title}
+                      </span>
+                    )
+                  }
+                />
+                <CtlButton id="pip-exit" shortcut="exitPip" label={t('exitPip')} onClick={() => void exitPip()} className="size-8 [&_svg]:size-4">
                   <PictureInPicture2 />
                 </CtlButton>
                 <CtlButton
+                  id="pip-close"
                   label={t('close')}
                   onClick={() => {
                     usePlayerStore.getState().stop();
@@ -329,8 +601,14 @@ function MpvPlayer({ compact }: { compact: boolean }) {
               </div>
             )}
             <div data-testid="mpv-overlay-chrome" className="absolute inset-x-0 bottom-0 z-10" {...barEvents}>
-              <MpvNotices compact={small} />
-              <Controls variant="dock" visible compact={small} onMenuOpenChange={setMenuOpen} />
+              <MpvNotices compact={small} overlay />
+              <Controls
+                variant="dock"
+                visible
+                compact={small}
+                onMenuOpenChange={setMenuOpen}
+                readoutIdle={buffering ? <BufferingLabel /> : undefined}
+              />
             </div>
           </>
         )
@@ -358,27 +636,60 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const waiting = useMediaStore((s) => s.waiting);
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
+  const statsOpen = useStreamInfoStore((s) => s.open);
+  const pip = usePipStore((s) => s.active);
+  const zapShown = useZapBannerShown();
   const [idle, setIdle] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [focusWithin, setFocusWithin] = useState(false);
+  const [onBar, setOnBar] = useState(false);
+  const focusPin = useKeyboardFocusPin();
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const lastClick = useRef<{ at: number; wasPaused: boolean } | null>(null);
+  /** A click on an ended item: the replay waits out the double-click time (C6). */
+  const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const setRoot = useCallback((el: HTMLDivElement | null) => {
+    rootRef.current = el;
+    setRootEl(el);
+  }, []);
+  const smallPlayer = useSmallPlayer(rootEl);
+  /** Short (any width): a stream error packs into the room the bar leaves, over the title. */
+  const shortPlayer = useNarrow(rootEl, Number.POSITIVE_INFINITY, SHORT_PLAYER_PX);
+  const shortError = shortPlayer && !compact && status === 'error';
 
   const playing = status === 'playing';
-  const chromeVisible = !idle || !playing || menuOpen || focusWithin || panelOpen;
+  // A small player has no room for both the zap chip and the bar: after a zap the chip shows alone
+  // (unless the bar is in use, or playback paused or ended), the new channel's tuning included.
+  // The bar comes back when the chip goes, the stream fails, or the pointer moves over the
+  // picture, which takes the chip down (see `onPointerActivity`).
+  const zapChip = smallPlayer && !compact && !pip && zapShown;
+  const inUse = menuOpen || focusPin.pinned || onBar || panelOpen;
+  const chromeVisible = inUse || (zapChip ? !playing && status !== 'loading' : !idle || !playing);
+  // The title takes the pointer only while the chrome shows it.
+  const titleHover = useZapHover(chromeVisible);
 
   const poke = (): void => {
     setIdle(false);
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setIdle(true), HIDE_AFTER_MS);
   };
+  /**
+   * The pointer moved or pressed over the player: the bar comes back. While the zap chip holds it
+   * down, the chip steps aside for it (the title above the bar names the channel), unless the
+   * pointer is on the chip itself, which keeps it up.
+   */
+  const onPointerActivity = (e: PointerEvent): void => {
+    if (zapChip && !chromeVisible && !(e.target instanceof Element && e.target.closest('[data-zap-banner]'))) hideZapBanner();
+    poke();
+  };
 
   useEffect(() => {
     poke();
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
-      if (clickTimer.current) clearTimeout(clickTimer.current);
+      if (replayTimer.current) clearTimeout(replayTimer.current);
+      replayTimer.current = null;
     };
   }, [source?.url]);
 
@@ -391,8 +702,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   // Resume notice for VOD.
   const resumedFrom = source?.resumeSeconds;
   useEffect(() => {
-    if (resumedFrom && resumedFrom > 5 && !compact) {
-      useMediaStore.setState({ osd: { primary: t('resumedAt', { time: formatTime(resumedFrom) }), key: Date.now() } });
+    if (resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
+      showOsd(t('resumedAt', { time: formatTime(resumedFrom) }));
     }
     // Only when a new item starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -415,59 +726,130 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
   if (mode === 'external') return null;
 
-  const onSurfaceClick = (): void => {
-    if (clickTimer.current) clearTimeout(clickTimer.current);
-    clickTimer.current = setTimeout(() => usePlayerStore.getState().togglePlay(), CLICK_DELAY_MS);
+  // A click toggles pause at once; the double click that follows puts the play state back and
+  // toggles fullscreen (C6). Waiting out the double-click time instead made clicks feel slow,
+  // and any wait shorter than the system's (500 ms on Windows) both paused and went fullscreen.
+  const onSurfaceClick = (e: MouseEvent): void => {
+    if (e.detail > 1) return;
+    const st = usePlayerStore.getState();
+    if (selectEnded(st)) {
+      // Replaying cannot be undone (it seeks to 0 and drops Up next), so it waits until the
+      // click is known not to start a double click.
+      lastClick.current = null;
+      if (replayTimer.current) clearTimeout(replayTimer.current);
+      const src = st.source;
+      replayTimer.current = setTimeout(() => {
+        replayTimer.current = null;
+        const now = usePlayerStore.getState();
+        if (now.source === src && selectEnded(now)) now.togglePlay();
+      }, DOUBLE_CLICK_MS);
+      return;
+    }
+    lastClick.current = { at: Date.now(), wasPaused: st.status !== 'playing' && st.status !== 'loading' };
+    st.togglePlay();
   };
   const onSurfaceDouble = (): void => {
-    if (clickTimer.current) clearTimeout(clickTimer.current);
+    if (replayTimer.current) clearTimeout(replayTimer.current);
+    replayTimer.current = null;
+    const lc = lastClick.current;
+    lastClick.current = null;
+    if (lc && Date.now() - lc.at < DOUBLE_CLICK_MS) setPaused(lc.wasPaused);
     usePlayerStore.getState().toggleFullscreen();
   };
 
   return (
     <div
-      ref={rootRef}
+      ref={setRoot}
       className="relative h-full w-full overflow-hidden bg-black select-none"
-      onPointerMove={poke}
-      onPointerDown={poke}
-      onFocus={() => {
-        setFocusWithin(true);
+      onPointerMove={onPointerActivity}
+      onPointerDown={onPointerActivity}
+      onFocus={(e) => {
+        focusPin.onFocus(e);
         poke();
       }}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
+      onBlur={focusPin.onBlur}
+      onPointerLeave={() => {
+        setOnBar(false);
+        if (playing) setIdle(true);
       }}
-      onPointerLeave={() => playing && setIdle(true)}
     >
-      <InlinePlayer as="video" />
+      <InlinePlayer as="video" compact={compact} short={shortPlayer} />
       {/* Click surface sits above the video so clicks never reach native controls. */}
       <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
       {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
+      {/* failover: smart reconnect / failover progress under the dial. */}
+      <ReconnectNotice compact={compact} />
 
       {!compact && (
         <div
           className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/75 to-transparent px-4 pt-3 pb-10 text-white motion-safe:transition-opacity motion-safe:duration-200',
-            !chromeVisible && 'opacity-0',
+            'player-scrim-top pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pt-3 pb-10 text-white motion-safe:transition-opacity motion-safe:duration-200',
+            // The zap banner takes this corner while it is up: it says all the title says. A short
+            // player's stream error starts up here.
+            (!chromeVisible || zapShown || shortError) && 'opacity-0',
           )}
         >
           <div className="flex items-center gap-2">
             {source.isLive && (
-              <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px font-display text-[11px] font-semibold text-white dark:text-bg">
+              <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px font-display text-[calc(11rem/15)] font-semibold text-white dark:text-bg">
                 {t('live')}
               </span>
             )}
-            <h2 className="truncate font-display text-base sm:text-lg">{source.title}</h2>
+            {/*
+              Hovering the channel title brings up the zap banner (live TV) and, like the bar,
+              keeps the chrome up. It sits above the click layer, so it passes clicks on to it;
+              hidden chrome lets the pointer through to the video.
+            */}
+            <h2
+              data-testid="player-title"
+              className={cn('min-w-0 truncate font-display text-base sm:text-lg', chromeVisible && 'pointer-events-auto')}
+              onClick={onSurfaceClick}
+              onDoubleClick={onSurfaceDouble}
+              onPointerEnter={() => {
+                setOnBar(true);
+                titleHover.onPointerEnter();
+              }}
+              onPointerLeave={() => {
+                setOnBar(false);
+                titleHover.onPointerLeave();
+              }}
+            >
+              {source.title}
+            </h2>
           </div>
           {source.subtitle && <p className="truncate text-sm text-white/70">{source.subtitle}</p>}
         </div>
       )}
 
       <Osd />
+      <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
+      {/*
+        Zap banner (C5): the title's corner, or the far one while the channel list or stream info
+        holds it. The mini player says it in its header instead; a small player gets the
+        one-line chip.
+      */}
+      {!compact && (
+        <ZapBanner
+          compact={pip}
+          chip={smallPlayer && !pip}
+          className={
+            pip || smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+          }
+        />
+      )}
+      {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+      {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : 'bottom-28'} />}
       <EndedOverlay compact={compact} />
-      <UpNextCard />
+      <UpNextCard compact={compact} />
 
-      <div className="absolute inset-x-0 bottom-0 z-20">
+      <div
+        data-testid="overlay-chrome"
+        // Only the bar's pane takes the pointer (Controls): the scrim above it lets it through.
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
+        // Resting the pointer on the bar (volume slider, time, a held scrub) keeps it up.
+        onPointerEnter={() => setOnBar(true)}
+        onPointerLeave={() => setOnBar(false)}
+      >
         <Controls variant="overlay" visible={chromeVisible} compact={compact} onMenuOpenChange={setMenuOpen} />
       </div>
 

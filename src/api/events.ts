@@ -6,6 +6,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+import { onServerAnswered } from './reachability';
 import { isDesktop } from './transport';
 import type { AppEvent, AppEventMap, AppEventType } from './types';
 
@@ -22,7 +23,15 @@ let connectionState: ConnectionState = 'closed';
 let stopUpstream: (() => void) | null = null;
 
 const BACKOFF_MIN_MS = 500;
-const BACKOFF_MAX_MS = 15_000;
+// Low cap: a restarted server is noticed within about 5 s even without a focus or RPC nudge.
+const BACKOFF_MAX_MS = 4_000;
+/**
+ * While a reconnect is further off than this, `GET /api/health` is asked every this often, and an
+ * answer reconnects at once (L3-app-10: a page that errored during an outage kept "Couldn't reach
+ * the server" for up to 4 s after the server was back). One small request a second, only while
+ * the socket is down.
+ */
+export const HEALTH_POLL_MS = 1_000;
 
 function setState(s: ConnectionState): void {
   if (s === connectionState) return;
@@ -86,18 +95,44 @@ function startWeb(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
   let stopped = false;
-  let opened = false;
+  // Set once a socket closed or failed to connect: the next open may have missed events.
+  let tried = false;
+  let healthTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const stopHealth = (): void => {
+    if (healthTimer) clearTimeout(healthTimer);
+    healthTimer = null;
+  };
+  const armHealth = (): void => {
+    if (!healthTimer && typeof fetch === 'function') healthTimer = setTimeout(probeHealth, HEALTH_POLL_MS);
+  };
+  function probeHealth(): void {
+    healthTimer = null;
+    if (stopped || !timer) return;
+    fetch('/api/health', { cache: 'no-store' })
+      .then((r) => {
+        if (r.ok) retryNow();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        // Still waiting out the backoff: ask again in a second.
+        if (!stopped && timer) armHealth();
+      });
+  }
 
   const schedule = (): void => {
+    tried = true;
     setState('closed');
     const base = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** attempt);
     const delay = Math.min(BACKOFF_MAX_MS, base + Math.random() * base * 0.3);
     attempt += 1;
     timer = setTimeout(connect, delay);
+    if (delay > HEALTH_POLL_MS) armHealth();
   };
 
   function connect(): void {
     timer = null;
+    stopHealth();
     if (stopped) return;
     setState('connecting');
     let socket: WebSocket;
@@ -111,10 +146,11 @@ function startWeb(): () => void {
     socket.onopen = () => {
       attempt = 0;
       setState('open');
-      // Events sent while the socket was down are lost; treat a reconnect
-      // like a lagged receiver so every cached query is refetched.
-      if (opened) dispatch({ type: 'events.lagged', payload: { skipped: 0 } } as AppEvent);
-      opened = true;
+      // Events sent while the socket was down are lost, and RPCs made while the server
+      // was unreachable failed (a page opened during a restart). Treat any open after a
+      // closed or failed socket like a lagged receiver so every cached query is refetched.
+      if (tried) dispatch({ type: 'events.lagged', payload: { skipped: 0 } } as AppEvent);
+      tried = true;
     };
     socket.onmessage = (msg: MessageEvent) => {
       if (typeof msg.data !== 'string') return;
@@ -133,9 +169,29 @@ function startWeb(): () => void {
     // onerror is always followed by onclose, which schedules the reconnect.
   }
 
+  /** Skips the backoff wait: the server looks reachable again (focus, online, an RPC answered). */
+  const retryNow = (): void => {
+    if (stopped || !timer) return;
+    clearTimeout(timer);
+    attempt = 0;
+    connect();
+  };
+  const onVisible = (): void => {
+    if (document.visibilityState === 'visible') retryNow();
+  };
+  window.addEventListener('online', retryNow);
+  window.addEventListener('focus', retryNow);
+  document.addEventListener('visibilitychange', onVisible);
+  const offAnswered = onServerAnswered(retryNow);
+
   connect();
   return () => {
     stopped = true;
+    window.removeEventListener('online', retryNow);
+    window.removeEventListener('focus', retryNow);
+    document.removeEventListener('visibilitychange', onVisible);
+    offAnswered();
+    stopHealth();
     if (timer) clearTimeout(timer);
     if (ws) {
       ws.onclose = null;

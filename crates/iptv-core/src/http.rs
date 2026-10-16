@@ -37,8 +37,31 @@ use std::sync::Arc;
 use std::time::Duration;
 use url::{Host, Url};
 
-/// Connect timeout for every request.
+/// Connect timeout for every request outside [`interactive`].
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Connect timeout while the user waits on the answer ([`interactive`]:
+/// adding a source, testing a connection). An unreachable host fails after
+/// this, once, instead of after [`CONNECT_TIMEOUT`] (L3-app-2).
+pub const INTERACTIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+tokio::task_local! {
+    /// Set by [`interactive`].
+    static INTERACTIVE: ();
+}
+
+/// Runs `fut` as work the user is waiting on (adding a source, a connection
+/// test): the clients from [`guarded_client`] and its wrappers connect with
+/// [`INTERACTIVE_CONNECT_TIMEOUT`], and a connect timeout is final (not
+/// retried). Background refreshes keep [`CONNECT_TIMEOUT`] and their retries.
+/// Like every task-local, it does not reach tasks `fut` spawns.
+pub async fn interactive<F: Future>(fut: F) -> F::Output {
+    INTERACTIVE.scope((), fut).await
+}
+
+/// True inside [`interactive`].
+pub fn is_interactive() -> bool {
+    INTERACTIVE.try_with(|_| ()).is_ok()
+}
 /// Read (idle body) timeout for every request.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// Time allowed between sending a request and receiving the response head
@@ -94,9 +117,10 @@ pub fn backoff_delay(attempt: u32) -> Duration {
     (base + jitter).min(Duration::from_secs(10))
 }
 
-/// Runs `op` up to `attempts` times (at least once). Retries only
-/// `CoreError::Network` and `CoreError::Timeout`, sleeping [`backoff_delay`]
-/// between tries. Returns the last error.
+/// Runs `op` up to `attempts` times (at least once). Retries only errors
+/// [`CoreError::is_retryable`] accepts (Network, Timeout, Server, but not a
+/// refused connection, an unknown host or a bad certificate), sleeping
+/// [`backoff_delay`] between tries. Returns the last error.
 pub async fn with_retry<T, F, Fut>(attempts: u32, op: F) -> CoreResult<T>
 where
     F: Fn() -> Fut,
@@ -107,14 +131,35 @@ where
     loop {
         match op().await {
             Ok(v) => return Ok(v),
-            Err(err) if err.is_retryable() && n + 1 < attempts => {
+            // A cancelled import run (C8) stops retrying at once.
+            Err(err) if err.is_retryable() && n + 1 < attempts && !import_cancelled() => {
                 let delay = backoff_delay(n);
                 tracing::debug!(attempt = n + 1, ?delay, error = %err, "retrying after transient error");
-                tokio::time::sleep(delay).await;
+                cancellable(tokio::time::sleep(delay)).await?;
                 n += 1;
             }
             Err(err) => return Err(err),
         }
+    }
+}
+
+fn import_cancelled() -> bool {
+    crate::sources::is_import_cancelled()
+}
+
+/// Awaits `fut` unless the import run of the current task (C8, see
+/// [`crate::sources::import_cancel`]) is cancelled first, which fails with
+/// [`crate::sources::import_cancelled_error`]. Outside an import run this is
+/// `fut` itself. Every network wait in this module goes through it, so a
+/// cancelled import stops at its next send or body read.
+pub async fn cancellable<T>(fut: impl Future<Output = T>) -> CoreResult<T> {
+    match crate::sources::import_cancel() {
+        None => Ok(fut.await),
+        Some(token) => tokio::select! {
+            biased;
+            () = token.cancelled() => Err(crate::sources::import_cancelled_error()),
+            v = fut => Ok(v),
+        },
     }
 }
 
@@ -136,35 +181,151 @@ pub fn apply_source_headers(
     req
 }
 
+/// What the user can do about a non-success HTTP status.
+pub fn status_hint(status: reqwest::StatusCode) -> &'static str {
+    match status.as_u16() {
+        401 | 403 => "The server refused access. Check your login details, and that the subscription is still active.",
+        404 | 410 => "The server does not know this address. Check the URL; the provider may have changed it.",
+        408 | 504 => "The server took too long to answer. Try again later.",
+        429 => "The server is rate limiting requests. Wait a minute, then try again.",
+        500..=599 => "The server is busy or down. Try again later.",
+        _ => "Check the address and settings, then try again.",
+    }
+}
+
 /// Maps a non-success HTTP status to a `CoreError` (401/403 Auth, 404 NotFound,
-/// 408/504 Timeout, 5xx and 429 Network (retryable), other 4xx Invalid).
+/// 408/504 Timeout, 429 and other 5xx Server (retryable; the server is up but
+/// refusing work, not unreachable), other 4xx Invalid). The
+/// message is `"{context}: HTTP {status}. {hint}"` ([`status_hint`]).
 pub fn status_error(status: reqwest::StatusCode, context: &str) -> CoreError {
-    let msg = format!("{context}: HTTP {status}");
+    status_error_with_hint(status, context, status_hint(status))
+}
+
+/// [`status_error`] with a caller-chosen next step.
+pub fn status_error_with_hint(status: reqwest::StatusCode, context: &str, hint: &str) -> CoreError {
+    let msg = format!("{context}: HTTP {status}. {hint}");
     match status.as_u16() {
         401 | 403 => CoreError::Auth(msg),
         404 => CoreError::NotFound(msg),
         408 | 504 => CoreError::Timeout(msg),
-        429 | 500..=599 => CoreError::Network(msg),
+        429 | 500..=599 => CoreError::Server(msg),
         _ => CoreError::Invalid(msg),
     }
 }
 
-/// Turns a transport failure into an actionable error. Timeouts stay
-/// `Timeout` and everything else `Network`, so both remain retryable; a
-/// request refused by the server-mode guard becomes `Invalid` (not retried).
+/// Turns a transport failure into an actionable error: "Could not reach
+/// {host}. {next step} ({OS detail})". Timeouts stay `Timeout` and everything
+/// else `Network`. A refused connection, an unknown host name or an invalid
+/// certificate gets its own next step, which also marks it as not retryable
+/// ([`is_permanent_transport`]); other network failures (a reset, a closed
+/// connection) stay retryable. A request refused by the server-mode guard
+/// becomes `Invalid` (not retried).
 pub fn transport_error(host: &str, err: reqwest::Error) -> CoreError {
     if let Some(blocked) = find_blocked(&err) {
         return CoreError::Invalid(blocked.0);
     }
     if err.is_timeout() {
+        // The user is waiting ([`interactive`]): a host that does not
+        // answer the connection within the short timeout is reported now,
+        // not after more tries.
+        if err.is_connect() && is_interactive() {
+            return CoreError::Network(format!("Could not reach {host}. {UNREACHABLE_HINT}"));
+        }
         return CoreError::Timeout(format!(
             "{host} did not respond in time. Check the address and that the server is online, then try again."
         ));
     }
+    let hint = if err.is_connect() {
+        connect_failure(&err).map_or(RETRY_HINT, ConnectFailure::hint)
+    } else {
+        RETRY_HINT
+    };
     let detail = root_cause(&err.without_url());
-    CoreError::Network(format!(
-        "Could not reach {host}. Check the address and that the server is online, then try again. ({detail})"
-    ))
+    let detail = crate::logging::redact_text(&detail);
+    CoreError::Network(format!("Could not reach {host}. {hint} ({detail})"))
+}
+
+/// Next step of a network failure worth retrying.
+const RETRY_HINT: &str = "Check the address and that the server is online, then try again.";
+/// Next steps of connect failures a retry cannot fix. Each is unique to
+/// [`transport_error`]; [`is_permanent_transport`] looks for them.
+const REFUSED_HINT: &str = "The server refused the connection. Check the address and port, and that the server is running, then try again.";
+const UNKNOWN_HOST_HINT: &str =
+    "The host name was not found. Check the address for typos, then try again.";
+const CERTIFICATE_HINT: &str = "The server's security certificate is not valid. Check the address; if it is right, the provider has to fix its certificate.";
+/// A connect timeout while the user waits ([`interactive`]).
+const UNREACHABLE_HINT: &str = "The server did not answer. Check the address and port, and that the server is online, then try again.";
+
+/// True when a `Network` message from [`transport_error`] is a refused
+/// connection, an unknown host name or an invalid certificate: trying again
+/// a moment later meets the same answer, so the retry loops stop at once
+/// ([`CoreError::is_retryable`]).
+pub fn is_permanent_transport(message: &str) -> bool {
+    permanent_transport_hint(message).is_some()
+}
+
+/// The next step [`transport_error`] gave a connect failure a retry cannot
+/// fix, so callers that word their own message (Stalker) can keep it.
+pub fn permanent_transport_hint(message: &str) -> Option<&'static str> {
+    [
+        REFUSED_HINT,
+        UNKNOWN_HOST_HINT,
+        CERTIFICATE_HINT,
+        UNREACHABLE_HINT,
+    ]
+    .into_iter()
+    .find(|hint| message.contains(hint))
+}
+
+/// A connect failure a retry cannot fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectFailure {
+    /// Nothing listens at the address and port (the OS refused).
+    Refused,
+    /// The host name does not resolve (not a temporary resolver failure).
+    UnknownHost,
+    /// TLS rejected the server's certificate.
+    Certificate,
+}
+
+impl ConnectFailure {
+    const fn hint(self) -> &'static str {
+        match self {
+            Self::Refused => REFUSED_HINT,
+            Self::UnknownHost => UNKNOWN_HOST_HINT,
+            Self::Certificate => CERTIFICATE_HINT,
+        }
+    }
+}
+
+/// Classifies a connect error by its source chain: an `io::Error` of kind
+/// `ConnectionRefused`; rustls' "invalid peer certificate" (or any
+/// certificate complaint); hyper-util's "dns error" unless the resolver
+/// called it temporary (`EAI_AGAIN`, Windows `WSATRY_AGAIN` 11002), which a
+/// retry can fix.
+fn connect_failure(err: &(dyn std::error::Error + 'static)) -> Option<ConnectFailure> {
+    let mut dns = false;
+    let mut text = String::new();
+    let mut cur = Some(err);
+    while let Some(e) = cur {
+        if e.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::ConnectionRefused)
+        {
+            return Some(ConnectFailure::Refused);
+        }
+        let shown = e.to_string().to_ascii_lowercase();
+        dns |= shown.starts_with("dns error");
+        text.push_str(&shown);
+        text.push('\n');
+        cur = e.source();
+    }
+    if text.contains("certificate") {
+        Some(ConnectFailure::Certificate)
+    } else if dns && !(text.contains("temporar") || text.contains("os error 11002")) {
+        Some(ConnectFailure::UnknownHost)
+    } else {
+        None
+    }
 }
 
 /// The innermost cause of a transport error ("connection refused", "dns
@@ -204,7 +365,7 @@ pub async fn send_within(
         ))
     })?;
     let host = request.url().host_str().unwrap_or("the server").to_owned();
-    match tokio::time::timeout(header_timeout, client.execute(request)).await {
+    match cancellable(tokio::time::timeout(header_timeout, client.execute(request))).await? {
         Ok(Ok(resp)) => Ok(resp),
         Ok(Err(e)) => Err(transport_error(&host, e)),
         Err(_) => Err(CoreError::Timeout(format!(
@@ -219,7 +380,17 @@ pub async fn send_checked(
     req: reqwest::RequestBuilder,
     context: &str,
 ) -> CoreResult<reqwest::Response> {
-    let resp = send(req).await?;
+    send_checked_within(req, HEADER_TIMEOUT, context).await
+}
+
+/// [`send_checked`] with a caller-chosen response-head deadline
+/// ([`send_within`]).
+pub async fn send_checked_within(
+    req: reqwest::RequestBuilder,
+    header_timeout: Duration,
+    context: &str,
+) -> CoreResult<reqwest::Response> {
+    let resp = send_within(req, header_timeout).await?;
     let status = resp.status();
     if status.is_success() {
         Ok(resp)
@@ -646,6 +817,8 @@ fn guarded_redirect(guard: Arc<NetGuard>, trusted: Option<Authority>) -> reqwest
 pub struct ServerMode {
     pub guard: Arc<NetGuard>,
     clients: GuardedClients,
+    /// The same clients with [`INTERACTIVE_CONNECT_TIMEOUT`].
+    interactive: GuardedClients,
 }
 
 /// Extension key of [`ServerMode`].
@@ -658,22 +831,36 @@ impl ServerMode {
             return None;
         }
         let guard = Arc::new(NetGuard::new(allow_private));
-        let g = guard.clone();
-        let clients = GuardedClients::new(move |trusted| {
-            build(
-                builder(None)
-                    .redirect(guarded_redirect(g.clone(), trusted.cloned()))
-                    .dns_resolver(g.resolver(trusted)),
-            )
+        let guarded = |connect: Duration| {
+            let g = guard.clone();
+            GuardedClients::new(move |trusted| {
+                build(
+                    builder(None)
+                        .connect_timeout(connect)
+                        .redirect(guarded_redirect(g.clone(), trusted.cloned()))
+                        .dns_resolver(g.resolver(trusted)),
+                )
+            })
+        };
+        let clients = guarded(CONNECT_TIMEOUT);
+        let interactive = guarded(INTERACTIVE_CONNECT_TIMEOUT);
+        let mode = Arc::new(Self {
+            guard,
+            clients,
+            interactive,
         });
-        let mode = Arc::new(Self { guard, clients });
         state.set_ext(SERVER_MODE_EXT, mode.clone());
         Some(mode)
     }
 
-    /// The guarded client that trusts exactly `trusted` (or nothing).
+    /// The guarded client that trusts exactly `trusted` (or nothing); inside
+    /// [`interactive`] its short-connect twin.
     pub fn client(&self, trusted: Option<&Authority>) -> reqwest::Client {
-        self.clients.get(trusted)
+        if is_interactive() {
+            self.interactive.get(trusted)
+        } else {
+            self.clients.get(trusted)
+        }
     }
 }
 
@@ -697,8 +884,24 @@ pub fn is_server_mode(state: &AppState) -> bool {
 pub fn guarded_client(state: &AppState, trusted: Option<&Authority>) -> reqwest::Client {
     match server_mode(state) {
         Some(mode) => mode.client(trusted),
+        None if is_interactive() => interactive_client(state),
         None => state.http.clone(),
     }
+}
+
+/// Extension key of the desktop's short-connect client.
+const INTERACTIVE_CLIENT_EXT: &str = "http.interactive";
+
+/// `state.http` with [`INTERACTIVE_CONNECT_TIMEOUT`], built once.
+fn interactive_client(state: &AppState) -> reqwest::Client {
+    let client = state.ext_or_insert_with(INTERACTIVE_CLIENT_EXT, || {
+        Arc::new(build(
+            builder(None)
+                .connect_timeout(INTERACTIVE_CONNECT_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS)),
+        ))
+    });
+    reqwest::Client::clone(&client)
 }
 
 /// Client for fetching user-supplied URLs that trusts no source: the guarded
@@ -765,7 +968,7 @@ where
     S: futures::Stream<Item = reqwest::Result<T>> + Unpin,
 {
     use futures::StreamExt;
-    match tokio::time::timeout(idle, stream.next()).await {
+    match cancellable(tokio::time::timeout(idle, stream.next())).await? {
         Ok(Some(Ok(chunk))) => Ok(Some(chunk)),
         Ok(Some(Err(err))) => Err(transport_error(host, err)),
         Ok(None) => Ok(None),
@@ -776,9 +979,77 @@ where
     }
 }
 
+/// Reads a response body into memory, failing with `Invalid` once it passes
+/// `max` bytes (checked against Content-Length first, then while streaming).
+/// `context` starts the error message ("Xtream get_vod_streams").
+pub async fn read_capped(
+    mut resp: reqwest::Response,
+    context: &str,
+    max: usize,
+) -> CoreResult<bytes::Bytes> {
+    let too_large = || {
+        CoreError::Invalid(format!(
+            "{context}: the server sent more than {}, which is not an API answer. Check the server URL.",
+            size_text(max)
+        ))
+    };
+    let declared = resp.content_length().unwrap_or(0);
+    if declared > max as u64 {
+        return Err(too_large());
+    }
+    // Content-Length is only a hint for the first allocation; never trust it
+    // for more than a few MB.
+    let mut buf = bytes::BytesMut::with_capacity((declared as usize).min(8 * 1024 * 1024));
+    // The request's own deadline ([`send_metadata`]) also bounds these
+    // reads; a cancelled import stops at the next one.
+    while let Some(chunk) = cancellable(resp.chunk()).await?.map_err(|err| {
+        if err.is_timeout() {
+            CoreError::Timeout(format!(
+                "{context}: the server took too long to send its answer. Try again later."
+            ))
+        } else {
+            CoreError::from(err)
+        }
+    })? {
+        if buf.len().saturating_add(chunk.len()) > max {
+            return Err(too_large());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf.freeze())
+}
+
+fn size_text(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{} MB", bytes / (1024 * 1024))
+    } else {
+        format!("{} KB", (bytes / 1024).max(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review round 1: the 401/403 hint fits every source kind, and a 5xx is
+    /// `Server` (C12) except 504, which stays a timeout.
+    #[test]
+    fn status_errors_are_kind_neutral_and_classify_5xx_as_server() {
+        let auth = status_error(reqwest::StatusCode::UNAUTHORIZED, "Xtream account");
+        let text = auth.to_string();
+        assert!(text.contains("Check your login details"), "{text}");
+        assert!(!text.contains("MAC"), "{text}");
+        for code in [500, 502, 503] {
+            let err = status_error(reqwest::StatusCode::from_u16(code).unwrap(), "x");
+            assert!(matches!(err, CoreError::Server(_)), "{code}: {err:?}");
+            assert!(err.is_retryable());
+        }
+        let gw = status_error(reqwest::StatusCode::GATEWAY_TIMEOUT, "x");
+        assert!(matches!(gw, CoreError::Timeout(_)), "{gw:?}");
+        let busy = status_error(reqwest::StatusCode::TOO_MANY_REQUESTS, "x");
+        assert!(matches!(busy, CoreError::Server(_)), "{busy:?}");
+        assert!(busy.is_retryable());
+    }
     use std::sync::atomic::{AtomicU32, Ordering};
 
     #[tokio::test]
@@ -823,6 +1094,30 @@ mod tests {
         assert!(!status_error(reqwest::StatusCode::BAD_REQUEST, "x").is_retryable());
     }
 
+    /// B8: every status error keeps "HTTP <code>" (the UI classifies on it)
+    /// and ends with a next step.
+    #[test]
+    fn status_errors_say_what_to_do() {
+        use reqwest::StatusCode as S;
+        let msg = |s: S| status_error(s, "Xtream get_live_streams").to_string();
+        let m = msg(S::UNAUTHORIZED);
+        assert!(
+            m.contains("Xtream get_live_streams: HTTP 401") && m.contains("login details"),
+            "{m}"
+        );
+        assert!(msg(S::FORBIDDEN).contains("subscription"));
+        assert!(
+            msg(S::NOT_FOUND).contains("HTTP 404") && msg(S::NOT_FOUND).contains("Check the URL")
+        );
+        assert!(msg(S::GATEWAY_TIMEOUT).contains("Try again later"));
+        assert!(msg(S::TOO_MANY_REQUESTS).contains("Wait a minute"));
+        assert!(msg(S::SERVICE_UNAVAILABLE).contains("busy or down"));
+        let custom = status_error_with_hint(S::NOT_FOUND, "ctx", "Do X.");
+        assert!(
+            matches!(custom, CoreError::NotFound(ref m) if m == "ctx: HTTP 404 Not Found. Do X.")
+        );
+    }
+
     /// A server that accepts TCP and never answers fails after the header
     /// timeout with an actionable, retryable error.
     #[tokio::test]
@@ -857,14 +1152,159 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Network(_)), "{err:?}");
-        assert!(err.is_retryable());
+        // L1-sources-home-7: a refused connection is final (it was retried
+        // three times); the RPC error still offers Try again.
+        assert!(!err.is_retryable());
+        assert!(crate::error::RpcError::from(CoreError::Network(err.to_string())).retryable);
         assert!(
             err.to_string()
-                .contains("Could not reach 127.0.0.1. Check the address"),
+                .contains(&format!("Could not reach 127.0.0.1. {REFUSED_HINT} (")),
             "{err}"
         );
         // The detail is the OS-level cause, not reqwest's generic wrapper.
         assert!(!err.to_string().contains("error sending request"), "{err}");
+    }
+
+    /// Error with a fixed text and an optional cause, to build source chains.
+    #[derive(Debug)]
+    struct Layer(
+        &'static str,
+        Option<Box<dyn std::error::Error + Send + Sync>>,
+    );
+
+    impl fmt::Display for Layer {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1
+                .as_deref()
+                .map(|e| e as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    fn chain(outer: &'static str, inner: impl std::error::Error + Send + Sync + 'static) -> Layer {
+        Layer(
+            "client error (Connect)",
+            Some(Box::new(Layer(outer, Some(Box::new(inner))))),
+        )
+    }
+
+    #[test]
+    fn connect_failures_are_classified_by_their_cause() {
+        use std::io::{Error as IoError, ErrorKind};
+        let refused = chain(
+            "tcp connect error",
+            IoError::from(ErrorKind::ConnectionRefused),
+        );
+        assert_eq!(connect_failure(&refused), Some(ConnectFailure::Refused));
+        let windows_dns = chain(
+            "dns error",
+            IoError::other("No such host is known. (os error 11001)"),
+        );
+        assert_eq!(
+            connect_failure(&windows_dns),
+            Some(ConnectFailure::UnknownHost)
+        );
+        let unix_dns = chain(
+            "dns error",
+            IoError::other("failed to lookup address information: Name or service not known"),
+        );
+        assert_eq!(
+            connect_failure(&unix_dns),
+            Some(ConnectFailure::UnknownHost)
+        );
+        // A resolver that could not ask right now may answer on the next try.
+        for temporary in [
+            "failed to lookup address information: Temporary failure in name resolution",
+            "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server. (os error 11002)",
+        ] {
+            let e = chain("dns error", IoError::other(temporary));
+            assert_eq!(connect_failure(&e), None, "{temporary}");
+        }
+        // rustls wraps its error in an io::Error whose text is rustls' own.
+        let cert = chain(
+            "tcp connect error",
+            IoError::new(
+                ErrorKind::InvalidData,
+                Layer("invalid peer certificate: UnknownIssuer", None),
+            ),
+        );
+        assert_eq!(connect_failure(&cert), Some(ConnectFailure::Certificate));
+        // A reset or an unreachable network is worth another try.
+        let reset = chain(
+            "tcp connect error",
+            IoError::from(ErrorKind::ConnectionReset),
+        );
+        assert_eq!(connect_failure(&reset), None);
+        let unreachable = chain(
+            "tcp connect error",
+            IoError::new(ErrorKind::NotConnected, "Network unreachable"),
+        );
+        assert_eq!(connect_failure(&unreachable), None);
+    }
+
+    /// Resolver that fails every lookup with `msg` (no real DNS).
+    struct FailingResolver(&'static str);
+
+    impl Resolve for FailingResolver {
+        fn resolve(&self, _name: Name) -> Resolving {
+            let msg = self.0;
+            Box::pin(async move {
+                Err(Box::new(std::io::Error::other(msg))
+                    as Box<dyn std::error::Error + Send + Sync>)
+            })
+        }
+    }
+
+    /// The real reqwest chain of a failed lookup: an unknown host is final
+    /// and says to check the address; a temporary failure stays retryable.
+    #[tokio::test]
+    async fn unknown_host_is_final_and_temporary_dns_failure_is_retried() {
+        let lookup = |msg: &'static str| {
+            reqwest::Client::builder()
+                .dns_resolver(Arc::new(FailingResolver(msg)))
+                .build()
+                .unwrap()
+        };
+        let err = send(
+            lookup("No such host is known. (os error 11001)").get("http://tv.example.invalid/x"),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        assert!(!err.is_retryable(), "{err}");
+        assert!(
+            err.to_string().contains(&format!(
+                "Could not reach tv.example.invalid. {UNKNOWN_HOST_HINT} ("
+            )),
+            "{err}"
+        );
+        let err =
+            send(lookup("Temporary failure in name resolution").get("http://tv.example.invalid/x"))
+                .await
+                .unwrap_err();
+        assert!(err.is_retryable(), "{err}");
+        assert!(
+            err.to_string().contains(&format!(
+                "Could not reach tv.example.invalid. {RETRY_HINT} ("
+            )),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn permanent_hints_are_recognised_after_a_suffix() {
+        for hint in [REFUSED_HINT, UNKNOWN_HOST_HINT, CERTIFICATE_HINT] {
+            let msg = format!("Could not reach h. {hint} (x) The download failed after 1 tries.");
+            assert!(is_permanent_transport(&msg), "{hint}");
+        }
+        assert!(!is_permanent_transport(&format!(
+            "Could not reach h. {RETRY_HINT} (connection reset)"
+        )));
     }
 
     fn u(s: &str) -> Url {

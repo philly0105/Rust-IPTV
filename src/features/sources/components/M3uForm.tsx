@@ -6,7 +6,7 @@ import type { M3uOrigin } from '@/api/types';
 
 import { Button, Input, Tabs, Textarea } from '@/ui';
 import type { DraftErrors, M3uDraft } from '../lib/draft';
-import { PLAYLIST_EXTENSIONS, baseName, pickPathDesktop, readFileText } from '../lib/files';
+import { MAX_WEB_FILE_BYTES, PLAYLIST_EXTENSIONS, baseName, formatFileSize, pickPathDesktop, readFileText } from '../lib/files';
 import { usePlaylistPreview } from '../lib/usePreview';
 import { parseXtreamLink } from '../lib/validate';
 import { Field } from './Field';
@@ -25,10 +25,12 @@ export interface M3uFormProps {
   onUseXtream?: (cfg: { serverUrl: string; username: string; password: string }) => void;
   /** Lets the dialog suggest a name from a URL or file. */
   onSuggestName?: (input: string) => void;
+  /** Validates one field (error path, e.g. `m3u.url`) when the user leaves it. */
+  onFieldBlur?: (path: string) => void;
 }
 
-export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName }: M3uFormProps) {
-  const { t } = useTranslation('sources');
+export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur }: M3uFormProps) {
+  const { t, i18n } = useTranslation('sources');
   const fileInput = useRef<HTMLInputElement>(null);
   const fileHintId = useId();
   const [reading, setReading] = useState(false);
@@ -60,6 +62,11 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     setFileError(null);
+    // Reading a huge file into one string can stall or crash the page; such lists belong at a URL.
+    if (file.size > MAX_WEB_FILE_BYTES) {
+      setFileError(t('errorFileTooLarge', { size: formatFileSize(file.size, i18n.language) }));
+      return;
+    }
     setReading(true);
     try {
       const text = await readFileText(file);
@@ -103,7 +110,10 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
                 placeholder="https://provider.example/playlist.m3u"
                 value={value.url}
                 onChange={(e) => set({ url: e.target.value })}
-                onBlur={() => onSuggestName?.(value.url)}
+                onBlur={() => {
+                  onSuggestName?.(value.url);
+                  onFieldBlur?.('m3u.url');
+                }}
               />
             )}
           </Field>

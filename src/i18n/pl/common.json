@@ -23,7 +23,7 @@
   "pageNotFound": "Nie znaleziono strony",
   "pageNotFoundHint": "Ten adres nie pasuje do żadnej strony. Użyj paska bocznego lub wróć na stronę główną.",
 
-  "errorTitleNetwork": "Nie można połączyć się z serwerem",
+  "errorTitleNetwork": "Nie udało się połączyć z serwerem",
   "errorTitleTimeout": "Żądanie trwało zbyt długo",
   "errorTitleAuth": "Logowanie zostało odrzucone",
   "errorTitleNotFound": "Nie znaleziono",
@@ -40,11 +40,16 @@
   "errorTechnicalDetails": "Szczegóły techniczne",
   "errorHintTimeout": "Dostawca może być przeciążony. Spróbuj ponownie za chwilę.",
   "errorHintAuth": "Sprawdź nazwę użytkownika, hasło lub adres MAC w ustawieniach źródła.",
-  "errorHintNotFound": "Dostawca mógł to usunąć. Odśwież źródło, aby zaktualizować listę.",
+  "errorHintNotFound": "Mogło zostać usunięte albo ten link jest nieaktualny.",
   "errorHintInvalid": "Sprawdź wprowadzone wartości i spróbuj ponownie.",
   "errorHintUnsupported": "To źródło lub typ strumienia nie obsługuje tej akcji. Spróbuj zewnętrznego odtwarzacza.",
   "errorHintConflict": "Załaduj ponownie, aby zobaczyć najnowszą wersję, i spróbuj jeszcze raz.",
   "errorHintIo": "Sprawdź, czy folder istnieje i czy masz uprawnienia do zapisu.",
   "errorHintDb": "Uruchom ponownie aplikację. Jeśli problem się powtarza, przywróć kopię zapasową w Ustawieniach.",
-  "errorHintInternal": "Spróbuj ponownie. Jeśli problem się powtarza, uruchom ponownie aplikację."
+  "errorHintInternal": "Spróbuj ponownie. Jeśli problem się powtarza, uruchom ponownie aplikację.",
+  "errorCode": "Kod błędu: {{code}}",
+  "errorTitleEngineMissing": "Nie udało się uruchomić silnika odtwarzacza",
+  "errorHintEngineMissing": "Brakuje silnika odtwarzacza wideo (mpv) lub nie udało się go uruchomić.",
+  "errorTitleServer": "Wystąpił problem z serwerem",
+  "errorHintServer": "Serwer jest przeciążony lub ma problemy. Spróbuj ponownie później."
 }

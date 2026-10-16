@@ -31,6 +31,9 @@ const REUSE_KILL_WAIT: Duration = Duration::from_secs(3);
 #[derive(Default)]
 pub struct ExternalTracker {
     running: parking_lot::Mutex<Option<RunningPlayer>>,
+    /// Serializes close-previous + spawn + track: two launches at once would
+    /// both find nothing to close and leave one player running untracked.
+    launch: tokio::sync::Mutex<()>,
 }
 
 struct RunningPlayer {
@@ -151,25 +154,25 @@ pub async fn open_external(
     })
     .await?
     .ok_or_else(|| {
-        CoreError::NotFound(format!(
+        CoreError::EngineMissing(format!(
             "{} was not found. Install it or set its path in Settings > Players.",
             player.display_name()
         ))
     })?;
 
     let args = build_args(player, source, &settings);
+    let tracker_arc = tracker(state);
+    let _launch = tracker_arc.launch.lock().await;
     if settings.player_reuse_instance {
         close_previous(state).await;
     }
     let mut child = spawn_detached(&program, &args).map_err(|e| {
-        CoreError::Io(std::io::Error::new(
-            e.kind(),
-            format!(
-                "could not start {} ({}): {e}. Check the path in Settings > Players.",
-                player.display_name(),
-                program.display()
-            ),
-        ))
+        let msg = format!(
+            "could not start {} ({}): {e}. Check the path in Settings > Players.",
+            player.display_name(),
+            program.display()
+        );
+        super::spawn_error(e, msg)
     })?;
     let pid = child.id().unwrap_or(0);
     // URL omitted on purpose: it may embed portal credentials.

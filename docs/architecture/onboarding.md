@@ -4,7 +4,7 @@ Code: `src/features/onboarding/`. Strings: `src/i18n/<locale>/onboarding.json` (
 
 Two overlays help people find their way (contract C7):
 
-- The tour: three steps that point at Live TV, My List (for movies and series), and search. It runs once, after the first source is added.
+- The tour: three steps that point at Live TV, My List (for movies and series), and search. It runs once, after the first source is added. A source whose imports have all failed does not count, so the tour waits for one that imports.
 - What's new: a dialog listing what changed since the version the user last saw, each item with an icon. It shows once per update.
 
 Neither needs the core beyond the two settings markers, `app.info` and `sources.list`. The markers live in settings but are machine-local: they are not in `backup::APP_SETTING_KEYS`, so backups leave them out, unlike the preferences that travel in backups (the split is in [settings.md](settings.md)). They belong to this install.
@@ -39,7 +39,7 @@ Neither needs the core beyond the two settings markers, `app.info` and `sources.
 
 ## The host
 
-`OnboardingHost` (`host.tsx`) is mounted once in the shell. It reads `settings.get`, `app.info` and `sources.list` through the query cache and re-runs the decision whenever any of them changes. Adding the first source invalidates `sources.list`, so the tour starts without a reload.
+`OnboardingHost` (`host.tsx`) is mounted once in the shell. It reads `settings.get`, `app.info` and `sources.list` through the query cache and re-runs the decision whenever any of them changes. Adding the first source invalidates `sources.list`, so the tour starts without a reload. `sourceCount` comes from `countUsableSources` in `decide.ts`: a source counts once it has imported (`lastRefreshAt`) or while its first import runs (no `lastError`). A source whose imports have all failed does not count, so the tour waits for one that imports instead of showing over an empty app.
 
 - A `silent` result is written once per session.
 - An automatic overlay opens only when the app is idle. Idle means no `[aria-modal="true"]` on the page (for example the add-source dialog or a PIN prompt), no fullscreen element, and a visible document. The host first checks after `START_DELAY_MS` (600 ms) and then every `IDLE_POLL_MS` (400 ms). The delay also gives the rail time to render its anchors.

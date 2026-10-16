@@ -142,6 +142,7 @@ async fn bulk_rewrites_keep_every_index_and_store_exact_verdicts() {
             catalog::replace_catalog(c, "s1", ContentType::Movie, &categories(), &mut rows)?;
             assert_eq!(item_indexes(c), before);
             assert_verdicts(c, "s1");
+            assert_items_rank(c);
 
             // A second source as large as the first, categories declared:
             // it touches fewer rows than it would re-sort, so its indexes
@@ -149,12 +150,14 @@ async fn bulk_rewrites_keep_every_index_and_store_exact_verdicts() {
             write_declared(c, "s2", &movies("s2", "b"));
             assert_eq!(item_indexes(c), before);
             assert_verdicts(c, "s2");
+            assert_items_rank(c);
 
             // A refresh of s1 replaces enough rows to drop the indexes in begin.
             write_declared(c, "s1", &movies("s1", "c"));
             assert_eq!(item_indexes(c), before);
             assert_verdicts(c, "s1");
             assert_verdicts(c, "s2");
+            assert_items_rank(c);
 
             for (sort, index) in [
                 ("rating DESC, position", "idx_items_rating"),
@@ -247,6 +250,7 @@ async fn bulk_mode_weighs_a_refresh_against_the_rows_it_keeps() {
                 assert!(item_indexes(&tx).is_empty(), "bulk from begin");
             }
             assert_eq!(item_indexes(c), before);
+            assert_items_rank(c);
             Ok(())
         })
         .await
@@ -289,6 +293,7 @@ async fn a_failed_bulk_rewrite_rolls_back_rows_and_indexes() {
             )?;
             assert_eq!(n as u64, N, "the previous catalog stays");
             assert_verdicts(c, "s1");
+            assert_items_rank(c);
             Ok(())
         })
         .await

@@ -641,6 +641,8 @@ function HitGrid({
 /** Widest a poster's source badge gets; a narrower poster (phones) keeps its 6px inset on both sides. */
 const POSTER_BADGE_MAX = 120;
 const POSTER_BADGE_INSETS = 12;
+/** Room the rating chip takes on the poster's top-end corner, so the source badge stops short of it. */
+const POSTER_RATING_ROOM = 52;
 
 /**
  * Movie or series hits as poster cards, with the language the provider gives each title.
@@ -683,6 +685,8 @@ const PosterGrid = memo(function PosterGrid({
             href={h.href ?? '#'}
             posterUrl={h.imageUrl}
             meta={h.meta}
+            // L4-vod-3: the rating chip, as on the category grid and the rails.
+            rating={item.rating}
             progress={resume.get(resumeKey(item.ref))}
             watched={watched.has(itemKey(item.ref))}
             language={itemLanguage(item.title, item.categoryName)}
@@ -694,7 +698,7 @@ const PosterGrid = memo(function PosterGrid({
                   dir="auto"
                   title={h.sourceName}
                   className="bg-scrim text-white"
-                  style={{ maxWidth: Math.max(0, Math.min(POSTER_BADGE_MAX, cellWidth - POSTER_BADGE_INSETS)) }}
+                  style={{ maxWidth: Math.max(0, Math.min(POSTER_BADGE_MAX, cellWidth - POSTER_BADGE_INSETS - (item.rating ? POSTER_RATING_ROOM : 0))) }}
                 >
                   {h.sourceName}
                 </Badge>

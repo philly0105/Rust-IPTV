@@ -3,15 +3,15 @@
 //! large Xtream account next to a 50k M3U:
 //!
 //! - `catalog.search` (the Search page: three lists of up to 61): every
-//!   query of two or more letters under [`SEARCH_BUDGET`] at p95, except
-//!   the broad prefixes ("th", "the", "a": 15-26% of the library, 32k-56k
-//!   matches) and the substring scan ("rchard"), held to [`WIDE_BUDGET`].
-//!   run.md asks 100 ms of those too; that is not met here. Their cost is
-//!   one `items` row read per match to rank it (about 2-3 µs, mostly page
-//!   cache misses on the default 2 MB cache), or every title for the
-//!   substring scan. A larger page cache or mmap on the connection (db/mod.rs)
-//!   cut them 20-40% in a probe; on the 220k-item account database of the
-//!   hunt (25k-29k matches) they measured 60-110 ms at p95.
+//!   query of two or more letters under [`SEARCH_BUDGET`] at p95, the broad
+//!   prefixes included ("th", "the", "a": 15-26% of the library, 32k-56k
+//!   matches, also in hide mode). Their cost is a bm25 rank and one narrow
+//!   `items_rank` row (migration 0020) per match, then a bounded top-61 per
+//!   list; reading each match's wide `items` row and sorting every match in
+//!   a `ROW_NUMBER()` window took "th" to 140-155 ms at p95, against about
+//!   60 ms on `items_rank` ("the" and "a" about 45 ms, hide-mode "th"
+//!   50-60 ms). The substring scan ("rchard"), which reads every title, is
+//!   held to [`WIDE_BUDGET`].
 //! - The movie page sorted by date added with a minimum rating or a decade
 //!   filter, and parental hide mode with every movie category and live
 //!   group locked: under [`RPC_BUDGET`] at p95, like every catalog RPC.
@@ -58,7 +58,7 @@ const DEBUG_SCALE: u32 = 1;
 
 /// `catalog.search`, p95 (run.md: under 100 ms for every 2+ letter query).
 const SEARCH_BUDGET: Duration = Duration::from_millis(100 * DEBUG_SCALE as u64);
-/// Broad prefixes and the substring scan, p95: see the module doc.
+/// The substring scan, p95: see the module doc.
 const WIDE_BUDGET: Duration = Duration::from_millis(250 * DEBUG_SCALE as u64);
 /// Any other catalog RPC, p95 (run.md: 50 ms).
 const RPC_BUDGET: Duration = Duration::from_millis(50 * DEBUG_SCALE as u64);
@@ -359,11 +359,6 @@ async fn search_vod_filters_and_hide_mode_on_215k_items_meet_run_budgets() {
     for q in [
         "blue", "blue cur", "orchard", "news", "new", "th", "the", "a", "am",
     ] {
-        let budget = if matches!(q, "th" | "the" | "a") {
-            WIDE_BUDGET
-        } else {
-            SEARCH_BUDGET
-        };
         let same = same_as_one_list(&env.state, q, false).await;
         calls.push((
             format!("search {q:?}"),
@@ -373,7 +368,7 @@ async fn search_vod_filters_and_hide_mode_on_215k_items_meet_run_budgets() {
                 ensure!(any_hits(v), "no hits: {v}");
                 same(v)
             }),
-            budget,
+            SEARCH_BUDGET,
         ));
     }
     calls.push((
@@ -594,11 +589,7 @@ async fn search_vod_filters_and_hide_mode_on_215k_items_meet_run_budgets() {
                 ensure!(!ids(v, "series").is_empty(), "{v}");
                 same(v)
             }),
-            if q == "th" {
-                WIDE_BUDGET
-            } else {
-                SEARCH_BUDGET
-            },
+            SEARCH_BUDGET,
         ));
     }
     run(&r, &env, hidden, "hide", &mut failures, &mut table).await;

@@ -244,6 +244,22 @@ async fn user_initiated_calls_give_up_on_an_unreachable_host_quickly() {
     if took >= Duration::from_secs(2) {
         assert!(!err.error.is_retryable(), "{:?}", err.error);
     }
+
+    // L4-settings-4: the add dialog's Try again and a card's Refresh go
+    // through `sources.refresh`, which the user waits on too.
+    let sid = err.source_id.expect("the failed add keeps its source");
+    let started = Instant::now();
+    let refreshed = iptv_core::sources::refresh(state.clone(), &sid).await;
+    let took = started.elapsed();
+    let err = refreshed.expect_err("the refresh fails");
+    assert!(
+        took < Duration::from_secs(8),
+        "sources.refresh took {took:?}"
+    );
+    if took >= Duration::from_secs(2) {
+        assert!(!err.is_retryable(), "{err:?}");
+        assert!(err.to_string().contains("Could not reach"), "{err}");
+    }
 }
 
 /// Background work keeps the long connect timeout: a task spawned from the

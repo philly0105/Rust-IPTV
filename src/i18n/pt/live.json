@@ -70,6 +70,8 @@
   "portalGuideUnavailable": "O guia do portal não está respondendo. Tentando de novo automaticamente.",
   "guideNotAnswering": "O guia não está respondendo",
   "guideNoData": "Ainda não há dados de guia para estes canais. Adicione um endereço XMLTV ou atualize as fontes de EPG.",
+  "guideNoDataHere": "Nada no guia para este horário.",
+  "guideBackToNow": "Voltar para agora",
   "guideNoSources": "Nenhuma fonte ainda",
   "guideNoSourcesHint": "Adicione uma playlist ou um portal para ver o guia de TV.",
   "previousDay": "Dia anterior",

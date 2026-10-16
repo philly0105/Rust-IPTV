@@ -82,6 +82,8 @@
   "portalGuideUnavailable": "دليل البوابة لا يستجيب. تجري إعادة المحاولة تلقائيًا.",
   "guideNotAnswering": "الدليل لا يستجيب",
   "guideNoData": "لا توجد بيانات دليل لهذه القنوات بعد. أضف عنوان XMLTV أو حدّث مصادر EPG.",
+  "guideNoDataHere": "لا شيء في الدليل لهذا الوقت.",
+  "guideBackToNow": "العودة إلى الآن",
   "guideNoSources": "لا توجد مصادر بعد",
   "guideNoSourcesHint": "أضف قائمة تشغيل أو بوابة لرؤية دليل برامجها.",
   "previousDay": "اليوم السابق",

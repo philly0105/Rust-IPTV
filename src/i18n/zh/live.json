@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "门户的节目指南没有响应，正在自动重试。",
   "guideNotAnswering": "节目指南无响应",
   "guideNoData": "这些频道暂无节目指南数据。请添加 XMLTV 地址或刷新 EPG 来源。",
+  "guideNoDataHere": "节目指南中没有此时段的内容。",
+  "guideBackToNow": "回到现在",
   "guideNoSources": "暂无播放源",
   "guideNoSourcesHint": "添加播放列表或门户后即可查看其节目指南。",
   "previousDay": "前一天",

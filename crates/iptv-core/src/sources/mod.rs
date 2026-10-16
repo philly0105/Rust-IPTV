@@ -1632,8 +1632,13 @@ pub async fn reorder(state: &AppState, ids: Vec<String>) -> CoreResult<()> {
 }
 
 /// `sources.refresh`: re-import one source.
+///
+/// User-initiated (a card's Refresh, the add dialog's Try again): an
+/// unreachable host fails after the short connect timeout, as in [`add`]
+/// (L4-settings-4). The startup pass ([`refresh_all`]) and the schedule
+/// call the importer directly and keep the background 10 s and retries.
 pub async fn refresh(state: Arc<AppState>, id: &str) -> CoreResult<Source> {
-    Ok(run_import(state, id).await?.0)
+    Ok(crate::http::interactive(run_import(state, id)).await?.0)
 }
 
 /// `sources.refreshAll`: re-imports every auto-refresh source, one at a time.

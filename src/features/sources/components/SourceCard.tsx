@@ -64,6 +64,13 @@ function sourceHost(s: Source): string | undefined {
  * with the core's raw (English, OS-level) text behind a disclosure. Errors the
  * app does not recognise keep the raw text in view, since it is the only detail.
  */
+/**
+ * The error text grows from a 12rem basis, so on a narrow card the buttons wrap
+ * below it. With `flex-1` (basis 0) everything fit on one line and the text was
+ * squeezed to a column a few letters wide at 390 px (L4-settings-3).
+ */
+const ERROR_TEXT = 'min-w-0 grow basis-48 text-fg';
+
 function SourceErrorText({ source }: { source: Source }) {
   const { t } = useTranslation('sources');
   const raw = source.lastError ?? '';
@@ -80,7 +87,7 @@ function SourceErrorText({ source }: { source: Source }) {
   ) : null;
   if (info.kind === 'unknown') {
     return (
-      <div className="min-w-0 flex-1 text-fg">
+      <div className={ERROR_TEXT}>
         <p className="break-words">
           <span className="font-medium">{t('lastRefreshFailed')}</span>{' '}
           <span className="text-fg-muted" data-testid="source-error-plain">
@@ -105,7 +112,7 @@ function SourceErrorText({ source }: { source: Source }) {
   // Sign-in advice names what this kind of source signs in with.
   const key = info.kind === 'auth' ? `sourceErrorAuth_${source.kind}` : SOURCE_ERROR_KEYS[info.kind];
   return (
-    <div className="min-w-0 flex-1 text-fg">
+    <div className={ERROR_TEXT}>
       <p className="break-words">
         <span className="font-medium">{t('lastRefreshFailed')}</span>{' '}
         <span className="text-fg-muted" data-testid="source-error-message" data-kind={info.kind}>
@@ -371,7 +378,7 @@ export function SourceCard(props: SourceCardProps) {
         <div role="alert" className="flex flex-wrap items-center gap-3 border-t border-danger/40 bg-danger/10 px-4 py-2.5 text-sm" data-testid="source-error">
           <CircleAlert aria-hidden className="size-4 shrink-0 text-danger" />
           <SourceErrorText source={s} />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" onClick={props.onEdit} aria-describedby={nameId}>
               {t('checkSettings')}
             </Button>

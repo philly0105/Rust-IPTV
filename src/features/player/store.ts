@@ -31,7 +31,7 @@ import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQuer
 import { preloadEngineFor } from './enginePreload';
 import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
-import { __resetNowNextForTests, fetchNowNext, holdNowNext, peekNowNext } from './nowNext';
+import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNowNext } from './nowNext';
 import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
 import { hideModeNow, lockedNow, onPlaybackHidden } from './parentalLocks';
 
@@ -417,6 +417,9 @@ let finishedSavedFor: PlayerSource | undefined;
 
 const isPositionsKey = (key: readonly unknown[]) => typeof key[0] === 'string' && key[0].startsWith('positions.');
 
+/** The latest `positions.set` sent (settled once the core has it, or the send failed). */
+let lastSave: Promise<void> = Promise.resolve();
+
 /** Sends the VOD position; the promise settles when the core has it (or the send failed). */
 function savePosition(): Promise<void> {
   const { source, positionSeconds, durationSeconds } = usePlayerStore.getState();
@@ -433,7 +436,7 @@ function savePosition(): Promise<void> {
   if (dur && Number.isFinite(dur)) args.durationSeconds = Math.floor(dur);
   const snap = snapshotOf(source);
   if (snap) args.snapshot = snap;
-  return rpc('positions.set', args).then(
+  return (lastSave = rpc('positions.set', args).then(
     () => {
       // C4 caches `positions.` for 15 s and no event follows a save: mark it stale so Continue
       // Watching reads the new position on its next mount. No refetch now: this runs every 5 s.
@@ -451,7 +454,7 @@ function savePosition(): Promise<void> {
     () => {
       lastSavedPosition = -1; // retry on next tick
     },
-  );
+  ));
 }
 
 /** Persist now: resume record and VOD position. Called every 5 s, on stop, and on page hide. */
@@ -580,7 +583,14 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   stop() {
     playToken++;
     requestSeq++;
-    if (get().source) flushProgress();
+    const stopped = get().source;
+    if (stopped) flushProgress();
+    // Once the stop's save (or a tick's still under way) has landed, refetch the positions a page
+    // still shows, such as a VOD detail page behind the mini player, so it offers the new resume
+    // point. The 5 s ticks only mark them stale.
+    if (tracksPosition(stopped)) {
+      void lastSave.then(() => queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'active' }));
+    }
     stopSaver();
     clearResume();
     lastSavedPosition = -1;
@@ -1463,6 +1473,7 @@ async function tuneChannel(channel: Channel, sourceKind?: SourceKind, opts: Tune
   const { readout = true, keepList = false, onRequest, onPlay } = opts;
   return startItem(args, {
     onAllowed: () => {
+      passNowNext(channel.ref);
       if (typeof readout === 'function' ? readout() : readout) showZapReadout(channel, name);
     },
     keepList,
@@ -1573,7 +1584,7 @@ function prefetchAfterTune(): void {
   const src = s.source;
   if (!src?.ref || !src.url || isPendingZap(src) || s.status === 'error' || !canZap(s)) return;
   prefetchNeighbours(src.ref);
-  prefetchConnectionLimit(src.ref.sourceId);
+  void prefetchConnectionLimit(src.ref.sourceId);
 }
 
 /** How long a known account status counts for the zap (the multi-view banner keeps it as long). */
@@ -1584,24 +1595,38 @@ function accountKey(sourceId: string): readonly unknown[] {
   return rpcKey('account.status', { sourceId });
 }
 
+/** How soon an empty or failed answer is asked again (the core is asking the panel meanwhile). */
+const ACCOUNT_RETRY_MS = 2_000;
+
 /**
- * The source allows one connection at a time: an Xtream panel's `user_info.max_connections` of 1
- * (the account status the core keeps). Unknown counts as more than one.
+ * A zap on this source opens only the channel a burst stops on: it allows one connection at a
+ * time (an Xtream panel's `user_info.max_connections` of 1, the account status the core keeps),
+ * or it is an Xtream source whose status is not known yet. Other kinds report no limit.
  */
-function oneConnection(sourceId: string): boolean {
-  return queryClient.getQueryData<AccountStatus | null>(accountKey(sourceId))?.maxConnections === 1;
+function holdsZapTune(sourceId: string): boolean {
+  const status = queryClient.getQueryData<AccountStatus | null>(accountKey(sourceId));
+  if (status) return status.maxConnections === 1;
+  return knownSourceKind(sourceId) === 'xtream';
 }
 
 /**
- * Asks for an Xtream source's account status ahead of the next zap, so its first press knows the
+ * Asks for an Xtream source's account status ahead of the next zap, so its presses know the
  * connection limit. The core answers from its cache; it has none before its first check (which
- * it starts then), so an empty answer is asked again on the next tune.
+ * it starts then), so an empty answer is asked again on a tune or press ACCOUNT_RETRY_MS later.
+ * Resolves when the answer is in (joining the request under way, if any); undefined when none
+ * is asked.
  */
-function prefetchConnectionLimit(sourceId: string): void {
-  if (knownSourceKind(sourceId) !== 'xtream') return;
+function prefetchConnectionLimit(sourceId: string): Promise<unknown> | undefined {
+  if (knownSourceKind(sourceId) !== 'xtream') return undefined;
   const state = queryClient.getQueryState<AccountStatus | null>(accountKey(sourceId));
-  if (state?.fetchStatus === 'fetching' || (state?.data && Date.now() - state.dataUpdatedAt < ACCOUNT_STALE_MS)) return;
-  void queryClient.prefetchQuery({ queryKey: accountKey(sourceId), queryFn: () => rpc('account.status', { sourceId }), staleTime: 0, retry: false });
+  if (state && state.fetchStatus !== 'fetching') {
+    const now = Date.now();
+    if (state.data && now - state.dataUpdatedAt < ACCOUNT_STALE_MS) return undefined;
+    if (!state.data && now - Math.max(state.dataUpdatedAt, state.errorUpdatedAt) < ACCOUNT_RETRY_MS) return undefined;
+  }
+  return queryClient
+    .fetchQuery({ queryKey: accountKey(sourceId), queryFn: () => rpc('account.status', { sourceId }), staleTime: 0, retry: false })
+    .catch(() => undefined);
 }
 
 usePlayerStore.subscribe((s, prev) => {
@@ -1800,12 +1825,24 @@ async function stepZap(direction: 'up' | 'down'): Promise<ZapBurst | undefined> 
   // A press on its own tunes at once, unless the source allows one connection: a press that
   // follows within ZAP_SETTLE_MS would open a second stream while the provider still counts the
   // first (panels keep a closed one counted for a while), so there the burst opens only the
-  // channel it stops on, after the quiet. The guide answer the banner and the tune both use: one a
-  // view already holds, else asked now for a press that tunes at once, and for the others once
-  // the burst stops on them (not for each channel it passes).
-  const tunesNow = fresh && queuedPresses === 0 && !oneConnection(target.ref.sourceId);
-  prefetchConnectionLimit(target.ref.sourceId);
-  if (!tunesNow && peekNowNext(target.ref) === undefined) holdNowNext(target.ref, ZAP_SETTLE_MS);
+  // channel it stops on, after the quiet. An Xtream source whose limit is not known yet waits the
+  // same way while its status is asked; a press on its own tunes once the answer allows more than
+  // one (before the quiet, if no press came meanwhile). The guide answer the banner and the tune
+  // both use: one a view already holds, else asked now for a press that tunes at once, and for
+  // the others once the burst stops on them (not for each channel it passes).
+  const sourceId = target.ref.sourceId;
+  const alone = fresh && queuedPresses === 0;
+  const tunesNow = alone && !holdsZapTune(sourceId);
+  const limit = prefetchConnectionLimit(sourceId);
+  // Its guide is asked now too, as for a press that tunes at once.
+  const awaitsLimit = alone && !tunesNow && !!limit;
+  if (awaitsLimit) {
+    const press = b.press;
+    void limit.then(() => {
+      if (current(b, press) && !b.quiet && b.tuning === null && b.tunedPress === null && queuedPresses === 0 && !holdsZapTune(sourceId)) void runTune(b, press);
+    });
+  }
+  if (!tunesNow && !awaitsLimit && peekNowNext(target.ref) === undefined) holdNowNext(target.ref, ZAP_SETTLE_MS);
   void fetchNowNext(target.ref);
   // Nothing on screen moves when the parental lookup fails: the tune asks the gate itself.
   void showZapTarget(b, target, b.press).catch(() => undefined);
@@ -1946,9 +1983,10 @@ async function runTune(b: ZapBurst, press: number): Promise<void> {
  *
  * Presses step at once, one after another (N presses land N channels away), and each one
  * moves the title, banner and readout to its target over the picture still playing. A press on
- * its own tunes at once (except on a one-connection source); the presses that follow it within
- * ZAP_SETTLE_MS tune only once they go quiet, so the channels passed on the way never open a
- * stream or a Recent row.
+ * its own tunes at once (except on a one-connection source, or an Xtream one whose limit is not
+ * known yet: that one tunes once the answer allows more, or after the quiet); the presses that
+ * follow it within ZAP_SETTLE_MS tune only once they go quiet, so the channels passed on the way
+ * never open a stream or a Recent row.
  */
 export function zap(direction: 'up' | 'down'): Promise<Channel | undefined> {
   preloadEngineFor(usePlayerStore.getState().source?.url);
@@ -1980,6 +2018,7 @@ export function __resetPlayerForTests(): void {
   settingsCache = null;
   settingsPromise = null;
   lastSavedPosition = -1;
+  lastSave = Promise.resolve();
   finishedSavedFor = undefined;
   failedResolve = null;
   allowedRefKey = null;

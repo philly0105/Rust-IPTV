@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "Der Programmführer des Portals antwortet nicht. Es wird automatisch erneut versucht.",
   "guideNotAnswering": "Programmführer antwortet nicht",
   "guideNoData": "Noch keine Programmdaten für diese Sender. Fügen Sie eine XMLTV-Adresse hinzu oder aktualisieren Sie die EPG-Quellen.",
+  "guideNoDataHere": "Für diese Zeit gibt es keine Programmdaten.",
+  "guideBackToNow": "Zurück zu jetzt",
   "guideNoSources": "Noch keine Quellen",
   "guideNoSourcesHint": "Fügen Sie eine Playlist oder ein Portal hinzu, um dessen Programmführer zu sehen.",
   "previousDay": "Zum vorherigen Tag",

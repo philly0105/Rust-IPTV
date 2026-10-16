@@ -115,4 +115,15 @@ describe('SourceCard error line', () => {
     expect(screen.getByTestId('source-error').textContent).toContain('The playlist has no channels.');
     expect(screen.getByTestId('source-error').querySelector('details')).toBeNull();
   });
+
+  // L4-settings-3: with `flex-1` (basis 0) the buttons stayed beside the text and squeezed it
+  // to a few letters wide on a 390 px card. A 12rem basis makes the buttons wrap below instead.
+  it.each([REFUSED, 'The playlist has no channels.'])('gives the error text a basis so the buttons wrap on narrow cards (%#)', (error) => {
+    renderCard(error);
+    const text = screen.getByTestId('source-error').children[1]!;
+    expect(text.className).toContain('basis-48');
+    expect(text.className).not.toMatch(/\bflex-1\b/);
+    // Longer labels (German) wrap instead of running past the card's edge.
+    expect(screen.getByTestId('source-error').children[2]!.className).toContain('flex-wrap');
+  });
 });

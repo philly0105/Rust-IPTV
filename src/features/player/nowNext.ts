@@ -71,6 +71,8 @@ export function peekNowNext(ref: ItemRef, now = Date.now()): EpgNowNext | null |
  * stops on it. Each resolves true when the channel is to be asked, false when the burst moved on.
  */
 const holds = new Map<string, Promise<boolean>>();
+/** Lets a locked step's hold go once its PIN let it through (its tune waits on the guide answer). */
+const passes = new Map<string, () => void>();
 
 /** The channel on screen is `key`, and a step whose guide may be asked (a locked one shows none). */
 function stoppedOn(key: string): boolean {
@@ -92,19 +94,33 @@ export function holdNowNext(ref: ItemRef, dwellMs: number): void {
         resolve(stoppedOn(key));
         return;
       }
-      // Behind its PIN prompt: wait for what the prompt decides.
+      // Behind its PIN prompt: wait for what the prompt decides (the tune passes it on accept).
       const unsub = usePlayerStore.subscribe((st) => {
         if (st.source === s) return;
         unsub();
         resolve(stoppedOn(key));
+      });
+      passes.set(key, () => {
+        unsub();
+        resolve(true);
       });
     }, dwellMs);
   });
   holds.set(key, hold);
   // Decided: a later request for the channel is not held by it.
   void hold.then(() => {
-    if (holds.get(key) === hold) holds.delete(key);
+    if (holds.get(key) !== hold) return;
+    holds.delete(key);
+    passes.delete(key);
   });
+}
+
+/**
+ * The PIN prompt let `ref` through: a hold waiting on it is asked now. The tune waits for the
+ * guide answer before it plays, so waiting for the play itself would never end.
+ */
+export function passNowNext(ref: ItemRef): void {
+  passes.get(itemKey(ref))?.();
 }
 
 /**
@@ -198,5 +214,6 @@ export function __resetNowNextForTests(): void {
   cache.clear();
   pending.clear();
   holds.clear();
+  passes.clear();
   queryClient.removeQueries({ queryKey: ['epg.nowNext'] });
 }

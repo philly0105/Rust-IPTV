@@ -194,7 +194,14 @@ export const GuideRow = memo(function GuideRow({
           still sticks to the grid's own scroll. */}
       <div role="gridcell" className="relative overflow-x-clip" style={{ width: trackWidth }}>
         {programs === undefined ? (
-          <div className="absolute inset-1.5 rounded bg-surface-2/60" aria-hidden />
+          // Guide data still on its way: a cell-shaped skeleton, like the channel column's, so a row
+          // that waits after a fast fling does not read as an empty guide (L4-live-3).
+          <div data-testid="row-guide-pending" className="absolute inset-1.5 flex items-center rounded-md bg-surface-2/60" aria-hidden>
+            <span className="sticky flex w-44 max-w-[60%] flex-col gap-1.5 px-3" style={{ insetInlineStart: channelCol }}>
+              <Skeleton className="h-3" />
+              <Skeleton className="h-2.5 w-3/5 opacity-70" />
+            </span>
+          </div>
         ) : programs.length === 0 ? (
           <div className="absolute inset-1.5 flex items-center rounded border border-dashed border-divider text-xs text-fg-subtle">
             {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}

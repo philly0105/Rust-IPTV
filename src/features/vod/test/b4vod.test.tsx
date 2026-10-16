@@ -360,6 +360,14 @@ describe('SearchPage (B4-vod-D5, D6, D7, D9)', () => {
     expect(Number(grid.getAttribute('data-columns'))).toBeGreaterThan(0);
   });
 
+  it('L4-vod-3: posters show the rating chip, as the category grid does', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [{ ...movie(1), rating: 8.2 }, movie(2)], series: [] });
+    renderAt('/search?q=movie', [{ path: '/search', element: <SearchPage /> }]);
+    const grid = await screen.findByTestId('vod-search-movies');
+    expect(await within(grid).findByRole('link', { name: 'Movie 1, rated 8.2 of 10' })).toBeTruthy();
+    expect(within(grid).getByRole('link', { name: 'Movie 2' })).toBeTruthy();
+  });
+
   it('D5: back from a title, the results scroll to where they were', async () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [movie(1)], series: [] });
     rememberSpot('/search?q=movie', { scrollTop: 640 });

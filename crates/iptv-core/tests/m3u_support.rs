@@ -215,3 +215,25 @@ pub async fn stub(body: &str) -> Stub {
         _stop: tx,
     }
 }
+
+/// Panics unless `items_rank` (migration 0020) holds exactly one row per
+/// `items` row with the columns the search ranks and filters by. A drifted
+/// row would mis-rank or mis-filter search hits without an error.
+pub fn assert_items_rank(c: &rusqlite::Connection) {
+    let (items, rank, wrong): (i64, i64, i64) = c
+        .query_row(
+            "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM items_rank), \
+             (SELECT count(*) FROM items i LEFT JOIN items_rank r ON r.id = i.rowid \
+              WHERE r.id IS NULL OR r.source_id IS NOT i.source_id OR r.content_type IS NOT i.content_type \
+              OR r.category_id IS NOT i.category_id OR r.non_english IS NOT i.non_english \
+              OR r.title_len IS NOT length(i.title) OR r.position IS NOT i.position)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (rank, wrong),
+        (items, 0),
+        "items_rank: {rank} rows for {items} items, {wrong} missing or stale"
+    );
+}

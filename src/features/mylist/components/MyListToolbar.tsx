@@ -62,7 +62,8 @@ export function MyListToolbar({
           badge: nf.format(counts[f]),
         }))}
       />
-      <div className="flex w-full min-w-0 flex-wrap items-center gap-x-5 gap-y-2 lg:ms-auto lg:w-auto">
+      {/* L4-vod-5: below sm, Hide watched and the sort menu share one row; the menu takes the rest of it. */}
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-5 lg:ms-auto lg:w-auto">
         <SearchInput
           value={query}
           onChange={onQuery}
@@ -93,8 +94,8 @@ export function MyListToolbar({
           value={sort}
           onValueChange={(v) => onSort(v as MyListSort)}
           options={SORTS.map((s) => ({ value: s, label: t(SORT_KEY[s]) }))}
-          wrapperClassName="ms-auto"
-          className="h-9 min-w-[11rem]"
+          wrapperClassName="ms-auto min-w-0 flex-1 sm:flex-none"
+          className="h-9 sm:min-w-[11rem]"
           data-testid="mylist-sort"
         />
       </div>

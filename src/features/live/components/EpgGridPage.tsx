@@ -66,6 +66,7 @@ import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/feature
 // guide (Run 2 C5): jump to a date and time, guide search.
 import { GuideSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
+import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
 import { fitCellText, GRID_SHIFT_VAR, GuideRow, type GuideRowHandlers } from '../guide/GuideRow';
 import { useStable } from '../guide/useStable';
@@ -317,7 +318,8 @@ export function EpgGridPage() {
   usePrefetchSchedule();
 
   const sources = useRpcQuery('sources.list', undefined);
-  const sourceId = params.get('source') ?? sources.data?.[0]?.id ?? '';
+  const sourceId = params.get('source') ?? defaultGuideSource(sources.data) ?? '';
+  useEffect(() => rememberGuideSource(sourceId), [sourceId]);
   const categoryId = params.get('category') ?? undefined;
   const source = sources.data?.find((s) => s.id === sourceId);
   const kind: SourceKind | undefined = source?.kind;
@@ -1212,12 +1214,19 @@ export function EpgGridPage() {
                 data-testid="guide-no-data"
                 className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-fg-muted shadow-2 motion-safe:animate-fade-in"
               >
-                <span className="min-w-0 truncate" title={t('guideNoData')}>
-                  {t('guideNoData')}
+                {/* Away from now, an empty window is past the guide's end, not a missing guide (L4-live-1). */}
+                <span className="min-w-0 truncate" title={nowInWindow ? t('guideNoData') : t('guideNoDataHere')}>
+                  {nowInWindow ? t('guideNoData') : t('guideNoDataHere')}
                 </span>
-                <Link to="/settings/epg" className="shrink-0 text-accent hover:underline">
-                  {t('epgSettings')}
-                </Link>
+                {nowInWindow ? (
+                  <Link to="/settings/epg" className="shrink-0 text-accent hover:underline">
+                    {t('epgSettings')}
+                  </Link>
+                ) : (
+                  <button type="button" className="shrink-0 text-accent hover:underline" onClick={toNow}>
+                    {t('guideBackToNow')}
+                  </button>
+                )}
               </div>
             </div>
           ) : null}
@@ -1272,8 +1281,11 @@ const GuideHeader = memo(function GuideHeader({
       <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
         <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
       </div>
-      {slots.map((s, i) => (
-        <div role="columnheader" key={s} className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted" style={{ width: GRID_SLOT_PX }}>
+      {/* Keyed by place, not time: a window move at the edge of a sideways scroll relabels the
+          slots where they stand instead of moving them while the scroll makes up for it, which
+          counted as a layout shift on every move (L4-live-4). */}
+      {slots.map((_, i) => (
+        <div role="columnheader" key={i} className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted" style={{ width: GRID_SLOT_PX }}>
           {labels[i]}
         </div>
       ))}

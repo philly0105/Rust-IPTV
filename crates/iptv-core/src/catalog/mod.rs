@@ -471,8 +471,9 @@ impl<'c> CatalogWriter<'c> {
                 "CatalogWriter must run inside a transaction".into(),
             ));
         }
-        // Per-row FTS triggers are suspended for this source until `finish`;
-        // the index is updated in bulk instead (see migration 0002).
+        // Per-row FTS and items_rank triggers are suspended for this source
+        // until `finish`; both are updated in bulk instead (see migrations
+        // 0002 and 0020).
         conn.execute(
             "INSERT OR IGNORE INTO fts_suspend (source_id) VALUES (?1)",
             [source_id],
@@ -508,6 +509,10 @@ impl<'c> CatalogWriter<'c> {
         for ct in types {
             conn.execute(
                 "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
+                params![source_id, ct.as_str()],
+            )?;
+            conn.execute(
+                "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1 AND content_type = ?2)",
                 params![source_id, ct.as_str()],
             )?;
             conn.execute(
@@ -783,9 +788,15 @@ impl<'c> CatalogWriter<'c> {
             // C2: hidden channels (kept across the rewrite) leave the counts.
             recount_categories(self.conn, &self.source_id, *ct)?;
         }
+        // The search index and the ranking rows of the rewritten types, after
+        // the verdict updates above (items_rank copies non_english).
         for ct in &self.types {
             self.conn.execute(
                 "INSERT INTO items_fts (rowid, title) SELECT rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
+                params![self.source_id, ct.as_str()],
+            )?;
+            self.conn.execute(
+                "INSERT INTO items_rank (id, source_id, content_type, category_id, non_english, title_len, position) SELECT rowid, source_id, content_type, category_id, non_english, length(title), position FROM items WHERE source_id = ?1 AND content_type = ?2",
                 params![self.source_id, ct.as_str()],
             )?;
         }
@@ -1568,8 +1579,9 @@ pub fn search_named(
 
 /// [`search_named`] for several groups of content types at once (the
 /// `catalog.search` lists: live and radio, movies, series), up to `limit`
-/// rows per group, in one ranked pass: one FTS match and one sort for every
-/// group instead of one each, partitioned with `ROW_NUMBER()`. When the
+/// rows per group, in one ranked pass: one FTS match for every group instead
+/// of one each, ranked on the narrow `items_rank` rows with a top-`limit`
+/// per group (ties by rowid), then the full rows of the winners. When the
 /// word-prefix match finds nothing in any group, every group falls back to
 /// a substring match, again one statement for all of them, over the title
 /// index rather than the table (wide rows: URLs, JSON). A group with
@@ -1595,10 +1607,11 @@ pub fn search_groups(
     let fts = fts_query(text);
 
     let channels = types.iter().any(|t| channeledit::is_channel_type(*t));
-    // Every filter tests columns of `items i` alone, so the ranking pass
+    // Every filter tests columns of `items i` alone, and only columns that
+    // items_rank copies, so the word-prefix pass can rank on items_rank and
     // reads no category row per match (about 30% of a broad prefix), except
     // the per-row English-only rule while a catalog is pending (it needs
-    // the category name).
+    // the title and the category name, so that case ranks on items).
     let english = english_clause(conn, english_only)?;
     let ranking_join = english == language::ENGLISH_ONLY_SQL;
     let mut filter = String::from(english);
@@ -1659,9 +1672,10 @@ pub fn search_groups(
     };
     // Ranks each group's matching rows on their rowids alone and then reads
     // the full rows of the `limit` best, so the window sorts small records
-    // rather than every match's URLs and JSON (a third faster on a broad
-    // prefix). `body` is the match: joins and WHERE after `items i` (and
-    // `c` when `ranking_join`).
+    // rather than every match's URLs and JSON. Used by the substring pass
+    // and by the word-prefix pass while the English-only rule is pending.
+    // `body` is the match: joins and WHERE after `items i` (and `c` when
+    // `ranking_join`).
     let ranked = |group: &str, order: &str, body: &str| -> String {
         let (cols, join) = SELECT_NAMED
             .split_once(" FROM items i")
@@ -1687,16 +1701,47 @@ pub fn search_groups(
         Ok(())
     };
 
-    if let Some(fq) = &fts {
+    // The word-prefix pass ranks on items_rank (narrow rows, migration
+    // 0020) and keeps each group's best `limit` with a bounded ORDER BY ...
+    // LIMIT per group over one materialized match set, instead of a
+    // ROW_NUMBER() window that sorts every match: "th" on 215k items has 56k
+    // matches. Ties end on the rowid. `filter` names only columns that
+    // items_rank copies from items (rowid, source_id, content_type,
+    // category_id, non_english).
+    let ranked_fts = |body_filter: &str| -> String {
         let group = group_of(&|_| true);
-        let sql = ranked(
-            &group,
-            "items_fts.rank, length(i.title), i.position",
-            &format!(
-                "JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{}{filter}",
-                scope("")
-            ),
-        );
+        let (cols, join) = SELECT_NAMED
+            .split_once(" FROM items i")
+            .unwrap_or((SELECT_NAMED, ""));
+        let tops: Vec<String> = groups
+            .iter()
+            .enumerate()
+            .filter(|(_, ts)| !ts.is_empty())
+            .map(|(g, _)| {
+                format!("SELECT * FROM (SELECT rid, grp, r, l, p FROM m WHERE grp = {g} ORDER BY r, l, p, rid LIMIT {limit})")
+            })
+            .collect();
+        format!(
+            "WITH m AS MATERIALIZED (SELECT i.rowid AS rid, {group} AS grp, items_fts.rank AS r, i.title_len AS l, i.position AS p FROM items_fts CROSS JOIN items_rank i ON i.rowid = items_fts.rowid WHERE items_fts MATCH ?1{body_filter}) {cols}, t.grp FROM ({}) t CROSS JOIN items i ON i.rowid = t.rid{join} ORDER BY t.grp, t.r, t.l, t.p, t.rid",
+            tops.join(" UNION ALL ")
+        )
+    };
+
+    if let Some(fq) = &fts {
+        let sql = if ranking_join {
+            // The pending English-only rule reads the title and the
+            // category name, which items_rank lacks.
+            ranked(
+                &group_of(&|_| true),
+                "items_fts.rank, length(i.title), i.position",
+                &format!(
+                    "JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{}{filter}",
+                    scope("")
+                ),
+            )
+        } else {
+            ranked_fts(&format!("{}{filter}", scope("")))
+        };
         run(sql, fq.clone().into(), &mut out)?;
     }
     // The substring pass is for text that starts no word anywhere (inside

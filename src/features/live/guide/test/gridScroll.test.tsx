@@ -5,7 +5,7 @@
  * and closes once the cell scrolls away, the sticky "No guide data" label, and the no-guide
  * notice that neither blinks nor moves the grid while the next window loads.
  */
-import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
@@ -13,6 +13,7 @@ import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, extendDirection, GRID_EXTEND_EDGE_PX, GRID_SLOT_PX, nowLead } from '../../components/EpgGridPage';
 import { HOUR } from '../../lib/epgTime';
+import { __resetGuideSourceForTests, rememberGuideSource } from '../lastSource';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -265,5 +266,69 @@ describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)',
     await waitFor(() => expect((rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === laterFrom)).toBe(true));
     await waitFor(() => expect(atParam()).toBe(at + 3 * HOUR));
     expect(screen.getByTestId('guide-no-data')).toBe(notice);
+  });
+
+  it('an empty window away from now says the guide has nothing then, and offers Back to now (L4-live-1)', async () => {
+    const at = defaultStart(Date.now()) + 48 * HOUR;
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const notice = await screen.findByTestId('guide-no-data');
+    expect(notice.textContent).toContain('Nothing in the guide for this time.');
+    expect(notice.textContent).not.toContain('Add an XMLTV address');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Back to now' }));
+    await waitFor(() => expect(screen.getByTestId('guide-no-data').textContent).toContain('No guide data for these channels yet.'));
+    expect(within(screen.getByTestId('guide-no-data')).getByRole('link', { name: 'EPG settings' })).toBeTruthy();
+  });
+});
+
+describe('rows waiting for guide data (L4-live-3)', () => {
+  it('show a cell-shaped skeleton past the channel column, not a blank band', async () => {
+    rpc.handlers['epg.grid'] = () => new Promise(() => undefined);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const pending = await screen.findAllByTestId('row-guide-pending');
+    expect(pending.length).toBe(CHANNELS.length);
+    const lines = pending[0]!.firstElementChild as HTMLElement;
+    expect(lines.className).toContain('sticky');
+    expect(lines.style.insetInlineStart).toBe('220px');
+    expect(lines.querySelectorAll('.skeleton-surface').length).toBe(2);
+    expect(screen.queryByTestId('no-guide-label')).toBeNull();
+  });
+});
+
+describe('time ruler (L4-live-4)', () => {
+  it('a window move relabels the slots in place instead of moving them', async () => {
+    const at = defaultStart(Date.now());
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findAllByTestId('no-guide-label');
+    const slots = () => screen.getAllByRole('columnheader').slice(1);
+    const before = slots();
+    const firstLabel = before[0]!.textContent;
+    fireEvent.click(screen.getByRole('button', { name: '3 hours later' }));
+    await waitFor(() => expect(slots()[0]!.textContent).not.toBe(firstLabel));
+    // The same nodes in the same places: only their text changed (no layout shift).
+    slots().forEach((el, i) => expect(el).toBe(before[i]));
+  });
+});
+
+describe('the source the guide opens on (L4-live-2)', () => {
+  afterEach(() => __resetGuideSourceForTests());
+  const two = () => [
+    { id: 'src1', kind: 'm3u', name: 'Demo', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } },
+    { id: 'src2', kind: 'm3u', name: 'Big', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } },
+  ];
+  const askedSources = () => (rpc.of('catalog.channels') as { sourceId: string }[]).map((a) => a.sourceId);
+
+  it('without ?source, opens on the source last browsed on the Live page', async () => {
+    rpc.handlers['sources.list'] = two;
+    rememberGuideSource('src2');
+    renderGuide({ path: '/epg', routes: GRID });
+    await waitFor(() => expect(askedSources()).toContain('src2'));
+    expect(askedSources()).not.toContain('src1');
+  });
+
+  it('falls back to the first source once the remembered one is gone', async () => {
+    rpc.handlers['sources.list'] = two;
+    rememberGuideSource('gone');
+    renderGuide({ path: '/epg', routes: GRID });
+    await waitFor(() => expect(askedSources()).toContain('src1'));
   });
 });

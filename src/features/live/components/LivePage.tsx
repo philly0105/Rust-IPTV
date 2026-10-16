@@ -71,6 +71,7 @@ import { openChannelSource, playChannel } from '../lib/playback';
 import { needsFallback } from '../lib/shortEpg';
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
+import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
 import { ChannelLogo } from './ChannelLogo';
@@ -163,6 +164,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     setDebouncedSearch('');
   }, []);
   useEffect(() => clearSearch(), [sourceId, categoryId, clearSearch]);
+  // The rail's TV guide link opens the guide on the source browsed here (L4-live-2).
+  useEffect(() => rememberGuideSource(sourceId), [sourceId]);
   /** Focus the list cursor once the committed search's rows are on screen. */
   const focusListPending = useRef(false);
 

@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "포털의 TV 가이드가 응답하지 않습니다. 자동으로 다시 시도하는 중입니다.",
   "guideNotAnswering": "가이드 응답 없음",
   "guideNoData": "이 채널들의 가이드 데이터가 아직 없습니다. XMLTV 주소를 추가하거나 EPG 소스를 새로 고치세요.",
+  "guideNoDataHere": "이 시간대에는 가이드에 아무것도 없습니다.",
+  "guideBackToNow": "지금으로 돌아가기",
   "guideNoSources": "아직 소스가 없습니다",
   "guideNoSourcesHint": "TV 가이드를 보려면 재생목록이나 포털을 추가하세요.",
   "previousDay": "전날",

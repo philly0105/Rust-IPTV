@@ -74,6 +74,8 @@
   "portalGuideUnavailable": "Przewodnik portalu nie odpowiada. Trwa automatyczne ponawianie.",
   "guideNotAnswering": "Przewodnik nie odpowiada",
   "guideNoData": "Brak danych przewodnika dla tych kanałów. Dodaj adres XMLTV lub odśwież źródła EPG.",
+  "guideNoDataHere": "Brak programów w przewodniku dla tego czasu.",
+  "guideBackToNow": "Wróć do teraz",
   "guideNoSources": "Brak źródeł",
   "guideNoSourcesHint": "Dodaj listę odtwarzania lub portal, aby zobaczyć przewodnik TV.",
   "previousDay": "Poprzedni dzień",

@@ -197,3 +197,90 @@ fn a_database_that_already_ran_0007_keeps_its_guide() {
         .unwrap();
     assert_eq!(fetched, FEEDS as i64);
 }
+
+/// Migration 0020 on a 220k-item library (95k channels on one source, 105k
+/// movies and 20k series on another, schema 19): it fills `items_rank` with
+/// one row per item, equal to the projection of `items`, at an upgrade cost
+/// of 0.1-0.2 s in release.
+#[test]
+fn migration_0020_fills_items_rank_on_a_220k_library() {
+    #[cfg(debug_assertions)]
+    const BUDGET: Duration = Duration::from_secs(6);
+    #[cfg(not(debug_assertions))]
+    const BUDGET: Duration = Duration::from_secs(1);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v19.db");
+    let built = Instant::now();
+    {
+        let mut c = Connection::open(&path).unwrap();
+        iptv_core::db::configure(&mut c).unwrap();
+        let tx = c.transaction().unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 19) {
+            tx.execute_batch(m.sql).unwrap();
+            tx.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                [m.version],
+            )
+            .unwrap();
+        }
+        tx.execute_batch(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('live', 'm3u', 'Live', '{}'), ('vod', 'xtream', 'VOD', '{}');
+             INSERT INTO fts_suspend(source_id) VALUES ('live'), ('vod');",
+        )
+        .unwrap();
+        {
+            let mut ins = tx
+                .prepare(
+                    "INSERT INTO items(source_id, content_type, item_id, category_id, title, url, extra_json, position, non_english)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                )
+                .unwrap();
+            for (sid, ct, n) in [
+                ("live", "live", 95_000),
+                ("vod", "movie", 105_000),
+                ("vod", "series", 20_000),
+            ] {
+                for i in 0..n {
+                    ins.execute(params![
+                        sid,
+                        ct,
+                        format!("{ct}{i}"),
+                        format!("c{}", i % 150),
+                        format!("UK The Title Number {i}"),
+                        format!("http://stream.example/{ct}/{i}.ts"),
+                        r#"{"plot":"A plot line as wide as a provider's."}"#,
+                        i,
+                        i % 4 == 0,
+                    ])
+                    .unwrap();
+                }
+            }
+        }
+        tx.execute("DELETE FROM fts_suspend", []).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(schema_version(&c).unwrap(), 19);
+    }
+    eprintln!(
+        "migration_perf: built v19 with 220k items in {:?}",
+        built.elapsed()
+    );
+    let (took, peak) = upgrade(&path);
+    eprintln!(
+        "migration_perf: 0020 on 220k items took {took:?}, SQLite heap peak {} MB",
+        peak >> 20
+    );
+    let c = Connection::open(&path).unwrap();
+    let (items, rank, wrong): (i64, i64, i64) = c
+        .query_row(
+            "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM items_rank), \
+             (SELECT count(*) FROM items i LEFT JOIN items_rank r ON r.id = i.rowid \
+              WHERE r.id IS NULL OR r.source_id IS NOT i.source_id OR r.content_type IS NOT i.content_type \
+              OR r.category_id IS NOT i.category_id OR r.non_english IS NOT i.non_english \
+              OR r.title_len IS NOT length(i.title) OR r.position IS NOT i.position)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((items, rank, wrong), (220_000, 220_000, 0));
+    assert!(took < BUDGET, "0020 took {took:?} (budget {BUDGET:?})");
+}

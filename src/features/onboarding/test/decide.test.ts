@@ -3,7 +3,7 @@
 // version silently), version ordering, and which releases What's new lists.
 import { describe, expect, it } from 'vitest';
 
-import { compareVersions, onboardingAction, releasesToShow } from '../decide';
+import { compareVersions, countUsableSources, onboardingAction, releasesToShow } from '../decide';
 
 const V = '0.1.0';
 const decide = (lastSeenVersion: string, tourCompleted: boolean, sourceCount: number, version = V) =>
@@ -157,5 +157,19 @@ describe('releasesToShow', () => {
     const copy = [...notes];
     releasesToShow(notes, '0.3.0', null);
     expect(notes).toEqual(copy);
+  });
+});
+
+describe('countUsableSources (L4-settings-2)', () => {
+  it('skips sources whose every import failed, keeps imported and importing ones', () => {
+    expect(
+      countUsableSources([
+        { lastError: 'connect timeout' },
+        { lastRefreshAt: '2026-10-16T10:00:00Z', lastError: 'later refresh failed' },
+        {},
+        { lastRefreshAt: '2026-10-16T10:00:00Z' },
+      ]),
+    ).toBe(3);
+    expect(countUsableSources([{ lastError: 'auth' }])).toBe(0);
   });
 });

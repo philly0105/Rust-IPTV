@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "入口網站的節目表沒有回應，正在自動重試。",
   "guideNotAnswering": "節目表沒有回應",
   "guideNoData": "這些頻道尚無節目表資料。請新增 XMLTV 位址或重新整理 EPG 來源。",
+  "guideNoDataHere": "節目表中沒有此時段的內容。",
+  "guideBackToNow": "回到現在",
   "guideNoSources": "尚無播放來源",
   "guideNoSourcesHint": "新增播放清單或入口網站後，即可查看其節目表。",
   "previousDay": "上一天",

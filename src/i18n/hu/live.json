@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "A portál műsorújsága nem válaszol. Automatikus újrapróbálkozás folyamatban.",
   "guideNotAnswering": "A műsorújság nem válaszol",
   "guideNoData": "Ezekhez a csatornákhoz még nincsenek műsoradatok. Adjon meg egy XMLTV-címet, vagy frissítse az EPG-forrásokat.",
+  "guideNoDataHere": "Erre az időszakra nincs semmi a műsorújságban.",
+  "guideBackToNow": "Vissza a mostanihoz",
   "guideNoSources": "Még nincs forrás",
   "guideNoSourcesHint": "A műsorújság megtekintéséhez adjon hozzá egy lejátszási listát vagy portált.",
   "previousDay": "Előző nap",

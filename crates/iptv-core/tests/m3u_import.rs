@@ -147,6 +147,14 @@ async fn url_import_sha_skip_and_failed_refresh_keeps_catalog() {
     stub.set_body(&gen_m3u(450, 3));
     let changed = sources::refresh(env.state.clone(), &src.id).await.unwrap();
     assert_eq!(changed.channel_count, 450);
+    // The search ranking rows follow the rewrite (migration 0020).
+    env.state
+        .db_call(|c| {
+            assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
     let cats = r
         .dispatch(
             env.state.clone(),
@@ -195,6 +203,13 @@ async fn url_import_sha_skip_and_failed_refresh_keeps_catalog() {
     stub.set_fail(false);
     let ok = sources::refresh(env.state.clone(), &src.id).await.unwrap();
     assert!(ok.last_error.is_none());
+    env.state
+        .db_call(|c| {
+            assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
 
     // No temp files left behind.
     let tmp = env.dir.path().join("tmp");

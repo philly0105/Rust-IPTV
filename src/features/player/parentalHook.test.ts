@@ -249,6 +249,19 @@ describe('zapping past a locked channel (Ask mode)', () => {
     expect(useMediaStore.getState().osd?.primary).toBe('666');
   });
 
+  it('on a one-connection account, plays the locked neighbour once the PIN is accepted after the quiet (L4-zap-gap)', async () => {
+    // The tune waits for the quiet, and for the guide answer held behind the PIN prompt.
+    handlers['account.status'] = () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, maxConnections: 1, checkedAt: new Date().toISOString() });
+    await store.playChannel(channel('101'));
+    await vi.waitFor(() => expect(calls('account.status')).toHaveLength(1));
+    const pending = zap('down');
+    await vi.waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
+    settleGate(useGateStore.getState().queue[0]!.id, true);
+    expect((await pending)?.ref.itemId).toBe('666');
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
+    expect(calls('xtream.streamUrl').map((a) => (a as { ref: ItemRef }).ref.itemId)).toEqual(['101', '666']);
+  });
+
   it('stays put at the end of the list when everything past the refusal is locked', async () => {
     order = ['101', '666', '667'];
     await store.playChannel(channel('101'));

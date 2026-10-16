@@ -673,6 +673,9 @@ describe('zap bursts, catch-up zapping and channel renames', () => {
       const n = Number((a as { ref: ItemRef }).ref.itemId) - 100;
       return { prev: n > 0 ? channel(n - 1) : null, next: n < 20 ? channel(n + 1) : null };
     };
+    // An Xtream account that allows two connections (an unknown limit holds every press).
+    queryClient.removeQueries({ queryKey: ['account.status'] });
+    handlers['account.status'] = () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, maxConnections: 2, checkedAt: new Date().toISOString() });
   });
 
   it('three quick presses land three channels away, move the title at once and open one stream', async () => {
@@ -862,6 +865,73 @@ describe('zap bursts, catch-up zapping and channel renames', () => {
       expect((await Promise.all(presses)).map((c) => c?.number)).toEqual([3, 3]);
       expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }, { ref: channel(3).ref }]);
     });
+
+    it('unknown limit on an Xtream source: a burst opens only where it stops, and account.status is asked once (L4-zap-gap)', async () => {
+      // A source just added: the status request is still out when the burst starts.
+      let answer: (v: unknown) => void = () => undefined;
+      handlers['account.status'] = () => new Promise((r) => (answer = r));
+      queryClient.removeQueries({ queryKey: rpcKey('account.status', { sourceId: 's1' }) });
+      await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+      await vi.waitFor(() => expect(calls('account.status')).toHaveLength(1));
+      vi.useFakeTimers();
+      const presses = [zap('down')];
+      await step(80);
+      presses.push(zap('down'));
+      await step(80);
+      presses.push(zap('down'));
+      await step(80);
+      expect(usePlayerStore.getState().source?.title).toBe('Channel 4');
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(1).ref }]);
+      await step(store.ZAP_SETTLE_MS + 50);
+      expect((await Promise.all(presses)).map((c) => c?.number)).toEqual([4, 4, 4]);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(1).ref }, { ref: channel(4).ref }]);
+      answer(limit(1)());
+      await step(50);
+      // Every press joined the request the tune had started.
+      expect(calls('account.status')).toEqual([{ sourceId: 's1' }]);
+      expect(calls('xtream.streamUrl')).toHaveLength(2);
+    });
+
+    it('unknown limit: a single press opens as soon as the answer allows two, before the quiet (L4-zap-gap)', async () => {
+      let answer: (v: unknown) => void = () => undefined;
+      handlers['account.status'] = () => new Promise((r) => (answer = r));
+      queryClient.removeQueries({ queryKey: rpcKey('account.status', { sourceId: 's1' }) });
+      await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+      await vi.waitFor(() => expect(calls('account.status')).toHaveLength(1));
+      rpcMock.mockClear();
+      vi.useFakeTimers();
+      const press = zap('down');
+      await step(50);
+      expect(usePlayerStore.getState().source?.title).toBe('Channel 2');
+      expect(calls('xtream.streamUrl')).toEqual([]);
+      answer(limit(2)());
+      await step(50);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      await step(store.ZAP_SETTLE_MS + 50);
+      expect((await press)?.number).toBe(2);
+      expect(calls('xtream.streamUrl')).toHaveLength(1);
+      expect(calls('account.status')).toEqual([]);
+    });
+
+    it('an M3U source opens a single press at once and never asks account.status (L4-zap-gap)', async () => {
+      const m3u = (n: number): Channel => ({ ...channel(n), ref: { ...channel(n).ref, sourceId: 'm1' }, url: `http://m/${n}.ts` });
+      handlers['sources.get'] = () => ({ id: 'm1', kind: 'm3u', m3u: { headers: {} } });
+      handlers['catalog.item'] = (a) => m3u(Number((a as { ref: ItemRef }).ref.itemId) - 100);
+      handlers['catalog.neighbors'] = (a) => {
+        const n = Number((a as { ref: ItemRef }).ref.itemId) - 100;
+        return { prev: m3u(n - 1), next: m3u(n + 1) };
+      };
+      delete handlers['account.status'];
+      queryClient.removeQueries({ queryKey: rpcKey('account.status', { sourceId: 'm1' }) });
+      await playItem({ title: 'Channel 1', isLive: true, ref: m3u(1).ref, sourceKind: 'm3u' });
+      vi.useFakeTimers();
+      const press = zap('down');
+      await step(80);
+      expect(usePlayerStore.getState().source?.url).toBe('http://m/2.ts');
+      await step(store.ZAP_SETTLE_MS + 50);
+      expect((await press)?.number).toBe(2);
+      expect(calls('account.status')).toEqual([]);
+    });
   });
 });
 
@@ -925,6 +995,48 @@ describe('settings and the first-frame watchdog', () => {
     store.setPaused(true);
     await vi.advanceTimersByTimeAsync(store.STARTUP_TIMEOUT_MS * 2);
     expect(usePlayerStore.getState().status).toBe('paused');
+  });
+});
+
+describe('the open page after a stop from the player (L4-player-1)', () => {
+  it('refetches an active positions.get once the stop\'s positions.set has landed; a 5 s tick does not', async () => {
+    const { QueryObserver } = await import('@tanstack/react-query');
+    const ref = vod('1').ref!;
+    const key = rpcKey('positions.get', { ref });
+    let stored = 0;
+    let land: () => void = () => undefined;
+    handlers['positions.set'] = (a) =>
+      new Promise<void>((resolve) => {
+        land = () => {
+          stored = (a as { positionSeconds: number }).positionSeconds;
+          resolve();
+        };
+      });
+    handlers['positions.get'] = () => (stored ? { ref, positionSeconds: stored, updatedAt: '', watched: false } : null);
+    // A VOD detail page left open behind the mini player.
+    const page = new QueryObserver(queryClient, { queryKey: key, queryFn: () => rpcMock('positions.get', { ref }) as Promise<unknown> });
+    const unsub = page.subscribe(() => undefined);
+    await vi.waitFor(() => expect(queryClient.getQueryState(key)?.status).toBe('success'));
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportStatus('playing');
+    store.reportProgress(80, 1000);
+    rpcMock.mockClear();
+    store.flushProgress(); // what the 5 s saver runs
+    land();
+    await flush();
+    expect(calls('positions.set')).toEqual([expect.objectContaining({ positionSeconds: 80 })]);
+    expect(calls('positions.get')).toEqual([]);
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
+
+    store.reportProgress(120, 1000);
+    usePlayerStore.getState().stop();
+    await flush();
+    // Not while the save is in flight: that would bring back the previous position.
+    expect(calls('positions.get')).toEqual([]);
+    land();
+    await vi.waitFor(() => expect(queryClient.getQueryData(key)).toMatchObject({ positionSeconds: 120 }));
+    expect(calls('positions.get')).toHaveLength(1);
+    unsub();
   });
 });
 

@@ -69,6 +69,19 @@ describe('OnboardingHost', () => {
     expect(whatsNew()).toBeNull();
   });
 
+  it('L4-settings-2: a source whose first import failed does not start the tour; once it imports, it does', async () => {
+    seed({ lastSeenVersion: h.VERSION, tourCompleted: false, sources: 1 });
+    core.state.sources = core.state.sources.map((s) => ({ ...s, lastError: 'connect timeout', lastErrorCode: 'timeout' as const }));
+    mount();
+    await waitFor(() => expect(core.calls.some((c) => c.cmd === 'sources.list')).toBe(true));
+    await sleep(START_DELAY_MS + IDLE_POLL_MS + 300);
+    expect(tour()).toBeNull();
+
+    core.addSource();
+    await act(() => queryClient.invalidateQueries({ queryKey: rpcKey('sources.list') }));
+    await waitFor(() => expect(tour()).toBeTruthy(), SHOW);
+  });
+
   it('rule A: skipping the tour stores tourCompleted and it does not come back', async () => {
     seed({ lastSeenVersion: h.VERSION, tourCompleted: false, sources: 1 });
     mount();

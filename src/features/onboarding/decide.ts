@@ -22,7 +22,17 @@
  * must stay small.
  */
 
-import type { Settings } from '@/api/types';
+import type { Settings, Source } from '@/api/types';
+
+/**
+ * The sources that count as "a source exists": one that has imported at least
+ * once, or is still on its first import. A source whose every import failed
+ * has nothing to show, so it neither starts the tour over an empty app nor
+ * counts as an upgrade (L4-settings-2).
+ */
+export function countUsableSources(sources: readonly Pick<Source, 'lastRefreshAt' | 'lastError'>[]): number {
+  return sources.filter((s) => s.lastRefreshAt !== undefined || !s.lastError).length;
+}
 
 export interface OnboardingInput {
   /** The running app version (`app.info.version`). */

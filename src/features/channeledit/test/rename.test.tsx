@@ -31,14 +31,15 @@ const lastToast = () => useToastStore.getState().toasts.at(-1);
 const input = () => screen.getByTestId<HTMLInputElement>('channel-rename-input');
 const save = () => screen.getByTestId<HTMLButtonElement>('channel-rename-save');
 
-/** Mounts the host, opens the dialog for `channel` and waits until Save is ready. */
+/** Mounts the host, opens the dialog for `channel` and waits until the edits answered. */
 async function open(channel: Channel = bbc) {
   const view = renderUi(<ChannelEditDialogHost />, queryClient);
   act(() => {
     expect(openRenameDialog(channel)).toBe(true);
   });
   await screen.findByTestId('channel-rename-dialog');
-  await waitFor(() => expect(save().disabled).toBe(false));
+  // Save is no longer disabled while the edits load (L4-live-5): wait for the provider's name.
+  await waitFor(() => expect(screen.getByTestId('channel-rename-provider').textContent).toContain("Provider's name"));
   return view;
 }
 
@@ -98,6 +99,28 @@ describe('rename dialog', () => {
     fireEvent.submit(input().form!);
     await closed();
     expect(core.nameOf(bbc.ref)).toBe('My News');
+  });
+
+  it('Enter pressed before the edits answer saves once they do (L4-live-5)', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    core.override('channels.edits', async (a) => {
+      await gate;
+      return core.base('channels.edits')(a);
+    });
+    renderUi(<ChannelEditDialogHost />, queryClient);
+    act(() => {
+      expect(openRenameDialog(bbc)).toBe(true);
+    });
+    await screen.findByTestId('channel-rename-dialog');
+    expect(save().disabled).toBe(false);
+    type('My News');
+    fireEvent.submit(input().form!);
+    expect(core.callsOf('channels.rename')).toEqual([]);
+    expect(screen.getByTestId('channel-rename-dialog')).toBeTruthy();
+    release();
+    await closed();
+    expect(core.callsOf('channels.rename')).toEqual([{ ref: bbc.ref, name: 'My News' }]);
   });
 
   it('closes without a call when the name did not change', async () => {

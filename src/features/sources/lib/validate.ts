@@ -46,11 +46,15 @@ export function looksLikeFullPortal(url: string): boolean {
 
 export type UrlCheck = { ok: true; url: string } | { ok: false; error: string };
 
-/** Accepts http(s) URLs only; trims; adds `http://` when the scheme is missing. */
+/**
+ * Accepts http(s) URLs only; trims; adds `http://` when the scheme is missing.
+ * A scheme typed with one slash (`http:/host`, `htp:/host`) is still a scheme:
+ * prefixing it would turn the scheme into the host name.
+ */
 export function checkHttpUrl(raw: string): UrlCheck {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, error: 'errorRequired' };
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   let parsed: URL;
   try {
     parsed = new URL(withScheme);
@@ -59,7 +63,8 @@ export function checkHttpUrl(raw: string): UrlCheck {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { ok: false, error: 'errorUrlScheme' };
   if (!parsed.hostname) return { ok: false, error: 'errorUrlInvalid' };
-  return { ok: true, url: withScheme };
+  // `http:/host` parses as `http://host/`; send the repaired form.
+  return { ok: true, url: /^[a-z][a-z0-9+.-]*:\/\//i.test(withScheme) ? withScheme : parsed.href };
 }
 
 /**

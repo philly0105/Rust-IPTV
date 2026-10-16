@@ -7,7 +7,8 @@
  * the English strings) are lazy chunks fetched when one opens.
  *
  * The decision runs whenever its inputs change: `settings.get`, `app.info`
- * and `sources.list` (so adding the first source starts the tour). Each
+ * and `sources.list` (so adding the first source starts the tour; one whose
+ * imports all failed does not, see `countUsableSources`). Each
  * automatic overlay opens at most once per session, even when storing its
  * marker fails, and only while the app is idle: no modal dialog open (the
  * add-source dialog, a PIN prompt), no fullscreen video, the window visible.
@@ -17,7 +18,7 @@ import { lazy, Suspense, useEffect, useMemo, type JSX } from 'react';
 
 import { useRpcQuery } from '@/api/query';
 
-import { onboardingAction } from './decide';
+import { countUsableSources, onboardingAction } from './decide';
 import { saveOnboarding } from './persist';
 import { closeOverlay, showOverlay, useOnboardingStore } from './store';
 
@@ -65,7 +66,7 @@ function useStartupDecision(): void {
   const version = info.data?.version;
   const lastSeenVersion = settings.data?.lastSeenVersion;
   const tourCompleted = settings.data?.tourCompleted;
-  const sourceCount = sources.data?.length;
+  const sourceCount = sources.data ? countUsableSources(sources.data) : undefined;
 
   const action = useMemo(
     () =>

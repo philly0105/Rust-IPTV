@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "ポータルの番組表が応答していません。自動的に再試行しています。",
   "guideNotAnswering": "番組表が応答していません",
   "guideNoData": "これらのチャンネルの番組表データはまだありません。XMLTVのアドレスを追加するか、EPGソースを更新してください。",
+  "guideNoDataHere": "この時間帯の番組表データはありません。",
+  "guideBackToNow": "現在に戻る",
   "guideNoSources": "ソースがまだありません",
   "guideNoSourcesHint": "番組表を見るには、プレイリストまたはポータルを追加してください。",
   "previousDay": "前日",

@@ -62,9 +62,16 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
   const fieldError = failure ?? (over || touched ? invalidText : null);
   const radio = channel.ref.contentType === 'radio';
 
+  // Save (or Enter) before the edits answer waits for them rather than being dropped (L4-live-5).
+  const [queued, setQueued] = useState(false);
   const save = async (e?: FormEvent) => {
     e?.preventDefault();
     if (saving) return;
+    if (!known) {
+      setQueued(true);
+      return;
+    }
+    setQueued(false);
     setTouched(true);
     setFailure(null);
     if (plan.kind === 'invalid') {
@@ -89,6 +96,12 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
     }
   };
 
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (queued && known) void saveRef.current();
+  }, [queued, known]);
+
   const fillProvider = () => {
     setValue(provider);
     setFailure(null);
@@ -112,8 +125,7 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
             type="submit"
             form={formId}
             variant="primary"
-            loading={saving}
-            disabled={!known}
+            loading={saving || queued}
             data-testid="channel-rename-save"
           >
             {t('save')}

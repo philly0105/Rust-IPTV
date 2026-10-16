@@ -206,6 +206,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0019_guide_search_speed",
         sql: include_str!("migrations/0019_guide_search_speed.sql"),
     },
+    // catalog search: items_rank, the narrow ranking rows (loop 4).
+    Migration {
+        version: 20,
+        name: "0020_search_rank",
+        sql: include_str!("migrations/0020_search_rank.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -937,12 +943,36 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1);
+        let rank: (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT r.source_id, r.content_type, r.title_len, r.position FROM items_rank r JOIN items i ON i.rowid = r.id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            rank,
+            ("s".into(), "live".into(), 10, 0),
+            "items_rank follows an insert"
+        );
+        conn.execute("UPDATE items SET title = 'BBC One', position = 4", [])
+            .unwrap();
+        let rank: (i64, i64) = conn
+            .query_row("SELECT title_len, position FROM items_rank", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(rank, (7, 4), "items_rank follows an update");
         conn.execute("DELETE FROM sources WHERE id = 's'", [])
             .unwrap();
         let n: i64 = conn
             .query_row("SELECT count(*) FROM items", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0, "ON DELETE CASCADE removes items");
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM items_rank", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "and their items_rank rows");
     }
 
     #[test]

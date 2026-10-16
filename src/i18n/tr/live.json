@@ -66,6 +66,8 @@
   "portalGuideUnavailable": "Portalın rehberi yanıt vermiyor. Otomatik olarak yeniden deneniyor.",
   "guideNotAnswering": "Rehber yanıt vermiyor",
   "guideNoData": "Bu kanallar için henüz rehber verisi yok. Bir XMLTV adresi ekleyin veya EPG kaynaklarını yenileyin.",
+  "guideNoDataHere": "Rehberde bu saat için bir şey yok.",
+  "guideBackToNow": "Şimdiye dön",
   "guideNoSources": "Henüz kaynak yok",
   "guideNoSourcesHint": "TV rehberini görmek için bir oynatma listesi veya portal ekleyin.",
   "previousDay": "Önceki gün",

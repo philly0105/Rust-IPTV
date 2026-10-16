@@ -246,6 +246,30 @@ describe('search hits on the grid', () => {
     expect(useToastStore.getState().toasts).toEqual([]);
   });
 
+  it("a hit whose row's guide is still loading lands on the programme once it is in, not on the channel cell (L3-guide-library-3)", async () => {
+    const start = defaultStart(Date.now()) + 3 * HOUR;
+    progs = (r) => (r.itemId === 'c4' ? [program('Evening News', start, start + HOUR)] : []);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const answer = rpc.handlers['epg.grid']!;
+    // The hit row's guide answers late, as a large source's does.
+    rpc.handlers['epg.grid'] = async (a) => {
+      if ((a as { refs: Channel['ref'][] }).refs.some((r) => r.itemId === 'c4')) await gate;
+      return answer(a);
+    };
+    await searchAndPick('/epg', [searchHit(4, start)], /^Evening News, Channel 4, /);
+    const channelCell = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-channel-row="4"]');
+      expect(el?.hasAttribute('data-highlighted')).toBe(true);
+      return el!;
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(document.activeElement).not.toBe(channelCell);
+    expect(document.activeElement).toBe(screen.getByTestId('epg-grid'));
+    release();
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-start')).toBe(new Date(start).toISOString()));
+  });
+
   it('a channel that is not in the list says so', async () => {
     const start = defaultStart(Date.now()) + 3 * HOUR;
     const ghost = searchHit(2, start, { ref: { sourceId: 'src1', contentType: 'live', itemId: 'gone' }, channelName: 'Gone TV', categoryId: undefined });

@@ -1863,6 +1863,26 @@ async fn edits_keep_lists_and_search_fast_on_50k_channels_with_english_only() {
             Box::new(|v: &Value| assert!(!v.as_array().unwrap().is_empty())),
         ),
         (
+            // L3-perf-desktop-7: the one call the Live page makes.
+            "categories, includeHidden",
+            "catalog.categories",
+            json!({"sourceId": sid, "contentType": "live", "includeHidden": true}),
+            Box::new(|v: &Value| {
+                let flag = |g: usize| {
+                    v.as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|c| c["name"] == mixed_group(g))
+                        .unwrap_or_else(|| panic!("group {g} missing: {v}"))["emptiedByEdits"]
+                        .clone()
+                };
+                // Groups g with g % 50 == 6 have every channel hidden.
+                assert_eq!(flag(156), true, "all 200 channels hidden");
+                assert_eq!(flag(6), true, "all 200 channels hidden");
+                assert_eq!(flag(161), false, "renamed, not hidden");
+            }),
+        ),
+        (
             "all live channels (zap list)",
             "catalog.allLiveChannels",
             json!({"sourceId": sid}),
@@ -1906,4 +1926,101 @@ async fn edits_keep_lists_and_search_fast_on_50k_channels_with_english_only() {
     eprintln!("channel_edits perf: neighbors in {took:?}");
     assert!(n["next"].is_object() && n["prev"].is_object(), "{n}");
     assert!(took < QUERY_BUDGET, "neighbors took {took:?}");
+}
+
+/// L3-perf-desktop-7: `catalog.categories` with `includeHidden` flags each
+/// group with `emptiedByEdits`: true exactly for the groups the answer
+/// without `includeHidden` drops only because hidden channels emptied them.
+/// A group the provider ships empty, a partly hidden group and a hidden
+/// category are false, so the Live page can derive the shown groups from
+/// the one includeHidden answer.
+#[tokio::test]
+async fn categories_flag_the_groups_emptied_by_hidden_channels() {
+    let a = app().await;
+    a.state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO categories(source_id, content_type, category_id, name, position) VALUES ('s1', 'live', 'empty', 'Empty', 3)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let flags = |v: &Value| -> Vec<(String, Option<bool>)> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    c["id"].as_str().unwrap().to_string(),
+                    c.get("emptiedByEdits").map(|f| f.as_bool().unwrap()),
+                )
+            })
+            .collect()
+    };
+    let cats = |include_hidden: bool| {
+        a.call(
+            "catalog.categories",
+            json!({"sourceId": "s1", "contentType": "live", "includeHidden": include_hidden}),
+        )
+    };
+    let flag = |id: &str, f: bool| (id.to_string(), Some(f));
+
+    // No edits: every group is false, and the flag is always sent.
+    assert_eq!(
+        flags(&cats(true).await),
+        vec![
+            flag("news", false),
+            flag("sport", false),
+            flag("solo", false),
+            flag("empty", false)
+        ]
+    );
+
+    // 105 is the only channel of solo; 102 is one of three in news; sport
+    // is a hidden category whose only channel is hidden too.
+    a.call(
+        "channels.setHidden",
+        json!({"refs": [live("s1", "102"), live("s1", "105"), live("s1", "104")], "hidden": true}),
+    )
+    .await;
+    a.call(
+        "catalog.setCategoryHidden",
+        json!({"sourceId": "s1", "contentType": "live", "categoryId": "sport", "hidden": true}),
+    )
+    .await;
+    let all = cats(true).await;
+    assert_eq!(
+        flags(&all),
+        vec![
+            flag("news", false),
+            flag("sport", false),
+            flag("solo", true),
+            flag("empty", false)
+        ]
+    );
+    let shown = cats(false).await;
+    assert_eq!(
+        flags(&shown),
+        vec![("news".to_string(), None), ("empty".to_string(), None)],
+        "solo (emptied) and sport (hidden) are left out; no flag without includeHidden"
+    );
+    // The derivation the Live page makes from the includeHidden answer.
+    let derived: Vec<&str> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["hidden"] == false && c["emptiedByEdits"] == false)
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(derived, vec!["news", "empty"]);
+
+    // Unhiding the channel brings solo back and clears its flag.
+    a.call(
+        "channels.setHidden",
+        json!({"refs": [live("s1", "105")], "hidden": false}),
+    )
+    .await;
+    assert_eq!(flags(&cats(true).await)[2], flag("solo", false));
 }

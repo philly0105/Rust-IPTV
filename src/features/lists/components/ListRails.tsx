@@ -45,7 +45,12 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
   const itemCount = list.itemCount - ((items.data?.length ?? 0) - (entries?.length ?? 0));
   const refs = useMemo(() => channels.map((c) => c.ref), [channels]);
   const offset = prefs.epgOffsetMinutes;
-  const nowNext = useRpcQuery('epg.nowNext', offset ? { refs, offsetMinutes: offset } : { refs }, { enabled: refs.length > 0, staleTime: 60_000 });
+  // The cards show the title and progress only: no descriptions, about half the bytes (L3-serve-ui-7).
+  const nowNext = useRpcQuery(
+    'epg.nowNext',
+    offset ? { refs, offsetMinutes: offset, withDescription: false } : { refs, withDescription: false },
+    { enabled: refs.length > 0, staleTime: 60_000 },
+  );
   const fmt = new Intl.NumberFormat(i18n.language);
 
   return (
@@ -53,7 +58,8 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
       id={`list-${list.id}`}
       title={list.name}
       items={items.data ? channels : undefined}
-      loading={items.isPending}
+      // An empty list skips the skeleton: it would only collapse again and shift Home (L3-vod-x4).
+      loading={items.isPending && list.itemCount > 0}
       loaded={items.isSuccess}
       error={items.error ?? undefined}
       errorHint={t('localDataHint')}

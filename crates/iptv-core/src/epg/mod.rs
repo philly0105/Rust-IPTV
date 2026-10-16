@@ -125,6 +125,18 @@ pub async fn now_next_with_offset(
     refs: Vec<ItemRef>,
     offset_minutes: i32,
 ) -> CoreResult<HashMap<String, EpgNowNext>> {
+    now_next_opts(state, refs, offset_minutes, true).await
+}
+
+/// [`now_next_with_offset`]; `with_description: false` leaves programme
+/// descriptions out (`epg.nowNext {withDescription: false}`: lists that never
+/// show them get about half the bytes).
+pub async fn now_next_opts(
+    state: &AppState,
+    refs: Vec<ItemRef>,
+    offset_minutes: i32,
+    with_description: bool,
+) -> CoreResult<HashMap<String, EpgNowNext>> {
     check_refs(&refs)?;
     if !(-MAX_OFFSET_MINUTES..=MAX_OFFSET_MINUTES).contains(&offset_minutes) {
         return Err(CoreError::Invalid(format!(
@@ -143,7 +155,7 @@ pub async fn now_next_with_offset(
                     Some(key) => match cache.get(&key) {
                         Some(v) => v.clone(),
                         None => {
-                            let v = query::now_next(c, &key.0, now, key.1)?;
+                            let v = query::now_next_with(c, &key.0, now, key.1, with_description)?;
                             cache.insert(key, v.clone());
                             v
                         }
@@ -186,6 +198,19 @@ pub async fn grid(
     from: &str,
     to: &str,
 ) -> CoreResult<HashMap<String, Vec<EpgProgram>>> {
+    grid_opts(state, refs, from, to, true).await
+}
+
+/// [`grid`]; `with_description: false` leaves programme descriptions out
+/// (`epg.grid {withDescription: false}`: the guide shows one description, the
+/// selected programme's, and fetches it with `epg.programs`).
+pub async fn grid_opts(
+    state: &AppState,
+    refs: Vec<ItemRef>,
+    from: &str,
+    to: &str,
+    with_description: bool,
+) -> CoreResult<HashMap<String, Vec<EpgProgram>>> {
     check_refs(&refs)?;
     let (f, t) = query::parse_range(from, to)?;
     let rt = runtime(state);
@@ -199,7 +224,7 @@ pub async fn grid(
                     Some(key) => match cache.get(&key) {
                         Some(v) => v.clone(),
                         None => {
-                            let v = query::programs(c, &key.0, f, t, key.1)?;
+                            let v = query::programs_with(c, &key.0, f, t, key.1, with_description)?;
                             cache.insert(key, v.clone());
                             v
                         }

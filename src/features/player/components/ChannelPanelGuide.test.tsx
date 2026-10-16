@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
-import { DEFAULT_SETTINGS, type Channel, type ItemRef } from '@/api/types';
+import { DEFAULT_SETTINGS, itemKey, type Channel, type ItemRef } from '@/api/types';
 
 // Guide slice: the fullscreen channel panel's now line and "Browse archive".
 
@@ -28,6 +28,8 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { FullscreenChannelPanel } = await import('./FullscreenChannelPanel');
+const { ChannelHistory } = await import('./ChannelHistory');
+const { useHistoryStore } = await import('../history');
 
 const channel = (i: number, archive = i === 0): Channel => ({
   ref: { sourceId: 's1', contentType: 'live', itemId: `c${i}` },
@@ -96,6 +98,10 @@ describe('fullscreen channel panel guide', () => {
     // Only the rows XMLTV left empty went to the provider.
     const asked = rpcMock.calls.filter((c) => c.cmd === 'epg.shortEpg').map((c) => (c.args as { ref: ItemRef }).ref.itemId);
     expect(asked.sort()).toEqual(['c1', 'c2']);
+    // Titles only (L3-serve-ui-9): no programme descriptions over the wire.
+    const guide = rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext');
+    expect(guide.length).toBeGreaterThan(0);
+    for (const c of guide) expect(c.args).toMatchObject({ withDescription: false });
   });
 
   it('opens the archive of the playing channel and closes the panel', async () => {
@@ -104,6 +110,15 @@ describe('fullscreen channel panel guide', () => {
     fireEvent.click(await screen.findByTestId('panel-browse-archive'));
     expect(await screen.findByText('archive route')).toBeTruthy();
     expect(useMediaStore.getState().channelPanelOpen).toBe(false);
+  });
+
+  it('the channel history asks the guide for titles only (L3-serve-ui-9)', async () => {
+    act(() => useHistoryStore.setState({ entries: [{ key: itemKey(channel(1).ref), ref: channel(1).ref, title: 'Channel 1', isRadio: false }], open: true }));
+    render(<ChannelHistory />);
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'epg.nowNext' && (c.args as { refs: ItemRef[] }).refs[0]?.itemId === 'c1')).toBe(true));
+    const asked = rpcMock.calls.find((c) => c.cmd === 'epg.nowNext' && (c.args as { refs: ItemRef[] }).refs[0]?.itemId === 'c1');
+    expect(asked?.args).toMatchObject({ withDescription: false });
+    act(() => useHistoryStore.setState({ entries: [], open: false }));
   });
 
   it('has no archive action for a channel without one', async () => {

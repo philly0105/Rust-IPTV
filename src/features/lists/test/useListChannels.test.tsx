@@ -81,7 +81,14 @@ describe('useListChannels', () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
     const { result } = renderHook(() => useListChannels('L1', { epgOffsetMinutes: 60 }), { wrapper });
     await waitFor(() => expect(result.current.total).toBe(1));
-    await waitFor(() => expect(rpc.callsOf('epg.nowNext')).toEqual([{ refs: [BBC.ref], offsetMinutes: 60 }]));
+    await waitFor(() => expect(rpc.callsOf('epg.nowNext')).toEqual([{ refs: [BBC.ref], offsetMinutes: 60, withDescription: false }]));
+  });
+
+  it('L3-serve-ui-7: asks now/next without descriptions (the rows show titles and times)', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+    const { result } = renderHook(() => useListChannels('L1'), { wrapper });
+    await waitFor(() => expect(result.current.total).toBe(1));
+    await waitFor(() => expect(rpc.callsOf('epg.nowNext')).toEqual([{ refs: [BBC.ref], withDescription: false }]));
   });
 
   it('reports an empty list as total 0, and an error with a working retry', async () => {

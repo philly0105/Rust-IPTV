@@ -164,8 +164,10 @@ export function useNewSourceProgress(knownIds: readonly string[], since: number 
 }
 
 /** 0..1 when the total is known, otherwise undefined (indeterminate). */
-export function progressFraction(e: Pick<ImportProgressEvent, 'done' | 'total' | 'phase'>): number | undefined {
+export function progressFraction(e: Pick<ImportProgressEvent, 'done' | 'total' | 'phase' | 'step'>): number | undefined {
   if (e.phase === 'done') return 1;
+  // Replacing the old catalog or rebuilding the indexes: a wait with no meaningful count (L3-import-ui-3).
+  if (e.phase === 'saving' && e.step) return undefined;
   if (!e.total || e.total <= 0 || !Number.isFinite(e.done)) return undefined;
   return Math.max(0, Math.min(1, e.done / e.total));
 }

@@ -6,10 +6,17 @@
  * A small on-screen-display pill in the top corner holds the rotation toggle,
  * previous/next and one dial tick per slide (a tablist: arrows move and choose,
  * Home/End jump). Rotation pauses while the pointer is over the hero or focus
- * is inside it, while the window is hidden or the hero is scrolled away, and
- * never starts under prefers-reduced-motion. The active tick fills over the
- * dwell time and freezes with the timer, so it always shows how long is left.
- * The fill is a transform (compositor only). The tick's grow from dot to bar
+ * is inside it, while the window is hidden, unfocused or the hero is scrolled
+ * away, and never starts under prefers-reduced-motion. It also rests after
+ * HERO_IDLE_ROUNDS full rounds without any pointer, key or wheel input in the
+ * window (nobody is watching), and the next input resumes it.
+ *
+ * The active tick fills over the dwell time and freezes with the timer, so it
+ * always shows how long is left. The fill is a transform that a timer sets a
+ * few times a second (DIAL_TICK_MS), not a CSS animation: a running animation,
+ * even a tiny one on the compositor, makes the browser produce a frame at the
+ * display's refresh rate, and on a 240 Hz screen that kept an idle dashboard
+ * at 38 % of a core (L3-perf-desktop-1). The tick's grow from dot to bar
  * animates width, which lays out and repaints on the main thread every frame,
  * so it plays only when the user changes slides: an automatic turn swaps the
  * ticks at once (idle Home 3.2% -> 0.8% main-thread time, L2 XB2-22).
@@ -27,7 +34,7 @@
  */
 
 import { ChevronLeft, ChevronRight, Info, Pause, Play, Star } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -91,6 +98,61 @@ function useDocumentVisible(): boolean {
   return visible;
 }
 
+/**
+ * Whether the window has focus, live. It starts true: a page cannot learn reliably that it was
+ * opened in the background, and the idle rest (useInputRest) covers a window nobody returns to.
+ */
+function useWindowFocused(): boolean {
+  const [focused, setFocused] = useState(true);
+  useEffect(() => {
+    const on = () => setFocused(true);
+    const off = () => setFocused(false);
+    window.addEventListener('focus', on);
+    window.addEventListener('blur', off);
+    return () => {
+      window.removeEventListener('focus', on);
+      window.removeEventListener('blur', off);
+    };
+  }, []);
+  return focused;
+}
+
+/** Input that shows someone is at the window: any of these ends the hero's idle rest. */
+const INPUT_EVENTS = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+
+/**
+ * Counts the hero's automatic turns since the last input in the window. `resting` turns true
+ * after `limit` of them and false again on the next input. The listeners only reset a counter
+ * (state changes on the two transitions alone), so a moving mouse costs no renders.
+ */
+function useInputRest(limit: number, enabled: boolean): { resting: boolean; countTurn: () => void } {
+  const [resting, setResting] = useState(false);
+  const turns = useRef(0);
+  const restingRef = useRef(false);
+  useEffect(() => {
+    if (!enabled) return;
+    const onInput = () => {
+      turns.current = 0;
+      if (restingRef.current) {
+        restingRef.current = false;
+        setResting(false);
+      }
+    };
+    for (const type of INPUT_EVENTS) window.addEventListener(type, onInput, { capture: true, passive: true });
+    return () => {
+      for (const type of INPUT_EVENTS) window.removeEventListener(type, onInput, true);
+    };
+  }, [enabled]);
+  const countTurn = useCallback(() => {
+    turns.current += 1;
+    if (turns.current >= limit && !restingRef.current) {
+      restingRef.current = true;
+      setResting(true);
+    }
+  }, [limit]);
+  return { resting: enabled && resting, countTurn };
+}
+
 /** Whether the element is at least partly on screen (true where IntersectionObserver is missing). */
 function useOnScreen(ref: RefObject<HTMLElement | null>): boolean {
   const [on, setOn] = useState(true);
@@ -105,28 +167,61 @@ function useOnScreen(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
+ * How often the dial's fill moves while a slide dwells: 40 steps over the default 8 s on a
+ * 28 px bar, under a pixel each, so it reads as a smooth fill at 5 frames a second.
+ */
+export const DIAL_TICK_MS = 200;
+
+/** Automatic rounds through every slide, with no input in the window, before the rotation rests. */
+export const HERO_IDLE_ROUNDS = 2;
+
+/** The dial's fill for `left` ms of `dwell` remaining: 0 at the start, 1 when it turns. */
+export function dialFill(left: number, dwell: number): number {
+  return dwell > 0 ? Math.min(1, Math.max(0, 1 - left / dwell)) : 1;
+}
+
+/**
  * Advances `onAdvance` every `dwell` ms while `running`. Pausing keeps the
  * time already spent on the current slide, so resuming finishes the dwell
- * rather than restarting it (the dial tick, paused with it, agrees).
- * A new `activeKey` starts a full dwell.
+ * rather than restarting it; the dial (`dial`, when `fill`) shows that share,
+ * moved every DIAL_TICK_MS while running and frozen with the timer. A new
+ * `activeKey` starts a full dwell.
  */
-function useRotation(activeKey: string | undefined, running: boolean, dwell: number, onAdvance: () => void) {
+function useRotation(
+  activeKey: string | undefined,
+  running: boolean,
+  dwell: number,
+  onAdvance: () => void,
+  dial: RefObject<HTMLElement | null>,
+  fill: boolean,
+) {
   const left = useRef<{ key: string | undefined; ms: number }>({ key: undefined, ms: dwell });
   const advance = useRef(onAdvance);
   advance.current = onAdvance;
-  useEffect(() => {
-    if (!running || activeKey === undefined) return;
+  // A layout effect, so a new slide's dial is set before it first paints (no full-bar flash).
+  useLayoutEffect(() => {
+    if (activeKey === undefined) return;
     const ms = left.current.key === activeKey ? left.current.ms : dwell;
+    const paint = (remaining: number) => {
+      const el = dial.current;
+      // Four places: no float noise in the style, and finer than a pixel on any tick.
+      if (el) el.style.transform = fill ? `scaleX(${+dialFill(remaining, dwell).toFixed(4)})` : '';
+    };
+    paint(ms);
+    if (!running) return;
     const started = Date.now();
+    const elapsed = () => Date.now() - started;
+    const tick = fill ? setInterval(() => paint(ms - elapsed()), DIAL_TICK_MS) : undefined;
     const id = setTimeout(() => {
       left.current = { key: undefined, ms: dwell };
       advance.current();
     }, ms);
     return () => {
       clearTimeout(id);
-      left.current = { key: activeKey, ms: Math.max(0, ms - (Date.now() - started)) };
+      if (tick !== undefined) clearInterval(tick);
+      left.current = { key: activeKey, ms: Math.max(0, ms - elapsed()) };
     };
-  }, [activeKey, running, dwell]);
+  }, [activeKey, running, dwell, dial, fill]);
 }
 
 /** Background tint for a slide with no usable artwork: the title's hue, like the poster fallback. */
@@ -266,7 +361,9 @@ function SlideBody({
       <div className={cn('flex min-w-0 max-w-[28rem] flex-1 flex-col gap-2.5 text-on-glass min-[1440px]:max-w-[40rem]', active && 'motion-safe:animate-hero-copy')}>
         <p className="flex items-center gap-2 text-sm font-semibold text-on-glass-muted">
           <span aria-hidden className="h-3.5 w-[3px] shrink-0 rounded-full bg-glass-accent shadow-[0_0_10px_var(--color-glass-accent)]" />
-          <span dir="auto" className="truncate">{eyebrow}</span>
+          <span dir="auto" title={eyebrow} className="truncate">
+            {eyebrow}
+          </span>
         </p>
         <h2
           id={titleId}
@@ -361,12 +458,15 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
 
   const reducedMotion = useReducedMotion();
   const visible = useDocumentVisible();
+  const windowFocused = useWindowFocused();
   const onScreen = useOnScreen(sectionRef);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   const canRotate = count > 1 && !reducedMotion;
-  const running = canRotate && !userPaused && !hovered && !focused && visible && onScreen;
+  const rest = useInputRest(HERO_IDLE_ROUNDS * count, canRotate);
+  const running = canRotate && !userPaused && !hovered && !focused && visible && windowFocused && onScreen && !rest.resting;
+  const dialRef = useRef<HTMLSpanElement>(null);
 
   const go = useCallback(
     (step: number, auto = false) => {
@@ -376,7 +476,17 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
     },
     [slides, index, count],
   );
-  useRotation(active?.key, running, dwellMs, () => go(1, true));
+  useRotation(
+    active?.key,
+    running,
+    dwellMs,
+    () => {
+      rest.countTurn();
+      go(1, true);
+    },
+    dialRef,
+    canRotate,
+  );
 
   // Backdrops mount once visited. The next one mounts when the main thread is idle, so it
   // is fetched (at low priority, through the image cache) and decoded before its turn
@@ -433,7 +543,7 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
       className={cn(
         HERO_FRAME,
         // Over artwork the focus ring is the glass text colour in every theme (the light accent would vanish on it).
-        'isolate border-glass-border bg-glass-strong [--color-focus:var(--color-on-glass)] [--color-glow:transparent]',
+        'isolate [--color-focus:var(--color-on-glass)] [--color-glow:transparent]',
       )}
     >
       {slides.map((s, i) =>
@@ -491,12 +601,12 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
                   >
                     {on && (
                       <span
-                        // Keyed by slide, so the fill restarts on every turn.
+                        // Keyed by slide, so the fill restarts on every turn. useRotation sets its
+                        // transform (frozen, not reset, while paused, like the timer behind it).
                         key={s.key}
+                        ref={dialRef}
                         data-hero-dial=""
-                        // Frozen (not reset) while paused, like the timer behind it.
-                        className={cn('absolute inset-0 origin-left rounded-full bg-glass-accent rtl:origin-right', canRotate && 'motion-safe:animate-dial-fill')}
-                        style={canRotate ? { animationDuration: `${dwellMs}ms`, animationPlayState: running ? 'running' : 'paused' } : undefined}
+                        className="absolute inset-0 origin-left rounded-full bg-glass-accent rtl:origin-right"
                       />
                     )}
                   </span>

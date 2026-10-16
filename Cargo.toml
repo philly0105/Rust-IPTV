@@ -36,7 +36,8 @@ r2d2_sqlite = "0.25"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "brotli"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
-tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+# compression-*: gzip/brotli for server-mode RPC replies and the built UI.
+tower-http = { version = "0.6", features = ["fs", "cors", "trace", "compression-gzip", "compression-br"] }
 tower = { version = "0.5", features = ["util"] }
 futures = "0.3"
 bytes = "1"
@@ -53,6 +54,8 @@ flate2 = "1"
 memchr = "2"
 regex = "1"
 base64 = "0.22"
+# imagecache: downscaled poster/logo variants (JPEG and PNG only).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 hex = "0.4"
 
 # Errors / logging

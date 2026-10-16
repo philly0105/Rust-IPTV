@@ -1,9 +1,10 @@
 /**
- * Loop 2 guide performance fixes: cell text padding written per clipped cell (no inherited
- * scroll variable), memoised rows that a cursor move or a scroll frame leaves alone, window
- * moves that show at once and reach the URL once they pause, wheel distance kept across window
- * moves, chunk fetches that wait for a fast scroll to settle, no wasted guide request before the
- * page is measured, and the now line under the sticky channel column.
+ * Guide performance fixes: sticky cell text with a width cap written per clipped cell (no
+ * padding, no inherited scroll variable), memoised rows that a cursor move, a scroll frame or a
+ * window move leaves alone, window moves that show at once and reach the URL once they pause,
+ * wheel distance kept across window moves, chunk fetches that wait for a fast scroll to settle, no
+ * wasted guide request before the page is measured, and the now line under the sticky channel
+ * column and the cells' text.
  */
 import { QueryClient } from '@tanstack/react-query';
 import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -14,7 +15,7 @@ import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_CHUNK, GRID_ROW, GRID_SCROLL_ROOM_PX, gridWindowFor } from '../../components/EpgGridPage';
 import { HOUR, layoutBlocks } from '../../lib/epgTime';
-import { cellTextPadPx, padCellText } from '../GuideRow';
+import { cellTextPadPx, fitCellText } from '../GuideRow';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -39,6 +40,16 @@ const rpc = rpcMock.current;
 
 let channels = Array.from({ length: 6 }, (_, i) => makeChannel(i));
 const key = (r: Channel['ref']) => `${r.sourceId}|${r.contentType}|${r.itemId}`;
+
+/** Like {@link hourly}, cut to the window asked for, as the core answers. */
+function hourlyWindow(at: number) {
+  const all = hourly(at);
+  return (a: unknown) => {
+    const { from, to } = a as { from: string; to: string };
+    const [f, t] = [Date.parse(from), Date.parse(to)];
+    return Object.fromEntries(Object.entries(all(a)).map(([k, list]) => [k, list.filter((p) => Date.parse(p.end) > f && Date.parse(p.start) < t)]));
+  };
+}
 
 /** Hour-long programmes `<item> P<k>` from 12 h before `at` to 18 h after it. */
 function hourly(at: number) {
@@ -115,7 +126,7 @@ const focusedLabel = () => (document.activeElement as HTMLElement | null)?.getAt
 const atParam = () => Number(new URLSearchParams(router.location?.search).get('at'));
 const textOf = (name: RegExp) => screen.getByRole('button', { name }).querySelector<HTMLElement>('[data-testid="cell-text"]')!;
 
-describe('cell text padding (L2-guide-library-2)', () => {
+describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () => {
   it('cellTextPadPx pushes the text of a clipped cell past the edge, keeping room for it', () => {
     expect(cellTextPadPx(0, 0, 300)).toBe(0);
     expect(cellTextPadPx(100, 0, 300)).toBe(98);
@@ -123,36 +134,53 @@ describe('cell text padding (L2-guide-library-2)', () => {
     expect(cellTextPadPx(100, 300, 300)).toBe(0); // not clipped
   });
 
-  it('padCellText writes only the cells that need padding, straight to their style', () => {
+  // The text sticks by itself now (position: sticky moves it in the compositor, so it is no
+  // layout shift); script only narrows the text of a clipped cell, so a long title ends in an
+  // ellipsis inside the cell. Padding it, as before, shifted every cell on every scroll frame.
+  it('fitCellText caps only the clipped cells, straight to their style, from the shifted origin', () => {
     const root = document.createElement('div');
     root.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span><span data-pad-left="600" data-pad-width="300"></span>';
     const [a, b] = root.querySelectorAll<HTMLElement>('span');
-    padCellText(root, 300);
-    expect(a!.style.paddingInlineStart).toBe('298px');
-    expect(b!.style.paddingInlineStart).toBe('');
-    padCellText(root, 0);
+    fitCellText(root, 300);
+    expect(a!.style.maxWidth).toBe(`${600 - 20 - 298}px`);
+    expect(b!.style.maxWidth).toBe('');
+    fitCellText(root, 0);
+    expect(a!.style.maxWidth).toBe('');
+    // Cells moved 600 px back with the window: the second one now starts at the edge.
+    fitCellText(root, 0, -600);
+    expect(a!.style.maxWidth).toBe('48px');
+    expect(b!.style.maxWidth).toBe('');
     expect(a!.style.paddingInlineStart).toBe('');
   });
 
-  it('a horizontal scroll pads the clipped cells and publishes no inherited variable', async () => {
+  it('a horizontal scroll caps the clipped cells, and pads nothing or publishes an inherited variable', async () => {
     const at = defaultStart(Date.now());
     rpc.handlers['epg.grid'] = hourly(at);
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     await screen.findByRole('button', { name: /^c1 P0,/ });
     const grid = screen.getByTestId('epg-grid');
+    expect(textOf(/^c1 P0,/).className).toContain('sticky');
     grid.scrollLeft = 400;
     fireEvent.scroll(grid);
-    expect(textOf(/^c1 P0,/).style.paddingInlineStart).toBe(`${300 - 20 - 48}px`);
-    expect(textOf(/^c1 P1,/).style.paddingInlineStart).toBe('98px');
-    expect(textOf(/^c1 P2,/).style.paddingInlineStart).toBe('');
+    expect(textOf(/^c1 P0,/).style.maxWidth).toBe('48px');
+    expect(textOf(/^c1 P1,/).style.maxWidth).toBe(`${300 - 20 - 98}px`);
+    expect(textOf(/^c1 P2,/).style.maxWidth).toBe('');
+    expect(textOf(/^c1 P1,/).style.paddingInlineStart).toBe('');
     expect(grid.style.getPropertyValue('--grid-scroll')).toBe('');
-    // RTL scrollers count scrollLeft down from 0: the padding follows the distance from the inline start.
+    // RTL scrollers count scrollLeft down from 0: the cap follows the distance from the inline start.
     grid.scrollLeft = -400;
     fireEvent.scroll(grid);
-    expect(textOf(/^c1 P1,/).style.paddingInlineStart).toBe('98px');
+    expect(textOf(/^c1 P1,/).style.maxWidth).toBe('182px');
     grid.scrollLeft = 0;
     fireEvent.scroll(grid);
-    expect(textOf(/^c1 P0,/).style.paddingInlineStart).toBe('');
+    expect(textOf(/^c1 P0,/).style.maxWidth).toBe('');
+  });
+
+  it('a cell keeps its full title as a tooltip (L3-visual-12)', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    expect((await screen.findByRole('button', { name: /^c1 P0,/ })).title).toBe('c1 P0');
   });
 });
 
@@ -178,6 +206,33 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     fireEvent.scroll(grid);
     expect(vi.mocked(layoutBlocks)).not.toHaveBeenCalled();
   });
+
+  it('a window move at the edge of a sideways scroll re-renders no row: one variable moves every cell (L3-perf-ui-4)', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c2 P1,/ });
+    const grid = screen.getByTestId('epg-grid');
+    Object.defineProperty(grid, 'scrollWidth', { configurable: true, value: 2000 });
+    Object.defineProperty(grid, 'clientWidth', { configurable: true, value: 800 });
+    const content = grid.firstElementChild as HTMLElement;
+    const left = cell.style.left;
+    expect(content.style.getPropertyValue('--grid-shift')).toBe('0px');
+    // The next window's guide is held back: the move itself renders without it.
+    rpc.handlers['epg.grid'] = () => new Promise(() => undefined);
+
+    vi.mocked(layoutBlocks).mockClear();
+    grid.scrollLeft = 1100;
+    fireEvent.scroll(grid);
+    expect(grid.scrollLeft).toBe(200);
+    expect(content.style.getPropertyValue('--grid-shift')).toBe(`${-3 * 300}px`);
+    // The rows keep their props: no cell was laid out again, and each keeps its own position. Only
+    // the keyboard cursor's row (row 0, its tab stop left the window) renders.
+    const rendered = vi.mocked(layoutBlocks).mock.calls.map((c) => c[0][0]!.title.split(' ')[0]);
+    expect(rendered.filter((r) => r !== 'c0')).toEqual([]);
+    expect(screen.getByRole('button', { name: /^c2 P1,/ })).toBe(cell);
+    expect(cell.style.left).toBe(left);
+  });
 });
 
 describe('window moves (L2-perf-ui-4, L2-guide-library-5)', () => {
@@ -194,6 +249,37 @@ describe('window moves (L2-perf-ui-4, L2-guide-library-5)', () => {
     await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P6,/));
     expect(atParam()).toBe(at); // no router navigation per move
     await waitFor(() => expect(atParam()).toBe(at + 3 * HOUR));
+  });
+
+  it('an arrow past the window edge while its guide loads leaves the old cell and skips nothing (L3-guide-library-1)', async () => {
+    const at = defaultStart(Date.now());
+    const answer = hourlyWindow(at);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const first = new Date(at).toISOString();
+    // Only the window the page opened on answers at once; the next one (prefetched or asked) waits.
+    rpc.handlers['epg.grid'] = async (a) => {
+      if ((a as { from: string }).from !== first) await gate;
+      return answer(a);
+    };
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    act(() => cell.focus());
+    fireEvent.keyDown(cell, { key: 'End' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P5,/));
+    const grid = screen.getByTestId('epg-grid');
+
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    // The window moved; its guide is not in: the grid holds focus, not the cell just left.
+    await waitFor(() => expect(document.activeElement).toBe(grid));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(document.activeElement).toBe(grid);
+    // A second press before it arrives does not step past the programme the first one is on.
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    release();
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P6,/));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    await waitFor(() => expect(focusedLabel()).toMatch(/^c1 P7,/));
   });
 
   it('two wheel steps into the window edge move the window twice, the second without waiting for the first', async () => {
@@ -283,13 +369,18 @@ describe('guide requests', () => {
   });
 });
 
-describe('the now line (L2-guide-library-6)', () => {
-  it('passes under the sticky channel column', async () => {
+describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
+  // It used to sit over the cells (z-[5]) and strike through the airing title and time. It is
+  // drawn first now, with no z-index: under the sticky channel column (z-10), and under the cells'
+  // text, showing through the airing cell's tint.
+  it('passes under the sticky channel column and the cells, over the translucent airing cell', async () => {
     rpc.handlers['epg.grid'] = hourly(defaultStart(Date.now()));
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     const line = await screen.findByTestId('epg-now-line');
-    expect(line.className).toContain('z-[5]');
-    expect(line.className).not.toContain('z-10');
+    const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    expect(line.className).not.toMatch(/(^|\s)z-/);
+    expect(line.compareDocumentPosition(cell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[role="rowheader"]')!.className).toContain('z-10');
+    expect(cell.className).toMatch(/bg-accent\/\d+/);
   });
 });

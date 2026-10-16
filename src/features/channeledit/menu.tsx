@@ -6,7 +6,7 @@ import type { Channel } from '@/api/types';
 import { comboKeys, type MenuAction } from '@/ui';
 
 import { hideChannel, resetName, unhideChannel } from './actions';
-import { findEdit, isEditable, useDisplayName, useSourceEdits } from './edits';
+import { findEdit, isEditable, prefetchSourceEdits, useDisplayName, useSourceEdits } from './edits';
 import { openRenameDialog } from './store';
 
 /** Combos bound by {@link useChannelEditShortcuts}, shown as menu hints. */
@@ -44,7 +44,10 @@ export function useChannelEditMenuItems(channel: Channel | null): MenuAction[] {
         label: t('menuRename'),
         icon: <Pencil aria-hidden size={16} />,
         hint: hint(RENAME_COMBO),
-        onSelect: () => void openRenameDialog(channel),
+        onSelect: () => {
+          prefetchSourceEdits(channel.ref.sourceId);
+          openRenameDialog(channel);
+        },
       },
     ];
     if (edit?.name !== undefined) {

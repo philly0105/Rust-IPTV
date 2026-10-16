@@ -48,13 +48,20 @@ const QUIT_GRACE: Duration = Duration::from_secs(2);
 const CLICK_MESSAGE: &str = "tsrust-click";
 
 /// IPC commands `mpv.command` accepts besides [`PROPERTY_COMMANDS`]: what
-/// the player UI sends (`seek`) and read-only property queries. Everything
-/// else is refused, including mpv's command prefixes (`no-osd`, `async`,
+/// the player UI sends (`seek`, and `osd-overlay` for the dim under a
+/// dialog's backdrop, see [`validate_osd_overlay`]) and read-only property
+/// queries. Everything else is refused, including mpv's command prefixes (`no-osd`, `async`,
 /// `raw`, ...), which would otherwise smuggle any command in as an argument,
 /// and `keybind`, `run`, `loadfile`, `dump-cache`, `screenshot-to-file`.
 /// `sub-add` is refused too: it reads any path, so it only runs through
 /// `mpv.addSubtitle`, which checks the file first.
-const ALLOWED_COMMANDS: &[&str] = &["seek", "get_property", "get_property_string"];
+const ALLOWED_COMMANDS: &[&str] = &["seek", "get_property", "get_property_string", OSD_OVERLAY];
+
+/// mpv's `osd-overlay`: draws ASS over the whole window (letterbox included).
+const OSD_OVERLAY: &str = "osd-overlay";
+
+/// Longest `osd-overlay` text the UI may send (one ASS drawing).
+const OSD_OVERLAY_MAX: usize = 512;
 
 /// Properties `mpv.setProperty` (and property commands sent through
 /// `mpv.command`) may change: the playback controls the UI exposes. Anything
@@ -622,6 +629,9 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
             "mpv command arguments must be strings, numbers, or booleans",
         ));
     }
+    if name == OSD_OVERLAY {
+        return validate_osd_overlay(cmd);
+    }
     if PROPERTY_COMMANDS.contains(&name) {
         // `cycle-values` may lead with the `!reverse` flag.
         let prop = cmd[1..]
@@ -649,6 +659,34 @@ pub fn validate_command(cmd: &[Value]) -> CoreResult<()> {
         }
     }
     Ok(())
+}
+
+/// `osd-overlay <id> <format> <data> [<res_x> <res_y> <z>]`, and nothing
+/// more: an overlay id mpv accepts (0-63), ASS events or `none` (remove it),
+/// one short line of ASS (no newline: a single event), and small integer
+/// sizes. It only draws on mpv's own window.
+fn validate_osd_overlay(cmd: &[Value]) -> CoreResult<()> {
+    let ok = match cmd {
+        [_, id, format, data, sizes @ ..] => {
+            id.as_u64().is_some_and(|i| i < 64)
+                && matches!(format.as_str(), Some("ass-events" | "none"))
+                && data
+                    .as_str()
+                    .is_some_and(|d| d.len() <= OSD_OVERLAY_MAX && !d.contains(['\n', '\r']))
+                && sizes.len() <= 3
+                && sizes
+                    .iter()
+                    .all(|v| v.as_i64().is_some_and(|n| (0..=16384).contains(&n)))
+        }
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(CoreError::invalid(
+            "osd-overlay takes an id (0-63), ass-events or none, one line of ASS, and up to three sizes",
+        ))
+    }
 }
 
 /// `mpv.record` result.
@@ -1350,6 +1388,68 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn osd_overlay_takes_only_one_short_ass_drawing() {
+        use super::validate_command;
+        use serde_json::json;
+        let dim = "{\\an7\\pos(0,0)\\1c&H100804&\\1a&H47&\\p1}m -10 -10 l 10000 -10 10000 10000 -10 10000{\\p0}";
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(63),
+            json!("ass-events"),
+            json!(dim),
+            json!(0),
+            json!(720),
+            json!(0)
+        ])
+        .is_ok());
+        assert!(
+            validate_command(&[json!("osd-overlay"), json!(63), json!("none"), json!("")]).is_ok()
+        );
+        // Other formats (bitmaps read from a file or memory), ids past mpv's 64, a second
+        // event, oversized text, non-integer or extra arguments are refused.
+        assert!(
+            validate_command(&[json!("osd-overlay"), json!(63), json!("bgra"), json!("")]).is_err()
+        );
+        assert!(
+            validate_command(&[json!("osd-overlay"), json!(64), json!("none"), json!("")]).is_err()
+        );
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("a\nb")
+        ])
+        .is_err());
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("x".repeat(600))
+        ])
+        .is_err());
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("x"),
+            json!("720")
+        ])
+        .is_err());
+        assert!(validate_command(&[
+            json!("osd-overlay"),
+            json!(1),
+            json!("ass-events"),
+            json!("x"),
+            json!(0),
+            json!(720),
+            json!(0),
+            json!(true)
+        ])
+        .is_err());
+        assert!(validate_command(&[json!("osd-overlay"), json!(1)]).is_err());
+    }
+
     use super::*;
 
     /// Review round 2: an mpv that dies in the Windows loader (missing or

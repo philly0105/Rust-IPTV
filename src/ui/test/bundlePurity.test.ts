@@ -55,7 +55,13 @@ describe('bundle shape', () => {
   });
 
   it('merges tiny chunks instead of a waterfall of sub-4 kB files', () => {
-    expect(rollup.output?.experimentalMinChunkSize).toBeGreaterThanOrEqual(8_000);
+    expect(rollup.output?.experimentalMinChunkSize).toBeGreaterThanOrEqual(3_000);
+  });
+
+  // L3 "need XB2 vite": Rollup merges a small chunk shared by lazy pages into the always-loaded
+  // entry; at 10 kB that added 19 kB of lazy-only code to it (162.0 kB against 143.0 kB at 4 kB).
+  it('keeps the merge small enough that lazy-only code stays out of the entry', () => {
+    expect(rollup.output?.experimentalMinChunkSize).toBeLessThanOrEqual(5_000);
   });
 
   it('puts each language in one chunk and keeps app modules out of the locale chunks', () => {

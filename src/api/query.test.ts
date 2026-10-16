@@ -1,4 +1,4 @@
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, hashKey } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -152,6 +152,20 @@ describe('useRpcQuery (C4)', () => {
     const { result } = renderHook(() => useRpcQuery('stats.summary', null as never, { enabled: false }), { wrapper });
     expect(result.current.fetchStatus).toBe('idle');
   });
+
+  it('passes a queryKeyHashFn through and keeps the entry shared with plain readers (L3-cross-XB-5)', async () => {
+    const hash = vi.fn((key: readonly unknown[]) => hashKey(key));
+    const { result } = renderHook(
+      () => [useRpcQuery('stats.summary', null as never, { queryKeyHashFn: hash }), useRpcQuery('stats.summary', null as never)] as const,
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current[0].isSuccess).toBe(true));
+    expect(hash).toHaveBeenCalled();
+    expect(observed('stats.summary', null)?.queryKeyHashFn).toBe(hash);
+    // One cache entry, one request.
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['stats.summary'] })).toHaveLength(1);
+    expect(vi.mocked(rpcRaw).mock.calls.filter(([c]) => c === 'stats.summary')).toHaveLength(1);
+  });
 });
 
 describe('event invalidation', () => {
@@ -176,6 +190,25 @@ describe('event invalidation', () => {
     ]);
     // `recordings.rules` shares the prefix.
     expect(invalidationPrefixes({ type: 'recordings.update' })).toEqual(['recordings.']);
+  });
+
+  it('narrows sources.changed by its reason (L3-perf-core-5), and an older core\'s {} keeps the full set', () => {
+    const extra = { 'sources.changed': ['favorites.', 'recent.'] };
+    // A failed or cancelled import, a schedule backoff, a new source: the catalog did not change.
+    expect(invalidationPrefixes({ type: 'sources.changed', payload: { sourceId: 'a', reason: 'status' } }, extra)).toEqual(['sources.']);
+    expect(invalidationPrefixes({ type: 'sources.changed', payload: { sourceId: 'a', reason: 'added' } }, extra)).toEqual(['sources.']);
+    for (const reason of ['catalog', 'config', 'removed']) {
+      expect(invalidationPrefixes({ type: 'sources.changed', payload: { sourceId: 'a', reason } })).toEqual(['catalog.', 'sources.', 'lists.']);
+    }
+    expect(invalidationPrefixes({ type: 'sources.changed', payload: {} })).toEqual(['catalog.', 'sources.', 'lists.']);
+    expect(invalidationPrefixes({ type: 'sources.changed', payload: null })).toEqual(['catalog.', 'sources.', 'lists.']);
+    expect(invalidationPrefixes({ type: 'sources.changed', payload: { reason: 'catalog' } }, extra)).toEqual([
+      'catalog.',
+      'sources.',
+      'lists.',
+      'favorites.',
+      'recent.',
+    ]);
   });
 
   it('does not refetch settings when the event carries them', () => {

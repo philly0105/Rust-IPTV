@@ -1,24 +1,55 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
-import type { Channel } from '@/api/types';
+import { itemKey, type Channel } from '@/api/types';
 import { useImageChain } from '@/ui/image';
+import { gateImage } from '@/ui/imageGate';
 
 import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
+import { fetchChannelInfo } from '../zapBanner';
 import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
+import { locateChannel } from './channelPanelLocate';
 
-/** A row's channel logo through the image cache (C3), then its own URL once, then a blank tile. */
-function RowLogo({ url, sourceId }: { url?: string | null; sourceId: string }) {
-  const logo = useImageChain([safeImageUrl(url ?? undefined)], sourceId);
-  if (!logo.url) return <span className="size-8 shrink-0 rounded-sm bg-white/5" aria-hidden />;
+/**
+ * A row's channel logo through the image cache (C3), then its own URL once, then a blank tile.
+ * Fetched through the shared image gate (ui/imageGate.ts), as ChannelLogo's: at most four at once,
+ * the rows in view first, and a row that leaves before its turn asks nothing. `defer` (the list
+ * is scrolling) is RowLogo's own latch on top of the gate: `allowed` holds the last address let
+ * through, so a logo not showing yet waits for the scroll to rest before it reaches the gate, and
+ * one already showing stays, since its <img> is kept while the address is the same.
+ */
+function RowLogo({ url, sourceId, defer = false }: { url?: string | null; sourceId: string; defer?: boolean }) {
+  const image = useImageChain([safeImageUrl(url ?? undefined)], sourceId, 32);
+  const src = image.url;
+  // The address last allowed to load: a reused row that shows another channel while `defer` holds waits.
+  const [allowed, setAllowed] = useState(defer ? undefined : src);
+  if (!defer && allowed !== src) setAllowed(src);
+  const waiting = defer && allowed !== src;
+  // One <img> per address (keyed below): React renders no `src`, the gate sets it.
+  const imgRef = useCallback((el: HTMLImageElement | null) => (el && src ? gateImage(el, src) : undefined), [src]);
   return (
-    <img src={logo.url} alt="" loading="lazy" onError={logo.onError} className="size-8 shrink-0 rounded-sm bg-white/5 object-contain" />
+    <span aria-hidden className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-white/5">
+      {src && !waiting && (
+        <img
+          key={src}
+          ref={imgRef}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+          draggable={false}
+          onError={image.onError}
+          // Waiting for the gate (no src yet) the box fills the tile, so a row half in view counts as in view.
+          className="max-h-full max-w-full object-contain [&:not([src])]:size-full"
+        />
+      )}
+    </span>
   );
 }
 
@@ -32,6 +63,23 @@ const KEEP_PAGES = 3;
 interface PageCache {
   total: number | null;
   pages: Map<number, Channel[]>;
+}
+
+function pageArgs(sourceId: string, categoryId: string | undefined, search: string, page: number): Parameters<typeof rpc<'catalog.channels'>>[1] {
+  const args: Parameters<typeof rpc<'catalog.channels'>>[1] = {
+    sourceId,
+    query: { offset: page * PAGE, limit: PAGE, sort: 'number', dir: 'asc', ...(search ? { search } : {}) },
+  };
+  if (categoryId) args.categoryId = categoryId;
+  return args;
+}
+
+/** Keeps `page` and drops pages far from it, so the panel never holds the whole catalog. */
+function withPage(c: PageCache, page: number, items: Channel[], total: number): PageCache {
+  const pages = new Map(c.pages);
+  pages.set(page, items);
+  for (const k of pages.keys()) if (Math.abs(k - page) > KEEP_PAGES) pages.delete(k);
+  return { total, pages };
 }
 
 function useChannelPages(sourceId: string | undefined, categoryId: string | undefined, search: string, enabled: boolean) {
@@ -52,21 +100,9 @@ function useChannelPages(sourceId: string | undefined, categoryId: string | unde
       if (!enabled || !sourceId || inflight.current.has(page)) return;
       inflight.current.add(page);
       const g = gen.current;
-      const args: Parameters<typeof rpc<'catalog.channels'>>[1] = {
-        sourceId,
-        query: { offset: page * PAGE, limit: PAGE, sort: 'number', dir: 'asc', ...(search ? { search } : {}) },
-      };
-      if (categoryId) args.categoryId = categoryId;
-      rpc('catalog.channels', args)
+      rpc('catalog.channels', pageArgs(sourceId, categoryId, search, page))
         .then((res) => {
-          if (g !== gen.current) return;
-          setCache((c) => {
-            const pages = new Map(c.pages);
-            pages.set(page, res.items);
-            // Evict far pages so the panel never holds the whole catalog.
-            for (const k of pages.keys()) if (Math.abs(k - page) > KEEP_PAGES) pages.delete(k);
-            return { total: res.total, pages };
-          });
+          if (g === gen.current) setCache((c) => withPage(c, page, res.items, res.total));
         })
         .catch((err: unknown) => {
           if (g === gen.current) setError(err);
@@ -76,7 +112,10 @@ function useChannelPages(sourceId: string | undefined, categoryId: string | unde
     [enabled, sourceId, categoryId, search],
   );
 
-  return { cache, error, ensure };
+  /** A page fetched elsewhere (finding the playing channel) for the current list. */
+  const seed = useCallback((page: number, items: Channel[], total: number) => setCache((c) => withPage(c, page, items, total)), []);
+
+  return { cache, error, ensure, seed };
 }
 
 /**
@@ -154,11 +193,17 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
     if (!available && open) setOpen(false);
   }, [available, open, setOpen]);
 
+  /** Opened just now: the list goes to the playing channel and focus to its row (see below). */
+  const arriving = useRef(false);
   useEffect(() => {
-    if (open) {
-      ensure(0);
-      requestAnimationFrame(() => searchRef.current?.focus());
-    }
+    if (!open) return;
+    ensure(0);
+    arriving.current = true;
+    // The list holds focus while the playing channel is looked up, so the arrows work at once.
+    const id = requestAnimationFrame(() => {
+      if (arriving.current) scrollRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(id);
   }, [open, ensure]);
 
   // Closing makes the panel inert, which drops focus from its search field to <body>:
@@ -209,10 +254,170 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
     [cache],
   );
 
+  // Where the playing channel sits in the list (-1: not in it). A search lists other rows.
+  const searching = debounced !== '';
+  const currentKey = current ? itemKey(current) : null;
+  const scope = `${inList ? `list:${listId}` : `${sourceId}|${categoryId ?? ''}`}|${currentKey}`;
+  const [located, setLocated] = useState<{ scope: string; index: number } | null>(null);
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+  const seed = pages.seed;
+  useEffect(() => {
+    if (!open || searching) return;
+    if (!current) {
+      setLocated({ scope, index: -1 });
+      return;
+    }
+    const findLoaded = (): number => {
+      for (const [p, rows] of cacheRef.current.pages) {
+        const at = rows.findIndex((c) => c.ref.itemId === current.itemId && c.ref.sourceId === current.sourceId);
+        if (at >= 0) return p * PAGE + at;
+      }
+      return -1;
+    };
+    if (inList) {
+      // A list is read whole: its rows say.
+      if (list.cache.total !== null) setLocated({ scope, index: findLoaded() });
+      return;
+    }
+    const loaded = findLoaded();
+    if (loaded >= 0 || !sourceId) {
+      setLocated({ scope, index: loaded });
+      return;
+    }
+    let stale = false;
+    const ref = current;
+    void fetchChannelInfo(ref)
+      .then((info) => locateChannel((p) => rpc('catalog.channels', pageArgs(sourceId, categoryId, '', p)), ref, info.number, PAGE))
+      .then(
+        (found) => {
+          if (stale) return;
+          if (found) seed(found.page, found.items, found.total);
+          setLocated({ scope, index: found ? found.index : -1 });
+        },
+        () => {
+          if (!stale) setLocated({ scope, index: -1 });
+        },
+      );
+    return () => {
+      stale = true;
+    };
+    // `current` and the source are named by `scope`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, searching, scope, inList, list.cache, seed]);
+  const target = searching ? -1 : located?.scope === scope ? located.index : null;
+
+  /** The row that takes Tab and the arrows (roving focus); null until one is chosen. */
+  const [active, setActive] = useState<number | null>(null);
+  /** Focus follows `active` once its row is drawn (its page may still be loading). */
+  const focusRow = useRef(false);
+  useEffect(() => setActive(null), [debounced, scope]);
+  useEffect(() => {
+    if (!open) setActive(null);
+  }, [open]);
+
+  // On arrival: centre the playing channel and focus its row or, when it is not in the list, the
+  // search field, as before. Focus moves only if it is still where opening put it.
+  useEffect(() => {
+    if (!open || !arriving.current || target === null) return;
+    arriving.current = false;
+    const a = document.activeElement;
+    const free = !a || a === scrollRef.current || a === document.body || !panelRef.current?.contains(a);
+    if (target < 0 || target >= total) {
+      if (free) searchRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    virtualizer.scrollToIndex(target, { align: 'center' });
+    setActive(target);
+    if (free) focusRow.current = true;
+  }, [open, target, total, virtualizer]);
+
+  const rowEl = (i: number): HTMLElement | null | undefined =>
+    scrollRef.current?.querySelector<HTMLElement>(`[data-index="${i}"] [role="option"]`);
+  useEffect(() => {
+    if (!focusRow.current || active === null) return;
+    const row = rowEl(active);
+    if (!row) return;
+    focusRow.current = false;
+    row.focus({ preventScroll: true });
+  });
+
+  /** Moves the roving focus to row `i`, scrolling it into view (focus waits for a row not drawn yet). */
+  const moveTo = (i: number): void => {
+    setActive(i);
+    virtualizer.scrollToIndex(i, { align: 'auto' });
+    const row = rowEl(i);
+    focusRow.current = !row;
+    row?.focus({ preventScroll: true });
+  };
+
+  /** Arrows, Page Up/Down, Home and End walk the rows; Enter plays (each row is a button). */
+  const onListKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.altKey || e.ctrlKey || e.metaKey || total === 0) return;
+    const lastRow = total - 1;
+    const from = active ?? (target !== null && target >= 0 ? target : -1);
+    const pageRows = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? ROW) / ROW) - 1);
+    let to: number;
+    switch (e.key) {
+      case 'ArrowDown':
+        to = Math.min(lastRow, from + 1);
+        break;
+      case 'ArrowUp':
+        if (from <= 0) {
+          // Above the first row: back to the search field.
+          e.preventDefault();
+          e.stopPropagation();
+          searchRef.current?.focus();
+          return;
+        }
+        to = from - 1;
+        break;
+      case 'PageDown':
+        to = Math.min(lastRow, Math.max(0, from) + pageRows);
+        break;
+      case 'PageUp':
+        to = Math.max(0, from - pageRows);
+        break;
+      case 'Home':
+        to = 0;
+        break;
+      case 'End':
+        to = lastRow;
+        break;
+      default:
+        // Typing on a row searches: the key goes on to the search field.
+        if (e.key.length === 1 && e.key !== ' ') {
+          e.stopPropagation();
+          searchRef.current?.focus();
+        }
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    moveTo(to);
+  };
+
+  /** Down from the search field goes into the list: the playing channel, else the first row in view. */
+  const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key !== 'ArrowDown' && e.key !== 'Enter') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.nativeEvent.isComposing || total === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Enter on a search plays its first result.
+    if (e.key === 'Enter' && searching) {
+      const top = rowAt(0);
+      if (top) void playChannel(top, undefined, inList ? { keepList: true } : undefined).catch(() => undefined);
+      return;
+    }
+    const inView = Math.min(total - 1, Math.ceil((scrollRef.current?.scrollTop ?? 0) / ROW));
+    moveTo(active ?? (target !== null && target >= 0 ? target : inView));
+  };
+
   if (!available) return null;
 
   const isCurrent = (c: Channel): boolean =>
     !!current && c.ref.itemId === current.itemId && c.ref.sourceId === current.sourceId;
+  const tabStop = active ?? (target !== null && target >= 0 ? target : first);
 
   return (
     <>
@@ -278,6 +483,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={onSearchKeyDown}
             placeholder={t('searchChannels')}
             aria-label={t('searchChannels')}
             className="min-w-0 flex-1 rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/50"
@@ -291,7 +497,14 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
             <X className="size-4" />
           </button>
         </div>
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label={t('channels')}>
+        <div
+          ref={scrollRef}
+          tabIndex={-1}
+          className="min-h-0 flex-1 overflow-y-auto outline-none"
+          role="listbox"
+          aria-label={t('channels')}
+          onKeyDown={onListKeyDown}
+        >
           {error ? (
             <p className="p-4 text-sm text-white/70">{t('channelsFailed')}</p>
           ) : cache.total === 0 ? (
@@ -311,6 +524,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                 return (
                   <div
                     key={v.key}
+                    data-index={v.index}
                     className="absolute inset-x-0 px-2"
                     style={{ top: v.start, height: ROW }}
                   >
@@ -319,16 +533,20 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         type="button"
                         role="option"
                         aria-selected={isCurrent(c)}
+                        tabIndex={v.index === tabStop ? 0 : -1}
+                        onFocus={() => {
+                          if (active !== v.index) setActive(v.index);
+                        }}
                         onClick={() => void playChannel(c, undefined, inList ? { keepList: true } : undefined).catch(() => undefined)}
                         className={cn(
-                          'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-start hover:bg-white/10',
+                          'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-start hover:bg-white/10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white/70',
                           isCurrent(c) && 'bg-white/10 text-white dark:text-accent-hover',
                         )}
                       >
                         <span className="w-10 shrink-0 text-end font-display text-sm text-white/70 tabular-nums">
                           {c.number ?? ''}
                         </span>
-                        <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} />
+                        <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
                         {/* guide: name over the programme on now. */}
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span dir="auto" className="truncate text-sm text-match-parent">{c.name}</span>

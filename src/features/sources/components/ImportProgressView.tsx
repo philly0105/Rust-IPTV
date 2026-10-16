@@ -3,7 +3,7 @@ import { CircleSlash } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { ImportPhase, SourceKind } from '@/api/types';
+import type { ImportPhase, ImportSaveStep, SourceKind } from '@/api/types';
 
 import { Button, ProgressBar } from '@/ui';
 import { importSummaryKey } from '../lib/errors';
@@ -21,6 +21,16 @@ const PHASE_KEY: Record<ImportPhase, string> = {
   done: 'phaseDone',
   error: 'phaseError',
   cancelled: 'phaseCancelled',
+};
+
+/**
+ * The two long steps at the end of `saving` (L3-import-ui-3): the old catalog going, then the
+ * indexes and counts being rebuilt. Neither has a count worth showing, so the bar is indeterminate.
+ * A core that does not send `step` keeps the plain "Saving N of N".
+ */
+const SAVE_STEP_KEY: Readonly<Record<ImportSaveStep, string>> = {
+  replacing: 'phaseReplacing',
+  indexing: 'phaseIndexing',
 };
 
 /**
@@ -70,6 +80,12 @@ export function isWaitingForData(entry: ProgressEntry | undefined): boolean {
   return phase === 'connecting' || (phase === 'fetching' && !(entry.done > 0) && !entry.total);
 }
 
+/**
+ * Seconds without an answer after which "Connecting to <host>" turns into "Still trying to reach
+ * <host>" (L3-import-ui-4): the core gives up on an unreachable host after 3 s.
+ */
+export const STILL_TRYING_S = 2;
+
 /** Whole seconds since `since`, ticking once a second while `on`. */
 function useElapsedSeconds(since: number, on: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -99,14 +115,17 @@ export function ImportProgressView({ entry, compact, onCancel, cancelling, cance
   const waiting = running && isWaitingForData(entry);
   const [mountedAt] = useState(() => Date.now());
   const elapsed = useElapsedSeconds(startedAt ?? mountedAt, waiting);
+  const saveStep = phase === 'saving' && entry?.step && Object.hasOwn(SAVE_STEP_KEY, entry.step) ? SAVE_STEP_KEY[entry.step] : undefined;
   const label =
     cancelling && running
       ? t('phaseCancelling')
       : waiting
         ? host
-          ? t('phaseConnectingTo', { host })
+          ? t(elapsed >= STILL_TRYING_S ? 'phaseStillTrying' : 'phaseConnectingTo', { host })
           : t('phaseStarting')
-        : t(PHASE_KEY[phase] ?? 'phaseFetching');
+        : saveStep
+          ? t(saveStep)
+          : t(PHASE_KEY[phase] ?? 'phaseFetching');
 
   if (phase === 'cancelled') {
     return (
@@ -129,7 +148,7 @@ export function ImportProgressView({ entry, compact, onCancel, cancelling, cance
     ? elapsed > 0
       ? formatSeconds(elapsed, i18n.language)
       : null
-    : entry && entry.done > 0 && phase !== 'error'
+    : entry && entry.done > 0 && phase !== 'error' && !saveStep
       ? kind === 'm3u' && phase === 'fetching'
         ? t('progressBytes', { size: formatFileSize(entry.done, i18n.language) })
         : entry.total

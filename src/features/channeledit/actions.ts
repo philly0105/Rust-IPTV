@@ -17,7 +17,7 @@ import { isParentalLocked, rpc, RpcError } from '@/api/transport';
 import { itemKey, sameRef, type ChannelEdit, type ItemRef } from '@/api/types';
 import { toast } from '@/ui';
 
-import { editRefresh, hideInCache, ITEM_STALE_MS, patchHidden, renameInCache, restoreCache, restoreHidden } from './edits';
+import { editRefresh, hideInCache, ITEM_STALE_MS, patchHidden, renameInCache, restoreCache, restoreHidden, unhideInCache } from './edits';
 
 export type T = TFunction<'channels'>;
 
@@ -195,27 +195,32 @@ export function hideChannel(target: EditTarget, t: T): Promise<boolean> {
 
 /**
  * Shows a hidden channel again. The cached hidden list drops it at once (the
- * dialog row goes away) and comes back if the core refuses. With `undo`
- * (default) the toast can hide it again. A channel the provider has dropped
- * leaves the hidden list without coming back anywhere: its toast says so and
- * offers no Undo, since the core cannot hide a channel it does not have.
- * Resolves true once the hidden mark is gone.
+ * dialog row goes away) and its row returns to the cached channel lists at
+ * once (L3-live-8, {@link unhideInCache}); both go back if the core refuses.
+ * With `undo` (default) the toast can hide it again. A channel the provider
+ * has dropped leaves the hidden list without coming back anywhere: its toast
+ * says so and offers no Undo, since the core cannot hide a channel it does
+ * not have. Resolves true once the hidden mark is gone.
  */
 export function unhideChannel(target: EditTarget, t: T, opts: { undo?: boolean } = {}): Promise<boolean> {
   const { undo = true } = opts;
   return once(target.ref, async () => {
     const refresh = editRefresh();
     const before = patchHidden(target.ref.sourceId, (l) => l.filter((e) => !sameRef(e.ref, target.ref)));
+    const shown = unhideInCache(target.ref);
     try {
       await rpc('channels.setHidden', { refs: [target.ref], hidden: false });
     } catch (err) {
       refresh.cancel();
+      restoreCache(shown);
       restoreHidden(target.ref.sourceId, before);
       toast({ variant: 'error', title: t('unhideFailed', { name: target.name }), description: failureText(err, t) });
       return false;
     }
     // Before the refresh below, which would mark the cached answer stale.
     const { gone } = await splitByPresence([target.ref]);
+    // A channel the provider dropped shows nowhere: its row goes again until the refresh lands.
+    if (gone.length > 0) restoreCache(shown);
     void refresh.settle();
     if (gone.length > 0) {
       toast({ variant: 'info', title: t('removedToast', { name: target.name }), description: t('goneText') });

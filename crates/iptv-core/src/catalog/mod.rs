@@ -417,6 +417,8 @@ pub struct CatalogWriter<'c> {
     declared: HashMap<ContentType, HashMap<String, i64>>,
     /// Rows of the rewritten types deleted by `begin`.
     replaced: u64,
+    /// Whether `begin` has deleted the `replaced` rows yet.
+    replaced_gone: bool,
     /// `(name, CREATE statement)` of the indexes dropped for a bulk rewrite;
     /// `None` while the indexes are maintained row by row.
     dropped_indexes: Option<Vec<(String, String)>>,
@@ -495,6 +497,7 @@ impl<'c> CatalogWriter<'c> {
             undecided: HashMap::new(),
             declared: HashMap::new(),
             replaced,
+            replaced_gone: false,
             dropped_indexes: None,
             total: 0,
             duplicates: 0,
@@ -516,14 +519,16 @@ impl<'c> CatalogWriter<'c> {
                 params![source_id, ct.as_str()],
             )?;
         }
+        w.replaced_gone = true;
         Ok(w)
     }
 
     /// Drops every secondary index of `items` once the rewrite touches enough
     /// rows ([`BULK_MIN_ROWS`]); [`CatalogWriter::finish`] runs their stored
     /// CREATE statements again. Sorting the rows once is several times
-    /// cheaper than updating a dozen b-trees per row. The primary key stays
-    /// (duplicate detection and the per-source deletes use it).
+    /// cheaper than updating all eleven of them (as of migration 0019) per
+    /// row. The primary key stays (duplicate detection and the per-source
+    /// deletes use it).
     fn maybe_go_bulk(&mut self) -> CoreResult<()> {
         let touched = self.replaced + self.total + self.duplicates;
         if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
@@ -532,8 +537,15 @@ impl<'c> CatalogWriter<'c> {
         let all: i64 = self
             .conn
             .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
-        // Rows the rebuild sorts although this rewrite leaves them alone.
-        let kept = (all as u64).saturating_sub(self.replaced + self.total);
+        // Rows the rebuild sorts although this rewrite leaves them alone: all
+        // but the rewrite's own, which are the replaced rows until `begin`
+        // deletes them and the inserted rows after.
+        let own = if self.replaced_gone {
+            self.total
+        } else {
+            self.replaced
+        };
+        let kept = (all as u64).saturating_sub(own);
         if touched < kept {
             return Ok(());
         }
@@ -938,7 +950,8 @@ pub fn source_counts(conn: &Connection, source_id: &str) -> CoreResult<(i64, i64
 /// `item_count` leaves out channels hidden by a channel edit (C2; stored
 /// that way by [`recount_categories`]). Without `include_hidden`, a category
 /// whose channels are all hidden is dropped like a hidden category; the
-/// manage-categories view (`include_hidden`) still lists it, with 0.
+/// manage-categories view (`include_hidden`) still lists it, with 0 and
+/// `emptied_by_edits` set (false on every other category there).
 pub fn categories(
     conn: &Connection,
     source_id: &str,
@@ -960,14 +973,19 @@ pub fn categories(
             hidden: r.get(2)?,
             item_count: r.get(3)?,
             position: r.get(4)?,
+            emptied_by_edits: None,
         })
     })?;
     let mut all: Vec<Category> = rows.collect::<Result<_, _>>()?;
-    if !include_hidden {
-        let emptied = channeledit::hidden_counts(conn, source_id, content_type)?;
-        if !emptied.is_empty() {
-            all.retain(|c| c.item_count > 0 || !emptied.contains_key(&c.id));
+    // Categories holding hidden channels; empty (one cheap probe) without edits.
+    let edited = channeledit::hidden_counts(conn, source_id, content_type)?;
+    let emptied = |c: &Category| c.item_count == 0 && edited.contains_key(&c.id);
+    if include_hidden {
+        for c in &mut all {
+            c.emptied_by_edits = Some(!c.hidden && emptied(c));
         }
+    } else if !edited.is_empty() {
+        all.retain(|c| !emptied(c));
     }
     Ok(all)
 }
@@ -1315,29 +1333,60 @@ pub fn query_named(
     // `include_hidden`); custom names are searched too, when there are any.
     let edited = channeledit::scoped(conn, &q.source_id, q.content_type, "?1", "?2")?;
     let named = search.is_some() && channeledit::has_names(conn, &q.source_id, q.content_type)?;
+    // The page statement walks the sort's index: a rating or year filter on
+    // another sort key is written `+i.rating` / `+i.year` there, which keeps
+    // it off the index choice. Left alone, SQLite took idx_items_rating or
+    // idx_items_year for the filter and sorted every match in a temp b-tree
+    // (100-340 ms a page on 60k movies; under 1 ms through the sort index).
+    // The sort indexes hold both columns (migration 0019), so a selective
+    // filter on a deep page reads index entries, not table rows. The count
+    // keeps the plain column, where the filter's index helps.
+    let sort = q.page.sort;
+    let page_rating = if sort == Some(SortKey::Rating) {
+        "i.rating"
+    } else {
+        "+i.rating"
+    };
+    let page_year = if sort == Some(SortKey::Year) {
+        "i.year"
+    } else {
+        "+i.year"
+    };
     for (i, m) in attempts.iter().enumerate() {
-        let mut where_sql = String::from("i.source_id = ?1 AND i.content_type = ?2");
+        // The WHERE of the count (plain filter columns) and of the page;
+        // both take the same `args`.
+        let mut count_where = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
             q.source_id.clone().into(),
             q.content_type.as_str().to_string().into(),
         ];
         if let Some(cat) = &q.category_id {
             args.push(cat.clone().into());
-            where_sql.push_str(&format!(" AND i.category_id = ?{}", args.len()));
+            count_where.push_str(&format!(" AND i.category_id = ?{}", args.len()));
         } else if filter_hidden {
             // Same rows as `COALESCE(c.hidden, 0) = 0` on the join (an item
             // whose category is missing stays visible), without a join per row.
-            where_sql.push_str(
+            count_where.push_str(
                 " AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
             );
         }
+        let mut page_where = count_where.clone();
         if let Some(min) = q.min_rating.filter(|r| r.is_finite() && *r > 0.0) {
             args.push(min.into());
-            where_sql.push_str(&format!(" AND i.rating >= ?{}", args.len()));
+            count_where.push_str(&format!(" AND i.rating >= ?{}", args.len()));
+            page_where.push_str(&format!(" AND {page_rating} >= ?{}", args.len()));
         }
         // vod: year range and "Hide watched" (C4; nothing for channels).
-        where_sql.push_str(&vodfilter::vod_filter_sql(&q.vod, &mut args));
-        where_sql.push_str(english);
+        let mut page_args = args.clone();
+        count_where.push_str(&vodfilter::vod_filter_sql(&q.vod, &mut args));
+        page_where.push_str(&vodfilter::vod_filter_sql_on(
+            &q.vod,
+            page_year,
+            &mut page_args,
+        ));
+        debug_assert_eq!(args, page_args);
+        // The rest is shared.
+        let mut where_sql = String::from(english);
         if let Some(s) = search {
             match m {
                 Match::Fts => {
@@ -1378,20 +1427,30 @@ pub fn query_named(
         // No join: it only adds the category name, which cannot change the
         // count (categories' key is unique), and the English-only clause
         // reads categories through its own sets.
-        let count_sql = format!("SELECT count(*) FROM items i WHERE {where_sql}");
+        let count_sql = format!("SELECT count(*) FROM items i WHERE {count_where}{where_sql}");
         let total: i64 = conn
             .prepare_cached(&count_sql)?
             .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
         if total == 0 && i + 1 < attempts.len() {
             continue;
         }
-        // The page's rowids first, from the sort's index alone (migration
-        // 0018 puts every filter column in it), then the full rows of just
-        // those: OFFSET no longer reads and joins every skipped row, which
-        // made pages near the end of a 100k list take 100-900 ms.
+        // Nothing on this page: skip the walk (a decade with no titles
+        // would otherwise pass every entry of the sort index).
+        if offset >= total {
+            return Ok(Page {
+                items: Vec::new(),
+                total,
+                offset,
+                limit,
+            });
+        }
+        // The page's rowids first, from the sort's index (migration 0018
+        // puts the category and English-only columns in it), then the full
+        // rows of just those: OFFSET no longer reads and joins every skipped
+        // row, which made pages near the end of a 100k list take 100-900 ms.
         let order = order_clause(&q.page);
         let sql = format!(
-            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {where_sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}) ORDER BY {order}"
+            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}) ORDER BY {order}"
         );
         let mut stmt = conn.prepare_cached(&sql)?;
         let items = stmt
@@ -1418,6 +1477,20 @@ pub(crate) fn has_hidden_categories(
             "SELECT EXISTS(SELECT 1 FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
         )?
         .query_row(params![source_id, content_type.as_str()], |r| r.get(0))?)
+}
+
+/// True when a category of `source_id` (any source when `None`) is hidden.
+fn has_hidden_any(conn: &Connection, source_id: Option<&str>) -> CoreResult<bool> {
+    Ok(match source_id {
+        Some(s) => conn
+            .prepare_cached(
+                "SELECT EXISTS(SELECT 1 FROM categories WHERE source_id = ?1 AND hidden <> 0)",
+            )?
+            .query_row([s], |r| r.get(0))?,
+        None => conn
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM categories WHERE hidden <> 0)")?
+            .query_row([], |r| r.get(0))?,
+    })
 }
 
 /// One item by reference.
@@ -1496,11 +1569,12 @@ pub fn search_named(
 /// [`search_named`] for several groups of content types at once (the
 /// `catalog.search` lists: live and radio, movies, series), up to `limit`
 /// rows per group, in one ranked pass: one FTS match and one sort for every
-/// group instead of one each, partitioned with `ROW_NUMBER()`. A group the
-/// word-prefix match finds nothing for falls back to a substring match,
-/// again one statement for all such groups, over the title index rather
-/// than the table (wide rows: URLs, JSON). Each group answers exactly as a
-/// [`search_named`] call of its own would.
+/// group instead of one each, partitioned with `ROW_NUMBER()`. When the
+/// word-prefix match finds nothing in any group, every group falls back to
+/// a substring match, again one statement for all of them, over the title
+/// index rather than the table (wide rows: URLs, JSON). A group with
+/// word-prefix hits answers exactly as a [`search_named`] call of its own
+/// would; a group without them is empty unless no group has any.
 pub fn search_groups(
     conn: &Connection,
     query: &str,
@@ -1521,8 +1595,13 @@ pub fn search_groups(
     let fts = fts_query(text);
 
     let channels = types.iter().any(|t| channeledit::is_channel_type(*t));
-    let mut filter = String::from(" AND COALESCE(c.hidden, 0) = 0");
-    filter.push_str(english_clause(conn, english_only)?);
+    // Every filter tests columns of `items i` alone, so the ranking pass
+    // reads no category row per match (about 30% of a broad prefix), except
+    // the per-row English-only rule while a catalog is pending (it needs
+    // the category name).
+    let english = english_clause(conn, english_only)?;
+    let ranking_join = english == language::ENGLISH_ONLY_SQL;
+    let mut filter = String::from(english);
     if let Some(h) = hide {
         filter.push_str(&parental::filter::item_set(conn, h)?);
     }
@@ -1537,13 +1616,32 @@ pub fn search_groups(
             format!("?{}", base_args.len() + 1)
         })
         .collect();
-    filter.push_str(&format!(
-        " AND i.content_type IN ({})",
-        placeholders.join(", ")
-    ));
-    if let Some(sid) = source_id {
+    let source_param = source_id.map(|sid| {
         base_args.push(sid.to_string().into());
-        filter.push_str(&format!(" AND i.source_id = ?{}", base_args.len() + 1));
+        format!("?{}", base_args.len() + 1)
+    });
+    // The content types and the source, apart from `filter`: the substring
+    // pass writes them as `+i.content_type` / `+i.source_id` (below).
+    let scope = |plus: &str| -> String {
+        let mut s = format!(" AND {plus}i.content_type IN ({})", placeholders.join(", "));
+        if let Some(p) = &source_param {
+            s.push_str(&format!(" AND {plus}i.source_id = {p}"));
+        }
+        s
+    };
+    let hidden_scope = source_param
+        .as_ref()
+        .map(|p| format!(" AND source_id = {p}"))
+        .unwrap_or_default();
+    // Hidden categories, only when there are any: the same rows as
+    // `COALESCE(c.hidden, 0) = 0` on the join (an item whose category is
+    // missing stays visible). A row whose category id is not among the
+    // hidden ids (one set per statement) passes at once; the others get an
+    // exact primary-key probe, since category ids repeat across sources.
+    if has_hidden_any(conn, source_id)? {
+        filter.push_str(&format!(
+            " AND NOT (i.category_id IN (SELECT category_id FROM categories WHERE hidden <> 0{hidden_scope}) AND EXISTS (SELECT 1 FROM categories hc WHERE hc.source_id = i.source_id AND hc.content_type = i.content_type AND hc.category_id = i.category_id AND hc.hidden <> 0))"
+        ));
     }
     // The group of each row, by content type (content types are fixed
     // identifiers, safe as literals).
@@ -1562,13 +1660,15 @@ pub fn search_groups(
     // Ranks each group's matching rows on their rowids alone and then reads
     // the full rows of the `limit` best, so the window sorts small records
     // rather than every match's URLs and JSON (a third faster on a broad
-    // prefix). `body` is the match: joins and WHERE after `items i` + `c`.
+    // prefix). `body` is the match: joins and WHERE after `items i` (and
+    // `c` when `ranking_join`).
     let ranked = |group: &str, order: &str, body: &str| -> String {
         let (cols, join) = SELECT_NAMED
             .split_once(" FROM items i")
             .unwrap_or((SELECT_NAMED, ""));
+        let inner_join = if ranking_join { join } else { "" };
         format!(
-            "{cols}, g.search_group FROM (SELECT i.rowid AS rid, {group} AS search_group, ROW_NUMBER() OVER (PARTITION BY {group} ORDER BY {order}) AS search_rank FROM items i{join} {body}) g CROSS JOIN items i ON i.rowid = g.rid{join} WHERE g.search_rank <= {limit} ORDER BY g.search_group, g.search_rank"
+            "{cols}, g.search_group FROM (SELECT i.rowid AS rid, {group} AS search_group, ROW_NUMBER() OVER (PARTITION BY {group} ORDER BY {order}) AS search_rank FROM items i{inner_join} {body}) g CROSS JOIN items i ON i.rowid = g.rid{join} WHERE g.search_rank <= {limit} ORDER BY g.search_group, g.search_rank"
         )
     };
     let run = |sql: String, first: SqlValue, out: &mut Vec<Vec<NamedRow>>| -> CoreResult<()> {
@@ -1593,14 +1693,24 @@ pub fn search_groups(
             &group,
             "items_fts.rank, length(i.title), i.position",
             &format!(
-                "JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{filter}"
+                "JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{}{filter}",
+                scope("")
             ),
         );
         run(sql, fq.clone().into(), &mut out)?;
     }
-    let missing: Vec<usize> = (0..groups.len())
-        .filter(|g| out[*g].is_empty() && !groups[*g].is_empty())
-        .collect();
+    // The substring pass is for text that starts no word anywhere (inside
+    // a word, "mber atl"): it runs only when every list came back empty.
+    // A list without word-prefix hits next to lists with some stays empty;
+    // filling it scanned every title of the library (50-120 ms on 220k
+    // items) for the few in-word matches.
+    let missing: Vec<usize> = if out.iter().all(Vec::is_empty) {
+        (0..groups.len())
+            .filter(|g| !groups[*g].is_empty())
+            .collect()
+    } else {
+        Vec::new()
+    };
     if !missing.is_empty() {
         let group = group_of(&|g| missing.contains(&g));
         let wanted: Vec<String> = missing
@@ -1611,20 +1721,20 @@ pub fn search_groups(
         // for this subquery) instead of every table row. Without a source
         // the `+` keeps SQLite off idx_items_added, which it otherwise took
         // for the type and then read every row of it (300-800 ms on 100k
-        // movies against about 12 ms for the index scan).
-        let (scope, ct_col) = match source_id {
-            Some(_) => (
-                format!(" AND source_id = ?{}", base_args.len() + 1),
-                "content_type",
-            ),
+        // movies against about 12 ms for the index scan). The outer scope
+        // is `+` for the same reason: the matched rowids drive the outer
+        // pass, not an index on the type or source (twice as fast).
+        let (inner_scope, ct_col) = match &source_param {
+            Some(p) => (format!(" AND source_id = {p}"), "content_type"),
             None => (String::new(), "+content_type"),
         };
         let sql = ranked(
             &group,
             "length(i.title), i.title COLLATE NOCASE",
             &format!(
-                "WHERE i.rowid IN (SELECT rowid FROM items WHERE title LIKE ?1 ESCAPE '\\' AND {ct_col} IN ({}){scope}){filter}",
-                wanted.join(", ")
+                "WHERE i.rowid IN (SELECT rowid FROM items WHERE title LIKE ?1 ESCAPE '\\' AND {ct_col} IN ({}){inner_scope}){}{filter}",
+                wanted.join(", "),
+                scope("+")
             ),
         );
         run(sql, like_pattern(text).into(), &mut out)?;
@@ -1634,7 +1744,13 @@ pub fn search_groups(
     // user's own names), shortest name first; the provider-name matches
     // follow without repeating them.
     if channels && has_any_names(conn, source_id)? {
-        let custom = custom_name_matches(conn, text, &filter, &base_args, limit)?;
+        let custom = custom_name_matches(
+            conn,
+            text,
+            &format!("{}{filter}", scope("")),
+            &base_args,
+            limit,
+        )?;
         if !custom.is_empty() {
             for (g, ts) in groups.iter().enumerate() {
                 let mine: Vec<NamedRow> = custom

@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "{{count}} recording in progress",
   "scheduledSummaryNow_other": "{{count}} recordings in progress",
   "scheduledEmptyTitle": "Nothing scheduled",
-  "scheduledEmptyBody": "Open the TV guide and choose Remind me or Record on a programme.",
+  "scheduledEmptyBody": "Open the TV guide and choose Remind me, Record or Record series on a programme.",
   "scheduledOpenGuide": "Open TV guide",
   "scheduledNow": "Recording now",
   "scheduledUpcoming": "Upcoming",

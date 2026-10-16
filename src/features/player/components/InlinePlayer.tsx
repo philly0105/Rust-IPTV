@@ -52,6 +52,37 @@ function mediaKey(s: PlayerSource | undefined): string {
  */
 export const ENGINE_ERROR_GRACE_MS = 1_000;
 
+/** The longest a zap keeps the last channel's frame up while the next one connects. */
+export const ZAP_HOLD_MAX_MS = 6000;
+
+/**
+ * Keeps the last frame of a live channel on `hold` (a canvas over the video) while the next live
+ * channel's engine replaces it: tearing the old engine down empties the element, and the new
+ * stream's first frame comes 150-200 ms later, so a zap would otherwise flash black. True when
+ * a frame was held. Drawing a cross-origin frame only taints the canvas; it is never read back.
+ */
+export function holdLastFrame(el: HTMLVideoElement, hold: HTMLCanvasElement): boolean {
+  if (el.readyState < 2 || !el.videoWidth || !el.videoHeight || el.error) return false;
+  try {
+    hold.width = el.videoWidth;
+    hold.height = el.videoHeight;
+    hold.getContext('2d')?.drawImage(el, 0, 0, hold.width, hold.height);
+  } catch {
+    hold.width = 0;
+    return false;
+  }
+  hold.hidden = false;
+  return true;
+}
+
+/** Takes the held frame down (and frees its pixels). */
+export function releaseHeldFrame(hold: HTMLCanvasElement | null): void {
+  if (!hold || hold.hidden) return;
+  hold.hidden = true;
+  hold.width = 0;
+  hold.height = 0;
+}
+
 function rangesOf(tr: TimeRanges, offset = 0): TimeRange[] {
   const out: TimeRange[] = [];
   for (let i = 0; i < tr.length; i++) out.push({ start: tr.start(i) + offset, end: tr.end(i) + offset });
@@ -64,13 +95,15 @@ export interface InlinePlayerProps {
   className?: string;
   /** Mini player: the error state keeps to a headline and Retry. */
   compact?: boolean;
+  /** A short player (a phone's 16:9, a docked stage): the error state packs into the room the bar leaves. */
+  short?: boolean;
 }
 
 /**
  * The media element plus its engine. Reports progress/status into the store and
  * registers itself as the store's PlaybackController. Chrome is rendered by the caller.
  */
-export function InlinePlayer({ as = 'video', className, compact = false }: InlinePlayerProps) {
+export function InlinePlayer({ as = 'video', className, compact = false, short = false }: InlinePlayerProps) {
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
@@ -81,6 +114,8 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
   const elRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
   /** Subtitles drawn by the player over the video (subtitles/inline.ts). */
   const subsRef = useRef<HTMLDivElement>(null);
+  /** The last channel's frame, up while a zap connects the next one (`holdLastFrame`). */
+  const holdRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [errorKind, setErrorKind] = useState<EngineError['kind'] | null>(null);
@@ -120,12 +155,38 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     if (!el || !src || !src.url) return;
     let disposed = false;
     const abort = new AbortController();
+    // A held frame from the last channel stays until this stream draws its own first frame.
+    const hold = holdRef.current;
+    let stopWatching: () => void = () => undefined;
+    if (hold && !hold.hidden && el instanceof HTMLVideoElement) {
+      let live = true;
+      const release = (): void => {
+        if (!live) return;
+        stopWatching();
+        releaseHeldFrame(hold);
+      };
+      // The frame is decoded at loadeddata; the next video frame callback is when it is on screen.
+      const onData = (): void => {
+        if (typeof el.requestVideoFrameCallback === 'function') el.requestVideoFrameCallback(() => release());
+        else release();
+      };
+      const timer = setTimeout(release, ZAP_HOLD_MAX_MS);
+      el.addEventListener('loadeddata', onData);
+      stopWatching = () => {
+        live = false;
+        clearTimeout(timer);
+        el.removeEventListener('loadeddata', onData);
+      };
+    }
     useMediaStore.setState({ buffered: [], seekable: undefined, waiting: true });
     publishTracks(EMPTY_TRACKS);
     const loadUrl = proxiedUrl(src);
 
     const onFatal = (err: EngineError): void => {
-      if (!disposed) failRef.current(src, err);
+      if (disposed) return;
+      stopWatching();
+      releaseHeldFrame(hold);
+      failRef.current(src, err);
     };
 
     // The engine starts once the tuned state (title, banner, loading dial) has painted: a click
@@ -182,6 +243,14 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       cancelStart();
       abort.abort();
       el.removeEventListener('loadedmetadata', onMeta);
+      stopWatching();
+      // A zap from one live channel to another: keep this channel's frame up until the next one
+      // draws (the engine below empties the element); a frame still held from the zap before
+      // (this channel never drew) stays. A retry, a stop or a move to VOD lets it go.
+      const next = usePlayerStore.getState().source;
+      const zap = !!hold && el instanceof HTMLVideoElement && src.isLive && !!next?.isLive && !!next.url && mediaKey(next) !== mediaKey(src);
+      if (!zap) releaseHeldFrame(hold);
+      else if (hold.hidden) holdLastFrame(el, hold);
       engineRef.current?.destroy();
       engineRef.current = null;
     };
@@ -403,6 +472,9 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
         // Found by the screenshot code (C6), which draws this frame on a canvas.
         data-player-video={as === 'video' ? '' : undefined}
       />
+      {as === 'video' && (
+        <canvas ref={holdRef} data-zap-hold="" hidden aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
+      )}
       {as === 'video' && <div ref={subsRef} data-subtitle-overlay aria-hidden className="player-subs" />}
       {status === 'loading' && <ConnectingNotice source={source} compact={compact} />}
       {status === 'error' && (
@@ -413,6 +485,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
           onRetry={retry}
           openExternalAvailable={isDesktop}
           compact={compact}
+          tight={short}
         />
       )}
     </div>
@@ -426,6 +499,7 @@ function ErrorOverlay({
   onRetry,
   openExternalAvailable,
   compact,
+  tight,
 }: {
   message?: string;
   kind: EngineError['kind'] | null;
@@ -433,6 +507,8 @@ function ErrorOverlay({
   onRetry(): void;
   openExternalAvailable: boolean;
   compact: boolean;
+  /** Short player: one-line headline, two lines of hint, small buttons, the details in the headline's tooltip. */
+  tight: boolean;
 }) {
   const { t } = useTranslation('player');
   const { toast } = useToast();
@@ -497,21 +573,39 @@ function ErrorOverlay({
     }
   };
 
+  // Buttons and their icons, smaller in a short player.
+  const action = tight ? 'gap-1.5 px-2.5 py-1 text-xs' : 'gap-2 px-3 py-1.5 text-sm';
+  const actionIcon = tight ? 'size-3.5' : 'size-4';
+
   return (
-    // Top room for the player's title bar, and m-auto centering: a short player (a phone's
-    // 16:9) scrolls the block from its top instead of pushing it up under the title.
+    // Bottom room for the control bar, which stays up over an error and paints above this. Top
+    // room for the player's title bar (a short player hides that title instead), and m-auto
+    // centering: what does not fit scrolls from its top instead of pushing up under the title.
     <div
       role="alert"
       data-error-class={view.cls}
-      className="pointer-events-auto absolute inset-0 z-20 flex overflow-y-auto bg-black/80 px-6 pt-14 pb-6 text-white"
+      data-tight={tight || undefined}
+      className={cn(
+        'pointer-events-auto absolute inset-0 z-20 flex overflow-y-auto bg-black/80 text-white',
+        tight ? 'px-4 pt-3 pb-14' : 'px-6 pt-14 pb-16',
+      )}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      <div className="m-auto flex max-w-md flex-col items-start gap-3">
-        <AlertTriangle className="size-7 text-warning" aria-hidden />
-        <h2 className="font-display text-lg">{view.title}</h2>
-        <p className="text-sm text-white/80">{hint}</p>
-        {message && (
+      <div className={cn('m-auto flex max-w-md flex-col items-start', tight ? 'gap-1.5' : 'gap-3')}>
+        {tight ? (
+          <h2 className="flex max-w-full items-center gap-2 font-display text-sm" title={message ? `${view.title}: ${message}` : undefined}>
+            <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
+            <span className="truncate">{view.title}</span>
+          </h2>
+        ) : (
+          <>
+            <AlertTriangle className="size-7 text-warning" aria-hidden />
+            <h2 className="font-display text-lg">{view.title}</h2>
+          </>
+        )}
+        <p className={cn('text-white/80', tight ? 'line-clamp-2 text-xs' : 'text-sm')}>{hint}</p>
+        {message && !tight && (
           // What the engine said, for a bug report or a provider ticket: out of the way until asked for.
           <details className="group w-full text-xs text-white/60">
             <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
@@ -526,18 +620,18 @@ function ErrorOverlay({
             ref={retryRef}
             type="button"
             onClick={onRetry}
-            className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+            className={cn('inline-flex items-center rounded-md bg-accent font-medium text-accent-fg hover:bg-accent-hover', action)}
           >
-            <RotateCcw className="size-4" aria-hidden />
+            <RotateCcw className={actionIcon} aria-hidden />
             {t('retry')}
           </button>
           {!openExternalAvailable && hasMedia && source && canShareSource(source) && (
             <button
               type="button"
               onClick={() => void copyLink()}
-              className="inline-flex items-center gap-2 rounded-md border border-white/25 px-3 py-1.5 text-sm hover:bg-white/10"
+              className={cn('inline-flex items-center rounded-md border border-white/25 hover:bg-white/10', action)}
             >
-              <Copy className="size-4" aria-hidden />
+              <Copy className={actionIcon} aria-hidden />
               {t('copyStreamLink')}
             </button>
           )}
@@ -546,17 +640,17 @@ function ErrorOverlay({
               <button
                 type="button"
                 onClick={() => void openExternal('mpv')}
-                className="inline-flex items-center gap-2 rounded-md border border-white/25 px-3 py-1.5 text-sm hover:bg-white/10"
+                className={cn('inline-flex items-center rounded-md border border-white/25 hover:bg-white/10', action)}
               >
-                <ExternalLink className="size-4" aria-hidden />
+                <ExternalLink className={actionIcon} aria-hidden />
                 {t('openInMpv')}
               </button>
               <button
                 type="button"
                 onClick={() => void openExternal('vlc')}
-                className="inline-flex items-center gap-2 rounded-md border border-white/25 px-3 py-1.5 text-sm hover:bg-white/10"
+                className={cn('inline-flex items-center rounded-md border border-white/25 hover:bg-white/10', action)}
               >
-                <ExternalLink className="size-4" aria-hidden />
+                <ExternalLink className={actionIcon} aria-hidden />
                 {t('openInVlc')}
               </button>
             </>

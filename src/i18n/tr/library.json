@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "{{count}} kayıt sürüyor",
   "scheduledSummaryNow_other": "{{count}} kayıt sürüyor",
   "scheduledEmptyTitle": "Planlanmış bir şey yok",
-  "scheduledEmptyBody": "TV rehberini açın ve bir programda Bana hatırlat veya Kaydet'i seçin.",
+  "scheduledEmptyBody": "TV rehberini açın ve bir programda Bana hatırlat, Kaydet veya Diziyi kaydet'i seçin.",
   "scheduledOpenGuide": "TV rehberini aç",
   "scheduledNow": "Şu an kaydediliyor",
   "scheduledUpcoming": "Yaklaşanlar",

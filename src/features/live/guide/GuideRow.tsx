@@ -2,6 +2,11 @@
  * One channel row of the guide grid (L2-perf-ui-1): memoised, so a scroll frame, a cursor move or
  * the programme popover re-renders only the rows whose props changed. Cells are plain elements:
  * the schedule index and every label come from the page, so a cell subscribes to nothing.
+ *
+ * Cells are laid out from a fixed origin, not from the window's start, and the page moves every
+ * row's cells to the window with one CSS variable ({@link GRID_SHIFT_VAR}): a window move at the
+ * edge of a sideways scroll leaves the rows' props alone, so no row re-renders inside the scroll
+ * event (L3-perf-ui-4). The track clips the cells that fall outside the window.
  */
 
 import { History } from 'lucide-react';
@@ -14,38 +19,30 @@ import { ScheduleMarkView, type ScheduleIndex } from '@/features/recording';
 
 import { ChannelLogo } from '../components/ChannelLogo';
 import { displayChannelName } from '../lib/channelName';
-import { canCatchUp, formatRange, hasUsableArchive, layoutBlocks } from '../lib/epgTime';
+import { MINUTE, canCatchUp, cellTextMaxPx, formatRange, hasUsableArchive, layoutBlocks, ms } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 
-/** Room a clipped cell keeps for its text before the cell's end pushes the text out. */
-export const CELL_TEXT_MIN_PX = 48;
+export { CELL_TEXT_MIN_PX, cellTextPadPx } from '../lib/epgTime';
+
+/** The CSS variable the page sets to the window's offset from the rows' origin, in px (0 or less after a later move). */
+export const GRID_SHIFT_VAR = '--grid-shift';
+
+const fitted = new WeakMap<HTMLElement, number | undefined>();
 
 /**
- * Inline-start padding, in px, for the text of a cell `left` px into the track and `width` px
- * wide, with the track scrolled `scroll` px from its inline start: a show that began before the
- * visible edge has its text pushed just past the sticky channel column, until only
- * {@link CELL_TEXT_MIN_PX} of it is left. The button sits at left + 1 with a 1 px border and
- * 8 px padding: its text starts at left + 10, and should start 8 px past the edge.
+ * Fits the text of the cells under `root` to a track scrolled `scroll` px, with the cells moved
+ * `shift` px from their origin (see {@link GRID_SHIFT_VAR}). The text itself sticks just past the
+ * sticky channel column (position: sticky: the compositor moves it with the scroll, and it is
+ * never a layout shift, L3-perf-ui-4). A cell that began before the visible edge only gets a
+ * narrower text box here, so a long title ends in an ellipsis inside the cell instead of starting
+ * under the column. Writes only the cells whose width changes; reads nothing from layout.
  */
-export function cellTextPadPx(scroll: number, left: number, width: number): number {
-  const max = Math.max(0, width - 20 - CELL_TEXT_MIN_PX);
-  return Math.min(max, Math.max(0, scroll - (left + 2)));
-}
-
-const padded = new WeakMap<HTMLElement, number>();
-
-/**
- * Pads the text of the cells under `root` for a track scrolled `scroll` px (L2-guide-library-2).
- * Only a cell clipped by the channel column gets padding, written straight to its style, so a
- * horizontal scroll restyles a cell or so per row instead of every cell of the grid. Reads
- * nothing from layout.
- */
-export function padCellText(root: ParentNode, scroll: number): void {
+export function fitCellText(root: ParentNode, scroll: number, shift = 0): void {
   for (const el of root.querySelectorAll<HTMLElement>('[data-pad-left]')) {
-    const pad = cellTextPadPx(scroll, Number(el.dataset.padLeft), Number(el.dataset.padWidth));
-    if ((padded.get(el) ?? 0) === pad) continue;
-    padded.set(el, pad);
-    el.style.paddingInlineStart = pad > 0 ? `${pad}px` : '';
+    const max = cellTextMaxPx(scroll, Number(el.dataset.padLeft) + shift, Number(el.dataset.padWidth));
+    if (fitted.has(el) && fitted.get(el) === max) continue;
+    fitted.set(el, max);
+    el.style.maxWidth = max === undefined ? '' : `${max}px`;
   }
 }
 
@@ -55,6 +52,10 @@ export interface GuideRowHandlers {
   open(row: number, channel: Channel, program: EpgProgram, el: HTMLElement): void;
   focusCell(row: number, program: EpgProgram): void;
   menu(channel: Channel, x: number, y: number): void;
+  /** Fits the text of the row's cells to the grid's current scroll (fitCellText). */
+  fitText(row: HTMLElement): void;
+  /** A press on a cell, before its click opens the detail: the detail's data can be fetched ahead. */
+  press(channel: Channel, program: EpgProgram): void;
 }
 
 export interface GuideRowProps {
@@ -65,8 +66,11 @@ export interface GuideRowProps {
   channel: Channel | undefined;
   /** Display-time programmes; undefined while loading, [] when the guide has none. */
   programs: EpgProgram[] | undefined;
-  start: number;
-  end: number;
+  /**
+   * The time the cells are laid out from (fixed for the page's life). The page moves the cells to
+   * the window with {@link GRID_SHIFT_VAR}, so a window move does not change this prop.
+   */
+  origin: number;
   now: number;
   pxPerMin: number;
   channelCol: number;
@@ -84,8 +88,6 @@ export interface GuideRowProps {
   stripCountryPrefix: boolean;
   schedule: ScheduleIndex;
   handlers: GuideRowHandlers;
-  /** The track's inline-start scroll distance at the last scroll event (cell text padding). */
-  scrollX: { readonly current: number };
 }
 
 export const GuideRow = memo(function GuideRow({
@@ -94,8 +96,7 @@ export const GuideRow = memo(function GuideRow({
   height,
   channel: ch,
   programs,
-  start,
-  end,
+  origin,
   now,
   pxPerMin,
   channelCol,
@@ -109,18 +110,27 @@ export const GuideRow = memo(function GuideRow({
   stripCountryPrefix,
   schedule,
   handlers,
-  scrollX,
 }: GuideRowProps) {
   const { t } = useTranslation('live');
   const ref = useRef<HTMLDivElement>(null);
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
   const onNow = t('onNow');
-  // Cells this render added or moved get their text padding before paint.
+  // Cells this render added get their text fitted before paint.
   useLayoutEffect(() => {
-    if (ref.current) padCellText(ref.current, scrollX.current);
+    if (ref.current) handlers.fitText(ref.current);
   });
 
-  const blocks = programs && programs.length > 0 ? layoutBlocks(programs, start, end, pxPerMin, now) : [];
+  // Cells sit at their true times, from the row's first programme (or the origin, if later): one
+  // that began before the window is clipped by the track, and its text sticks at the visible edge.
+  let from = origin;
+  for (const p of programs ?? []) {
+    const s = ms(p.start);
+    if (s < from) from = s;
+  }
+  const blocks = programs && programs.length > 0 ? layoutBlocks(programs, from, Infinity, pxPerMin, now) : [];
+  /** px from the origin to `from` (0 or less): where the row's cell layer starts. */
+  const base = ((from - origin) / MINUTE) * pxPerMin;
+  const layer = `calc(var(${GRID_SHIFT_VAR}, 0px) + ${base}px)`;
   return (
     <div
       ref={ref}
@@ -180,7 +190,9 @@ export const GuideRow = memo(function GuideRow({
           </div>
         )}
       </div>
-      <div role="gridcell" className="relative" style={{ width: trackWidth }}>
+      {/* Clips the cells outside the window without becoming a scroll container, so the cell text
+          still sticks to the grid's own scroll. */}
+      <div role="gridcell" className="relative overflow-x-clip" style={{ width: trackWidth }}>
         {programs === undefined ? (
           <div className="absolute inset-1.5 rounded bg-surface-2/60" aria-hidden />
         ) : programs.length === 0 ? (
@@ -191,47 +203,62 @@ export const GuideRow = memo(function GuideRow({
             </span>
           </div>
         ) : (
-          blocks.map((b) => {
-            const p = b.program;
-            const catchupOk = ch ? canCatchUp(p, ch, kind, now) : false;
-            const range = formatRange(p, lang);
-            return (
-              <button
-                key={p.start}
-                type="button"
-                data-cell-row={index}
-                data-start={p.start}
-                tabIndex={cursorStart === p.start ? 0 : -1}
-                aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}`}
-                onClick={(e) => {
-                  if (ch) handlers.open(index, ch, p, e.currentTarget);
-                }}
-                onFocus={() => handlers.focusCell(index, p)}
-                className={`absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                  b.when === 'now'
-                    ? 'border-accent/60 bg-accent/12 text-fg'
-                    : b.when === 'past'
-                      ? 'border-border/60 bg-surface-2/60 text-fg-muted'
-                      : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
-                }`}
-                style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
-              >
-                {/* A show that began before the visible edge keeps its title readable: padCellText pads
-                    the text past the sticky channel column until the cell's end pushes it out. */}
-                <span data-testid="cell-text" className="block" data-pad-left={b.left} data-pad-width={b.width}>
-                  <span className="flex items-center gap-1 truncate text-xs font-medium">
-                    {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
-                    <span dir="auto" className="truncate text-match-parent">
-                      {p.title}
+          <div data-testid="cell-layer" className="absolute inset-y-0" style={rtl ? { right: layer } : { left: layer }}>
+            {blocks.map((b) => {
+              const p = b.program;
+              const catchupOk = ch ? canCatchUp(p, ch, kind, now) : false;
+              const range = formatRange(p, lang);
+              return (
+                <button
+                  key={p.start}
+                  type="button"
+                  data-cell-row={index}
+                  data-start={p.start}
+                  tabIndex={cursorStart === p.start ? 0 : -1}
+                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}`}
+                  // The full title on hover: a narrow or clipped cell truncates it (L3-visual-12).
+                  title={p.title}
+                  onPointerDown={() => {
+                    if (ch) handlers.press(ch, p);
+                  }}
+                  onClick={(e) => {
+                    if (ch) handlers.open(index, ch, p, e.currentTarget);
+                  }}
+                  onFocus={() => handlers.focusCell(index, p)}
+                  // overflow-clip, not hidden: the cell is then no scroll container, so its text can stick.
+                  className={`absolute top-1 bottom-1 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    b.when === 'now'
+                      ? 'border-accent/60 bg-accent/12 text-fg'
+                      : b.when === 'past'
+                        ? 'border-border/60 bg-surface-2/60 text-fg-muted'
+                        : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
+                  }`}
+                  style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
+                >
+                  {/* A show that began before the visible edge keeps its title readable: the text sticks
+                      8 px past the sticky channel column until the cell's end pushes it out, and
+                      fitCellText narrows it so the title ends in an ellipsis inside the cell. */}
+                  <span
+                    data-testid="cell-text"
+                    className="sticky block w-max max-w-full"
+                    style={{ insetInlineStart: channelCol + 8 }}
+                    data-pad-left={b.left + base}
+                    data-pad-width={b.width}
+                  >
+                    <span className="flex items-center gap-1 truncate text-xs font-medium">
+                      {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
+                      <span dir="auto" className="truncate text-match-parent">
+                        {p.title}
+                      </span>
+                      {/* recording: */}
+                      <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
                     </span>
-                    {/* recording: */}
-                    <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
+                    <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{range}</span>
                   </span>
-                  <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{range}</span>
-                </span>
-              </button>
-            );
-          })
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

@@ -10,7 +10,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, ImportSummary, Source, SourceKind};
 use crate::sources::{progress, Importer};
 use crate::state::AppState;
-use crate::xtream::sync::{replace_catalogs, CatalogPart};
+use crate::xtream::sync::{replace_catalogs_with, CatalogPart};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -294,9 +294,36 @@ async fn run(
     // The run's token, read here (task-local) before waiting on the pool or
     // the write lock (C8; see `CatalogWriter::begin`).
     let cancel = crate::sources::import_cancel();
+    let st = state.clone();
     let (counts, kept_radio) = state
         .db_call(move |conn| {
-            let counts = replace_catalogs(conn, &sid, parts, cancel, &mut |_| {})?;
+            // A refresh deletes the previous rows first (L3-perf-core-4).
+            let had_rows: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM items WHERE source_id = ?1)",
+                [&sid],
+                |r| r.get(0),
+            )?;
+            if had_rows {
+                crate::sources::progress_step(&st, &sid, crate::sources::SaveStep::Replacing, 0);
+            }
+            // Every row is written: indexes and counts follow.
+            let mut on_finish = |written: u64| {
+                crate::sources::progress_step(
+                    &st,
+                    &sid,
+                    crate::sources::SaveStep::Indexing,
+                    written,
+                );
+            };
+            let counts = replace_catalogs_with(
+                conn,
+                &sid,
+                parts,
+                cancel,
+                &mut |_| {},
+                &mut on_finish,
+                |_, _| Ok(()),
+            )?;
             // The rewrite grew the WAL by about the catalog's size.
             crate::db::checkpoint_truncate(conn);
             // Kept radio rows still count towards the summary's channels.

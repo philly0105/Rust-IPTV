@@ -7,7 +7,7 @@ import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapsho
 import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
-import { CARD_ART, CARD_ROOT, LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
+import { Badge, CARD_ART, CARD_ROOT, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 
@@ -202,9 +202,15 @@ function PosterCardView({
           {artCorner}
         </Poster>
       </div>
-      {/* dir="auto": a Latin title in an RTL UI truncates at its own end, not its start. */}
-      <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{title}</span>
-      {subtitle && <span dir="auto" className="block truncate text-match-parent text-sm text-fg-muted">{subtitle}</span>}
+      {/* dir="auto": a Latin title in an RTL UI truncates at its own end, not its start. The title attribute shows a cut-off line in full. */}
+      <span dir="auto" title={title} className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+        {title}
+      </span>
+      {subtitle && (
+        <span dir="auto" title={subtitle} className="block truncate text-match-parent text-sm text-fg-muted">
+          {subtitle}
+        </span>
+      )}
     </>
   );
   if (onPlay) {
@@ -336,6 +342,22 @@ export interface ChannelCardProps {
   sourceId?: string;
 }
 
+/**
+ * The LIVE pill without the ui LiveBadge's pulse: a rail of channel cards ran one infinite CSS
+ * animation per card, and any running animation keeps the browser compositing at the display's
+ * refresh rate. On the idle dashboard the dots alone cost about 33% of a core, paused 8% (headed
+ * Edge, process tree, 20 s; L3-perf-desktop-1). The red pill already says live.
+ */
+function StillLiveBadge() {
+  const { t } = useTranslation('common');
+  return (
+    <Badge variant="live">
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg" />
+      {t('live')}
+    </Badge>
+  );
+}
+
 /** 16:9 channel tile with the logo centered on a per-channel tint. */
 export function ChannelCard({
   rail,
@@ -391,7 +413,7 @@ export function ChannelCard({
         />
         <PlayGlyph />
         <span className="absolute top-2 start-2">
-          <LiveBadge />
+          <StillLiveBadge />
         </span>
         {nowProgress !== undefined && (
           // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
@@ -400,18 +422,24 @@ export function ChannelCard({
           </span>
         )}
       </div>
-      <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">{name}</span>
+      <span dir="auto" title={name} className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+        {name}
+      </span>
       {now && showSourceWithNow && sourceName ? (
         // Programme first; the source keeps up to half the line, so it never truncates away.
         <span className="flex min-w-0 items-baseline gap-1.5 text-sm text-fg-muted">
-          <span dir="auto" className="min-w-0 truncate text-match-parent">{now}</span>
+          <span dir="auto" title={now} className="min-w-0 truncate text-match-parent">
+            {now}
+          </span>
           <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
-          <span dir="auto" className="max-w-[50%] shrink-0 truncate text-fg-subtle" data-testid="channel-card-source">
+          <span dir="auto" title={sourceName} className="max-w-[50%] shrink-0 truncate text-fg-subtle" data-testid="channel-card-source">
             {sourceName}
           </span>
         </span>
       ) : (
-        <span dir="auto" className="block truncate text-match-parent text-sm text-fg-muted">{now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}</span>
+        <span dir="auto" title={now ?? sourceName} className="block truncate text-match-parent text-sm text-fg-muted">
+          {now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}
+        </span>
       )}
     </button>
   );
@@ -460,13 +488,13 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
           </span>
         )}
       </div>
-      <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+      <span dir="auto" title={source.name} className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
         {source.name}
       </span>
       {/* A title alone is never read on a link; these join the card's name after the source name. */}
       <span className="sr-only" data-testid="source-card-kind">{`, ${KIND_NAMES[source.kind]}`}</span>
       {source.lastError && <span className="sr-only">{`, ${t('sourceHasError')}`}</span>}
-      <span className={cn('block truncate text-sm tabular', importing ? 'text-fg' : 'text-fg-muted')} data-testid="source-card-caption">
+      <span title={caption} className={cn('block truncate text-sm tabular', importing ? 'text-fg' : 'text-fg-muted')} data-testid="source-card-caption">
         {caption}
       </span>
     </Link>

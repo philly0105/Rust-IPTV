@@ -22,7 +22,7 @@ import { epgPatch } from '../lib/epgLinks';
 import { newlyEnabledEpgUrls, refreshGuides } from '../lib/epgRefresh';
 import { fieldForError, importErrorCode, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
-import { useNextFrame } from '../lib/useNextFrame';
+import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { AccountPanel, hasAccountInfo } from './AccountPanel';
 import { CatchupOverrideFields } from './CatchupOverrideFields';
 import { EpgLinksEditor } from './EpgLinksEditor';
@@ -76,7 +76,8 @@ export function EditSourceDialog({
   const [checkError, setCheckError] = useState<RpcError | null>(null);
   const [checking, setChecking] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const nextFrame = useNextFrame();
+  // Focus the field a failed save points at once the error has rendered and the fields are enabled again.
+  const focusInvalid = useFocusInvalid(formRef, saving);
 
   const sourceId = source?.id;
   useEffect(() => {
@@ -113,7 +114,7 @@ export function EditSourceDialog({
     setErrors(built.errors);
     if (!built.ok) {
       setTab('details');
-      nextFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+      focusInvalid();
       return;
     }
     const patch = { ...built.value };
@@ -135,7 +136,7 @@ export function EditSourceDialog({
         if (field) {
           setErrors((prev) => ({ ...prev, [field]: summaryKey(failure) }));
           setTab('details');
-          nextFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+          focusInvalid();
         }
         return;
       }
@@ -160,7 +161,7 @@ export function EditSourceDialog({
       if (field) {
         setErrors((prev) => ({ ...prev, [field]: summaryKey(err) }));
         setTab('details');
-        nextFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+        focusInvalid();
       }
     } finally {
       setSaving(false);

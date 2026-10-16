@@ -147,6 +147,12 @@ function safeDecode(text: string): string {
  * Host part of a URL for display, without credentials. Text that does not parse
  * as a URL is shown with any userinfo, secret parameters or Xtream path removed.
  */
+/** Host (and port) of an address as typed, for "Still trying to reach <host>"; undefined until it is a valid URL. */
+export function inputHost(raw: string): string | undefined {
+  const check = checkHttpUrl(raw);
+  return check.ok ? displayHost(check.url) : undefined;
+}
+
 export function displayHost(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {

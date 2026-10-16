@@ -181,12 +181,30 @@ export function holdImportToasts(): () => void {
   };
 }
 
+/** The saving step an import reports (an older core sends none). */
+function importSaveStep(p: ImportProgressEvent): ImportProgressEvent['step'] {
+  return p.phase === 'saving' ? p.step : undefined;
+}
+
+/**
+ * The toast's label for an import's phase or saving step. An unknown phase or step (a newer
+ * core) reads as a translated "Saving", never as a raw key.
+ */
+export function importPhaseLabel(p: ImportProgressEvent, t: (key: string, opts?: Record<string, string>) => string): string {
+  if (p.phase === 'connecting') return t('sources:phaseStarting');
+  const step = importSaveStep(p);
+  const fallback = { defaultValue: t('importPhase_saving') };
+  return step ? t(`importStep_${step}`, fallback) : t(`importPhase_${p.phase}`, fallback);
+}
+
 /**
  * The progress line of a shell import toast, worded as the Sources page's
  * ImportProgressView counts: an M3U download reports bytes while it fetches,
  * shown as a size; every other count is grouped in the user's number format.
  * A source not cached yet counts as M3U when it fetches without a message
- * (Xtream and Stalker always name what they load).
+ * (Xtream and Stalker always name what they load). The two long saving steps
+ * (`step`: replacing the old catalog, building the search index) show their
+ * name alone: their counts said "Saving 88,000 of 88,000" for seconds on end.
  */
 export function importProgressText(
   p: ImportProgressEvent,
@@ -195,6 +213,7 @@ export function importProgressText(
   lang: string,
   t: (key: string, opts: Record<string, string>) => string,
 ): string {
+  if (importSaveStep(p)) return phaseLabel;
   const bytes = p.phase === 'fetching' && (kind === 'm3u' || (kind === undefined && !p.message));
   const fmt = (n: number) => (bytes ? formatFileSize(n, lang) : formatCount(n, lang));
   if (p.total && p.total > 0) return t('importProgressOf', { phase: phaseLabel, done: fmt(p.done), total: fmt(p.total) });
@@ -294,10 +313,30 @@ export function useShellEvents(): void {
       }),
     );
 
+    // Sources with a sticky "didn't import" toast. It stays until the user dismisses it, a later
+    // import of the same source replaces it, or the source is gone from the list (removed, or
+    // removed and added again under a new id): a toast about a source that no longer exists
+    // stayed on screen across every page (L3-desktop-9).
+    const failedImports = new Set<string>();
+    offs.push(
+      queryClient.getQueryCache().subscribe((event) => {
+        if (failedImports.size === 0 || event.type !== 'updated' || event.query.queryKey[0] !== 'sources.list') return;
+        const list = event.query.state.data as Source[] | undefined;
+        if (!Array.isArray(list)) return;
+        const present = new Set(list.map((s) => s.id));
+        for (const sourceId of failedImports) {
+          if (present.has(sourceId)) continue;
+          failedImports.delete(sourceId);
+          dismissToast(`import-${sourceId}`);
+        }
+      }),
+    );
     offs.push(
       onAppEvent('import.progress', (p: ImportProgressEvent) => {
         const tr = tRef.current;
         const id = `import-${p.sourceId}`;
+        // Any newer event for the source replaces or dismisses its error toast; an error adds it back below.
+        failedImports.delete(p.sourceId);
         const onSources = isSourcesRoute(pathRef.current);
         // A finished import's catalog and source queries are invalidated by bindEventInvalidation
         // (DEFAULT_EVENT_INVALIDATION in api/query.ts); doing it here too refetched them twice.
@@ -333,6 +372,7 @@ export function useShellEvents(): void {
             return;
           }
           // A translated summary; the raw core text stays on the source card as technical detail.
+          failedImports.add(p.sourceId);
           toast({
             id,
             variant: 'error',
@@ -343,13 +383,14 @@ export function useShellEvents(): void {
           });
           return;
         }
-        const phaseLabel = p.phase === 'connecting' ? tr('sources:phaseStarting') : tr(`importPhase_${p.phase}`);
+        const phaseLabel = importPhaseLabel(p, tr);
         toast({
           id,
           variant: 'info',
           title: tr('importing', { name }),
           description: importProgressText(p, source?.kind, phaseLabel, langRef.current, tr),
-          progress: p.total && p.total > 0 ? { value: p.done, max: p.total } : {},
+          // A saving step is a wait with no meaningful count: the bar runs indeterminate.
+          progress: p.total && p.total > 0 && !importSaveStep(p) ? { value: p.done, max: p.total } : {},
         });
       }),
     );

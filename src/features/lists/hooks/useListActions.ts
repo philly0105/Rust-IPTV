@@ -11,7 +11,7 @@ import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { queryClient, rpcKey } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type CustomList, type CustomListEntry, type ItemRef } from '@/api/types';
 
 import { useToast } from '../deps';
@@ -150,7 +150,10 @@ export function useListActions(): ListActions {
       deleteLater(list, {
         undoLabel: t('undo'),
         showToast: (action) => toast({ title: t('deleted', { list: list.name }), variant: 'info', action }),
-        remove: () => rpc('lists.remove', { id: list.id }),
+        // `call` is { keepalive: true } from the unload and quit flushes (L3-vod-x3); in-app it is unset.
+        remove: async (call) => {
+          await rpcRaw('lists.remove', { id: list.id }, call);
+        },
         onFailed: (err) => toast({ title: t('deleteFailed', { list: list.name }), description: errorText(err, t), variant: 'error' }),
       });
     },

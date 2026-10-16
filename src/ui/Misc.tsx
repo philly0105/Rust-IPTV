@@ -28,17 +28,38 @@ const KEY_LABELS: Record<string, string> = {
   end: 'End',
   delete: 'Del',
   contextmenu: 'Menu',
+  // Media keys show the symbol printed on the key. U+FE0E asks for the text glyph, so Windows
+  // does not swap in a colour emoji; KEY_NAMES gives each one a spoken name.
+  mediaplaypause: '⏯︎',
+  mediastop: '⏹︎',
+  mediatracknext: '⏭︎',
+  mediatrackprevious: '⏮︎',
 };
+
+/** Spoken names for keys whose label is a symbol a screen reader would read out by its Unicode name. */
+const KEY_NAMES: Record<string, string> = {
+  mediaplaypause: 'Play/Pause',
+  mediastop: 'Stop',
+  mediatracknext: 'Next track',
+  mediatrackprevious: 'Previous track',
+};
+
+const comboParts = (combo: string) =>
+  combo
+    .split('+')
+    .filter(Boolean)
+    .map((k) => k.trim().toLowerCase());
+
+const keyLabel = (key: string) => KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key[0]!.toUpperCase() + key.slice(1));
 
 /** Human labels for a combo string like `mod+shift+k`. */
 export function comboKeys(combo: string): string[] {
-  return combo
-    .split('+')
-    .filter(Boolean)
-    .map((k) => {
-      const key = k.trim().toLowerCase();
-      return KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key[0]!.toUpperCase() + key.slice(1));
-    });
+  return comboParts(combo).map(keyLabel);
+}
+
+/** The combo as a screen reader should say it: like {@link comboKeys}, with media keys by name. */
+function comboKeyNames(combo: string): string[] {
+  return comboParts(combo).map((key) => KEY_NAMES[key] ?? keyLabel(key));
 }
 
 export interface KbdProps {
@@ -53,13 +74,15 @@ export function Kbd({ combo, children, className }: KbdProps) {
     'inline-flex h-6 min-w-6 items-center justify-center rounded-sm border border-border border-b-2 bg-surface-2 px-1.5 font-mono text-xs text-fg-muted';
   if (combo) {
     const keys = comboKeys(combo);
+    const names = comboKeyNames(combo);
     return (
       // A plain span cannot carry aria-label (prohibited on the generic role), so the
       // spoken form is visually hidden text and the key caps are hidden from AT.
       <span className={cn('inline-flex items-center gap-1', className)}>
-        <span className="sr-only">{keys.join(' + ')}</span>
+        <span className="sr-only">{names.join(' + ')}</span>
         {keys.map((k, i) => (
-          <kbd key={`${k}-${i}`} className={keyClass} aria-hidden>
+          // A symbol key also names itself on hover.
+          <kbd key={`${k}-${i}`} className={keyClass} title={names[i] !== k ? names[i] : undefined} aria-hidden>
             {k}
           </kbd>
         ))}

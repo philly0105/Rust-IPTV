@@ -72,7 +72,8 @@ describe('toast stack', () => {
     });
     const list = document.querySelector<HTMLOListElement>('[data-toast-list]')!;
     expect(list.className).toContain('pointer-events-none');
-    expect(list.className).toContain('max-h-[50vh]');
+    // Half the window, less any room kept clear above the mini player (L3-desktop-4).
+    expect(list.className).toContain('max-h-[min(50vh,calc(100vh_-_var(--toast-clear,0px)_-_2rem))]');
     expect(list.className).toContain('overflow-y-auto');
     const item = within(list).getAllByRole('listitem')[0]!;
     expect(item.className).toContain('pointer-events-auto');

@@ -248,9 +248,9 @@ test.describe.serial('subtitles', () => {
       if (!box) throw new Error('no player to hover');
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.move(box.x + box.width / 2 + 6, box.y + box.height / 2 + 6);
-      // Under 480 px wide (the live page's player at 1280) the bar waits while the zap chip
-      // shows unless the pointer rests on it.
-      await host.getByTestId('overlay-chrome').hover();
+      // The move over the picture shows the bar and takes down the zap chip a small player shows
+      // after a tune; resting on the bar's pane keeps the bar up.
+      await host.getByTestId('controls-pane').hover();
       await host.getByRole('button', { name: 'Playback options' }).click();
 
       // The style view is a dialog, the others are menus: one frame, found by its test id.

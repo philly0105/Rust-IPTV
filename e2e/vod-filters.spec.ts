@@ -79,8 +79,13 @@ test.describe('VOD year filter and watched', () => {
     await rangeGroup(page).getByRole('combobox', { name: 'To' }).selectOption('2026');
     await expect(page).toHaveURL(/[?&]yf=2026&yt=2026/);
     await expect(options(page).first()).toContainText('2026');
-    const shown = await options(page).count();
-    for (let i = 0; i < shown; i++) await expect(options(page).nth(i)).toContainText('2026');
+    // The grid stays mounted and keeps the old titles (dimmed) until the new range answers (L3-vod-3).
+    await expect
+      .poll(async () => {
+        const texts = await options(page).allInnerTexts();
+        return texts.length > 0 && texts.every((t) => t.includes('2026'));
+      })
+      .toBe(true);
 
     // A reload keeps the range.
     await page.reload();

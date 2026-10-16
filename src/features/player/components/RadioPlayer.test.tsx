@@ -12,6 +12,7 @@ vi.mock('@/api/transport', () => ({
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { RadioPlayer } = await import('./RadioPlayer');
+const { useToastStore } = await import('@/ui/Toast');
 
 const radio = { url: 'http://r/1.mp3', kind: 'direct' as const, title: 'Jazz FM', isLive: true, isRadio: true };
 
@@ -23,6 +24,7 @@ afterEach(() => {
   cleanup();
   __resetPlayerForTests();
   resetMedia();
+  act(() => useToastStore.setState({ toasts: [] }));
 });
 
 describe('RadioPlayer', () => {
@@ -63,7 +65,9 @@ describe('RadioPlayer', () => {
     camera.focus();
     expect(document.activeElement).toBe(camera);
     fireEvent.click(camera);
-    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Take screenshot', secondary: 'Radio has no picture to capture.' });
+    // The reason is a toast; the OSD repeats it only in picture-in-picture, where toasts cannot be seen (X-desk-3).
+    expect(useToastStore.getState().toasts).toEqual([expect.objectContaining({ title: 'Radio has no picture to capture.', variant: 'info' })]);
+    expect(useMediaStore.getState().osd).toBeUndefined();
   });
 
   it('leaves the camera off the compact strip, like the mini player bar', async () => {

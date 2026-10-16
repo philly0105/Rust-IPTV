@@ -5,7 +5,7 @@
 
 import { useCallback, useState } from 'react';
 
-import { imageAttempts, imageFailedRecently, markImageFailed, type ImageAttempt } from '@/api/images';
+import { imageAttempts, imageFailedRecently, imageWidthBucket, markImageFailed, type ImageAttempt } from '@/api/images';
 
 export interface ImageChain {
   /** The URL to put on the <img> now; undefined once every attempt failed or there is no picture. */
@@ -32,8 +32,13 @@ function nextLive(attempts: readonly ImageAttempt[], from: number): number {
   return i;
 }
 
-function startChain(key: string, sources: readonly (string | null | undefined)[], sourceId: string | undefined): Chain {
-  const attempts = imageAttempts(sources, sourceId);
+function startChain(
+  key: string,
+  sources: readonly (string | null | undefined)[],
+  sourceId: string | undefined,
+  width: number | undefined,
+): Chain {
+  const attempts = imageAttempts(sources, sourceId, width);
   return { key, attempts, step: nextLive(attempts, 0) };
 }
 
@@ -51,14 +56,17 @@ function startChain(key: string, sources: readonly (string | null | undefined)[]
  * - A failed URL is remembered for a few minutes (`markImageFailed`): a row
  *   scrolled out and back in starts at the first attempt that has not failed,
  *   or at the fallback, without asking the cache and the provider again.
+ * - `width` (CSS px the picture is drawn at) asks the cache for a resized copy (`imageUrl`); a
+ *   width that lands in another size bucket starts the picture again.
  */
-export function useImageChain(sources: readonly (string | null | undefined)[], sourceId?: string): ImageChain {
-  const key = `${sourceId ?? ''}\n${sources.map((s) => s?.trim() ?? '').join('\n')}`;
-  const [stored, setStored] = useState<Chain>(() => startChain(key, sources, sourceId));
+export function useImageChain(sources: readonly (string | null | undefined)[], sourceId?: string, width?: number): ImageChain {
+  const bucket = imageWidthBucket(width);
+  const key = `${sourceId ?? ''}\n${bucket ?? ''}\n${sources.map((s) => s?.trim() ?? '').join('\n')}`;
+  const [stored, setStored] = useState<Chain>(() => startChain(key, sources, sourceId, width));
   let chain = stored;
   if (stored.key !== key) {
     // A new picture: start it during this render (React's derived-state pattern), so no frame shows the old one.
-    chain = startChain(key, sources, sourceId);
+    chain = startChain(key, sources, sourceId, width);
     setStored(chain);
   }
   const { step } = chain;

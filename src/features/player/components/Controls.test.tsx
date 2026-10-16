@@ -399,11 +399,14 @@ describe('Controls in a narrow player', () => {
   });
 });
 
-describe('Controls dock menu height', () => {
-  it('is not cut to a small box: the menu takes its own height, up to part of the player', () => {
+describe('Controls dock menus (L3-player-ui-x5)', () => {
+  // Was: in the flow of the dock, up to 55 % of the player, which grew the strip embedded mpv
+  // reserves and shrank its video (396 to 222 px). A menu now floats over the picture, which mpv
+  // leaves out of its native window (role="menu"), so the strip keeps the bar's height.
+  it('float above the bar, out of the reserved strip, as tall as the room above them in the player', () => {
     const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const h = this.hasAttribute('data-player-host') ? 800 : 0;
-      return { top: 0, bottom: h, left: 0, right: 1000, width: 1000, height: h, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      const r = this.hasAttribute('data-player-host') ? { top: 0, bottom: 800 } : this.dataset['testid'] === 'player-options-menu' ? { top: 500, bottom: 740 } : { top: 0, bottom: 0 };
+      return { ...r, left: 0, right: 1000, width: 1000, height: r.bottom - r.top, x: 0, y: r.top, toJSON: () => ({}) } as DOMRect;
     });
     try {
       render(
@@ -413,9 +416,12 @@ describe('Controls dock menu height', () => {
       );
       openMenu();
       const m = screen.getByTestId('player-options-menu');
-      expect(m.parentElement!.className).not.toMatch(/max-h-|overflow/);
-      // 55 % of the 800 px player.
-      expect(m.getAttribute('style') ?? '').toContain('440px');
+      const pop = m.parentElement!;
+      expect(pop.parentElement!.hasAttribute('data-player-controls')).toBe(true);
+      expect(pop.className.split(' ')).toContain('absolute');
+      expect(pop.className).toContain('bottom-full');
+      // From its bottom edge (740 px) up to 8 px under the top of the player.
+      expect(m.getAttribute('style') ?? '').toContain('732px');
     } finally {
       spy.mockRestore();
     }

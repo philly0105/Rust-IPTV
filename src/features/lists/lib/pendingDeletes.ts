@@ -7,12 +7,18 @@
  * (also the hidden and parentally hidden ones that `lists.items` never
  * returns, so no client-side copy could restore them), Home rail and place.
  *
- * Closing the page (`pagehide`) or quitting the desktop app (`QUIT_FLUSH_EVENT`,
- * whose quit waits for the call) with a delete still pending sends it right
- * away; if that request never lands the list simply survives, which loses nothing.
+ * Closing or reloading the page, or quitting the desktop app (`QUIT_FLUSH_EVENT`,
+ * whose quit waits for the call), with a delete still pending sends it right
+ * away, once, with `keepalive`. The page flush starts on `beforeunload`, before
+ * the navigation (`pagehide` for browsers that skip it), as the source removals
+ * and the watch stats do: a plain send made during the navigation could be
+ * cancelled or stall, and a delete in the last seconds before a reload was lost
+ * (L3-vod-x3). If that request never lands the list simply survives, which loses
+ * nothing. In-app flushes (the toast leaving, a name that needs its place) send
+ * a plain call.
  */
 
-import { RpcError } from '@/api/transport';
+import { RpcError, type CallOptions } from '@/api/transport';
 import type { CustomList } from '@/api/types';
 import { QUIT_FLUSH_EVENT, type QuitFlushDetail } from '@/api/window';
 import { useToastStore, type ToastOptions } from '@/ui';
@@ -23,8 +29,8 @@ import { patchLists, refreshLists } from './cache';
 interface PendingDelete {
   list: CustomList;
   toastId: string;
-  /** Sends the delete now (once); resolves when the core has answered. */
-  settle(): Promise<void>;
+  /** Sends the delete now (once; `call` from the first settle wins); resolves when the core has answered. */
+  settle(call?: CallOptions): Promise<void>;
   /** Forgets the delete without sending it (Undo, test reset). */
   drop(): void;
 }
@@ -43,8 +49,11 @@ export interface DeleteLaterOptions {
   /** Shows the "Deleted" toast with the given Undo action; returns its id. */
   showToast(action: NonNullable<ToastOptions['action']>): string;
   undoLabel: string;
-  /** The core call. A list that is already gone counts as deleted. */
-  remove(): Promise<void>;
+  /**
+   * The core call. A list that is already gone counts as deleted. `call` is `{ keepalive: true }`
+   * when the page unloads or the app quits: pass it on to `rpcRaw`.
+   */
+  remove(call?: CallOptions): Promise<void>;
   /** The core refused: the list is back in view; tell the user. */
   onFailed(err: unknown): void;
 }
@@ -56,9 +65,9 @@ export function deleteLater(list: CustomList, opts: DeleteLaterOptions): void {
   let unsubscribe = () => {};
   let settled: Promise<void> | undefined;
 
-  const send = async () => {
+  const send = async (call?: CallOptions) => {
     try {
-      await opts.remove();
+      await opts.remove(call);
       // Gone from the cache before it leaves the pending set, so it never flashes back.
       patchLists((ls) => ls.filter((l) => l.id !== list.id));
     } catch (err) {
@@ -73,11 +82,11 @@ export function deleteLater(list: CustomList, opts: DeleteLaterOptions): void {
   const entry: PendingDelete = {
     list,
     toastId: '',
-    settle: () => {
+    settle: (call) => {
       if (!settled) {
         done = true;
         unsubscribe();
-        settled = send();
+        settled = send(call);
       }
       return settled;
     },
@@ -109,13 +118,13 @@ export function deleteLater(list: CustomList, opts: DeleteLaterOptions): void {
 /**
  * Sends the pending deletes that `match` picks right away (their Undo toasts
  * close) and waits for the core, e.g. before creating a list whose name a
- * pending one still holds.
+ * pending one still holds. `call` goes to each `remove` (the unload and quit flushes).
  */
-export async function settleDeletes(match: (list: CustomList) => boolean = () => true): Promise<void> {
+export async function settleDeletes(match: (list: CustomList) => boolean = () => true, call?: CallOptions): Promise<void> {
   const due = [...pending.values()].filter((p) => match(p.list));
   await Promise.all(
     due.map((p) => {
-      const done = p.settle();
+      const done = p.settle(call);
       useToastStore.getState().dismiss(p.toastId);
       return done;
     }),
@@ -139,13 +148,20 @@ export function resetPendingDeletes(): void {
   for (const p of [...pending.values()]) p.drop();
 }
 
+/** What the unload and quit flushes pass to `remove`. */
+const UNLOADING: CallOptions = { keepalive: true };
+const all = () => true;
+
 if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', () => void settleDeletes());
+  // Each delete is sent once: the first of these events settles it, the second finds it settled.
+  const onUnload = () => void settleDeletes(all, UNLOADING);
+  window.addEventListener('beforeunload', onUnload);
+  window.addEventListener('pagehide', onUnload);
   // The desktop app's quit (tray Quit, the window's X, Alt+F4) fires no pagehide; it waits for
   // the work handed to `waitUntil` (up to `QUIT_FLUSH_BUDGET_MS`) before it exits.
   window.addEventListener(QUIT_FLUSH_EVENT, (e) => {
     if (pending.size === 0) return;
-    const work = settleDeletes();
+    const work = settleDeletes(all, UNLOADING);
     (e as CustomEvent<QuitFlushDetail>).detail?.waitUntil(work);
   });
 }

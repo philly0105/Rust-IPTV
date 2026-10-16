@@ -18,6 +18,12 @@
 //!   week of browser caching and the same sandbox headers as the proxy.
 //! - Everything else: the built UI (`dist/`) with SPA fallback and cache headers.
 //!
+//! RPC replies and the built UI are compressed for clients that accept it
+//! ([`compression`]: brotli or gzip at level 4, bodies of 1 KiB or more;
+//! precompressed `.br`/`.gz` files next to the assets win when present).
+//! The event socket, the media proxy, downloads, recordings and images are
+//! never compressed: they are streams, ranges or already-compressed media.
+//!
 //! The binary (`main.rs`) parses the CLI and calls [`router`]; integration
 //! tests build a [`Server`] directly.
 
@@ -31,6 +37,7 @@ pub mod recordings;
 pub mod static_files;
 
 use axum::extract::DefaultBodyLimit;
+use axum::handler::Handler;
 use axum::http::Request;
 use axum::middleware;
 use axum::routing::{any, get, post};
@@ -42,6 +49,8 @@ use iptv_core::AppState;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
+use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
+use tower_http::compression::{CompressionLayer, CompressionLevel, DefaultPredicate};
 use tower_http::trace::{DefaultOnFailure, DefaultOnResponse, TraceLayer};
 use tower_http::LatencyUnit;
 use tracing::Level;
@@ -53,6 +62,25 @@ pub const DEFAULT_PORT: u16 = 7180;
 pub const EVENT_CAPACITY: usize = 1024;
 /// Max request body for `/api/rpc` (backup imports and pasted playlists are large).
 pub const BODY_LIMIT: usize = 256 * 1024 * 1024;
+/// Smallest reply body worth compressing.
+pub const COMPRESS_MIN_BYTES: u16 = 1024;
+/// Brotli and gzip level: about 9x smaller JSON for a fraction of a
+/// millisecond per 100 KB (level 11 costs tens of ms for a few % more).
+pub const COMPRESS_LEVEL: i32 = 4;
+
+/// Brotli/gzip for RPC replies and the built UI. Skipped for bodies under
+/// [`COMPRESS_MIN_BYTES`], images (SVG aside), event streams, fonts (WOFF2
+/// is already compressed), replies that carry a `Content-Encoding` (the
+/// precompressed assets) and ranges.
+pub fn compression() -> CompressionLayer<impl Predicate> {
+    let when = DefaultPredicate::new()
+        .and(SizeAbove::new(COMPRESS_MIN_BYTES))
+        .and(NotForContentType::const_new("font/"))
+        .and(NotForContentType::const_new("application/font-woff"));
+    CompressionLayer::new()
+        .quality(CompressionLevel::Precise(COMPRESS_LEVEL))
+        .compress_when(when)
+}
 
 /// Runtime options that are not part of the core state.
 #[derive(Debug, Clone)]
@@ -161,7 +189,7 @@ pub fn install_server_mode(app: &AppState, allow_private_targets: bool) -> Arc<N
 /// Builds the full HTTP router.
 pub fn router(server: Server) -> Router {
     let api = Router::new()
-        .route("/rpc/{cmd}", post(api::rpc))
+        .route("/rpc/{cmd}", post(api::rpc).layer(compression()))
         .route("/events", get(api::events))
         .route("/health", get(api::health))
         .route("/proxy", get(proxy::handler))
@@ -178,7 +206,7 @@ pub fn router(server: Server) -> Router {
 
     Router::new()
         .nest("/api", api)
-        .fallback(static_files::handler)
+        .fallback(static_files::handler.layer(compression()))
         .with_state(server)
         .layer(middleware::map_response(guard::security_headers))
         .layer(

@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "녹화 중 {{count}}개",
   "scheduledSummaryNow_other": "녹화 중 {{count}}개",
   "scheduledEmptyTitle": "예약된 항목 없음",
-  "scheduledEmptyBody": "TV 가이드를 열고 프로그램에서 알림 받기 또는 녹화를 선택하세요.",
+  "scheduledEmptyBody": "TV 가이드를 열고 프로그램에서 알림 받기, 녹화 또는 시리즈 녹화를 선택하세요.",
   "scheduledOpenGuide": "TV 가이드 열기",
   "scheduledNow": "녹화 중",
   "scheduledUpcoming": "예정",

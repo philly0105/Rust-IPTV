@@ -55,6 +55,18 @@ export async function lockedNow(item: LockCheckItem): Promise<boolean> {
 }
 
 /**
+ * True when the controls are in Hide mode and filtering now: a locked item there is not to be
+ * named at all (Ask mode names it and asks for the PIN). A failed lookup answers true.
+ */
+export async function hideModeNow(): Promise<boolean> {
+  try {
+    return hidesContent(await currentStatus());
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Told when Hide mode refused to start an item the player still held on to: the channel
  * history drops it, the resume record forgets it, and the player says why.
  */

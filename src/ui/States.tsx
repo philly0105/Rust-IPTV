@@ -40,7 +40,12 @@ export function EmptyState({ icon, title, description, action, className, size =
           {icon}
         </div>
       )}
-      <div className="flex max-w-md flex-col gap-1.5">
+      {/*
+        overflow-wrap:anywhere (not break-word): it also lowers the min-content width, so a long
+        unbroken string (a pasted URL as the search query) wraps inside the column instead of
+        widening this shrink-to-fit block past the window edge.
+      */}
+      <div className="flex max-w-md flex-col gap-1.5 [overflow-wrap:anywhere]">
         <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title}</h2>
         {description && <p className="text-sm text-fg-muted">{description}</p>}
       </div>

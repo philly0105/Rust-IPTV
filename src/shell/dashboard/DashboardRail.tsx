@@ -60,13 +60,28 @@ export interface DashboardRailProps<T> {
   meta?: ReactNode;
 }
 
-/** One placeholder card: poster or tile at the rail's aspect, plus two text lines. */
+/**
+ * The track's padding (focus rings and shadows room), shared by the skeleton row and the error
+ * spacer so all three stand exactly as tall.
+ */
+const TRACK_PAD = 'pt-1 pb-3';
+
+/**
+ * One placeholder card, as tall as the cards it stands in for: the art at the rail's aspect,
+ * then two caption lines of the cards' text-sm line height (1lh), the first after their mt-2.
+ * Thinner bars with gap-2 between them came up 22 px short, so every rail grew as it loaded
+ * (a 0.166 layout shift on the Arabic dashboard, L3-visual-14).
+ */
 function SkeletonCard({ width, aspect }: { width: number; aspect: number }) {
   return (
-    <div className="flex shrink-0 flex-col gap-2" style={{ width }}>
+    <div className="flex shrink-0 flex-col" style={{ width }} data-rail-skeleton-card="">
       <div className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
-      <Skeleton className="h-3.5 w-4/5" />
-      <Skeleton className="h-3 w-1/2 opacity-70" />
+      <div className="mt-2 flex h-[1lh] items-center text-sm">
+        <Skeleton className="h-3.5 w-4/5" />
+      </div>
+      <div className="flex h-[1lh] items-center text-sm">
+        <Skeleton className="h-3 w-1/2 opacity-70" />
+      </div>
     </div>
   );
 }
@@ -227,7 +242,7 @@ export function DashboardRail<T>({
     >
       <div className="flex items-baseline justify-between gap-4 px-4 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
-          <h2 id={headingId} className="truncate text-lg">
+          <h2 id={headingId} title={title} className="truncate text-lg">
             {title}
           </h2>
           {meta}
@@ -244,7 +259,7 @@ export function DashboardRail<T>({
         // at least as tall as the skeleton it replaces; the row layout keeps it from being taller.
         <div className="mx-4 grid rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-rail-error">
           {/* -my-px: the box's 1px border plus this cell equal the bare skeleton row. */}
-          <div aria-hidden className="invisible col-start-1 row-start-1 -my-px" data-rail-error-spacer="">
+          <div aria-hidden className={cn('invisible col-start-1 row-start-1 -my-px', TRACK_PAD)} data-rail-error-spacer="">
             <SkeletonCard width={width} aspect={skeletonAspect} />
           </div>
           <ErrorState
@@ -256,7 +271,7 @@ export function DashboardRail<T>({
           />
         </div>
       ) : loading && count === 0 ? (
-        <div className="flex gap-4 overflow-hidden px-4 sm:px-8" aria-busy="true" aria-label={t('loadingRail', { title })}>
+        <div className={cn('flex gap-4 overflow-hidden px-4 sm:px-8', TRACK_PAD)} aria-busy="true" aria-label={t('loadingRail', { title })}>
           {Array.from({ length: 8 }, (_, i) => (
             <SkeletonCard key={i} width={width} aspect={skeletonAspect} />
           ))}
@@ -272,7 +287,10 @@ export function DashboardRail<T>({
               if (i >= 0 && i !== focusIndex) setFocusIndex(i);
             }}
             aria-labelledby={headingId}
-            className="flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto overflow-y-visible px-4 pt-1 pb-3 scrollbar-none sm:scroll-px-8 sm:px-8 motion-safe:scroll-smooth"
+            className={cn(
+              'flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto overflow-y-visible px-4 scrollbar-none sm:scroll-px-8 sm:px-8 motion-safe:scroll-smooth',
+              TRACK_PAD,
+            )}
           >
             {items!.map((item, i) => (
               <li key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>

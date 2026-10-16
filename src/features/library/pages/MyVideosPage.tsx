@@ -113,7 +113,9 @@ export function MyVideosPage() {
     [setParams],
   );
 
-  const subtitle = query.data
+  // An empty library says so in the page; "0 titles, 0 B" above it adds nothing (L3-visual-11).
+  const subtitle =
+    query.data && (library.length > 0 || recordings.count > 0)
     ? librarySubtitle({
         titles: library.length,
         recordings: recordings.count,
@@ -124,7 +126,7 @@ export function MyVideosPage() {
     : undefined;
   const headerActions = useMemo(
     () => (
-      <Link to="/downloads" className={buttonClass('ghost', 'sm')}>
+      <Link to="/downloads" className={buttonClass('ghost', 'sm')} title={t('openQueue')}>
         <ListOrdered size={16} aria-hidden />
         {/* Icon only on a phone, so the header keeps the palette and theme buttons on screen. */}
         <span className="max-sm:sr-only">{t('openQueue')}</span>

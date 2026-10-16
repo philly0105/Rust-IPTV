@@ -289,7 +289,7 @@
   "scheduledSummaryNow_many": "{{count}} تسجيل خدام دابا",
   "scheduledSummaryNow_other": "{{count}} تسجيلات خدامين دابا",
   "scheduledEmptyTitle": "حتى حاجة ما مبرمجة",
-  "scheduledEmptyBody": "حل دليل البرامج وختار فكّرني ولا سجّل على شي برنامج.",
+  "scheduledEmptyBody": "حل دليل البرامج وختار فكّرني ولا سجّل ولا سجّل السلسلة على شي برنامج.",
   "scheduledOpenGuide": "حل دليل البرامج",
   "scheduledNow": "كيتسجل دابا",
   "scheduledUpcoming": "الجاي",

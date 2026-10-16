@@ -43,6 +43,24 @@ export function rollbackList(previous: WatchlistEntry[] | undefined): void {
   if (previous) queryClient.setQueryData<WatchlistEntry[]>(LIST_KEY, previous);
 }
 
+/**
+ * My List's watched ticks are the core's playback rows, and some writes to
+ * those rows only mark `positions.` stale (Start over drops a movie's row,
+ * Recent's Remove, the player's saves). Whenever a `positions.` query is
+ * marked stale, so is the list: nothing refetches now, the next page or rail
+ * mount reads it again. This lets the page keep a long staleTime (L3-vod-7).
+ */
+function stalesWithPositions(): () => void {
+  return queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== 'updated' || event.action.type !== 'invalidate') return;
+    const head = event.query.queryKey[0];
+    if (typeof head === 'string' && head.startsWith('positions.')) {
+      void queryClient.invalidateQueries({ queryKey: LIST_KEY, exact: true, refetchType: 'none' });
+    }
+  });
+}
+stalesWithPositions();
+
 /** Refetches every `watchlist.*` query. */
 export function refreshMyList(): Promise<void> {
   return invalidate('watchlist.');

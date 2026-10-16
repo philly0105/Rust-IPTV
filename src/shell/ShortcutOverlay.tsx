@@ -121,6 +121,11 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 's', descKey: 'player:screenshot', area: 'Playback' },
   // Bound by pip.ts only while picture-in-picture is on.
   { combo: 'escape', descKey: 'player:exitPip', area: 'Playback' },
+  // The keyboard's media keys (usePlaybackShortcuts.ts, L3-desktop-5); they work in a text field too.
+  { combo: 'mediaplaypause', descKey: 'player:shortcutMediaPlayPause', area: 'Playback' },
+  { combo: 'mediastop', descKey: 'player:shortcutMediaStop', area: 'Playback' },
+  { combo: 'mediatracknext', descKey: 'player:shortcutMediaNext', area: 'Playback' },
+  { combo: 'mediatrackprevious', descKey: 'player:shortcutMediaPrevious', area: 'Playback' },
   // Bound by the focused seek bar (SeekBar.tsx onKeyDown). Its own area: PgUp/PgDn mean channel up/down in Playback.
   { combo: 'pageup', descKey: 'scSeekBarPageForward', area: 'Seek bar' },
   { combo: 'pagedown', descKey: 'scSeekBarPageBack', area: 'Seek bar' },

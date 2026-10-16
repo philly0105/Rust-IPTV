@@ -133,6 +133,11 @@ export interface Category {
   hidden: boolean;
   itemCount: number;
   position: number;
+  /**
+   * Only on `includeHidden` answers: true when the answer without `includeHidden` leaves this group
+   * out only because its channels are hidden. Absent from an older core.
+   */
+  emptiedByEdits?: boolean;
 }
 
 export interface ArchiveInfo {
@@ -908,6 +913,9 @@ export interface SourceRunErrorDetails {
  */
 export type ImportPhase = 'connecting' | 'fetching' | 'parsing' | 'saving' | 'done' | 'error' | 'cancelled';
 
+/** Sub-step of `phase: 'saving'`. An older core sends no step. */
+export type ImportSaveStep = 'replacing' | 'indexing';
+
 export interface ImportProgressEvent {
   sourceId: string;
   phase: ImportPhase;
@@ -919,6 +927,11 @@ export interface ImportProgressEvent {
   /** Download attempt in progress (1-based) and how many are allowed; sent with `phase: 'fetching'`. */
   attempt?: number;
   attempts?: number;
+  /**
+   * Only with phase 'saving': 'replacing' while the old catalog is deleted (no total), 'indexing'
+   * while indexes and counts are rebuilt (done = total).
+   */
+  step?: ImportSaveStep;
 }
 
 export interface EpgProgressEvent {
@@ -957,6 +970,19 @@ export interface DeepLinkEvent {
 
 export type EmptyEvent = Record<string, never>;
 
+/**
+ * Why `sources.changed` fired. `added`: a new source, no catalog yet. `catalog`: an import replaced
+ * a catalog. `config`: settings of a source changed. `removed`: a source went. `status`: only the
+ * status moved (a failed or cancelled import, a schedule backoff); the catalog is as it was.
+ */
+export type SourcesChangeReason = 'added' | 'catalog' | 'config' | 'removed' | 'status';
+
+/** Both fields are optional: an older core sends `{}`. */
+export interface SourcesChangedEvent {
+  sourceId?: string;
+  reason?: SourcesChangeReason;
+}
+
 /** Server mode: the event socket fell behind and `skipped` events were dropped; refetch everything. */
 export interface EventsLaggedEvent {
   skipped: number;
@@ -964,7 +990,7 @@ export interface EventsLaggedEvent {
 
 export interface AppEventMap {
   'import.progress': ImportProgressEvent;
-  'sources.changed': EmptyEvent;
+  'sources.changed': SourcesChangedEvent;
   'epg.progress': EpgProgressEvent;
   'epg.changed': EmptyEvent;
   'downloads.update': EmptyEvent;

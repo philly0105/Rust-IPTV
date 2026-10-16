@@ -277,6 +277,29 @@ export function layoutBlocks(programs: EpgProgram[], from: number, to: number, p
   return out;
 }
 
+/** Room a clipped cell keeps for its text before the cell's end pushes the text out. */
+export const CELL_TEXT_MIN_PX = 48;
+
+/**
+ * How far, in px, the text of a cell `left` px into a time track and `width` px wide is pushed
+ * past its own start with the track scrolled `scroll` px from its inline start: a show that began
+ * before the visible edge has its text moved just past the edge, until only
+ * {@link CELL_TEXT_MIN_PX} of it is left. A cell sits at left + 1 with a 1 px border and 8 px
+ * padding, so its text starts at left + 10 and should start 8 px past the edge. Guide cells and
+ * ribbon blocks pin their text there with `position: sticky`; this is the room the text gives up,
+ * so its box (and its ellipsis) ends where the cell does.
+ */
+export function cellTextPadPx(scroll: number, left: number, width: number): number {
+  const max = Math.max(0, width - 20 - CELL_TEXT_MIN_PX);
+  return Math.min(max, Math.max(0, scroll - (left + 2)));
+}
+
+/** Widest a cell's sticky text may be (see {@link cellTextPadPx}); undefined when the cell is not clipped. */
+export function cellTextMaxPx(scroll: number, left: number, width: number): number | undefined {
+  const pad = cellTextPadPx(scroll, left, width);
+  return pad > 0 ? width - 20 - pad : undefined;
+}
+
 /** Index of the programme covering `t`, else the first starting after it, else the last. */
 export function programIndexAt(programs: EpgProgram[], t: number): number {
   if (programs.length === 0) return -1;

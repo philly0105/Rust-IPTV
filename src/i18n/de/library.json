@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "{{count}} Aufnahme läuft",
   "scheduledSummaryNow_other": "{{count}} Aufnahmen laufen",
   "scheduledEmptyTitle": "Nichts geplant",
-  "scheduledEmptyBody": "Öffne den TV-Guide und wähle bei einer Sendung Erinnern oder Aufnehmen.",
+  "scheduledEmptyBody": "Öffne den TV-Guide und wähle bei einer Sendung Erinnern, Aufnehmen oder Serie aufnehmen.",
   "scheduledOpenGuide": "TV-Guide öffnen",
   "scheduledNow": "Wird aufgenommen",
   "scheduledUpcoming": "Demnächst",

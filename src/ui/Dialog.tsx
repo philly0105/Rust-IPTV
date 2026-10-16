@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
 import { cn } from './cn';
-import { focusableIn } from './focus';
+import { announceFocusAfterCommit, focusableIn } from './focus';
 import { portalContainer } from './portal';
 
 export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -93,7 +93,11 @@ function restoreFocus(self: OpenDialog): void {
   for (const el of candidates) {
     if (!el || !canHoldFocus(el)) continue;
     el.focus({ preventScroll: true });
-    if (document.activeElement === el) return;
+    if (document.activeElement === el) {
+      // This runs in a layout cleanup, inside React's commit, where React drops the focus event.
+      announceFocusAfterCommit(el);
+      return;
+    }
   }
 }
 
@@ -278,6 +282,9 @@ export function Dialog({
     >
       <div
         aria-hidden
+        // Marks the dimming layer by role, not by class names, for code that has to find it
+        // (mpvBounds dims the native video to match).
+        data-scrim=""
         className="fixed inset-0 bg-scrim motion-safe:animate-fade-in"
         onMouseDown={(e) => {
           // The press's default would move focus to <body> after the close put it back on the

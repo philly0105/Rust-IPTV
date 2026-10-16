@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 import type { RecordingFile } from '@/api/types';
 import { scheduleRemoval, usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { buttonClass } from '@/ui/Button';
@@ -112,7 +112,8 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
       // A server may run on a system without a Recycle Bin, where the file is deleted.
       toast: { title: f.fileAvailable ? t(isDesktop ? 'recDeleted' : 'recDeletedNoBin', { name: f.fileName }) : t('recForgotten', { name: f.fileName }) },
       undoLabel: t('recUndo'),
-      remove: () => rpc('recordings.delete', { id: f.id }),
+      // keepalive (in `call`) when the page unloads before the undo window passed.
+      remove: async (call) => void (await rpcRaw('recordings.delete', { id: f.id }, call)),
       onRemoved: () => void invalidate('recordings.'),
       onFailed: (e) => toast({ variant: 'error', title: t('recDeleteFailed'), description: RpcError.from(e).message }),
     });

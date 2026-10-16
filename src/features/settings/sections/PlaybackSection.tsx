@@ -3,11 +3,12 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
+import { isDesktop } from '@/api/transport';
 import type { Settings, StreamFormat, VideoPlayer } from '@/api/types';
 import { BackgroundChoice, ColorChoice, PositionSlider, SizeChoice, SubtitlePreview } from '@/features/player/components/SubtitleStyleFields';
 import { styleFromSettings } from '@/features/player/subtitles/style';
 
-import { Button, Skeleton } from '@/ui';
+import { Button } from '@/ui';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
 
@@ -92,13 +93,17 @@ export function PlaybackSection({ settings, update }: SectionProps) {
     { value: 'html5', label: t('playerBuiltIn'), hint: t('playerBuiltInHint'), available: true },
   ];
   const embedded = caps.data?.embeddedMpv ?? false;
-  if (embedded || settings.player === 'embedded-mpv') {
+  // The list keeps its shape while the capabilities load (L3-visual-10): no placeholder above it that
+  // goes away again. Only the desktop app can embed mpv, so there the row is always listed, available
+  // until the answer says otherwise and then with the reason; in the browser it appears only if chosen.
+  const embeddedPending = caps.isPending && (isDesktop || settings.player === 'embedded-mpv');
+  if (embedded || isDesktop || settings.player === 'embedded-mpv') {
     players.push({
       value: 'embedded-mpv',
       label: t('playerEmbeddedMpv'),
       hint: t('playerEmbeddedMpvHint'),
-      available: embedded,
-      note: embedded ? undefined : (caps.data?.reason ?? t('playerEmbeddedUnavailable')),
+      available: embedded || embeddedPending,
+      note: embedded || embeddedPending ? undefined : (caps.data?.reason ?? t('playerEmbeddedUnavailable')),
     });
   }
   players.push(
@@ -124,7 +129,6 @@ export function PlaybackSection({ settings, update }: SectionProps) {
     <SettingsSection title={t('sectionPlayback')} description={t('sectionPlaybackLead')} testId="settings-playback">
       <SettingsGroup title={t('player')} description={t('playerHint')}>
         <div role="radiogroup" aria-label={t('player')} className="flex flex-col p-2">
-          {caps.isPending ? <Skeleton className="m-2 h-12" /> : null}
           {caps.isError ? (
             <div role="alert" className="m-2 flex flex-wrap items-center gap-3 rounded-md bg-danger/10 px-3 py-2 text-sm" data-testid="player-caps-error">
               <span className="min-w-0 flex-1 text-danger">{t('capabilitiesFailed', { message: caps.error.message })}</span>

@@ -186,6 +186,73 @@ async fn bulk_rewrites_keep_every_index_and_store_exact_verdicts() {
         .unwrap();
 }
 
+/// `n` plain movies in category c0.
+fn plain(source: &str, salt: &str, n: u64) -> Vec<ItemRow> {
+    (0..n)
+        .map(|i| ItemRow {
+            source_id: source.into(),
+            content_type: ContentType::Movie,
+            item_id: format!("{salt}{i}"),
+            category_id: "c0".into(),
+            title: format!("Movie {salt}{i}"),
+            position: i as i64,
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// Whether a rewrite of `source` with `rows` has dropped the indexes of
+/// `items` once its last row is in. The rewrite is rolled back.
+fn goes_bulk(c: &mut Connection, source: &str, rows: &[ItemRow]) -> bool {
+    let tx = c.transaction().unwrap();
+    let mut w = CatalogWriter::begin(&tx, source, &[ContentType::Movie], None).unwrap();
+    for r in rows {
+        w.insert(r).unwrap();
+    }
+    item_indexes(&tx).is_empty()
+}
+
+/// L3 XA-8: once `begin` has deleted the replaced rows, a refresh is weighed
+/// against the other sources' rows only (they used to be counted short by
+/// the replaced rows, so a refresh smaller than what it keeps went bulk). A
+/// refresh that outgrows them, or replaces a large source in full, still
+/// goes bulk.
+#[tokio::test]
+async fn bulk_mode_weighs_a_refresh_against_the_rows_it_keeps() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    bare_source(&env.state, "s2").await;
+    env.state
+        .db_call(|c| {
+            let before = item_indexes(c);
+            write_declared(c, "s1", &plain("s1", "a", 26_000));
+            write_declared(c, "s2", &plain("s2", "b", 10_000));
+            // 10k replaced + 12k new: past BULK_MIN_ROWS, under the 26k rows
+            // of s1 a rebuild would sort too.
+            assert!(
+                !goes_bulk(c, "s2", &plain("s2", "c", 12_000)),
+                "a refresh smaller than the rows it keeps updates its indexes"
+            );
+            assert_eq!(item_indexes(c), before);
+            // 10k replaced + 17k new outgrows s1.
+            assert!(
+                goes_bulk(c, "s2", &plain("s2", "d", 17_000)),
+                "a refresh larger than the rows it keeps goes bulk"
+            );
+            assert_eq!(item_indexes(c), before, "rolled back with the rows");
+            // A full refresh of s1 replaces 26k rows against s2's 10k.
+            {
+                let tx = c.transaction()?;
+                let _w = CatalogWriter::begin(&tx, "s1", &[ContentType::Movie], None)?;
+                assert!(item_indexes(&tx).is_empty(), "bulk from begin");
+            }
+            assert_eq!(item_indexes(c), before);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn a_failed_bulk_rewrite_rolls_back_rows_and_indexes() {
     let env = env().await;

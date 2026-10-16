@@ -24,6 +24,9 @@ vi.mock('@/features/vod/lib/watchedQueries', async (importOriginal) => ({
 
 const store = await import('./store');
 const media = await import('./media');
+const nowNext = await import('./nowNext');
+const { queryClient, rpcKey } = await import('@/api/query');
+const { itemKey } = await import('@/api/types');
 const { usePlayerStore, playItem, playChannel, playSource, restorePlayback, zap, zapToNumber, handleEnded, registerStage, RESUME_KEY, SAVE_INTERVAL_MS } =
   store;
 
@@ -709,6 +712,187 @@ describe('zap bursts, catch-up zapping and channel renames', () => {
     await store.refreshPlayingChannel('s1');
     expect(usePlayerStore.getState().source?.title).toBe('Channel One HD');
     expect(usePlayerStore.getState().source?.url).toBe('http://x/live/101.m3u8');
+  });
+
+  it('a single press tunes at once, without waiting for the burst to go quiet (L3-player-2)', async () => {
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    rpcMock.mockClear();
+    vi.useFakeTimers();
+    const press = zap('down');
+    await vi.advanceTimersByTimeAsync(store.ZAP_SETTLE_MS - 50);
+    // The stream is asked for and playing before ZAP_SETTLE_MS has passed.
+    expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/102.m3u8');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await press)?.number).toBe(2);
+    expect(calls('xtream.streamUrl')).toHaveLength(1);
+  });
+
+  it("keeps the last channel's picture under the next channel's name until it is tuned (L3-player-2)", async () => {
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    const presses = [zap('down'), zap('down')];
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.title).toBe('Channel 3'));
+    const shown = usePlayerStore.getState().source;
+    // Same url and kind: the surfaces keep the stream they have instead of a black frame.
+    expect(shown).toMatchObject({ url: 'http://x/live/101.m3u8', kind: 'hls', ref: channel(3).ref });
+    expect(store.isPendingZap(shown)).toBe(true);
+    await Promise.all(presses);
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/103.m3u8');
+    expect(store.isPendingZap(usePlayerStore.getState().source)).toBe(false);
+  });
+
+  it('a press away and straight back leaves the channel playing untouched (L3-player-2)', async () => {
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ status: 'playing' });
+    const playing = usePlayerStore.getState().source;
+    rpcMock.mockClear();
+    const presses = [zap('down'), zap('up')];
+    const landed = await Promise.all(presses);
+    expect(landed.map((c) => c?.number)).toEqual([1, 1]);
+    // The very same item: no new stream, no Recent row, nothing restarted.
+    expect(usePlayerStore.getState().source).toBe(playing);
+    expect(usePlayerStore.getState().status).toBe('playing');
+    expect(calls('xtream.streamUrl')).toEqual([]);
+    expect(calls('recent.add')).toEqual([]);
+  });
+
+  it('a burst asks the guide only for the channel it stops on (L3-live-ch-x1)', async () => {
+    handlers['epg.nowNext'] = () => ({});
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    rpcMock.mockClear();
+    const presses = Array.from({ length: 8 }, () => zap('down'));
+    expect((await Promise.all(presses)).map((c) => c?.number)).toEqual(Array(8).fill(9));
+    await vi.waitFor(() => expect(calls('epg.nowNext')).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, store.ZAP_SETTLE_MS + 50));
+    expect(calls('epg.nowNext')).toEqual([{ refs: [channel(9).ref] }]);
+  });
+
+  it('takes the guide a Live list page already holds instead of asking (L3-live-ch-x1)', async () => {
+    handlers['epg.nowNext'] = () => ({});
+    const now = Date.now();
+    const airing = { channelId: 'c2', title: 'News at Nine', start: new Date(now - 60_000).toISOString(), end: new Date(now + 3_600_000).toISOString() };
+    // A list page's request: several channels, without descriptions.
+    queryClient.setQueryData(rpcKey('epg.nowNext', { refs: [channel(2).ref, channel(3).ref], withDescription: false }), {
+      [itemKey(channel(2).ref)]: { now: airing },
+    });
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    rpcMock.mockClear();
+    await zap('down');
+    expect(nowNext.peekNowNext(channel(2).ref)?.now?.title).toBe('News at Nine');
+    expect(usePlayerStore.getState().source?.subtitle).toBe('News at Nine');
+    expect(calls('epg.nowNext')).toEqual([]);
+  });
+
+  it("seeds the catalog's item rows from the neighbours a zap fetched (L3-player-9)", async () => {
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    await zap('down');
+    expect(queryClient.getQueryData(rpcKey('catalog.item', { ref: channel(3).ref }))).toMatchObject({ name: 'Channel 3', number: 3 });
+  });
+
+  it('fetches the neighbours of a channel as soon as it is tuned (L3-player-10)', async () => {
+    rpcMock.mockClear();
+    await playItem({ title: 'Channel 5', isLive: true, ref: channel(5).ref, sourceKind: 'xtream' });
+    await vi.waitFor(() => expect(calls('catalog.neighbors')).toEqual([expect.objectContaining({ ref: channel(5).ref })]));
+    rpcMock.mockClear();
+    // The first press steps from what is held: no lookup before the title moves.
+    const press = zap('down');
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.title).toBe('Channel 6'));
+    expect(calls('catalog.neighbors').map((a) => (a as { ref: ItemRef }).ref.itemId)).not.toContain('105');
+    await press;
+  });
+
+  describe('the connection limit (L3-player-core-x3)', () => {
+    /** The account status the core keeps for s1: `max` is the panel's `user_info.max_connections`. */
+    const limit = (max: number) => () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, activeCons: 0, maxConnections: max, checkedAt: new Date().toISOString() });
+    /** Fake time in small steps, so every step's promise chain (lookups, gate, stream) runs out. */
+    const step = async (ms: number): Promise<void> => {
+      for (let t = 0; t < ms; t += 10) await vi.advanceTimersByTimeAsync(10);
+    };
+    const tuneChannel1 = async (): Promise<void> => {
+      queryClient.removeQueries({ queryKey: rpcKey('account.status', { sourceId: 's1' }) });
+      await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+      // Asked for after the tune, ahead of the first press.
+      await vi.waitFor(() => expect(queryClient.getQueryData(rpcKey('account.status', { sourceId: 's1' }))).toBeTruthy());
+      rpcMock.mockClear();
+    };
+
+    it('one connection: presses 80 ms apart open only the channel the burst stops on, after the quiet', async () => {
+      handlers['account.status'] = limit(1);
+      await tuneChannel1();
+      vi.useFakeTimers();
+      const presses = [zap('down')];
+      await step(80);
+      // The first press moved the name at once but opened nothing: the picture held is channel 1's.
+      expect(usePlayerStore.getState().source).toMatchObject({ title: 'Channel 2', url: 'http://x/live/101.m3u8' });
+      expect(calls('xtream.streamUrl')).toEqual([]);
+      presses.push(zap('down'));
+      await step(80);
+      presses.push(zap('down'));
+      await step(80);
+      expect(usePlayerStore.getState().source?.title).toBe('Channel 4');
+      expect(calls('xtream.streamUrl')).toEqual([]);
+      await step(store.ZAP_SETTLE_MS + 50);
+      expect((await Promise.all(presses)).map((c) => c?.number)).toEqual([4, 4, 4]);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(4).ref }]);
+      expect(usePlayerStore.getState().source?.url).toBe('http://x/live/104.m3u8');
+    });
+
+    it('one connection: a single press opens once the quiet has passed', async () => {
+      handlers['account.status'] = limit(1);
+      await tuneChannel1();
+      vi.useFakeTimers();
+      const press = zap('down');
+      await step(store.ZAP_SETTLE_MS - 50);
+      expect(usePlayerStore.getState().source?.title).toBe('Channel 2');
+      expect(calls('xtream.streamUrl')).toEqual([]);
+      await step(100);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      expect((await press)?.number).toBe(2);
+    });
+
+    it('two connections: a single press still opens at once, and a burst after it opens the last channel', async () => {
+      handlers['account.status'] = limit(2);
+      await tuneChannel1();
+      vi.useFakeTimers();
+      const presses = [zap('down')];
+      await step(80);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }]);
+      presses.push(zap('down'));
+      await step(store.ZAP_SETTLE_MS + 50);
+      expect((await Promise.all(presses)).map((c) => c?.number)).toEqual([3, 3]);
+      expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(2).ref }, { ref: channel(3).ref }]);
+    });
+  });
+});
+
+describe('external players (need live-channels#2)', () => {
+  it("opens the player a menu chose, and the stage's Reopen opens the same one", async () => {
+    handlers['player.openExternal'] = () => ({ pid: 1 });
+    const players = (): unknown[] => calls('player.openExternal').map((a) => (a as { player: string }).player);
+    await usePlayerStore.getState().play(vod('5'), { mode: 'external', externalPlayer: 'vlc' });
+    expect(usePlayerStore.getState()).toMatchObject({ mode: 'external', status: 'playing', dock: 'hidden' });
+    // Reopen: the same item, no player named.
+    await usePlayerStore.getState().play(usePlayerStore.getState().source!, { mode: 'external' });
+    // Another item without a choice: the settings' player (here none set: mpv).
+    await usePlayerStore.getState().play(vod('6'), { mode: 'external' });
+    expect(players()).toEqual(['vlc', 'vlc', 'mpv']);
+  });
+});
+
+describe('the guide answer the player shares with the live page (L3-player-9)', () => {
+  it('asks the core once when the banner and the live page ask together', async () => {
+    let n = 0;
+    handlers['epg.nowNext'] = () => {
+      n++;
+      return {};
+    };
+    const args = { refs: [liveRef] };
+    await Promise.all([
+      nowNext.fetchNowNext(liveRef),
+      queryClient.fetchQuery({ queryKey: rpcKey('epg.nowNext', args), queryFn: () => rpcMock('epg.nowNext', args) }),
+      nowNext.fetchNowNext(liveRef),
+    ]);
+    expect(n).toBe(1);
   });
 });
 

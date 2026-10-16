@@ -111,6 +111,17 @@ pub const INSIDE_SQL: &str =
     "SELECT start, stop, title, description, category, icon FROM epg_programs
      WHERE epg_url = ?1 AND channel_id = ?2 AND start >= ?3 AND start < ?4
      ORDER BY start LIMIT ?5";
+/// [`BEFORE_SQL`] without the description (`withDescription: false`): about
+/// half the bytes of a guide page or a now/next list.
+pub const BEFORE_BRIEF_SQL: &str =
+    "SELECT start, stop, title, NULL, category, icon FROM epg_programs
+     WHERE epg_url = ?1 AND channel_id = ?2 AND start >= ?3 AND start < ?4 AND stop > start
+     ORDER BY start DESC LIMIT 1";
+/// [`INSIDE_SQL`] without the description.
+pub const INSIDE_BRIEF_SQL: &str =
+    "SELECT start, stop, title, NULL, category, icon FROM epg_programs
+     WHERE epg_url = ?1 AND channel_id = ?2 AND start >= ?3 AND start < ?4
+     ORDER BY start LIMIT ?5";
 
 /// Tidied programmes of `channel_id` overlapping `[from, to)`, at most
 /// `limit`, moved by `shift` seconds (the channel's `tvg-shift`): the range
@@ -127,6 +138,8 @@ pub const INSIDE_SQL: &str =
 /// rows of the whole lookback window instead let a `LIMIT` cut the list
 /// before the programme that is actually on (broken feeds whose programmes
 /// overlap by days).
+///
+/// `with_description: false` leaves every description out.
 fn rows(
     conn: &Connection,
     channel_id: &str,
@@ -134,6 +147,7 @@ fn rows(
     to: i64,
     limit: i64,
     shift: i64,
+    with_description: bool,
 ) -> CoreResult<Vec<Row>> {
     let (from, to) = (from - shift, to - shift);
     let feed: Option<String> = conn
@@ -162,14 +176,19 @@ fn rows(
             icon: r.get(5)?,
         })
     };
-    let mut before = conn.prepare_cached(BEFORE_SQL)?;
+    let (before_sql, inside_sql) = if with_description {
+        (BEFORE_SQL, INSIDE_SQL)
+    } else {
+        (BEFORE_BRIEF_SQL, INSIDE_BRIEF_SQL)
+    };
+    let mut before = conn.prepare_cached(before_sql)?;
     let mut list: Vec<Row> = before
         .query_map(
             params![feed, channel_id, from - MAX_PROGRAMME_SECS, from],
             map,
         )?
         .collect::<Result<_, _>>()?;
-    let mut inside = conn.prepare_cached(INSIDE_SQL)?;
+    let mut inside = conn.prepare_cached(inside_sql)?;
     for r in inside.query_map(params![feed, channel_id, from, to, limit], map)? {
         list.push(r?);
     }
@@ -227,10 +246,30 @@ pub fn programs(
     to: i64,
     shift: i64,
 ) -> CoreResult<Vec<EpgProgram>> {
-    Ok(rows(conn, channel_id, from, to, MAX_PER_CHANNEL, shift)?
-        .into_iter()
-        .map(|r| to_program(channel_id, r))
-        .collect())
+    programs_with(conn, channel_id, from, to, shift, true)
+}
+
+/// [`programs`], with or without descriptions.
+pub fn programs_with(
+    conn: &Connection,
+    channel_id: &str,
+    from: i64,
+    to: i64,
+    shift: i64,
+    with_description: bool,
+) -> CoreResult<Vec<EpgProgram>> {
+    Ok(rows(
+        conn,
+        channel_id,
+        from,
+        to,
+        MAX_PER_CHANNEL,
+        shift,
+        with_description,
+    )?
+    .into_iter()
+    .map(|r| to_program(channel_id, r))
+    .collect())
 }
 
 /// Current and next programme of `channel_id` at `now`, moved by `shift`
@@ -241,8 +280,27 @@ pub fn now_next(
     now: i64,
     shift: i64,
 ) -> CoreResult<EpgNowNext> {
+    now_next_with(conn, channel_id, now, shift, true)
+}
+
+/// [`now_next`], with or without descriptions.
+pub fn now_next_with(
+    conn: &Connection,
+    channel_id: &str,
+    now: i64,
+    shift: i64,
+    with_description: bool,
+) -> CoreResult<EpgNowNext> {
     // A day ahead is plenty to find "next"; the limit bounds the work.
-    let list = rows(conn, channel_id, now, now + 86_400, 16, shift)?;
+    let list = rows(
+        conn,
+        channel_id,
+        now,
+        now + 86_400,
+        16,
+        shift,
+        with_description,
+    )?;
     let mut out = EpgNowNext::default();
     let mut it = list.into_iter().peekable();
     while let Some(r) = it.next() {
@@ -409,6 +467,28 @@ mod tests {
             now_next(&conn, "c", from, 0).unwrap().now.unwrap().title,
             "on"
         );
+    }
+
+    /// The brief statements differ from the full ones only in the
+    /// description column: same parameters, same index plan.
+    #[test]
+    fn brief_statements_match_the_full_ones_but_the_description() {
+        for (full, brief) in [
+            (BEFORE_SQL, BEFORE_BRIEF_SQL),
+            (INSIDE_SQL, INSIDE_BRIEF_SQL),
+        ] {
+            assert_eq!(full.replacen("description", "NULL", 1), brief);
+            let conn = guide(&[]);
+            let plan = |sql: &str| -> Vec<String> {
+                let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+                let args = vec![rusqlite::types::Null; stmt.parameter_count()];
+                stmt.query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect()
+            };
+            assert_eq!(plan(full), plan(brief), "{brief}");
+        }
     }
 
     #[test]

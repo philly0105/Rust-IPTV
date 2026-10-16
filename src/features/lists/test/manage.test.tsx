@@ -6,11 +6,18 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { ItemRef } from '@/api/types';
 
-const rpcMock = vi.hoisted(() => ({ current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> } }));
+const rpcMock = vi.hoisted(() => ({
+  current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> },
+  /** Every rpcRaw call with its options, to see which went out with keepalive. */
+  raw: [] as { cmd: string; args?: unknown; opts?: unknown }[],
+}));
 vi.mock('@/api/transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/transport')>()),
   rpc: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
-  rpcRaw: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
+  rpcRaw: (cmd: string, args?: unknown, opts?: unknown) => {
+    rpcMock.raw.push({ cmd, args, opts });
+    return rpcMock.current!.call(cmd, args);
+  },
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
@@ -61,6 +68,7 @@ const refIds = (refs: ItemRef[]) => refs.map((r) => r.itemId);
 beforeAll(h.installDomStubs);
 beforeEach(() => {
   rpc.reset();
+  rpcMock.raw.length = 0;
   h.resetShared();
 });
 afterEach(cleanup);
@@ -321,6 +329,70 @@ describe('manage lists', () => {
       // Settled: its Undo is gone and a second quit has nothing to wait for.
       expect(useToastStore.getState().toasts.some((t) => t.title === 'Deleted Kids')).toBe(false);
       expect(quit()).not.toHaveBeenCalled();
+    });
+
+    // L3-vod-x3: a delete in its undo window was flushed only on pagehide, with a plain call the
+    // navigation could cancel, so deleting a list and reloading at once could lose the delete.
+    describe('page unload and quit flush with keepalive', () => {
+      const removeSends = () => rpcMock.raw.filter((c) => c.cmd === 'lists.remove').map(({ args, opts }) => ({ args, opts }));
+      const KEEPALIVE = { args: { id: 'L2' }, opts: { keepalive: true } };
+      const deleteKids = async () => {
+        const core = seed();
+        const dialog = await openManage();
+        fireEvent.click(within(row(dialog, 'L2')).getByRole('button', { name: 'Delete Kids' }));
+        await waitFor(() => expect(rowNames(dialog)).toEqual(['Sports', 'News']));
+        expect(removeSends()).toEqual([]);
+        return core;
+      };
+
+      it('beforeunload sends a pending delete with keepalive, and the pagehide after it does not send it again', async () => {
+        const core = await deleteKids();
+        act(() => void window.dispatchEvent(new Event('beforeunload')));
+        expect(removeSends()).toEqual([KEEPALIVE]);
+        act(() => void window.dispatchEvent(new Event('pagehide')));
+        await waitFor(() => expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']));
+        expect(removeSends()).toEqual([KEEPALIVE]);
+        expect(rpc.callsOf('lists.remove')).toEqual([{ id: 'L2' }]);
+        expect(useToastStore.getState().toasts.some((t) => t.title === 'Deleted Kids')).toBe(false);
+      });
+
+      it('pagehide alone (no beforeunload) sends it with keepalive too', async () => {
+        const core = await deleteKids();
+        act(() => void window.dispatchEvent(new Event('pagehide')));
+        expect(removeSends()).toEqual([KEEPALIVE]);
+        await waitFor(() => expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']));
+      });
+
+      it('the desktop quit flush sends it with keepalive and still hands the work to waitUntil', async () => {
+        const core = await deleteKids();
+        const waitUntil = vi.fn();
+        window.dispatchEvent(new CustomEvent(QUIT_FLUSH_EVENT, { detail: { waitUntil } }));
+        expect(removeSends()).toEqual([KEEPALIVE]);
+        expect(waitUntil).toHaveBeenCalledTimes(1);
+        await act(() => waitUntil.mock.calls[0]![0] as Promise<unknown>);
+        expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']);
+        // An unload right after finds nothing left to send.
+        act(() => void window.dispatchEvent(new Event('beforeunload')));
+        expect(removeSends()).toEqual([KEEPALIVE]);
+      });
+
+      it('in-app flushes stay plain calls: the toast leaving, and a new list taking the name', async () => {
+        const core = await deleteKids();
+        dismissLastToast();
+        await waitFor(() => expect(core.lists.map((l) => l.id)).toEqual(['L1', 'L3']));
+        expect(removeSends()).toEqual([{ args: { id: 'L2' }, opts: undefined }]);
+
+        const dialog = screen.getByTestId('manage-lists-dialog');
+        fireEvent.click(within(row(dialog, 'L1')).getByRole('button', { name: 'Delete Sports' }));
+        await waitFor(() => expect(rowNames(dialog)).toEqual(['News']));
+        fireEvent.change(within(dialog).getByLabelText('New list name'), { target: { value: 'sports' } });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+        await waitFor(() => expect(rowNames(dialog)).toEqual(['News', 'sports']));
+        expect(removeSends()).toEqual([
+          { args: { id: 'L2' }, opts: undefined },
+          { args: { id: 'L1' }, opts: undefined },
+        ]);
+      });
     });
 
     it('a reorder while a delete waits keeps the pending list in its place', async () => {

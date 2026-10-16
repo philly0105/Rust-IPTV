@@ -49,7 +49,13 @@ const ms = (iso: string | undefined) => (iso ? Date.parse(iso) || 0 : 0);
 
 function useChunkExtras(refs: Channel['ref'][], offsetMinutes: number) {
   const has = refs.length > 0;
-  const nowNext = useRpcQuery('epg.nowNext', offsetMinutes ? { refs, offsetMinutes } : { refs }, { enabled: has, staleTime: 60_000 });
+  // The rows show titles and times only (a play takes the title), so the descriptions, about half
+  // the bytes, stay behind (L3-serve-ui-7).
+  const nowNext = useRpcQuery(
+    'epg.nowNext',
+    offsetMinutes ? { refs, offsetMinutes, withDescription: false } : { refs, withDescription: false },
+    { enabled: has, staleTime: 60_000 },
+  );
   const favs = useRpcQuery('favorites.contains', { refs }, { enabled: has });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };

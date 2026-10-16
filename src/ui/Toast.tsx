@@ -1,11 +1,12 @@
 import { CircleAlert, CircleCheck, Info, X } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
 import { cn } from './cn';
 import { reportToastStackBottom, useCenteredDialogOpen } from './Dialog';
+import { announceFocusAfterCommit, isAnnouncedFocus } from './focus';
 import { ProgressBar } from './Misc';
 import { portalContainer } from './portal';
 
@@ -85,8 +86,13 @@ let returnFocus: HTMLElement | null = null;
 /**
  * Notes where focus came from as it lands in a toast. Moves between toasts keep the first
  * origin; an entry from <body> or from outside the window (no related target) forgets a stale one.
+ * The focusin that focus.ts re-sends after a commit (a toast handing focus to its neighbour) has
+ * no related target either, but focus did not come from anywhere new, so it keeps the origin and
+ * F8's way back survives.
  */
-function noteFocusEntry(from: EventTarget | null): void {
+function noteFocusEntry(event: FocusEvent): void {
+  if (isAnnouncedFocus(event)) return;
+  const from = event.relatedTarget;
   if (from instanceof Element && from.closest(VIEWPORT_SELECTOR)) return;
   returnFocus = from instanceof HTMLElement && from !== document.body ? from : null;
 }
@@ -120,14 +126,21 @@ function leaveToasts(): void {
   returnFocus = null;
   if (back?.isConnected) {
     back.focus({ preventScroll: true });
-    if (document.activeElement === back) return;
+    if (document.activeElement === back) {
+      announceFocusAfterCommit(back);
+      return;
+    }
   }
-  document.getElementById('main')?.focus({ preventScroll: true });
+  const main = document.getElementById('main');
+  main?.focus({ preventScroll: true });
+  if (main && document.activeElement === main) announceFocusAfterCommit(main);
 }
 
 /**
  * Called as a toast that holds focus is removed: focus moves to the
  * neighbouring toast, or out of the stack when it was the last one.
+ * It runs in a layout cleanup, inside React's commit, where React drops focus
+ * events, so the new focus is announced again afterwards (focus.ts).
  */
 function handOffFocus(li: HTMLElement): void {
   if (!li.contains(document.activeElement)) return;
@@ -135,8 +148,10 @@ function handOffFocus(li: HTMLElement): void {
   const i = all.indexOf(li);
   const next = all[i + 1] ?? all[i - 1];
   const control = next ? toastControls(next)[0] : undefined;
-  if (control) control.focus();
-  else leaveToasts();
+  if (control) {
+    control.focus();
+    announceFocusAfterCommit(control);
+  } else leaveToasts();
 }
 
 /** Shows (or updates, when `id` matches) a toast. Returns its id. Works outside React. */
@@ -225,7 +240,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
       onKeyDown={onKeyDown}
       data-paused={paused || undefined}
       onFocus={(e) => {
-        noteFocusEntry(e.relatedTarget);
+        noteFocusEntry(e.nativeEvent);
         pause();
       }}
       onBlur={(e) => {
@@ -307,6 +322,86 @@ export function toastsToAnnounce(prev: ReadonlyMap<string, ReactNode>, next: rea
 }
 
 /**
+ * Floating chrome the stack keeps clear of. The docked mini player carries the attribute: a
+ * toast over it would cover its controls, and the embedded mpv window, which treats toasts as
+ * reserved space (player/mpvBounds.ts), would shrink its picture until the toast went.
+ */
+export const TOAST_AVOID_SELECTOR = '[data-toast-avoid]';
+/** Space between the stack and the chrome it clears. */
+export const TOAST_AVOID_GAP = 8;
+/** The least height the stack keeps above the chrome; with less room it stays put (overlapping beats unreadable). */
+const TOAST_MIN_ROOM = 160;
+
+interface Span {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The stack's bottom edge, in px from the bottom of the window, that clears every obstacle in its
+ * column: 0 when nothing needs clearing (the stack keeps its usual inset). An obstacle counts when
+ * it shows (non-zero size), overlaps the stack's column horizontally and reaches into the lower
+ * half of the window, where the stack grows from. Exported for tests.
+ */
+export function toastClearanceFor(column: { left: number; right: number }, obstacles: readonly Span[], viewportHeight: number): number {
+  let clear = 0;
+  for (const r of obstacles) {
+    if (r.width <= 0 || r.height <= 0) continue;
+    if (r.right <= column.left || r.left >= column.right) continue;
+    if (r.bottom <= viewportHeight / 2) continue;
+    clear = Math.max(clear, viewportHeight - r.top + TOAST_AVOID_GAP);
+  }
+  if (clear > 0 && viewportHeight - clear < TOAST_MIN_ROOM) return 0;
+  return Math.ceil(clear);
+}
+
+/**
+ * Keeps the stack above floating chrome in its corner (TOAST_AVOID_SELECTOR) while toasts show:
+ * measured when the first toast arrives and again whenever that chrome shows, hides, moves
+ * (a drag sets its inline style), resizes or finishes its entry animation.
+ */
+function useToastClearance(sectionRef: { current: HTMLElement | null }, active: boolean): number {
+  const [clear, setClear] = useState(0);
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    if (!active || !section) {
+      setClear(0);
+      return;
+    }
+    const obstacles = Array.from(document.querySelectorAll<HTMLElement>(TOAST_AVOID_SELECTOR));
+    if (obstacles.length === 0) {
+      setClear(0);
+      return;
+    }
+    const measure = () => {
+      const col = section.getBoundingClientRect();
+      const rects = obstacles.filter((el) => el.isConnected && !el.hidden).map((el) => el.getBoundingClientRect());
+      setClear(toastClearanceFor(col, rects, window.innerHeight));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    const mo = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
+    for (const el of obstacles) {
+      ro?.observe(el);
+      mo?.observe(el, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
+      el.addEventListener('animationend', measure);
+    }
+    return () => {
+      window.removeEventListener('resize', measure);
+      ro?.disconnect();
+      mo?.disconnect();
+      for (const el of obstacles) el.removeEventListener('animationend', measure);
+    };
+  }, [active, sectionRef]);
+  return clear;
+}
+
+/**
  * Renders the toast stack (bottom-right). Mount once; the shell does. In element
  * fullscreen (player, multi-view wall) the stack moves into the fullscreen element
  * (portalContainer), so an Undo offered there can be seen and reached.
@@ -328,6 +423,7 @@ export function ToastViewport() {
   const listRef = useRef<HTMLOListElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const overDialog = useCenteredDialogOpen();
+  const clearance = useToastClearance(sectionRef, toasts.length > 0);
   // Over a centred dialog the stack's bottom edge is reported, so below sm (stack at the top)
   // the dialog layer starts under it instead of being covered (Dialog.tsx, toastReserveFor).
   // Wider windows keep the stack at the bottom and the layer ignores the value.
@@ -389,8 +485,12 @@ export function ToastViewport() {
       aria-keyshortcuts="F8"
       data-toast-viewport=""
       data-over-dialog={overDialog ? '' : undefined}
+      data-clearing={clearance > 0 ? '' : undefined}
+      style={clearance > 0 ? ({ '--toast-clear': `${clearance}px` } as CSSProperties) : undefined}
       className={cn(
-        'pointer-events-none fixed end-4 bottom-4 z-[80] w-[min(380px,calc(100vw-32px))]',
+        // --toast-clear lifts the stack above the docked mini player (useToastClearance); the
+        // capped list below shrinks by the same amount so the top toast stays on screen.
+        'pointer-events-none fixed end-4 bottom-[max(calc(var(--spacing)*4),var(--toast-clear,0px))] z-[80] w-[min(380px,calc(100vw-32px))]',
         // Below sm a centred dialog spans the window and its footer (Save, Cancel) sits at
         // the bottom, where the toasts are: while one is open they move to the top edge, and
         // the dialog moves down below them (the reserve above), so neither its actions nor
@@ -416,7 +516,7 @@ export function ToastViewport() {
         ref={listRef}
         data-toast-list=""
         data-scrolled={scrolled ? '' : undefined}
-        className="pointer-events-none -mx-6 -mt-6 -mb-4 flex max-h-[50vh] flex-col gap-2 overflow-y-auto overscroll-contain px-6 pt-6 pb-4 data-[scrolled]:[mask-image:linear-gradient(to_bottom,transparent,#000_48px)]"
+        className="pointer-events-none -mx-6 -mt-6 -mb-4 flex max-h-[min(50vh,calc(100vh_-_var(--toast-clear,0px)_-_2rem))] flex-col gap-2 overflow-y-auto overscroll-contain px-6 pt-6 pb-4 data-[scrolled]:[mask-image:linear-gradient(to_bottom,transparent,#000_48px)]"
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}

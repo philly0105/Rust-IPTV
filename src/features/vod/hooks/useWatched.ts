@@ -4,7 +4,7 @@
  * Watched episodes never tick their series.
  */
 
-import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useQueries, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -26,14 +26,55 @@ function refsOf(items: readonly WithRef[] | undefined): ItemRef[] {
   return (items ?? []).slice(0, WATCHED_LOOKUP_MAX).map((i) => i.ref);
 }
 
+const NO_REFS: ItemRef[] = [];
+const NO_KEYS: ReadonlySet<string> = new Set();
+/** The lookup refs of a page's items, the hash of their query key, and the watched set of an answer: built once and shared. */
+const refsByItems = new WeakMap<readonly WithRef[], ItemRef[]>();
+const hashByRefs = new WeakMap<readonly ItemRef[], string>();
+const keysByAnswer = new WeakMap<readonly ItemRef[], ReadonlySet<string>>();
+
+function sharedRefs(items: readonly WithRef[] | undefined): ItemRef[] {
+  if (!items) return NO_REFS;
+  let refs = refsByItems.get(items);
+  if (!refs) {
+    refs = refsOf(items);
+    refsByItems.set(items, refs);
+  }
+  return refs;
+}
+
+/** TanStack's own hash (so every reader shares the cache entry), computed once per refs array. */
+function watchedKeyHash(key: QueryKey): string {
+  const refs = (key[1] as { refs?: readonly ItemRef[] } | null | undefined)?.refs;
+  if (!refs) return hashKey(key);
+  let hash = hashByRefs.get(refs);
+  if (hash === undefined) {
+    hash = hashKey(key);
+    hashByRefs.set(refs, hash);
+  }
+  return hash;
+}
+
 /**
  * Item keys of the watched titles among one loaded page. Grid cells of the
  * same page share the query. A failed lookup ticks nothing.
+ *
+ * Every cell of a page calls this with the same page array (L3-perf-ui-3), so the refs, the
+ * query key's hash and the answer's set are made once per page and shared: built per cell, up
+ * to 120 refs were copied and hashed on every render of every cell, and a fast scroll through a
+ * big grid spent its frames in garbage collection.
  */
 export function useWatchedKeys(items: readonly WithRef[] | undefined): ReadonlySet<string> {
-  const refs = useMemo(() => refsOf(items), [items]);
-  const q = useRpcQuery('positions.watchedContains', { refs }, { enabled: refs.length > 0, staleTime: WATCHED_STALE_MS });
-  return useMemo(() => new Set((q.data ?? []).map(itemKey)), [q.data]);
+  const refs = sharedRefs(items);
+  const q = useRpcQuery('positions.watchedContains', { refs }, { enabled: refs.length > 0, staleTime: WATCHED_STALE_MS, queryKeyHashFn: watchedKeyHash });
+  const data = q.data;
+  if (!data) return NO_KEYS;
+  let keys = keysByAnswer.get(data);
+  if (!keys) {
+    keys = new Set(data.map(itemKey));
+    keysByAnswer.set(data, keys);
+  }
+  return keys;
 }
 
 /**

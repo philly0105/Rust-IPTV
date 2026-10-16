@@ -121,6 +121,10 @@ export function ScheduledPage() {
   // panel's query keeps one observer: remounting it after an error would refetch and loop).
   const rulesPanel = <RecordingRulesPanel />;
   let rulesAboveUpcoming = false;
+  // An empty page: its own empty state points to the guide (series included), so the rules panel's
+  // empty state with a second guide button would only repeat it (L3-visual-11). The page keeps
+  // observing the rules, so the panel appears with the first rule.
+  let showRules = true;
 
   let body;
   if (loading) {
@@ -137,6 +141,7 @@ export function ScheduledPage() {
       />
     );
   } else if (nowList.length === 0 && next.length === 0 && done.length === 0) {
+    showRules = !rules.data || rules.data.length > 0;
     body = (
       <EmptyState
         icon={<AlarmClock size={28} aria-hidden />}
@@ -203,7 +208,7 @@ export function ScheduledPage() {
         </p>
       ) : null}
       {body}
-      {rulesAboveUpcoming ? null : rulesPanel}
+      {rulesAboveUpcoming || !showRules ? null : rulesPanel}
     </div>
   );
 }

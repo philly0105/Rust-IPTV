@@ -253,7 +253,7 @@
   "scheduledSummaryNow_many": "{{count}} запісаў ідзе",
   "scheduledSummaryNow_other": "Запісаў ідзе: {{count}}",
   "scheduledEmptyTitle": "Нічога не запланавана",
-  "scheduledEmptyBody": "Адкрыйце праграму перадач і выберыце «Нагадаць» або «Запісаць» каля перадачы.",
+  "scheduledEmptyBody": "Адкрыйце праграму перадач і выберыце «Нагадаць», «Запісаць» або «Запісваць серыял» каля перадачы.",
   "scheduledOpenGuide": "Адкрыць праграму перадач",
   "scheduledNow": "Ідзе запіс",
   "scheduledUpcoming": "Неўзабаве",

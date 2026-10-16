@@ -5,6 +5,11 @@ import type { HiddenChannelsPanelProps } from './HiddenChannelsPanel';
 
 const HiddenChannelsPanel = lazyDialog<HiddenChannelsPanelProps>(async () => (await import('./HiddenChannelsPanel')).HiddenChannelsPanel);
 
+/** Fetches the hidden-channels dialog's code ahead of its first open. */
+export function preloadHiddenChannelsDialog(): Promise<void> {
+  return HiddenChannelsPanel.preload();
+}
+
 export interface HiddenChannelsDialogProps {
   sourceId: string;
   open: boolean;

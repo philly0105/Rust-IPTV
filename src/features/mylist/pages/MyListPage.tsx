@@ -12,7 +12,7 @@
  */
 
 import { SearchX, SquareCheckBig, Tv } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -30,6 +30,18 @@ import { readList } from '../lib/cache';
 import { buildView, moveInSubset, relativeTime } from '../lib/list';
 
 const DRAG_MIME = 'application/x-tsrust-mylist';
+
+/**
+ * Watched ticks and order change only through writes that invalidate the list
+ * (this page's actions, the toggles, `watchlist.changed`, a finishing save and
+ * mark-watched through invalidateWatched) and playback rows (linked in
+ * lib/cache.ts). A visit within this time shows the cached list as it is
+ * instead of reading it again (L3-vod-7).
+ */
+const MY_LIST_STALE_MS = 5 * 60_000;
+
+/** A move by one place, given the row's index among the rows on screen. */
+const step = (delta: -1 | 1) => (from: number) => from + delta;
 
 interface Row {
   key: ItemKey;
@@ -82,8 +94,7 @@ export function MyListPage() {
   const { t, i18n } = useTranslation('mylist');
   const navigate = useNavigate();
   const { setHeader } = useShell();
-  // staleTime 0: watched ticks change from the player and the detail pages.
-  const query = useMyList({ staleTime: 0 });
+  const query = useMyList({ staleTime: MY_LIST_STALE_MS });
   const sources = useVisibleSources();
   const hiddenSources = usePendingRemovals((s) => s.ids);
   const [params, setParams] = useListParams();
@@ -158,7 +169,6 @@ export function MyListPage() {
     },
     [all, canReorder, visibleKeys, reorder, refocus],
   );
-  const step = (delta: -1 | 1) => (from: number) => from + delta;
 
   /** Runs `fn` on the row that has focus; keys pressed elsewhere on the page do nothing. */
   const onFocused = (fn: (row: Row) => void) => {
@@ -178,45 +188,52 @@ export function MyListPage() {
     { description: t('shortcutWatched'), area: title, enabled: rows.length > 0 },
   );
 
-  const dragRow = drag ? rows.find((r) => r.key === drag.key) : undefined;
-  const reorderProps = (row: Row): RowReorder | undefined => {
-    if (!canReorder) return undefined;
-    return {
-      canUp: row.index > 0,
-      canDown: row.index < rows.length - 1,
-      onMove: (delta) => move(row.entry, step(delta)),
-      dragging: drag?.key === row.key,
-      dropTarget: drag?.over?.key === row.key && drag.key !== row.key ? drag.over.where : null,
-      onDragStart: (e: DragEvent<HTMLElement>) => {
+  // The reorder handlers read the latest render through this ref, so one object
+  // serves every row for the page's lifetime and memoized rows stay put.
+  const latest = useRef({ rows, drag, move });
+  useLayoutEffect(() => {
+    latest.current = { rows, drag, move };
+  });
+  const reorderHandlers = useMemo<RowReorder>(
+    () => ({
+      onMove: (entry, delta) => latest.current.move(entry, step(delta)),
+      onDragStart: (entry, e) => {
+        const key = itemKey(entry.ref);
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData(DRAG_MIME, row.key);
-        e.dataTransfer.setData('text/plain', row.entry.snapshot.title);
-        setDrag({ key: row.key });
+        e.dataTransfer.setData(DRAG_MIME, key);
+        e.dataTransfer.setData('text/plain', entry.snapshot.title);
+        setDrag({ key });
       },
       onDragEnd: () => setDrag(null),
-      onDragOver: (e: DragEvent<HTMLElement>) => {
-        if (!dragRow) return;
+      onDragOver: (entry, e) => {
+        const { drag: current, rows: shown } = latest.current;
+        if (!current || !shown.some((r) => r.key === current.key)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         const rect = e.currentTarget.getBoundingClientRect();
         const where = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-        if (drag?.over?.key !== row.key || drag.over.where !== where) setDrag({ key: dragRow.key, over: { key: row.key, where } });
+        const key = itemKey(entry.ref);
+        setDrag((d) => (d && (d.over?.key !== key || d.over.where !== where) ? { key: d.key, over: { key, where } } : d));
       },
-      onDrop: (e: DragEvent<HTMLElement>) => {
+      onDrop: (entry, e) => {
         e.preventDefault();
-        const over = drag?.over;
+        const { drag: current, rows: shown, move: moveEntry } = latest.current;
         setDrag(null);
+        const dragRow = current ? shown.find((r) => r.key === current.key) : undefined;
+        const over = current?.over;
         if (!dragRow || !over) return;
-        move(dragRow.entry, (from, subset) => {
-          const target = subset.findIndex((x) => itemKey(x.ref) === row.key);
+        const key = itemKey(entry.ref);
+        moveEntry(dragRow.entry, (from, subset) => {
+          const target = subset.findIndex((x) => itemKey(x.ref) === key);
           if (target < 0) return from;
           let to = target + (over.where === 'after' ? 1 : 0);
           if (from < to) to -= 1;
           return to;
         });
       },
-    };
-  };
+    }),
+    [],
+  );
 
   const dateFormat = useMemo(() => {
     try {
@@ -238,10 +255,18 @@ export function MyListPage() {
         added={ago ? t('addedAgo', { time: ago }) : ''}
         addedTitle={Number.isFinite(at) ? dateFormat.format(at) : ''}
         busy={pending.has(row.key)}
-        reorder={reorderProps(row)}
-        onOpen={() => open(e)}
-        onRemove={() => remove(e)}
-        onToggleWatched={() => toggleWatched(e)}
+        {...(canReorder
+          ? {
+              reorder: reorderHandlers,
+              canUp: row.index > 0,
+              canDown: row.index < rows.length - 1,
+              dragging: drag?.key === row.key,
+              dropTarget: drag?.over?.key === row.key && drag.key !== row.key ? drag.over.where : null,
+            }
+          : {})}
+        onOpen={open}
+        onRemove={remove}
+        onToggleWatched={toggleWatched}
       />
     );
   };

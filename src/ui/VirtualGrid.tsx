@@ -12,6 +12,15 @@ export function aspectRatio(aspect: GridAspect): number {
   return aspect === 'poster' ? 2 / 3 : aspect === 'wide' ? 16 / 9 : 1;
 }
 
+/** True when `el` shows keyboard focus; engines without `:focus-visible` count every focus as keyboard focus. */
+function focusVisible(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
 /** Column count and cell width for a container width. */
 export function gridLayout(width: number, minColumnWidth: number, gap: number): { columns: number; cellWidth: number } {
   const columns = Math.max(1, Math.floor((width + gap) / (minColumnWidth + gap)));
@@ -28,13 +37,14 @@ interface GridSlotProps {
   setSize: number;
   render: (item: unknown, index: number, state: VirtualItemState) => ReactNode;
   onPick: (index: number) => void;
+  onPress: (index: number) => void;
 }
 
 /**
  * One cell. Memoised with primitive props and a stable click handler, so a scroll that only
  * moves the window re-renders the rows that enter it, not every cell already on screen.
  */
-const GridSlot = memo(function GridSlot({ item, index, id, active, selected, setSize, render, onPick }: GridSlotProps) {
+const GridSlot = memo(function GridSlot({ item, index, id, active, selected, setSize, render, onPick, onPress }: GridSlotProps) {
   return (
     <div
       id={id}
@@ -45,6 +55,10 @@ const GridSlot = memo(function GridSlot({ item, index, id, active, selected, set
       data-index={index}
       data-active={active || undefined}
       className="min-w-0"
+      // The cursor follows a press (any button, before the grid takes focus) and a context menu,
+      // so the menu and the keyboard shortcuts act on the title under the pointer (L3-visual-1).
+      onPointerDown={() => onPress(index)}
+      onContextMenu={() => onPress(index)}
       onClick={() => onPick(index)}
     >
       {render(item, index, { active, selected })}
@@ -83,6 +97,12 @@ export interface VirtualGridProps<T> {
    * back). Read once; does not scroll (restore the scroll offset separately).
    */
   initialActiveIndex?: number;
+  /**
+   * For a grid that stays mounted while its items are replaced (a new sort or filter): when this
+   * changes, the keyboard cursor goes back to the first title if the grid has keyboard focus, and
+   * to none otherwise, so it never points at whatever title now holds the old index.
+   */
+  resetKey?: string | number;
 }
 
 /**
@@ -109,6 +129,7 @@ export function VirtualGrid<T>({
   initialRect = { width: 960, height: 720 },
   testId,
   initialActiveIndex,
+  resetKey,
 }: VirtualGridProps<T>) {
   const uiScale = useUiScale();
   const density = useDensity();
@@ -172,6 +193,16 @@ export function VirtualGrid<T>({
     if (active >= items.length) setActive(items.length - 1);
   }, [items.length, active]);
 
+  // Before paint, so the ring never shows on the old index for a frame (L3-ui-data-x1).
+  const shownResetKey = useRef(resetKey);
+  useLayoutEffect(() => {
+    if (shownResetKey.current === resetKey) return;
+    shownResetKey.current = resetKey;
+    const el = parentRef.current;
+    const keyboard = !!el && document.activeElement === el && focusVisible(el);
+    setActive(keyboard && items.length > 0 ? 0 : -1);
+  }, [resetKey]);
+
   const moveTo = (i: number) => {
     if (items.length === 0) return;
     const next = Math.max(0, Math.min(items.length - 1, i));
@@ -229,6 +260,7 @@ export function VirtualGrid<T>({
     setActive(index);
     if (index < list.length) select?.(list[index]!, index);
   }, []);
+  const onPress = useCallback((index: number) => setActive(index), []);
   const renderCell = render as GridSlotProps['render'];
 
   return (
@@ -241,7 +273,10 @@ export function VirtualGrid<T>({
       aria-activedescendant={active >= 0 && active < items.length ? cellId(active) : undefined}
       onKeyDown={onKeyDown}
       onFocus={(e) => {
-        if (e.target === e.currentTarget && active < 0 && items.length > 0) setActive(0);
+        // Keyboard focus (Tab, or a key that moved focus here) starts the cursor on the first
+        // title. A pointer press puts it on the pressed title instead (GridSlot), so a press
+        // between cards or a click never paints the ring on card 0.
+        if (e.target === e.currentTarget && active < 0 && items.length > 0 && focusVisible(e.currentTarget)) setActive(0);
       }}
       data-testid={testId}
       data-columns={columns}
@@ -280,6 +315,7 @@ export function VirtualGrid<T>({
                     setSize={items.length}
                     render={renderCell}
                     onPick={onPick}
+                    onPress={onPress}
                   />
                 );
               })}

@@ -901,3 +901,65 @@ fn subtitle_paths_are_checked() {
         dir.path().join("ok.srt")
     );
 }
+
+/// L3-desktop: `osd-overlay` (the dim the UI draws under a dialog's backdrop
+/// on the embedded mpv) takes one short line of ASS or `none`, an id mpv
+/// accepts and at most three small integer sizes; anything else is Invalid.
+#[test]
+fn osd_overlay_is_limited_to_one_short_ass_line() {
+    let osd = |args: &[serde_json::Value]| {
+        let mut cmd = vec![json!("osd-overlay")];
+        cmd.extend_from_slice(args);
+        validate_command(&cmd)
+    };
+    let dim =
+        r"{\an7\pos(0,0)\1c&H100804&\1a&H47&\p1}m -10 -10 l 10000 -10 10000 10000 -10 10000{\p0}";
+    for ok in [
+        vec![
+            json!(63),
+            json!("ass-events"),
+            json!(dim),
+            json!(0),
+            json!(720),
+            json!(0),
+        ],
+        vec![json!(0), json!("ass-events"), json!(dim)],
+        vec![json!(1), json!("ass-events"), json!("x".repeat(512))],
+        vec![json!(63), json!("none"), json!("")],
+    ] {
+        assert!(osd(&ok).is_ok(), "{ok:?}");
+    }
+    for bad in [
+        // Ids past mpv's 0-63, or not an integer.
+        vec![json!(64), json!("none"), json!("")],
+        vec![json!(-1), json!("none"), json!("")],
+        vec![json!("1"), json!("none"), json!("")],
+        // Formats that read bitmaps from a file or memory.
+        vec![json!(1), json!("bgra"), json!("")],
+        // A second event, or more than one drawing's worth of text.
+        vec![json!(1), json!("ass-events"), json!("a\nb")],
+        vec![json!(1), json!("ass-events"), json!("a\rb")],
+        vec![json!(1), json!("ass-events"), json!("x".repeat(513))],
+        vec![json!(1), json!("ass-events"), json!(5)],
+        // More than three sizes, or sizes that are not small integers.
+        vec![
+            json!(1),
+            json!("ass-events"),
+            json!("x"),
+            json!(0),
+            json!(720),
+            json!(0),
+            json!(0),
+        ],
+        vec![json!(1), json!("ass-events"), json!("x"), json!(16385)],
+        vec![json!(1), json!("ass-events"), json!("x"), json!(-1)],
+        vec![json!(1), json!("ass-events"), json!("x"), json!("720")],
+        vec![json!(1), json!("ass-events"), json!("x"), json!(1.5)],
+        // Too few arguments.
+        vec![json!(1), json!("none")],
+        vec![],
+    ] {
+        let err = osd(&bad).unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{bad:?}: {err:?}");
+    }
+}

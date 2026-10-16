@@ -65,7 +65,7 @@ Tests use `screenshot::set_folder_override` so nothing is written to the real Pi
 
 ## Capture in the UI
 
-`takeScreenshot()` never rejects. Every outcome is shown as a toast. The saved, downloaded and failed results are repeated on the player's OSD only in picture-in-picture, where the toast cannot be seen; the "nothing to capture" message (`explainBlock`) always shows on both.
+`takeScreenshot()` never rejects. Every outcome is shown as a toast, including the "nothing to capture" message (`explainBlock`). Each one is repeated on the player's OSD only in picture-in-picture, where the toast cannot be seen.
 
 Toasts, dialogs and menus portal into the fullscreen element while one is set (`portalContainer()` in `src/ui/portal.ts`), and the player's fullscreen element is its host (`PlayerDock`), so in player fullscreen the toast is visible without an OSD copy. Only when a `<video>` or `<iframe>` is itself the fullscreen element, which paints none of its children, do toasts stay in `document.body`.
 
@@ -81,7 +81,7 @@ The built-in player's OSD stays within the player. It is at most `min(40rem, 100
 | External player | The camera stays on the stage, `aria-disabled`, with the reason: "This plays in an external player. Use its own screenshot key." The `S` shortcut is off. |
 | Radio | The camera sits on the radio stage beside the volume, `aria-disabled`, with "Radio has no picture to capture." The compact radio strip (mini player) has none, like the mini video bar. The `S` shortcut is off. |
 
-A disabled camera stays focusable. Its tooltip and `aria-describedby` give the reason, and pressing it shows the reason as an info toast and on the OSD.
+A disabled camera stays focusable. Its tooltip and `aria-describedby` give the reason, and pressing it shows the reason as an info toast, and in picture-in-picture on the OSD too.
 
 Built-in player failures, each a toast titled "Screenshot not saved" that names the cause:
 

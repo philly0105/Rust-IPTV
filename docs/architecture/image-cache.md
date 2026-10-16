@@ -1,19 +1,19 @@
 # Image cache
 
-Code: `crates/iptv-core/src/imagecache/` (core: `mod.rs` request flow, `fetch.rs` upstream fetch and type checks, `store.rs` index writer, eviction and reconcile, `rpc.rs` commands) and `crates/iptv-server/src/img.rs` (the HTTP route). Tests: `crates/iptv-core/tests/image_cache.rs`, `l2_import_img.rs` (posters answered while the write lock is held), the `img_*` cases in `crates/iptv-server/tests/server.rs`, `image_route_caches_behind_the_token_and_exposes_the_cache_header` and `cross_site_webview_requests_are_served_but_server_mode_refuses_them` in `crates/iptv-tauri/src/proxy.rs`, and unit tests in each core file.
+Code: `crates/iptv-core/src/imagecache/` (core: `mod.rs` request flow, `fetch.rs` upstream fetch and type checks, `store.rs` index writer, eviction and reconcile, `resize.rs` width variants, `rpc.rs` commands) and `crates/iptv-server/src/img.rs` (the HTTP route). Tests: `crates/iptv-core/tests/image_cache.rs`, `l2_import_img.rs` (posters answered while the write lock is held), `l3_serve_image_variants.rs` (width variants), the `img_*` cases in `crates/iptv-server/tests/server.rs`, `image_route_caches_behind_the_token_and_exposes_the_cache_header` and `cross_site_webview_requests_are_served_but_server_mode_refuses_them` in `crates/iptv-tauri/src/proxy.rs`, and unit tests in each core file.
 
-Posters, channel logos and backdrops are cached on disk, so a poster wall that was seen once loads from the device on the next visit and offline (Run 3 contract C2). The UI sends every http(s) image through `<base>/img?url=<absolute url>&sourceId=<id?>` (C3, `src/api/images.ts`). The first request fetches the image upstream; later requests read it from disk. The cache has a size cap from `settings.imageCacheMaxMb` (default 500, 50 to 5000) and drops the least recently used images when it goes over.
+Posters, channel logos and backdrops are cached on disk, so a poster wall that was seen once loads from the device on the next visit and offline (Run 3 contract C2). The UI sends every http(s) image through `<base>/img?url=<absolute url>&sourceId=<id?>&w=<px?>` (C3, `src/api/images.ts`); `w` asks for a smaller copy ([Width hints](#width-hints)). The first request fetches the image upstream; later requests read it from disk. The cache has a size cap from `settings.imageCacheMaxMb` (default 500, 50 to 5000) and drops the least recently used images when it goes over.
 
 ## Storage
 
-Files live under `data_dir/image-cache/<first 2 hex>/<key>`, where the key is the lowercase hex SHA-256 of the normalised URL. The bytes are stored exactly as received. A download is written to `<key>.<random>.tmp` in the shard folder and renamed into place, so a reader never sees half a file.
+Files live under `data_dir/image-cache/<first 2 hex>/<key>`, where the key is the lowercase hex SHA-256 of the normalised URL. The bytes are stored exactly as received; only a width variant holds a resized copy, under its own key. A download is written to `<key>.<random>.tmp` in the shard folder and renamed into place, so a reader never sees half a file.
 
 Migration `0017_image_cache.sql` creates the index:
 
 | Column | Notes |
 | --- | --- |
 | `key` | Primary key, the file name. |
-| `url` | The normalised URL (absolute http(s), no user info, no fragment, at most 8 KiB). |
+| `url` | The normalised URL (absolute http(s), no user info, no fragment, at most 8 KiB). A width variant's row records `<url>#w=<bucket>`. |
 | `content_type` | The stored type, `image/*` only. It is served as `Content-Type`. |
 | `bytes` | File size. A row whose file is missing or has another size counts as a miss. |
 | `created_at`, `last_access` | Unix seconds. `last_access` orders eviction (`idx_image_cache_lru`). |
@@ -50,12 +50,31 @@ Eviction and Clear keep the file of a key whose fetch is still running, because 
 2. The source, when `sourceId` names one, contributes its request headers (`config_json.headers`: User-Agent, Referer and the others a provider may need) and, in server mode, its own `host:port` as trusted by the SSRF guard. An unknown `sourceId` adds nothing; the image still loads without it.
 3. In server mode the guard checks the URL before the cache is read. This check does not resolve names: it refuses private and loopback IP literals and `localhost` names, and those stay refused even when the cache already holds the image. A host name that resolves to a private address is refused when it is fetched (see [Server mode and trust](#server-mode-and-trust)).
 4. A pending entry or a row whose file is on disk with the recorded size is a hit.
-5. Otherwise the request joins or starts the single fetch for that key and scope (`flight_scope`). The scope holds the source's trusted `host:port` while the guard is active, and a hash of the source's request headers as they are sent (trimmed, blank ones dropped). An image host that wants the provider's User-Agent or Referer refuses a request without them. A request without the source therefore never joins the source's fetch or inherits its refusal, and the reverse holds too. The stored file is keyed by URL alone, so once one request has stored the image, every request hits it. The fetch runs as its own task, so a client that disconnects does not cancel it for the others. Concurrent requests share its result and all report `miss`. A request that joins a fetch that has already answered reports `hit`, as does a fetch that found the image already stored by an earlier one.
+5. Otherwise the request joins or starts the single fetch for that key and scope (`flight_scope`). The scope holds the source's trusted `host:port` while the guard is active, and a hash of the source's request headers as they are sent (trimmed, blank ones dropped). An image host that wants the provider's User-Agent or Referer refuses a request without them. A request without the source therefore never joins the source's fetch or inherits its refusal, and the reverse holds too. The stored file is keyed by URL (and width bucket) alone, so once one request has stored the image, every request for it hits it. The fetch runs as its own task, so a client that disconnects does not cancel it for the others. Concurrent requests share its result and all report `miss`. A request that joins a fetch that has already answered reports `hit`, as does a fetch that found the image already stored by an earlier one.
 6. The fetch sends an image `Accept` header with a 15 s limit for the response head, a 20 s idle limit between body chunks and a 60 s limit overall.
 7. The response is checked. 404 and 410 become `NotFound`; any other non-2xx status or transport error becomes `Upstream`. An `image/*` type is accepted, unless the body is really HTML. A generic type (`application/octet-stream`, `binary/octet-stream`, `text/plain` and similar) or a missing one is sniffed (PNG, JPEG, GIF, WebP, AVIF, ICO, BMP, SVG) and stored as the type found. Anything else is `NotImage`. A body over 10 MB (`MAX_IMAGE_BYTES`) is `TooLarge`, and an empty body is `Upstream`.
 8. The file is written and renamed, a pending entry is added, and the insert is queued for the writer. The answer goes out without waiting for the row (see [Writer](#writer)), and the fetch ends. A request that follows before the row commits finds the pending entry and is a hit, so a busy database (a catalog import, say) never makes a poster wait or fetch twice.
 
 A failed fetch is remembered for 10 minutes (`FAILURE_TTL`, at most 4096 entries) per key and scope, so a broken poster wall does not refetch on every scroll. A local disk or database error is not remembered. `images.clear` forgets every failure.
+
+## Width hints
+
+`w` is the width a picture is drawn at, in device pixels (CSS width times `devicePixelRatio`). The route takes it when it is a positive whole number (`ImgQuery::width`), and `imagecache::fetch_sized` rounds it up to the next of `resize::WIDTH_BUCKETS`: 64, 96, 128, 192, 256, 384, 512, 768 or 1024. Without `w`, or with 0, a non-number or anything above 1024, the route serves the original.
+
+A variant is stored under `variant_key`, the SHA-256 of `<normalised url>#w=<bucket>`, with its own row, so it counts against the cap and is evicted like any other file. The normalised URL never has a fragment, so the key cannot collide with another image's. The variant has its own flight and failure memory (its key and scope); the guard check is the same.
+
+- When the original is cached (a row or a pending entry), the variant is made from that file with no upstream request, and the reply reports `hit`.
+- Otherwise the image is fetched once and only the resized copy is stored.
+- Only still JPEG and PNG wider than the bucket are resized (wider as shown, after the EXIF orientation). The copy is the bucket's width with the aspect ratio kept (Catmull-Rom). JPEG is encoded at quality 82 (`JPEG_QUALITY`); PNG stays PNG and keeps its alpha channel. The orientation is applied and the ICC profile carried over. Sources over 8192 px on a side, or needing more than 192 MiB to decode, are not decoded. Decode, resize and encode run on `spawn_blocking`.
+- Everything else is served as stored: SVG, GIF, WebP, AVIF, ICO, BMP, animated PNG, images no wider than the bucket, files that do not decode, and copies that would not be smaller. The answer is then the original (fetched and stored under its own key when it was not cached), and the variant key is remembered in memory (`kept`, at most 65,536 keys, emptied by `images.clear`), so later requests at that width read the original without decoding it again. The memory does not survive a restart.
+
+In the UI, `imageUrl(src, sourceId, width)` and the helpers built on it (`imageAttempts`, `imageCandidates`, `preloadImage`, and `useImageChain` in `src/ui/image.ts`) take the CSS width and add `w`, rounded up on the client to the same buckets (`IMAGE_WIDTH_BUCKETS`, `imageWidthBucket`). A card then keeps one URL, and one browser-cache entry, across small layout changes; a picture wider than 1024 device px gets no `w`. Callers:
+
+- `Poster` measures its frame when the `<img>` mounts and adds `w` from its `clientWidth` (`sizedImageUrl`). `priority` posters (the movie, series and My Videos detail pages) load the original.
+- `ChannelLogo` passes its `size` (36 by default: 64 at 1x, 96 at 2x), and the fullscreen channel panel passes 32.
+- No `w`: backdrops and heroes (`DetailHero`, `HeroCarousel`), cast photos, player artwork, the zap banner, channel history, multiview marks and the hover prefetch (`preloadImage` in `src/features/vod/hooks/prefetch.ts`, which warms the detail page's original).
+
+The desktop loopback proxy mounts the same handler, so `w` works there too.
 
 ## Commands (C2)
 
@@ -66,9 +85,9 @@ A failed fetch is remembered for 10 minutes (`FAILURE_TTL`, at most 4096 entries
 
 ## HTTP route
 
-`iptv_server::img::handler` serves `GET <base>/img?url=<absolute http(s) url>&sourceId=<id?>`. The first value of each parameter wins, a blank `sourceId` counts as absent, and any other parameter is ignored (see [Browser copies after Clear](#browser-copies-after-clear)).
+`iptv_server::img::handler` serves `GET <base>/img?url=<absolute http(s) url>&sourceId=<id?>&w=<px?>`. The first value of each parameter wins (`w` trimmed), a blank `sourceId` counts as absent, and any other parameter is ignored (see [Browser copies after Clear](#browser-copies-after-clear)).
 
-- Server mode mounts it at `/api/img`, before the `/{*rest}` catch-all.
+- Server mode mounts it at `/api/img`, before the `/{*rest}` catch-all, outside the response compression layer (server.md): images go out as stored.
 - The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks. CORS exposes `X-Image-Cache` to the webview.
 
 | Status | When | Body |
@@ -100,7 +119,7 @@ If eviction or Clear removes the file between the lookup and the read, the handl
 
 The browser keeps each 200 for a week (`max-age=604800`), and `images.clear` cannot reach those copies. After Clear the client therefore bumps a generation (`bumpImageCacheGeneration` in `src/api/images.ts`), stored in `localStorage` under `tsrust.imageCacheGen` and picked up by the app's other tabs, and adds `gen=<n>` to every later cache URL. Those URLs miss the browser's HTTP cache and reach the emptied cache, which fetches each image again. Before the first Clear in a browser, URLs carry no `gen`.
 
-The route must keep ignoring `gen` and any other parameter it does not know (`parse_query`): the cache key comes from `url` alone, so every generation hits the same stored file. The generation is per browser. In server mode another browser or device keeps showing its own copies for up to a week, and the Clear dialog says so. The desktop app has one webview, so its bump covers every picture it shows.
+The route must keep ignoring `gen` and any other parameter it does not know (`parse_query`): the cache key comes from `url` (and the `w` bucket) alone, so every generation hits the same stored file. The generation is per browser. In server mode another browser or device keeps showing its own copies for up to a week, and the Clear dialog says so. The desktop app has one webview, so its bump covers every picture it shows.
 
 ## Server mode and trust
 

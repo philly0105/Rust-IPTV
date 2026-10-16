@@ -289,6 +289,11 @@ pub struct Category {
     pub hidden: bool,
     pub item_count: i64,
     pub position: i64,
+    /// Only in `catalog.categories` answers with `includeHidden`: true when
+    /// the answer without it leaves this group out only because hidden
+    /// channels (channel edits) left it empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emptied_by_edits: Option<bool>,
 }
 
 /// Catch-up / timeshift availability of a channel.

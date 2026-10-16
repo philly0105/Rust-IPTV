@@ -103,6 +103,7 @@ export function EpisodeList({
         const playing = ep.id === playingEpisodeId;
         const runtime = formatRuntime(ep.durationSeconds ?? pos?.durationSeconds);
         const code = episodeCode(ep.season, ep.episode);
+        const hasActions = !!onToggleWatched || canDownload;
         return (
           <div
             key={ep.id}
@@ -110,16 +111,24 @@ export function EpisodeList({
             className="absolute start-0 w-full"
             style={{ top: row.start - margin, height: ROW_H }}
           >
-            <div className={cn('group flex h-full items-center gap-4 border-b border-divider py-2', playing && 'tuning-tick ps-3')}>
+            {/* Below sm (a phone) the episode takes the row's width and its actions wrap onto a line of
+                their own under the text, so the title keeps room to read (L3-visual-7). */}
+            <div
+              className={cn(
+                'group flex h-full flex-wrap content-center items-center gap-x-3 gap-y-1 border-b border-divider py-1.5 sm:flex-nowrap sm:gap-4 sm:py-2',
+                playing && 'tuning-tick ps-3',
+              )}
+              data-testid="episode-row"
+            >
               <button
                 type="button"
                 data-grid-index={row.index}
                 onClick={() => onPlay(ep)}
                 aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
-                className="flex min-w-0 flex-1 items-center gap-4 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus max-sm:basis-full sm:gap-4"
               >
-                <div className="relative w-40 shrink-0">
+                <div className="relative w-28 shrink-0 sm:w-40" data-testid="episode-thumb">
                   <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
                     <span
                       aria-hidden
@@ -135,48 +144,57 @@ export function EpisodeList({
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-3">
-                    <span className="font-display tabular text-sm text-fg-subtle">{code}</span>
+                  <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
+                    <span className="shrink-0 font-display tabular text-sm text-fg-subtle">{code}</span>
                     {watched && (
-                      <span className="inline-flex items-center gap-1 self-center text-xs text-success" data-testid="episode-watched">
-                        <CircleCheck aria-hidden size={14} />
-                        {t('watched')}
+                      <span className="inline-flex min-w-0 items-center gap-1 self-center text-xs text-success" data-testid="episode-watched">
+                        <CircleCheck aria-hidden size={14} className="shrink-0" />
+                        <span className="truncate">{t('watched')}</span>
                       </span>
                     )}
-                    {playing && <span className="text-xs text-accent">{t('nowPlaying')}</span>}
+                    {playing && <span className="min-w-0 truncate text-xs text-accent">{t('nowPlaying')}</span>}
                     {!playing && resumable && pos && (
-                      <span className="tabular text-xs text-accent">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
+                      <span className="tabular min-w-0 truncate text-xs text-accent">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
                     )}
-                    {runtime && <span className="tabular ms-auto text-xs text-fg-subtle">{runtime}</span>}
+                    {runtime && <span className="tabular ms-auto shrink-0 text-xs text-fg-subtle">{runtime}</span>}
                   </div>
-                  <div dir="auto" className="truncate text-[calc(15rem/15)] font-medium text-fg text-match-parent">{ep.title}</div>
-                  {ep.plot && <p dir="auto" className="line-clamp-2 text-sm text-fg-muted text-match-parent">{ep.plot}</p>}
+                  {/* Two lines on a phone, where the plot gives way; one beside the plot from sm up. The tooltip
+                      carries the whole title wherever it is clamped. */}
+                  <div
+                    dir="auto"
+                    title={ep.title}
+                    className="line-clamp-2 text-[calc(15rem/15)] leading-5 font-medium [overflow-wrap:anywhere] text-fg text-match-parent sm:line-clamp-1"
+                    data-testid="episode-title"
+                  >
+                    {ep.title}
+                  </div>
+                  {ep.plot && <p dir="auto" className="line-clamp-2 text-sm text-fg-muted text-match-parent max-sm:hidden">{ep.plot}</p>}
                 </div>
               </button>
-              {onToggleWatched && (
-                <div className="shrink-0">
-                  <Menu
-                    label={t('episodeActions', { code })}
-                    items={[
-                      {
-                        id: 'watched',
-                        label: t(watched ? 'markEpisodeUnwatched' : 'markEpisodeWatched', { code }),
-                        icon: watched ? <CircleDashed aria-hidden size={16} /> : <CircleCheck aria-hidden size={16} />,
-                        onSelect: () => onToggleWatched(ep),
-                      },
-                    ]}
-                  />
-                </div>
-              )}
-              {canDownload && (
-                <div className="shrink-0">
-                  <DownloadButton
-                    compact
-                    label={`${code} ${ep.title}`}
-                    download={downloads.get(ep.id)}
-                    pending={pendingDownload === ep.id}
-                    onStart={() => onDownload(ep)}
-                  />
+              {hasActions && (
+                <div className="flex shrink-0 items-center gap-1 max-sm:ms-auto sm:gap-4" data-testid="episode-actions">
+                  {onToggleWatched && (
+                    <Menu
+                      label={t('episodeActions', { code })}
+                      items={[
+                        {
+                          id: 'watched',
+                          label: t(watched ? 'markEpisodeUnwatched' : 'markEpisodeWatched', { code }),
+                          icon: watched ? <CircleDashed aria-hidden size={16} /> : <CircleCheck aria-hidden size={16} />,
+                          onSelect: () => onToggleWatched(ep),
+                        },
+                      ]}
+                    />
+                  )}
+                  {canDownload && (
+                    <DownloadButton
+                      compact
+                      label={`${code} ${ep.title}`}
+                      download={downloads.get(ep.id)}
+                      pending={pendingDownload === ep.id}
+                      onStart={() => onDownload(ep)}
+                    />
+                  )}
                 </div>
               )}
             </div>

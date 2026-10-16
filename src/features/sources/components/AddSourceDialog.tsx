@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import type { SourcesAddArgs } from '@/api/rpc';
-import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 import type { Source, SourceKind } from '@/api/types';
 
 import { Button, Dialog, Input, Tabs, Toggle, useToast } from '@/ui';
@@ -20,7 +20,7 @@ import {
   type SourceDraft,
 } from '../lib/draft';
 import { enabledEpgUrls, refreshGuides, useGuideProgressFeed } from '../lib/epgRefresh';
-import { claimImportErrors, duplicateSourceId, failedSourceId, fieldForError, nextStepKey, summaryKey } from '../lib/errors';
+import { claimImportErrors, duplicateSourceId, duplicateSourceName, failedSourceId, fieldForError, nextStepKey, summaryKey } from '../lib/errors';
 import {
   beginImport,
   cancelImport,
@@ -30,8 +30,9 @@ import {
   useSourceProgress,
   wasCancelled,
 } from '../lib/progress';
-import { flushPendingRemovals, isRemovalPending, scheduleRemoval } from '../lib/pendingRemoval';
+import { flushPendingRemovals, isRemovalPending, removeOnUnload, scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
+import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { useNextFrame } from '../lib/useNextFrame';
 import { checkHttpUrl, displayHost, parseXtreamLink, suggestName } from '../lib/validate';
 import { Field } from './Field';
@@ -120,7 +121,6 @@ export function AddSourceDialog({
   const cancelledRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
-  const nextFrame = useNextFrame();
   const scrollFrame = useNextFrame();
   /**
    * Bumped whenever the dialog opens, closes or unmounts. A submit left running by "Close, keep
@@ -195,8 +195,8 @@ export function AddSourceDialog({
   }, [draft]);
   // When a run ends, the progress view (and the Cancel button that may hold focus) unmounts and focus
   // falls to <body>, outside the dialog, where Escape and Tab no longer reach it. Put it back inside:
-  // on the cancelled notice, the error, or the submit button. A field the error points at wins (it is
-  // focused a frame later by focusFirstInvalid).
+  // on the cancelled notice, the error, or the submit button. A field the error points at wins (the
+  // focusFirstInvalid effect below runs after this one, in the same commit).
   const wasSubmitting = useRef(false);
   useEffect(() => {
     const ended = wasSubmitting.current && !submitting;
@@ -222,11 +222,16 @@ export function AddSourceDialog({
     setSubmitError(null);
   };
 
-  const focusFirstInvalid = () => {
-    nextFrame(() => {
-      bodyRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
-    });
-  };
+  // After the render that marks the field and re-enables the form, not a frame later (L3-app-9).
+  const focusFirstInvalid = useFocusInvalid(bodyRef, submitting);
+
+  // The source a failed add left behind goes when the dialog closes (discardFailed). A reload or a
+  // closed window ends the dialog without that, and the broken entry stayed in the list (L3-app-5).
+  const failedId = failed?.id;
+  useEffect(() => {
+    if (!open || submitting || !failedId) return;
+    return removeOnUnload(failedId);
+  }, [open, submitting, failedId]);
 
   /** `afterFlush`: the second try once a pending removal of the duplicated source went through. */
   const submit = async (afterFlush = false) => {
@@ -338,9 +343,9 @@ export function AddSourceDialog({
       id: f.id,
       toast: { variant: 'info', title: t('removedTitle', { name: f.name }), description: t('discardedFailedHint') },
       undoLabel: t('undo'),
-      remove: async () => {
+      remove: async (call) => {
         try {
-          await rpc('sources.remove', { id: f.id });
+          await rpcRaw('sources.remove', { id: f.id }, call);
         } catch (e) {
           if (RpcError.from(e).code !== 'not_found') throw e;
         }
@@ -369,6 +374,7 @@ export function AddSourceDialog({
 
   // The source a refused add duplicates: the error offers to open or refresh it instead.
   const duplicateId = submitError ? duplicateSourceId(submitError) : null;
+  const duplicateName = duplicateId && submitError ? (sources.data?.find((s) => s.id === duplicateId)?.name ?? duplicateSourceName(submitError)) : null;
   // Leaving the page closes the dialog. Not through onClose: the host clears its `?add` params with a
   // navigation of its own, which would cancel this one. Replace, so Back does not reopen the dialog.
   const openDuplicate = (id: string) => {
@@ -583,18 +589,24 @@ export function AddSourceDialog({
           <div ref={errorRef} tabIndex={-1} role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm outline-none" data-testid="add-source-error">
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
             <div className="flex min-w-0 flex-col gap-1">
-              <p className="font-medium text-fg">{t('addFailed')}</p>
-              <p className="text-fg">{t(summaryKey(submitError))}</p>
-              <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
-              {failed ? (
-                <p className="text-fg-muted" data-testid="add-source-retry-note">
-                  {t('addRetryNote', { name: failed.name })}
+              {duplicateId ? (
+                // Nothing failed: the address is already a source. Name it, and offer it right here.
+                <p className="font-medium text-fg" dir="auto">
+                  {duplicateName ? t('duplicateTitle', { name: duplicateName }) : t('errorSummaryConflict')}
                 </p>
-              ) : null}
-              <details className="text-fg-muted">
-                <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
-                <p className="mt-1 break-words font-mono text-xs">{redactText(submitError.message)}</p>
-              </details>
+              ) : (
+                <>
+                  <p className="font-medium text-fg">{t('addFailed')}</p>
+                  <p className="text-fg">{t(summaryKey(submitError))}</p>
+                  <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                  {failed ? (
+                    <p className="text-fg-muted" data-testid="add-source-retry-note">
+                      {t('addRetryNote', { name: failed.name })}
+                    </p>
+                  ) : null}
+                </>
+              )}
+              {/* The way out comes before the technical details, so it stays in view on a short window. */}
               {duplicateId ? (
                 <div className="mt-1 flex flex-wrap gap-2">
                   <Button size="sm" variant="secondary" onClick={() => openDuplicate(duplicateId)} data-testid="add-source-open-existing">
@@ -612,6 +624,12 @@ export function AddSourceDialog({
                   </Button>
                 </div>
               )}
+              <details className="mt-1 text-fg-muted">
+                <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
+                <p className="mt-1 break-words font-mono text-xs" dir="ltr">
+                  {redactText(submitError.message)}
+                </p>
+              </details>
             </div>
           </div>
         ) : null}

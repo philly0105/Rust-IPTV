@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "正在錄製 {{count}} 個",
   "scheduledSummaryNow_other": "正在錄製 {{count}} 個",
   "scheduledEmptyTitle": "沒有預約",
-  "scheduledEmptyBody": "開啟節目表，在節目上選擇提醒我或錄影。",
+  "scheduledEmptyBody": "開啟節目表，在節目上選擇提醒我、錄影或系列錄影。",
   "scheduledOpenGuide": "開啟節目表",
   "scheduledNow": "錄影中",
   "scheduledUpcoming": "即將進行",

@@ -21,6 +21,7 @@ import {
   HOUR,
   MINUTE,
   canCatchUp,
+  cellTextMaxPx,
   floorTo,
   formatClock,
   formatDay,
@@ -448,6 +449,12 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         aria-label={t('timelineView')}
       >
         <div style={{ width, height: '100%', position: 'relative', minHeight: 92 }}>
+          {/* First: the hour labels and the blocks' text paint over it, so it shows through the
+              airing block's tint and never strikes through a title, a time or a tick label
+              (L3-visual-3). */}
+          <div aria-hidden data-testid="ribbon-now-line" className="pointer-events-none absolute top-3 bottom-1 w-0.5 bg-live" style={inlineStart(nowX - 1, rtl)}>
+            <span className="absolute -top-1 -start-[3px] size-2 rounded-full bg-live" />
+          </div>
           {ticks.map((tt, i) => {
             const x = ((tt - from) / MINUTE) * RIBBON_PX_PER_MIN;
             const midnight = localDayKey(tt) !== localDayKey(i > 0 ? ticks[i - 1]! : from);
@@ -464,6 +471,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
             <TimelineBlock
               key={`${b.program.start}|${b.program.title}`}
               block={b}
+              textMax={cellTextMaxPx(view.left, b.left, b.width)}
               now={now}
               channel={channel}
               kind={kind}
@@ -474,9 +482,6 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
               onFocusProgram={props.onFocusProgram}
             />
           ))}
-          <div aria-hidden data-testid="ribbon-now-line" className="pointer-events-none absolute top-3 bottom-1 z-10 w-0.5 bg-live" style={inlineStart(nowX - 1, rtl)}>
-            <span className="absolute -top-1 -start-[3px] size-2 rounded-full bg-live" />
-          </div>
         </div>
       </div>
       {Math.abs(view.left + view.width * 0.25 - nowX) > view.width * 0.6 ? (
@@ -495,6 +500,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
 
 function TimelineBlock({
   block,
+  textMax,
   now,
   channel,
   kind,
@@ -505,6 +511,8 @@ function TimelineBlock({
   onFocusProgram,
 }: {
   block: Block;
+  /** The text's width cap while the block began before the visible edge (cellTextMaxPx). */
+  textMax: number | undefined;
   now: number;
   channel: Channel;
   kind?: SourceKind;
@@ -546,23 +554,29 @@ function TimelineBlock({
       onClick={() => onActivate(p)}
       onMouseEnter={() => onFocusProgram(p)}
       onFocus={() => onFocusProgram(p)}
-      className={`absolute top-5 bottom-2 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${tone}`}
+      // overflow-clip, not hidden: the block is then no scroll container, so its text can stick.
+      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${tone}`}
       style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}
     >
       {block.when === 'now' ? (
         <span aria-hidden className="absolute inset-y-0 start-0 bg-accent/15" style={{ width: `${progress * 100}%` }} />
       ) : null}
-      <span className="relative flex items-center gap-1 truncate text-xs font-medium">
-        {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
-        <span dir="auto" className="truncate text-match-parent">
-          {p.title}
+      {/* A show that began before the visible edge keeps its title in view: the text sticks 8 px
+          past the edge until the block's end pushes it out, and ends in an ellipsis inside the
+          block (L3-live-5). */}
+      <span data-testid="ribbon-block-text" className="sticky block w-max max-w-full" style={{ insetInlineStart: 8, maxWidth: textMax }}>
+        <span className="relative flex items-center gap-1 truncate text-xs font-medium">
+          {catchup && (block.when === 'past' || watchingLive) ? <History className="size-3 shrink-0" aria-hidden /> : null}
+          <span dir="auto" className="truncate text-match-parent">
+            {p.title}
+          </span>
+          {/* recording: */}
+          <ScheduleMark channelRef={channel.ref} program={p} />
         </span>
-        {/* recording: */}
-        <ScheduleMark channelRef={channel.ref} program={p} />
-      </span>
-      {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
-      <span className={`relative block truncate text-[calc(11rem/15)] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
-        {formatClock(ms(p.start), i18n.language)}
+        {/* Muted by token, not opacity: opacity over the tinted block drops below 4.5:1 in the light theme. */}
+        <span className={`relative block truncate text-[calc(11rem/15)] tabular-nums ${block.when === 'future' ? 'text-fg-muted' : ''}`}>
+          {formatClock(ms(p.start), i18n.language)}
+        </span>
       </span>
     </button>
   );

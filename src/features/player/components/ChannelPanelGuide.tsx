@@ -59,7 +59,12 @@ function NowLines({ sourceId, first, last, rowAt, children }: NowLinesProps) {
     const c = rowAt(i);
     if (c) refs.push(c.ref);
   }
-  const nowNext = useRpcQuery('epg.nowNext', { refs, offsetMinutes: prefs.epgOffsetMinutes }, { enabled: refs.length > 0, staleTime: 60_000 });
+  // The rows show titles only: no descriptions (about half the bytes).
+  const nowNext = useRpcQuery(
+    'epg.nowNext',
+    { refs, offsetMinutes: prefs.epgOffsetMinutes, withDescription: false },
+    { enabled: refs.length > 0, staleTime: 60_000 },
+  );
 
   const shortOn = useShortEpgEnabled(source.data?.kind);
   const data = nowNext.data;

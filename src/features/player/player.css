@@ -58,6 +58,20 @@
   overflow: hidden;
   container-type: inline-size;
 }
+/*
+ * While the control bar is up (PlayerSurface marks the host data-idle=false) the overlay ends
+ * above it, so the lower line of a two-line cue is not hidden behind the bar. A cue placed low
+ * rises by about the bar's height; one placed high hardly moves. The clearance is the floating
+ * bar (seek row, buttons, padding), capped by the player's height for the mini player's lower bar.
+ */
+[data-player-host][data-idle='false'] .player-subs {
+  bottom: min(5.5rem, 32%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduced-motion='true']) .player-subs {
+    transition: bottom 200ms ease-out;
+  }
+}
 .player-subs-line {
   position: absolute;
   inset-inline: 4%;

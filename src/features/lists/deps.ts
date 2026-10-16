@@ -43,4 +43,4 @@ export { displayChannelName } from '@/features/live/lib/channelName';
 export { playChannel } from '@/features/live/lib/playback';
 export { useParentalStatus } from '@/features/parental/status';
 export { PlayerStage, usePlayerStore } from '@/features/player';
-export { sourceKindOf } from '@/features/player/store';
+export { canZap, sourceKindOf } from '@/features/player/store';

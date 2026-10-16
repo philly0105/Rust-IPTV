@@ -1,4 +1,4 @@
-import { Tv } from 'lucide-react';
+import { Lock, Tv } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -10,19 +10,24 @@ import { cn } from '../cn';
 import { safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { airedShare, fetchNowNext, peekNowNext } from '../nowNext';
-import { usePlayerStore } from '../store';
+import { isLockedZap, usePlayerStore } from '../store';
 import { fetchChannelInfo, peekChannelInfo, useZapBanner, type ZapChannelInfo } from '../zapBanner';
 import { useZapBannerShown, useZapHover } from './zapHooks';
 
 interface ZapData {
   key: string | null;
   info?: ZapChannelInfo;
-  /** undefined while loading, null when the guide has nothing. */
+  /** undefined while loading, null when the guide has nothing (or is not asked: locked). */
   guide?: EpgNowNext | null;
+  locked?: boolean;
 }
 
-/** Number, logo and now/next for `ref`: the caches first, then one lookup each. */
-function useZapData(ref: ItemRef | undefined, now: number): ZapData {
+/**
+ * Number, logo and now/next for `ref`: the caches first, then one lookup each. `locked`: a zap
+ * passing a channel parental controls lock (Ask mode). Its guide is neither read nor asked
+ * until the PIN lets it play; the guide shows then, when the placeholder makes way.
+ */
+function useZapData(ref: ItemRef | undefined, now: number, locked = false): ZapData {
   const key = ref ? itemKey(ref) : null;
   const [data, setData] = useState<ZapData>({ key: null });
   // The airing programme ended while the banner is up (a hover across the hour): ask again.
@@ -32,8 +37,8 @@ function useZapData(ref: ItemRef | undefined, now: number): ZapData {
     if (!ref || !key) return;
     let stale = false;
     const info = peekChannelInfo(ref);
-    const guide = ended ? undefined : peekNowNext(ref);
-    setData({ key, info, guide });
+    const guide = locked ? null : ended ? undefined : peekNowNext(ref);
+    setData({ key, info, guide, locked });
     if (!info) {
       void fetchChannelInfo(ref).then((i) => {
         if (!stale) setData((d) => (d.key === key ? { ...d, info: i } : d));
@@ -49,9 +54,9 @@ function useZapData(ref: ItemRef | undefined, now: number): ZapData {
     };
     // `ref` is identified by `key`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, ended]);
-  if (data.key === key) return data;
-  return ref ? { key, info: peekChannelInfo(ref), guide: peekNowNext(ref) } : { key };
+  }, [key, ended, locked]);
+  if (data.key === key && !!data.locked === locked) return data;
+  return ref ? { key, info: peekChannelInfo(ref), guide: locked ? null : peekNowNext(ref) } : { key };
 }
 
 /** A clock for the progress bar while the banner is up (programmes move slowly: every 5 s). */
@@ -97,6 +102,20 @@ function Logo({ urls, sourceId, compact, chip = false }: { urls: readonly (strin
   );
 }
 
+/** In place of the logo for a locked channel: a lock on the logo's tile, nothing of the channel's own. */
+function LockTile({ compact, chip = false }: { compact: boolean; chip?: boolean }) {
+  const box = chip ? 'size-6 rounded-[3px]' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
+  return (
+    <span
+      data-testid="zap-lock"
+      className={cn('player-on-glass-muted flex shrink-0 items-center justify-center bg-white/8 ring-1 ring-white/10', box)}
+      aria-hidden
+    >
+      <Lock className={chip ? 'size-3.5' : compact ? 'size-4' : 'size-6'} />
+    </span>
+  );
+}
+
 /** How far into the programme, as a thin bar lit in the accent like the seek bar. */
 function Progress({ share, className }: { share: number; className?: string }) {
   return (
@@ -119,9 +138,17 @@ export function airingPair(guide: EpgNowNext | null | undefined, now: number): {
   return out;
 }
 
-function GuideRows({ guide, now, compact }: { guide: EpgNowNext | null | undefined; now: number; compact: boolean }) {
+function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext | null | undefined; now: number; compact: boolean; locked?: boolean }) {
   const { t, i18n } = useTranslation('player');
   const lang = i18n.language;
+  if (locked) {
+    return (
+      <p data-testid="zap-locked" className={cn('player-on-glass-muted flex items-center gap-1.5 text-sm', compact ? 'mt-1' : 'mt-2')}>
+        <Lock aria-hidden className="size-3.5 shrink-0" />
+        {t('zapLocked')}
+      </p>
+    );
+  }
   if (guide === undefined) {
     return (
       <div
@@ -205,10 +232,25 @@ function useDropZapReadout(shown: boolean, title: string | undefined): void {
 }
 
 /**
- * The phone-width banner: one line of number, name and what airs now, with how far in as a
+ * The small player's banner: one line of number, name and what airs now, with how far in as a
  * hairline along its bottom edge. Small enough to leave the picture visible.
  */
-function ZapChip({ number, title, guide, now, logo }: { number: number | undefined; title: string; guide: EpgNowNext | null | undefined; now: number; logo: ReactNode }) {
+function ZapChip({
+  number,
+  title,
+  guide,
+  now,
+  logo,
+  locked = false,
+}: {
+  number: number | undefined;
+  title: string;
+  guide: EpgNowNext | null | undefined;
+  now: number;
+  logo: ReactNode;
+  locked?: boolean;
+}) {
+  const { t } = useTranslation('player');
   const { current } = airingPair(guide, now);
   return (
     <>
@@ -222,7 +264,11 @@ function ZapChip({ number, title, guide, now, logo }: { number: number | undefin
         <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate font-display text-sm leading-tight" title={title}>
           {title}
         </span>
-        {guide === undefined ? (
+        {locked ? (
+          <span data-testid="zap-locked" className="player-on-glass-muted min-w-0 flex-1 truncate text-xs">
+            {t('zapLocked')}
+          </span>
+        ) : guide === undefined ? (
           <span data-testid="zap-guide-loading" aria-hidden className="h-2.5 w-16 shrink self-center rounded-sm bg-white/10 motion-safe:animate-pulse" />
         ) : (
           current && (
@@ -246,7 +292,7 @@ function ZapChip({ number, title, guide, now, logo }: { number: number | undefin
  * next. Up for 5 s on every live channel change and while the channel title is hovered; see
  * `zapBanner.ts`. Over embedded mpv it is cut out of the native video (`data-mpv-overlay`).
  * The caller places it (`className`: position and insets); `compact` is the two-line version
- * for picture-in-picture, `chip` the one-line version for a phone-width player. The mini player
+ * for picture-in-picture, `chip` the one-line version for a small player (`useSmallPlayer`). The mini player
  * shows `ZapHeaderLine` in its header instead.
  */
 export function ZapBanner({ compact = false, chip = false, className }: { compact?: boolean; chip?: boolean; className?: string }) {
@@ -256,7 +302,8 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
   const source = usePlayerStore((s) => s.source);
   const now = useClock(shown);
   const ref = shown ? source?.ref : undefined;
-  const { info, guide } = useZapData(ref, now);
+  const locked = isLockedZap(source);
+  const { info, guide } = useZapData(ref, now, locked);
   // Hidden while hovered (the stream failed, the setting went off): no leave comes, so `shown` releases it.
   const hover = useZapHover(shown);
   useDropZapReadout(shown, source?.title);
@@ -288,7 +335,14 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        <ZapChip number={number} title={source.title} guide={guide} now={now} logo={<Logo urls={logos} sourceId={ref.sourceId} compact chip />} />
+        <ZapChip
+          number={number}
+          title={source.title}
+          guide={guide}
+          now={now}
+          locked={locked}
+          logo={locked ? <LockTile compact chip /> : <Logo urls={logos} sourceId={ref.sourceId} compact chip />}
+        />
       </div>
     );
   }
@@ -318,7 +372,7 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className={cn('flex min-w-0 items-start', compact ? 'gap-2' : 'gap-3')}>
-        <Logo urls={logos} sourceId={ref.sourceId} compact={compact} />
+        {locked ? <LockTile compact={compact} /> : <Logo urls={logos} sourceId={ref.sourceId} compact={compact} />}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             {number !== undefined && (
@@ -341,7 +395,7 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
               {source.title}
             </span>
           </div>
-          <GuideRows guide={guide} now={now} compact={compact} />
+          <GuideRows guide={guide} now={now} compact={compact} locked={locked} />
         </div>
       </div>
     </div>
@@ -353,11 +407,13 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
  * beside the name it already shows, instead of a banner over its small picture.
  */
 export function ZapHeaderLine({ title }: { title: string }) {
+  const { t } = useTranslation('player');
   const shown = useZapBannerShown();
   const source = usePlayerStore((s) => s.source);
   const now = useClock(shown);
   const ref = shown ? source?.ref : undefined;
-  const { info, guide } = useZapData(ref, now);
+  const locked = shown && isLockedZap(source);
+  const { info, guide } = useZapData(ref, now, locked);
   useDropZapReadout(shown, source?.title);
   const { current } = airingPair(guide, now);
   const number = shown ? info?.number : undefined;
@@ -371,6 +427,12 @@ export function ZapHeaderLine({ title }: { title: string }) {
       <span className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0')} title={title}>
         {title}
       </span>
+      {locked && (
+        <span data-testid="zap-locked" className="flex shrink-0 self-center text-fg-muted motion-safe:animate-fade-in">
+          <Lock aria-hidden className="size-3.5" />
+          <span className="sr-only">{t('zapLocked')}</span>
+        </span>
+      )}
       {shown && current && (
         <span data-testid="zap-now" className="min-w-0 flex-1 truncate text-xs font-normal text-fg-muted motion-safe:animate-fade-in" title={current.title}>
           {current.title}

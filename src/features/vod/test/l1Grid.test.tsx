@@ -150,6 +150,20 @@ describe('L1-vod-7: empty states name the search first', () => {
     await screen.findByText(i18n.t('vod:noSearchMatchTitle', { query: 'zzz' }));
     expect(screen.queryByText(i18n.t('vod:watchedEmptyTitle'))).toBeNull();
   });
+
+  it('L3-cross-XB-4: a long query is echoed to 60 characters with an ellipsis, the full text on hover', async () => {
+    const long = `zz${'q'.repeat(98)}`;
+    renderAt(`/s/src1/movies/c/c1?q=${long}`, gridRoute);
+    const title = await screen.findByText(i18n.t('vod:noSearchMatchTitle', { query: `${long.slice(0, 59)}…` }));
+    expect(title.getAttribute('title')).toBe(long);
+  });
+
+  it('L3-cross-XB-4: a short query is echoed whole, with no tooltip', async () => {
+    const short = `zz${'q'.repeat(58)}`; // exactly 60
+    renderAt(`/s/src1/movies/c/c1?q=${short}`, gridRoute);
+    const title = await screen.findByText(i18n.t('vod:noSearchMatchTitle', { query: short }));
+    expect(title.hasAttribute('title')).toBe(false);
+  });
 });
 
 describe('L1-vod-10: Escape on a grid', () => {

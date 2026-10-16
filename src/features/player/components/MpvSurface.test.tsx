@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import '@/i18n';
@@ -80,7 +81,8 @@ vi.mock('@/api/window', () => ({
 const { usePlayerStore, __resetPlayerForTests, DOUBLE_CLICK_MS } = await import('../store');
 const { useMediaStore } = await import('../media');
 const { boundsClear, rectOf } = await import('../mpvBounds');
-const { HIDDEN_BOUNDS } = await import('./MpvSurface');
+const { HIDDEN_BOUNDS, MPV_FALLBACK_TOAST } = await import('./MpvSurface');
+const { clearMpvUnavailable } = await import('../mpvExtras');
 const { PlayerSurface } = await import('./PlayerSurface');
 const reconnect = await import('../reconnect');
 const { useAlternatesStore } = await import('../failover');
@@ -125,6 +127,7 @@ const tick = async (ms = 50): Promise<void> => {
 
 beforeEach(() => {
   __resetPlayerForTests();
+  clearMpvUnavailable();
   rpcMock.mockClear();
   attachGate = null;
   attachError = null;
@@ -233,6 +236,34 @@ describe('MpvSurface bounds', () => {
     document.querySelector('[data-test-rect="small"]')!.remove();
     await tick(100);
     expect(lastLayout()).toEqual({ bounds: before, holes: [] });
+  });
+
+  it("dims the video under a dialog's backdrop like the scrim dims the page, and undims it on close (L3-desktop-10)", async () => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    await tick(100);
+    const overlays = (): unknown[][] =>
+      calls('mpv.command')
+        .map((c) => (c[1] as { cmd: unknown[] }).cmd)
+        .filter((cmd) => cmd[0] === 'osd-overlay');
+    expect(overlays()).toEqual([]);
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div data-dialog-layer="" id="palette"><div aria-hidden="true" class="fixed inset-0 bg-scrim" style="background-color: rgba(4, 8, 16, 0.72)"></div><div role="dialog" aria-modal="true" data-test-rect="small"></div></div>',
+    );
+    await tick(100);
+    expect(overlays()).toHaveLength(1);
+    expect(overlays()[0]).toEqual(expect.arrayContaining(['osd-overlay', 63, 'ass-events']));
+    expect(String(overlays()[0]?.[3])).toContain('\\1c&H100804&\\1a&H47&');
+    // The panel is still a hole in the dimmed video.
+    expect(lastLayout()?.holes).toEqual([{ x: 300, y: 100, width: 200, height: 150 }]);
+    document.getElementById('palette')!.remove();
+    await tick(100);
+    expect(overlays()).toHaveLength(2);
+    expect(overlays()[1]).toEqual(['osd-overlay', 63, 'none', '']);
   });
 
   it('cuts a menu portalled to the body out of the video instead of covering it (L2-desktop-3)', async () => {
@@ -799,7 +830,8 @@ describe('embedded mpv recovery', () => {
     expect(usePlayerStore.getState()).toMatchObject({ mode: 'inline', error: undefined });
     expect(screen.queryByText(/no longer exists/i)).toBeNull();
     const { useToastStore } = await import('@/ui/Toast');
-    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({ title: 'Embedded MPV failed to start' });
+    // Not found is not a failed start (L3-desktop-6): it says so and how to fix it.
+    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({ title: "MPV wasn't found. Set its path under External players.", variant: 'info' });
   });
 
   it('a rejected load is reported with its class instead of loading forever', async () => {
@@ -858,9 +890,8 @@ describe('embedded mpv recovery', () => {
     expect(calls('mpv.setProperty').map((c) => c[1])).toContainEqual({ name: 'pause', value: true });
   });
 
-  it('when mpv is missing, falls back to the built-in player with a way back to MPV', async () => {
-    attachError = Object.assign(new Error('mpv not found'), { code: 'not_found' });
-    // The built-in player takes over; jsdom has no media playback.
+  /** The built-in player takes over after a fallback; jsdom has no media playback. */
+  const stubMedia = (): void => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
@@ -869,14 +900,72 @@ describe('embedded mpv recovery', () => {
       pause.mockRestore();
       load.mockRestore();
     });
+  };
+
+  it('when mpv is missing, falls back to the built-in player and points to the mpv path in Settings (L3-desktop-6)', async () => {
+    attachError = Object.assign(new Error('mpv not found'), { code: 'not_found' });
+    stubMedia();
+    const { useToastStore } = await import('@/ui/Toast');
+    useToastStore.setState({ toasts: [] });
+    render(
+      <MemoryRouter initialEntries={['/live']}>
+        <Routes>
+          <Route path="/settings/players" element={<p>players settings</p>} />
+          <Route path="*" element={surfaceTree} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await tick();
+    expect(usePlayerStore.getState().mode).toBe('inline');
+    const last = useToastStore.getState().toasts.at(-1);
+    expect(last).toMatchObject({ id: MPV_FALLBACK_TOAST, variant: 'info', title: "MPV wasn't found. Set its path under External players." });
+    expect(last?.action?.label).toBe('Settings: External players');
+    act(() => last?.action?.onClick());
+    expect(await screen.findByText('players settings')).toBeTruthy();
+  });
+
+  it('any other start failure offers Try MPV again, which tries it on the next play', async () => {
+    attachError = Object.assign(new Error('mpv exited during startup'), { code: 'internal' });
+    stubMedia();
+    const { useToastStore } = await import('@/ui/Toast');
+    useToastStore.setState({ toasts: [] });
     render(surfaceTree);
     await tick();
     expect(usePlayerStore.getState().mode).toBe('inline');
-    const { useToastStore } = await import('@/ui/Toast');
     const last = useToastStore.getState().toasts.at(-1);
+    expect(last).toMatchObject({ id: MPV_FALLBACK_TOAST, variant: 'error', title: 'Embedded MPV failed to start' });
     expect(last?.action?.label).toBe('Try MPV again');
+    attachError = null;
     act(() => last?.action?.onClick());
+    await tick();
     expect(usePlayerStore.getState().mode).toBe('embedded-mpv');
+    expect(calls('mpv.attach')).toHaveLength(2);
+  });
+
+  it('after mpv was not found, the next zaps play in the built-in player without trying mpv again or stacking notices (L3-desktop-6)', async () => {
+    attachError = Object.assign(new Error('mpv.exe was not found'), { code: 'engine_missing' });
+    stubMedia();
+    const { useToastStore } = await import('@/ui/Toast');
+    useToastStore.setState({ toasts: [] });
+    render(surfaceTree);
+    await tick();
+    expect(usePlayerStore.getState().mode).toBe('inline');
+    // Two zaps: the store derives embedded mpv from the settings again for each play.
+    for (const n of [2, 3]) {
+      act(() =>
+        usePlayerStore.setState({
+          source: { url: `http://h/live/${n}.ts`, kind: 'direct', title: `Channel ${n}`, isLive: true, isRadio: false },
+          mode: 'embedded-mpv',
+          status: 'loading',
+        }),
+      );
+      await tick();
+      expect(usePlayerStore.getState().mode).toBe('inline');
+    }
+    expect(calls('mpv.attach')).toHaveLength(1);
+    expect(screen.queryByTestId('mpv-connecting')).toBeNull();
+    expect(useToastStore.getState().toasts.filter((x) => x.id === MPV_FALLBACK_TOAST)).toHaveLength(1);
+    expect(useToastStore.getState().toasts).toHaveLength(1);
   });
 });
 

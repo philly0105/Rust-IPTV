@@ -92,6 +92,37 @@ describe('web event socket', () => {
     stop();
   });
 
+  it('asks /api/health every second during a long backoff and reconnects once it answers (L3-app-10)', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', FakeSocket);
+    let up = false;
+    const fetchMock = vi.fn(async () => ({ ok: up }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const seen: AppEvent[] = [];
+    const stop = onAnyAppEvent((e) => seen.push(e));
+    FakeSocket.all[0]!.onopen?.();
+    // An outage: three failed attempts push the backoff to 2-2.6 s.
+    for (let i = 0; i < 3; i++) {
+      FakeSocket.all.at(-1)!.onclose?.();
+      if (i < 2) await vi.advanceTimersByTimeAsync(1_400);
+    }
+    const before = FakeSocket.all.length;
+    fetchMock.mockClear();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchMock).toHaveBeenCalledWith('/api/health', { cache: 'no-store' });
+    expect(FakeSocket.all).toHaveLength(before); // still down: keep waiting
+    up = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(FakeSocket.all).toHaveLength(before + 1); // about 2 s, not the rest of the backoff
+    FakeSocket.all.at(-1)!.onopen?.();
+    expect(seen.map((e) => e.type)).toEqual(['events.lagged']);
+    // Open again: no more polling.
+    fetchMock.mockClear();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    stop();
+  });
+
   it('stops listening for nudges once nobody is subscribed', () => {
     vi.useFakeTimers();
     vi.stubGlobal('WebSocket', FakeSocket);

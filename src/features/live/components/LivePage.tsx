@@ -22,21 +22,32 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
+import { categoriesArgs } from '@/api/bootPrefetch';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
-import { itemKey, sameRef, type Category, type Channel, type ContentType, type EpgNowNext, type ItemKey, type ItemRef } from '@/api/types';
+import {
+  itemKey,
+  sameRef,
+  type Category,
+  type Channel,
+  type ContentType,
+  type EpgNowNext,
+  type ItemKey,
+  type ItemRef,
+  type PlayerSource,
+} from '@/api/types';
 
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
+import { canZap, isPendingZap } from '@/features/player/store';
 import { hideZapBanner } from '@/features/player/zapBanner';
-import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
+import { preloadChannelEditDialogs, useChannelEditMenuItems, useChannelEditShortcuts, useHiddenChannelCount } from '@/features/channeledit';
 import { ListsSidebarSection, useAddToListMenuItem, useAddToListShortcut } from '@/features/lists';
 import { channelInput } from '@/features/multiview/addChannel';
 import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
@@ -80,46 +91,29 @@ const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
  */
 export const SEARCH_DEBOUNCE_MS = 90;
 
-/** The row index that holds DOM focus in the list, outside React state: arrows must not re-render the page. */
-function createRowStore() {
-  let value: number | null = null;
-  const listeners = new Set<() => void>();
-  return {
-    get: () => value,
-    set(next: number | null) {
-      if (next === value) return;
-      value = next;
-      for (const l of listeners) l();
-    },
-    subscribe(l: () => void) {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-  };
+/** The index of the channel row `el` is in, if any. */
+function rowIndexOf(el: EventTarget | null): number | null {
+  const row = el instanceof Element ? el.closest<HTMLElement>('[data-testid="channel-list"] [data-row-index]') : null;
+  const i = row ? Number(row.dataset.rowIndex) : NaN;
+  return Number.isInteger(i) ? i : null;
 }
-type RowStore = ReturnType<typeof createRowStore>;
+
+/** The ref of `source` when it is a live channel or station of `sourceId`. */
+function liveRefOn(source: PlayerSource | undefined, sourceId: string): ItemRef | undefined {
+  const ref = source?.ref;
+  return ref && ref.sourceId === sourceId && (ref.contentType === 'live' || ref.contentType === 'radio') ? ref : undefined;
+}
 
 /**
- * Run 2: the row that has DOM focus, read from the focus event so a key pressed right after an
- * arrow acts on that row, not on the cursor channel that settles ACTIVE_SETTLE_MS later. Only this
- * component re-renders as focus moves (L2-perf-ui-8).
+ * The groups the sidebar lists, taken from the `includeHidden` answer so the page asks once, not
+ * twice for the same rows (L3-perf-desktop-7). It matches `catalog.categories` without
+ * `includeHidden`: no hidden groups, and no groups that hidden channels left empty (C2). The core
+ * marks those with `emptiedByEdits`, so a group the provider ships empty still shows. An older core
+ * does not send the flag; then, while the source has hidden channels, every group with no channels
+ * is left out.
  */
-function FocusedRowShortcuts({
-  store,
-  getChannel,
-  fallback,
-  listShown,
-}: {
-  store: RowStore;
-  getChannel(index: number): Channel | undefined;
-  fallback: Channel | undefined;
-  listShown: boolean;
-}) {
-  const row = useSyncExternalStore(store.subscribe, store.get);
-  const focusedChannel = row !== null && listShown ? (getChannel(row) ?? fallback) : undefined;
-  // C2 F2 / Shift+Delete: rename / hide it.
-  useChannelEditShortcuts(focusedChannel);
-  return null;
+export function shownGroups(all: readonly Category[], channelsHidden: boolean): Category[] {
+  return all.filter((c) => !c.hidden && !(c.emptiedByEdits ?? (channelsHidden && c.itemCount === 0)));
 }
 
 const MemoRibbon = memo(EpgRibbon);
@@ -144,10 +138,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // ---- data ---------------------------------------------------------------
   const source = useRpcQuery('sources.get', { id: sourceId }, { enabled: !!sourceId });
   const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
-  const categories = useRpcQuery('catalog.categories', { sourceId, contentType }, { enabled: !!sourceId });
-  const allCategories = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true }, { enabled: !!sourceId });
+  const allCategories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
+  // The query behind "Hidden channels (n)" below the groups: no request of its own.
+  const channelsHidden = (useHiddenChannelCount(sourceId) ?? 0) > 0;
+  const groups = useMemo(
+    () => (allCategories.data ? shownGroups(allCategories.data, channelsHidden) : undefined),
+    [allCategories.data, channelsHidden],
+  );
   const hiddenCount = useMemo(() => (allCategories.data ?? []).filter((c) => c.hidden).length, [allCategories.data]);
-  const category = useMemo(() => categories.data?.find((c) => c.id === categoryId), [categories.data, categoryId]);
+  const category = useMemo(() => groups?.find((c) => c.id === categoryId), [groups, categoryId]);
 
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -190,13 +189,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- playback -----------------------------------------------------------
   const playerSource = usePlayerStore((s) => s.source);
+  // PageUp/PageDown are channel up/down while a live channel plays in the app (the playback shortcuts' rule).
+  const zapKeys = usePlayerStore((s) => !!s.source && s.mode !== 'external' && canZap(s));
   const stageBusy = !!playerSource;
-  const playingRef =
-    playerSource?.ref && playerSource.ref.sourceId === sourceId && (playerSource.ref.contentType === 'live' || playerSource.ref.contentType === 'radio')
-      ? playerSource.ref
-      : undefined;
-  const playingItem = useRpcQuery('catalog.item', { ref: playingRef ?? EMPTY_REF }, { enabled: !!playingRef, staleTime: 5 * 60_000 });
-  const playingChannel = playingRef ? (playingItem.data as Channel | undefined) : undefined;
+  // The list marks and follows every channel a zap passes: the row moves with each press.
+  const playingRef = liveRefOn(playerSource, sourceId);
+  // A zap burst puts up a placeholder per press and tunes only the channel it stops on. The playing
+  // channel's details (catalog row, guide, ribbon) follow the settled source, so a burst of eight
+  // presses fetches one channel's details, not eight (L3-live-7). Meanwhile the ribbon keeps what it showed.
+  const [detailSource, setDetailSource] = useState(() => (isPendingZap(playerSource) ? undefined : playerSource));
+  if (detailSource !== playerSource && !isPendingZap(playerSource)) setDetailSource(playerSource);
+  const detailRef = liveRefOn(detailSource, sourceId);
+  const playingItem = useRpcQuery('catalog.item', { ref: detailRef ?? EMPTY_REF }, { enabled: !!detailRef, staleTime: 5 * 60_000 });
+  const playingChannel = detailRef ? (playingItem.data as Channel | undefined) : undefined;
+  // The number finds the playing row outside the loaded pages; mid-burst the details are the previous channel's.
+  const playingNumber = playingChannel && playingRef && sameRef(playingChannel.ref, playingRef) ? playingChannel.number : undefined;
   // ChannelList reports the cursor only once it settles, so a held arrow key doesn't fetch a
   // guide (and flash a skeleton) for every channel passed on the way. The report belongs to the
   // list it came from: once the list changes (search, group, source) or is replaced by a loading,
@@ -210,16 +217,30 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const activeChannel =
     listShown && reported.key === listKey && reported.channel?.ref.sourceId === sourceId ? reported.channel : undefined;
   const ribbonChannel = playingChannel ?? activeChannel;
-  const [focusedRows] = useState(createRowStore);
-  const rowIndexOf = (el: EventTarget | null): number | null => {
-    const row = el instanceof Element ? el.closest<HTMLElement>('[data-testid="channel-list"] [data-row-index]') : null;
-    const i = row ? Number(row.dataset.rowIndex) : NaN;
-    return Number.isInteger(i) ? i : null;
-  };
   // C3 `l`: add the focused row to a list.
   useAddToListShortcut(activeChannel, paged.getChannel);
-  const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
-  const watchingArchive = !!playerSource && !playerSource.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
+  // C2 F2 / Shift+Delete: rename / hide the row that has focus when the key is pressed. It is read
+  // then, not tracked from focus events: focus that a dialog hands back on close fires none
+  // (L3-live-2), and nothing re-renders as focus moves (L2-perf-ui-8).
+  const getChannel = paged.getChannel;
+  const focusedRowChannel = useCallback(() => {
+    const i = rowIndexOf(document.activeElement);
+    return i === null ? undefined : getChannel(i);
+  }, [getChannel]);
+  useChannelEditShortcuts(listShown ? focusedRowChannel : undefined);
+  // The rename and hidden-channels dialogs' code, fetched while the page idles: their first open
+  // waited 330-360 ms on it with nothing on screen (L3-live-6).
+  useEffect(() => {
+    const warm = () => void preloadChannelEditDialogs();
+    if (typeof requestIdleCallback === 'function') {
+      const h = requestIdleCallback(warm, { timeout: 3000 });
+      return () => cancelIdleCallback(h);
+    }
+    const h = setTimeout(warm, 1000);
+    return () => clearTimeout(h);
+  }, []);
+  const watchingLive = !!detailSource?.isLive && !!ribbonChannel && sameRef(detailSource.ref, ribbonChannel.ref);
+  const watchingArchive = !!detailSource && !detailSource.isLive && !!ribbonChannel && sameRef(detailSource.ref, ribbonChannel.ref);
   // The guide ribbon follows a tune in a background render: the click's own commit (row marked,
   // player up) paints first, and the ribbon's programmes come right after (L1-live-20).
   const ribbon = useDeferredValue(
@@ -228,18 +249,18 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const offset = prefs.epgOffsetMinutes;
   const playingNowNext = useRpcQuery(
     'epg.nowNext',
-    offset ? { refs: playingRef ? [playingRef] : [], offsetMinutes: offset } : { refs: playingRef ? [playingRef] : [] },
-    { enabled: !!playingRef, staleTime: 60_000 },
+    offset ? { refs: detailRef ? [detailRef] : [], offsetMinutes: offset } : { refs: detailRef ? [detailRef] : [] },
+    { enabled: !!detailRef, staleTime: 60_000 },
   );
   const playingPortalEpg = usePortalEpg(
-    { ref: playingRef ?? EMPTY_REF, limit: PREVIEW_FETCH_SIZE },
-    { enabled: !!playingRef && kind === 'stalker', staleTime: 60_000 },
+    { ref: detailRef ?? EMPTY_REF, limit: PREVIEW_FETCH_SIZE },
+    { enabled: !!detailRef && kind === 'stalker', staleTime: 60_000 },
   );
   const playingXmltv = playingNowNext.data ? Object.values(playingNowNext.data)[0] : undefined;
   // guide: the panel's short EPG once XMLTV answered without anything airing.
-  const playingShortEpg = useShortEpg(playingRef, shortEpgOn && !!playingNowNext.data && needsFallback(playingXmltv));
+  const playingShortEpg = useShortEpg(detailRef, shortEpgOn && !!playingNowNext.data && needsFallback(playingXmltv));
   // Unshifted programmes: the one shown as airing is the one airing at `now - offset`.
-  const currentNowNext = playingRef
+  const currentNowNext = detailRef
     ? preferNowNext(
         kind === 'stalker' ? nowNextFrom(playingPortalEpg.data, now - offset * MINUTE) : undefined,
         preferNowNext(playingXmltv, nowNextFrom(playingShortEpg, now - offset * MINUTE)),
@@ -312,7 +333,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     { enabled: !!sourceId && digitsUsed, staleTime: 5 * 60_000 },
   );
   const maxNumber = topNumber.data ? (topNumber.data.items[0]?.number ?? 0) : undefined;
-  const digits = useDigitEntry((n) => void selectNumber(n), undefined, maxNumber);
+  // Digits typed hard on the heels of a number that committed early belong to it. Together they pass
+  // the highest number, so the readout says no channel has it instead of starting a new number (L3-live-9).
+  const digits = useDigitEntry((n) => void selectNumber(n), undefined, maxNumber, (n) => flashOsd({ kind: 'missing', number: n }));
   useEffect(() => {
     if (digits.buffer) {
       if (osdTimer.current) clearTimeout(osdTimer.current);
@@ -555,14 +578,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         // C2: a locked channel or group asks for the PIN first, as inline playback does.
         const s = await openChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
         if (!s) return;
-        await rpc('player.openExternal', { player, source: s });
         // The stage says what plays where, with Stop and Reopen (the player's ExternalStage), instead
-        // of "Nothing playing"; the in-app player gives way to it (L2-desktop-9).
+        // of "Nothing playing"; the in-app player gives way to it (L2-desktop-9). The store opens it and
+        // remembers the player chosen here, so Reopen uses it too (L3-live-ch-x4); a failed open shows
+        // on the stage with Retry.
         const store = usePlayerStore.getState();
         if (store.source && store.mode !== 'external') store.stop();
         // The ref marks the row and the ribbon as playing, as an inline play does.
         const playing = { ...s, ref: s.ref ?? ch.ref };
-        usePlayerStore.setState({ source: playing, mode: 'external', status: 'playing', error: undefined, dock: 'hidden', queue: [] });
+        await store.play(playing, { mode: 'external', externalPlayer: player, queue: [] });
       } catch (err) {
         toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
       }
@@ -627,7 +651,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         : `/s/${encodeURIComponent(sourceId)}/live${cid ? `/${encodeURIComponent(cid)}` : ''}`,
     [isRadio, sourceId],
   );
-  const refetchCategories = categories.refetch;
+  const refetchCategories = allCategories.refetch;
   const retryCategories = useCallback(() => void refetchCategories(), [refetchCategories]);
   const onPlayLive = useCallback((c: Channel) => play(c), [play]);
 
@@ -667,10 +691,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       <ListsSidebarSection onNavigate={closeDrawer} />
       <div className="flex min-h-0 flex-1 flex-col">
         <MemoSidebar
-          categories={categories.data}
+          categories={groups}
           hiddenCount={hiddenCount}
-          isLoading={categories.isLoading}
-          error={categories.error}
+          isLoading={allCategories.isLoading}
+          error={allCategories.error}
           onRetry={retryCategories}
           activeId={categoryId}
           hrefFor={hrefFor}
@@ -771,7 +795,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         paged={paged}
         resetKey={listKey}
         playingRef={playingRef}
-        playingNumber={playingChannel?.number}
+        playingNumber={playingNumber}
+        zapKeys={zapKeys}
         openOnDoubleClick={settings.data?.openStreamOnDoubleClick ?? false}
         now={now}
         compact={false}
@@ -815,10 +840,6 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       {/* channel list: beside the stage from 768 px, under it on a phone */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        onFocus={(e) => focusedRows.set(rowIndexOf(e.target))}
-        onBlur={(e) => {
-          if (rowIndexOf(e.relatedTarget) === null) focusedRows.set(null);
-        }}
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:min-w-60 md:flex-initial md:border-e"
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
@@ -881,7 +902,6 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           </span>
         </div>
         {listBody}
-        <FocusedRowShortcuts store={focusedRows} getChannel={paged.getChannel} fallback={activeChannel} listShown={listShown} />
       </section>
 
       {/* stage: on top on a phone, as wide as the screen. Beside the list it keeps about 300 px for
@@ -891,11 +911,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           <RadioStage channel={playingChannel} stripPrefix={prefs.stripCountryPrefix} />
         ) : (
           <>
-            {/* On a phone nothing playing is a slim prompt above the list, not a black 16:9 box (L2-visual-13). */}
+            {/* On a phone nothing playing is a slim prompt above the list, not a black 16:9 box (L2-visual-13).
+                Beside the list the stage is a 16:9 screen with the guide ribbon under it, not a tall box of
+                black around a small picture (L3-player-4); when the column is too short for both, the
+                screen gives way and the ribbon keeps its height. */}
             <div
               data-testid="live-stage"
               data-idle={stageBusy ? undefined : ''}
-              className={`relative min-h-0 bg-black md:aspect-auto md:flex-1 ${stageBusy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2'}`}
+              className={`relative min-h-0 bg-black md:aspect-video md:shrink ${stageBusy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2'}`}
             >
               <PlayerStage className={stageBusy ? 'h-full w-full' : 'h-full w-full max-md:bg-transparent'}>
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70 max-md:flex-row max-md:justify-start max-md:gap-3 max-md:px-4 max-md:text-start max-md:text-fg-muted">
@@ -908,8 +931,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               </PlayerStage>
               <DigitOsd state={osd} />
             </div>
-            {/* On a phone the ribbon comes with a channel playing; until then the list starts near the top. */}
-            <div className={stageBusy ? 'contents' : 'contents max-md:hidden'}>
+            {/* On a phone the ribbon comes with a channel playing; until then the list starts near the top.
+                Beside the list the ribbon's surface runs on to the bottom of the column. */}
+            <div className={`${stageBusy ? 'max-md:contents' : 'max-md:hidden'} md:flex md:min-h-0 md:shrink-0 md:grow md:flex-col md:bg-surface`}>
               <MemoRibbon
                 channel={ribbon.channel}
                 sourceKind={ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined}

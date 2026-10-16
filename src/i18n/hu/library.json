@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "{{count}} felvétel folyamatban",
   "scheduledSummaryNow_other": "{{count}} felvétel folyamatban",
   "scheduledEmptyTitle": "Nincs semmi ütemezve",
-  "scheduledEmptyBody": "Nyisd meg a műsorújságot, és egy műsornál válaszd az Emlékeztess vagy a Felvétel lehetőséget.",
+  "scheduledEmptyBody": "Nyisd meg a műsorújságot, és egy műsornál válaszd az Emlékeztess, a Felvétel vagy a Sorozatfelvétel lehetőséget.",
   "scheduledOpenGuide": "Műsorújság megnyitása",
   "scheduledNow": "Felvétel folyamatban",
   "scheduledUpcoming": "Hamarosan",

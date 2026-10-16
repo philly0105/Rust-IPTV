@@ -31,11 +31,31 @@ export function useShortEpgPreviews(
   const [version, bump] = useReducer((x: number) => x + 1, 0);
   const bumpRef = useRef(bump);
   bumpRef.current = bump;
+  // Answers that land in one frame re-render the page once, not once each (L3-perf-ui-5).
+  const frame = useRef(0);
   const queue = useMemo(
-    () => new StalkerPreviewQueue(fetchShortEpg, () => bumpRef.current(), { sourceId, scope: SHORT_EPG_SCOPE, ttlMs: 10 * 60_000 }),
+    () =>
+      new StalkerPreviewQueue(
+        fetchShortEpg,
+        () => {
+          if (frame.current) return;
+          frame.current = requestAnimationFrame(() => {
+            frame.current = 0;
+            bumpRef.current();
+          });
+        },
+        { sourceId, scope: SHORT_EPG_SCOPE, ttlMs: 10 * 60_000 },
+      ),
     [sourceId],
   );
-  useEffect(() => () => queue.reset(), [queue]);
+  useEffect(
+    () => () => {
+      queue.reset();
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
+    },
+    [queue],
+  );
 
   const refsRef = useRef(refs);
   refsRef.current = refs;

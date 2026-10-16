@@ -41,6 +41,13 @@ function loadPlayerModule(): Promise<PlayerModule> {
 export const PLAYER_RESUME_KEY = 'player.resume';
 /** Longest the idle wait holds the player back after the shell's first paint. */
 export const PLAYER_IDLE_TIMEOUT_MS = 2000;
+/**
+ * How long the shell leaves the first route to itself before it starts the idle wait for the
+ * player (about 200 KB of chunks to fetch, parse and compile): they arrived at about 414 ms on a
+ * cold load, among the route's own chunks and in its long tasks (L3-perf-ui-6). A press still
+ * loads the player at once.
+ */
+export const PLAYER_PREFETCH_DELAY_MS = 2500;
 
 function playbackToRestore(): boolean {
   try {
@@ -52,10 +59,11 @@ function playbackToRestore(): boolean {
 
 /**
  * Calls `load` once: at once when `now`, else on the first idle moment (at most
- * PLAYER_IDLE_TIMEOUT_MS; a macrotask where requestIdleCallback is missing) or the first
- * pointer or key press, whichever comes first. Returns the cancel function.
+ * PLAYER_IDLE_TIMEOUT_MS; a macrotask where requestIdleCallback is missing) once `delayMs` has
+ * passed, or on the first pointer or key press, whichever comes first. Presses count from the
+ * start. Returns the cancel function.
  */
-export function schedulePlayerLoad(load: () => void, now: boolean, win: Window = window): () => void {
+export function schedulePlayerLoad(load: () => void, now: boolean, win: Window = window, delayMs = 0): () => void {
   const intents = ['pointerdown', 'keydown'] as const;
   let idle: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -74,8 +82,13 @@ export function schedulePlayerLoad(load: () => void, now: boolean, win: Window =
     return () => undefined;
   }
   for (const type of intents) win.addEventListener(type, fire, { capture: true, passive: true });
-  if (typeof win.requestIdleCallback === 'function') idle = win.requestIdleCallback(fire, { timeout: PLAYER_IDLE_TIMEOUT_MS });
-  else timer = setTimeout(fire, 0);
+  const waitForIdle = () => {
+    timer = undefined;
+    if (typeof win.requestIdleCallback === 'function') idle = win.requestIdleCallback(fire, { timeout: PLAYER_IDLE_TIMEOUT_MS });
+    else timer = setTimeout(fire, 0);
+  };
+  if (delayMs > 0) timer = setTimeout(waitForIdle, delayMs);
+  else waitForIdle();
   return cancel;
 }
 
@@ -95,6 +108,8 @@ function usePlayerModule(): PlayerModule | null {
           .catch(() => {});
       },
       playerModule !== null || playbackToRestore(),
+      window,
+      PLAYER_PREFETCH_DELAY_MS,
     );
     return () => {
       live = false;

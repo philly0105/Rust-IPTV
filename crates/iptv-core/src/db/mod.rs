@@ -2,7 +2,7 @@
 //!
 //! Written by W0; owned and extended by B1. Every pooled connection runs with
 //! `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`,
-//! `journal_size_limit` of 64 MiB, a busy handler that waits up to 5 s for the write lock (longer while a
+//! `journal_size_limit` of 64 MiB, a 32 MiB page cache, a busy handler that waits up to 5 s for the write lock (longer while a
 //! catalog import holds it, see [`long_write`]). Long imports should use one
 //! write transaction per source.
 
@@ -200,6 +200,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0018_catalog_query_speed",
         sql: include_str!("migrations/0018_catalog_query_speed.sql"),
     },
+    // guide search: epg_search_rows and the channel resolution index (loop 3).
+    Migration {
+        version: 19,
+        name: "0019_guide_search_speed",
+        sql: include_str!("migrations/0019_guide_search_speed.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -222,18 +228,146 @@ pub fn latest_version() -> i64 {
 /// is checked in the background instead (see [`spawn_background_check`]).
 const SYNC_CHECK_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
-/// How long after open the background `quick_check` of a large database
-/// starts, so it reads the file after the first window's queries.
-const BACKGROUND_CHECK_DELAY: Duration = Duration::from_secs(3);
+/// When the background `quick_check` of a large database starts. It reads
+/// the whole file (2.9 s for 352 MB) and made the first page loads 3-6x
+/// slower when it ran 3 s after open (L3-perf-core-7), so it now waits for
+/// the app to go quiet.
+#[derive(Debug, Clone, Copy)]
+struct CheckSchedule {
+    /// Earliest start after open.
+    delay: Duration,
+    /// Database quiet time (no call in flight) required before it starts.
+    idle: Duration,
+    /// Latest start after open, quiet or not.
+    max_wait: Duration,
+}
+
+impl CheckSchedule {
+    /// The boot schedule: 60 s after open, after 5 s without a database
+    /// call, and at most 10 min after open.
+    const BOOT: Self = Self {
+        delay: Duration::from_secs(60),
+        idle: Duration::from_secs(5),
+        max_wait: Duration::from_secs(600),
+    };
+}
+
+/// How long a passing background check stays valid when the previous run
+/// shut down cleanly (see [`note_clean_shutdown`]).
+const CHECK_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Suffix of the marker that exists while the app has the database open
+/// (`iptv.db.running`). Still there at open: the last run did not shut down
+/// cleanly.
+const RUNNING_SUFFIX: &str = ".running";
+
+/// Suffix of the file holding the time of the last passing background check
+/// (`iptv.db.checked`, RFC 3339).
+const CHECKED_SUFFIX: &str = ".checked";
+
+/// Database calls in flight in this process (see [`activity`]).
+static ACTIVE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// When the last database call ended, in ms since [`activity_epoch`].
+static LAST_CALL_END_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn activity_epoch() -> std::time::Instant {
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(std::time::Instant::now)
+}
+
+/// Marks a database call as in flight until dropped; the background check
+/// waits for none to be in flight (see [`CheckSchedule`]).
+#[must_use = "the mark lasts until the guard is dropped"]
+pub struct Activity(());
+
+impl Drop for Activity {
+    fn drop(&mut self) {
+        let ms = activity_epoch().elapsed().as_millis() as u64;
+        LAST_CALL_END_MS.fetch_max(ms, std::sync::atomic::Ordering::SeqCst);
+        ACTIVE_CALLS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Marks a database call as in flight; held by `AppState::db_call`.
+pub fn activity() -> Activity {
+    activity_epoch();
+    ACTIVE_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Activity(())
+}
+
+/// How long the database has been quiet: zero while a call is in flight.
+fn quiet_for() -> Duration {
+    if ACTIVE_CALLS.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+        return Duration::ZERO;
+    }
+    let now = activity_epoch().elapsed().as_millis() as u64;
+    let last = LAST_CALL_END_MS.load(std::sync::atomic::Ordering::SeqCst);
+    Duration::from_millis(now.saturating_sub(last))
+}
+
+/// Sleeps until `schedule` lets the background check start.
+fn wait_for_quiet(schedule: CheckSchedule) {
+    let opened = std::time::Instant::now();
+    std::thread::sleep(schedule.delay);
+    loop {
+        let quiet = quiet_for();
+        if quiet >= schedule.idle || opened.elapsed() >= schedule.max_wait {
+            return;
+        }
+        let rest = (schedule.idle - quiet).max(Duration::from_millis(50));
+        std::thread::sleep(rest.min(schedule.max_wait.saturating_sub(opened.elapsed())));
+    }
+}
+
+/// Path of the side file `<db file name><suffix>` next to `path`.
+fn side_path(path: &Path, suffix: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| DB_FILE.to_string());
+    path.with_file_name(format!("{name}{suffix}"))
+}
+
+/// Call when the app closes the database cleanly (after the last write).
+/// Removes the running marker, so the next start may skip the background
+/// check of a large database checked within [`CHECK_INTERVAL`].
+pub fn note_clean_shutdown(path: &Path) {
+    match std::fs::remove_file(side_path(path, RUNNING_SUFFIX)) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => tracing::warn!(%err, "could not remove the database running marker"),
+    }
+}
+
+/// True when a background check passed within [`CHECK_INTERVAL`].
+fn checked_recently(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(side_path(path, CHECKED_SUFFIX)) else {
+        return false;
+    };
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(text.trim()) else {
+        return false;
+    };
+    let age = chrono::Utc::now().signed_duration_since(at);
+    age >= chrono::TimeDelta::zero() && age.to_std().is_ok_and(|age| age < CHECK_INTERVAL)
+}
 
 /// Applies the per-connection pragmas and registers the app's SQL functions.
 /// `journal_size_limit` (64 MiB) truncates a WAL that an import grew back to
 /// that size when the WAL is next reset; see also [`checkpoint_truncate`].
+///
+/// `cache_size` is 32 MiB per connection (SQLite's default is 2 MiB): a
+/// broad search reads one `items` row per FTS match, and on a 215k-item
+/// library the default cache missed on most of them. 32 MiB halved "blue",
+/// "news" and "zzzz" (p50 25-30 -> 12-17 ms) for about 40 MB more peak
+/// memory in `l3_search_perf`; 16 MiB gave almost nothing and 64 MiB little
+/// more. The cache is private to each connection and fills only as pages are
+/// read, so the pool's [`POOL_MAX`] connections hold at most 256 MiB.
+/// `mmap_size` (pages shared through the OS cache) measured no gain.
 pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.busy_handler(Some(busy_wait))?;
     crate::catalog::language::register(conn)?;
     conn.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=67108864;",
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=67108864; PRAGMA cache_size=-32768;",
     )?;
     Ok(())
 }
@@ -259,10 +393,15 @@ pub fn migrate(conn: &mut Connection) -> CoreResult<()> {
     // Index builds over a large table (a unique index on a multi-million-row
     // table) sort through temp storage: on disk here, not in memory, so an
     // upgrade does not take hundreds of MB before the window shows. The
-    // pragma cannot change inside a transaction; restored afterwards.
-    conn.execute_batch("PRAGMA temp_store=FILE;")?;
+    // pragma cannot change inside a transaction; restored afterwards. For the
+    // same reason the page cache drops to SQLite's 2 MiB default (a 600k-row
+    // guide upgrade otherwise fills the whole 32 MiB of [`configure`]).
+    let cache: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0))?;
+    conn.execute_batch("PRAGMA temp_store=FILE; PRAGMA cache_size=-2000;")?;
     let result = migrate_in_tx(conn);
-    conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
+    conn.execute_batch(&format!(
+        "PRAGMA temp_store=MEMORY; PRAGMA cache_size={cache};"
+    ))?;
     result
 }
 
@@ -390,15 +529,19 @@ fn database_bytes(conn: &Connection) -> CoreResult<u64> {
 }
 
 /// Runs `quick_check` on its own read-only connection in a background thread,
-/// `delay` after open, for a database too large to check at open. A finding
-/// writes the recovery flag (see [`note_error`]), so the next boot runs the
-/// full check and quarantines the file.
-fn spawn_background_check(path: &Path, delay: Duration) -> Option<std::thread::JoinHandle<()>> {
+/// when `schedule` allows, for a database too large to check at open. A
+/// finding writes the recovery flag (see [`note_error`]), so the next boot
+/// runs the full check and quarantines the file; a pass records its time
+/// (see [`checked_recently`]).
+fn spawn_background_check(
+    path: &Path,
+    schedule: CheckSchedule,
+) -> Option<std::thread::JoinHandle<()>> {
     let path = path.to_path_buf();
     std::thread::Builder::new()
         .name("db-quick-check".into())
         .spawn(move || {
-            std::thread::sleep(delay);
+            wait_for_quiet(schedule);
             let started = std::time::Instant::now();
             let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -408,10 +551,16 @@ fn spawn_background_check(path: &Path, delay: Duration) -> Option<std::thread::J
                 .map_err(CoreError::from)
                 .and_then(|conn| check_integrity(&conn, false));
             match result {
-                Ok(()) => tracing::info!(
-                    ms = started.elapsed().as_millis() as u64,
-                    "background database check passed"
-                ),
+                Ok(()) => {
+                    tracing::info!(
+                        ms = started.elapsed().as_millis() as u64,
+                        "background database check passed"
+                    );
+                    let stamp = chrono::Utc::now().to_rfc3339();
+                    if let Err(err) = std::fs::write(side_path(&path, CHECKED_SUFFIX), stamp) {
+                        tracing::warn!(%err, "could not record the database check");
+                    }
+                }
                 // note_error logged the finding.
                 Err(err) if note_error(&path, &err) => {}
                 Err(err) => tracing::warn!(%err, "background database check did not run"),
@@ -480,26 +629,30 @@ pub fn note_error(db_path: &Path, err: &CoreError) -> bool {
 
 /// Boot path: open, check integrity, refuse a schema newer than this build,
 /// and migrate. The check is `quick_check` at open for a database up to
-/// 32 MiB, `quick_check` in a background thread a few seconds after open for
-/// a larger one (a finding flags the next boot), and the full
-/// `integrity_check` at open when a previous run flagged corruption (see
-/// [`note_error`]). When the file is corrupt or not a database, quarantine it
-/// (see [`quarantine`]), log a warning, and recreate an empty one.
+/// 32 MiB, and the full `integrity_check` at open when a previous run flagged
+/// corruption (see [`note_error`]). A larger database gets `quick_check` in a
+/// background thread once the app is quiet (see [`CheckSchedule::BOOT`]; a
+/// finding flags the next boot), unless the last run shut down cleanly (see
+/// [`note_clean_shutdown`]) and a check passed within [`CHECK_INTERVAL`].
+/// When the file is corrupt or not a database, quarantine it (see
+/// [`quarantine`]), log a warning, and recreate an empty one.
 pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
-    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, BACKGROUND_CHECK_DELAY).map(|(pool, _)| pool)
+    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT).map(|(pool, _)| pool)
 }
 
 /// [`open_and_migrate`] with the size limit of the check at open and the
-/// delay of the background check as parameters. Returns the background
+/// schedule of the background check as parameters. Returns the background
 /// check's thread when one started.
 fn open_and_migrate_with(
     path: &Path,
     sync_check_max_bytes: u64,
-    background_delay: Duration,
+    schedule: CheckSchedule,
 ) -> CoreResult<(DbPool, Option<std::thread::JoinHandle<()>>)> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let running = side_path(path, RUNNING_SUFFIX);
+    let unclean = running.exists();
     let flag = recovery_flag_path(path);
     let flagged = flag.exists();
     if flagged {
@@ -509,6 +662,8 @@ fn open_and_migrate_with(
         Ok(opened) => Ok(opened),
         Err(err) if is_corruption(&err) => {
             let moved = quarantine(path)?;
+            // The last pass was of the file just moved aside.
+            let _ = std::fs::remove_file(side_path(path, CHECKED_SUFFIX));
             tracing::warn!(error = %err, backup = %moved.display(), "database was corrupt; moved aside and recreating");
             try_open_and_migrate(path, false, sync_check_max_bytes)
         }
@@ -520,10 +675,16 @@ fn open_and_migrate_with(
         }
     }
     let (pool, checked) = result?;
+    if let Err(err) = std::fs::write(&running, chrono::Utc::now().to_rfc3339()) {
+        tracing::warn!(%err, "could not write the database running marker");
+    }
     let background = if checked {
         None
+    } else if !unclean && checked_recently(path) {
+        tracing::info!("background database check skipped: clean shutdown and a recent pass");
+        None
     } else {
-        spawn_background_check(path, background_delay)
+        spawn_background_check(path, schedule)
     };
     Ok((pool, background))
 }
@@ -867,6 +1028,106 @@ mod tests {
         handle.join().unwrap();
     }
 
+    /// Background check at once, quiet or not.
+    const NOW: CheckSchedule = CheckSchedule {
+        delay: Duration::ZERO,
+        idle: Duration::ZERO,
+        max_wait: Duration::ZERO,
+    };
+
+    /// L3-perf-core-7: after a clean shutdown and a pass within the
+    /// interval, the next start skips the background check; an unclean
+    /// shutdown or a stale pass runs it again.
+    #[test]
+    fn background_check_is_skipped_only_after_clean_shutdown_and_recent_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        populate(&path);
+        let checked = side_path(&path, CHECKED_SUFFIX);
+
+        // First start: never checked.
+        note_clean_shutdown(&path);
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        join_bounded(check.expect("no pass recorded yet"));
+        assert!(checked.exists(), "a pass is recorded");
+        drop(pool);
+
+        // Clean shutdown, recent pass: skipped.
+        note_clean_shutdown(&path);
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        assert!(check.is_none(), "skipped after a clean shutdown");
+        drop(pool);
+
+        // No clean shutdown (a crash): checked again.
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        join_bounded(check.expect("checked after an unclean shutdown"));
+        drop(pool);
+
+        // Clean shutdown but the last pass is 8 days old: checked again.
+        note_clean_shutdown(&path);
+        let old = chrono::Utc::now() - chrono::TimeDelta::days(8);
+        std::fs::write(&checked, old.to_rfc3339()).unwrap();
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
+        join_bounded(check.expect("checked when the last pass is stale"));
+        drop(pool);
+        assert!(!recovery_flag_path(&path).exists());
+    }
+
+    /// Broad searches need more than SQLite's default 2 MiB page cache (see
+    /// [`configure`]); `migrate` runs on the default and gives it back.
+    #[test]
+    fn connections_get_a_32_mib_page_cache() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&mut conn).unwrap();
+        let size =
+            |c: &Connection| -> i64 { c.query_row("PRAGMA cache_size", [], |r| r.get(0)).unwrap() };
+        assert_eq!(size(&conn), -32768);
+        migrate(&mut conn).unwrap();
+        assert_eq!(size(&conn), -32768, "restored after the migrations");
+    }
+
+    /// The desktop and server shells call `note_clean_shutdown` on exit: it
+    /// removes the running marker written at open, and does nothing once the
+    /// marker is gone.
+    #[test]
+    fn clean_shutdown_removes_the_running_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        let pool = open_and_migrate(&path).unwrap();
+        let running = side_path(&path, RUNNING_SUFFIX);
+        assert!(running.exists(), "written at open");
+        note_clean_shutdown(&path);
+        assert!(!running.exists(), "removed on a clean shutdown");
+        note_clean_shutdown(&path);
+        assert!(!running.exists());
+        drop(pool);
+    }
+
+    /// L3-perf-core-7: the background check does not start while a database
+    /// call is in flight, and starts once the database is quiet.
+    #[test]
+    fn background_check_waits_for_quiet() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        populate(&path);
+        let checked = side_path(&path, CHECKED_SUFFIX);
+        let busy = activity();
+        let schedule = CheckSchedule {
+            delay: Duration::ZERO,
+            idle: Duration::from_millis(200),
+            max_wait: Duration::from_secs(20),
+        };
+        let (pool, check) = open_and_migrate_with(&path, 0, schedule).unwrap();
+        let check = check.expect("a background check is scheduled");
+        std::thread::sleep(Duration::from_millis(800));
+        assert!(!check.is_finished(), "waits while a call is in flight");
+        assert!(!checked.exists());
+        drop(busy);
+        join_bounded(check);
+        assert!(checked.exists(), "ran once the database was quiet");
+        drop(pool);
+    }
+
     /// A database over the size limit opens without the check (the corrupt
     /// file stays in place); the background check then flags it, and the
     /// next boot quarantines it.
@@ -879,7 +1140,7 @@ mod tests {
         let flag = recovery_flag_path(&path);
 
         // Limit 0: every database counts as large.
-        let (pool, check) = open_and_migrate_with(&path, 0, Duration::ZERO).unwrap();
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         assert_eq!(corrupt_backups(dir.path()), 0, "not checked at open");
         let rows: i64 = pool
             .get()
@@ -901,7 +1162,7 @@ mod tests {
 
         // The flagged boot runs the full check at open (even with limit 0)
         // and recovers. The recreated file is checked in the background.
-        let (pool, check) = open_and_migrate_with(&path, 0, Duration::ZERO).unwrap();
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         assert_eq!(corrupt_backups(dir.path()), 1, "corrupt file moved aside");
         join_bounded(check.expect("the new file counts as large too"));
         assert!(!flag.exists(), "flag cleared after recovery");
@@ -919,7 +1180,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(DB_FILE);
         populate(&path);
-        let (pool, check) = open_and_migrate_with(&path, 0, Duration::ZERO).unwrap();
+        let (pool, check) = open_and_migrate_with(&path, 0, NOW).unwrap();
         join_bounded(check.expect("a background check started"));
         assert!(!recovery_flag_path(&path).exists());
         let rows: i64 = pool
@@ -943,7 +1204,7 @@ mod tests {
         corrupt_middle(&path);
 
         let (pool, check) =
-            open_and_migrate_with(&path, SYNC_CHECK_MAX_BYTES, BACKGROUND_CHECK_DELAY).unwrap();
+            open_and_migrate_with(&path, SYNC_CHECK_MAX_BYTES, CheckSchedule::BOOT).unwrap();
         assert!(check.is_none(), "checked at open, not in the background");
         assert_eq!(corrupt_backups(dir.path()), 1);
         let rows: i64 = pool

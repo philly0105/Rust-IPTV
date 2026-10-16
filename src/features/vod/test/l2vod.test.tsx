@@ -13,7 +13,7 @@ import { rpcKey } from '@/api/query';
 import type { Category, Page, PageQuery, ParentalLock, VodItem } from '@/api/types';
 import { VirtualGrid } from '@/ui';
 
-import { sameButHideWatched, useSource } from '../hooks/queries';
+import { sameGridSlot, useSource } from '../hooks/queries';
 import { forgetSpots, recallSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
@@ -155,14 +155,17 @@ describe('L2-vod-5: the landing holds its layout from the first frame', () => {
   });
 });
 
-describe('L2-vod-8: Hide watched keeps the page data meanwhile', () => {
-  it('compares two page keys ignoring only hideWatched', () => {
+describe('L2-vod-8, L3-vod-3: a new filter keeps the page data meanwhile', () => {
+  it('compares two page keys by command, source, category and page slot', () => {
     const key = (args: object) => ['catalog.movies', args] as const;
-    const a = key({ sourceId: 's', query: { offset: 0 }, hideWatched: false });
-    expect(sameButHideWatched(a, key({ sourceId: 's', query: { offset: 0 }, hideWatched: true }))).toBe(true);
-    expect(sameButHideWatched(a, key({ sourceId: 's', query: { offset: 0 } }))).toBe(true);
-    expect(sameButHideWatched(a, key({ sourceId: 's', query: { offset: 0, search: 'x' }, hideWatched: true }))).toBe(false);
-    expect(sameButHideWatched(a, ['catalog.series', { sourceId: 's', query: { offset: 0 } }])).toBe(false);
+    const a = key({ sourceId: 's', categoryId: 'c', query: { offset: 0, limit: 120, sort: 'added' }, hideWatched: false });
+    expect(sameGridSlot(a, key({ sourceId: 's', categoryId: 'c', query: { offset: 0, limit: 120, sort: 'added' }, hideWatched: true }))).toBe(true);
+    // L3-vod-3: a sort, search, rating or year change refills the same slot (was a remount).
+    expect(sameGridSlot(a, key({ sourceId: 's', categoryId: 'c', query: { offset: 0, limit: 120, sort: 'name', search: 'x' }, minRating: 7, yearFrom: 1990 }))).toBe(true);
+    expect(sameGridSlot(a, key({ sourceId: 's', categoryId: 'c', query: { offset: 120, limit: 120, sort: 'added' } }))).toBe(false);
+    expect(sameGridSlot(a, key({ sourceId: 's', categoryId: 'd', query: { offset: 0, limit: 120, sort: 'added' } }))).toBe(false);
+    expect(sameGridSlot(a, key({ sourceId: 't', categoryId: 'c', query: { offset: 0, limit: 120, sort: 'added' } }))).toBe(false);
+    expect(sameGridSlot(a, ['catalog.series', { sourceId: 's', categoryId: 'c', query: { offset: 0, limit: 120 } }])).toBe(false);
   });
 });
 

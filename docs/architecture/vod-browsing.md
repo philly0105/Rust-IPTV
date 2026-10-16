@@ -17,11 +17,11 @@ A movie or series is watched when it has an item-level row in `playback_position
 
 ### `catalog.movies` / `catalog.series` filters
 
-`VodListArgs` takes `yearFrom?`, `yearTo?` and `hideWatched?`. The catalog builds a `VodFilter` and checks it with `vodfilter::validate`: each bound must be in 1900..=2100 and `yearFrom <= yearTo`, otherwise the call returns `invalid`. `query_named` appends `vod_filter_sql` to the shared `WHERE` clause, so the count and the page statements filter the same set and `total` counts the filtered titles.
+`VodListArgs` takes `yearFrom?`, `yearTo?` and `hideWatched?`. The catalog builds a `VodFilter` and checks it with `vodfilter::validate`: each bound must be in 1900..=2100 and `yearFrom <= yearTo`, otherwise the call returns `invalid`. `query_named` appends the filter to both the count and the page statement with the same arguments, so they filter the same set and `total` counts the filtered titles. The count uses `vod_filter_sql`; the page uses `vod_filter_sql_on` with `+i.year` unless the grid is sorted by year (and writes a minimum rating as `+i.rating` unless it is sorted by rating), so the sort's index answers the page in order (catalog.md).
 
 - Year bounds compare `items.year` and are inclusive. When only one bound is set, the other defaults to its end of 1900..=2100. A NULL year fails every comparison, and a junk year (`0`, `20210`) falls outside the range, so titles without a usable year drop out as soon as one bound is set. The facets leave the same years out, so no chip can select them.
-- `hideWatched` adds `i.rowid NOT IN (SELECT it.rowid FROM playback_positions p JOIN items it ON <primary key> WHERE p.episode_id = '' AND p.watched = 1)`. The subquery does not depend on the outer row, so SQLite builds the set once per statement. The set holds only watched titles, and the rowid is in every index, so a `count(*)` over 50k titles stays an index-only scan. The parental hide filter uses the same pattern.
-- Migration `0013_catalog_edits.sql` adds `idx_items_year (source_id, content_type, year)`.
+- `hideWatched` adds `i.rowid NOT IN (SELECT it.rowid FROM playback_positions p JOIN items it ON <primary key> WHERE p.episode_id = '' AND p.watched = 1)`. The subquery does not depend on the outer row, so SQLite builds the set once per statement. The set holds only watched titles, and the rowid is in every index, so a `count(*)` over 50k titles stays an index-only scan. The parental hide filter uses the same pattern for item locks.
+- Migration `0013_catalog_edits.sql` adds `idx_items_year`. Migrations 0018 and 0019 rebuild it and the other sort indexes with the category, the English-only verdict, the rating and the year after the sort key, so a year range or a minimum rating on a page sorted by another key reads index entries rather than table rows. A page past the filtered total skips the page statement, so a decade with no titles does not walk the whole sort index.
 
 ### `catalog.yearFacets`
 
@@ -53,7 +53,7 @@ On a phone the chips scroll sideways inside their own row, so the page never scr
 
 ### URL
 
-The range lives in the URL as `yf` and `yt` (both inclusive), so a filtered grid can be linked, reloaded and restored with Back. `readGridParams` reads them through `readYearRange`. Values that are not four-digit years in 1900..2100 are ignored, and a reversed pair is swapped, so a hand-edited link never reaches the core as an invalid call. Both VirtualGrid keys include the range and the hide-watched flag, so a filter change remounts the grid at the top.
+The range lives in the URL as `yf` and `yt` (both inclusive), so a filtered grid can be linked, reloaded and restored with Back. `readGridParams` reads them through `readYearRange`. Values that are not four-digit years in 1900..2100 are ignored, and a reversed pair is swapped, so a hand-edited link never reaches the core as an invalid call. Both VirtualGrids are keyed on the category only, so a filter change keeps the grid mounted: each page shows its old titles until the new page answers (`sameGridSlot` in `useVodPage`), and the old posters dim to 60 % once the wait passes 150 ms (`aria-busy` on the grid's wrapper). A new sort, search, rating, English-only state or year range (`filterKey`) scrolls the grid to the top and, through VirtualGrid's `resetKey`, puts the keyboard cursor on the first title (or clears it when the grid has no keyboard focus). Hide watched is not part of that key, so flipping it keeps the scroll position and the cursor.
 
 ### Paging
 

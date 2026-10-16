@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useInRouterContext, useNavigate, type NavigateFunction } from 'react-router';
 
 import { onAppEvent } from '@/api/events';
 import { isDesktop, rpc } from '@/api/transport';
@@ -11,9 +12,9 @@ import type { EngineTracks, TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
 import { useAlternatesStore } from '../failover';
 import { setMediaCommands, useMediaStore } from '../media';
-import { bindMpvExtras, sendSubtitleStyle } from '../mpvExtras';
+import { bindMpvExtras, clearMpvUnavailable, markMpvUnavailable, mpvUnavailable, sendSubtitleStyle } from '../mpvExtras';
 import { useStreamInfoStore } from '../streamInfo';
-import { LAYOUT_WATCH_SELECTOR, measureMpvLayout, OVERLAY_SELECTOR } from '../mpvBounds';
+import { dimOverlayCommand, LAYOUT_WATCH_SELECTOR, measureMpvLayout, measureScrim, OVERLAY_SELECTOR } from '../mpvBounds';
 import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
 import { tryAnotherSource, useReconnectStore } from '../reconnect';
 import {
@@ -31,6 +32,12 @@ import {
 import { stepVolume } from '../usePlaybackShortcuts';
 import { usePlayerSettings } from '../useSettings';
 import { VideoContextMenu } from './lazyParts';
+
+/** The one notice for embedded mpv falling back to the built-in player (replaced, never stacked). */
+export const MPV_FALLBACK_TOAST = 'mpv-fallback';
+
+/** Settings > External players, where the mpv path is set. */
+const PLAYER_SETTINGS_PATH = '/settings/players';
 
 /** Off-screen bounds while a modal dialog covers most of the video (the native surface paints above the DOM). */
 export const HIDDEN_BOUNDS: Bounds = { x: -16000, y: -16000, width: 16, height: 16 };
@@ -64,6 +71,8 @@ function touchesNode(n: Node): boolean {
 /** The mutation can move the native window's rectangle or holes. */
 function touchesLayout(r: MutationRecord): boolean {
   if (r.type === 'attributes') return true;
+  // An overlay's content changed (a menu switching to its subtitle or sleep view): its hole resizes.
+  if (r.target instanceof Element && r.target.closest(OVERLAY_SELECTOR)) return true;
   for (const n of Array.from(r.addedNodes)) if (touchesNode(n)) return true;
   for (const n of Array.from(r.removedNodes)) if (touchesNode(n)) return true;
   return false;
@@ -143,28 +152,62 @@ export function MpvSurface({ className }: { className?: string }) {
   /** Re-measures the native window (set while attached): the open menu is cut out of the video. */
   const remeasure = useRef<() => void>(() => undefined);
   const closeMenu = useCallback(() => setMenuAt(null), []);
-  /** mpv cannot run here: say so, play in the built-in player, and offer the way back. */
-  const fallBack = useRef<(reason: string) => void>(() => undefined);
-  fallBack.current = (reason: string): void => {
-    toast({
-      title: t('mpvFailed'),
-      description: `${t('mpvUnavailable')}${reason ? ` (${reason})` : ''}`,
-      variant: 'error',
-      action: {
-        label: t('mpvTryAgain'),
-        onClick: () => {
-          if (usePlayerStore.getState().source) usePlayerStore.setState({ mode: 'embedded-mpv', status: 'loading', error: undefined });
+  /** Set inside a router: the not-found notice links to Settings (it outlives this surface). */
+  const navigateRef = useRef<NavigateFunction | null>(null);
+  /** Embedded mpv already failed this session: this mount hands over to the built-in player at once. */
+  const [skip] = useState(mpvUnavailable);
+  /**
+   * mpv cannot run here: say so once (one notice, replaced rather than stacked), play in the
+   * built-in player, and remember it for the session so the next zap does not try again. Not
+   * found: point to the mpv path in Settings. Any other failure: offer to try MPV again.
+   */
+  const fallBack = useRef<(reason: string, missing: boolean) => void>(() => undefined);
+  fallBack.current = (reason: string, missing: boolean): void => {
+    markMpvUnavailable();
+    const navigate = navigateRef.current;
+    if (missing) {
+      toast({
+        id: MPV_FALLBACK_TOAST,
+        title: t('settings:playerNotFound', { player: 'MPV' }),
+        description: t('mpvUnavailable'),
+        variant: 'info',
+        ...(navigate && {
+          action: {
+            label: t('shell:settingsSection', { section: t('shell:settingsPlayers') }),
+            onClick: () => void navigate(PLAYER_SETTINGS_PATH),
+          },
+        }),
+      });
+    } else {
+      toast({
+        id: MPV_FALLBACK_TOAST,
+        title: t('mpvFailed'),
+        description: `${t('mpvUnavailable')}${reason ? ` (${reason})` : ''}`,
+        variant: 'error',
+        action: {
+          label: t('mpvTryAgain'),
+          onClick: () => {
+            clearMpvUnavailable();
+            if (usePlayerStore.getState().source) usePlayerStore.setState({ mode: 'embedded-mpv', status: 'loading', error: undefined });
+          },
         },
-      },
-    });
+      });
+    }
     useMediaStore.setState({ errorCode: undefined });
     usePlayerStore.setState({ mode: 'inline', status: 'loading', error: undefined });
   };
 
+  // Known not to start: switch to the built-in player before this surface ever paints.
+  useLayoutEffect(() => {
+    if (!skip) return;
+    useMediaStore.setState({ errorCode: undefined });
+    usePlayerStore.setState({ mode: 'inline', status: 'loading', error: undefined });
+  }, [skip]);
+
   // Attach once per mount (again after a crash, from Retry); detach on unmount.
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || skip) return;
     let disposed = false;
     let session = 0;
     /** False until `mpv.attach` resolved and its state was applied: earlier events describe a session not yet configured. */
@@ -173,6 +216,8 @@ export function MpvSurface({ className }: { className?: string }) {
     let unExtras: () => void = () => undefined;
     let lastSent: Bounds | null = null;
     let lastHoles = '[]';
+    /** The dim mpv draws under a dialog's backdrop, as last sent (a new session starts without). */
+    let lastDim = 'null';
     let raf = 0;
 
     const send = (): void => {
@@ -181,6 +226,15 @@ export function MpvSurface({ className }: { className?: string }) {
       // Menus, tooltips and dialogs over the video (and fullscreen chrome) are cut out of the
       // native window as holes instead of shrinking or hiding it.
       const { bounds: b, holes } = surfaceLayout(ref.current);
+      // A scrim cannot darken the native video, so mpv dims itself to match (overlays need a session).
+      if (ready) {
+        const dim = b ? measureScrim(ref.current) : null;
+        const dimKey = JSON.stringify(dim);
+        if (dimKey !== lastDim) {
+          lastDim = dimKey;
+          void rpc('mpv.command', { cmd: dimOverlayCommand(dim) }).catch(() => undefined);
+        }
+      }
       const holesKey = JSON.stringify(holes);
       if (boundsEqual(lastSent, b) && holesKey === lastHoles) return;
       lastSent = b;
@@ -370,6 +424,7 @@ export function MpvSurface({ className }: { className?: string }) {
           }
           if (mine !== session) return;
           lastSent = initial;
+          lastDim = 'null';
           applyState(st, true);
           ready = true;
           // Only now can property writes reach mpv (before attach they fail with "not attached").
@@ -398,7 +453,7 @@ export function MpvSurface({ className }: { className?: string }) {
             return;
           }
           // Unsupported platform or mpv missing: fall back to the built-in player, and offer the way back.
-          fallBack.current(reason);
+          fallBack.current(reason, engineMissing(err));
         });
     }
     attach(false);
@@ -458,7 +513,7 @@ export function MpvSurface({ className }: { className?: string }) {
       .catch((err: unknown) => {
         if (stale) return;
         if (engineMissing(err)) {
-          fallBack.current(err instanceof Error ? err.message : '');
+          fallBack.current(err instanceof Error ? err.message : '', true);
           return;
         }
         loadedKey.current = loadKey;
@@ -488,8 +543,10 @@ export function MpvSurface({ className }: { className?: string }) {
     return () => document.removeEventListener('fullscreenchange', on);
   }, []);
 
+  const inRouter = useInRouterContext();
   return (
     <>
+    {inRouter && <NavigateBridge to={navigateRef} />}
     <div ref={ref} data-mpv-surface="" className={cn('relative h-full w-full bg-black', className)}>
       {/* Only before the native window exists: once attached it paints over this element. */}
       {!attached && (
@@ -512,6 +569,18 @@ export function MpvSurface({ className }: { className?: string }) {
     {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
     </>
   );
+}
+
+/** Hands the router's navigate to the surface (which also renders outside a router, in tests). */
+function NavigateBridge({ to }: { to: RefObject<NavigateFunction | null> }) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    to.current = navigate;
+    return () => {
+      to.current = null;
+    };
+  }, [navigate, to]);
+  return null;
 }
 
 /**

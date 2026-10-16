@@ -87,6 +87,9 @@ export function VirtualList<T>({
     overscan,
     initialRect,
     getItemKey: getKey ? (i) => getKey(items[i]!, i) : undefined,
+    // As in VirtualGrid: a scroll event renders with the next frame, not synchronously inside the
+    // event, so a fast fling through the channel list is not a string of long tasks (L3-live-1).
+    useFlushSync: false,
   });
 
   useEffect(() => {

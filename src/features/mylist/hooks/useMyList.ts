@@ -10,8 +10,8 @@ import { keysOf } from '../lib/list';
 
 /**
  * The whole of My List in the user's order (the shared `watchlist.list {}`
- * query). Pages that must show fresh watched ticks pass `staleTime: 0`;
- * buttons keep the default and follow invalidations.
+ * query). Every write that changes it invalidates the key (see lib/cache.ts),
+ * so readers follow invalidations rather than refetching on each mount.
  */
 export function useMyList(opts?: RpcQueryOptions) {
   return useRpcQuery('watchlist.list', LIST_ARGS, opts);

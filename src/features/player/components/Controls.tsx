@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   History,
+  Lock,
   Maximize,
   Minimize,
   Pause,
@@ -260,6 +261,7 @@ export function BarReadout({
   /** Inside the borderless PiP bar: the readout area still moves the window. */
   dragRegion?: boolean;
 } = {}) {
+  const { t } = useTranslation('player');
   const osd = useMediaStore((s) => s.osd);
   const [shown, setShown] = useState<typeof osd>(undefined);
   useEffect(() => {
@@ -285,6 +287,12 @@ export function BarReadout({
       {!shown && fallback}
       {shown && (
         <span key={shown.key} className="motion-safe:animate-fade-in">
+          {shown.locked && (
+            <span data-testid="bar-readout-locked">
+              <Lock aria-hidden className="me-1.5 inline size-3.5 align-[-0.125em]" />
+              <span className="sr-only">{t('zapLocked')} </span>
+            </span>
+          )}
           <span className={cn(/^\d+$/.test(shown.primary) && 'text-accent-hover')}>{shown.primary}</span>
           {shown.secondary && <span className="ms-2 text-white/70">{shown.secondary}</span>}
         </span>
@@ -372,19 +380,6 @@ export function roomAbove(menu: HTMLElement): number | null {
   return Number.isFinite(room) && bottom > 0 ? Math.max(room, 0) : null;
 }
 
-/** The share of the player's height a docked menu may take; the native video keeps the rest. */
-export const DOCK_MENU_SHARE = 0.55;
-
-/**
- * Docked under embedded mpv the menu grows the dock upward and the video shrinks to make room,
- * so it may take only part of the player's height. Null when it cannot be measured.
- */
-export function roomInDock(menu: HTMLElement): number | null {
-  const host = menu.closest<HTMLElement>('[data-player-host]');
-  const height = host?.getBoundingClientRect().height ?? 0;
-  return height > 0 ? Math.floor(height * DOCK_MENU_SHARE) : null;
-}
-
 /** When an Escape last closed a player menu (see `playerMenuJustClosed`). */
 let menuEscapeAt = Number.NEGATIVE_INFINITY;
 
@@ -400,17 +395,11 @@ function OptionsMenu({
   view,
   setView,
   isVod,
-  fit,
   moved,
 }: {
   view: MenuView;
   setView(v: MenuView | null): void;
   isVod: boolean;
-  /**
-   * `above`: floating over the picture, growing upward, never taller than the room above its
-   * bottom edge. `dock`: in the embedded mpv dock, never more than part of the player's height.
-   */
-  fit: 'above' | 'dock';
   /** Controls the bar has no room for (a narrow player), as a row at the top of the root view. */
   moved?: ReactNode;
 }) {
@@ -430,7 +419,8 @@ function OptionsMenu({
   useLayoutEffect(() => {
     const menu = ref.current;
     if (!menu) return;
-    const measure = (): void => setRoom(fit === 'dock' ? roomInDock(menu) : roomAbove(menu));
+    // Floating over the picture and growing upward: never taller than the room above its bottom edge.
+    const measure = (): void => setRoom(roomAbove(menu));
     measure();
     window.addEventListener('resize', measure);
     document.addEventListener('fullscreenchange', measure);
@@ -438,7 +428,7 @@ function OptionsMenu({
       window.removeEventListener('resize', measure);
       document.removeEventListener('fullscreenchange', measure);
     };
-  }, [fit, view]);
+  }, [view]);
 
   useEffect(() => {
     // The first item that can take focus (Sync rows may all be disabled, Sources may still be
@@ -983,45 +973,34 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       data-player-controls=""
       data-narrow={narrow ? '' : undefined}
       className={cn(
-        'pointer-events-auto relative text-white',
+        'relative text-white',
         variant === 'overlay'
           ? compact
             ? 'player-scrim-bottom pt-8'
             : 'player-scrim-bottom px-2 pt-12 pb-2 sm:px-3 sm:pb-3'
           : 'player-glass-strong border-t px-3 py-1.5',
         variant === 'overlay' && 'motion-safe:transition-opacity motion-safe:duration-200',
-        variant === 'overlay' && !visible && 'pointer-events-none opacity-0',
+        // The scrim's padding is only shade: the pointer goes through it to what is under it (a
+        // stream error's Retry, the picture), and only the pane and its menus take it.
+        variant !== 'overlay' ? 'pointer-events-auto' : visible ? 'pointer-events-none *:pointer-events-auto' : 'pointer-events-none opacity-0',
       )}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      {menu && variant === 'overlay' && (
-        // Floating: just above the glass pane, inside the scrim. Compact: over the picture.
+      {menu && (
+        // Floating: just above the glass pane, inside the scrim. Compact, and the embedded mpv dock:
+        // just above the bar, over the picture. Over mpv the native window leaves an open menu
+        // (role="menu" or "dialog") out of its region (mpvBounds), so the strip it reserves for the
+        // bar keeps the bar's height and the video keeps its size.
         <div className={cn('absolute z-10', floating ? 'end-2 bottom-[calc(100%-2.5rem)] sm:end-3' : 'end-1.5 bottom-full mb-1')}>
-          <OptionsMenu view={menu} setView={setMenuView} isVod={isVod} fit="above" moved={moved} />
+          <OptionsMenu view={menu} setView={setMenuView} isVod={isVod} moved={moved} />
         </div>
       )}
 
-      {showHistory && variant === 'overlay' && (
+      {showHistory && (
         <div className={cn('absolute z-10', floating ? 'start-2 bottom-[calc(100%-2.5rem)] sm:start-3' : 'start-1.5 bottom-full mb-1')}>
           <ChannelHistory />
-        </div>
-      )}
-
-      {showHistory && variant === 'dock' && (
-        <div className="flex max-h-48 items-start justify-start overflow-y-auto py-1">
-          <ChannelHistory />
-        </div>
-      )}
-
-      {menu && variant === 'dock' && (
-        // A native surface sits above the DOM, so dock menus grow the dock upward instead of popping over
-        // the video. The bar stays below so the options button can always close it; the surface shrinks
-        // to fit because MpvSurface re-measures the reserved strip on resize. The menu keeps its own
-        // height (and scrolls inside itself) up to part of the player's height.
-        <div className="flex items-start justify-end py-1">
-          <OptionsMenu view={menu} setView={setMenuView} isVod={isVod} fit="dock" moved={moved} />
         </div>
       )}
 

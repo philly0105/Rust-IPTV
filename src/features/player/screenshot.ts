@@ -197,11 +197,14 @@ function reportFailure(err: unknown): void {
   toast({ title: t('screenshotFailed'), description: detail, variant: 'error' });
 }
 
-/** Tells the user why there is nothing to capture (the button's and the shortcut's answer). */
+/**
+ * Tells the user why there is nothing to capture (the button's and the shortcut's answer): a
+ * toast, repeated on the OSD only in picture-in-picture like every other outcome.
+ */
 export function explainBlock(block: ScreenshotBlock): void {
   if (block === 'idle') return;
   const reason = t(blockReasonKey(block));
-  showOsd(t('screenshot'), reason);
+  osdIfToastHidden(t('screenshot'), reason);
   toast({ title: reason, variant: 'info' });
 }
 

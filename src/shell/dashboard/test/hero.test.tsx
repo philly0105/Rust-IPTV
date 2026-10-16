@@ -18,7 +18,7 @@ vi.mock('@/api/transport', async (orig) => ({
 }));
 
 const { queryClient } = await import('@/api/query');
-const { HeroCarousel } = await import('../HeroCarousel');
+const { DIAL_TICK_MS, HERO_IDLE_ROUNDS, HeroCarousel, dialFill } = await import('../HeroCarousel');
 const { buildHeroSlides, wrapIndex, HERO_MAX_CONTINUE, HERO_MAX_SLIDES } = await import('../heroSlides');
 type HeroSlide = import('../heroSlides').HeroSlide;
 
@@ -176,27 +176,29 @@ describe('HeroCarousel', () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => (hidden ? 'hidden' : 'visible'));
     try {
       const { hero } = renderHero();
-      const dial = () => hero.querySelector<HTMLElement>('[data-hero-dial]')!;
-      expect(dial().style.animationPlayState).toBe('running');
+      const dial = () => hero.querySelector<HTMLElement>('[data-hero-dial]')!.style.transform;
+      tick(DWELL * 0.4);
+      expect(dial()).toBe('scaleX(0.4)');
 
       hidden = true;
       act(() => void document.dispatchEvent(new Event('visibilitychange')));
       expect(hero.dataset['rotating']).toBeUndefined();
-      expect(dial().style.animationPlayState).toBe('paused');
       tick(DWELL * 5);
+      expect(dial()).toBe('scaleX(0.4)');
       expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
 
       hidden = false;
       act(() => void document.dispatchEvent(new Event('visibilitychange')));
       act(() => report!([{ isIntersecting: false }]));
       expect(hero.dataset['rotating']).toBeUndefined();
-      expect(dial().style.animationPlayState).toBe('paused');
       tick(DWELL * 5);
+      expect(dial()).toBe('scaleX(0.4)');
       expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
 
       act(() => report!([{ isIntersecting: true }]));
       expect(hero.dataset['rotating']).toBe('true');
-      tick(DWELL);
+      // It finishes the dwell it had left.
+      tick(DWELL * 0.6);
       expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
     } finally {
       visibility.mockRestore();
@@ -212,11 +214,70 @@ describe('HeroCarousel', () => {
     tick(DWELL);
     expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
     for (const label of ['Title a', 'Title b', 'Title c']) expect(tickBar(label).className).not.toContain('transition');
-    // The fill itself still runs (a transform, on the compositor).
-    expect(tickBar('Title b').querySelector<HTMLElement>('[data-hero-dial]')!.className).toContain('motion-safe:animate-dial-fill');
+    // The fill itself restarts on the new tick.
+    expect(tickBar('Title b').querySelector<HTMLElement>('[data-hero-dial]')!.style.transform).toBe('scaleX(0)');
     fireEvent.click(screen.getByTestId('hero-next'));
     expect(selectedTab().getAttribute('aria-label')).toBe('Title c');
     expect(tickBar('Title c').className).toContain('motion-safe:transition-[width,background-color]');
+  });
+
+  it('moves the dial a few times a second from a timer, never with a CSS animation (L3-perf-desktop-1)', () => {
+    vi.useFakeTimers();
+    const { hero } = renderHero();
+    const dial = hero.querySelector<HTMLElement>('[data-hero-dial]')!;
+    // A running animation of any size made the browser draw a frame per display refresh.
+    expect(dial.className).not.toMatch(/animate-/);
+    expect(dial.style.animationName).toBe('');
+    expect(dial.style.transform).toBe('scaleX(0)');
+    tick(DIAL_TICK_MS - 1);
+    expect(dial.style.transform).toBe('scaleX(0)');
+    tick(1);
+    expect(dial.style.transform).toBe(`scaleX(${DIAL_TICK_MS / DWELL})`);
+    tick(DIAL_TICK_MS);
+    expect(dial.style.transform).toBe(`scaleX(${(2 * DIAL_TICK_MS) / DWELL})`);
+    expect(dialFill(DWELL, DWELL)).toBe(0);
+    expect(dialFill(0, DWELL)).toBe(1);
+    expect(dialFill(-5, DWELL)).toBe(1);
+  });
+
+  it('pauses while the window is unfocused (a covered desktop window stays visible)', () => {
+    vi.useFakeTimers();
+    const { hero } = renderHero();
+    act(() => void window.dispatchEvent(new Event('blur')));
+    expect(hero.dataset['rotating']).toBeUndefined();
+    tick(DWELL * 3);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+    act(() => void window.dispatchEvent(new Event('focus')));
+    expect(hero.dataset['rotating']).toBe('true');
+    tick(DWELL);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+  });
+
+  it('rests after its idle rounds without input, and the next input resumes it', () => {
+    vi.useFakeTimers();
+    const { hero } = renderHero();
+    const turns = HERO_IDLE_ROUNDS * THREE.length;
+    // One turn per tick: each turn's next timer is set when React commits it.
+    const turn = (n: number) => {
+      for (let i = 0; i < n; i++) tick(DWELL);
+    };
+    // Input part way through starts the count again.
+    turn(turns - 1);
+    fireEvent.keyDown(window, { key: 'Shift' });
+    turn(turns - 1);
+    expect(hero.dataset['rotating']).toBe('true');
+    turn(1);
+    // Nobody is watching: the rotation rests on the slide it turned to.
+    expect(hero.dataset['rotating']).toBeUndefined();
+    const resting = selectedTab().getAttribute('aria-label');
+    turn(5);
+    expect(selectedTab().getAttribute('aria-label')).toBe(resting);
+    // The rotation toggle still says the slideshow plays: only the user's own pause flips it.
+    expect(screen.getByTestId('hero-rotation').getAttribute('aria-label')).toBe('Pause slideshow');
+    fireEvent.pointerMove(window);
+    expect(hero.dataset['rotating']).toBe('true');
+    tick(DWELL);
+    expect(selectedTab().getAttribute('aria-label')).not.toBe(resting);
   });
 
   it('pauses while focus is inside, and the live region speaks only then', () => {
@@ -255,7 +316,8 @@ describe('HeroCarousel', () => {
     const { hero } = renderHero();
     expect(hero.dataset['rotating']).toBeUndefined();
     expect(screen.queryByTestId('hero-rotation')).toBeNull();
-    expect(hero.querySelector('[data-hero-dial]')!.className).not.toContain('animate-dial-fill');
+    // The active tick is a full bar, not a fill that never moves.
+    expect(hero.querySelector<HTMLElement>('[data-hero-dial]')!.style.transform).toBe('');
     tick(DWELL * 5);
     expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
     fireEvent.click(screen.getByTestId('hero-next'));

@@ -35,6 +35,11 @@ export interface ChannelListProps {
   onActiveChange?(channel: Channel | undefined): void;
   /** Parental Ask mode: channels that ask for the PIN (rows show a lock and keep programmes back). */
   locks?: ParentalLocks;
+  /**
+   * A live channel plays, so PageUp and PageDown are channel up and down (the playback shortcuts):
+   * the list leaves them alone. Shift+PageUp and Shift+PageDown still page the list.
+   */
+  zapKeys?: boolean;
 }
 
 interface ListPlace {
@@ -113,6 +118,9 @@ export function ChannelList(props: ChannelListProps) {
     initialRect: { width: 360, height: props.initialHeight ?? 800 },
     // First paint already shows the remembered rows: no flash of the top of the list.
     initialOffset: () => listMemory.get(resetKey)?.scrollTop ?? 0,
+    // A scroll re-renders in the next commit instead of a flushSync inside the scroll event, so a
+    // fling never blocks on a synchronous render of the rows per event (as VirtualGrid does).
+    useFlushSync: false,
   });
   // A new scale or density: drop the cached row sizes so every row takes the new height.
   const measuredHeight = useRef(rowHeight);
@@ -323,10 +331,11 @@ export function ChannelList(props: ChannelListProps) {
         moveTo(active - 1);
         break;
       case 'PageDown':
-        moveTo(active + page);
-        break;
       case 'PageUp':
-        moveTo(active - page);
+        // While a live channel plays these zap (the `?` overlay's channel up and down): let the key
+        // through to the playback shortcuts. Arrows keep moving the cursor, Shift pages the list.
+        if (props.zapKeys && !e.shiftKey) return;
+        moveTo(e.key === 'PageDown' ? active + page : active - page);
         break;
       case 'Home':
         moveTo(0);
@@ -388,6 +397,13 @@ export function ChannelList(props: ChannelListProps) {
         onScroll={onScroll}
         onFocus={(e) => {
           lastFocused.current = e.target as HTMLElement;
+        }}
+        onBlur={(e) => {
+          // Focus left the list on purpose (a click elsewhere, Tab): a zap that later scrolls the old
+          // row away must not pull focus back in, where PageUp/PageDown would stop zapping. A row
+          // removed by a re-render blurs inside React's commit, which dispatches no events.
+          const to = e.relatedTarget;
+          if (!(to instanceof Node && e.currentTarget.contains(to)) && (e.target as HTMLElement).isConnected) lastFocused.current = null;
         }}
         className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
           paged.refreshing ? 'opacity-60' : ''

@@ -113,6 +113,11 @@ export interface RpcQueryOptions {
   /** Overrides the command's {@link queryDefaultsFor} gcTime. */
   gcTime?: number;
   keepPrevious?: boolean;
+  /**
+   * Hashes the query key in place of TanStack's own. It must return the same hash as `hashKey` for
+   * the same key, so other readers of the command share the cache entry; useWatchedKeys caches it.
+   */
+  queryKeyHashFn?: (key: QueryKey) => string;
 }
 
 export function useRpcQuery<K extends RpcName>(
@@ -130,6 +135,7 @@ export function useRpcQuery<K extends RpcName>(
   if (opts?.staleTime !== undefined) options.staleTime = opts.staleTime;
   if (opts?.gcTime !== undefined) options.gcTime = opts.gcTime;
   if (opts?.keepPrevious) options.placeholderData = keepPreviousData;
+  if (opts?.queryKeyHashFn) options.queryKeyHashFn = opts.queryKeyHashFn;
   return useQuery<RpcResult<K>, RpcError>(options);
 }
 
@@ -233,6 +239,14 @@ export function invalidationPrefixes(
     if (p?.phase !== 'done') return [];
     // The core kept the catalog (the playlist did not change): only the source's import time moved.
     if (p.message === 'unchanged') return ['sources.'];
+  }
+  if (event.type === 'sources.changed') {
+    const reason = (event.payload as { reason?: unknown } | null | undefined)?.reason;
+    // A new source has no catalog yet, and a status change (a failed or cancelled import, a
+    // schedule backoff) leaves the catalog as it was: only the sources list moved, so the
+    // catalog and the caller's extra prefixes are skipped. 'catalog', 'config', 'removed' and
+    // an older core's '{}' keep the full set.
+    if (reason === 'added' || reason === 'status') return ['sources.'];
   }
   const defaults = event.type === 'settings.changed' && isSettingsPayload(event.payload) ? [] : (DEFAULT_EVENT_INVALIDATION[event.type] ?? []);
   return [...new Set([...defaults, ...(extra[event.type] ?? [])])];

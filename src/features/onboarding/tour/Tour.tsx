@@ -257,7 +257,7 @@ export function Tour({ onClose }: TourProps) {
           style={{ width: spot.width, height: spot.height, transform: translateTo(spot.left, spot.top) }}
         />
       ) : (
-        <div aria-hidden data-testid="tour-scrim" className="pointer-events-none fixed inset-0 bg-scrim" />
+        <div aria-hidden data-scrim="" data-testid="tour-scrim" className="pointer-events-none fixed inset-0 bg-scrim" />
       )}
       {/* Catches clicks on the page behind; they do nothing while the tour is open. */}
       <div aria-hidden className="fixed inset-0" onMouseDown={(e) => e.preventDefault()} />

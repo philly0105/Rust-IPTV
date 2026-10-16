@@ -44,6 +44,8 @@ const { bindParentalGuard } = await import('./parentalGuard');
 const { useMediaStore } = await import('./media');
 const { queryClient } = await import('@/api/query');
 const { registerGateHost, settleGate, useGateStore } = await import('@/features/parental/gate');
+const { applyStatus } = await import('@/features/parental/status');
+const { openChannelSource } = await import('@/features/live/lib/playback');
 const { usePlayerStore, playItem, zap } = store;
 
 const locked: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '666' };
@@ -221,8 +223,12 @@ describe('zapping past a locked channel (Ask mode)', () => {
 
     const pending = zap('down');
     await vi.waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
-    // The locked channel's readout never shows behind the prompt.
-    expect(useMediaStore.getState().osd).toBeUndefined();
+    // L3-live-10: Ask mode names the locked channel behind the prompt (number and name, marked
+    // locked so the readout draws the lock instead of its logo and guide). This line used to
+    // expect no readout at all, which was the reported bug.
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: '666', secondary: 'Ch 666', locked: true });
+    expect(store.isLockedZap(usePlayerStore.getState().source)).toBe(true);
+    expect(usePlayerStore.getState().source?.posterUrl).toBeUndefined();
     settleGate(useGateStore.getState().queue[0]!.id, false);
     const played = await pending;
 
@@ -305,5 +311,42 @@ describe('controls locking again while a locked item plays (parentalGuard)', () 
     await flush();
     expect(usePlayerStore.getState().source?.ref).toEqual(open);
     expect(useGateStore.getState().queue).toEqual([]);
+  });
+});
+
+describe('Play in MPV/VLC from the Live list, Ask mode (L3-player-core-x2)', () => {
+  it('a channel the menu unlocked opens in the external player without a second PIN prompt', async () => {
+    // The core: an unlock running answers parental.check with nothing locked (parental::check).
+    let unlocked = false;
+    const lockCheck = handlers['parental.check']!;
+    handlers['parental.check'] = (a) => (unlocked ? [] : lockCheck(a));
+    handlers['parental.status'] = () => status({ unlocked });
+    handlers['parental.unlock'] = () => {
+      unlocked = true;
+      return status({ unlocked: true });
+    };
+    handlers['player.openExternal'] = () => undefined;
+    const channel = { ref: locked, name: 'Late Night', categoryId: 'news', isRadio: false } as Channel;
+
+    // The menu's own unlock (LivePage: openChannelSource), answered as the unlock dialog does.
+    const resolving = openChannelSource(channel, { kind: 'xtream' }, 'Late Night');
+    await vi.waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
+    applyStatus((await rpcMock('parental.unlock', { pin: '1234' })) as ParentalStatus);
+    settleGate(useGateStore.getState().queue[0]!.id, true);
+    const s = await resolving;
+    expect(s).not.toBeNull();
+
+    // Then the store opens it, and its gate runs again: the core's check passes it unasked.
+    let prompts = 0;
+    const unsub = useGateStore.subscribe((g) => {
+      if (g.queue.length > 0) prompts++;
+    });
+    await usePlayerStore.getState().play({ ...s!, ref: s!.ref ?? channel.ref }, { mode: 'external', externalPlayer: 'vlc', queue: [] });
+    unsub();
+
+    expect(prompts).toBe(0);
+    expect(calls('parental.check')).toHaveLength(2);
+    expect(calls('player.openExternal')).toEqual([{ player: 'vlc', source: expect.objectContaining({ ref: locked, url: 'http://x/live/666.m3u8' }) }]);
+    expect(usePlayerStore.getState()).toMatchObject({ mode: 'external', status: 'playing' });
   });
 });

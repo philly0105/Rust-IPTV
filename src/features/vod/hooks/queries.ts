@@ -7,6 +7,7 @@
 import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
+import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
 import { onAppEvent } from '@/api/events';
 import { invalidate, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpcRaw } from '@/api/transport';
@@ -108,22 +109,25 @@ export function useSourcesList(): UseQueryResult<Source[], RpcError> {
   return useRpcQuery('sources.list', undefined);
 }
 
-/** True when two page-query keys differ in `hideWatched` at most (same command, page and filters). */
-export function sameButHideWatched(a: readonly unknown[], b: readonly unknown[]): boolean {
+/**
+ * True when two page-query keys ask for the same slot of the same grid: the same command, source,
+ * category, offset and page size. Sort, search, rating, years and Hide watched may differ.
+ */
+export function sameGridSlot(a: readonly unknown[], b: readonly unknown[]): boolean {
   if (a[0] !== b[0]) return false;
-  const strip = (k: unknown) => {
+  const slot = (k: unknown) => {
     if (typeof k !== 'object' || k === null) return k;
-    const { hideWatched: _drop, ...rest } = k as Record<string, unknown>;
-    return rest;
+    const { sourceId, categoryId, query } = k as { sourceId?: unknown; categoryId?: unknown; query?: { offset?: unknown; limit?: unknown } };
+    return { sourceId, categoryId, offset: query?.offset, limit: query?.limit };
   };
-  return JSON.stringify(strip(a[1])) === JSON.stringify(strip(b[1]));
+  return JSON.stringify(slot(a[1])) === JSON.stringify(slot(b[1]));
 }
 
 /**
  * One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected.
- * Flipping "Hide watched" keeps each page's previous titles on screen until the new page answers
- * (L2-vod-8), so the grid, its scroll offset and its keyboard cursor stay put while the titles
- * refill, instead of the whole grid dropping to skeletons and remounting.
+ * A new sort, search, rating, year range or Hide watched keeps each page's previous titles on
+ * screen until the new page answers (L2-vod-8, L3-vod-3), so the grid stays mounted and its cells
+ * refill, instead of the whole grid dropping to skeletons and every cell being built again.
  */
 export function useVodPage(
   input: GridQueryInput | undefined,
@@ -138,7 +142,7 @@ export function useVodPage(
       return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
     enabled: !!req,
-    placeholderData: (prev, prevQuery) => (prev && prevQuery && sameButHideWatched(prevQuery.queryKey, queryKey) ? prev : undefined),
+    placeholderData: (prev, prevQuery) => (prev && prevQuery && sameGridSlot(prevQuery.queryKey, queryKey) ? prev : undefined),
     ...PAGE_TIMING,
   });
 }
@@ -168,16 +172,19 @@ export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: b
   });
 }
 
-/** Recently added rail. Stalker VOD is not in SQLite, so it reads the portal's first page sorted by added. */
+/**
+ * Recently added rail. Stalker VOD is not in SQLite, so it reads the portal's first page sorted by added.
+ * The SQLite args come from {@link recentlyAddedArgs}, which the boot prefetch asks with too (L3-ui-data-x7).
+ */
 export function useRecentlyAdded(
   source: Source | undefined,
   kind: 'movie' | 'series',
-  limit = 24,
+  limit = RECENTLY_ADDED_LIMIT,
 ): UseQueryResult<(VodItem | SeriesItem)[], RpcError> {
   return useQuery<(VodItem | SeriesItem)[], RpcError>({
     queryKey: source?.kind === 'stalker'
       ? [kind === 'movie' ? 'stalker.movies' : 'stalker.series', { sourceId: source.id, query: { offset: 0, limit: 28, sort: 'added', dir: 'desc' } }]
-      : ['catalog.recentlyAdded', { sourceId: source?.id ?? '', contentType: kind, limit }],
+      : ['catalog.recentlyAdded', recentlyAddedArgs(source?.id ?? '', kind, limit)],
     queryFn: async ({ signal }) => {
       if (!source) return [];
       if (source.kind === 'stalker') {
@@ -187,7 +194,7 @@ export function useRecentlyAdded(
         }, { signal })) as Page<VodItem | SeriesItem>;
         return page.items.slice(0, limit);
       }
-      return (await rpcRaw('catalog.recentlyAdded', { sourceId: source.id, contentType: kind, limit }, { signal })) as (VodItem | SeriesItem)[];
+      return (await rpcRaw('catalog.recentlyAdded', recentlyAddedArgs(source.id, kind, limit), { signal })) as (VodItem | SeriesItem)[];
     },
     enabled: !!source,
     staleTime: 60_000,

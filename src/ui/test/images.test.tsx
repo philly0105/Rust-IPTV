@@ -28,8 +28,8 @@ import { useImageChain } from '@/ui/image';
 
 // Run 3 C3: artwork goes through the image cache, and a failed cache route falls back to the original once.
 
-const cache = (url: string, sourceId?: string) =>
-  `${WEB_IMAGE_ROUTE}?${new URLSearchParams(sourceId ? { url, sourceId } : { url }).toString()}`;
+const cache = (url: string, sourceId?: string, w?: number) =>
+  `${WEB_IMAGE_ROUTE}?${new URLSearchParams(sourceId ? { url, sourceId } : { url }).toString()}${w ? `&w=${w}` : ''}`;
 
 /** A stand-in for `Image` that records what preloadImage made. */
 function stubImage() {
@@ -199,8 +199,11 @@ describe('Poster', () => {
     now += 2000;
     fireEvent.load(el);
     clock.mockRestore();
-    expect(el.className).toContain('opacity-100');
-    expect(el.className).toContain('motion-safe:transition-opacity');
+    // L3-perf-ui-7: the reveal is written on the DOM and the classes key off it.
+    expect(el.dataset.posterState).toBe('loaded');
+    expect('instant' in el.dataset).toBe(false);
+    expect(el.className).toContain('data-[poster-state=loaded]:opacity-100');
+    expect(el.className).toContain('motion-safe:not-data-instant:transition-opacity');
     expect(el.className).not.toMatch(/blur|scale-|transition-(all|transform|\[)|(^|\s)(motion-safe:)?transition(\s|$)/);
   });
 
@@ -225,7 +228,8 @@ describe('ChannelLogo', () => {
   it('tries the cache route, then the original once, then shows letters', () => {
     const logo = 'http://logos.example/bbc-one.png';
     const { container, rerender } = render(<ChannelLogo src={logo} name="BBC One" sourceId="s2" />);
-    expect(container.querySelector('img')!.getAttribute('src')).toBe(cache(logo, 's2'));
+    // A 36 px logo asks the cache for the 64 px copy at 1x (L3-serve-ui-1).
+    expect(container.querySelector('img')!.getAttribute('src')).toBe(cache(logo, 's2', 64));
     fireEvent.error(container.querySelector('img')!);
     expect(container.querySelector('img')!.getAttribute('src')).toBe(logo);
     fireEvent.error(container.querySelector('img')!);
@@ -233,7 +237,7 @@ describe('ChannelLogo', () => {
     expect(container.textContent).toBe('BO');
     // A reused row with another channel starts again.
     rerender(<ChannelLogo src="http://logos.example/itv.png" name="ITV" sourceId="s2" />);
-    expect(container.querySelector('img')!.getAttribute('src')).toBe(cache('http://logos.example/itv.png', 's2'));
+    expect(container.querySelector('img')!.getAttribute('src')).toBe(cache('http://logos.example/itv.png', 's2', 64));
   });
 });
 
@@ -358,7 +362,7 @@ describe('failed pictures are remembered', () => {
     now.mockReturnValue(1_000_000 + IMAGE_FAILURE_TTL_MS);
     expect(imageFailedRecently(logo)).toBe(false);
     const { container } = render(<ChannelLogo src={logo} name="Dead Channel" sourceId="s2" />);
-    expect(container.querySelector('img')!.getAttribute('src')).toBe(cache(logo, 's2'));
+    expect(container.querySelector('img')!.getAttribute('src')).toBe(cache(logo, 's2', 64));
     cleanup();
 
     markImageFailed(logo);

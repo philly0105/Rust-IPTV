@@ -209,6 +209,9 @@ describe('CategoryGridPage', () => {
     await waitFor(() => expect(toggles).toHaveLength(3));
     expect((toggles[2] as { ref: { itemId: string } }).ref.itemId).toBe(movie(2).ref.itemId);
     grid.focus();
+    // A right click puts the cursor on the pressed title (L3-visual-1), so place it by keyboard.
+    fireEvent.keyDown(grid, { key: 'Home' });
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
     // The cursor's card shows its toggle (S acts on it).
     expect(screen.getByRole('group', { name: /^Movie 1 \(/ }).querySelector('[data-testid="mylist-grid-toggle"]')!.className).toContain('opacity-100');
     // An unsaved corner under the cursor is up on that one card, so it may blur.

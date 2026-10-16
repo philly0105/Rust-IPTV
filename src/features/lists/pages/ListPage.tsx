@@ -26,6 +26,7 @@ import {
   ChannelLogo,
   ContextMenu,
   EmptyState,
+  canZap,
   ErrorState,
   IconButton,
   PlayerStage,
@@ -76,6 +77,8 @@ export function ListPage() {
 
   // ---- playback -----------------------------------------------------------
   const playerSource = usePlayerStore((s) => s.source);
+  // PageUp/PageDown zap while a live channel plays in the app, from a list row too, as on Live (L3-live-ch-x2).
+  const zapKeys = usePlayerStore((s) => !!s.source && s.mode !== 'external' && canZap(s));
   const inList = useMemo(() => new Set<ItemKey>(paged.channels.map((c) => itemKey(c.ref))), [paged.channels]);
   const playingRef =
     playerSource?.ref && (playerSource.ref.contentType === 'live' || playerSource.ref.contentType === 'radio') && inList.has(itemKey(playerSource.ref))
@@ -105,6 +108,11 @@ export function ListPage() {
   // Only once the rows are this list's own: right after a switch they are still
   // the previous list's, and its playing channel may not be in this one.
   const rowsAreThisList = paged.rowsListId === listId;
+  // Anything playing fills the stage (a phone shows it at 16:9 only then).
+  const stageBusy = !!playerSource;
+  // Nothing to pick: this list's own rows say so once they are in; before that the lists
+  // query's count does, from the first frame when it is cached.
+  const listEmpty = rowsAreThisList ? paged.total === 0 : list?.itemCount === 0;
   useEffect(() => {
     if (!rowsAreThisList) return;
     const ctx = usePlayerStore.getState().zapContext;
@@ -273,11 +281,27 @@ export function ListPage() {
       title,
       ...(subtitle ? { subtitle } : {}),
       actions: list ? (
+        // On a phone the list's name needs the room (L3-app-pages-x1): Edit channels leaves the header
+        // there, since the channels bar right below has the same button, and Manage lists is a bare icon.
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" icon={<ListOrdered className="size-4" />} onClick={() => openEditListItems(list.id)}>
-            <span className="max-sm:sr-only">{t('editChannels')}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<ListOrdered className="size-4" />}
+            onClick={() => openEditListItems(list.id)}
+            title={t('editChannels')}
+            className="max-sm:hidden"
+          >
+            {t('editChannels')}
           </Button>
-          <Button variant="ghost" size="sm" icon={<Settings2 className="size-4" />} onClick={() => openManageLists(list.id)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Settings2 className="size-4" />}
+            onClick={() => openManageLists(list.id)}
+            title={t('manageLists')}
+            className="max-sm:w-8 max-sm:px-0"
+          >
             <span className="max-sm:sr-only">{t('manageLists')}</span>
           </Button>
         </div>
@@ -367,6 +391,7 @@ export function ListPage() {
         favoriteOverrides={favOverrides}
         onActiveChange={onActiveChange}
         locks={locks}
+        zapKeys={zapKeys}
       />
     );
   }
@@ -377,7 +402,7 @@ export function ListPage() {
       {sidebarVisible ? <aside className="flex w-60 shrink-0 flex-col border-e border-divider bg-surface">{sidebar}</aside> : null}
       {!wide && drawerOpen ? (
         <>
-          <div className="fixed inset-0 z-40 bg-scrim" aria-hidden onClick={closeDrawer} />
+          <div data-scrim="" className="fixed inset-0 z-40 bg-scrim" aria-hidden onClick={closeDrawer} />
           <aside
             ref={drawerRef}
             role="dialog"
@@ -439,22 +464,38 @@ export function ListPage() {
         ) : null}
       </section>
 
-      {/* stage: on top on a phone, as wide as the screen */}
-      <section aria-label={tl('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:flex-1">
-        <div className="relative aspect-video min-h-0 bg-black md:aspect-auto md:flex-1">
-          <PlayerStage className="h-full w-full">
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70">
-              <Tv className="size-8" aria-hidden />
-              <p className="text-sm">{tl('stageIdle')}</p>
-              <p className="text-xs text-white/50">{t('stageIdleHint')}</p>
+      {/* stage: on top on a phone, as wide as the screen. With nothing playing a phone gets a slim
+          prompt above the channels instead of a black 16:9 box, and an empty list (nothing to pick)
+          no stage at all; from 768 px the stage stays (L3-visual-5, as Live's L2-visual-13). */}
+      <section
+        aria-label={tl('stage')}
+        className={cn('order-first flex min-w-0 shrink-0 flex-col md:order-none md:flex-1', !stageBusy && listEmpty && 'max-md:hidden')}
+        data-testid="list-stage-section"
+      >
+        <div
+          data-testid="list-stage"
+          data-idle={stageBusy ? undefined : ''}
+          className={cn(
+            'relative min-h-0 bg-black md:aspect-auto md:flex-1',
+            stageBusy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2',
+          )}
+        >
+          <PlayerStage className={stageBusy ? 'h-full w-full' : 'h-full w-full max-md:bg-transparent'}>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70 max-md:flex-row max-md:justify-start max-md:gap-3 max-md:px-4 max-md:text-start max-md:text-fg-muted">
+              <Tv className="size-8 max-md:size-5 max-md:shrink-0" aria-hidden />
+              <div className="flex min-w-0 flex-col gap-2 max-md:gap-0">
+                <p className="text-sm max-md:truncate max-md:font-medium max-md:text-fg">{tl('stageIdle')}</p>
+                <p className="text-xs text-white/50 max-md:truncate max-md:text-fg-subtle">{t('stageIdleHint')}</p>
+              </div>
             </div>
           </PlayerStage>
         </div>
-        {/* With no channel to show the ribbon is only an empty state; on a phone
-            it would push the list's own empty state and dropped channels below the fold.
-            While the list loads it holds its place, so the channels don't jump down when
-            the first one arrives (L2-vod-5, CLS 0.12 at 390 px). */}
-        <div className={cn('contents', !ribbonChannel && !paged.isLoading && !paged.total && 'max-md:hidden')} data-testid="list-ribbon">
+        {/* On a phone the ribbon comes with a channel playing, as on Live; until then the channels start
+            near the top, and nothing shifts when the list arrives (L3-visual-4). While something plays
+            and the list loads it holds its place, so the channels don't jump down when the first one
+            arrives (L2-vod-5); with no channel of a list known to be empty it is only an empty state,
+            which would push the list's own empty state and dropped channels below the fold. */}
+        <div className={cn('contents', (!stageBusy || (!ribbonChannel && listEmpty)) && 'max-md:hidden')} data-testid="list-ribbon">
           <EpgRibbon
             channel={ribbonChannel}
             sourceKind={ribbonKind}

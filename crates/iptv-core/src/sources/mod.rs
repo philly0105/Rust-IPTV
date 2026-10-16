@@ -90,6 +90,32 @@ pub struct ImportProgress<'a> {
     /// Classified error code for `phase: "error"` (C10).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<RpcErrorCode>,
+    /// What a `saving` event is doing (see [`SaveStep`]); absent while rows
+    /// are written. A client that does not know it keeps showing "Saving".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<&'a str>,
+}
+
+/// The long steps of a catalog save around the row writes, sent as
+/// `import.progress {phase: "saving", step}` so the progress never sits
+/// silent on "Saving N of N" (L3-perf-core-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveStep {
+    /// Waiting for the write lock and deleting the previous catalog
+    /// (`done` 0, no total: the bar is indeterminate).
+    Replacing,
+    /// Every row is written; building the indexes, the search index and
+    /// the counts before the commit (`done` = `total` = rows written).
+    Indexing,
+}
+
+impl SaveStep {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Replacing => "replacing",
+            Self::Indexing => "indexing",
+        }
+    }
 }
 
 /// Emits `import.progress` (C6). Importers call it at least every 2000 items.
@@ -110,6 +136,29 @@ pub fn progress(
             total,
             message,
             code: None,
+            step: None,
+        },
+    );
+}
+
+/// Emits `import.progress {phase: "saving", step}` (see [`SaveStep`]):
+/// `Replacing` before the writer deletes the previous catalog, `Indexing`
+/// once every row is written and the writer finishes.
+pub fn progress_step(state: &AppState, source_id: &str, step: SaveStep, written: u64) {
+    let (done, total) = match step {
+        SaveStep::Replacing => (0, None),
+        SaveStep::Indexing => (written, Some(written)),
+    };
+    state.emit(
+        "import.progress",
+        ImportProgress {
+            source_id,
+            phase: "saving",
+            done,
+            total,
+            message: None,
+            code: None,
+            step: Some(step.as_str()),
         },
     );
 }
@@ -126,6 +175,7 @@ pub fn progress_error(state: &AppState, source_id: &str, message: &str, code: Rp
             total: None,
             message: Some(message),
             code: Some(code),
+            step: None,
         },
     );
 }
@@ -147,9 +197,54 @@ pub fn progress_cancelled(state: &AppState, source_id: &str, message: &str) {
     progress(state, source_id, "cancelled", 0, None, Some(message));
 }
 
-/// Emits `sources.changed {}`.
-pub fn emit_changed(state: &AppState) {
-    state.emit("sources.changed", serde_json::json!({}));
+/// Why `sources.changed` fired. Clients refetch only what the reason can
+/// have changed (L3-perf-core-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeReason {
+    /// A new source row; it has no catalog yet.
+    Added,
+    /// The source's catalog (or the user state tied to it) was rewritten.
+    Catalog,
+    /// The source's settings (name, URL, guide links, order) changed.
+    Config,
+    /// The source and everything tied to it are gone.
+    Removed,
+    /// Only the source's import status changed (last error, next refresh);
+    /// its catalog is as it was.
+    Status,
+}
+
+impl ChangeReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Catalog => "catalog",
+            Self::Config => "config",
+            Self::Removed => "removed",
+            Self::Status => "status",
+        }
+    }
+}
+
+/// `sources.changed` payload. `sourceId` is absent when the change spans
+/// every source (remove all, reorder, a backup restore).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourcesChanged<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<&'a str>,
+    pub reason: &'static str,
+}
+
+/// Emits `sources.changed {sourceId?, reason}`.
+pub fn emit_changed(state: &AppState, source_id: Option<&str>, reason: ChangeReason) {
+    state.emit(
+        "sources.changed",
+        SourcesChanged {
+            source_id,
+            reason: reason.as_str(),
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,8 +1123,10 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
         }
     }
     tracing::info!(source_id = %id, kind = args.kind.as_str(), "source added");
-    emit_changed(&state);
-    match run_import(state.clone(), &id).await {
+    emit_changed(&state, Some(&id), ChangeReason::Added);
+    // User-initiated: an unreachable host fails after the short connect
+    // timeout instead of the background 10 s.
+    match crate::http::interactive(run_import(state.clone(), &id)).await {
         Ok((source, _)) => Ok(source),
         Err(error) => Err(AddError {
             source_id: Some(id),
@@ -1151,7 +1248,7 @@ async fn run_import_locked(
                 "source imported"
             );
             if !summary.unchanged || restored {
-                emit_changed(&state);
+                emit_changed(&state, Some(id), ChangeReason::Catalog);
             }
             let source = get(&state, id).await?;
             spawn_guide_refresh(&state, &source);
@@ -1171,7 +1268,7 @@ async fn run_import_locked(
                 tracing::debug!(source_id = id, error = %error_text(&err), "error after cancel");
             }
             progress_cancelled(&state, id, msg);
-            emit_changed(&state);
+            emit_changed(&state, Some(id), ChangeReason::Status);
             Err(if run.user_cancelled() {
                 user_cancelled_error()
             } else {
@@ -1184,7 +1281,7 @@ async fn run_import_locked(
             tracing::warn!(source_id = id, error = %msg, code = code.as_str(), "source import failed; previous catalog kept");
             record(&state, id, Some((&msg, code))).await;
             progress_error(&state, id, &msg, code);
-            emit_changed(&state);
+            emit_changed(&state, Some(id), ChangeReason::Status);
             Err(err)
         }
     }
@@ -1481,7 +1578,7 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     if portal_changed {
         crate::stalker::forget_source(state, id).await;
     }
-    emit_changed(state);
+    emit_changed(state, Some(id), ChangeReason::Config);
     Ok(updated)
 }
 
@@ -1507,7 +1604,7 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
         locks.remove(id);
     }
     tracing::info!(source_id = id, "source removed");
-    emit_changed(state);
+    emit_changed(state, Some(id), ChangeReason::Removed);
     Ok(())
 }
 
@@ -1523,14 +1620,14 @@ pub async fn remove_all(state: &AppState) -> CoreResult<()> {
         }
     }
     tracing::info!(count = ids.len(), "all sources removed");
-    emit_changed(state);
+    emit_changed(state, None, ChangeReason::Removed);
     Ok(())
 }
 
 /// `sources.reorder`.
 pub async fn reorder(state: &AppState, ids: Vec<String>) -> CoreResult<()> {
     state.db_call(move |c| store::reorder(c, &ids)).await?;
-    emit_changed(state);
+    emit_changed(state, None, ChangeReason::Config);
     Ok(())
 }
 

@@ -28,6 +28,39 @@ export function focusableIn(root: HTMLElement): HTMLElement[] {
   });
 }
 
+let announcePending: HTMLElement | null = null;
+const announced = new WeakSet<Event>();
+
+/**
+ * For focus moved inside a layout-effect cleanup (a dialog or toast closing). Cleanups run while
+ * React commits, and React ignores DOM events during a commit: the element gains focus, but the
+ * React onFocus handlers above it never run (L3-live-2: Live lost track of the focused channel row,
+ * so F2 and Shift+Delete did nothing until an arrow key moved focus). Once the commit is over (a
+ * microtask later), React hears of the focus through a focusin event on the element, if focus is
+ * still there. Several calls in one commit announce only the last element. Native focusin
+ * listeners see the event too; it has no relatedTarget, so a handler that reads where focus came
+ * from checks {@link isAnnouncedFocus} first.
+ */
+export function announceFocusAfterCommit(el: HTMLElement): void {
+  const scheduled = announcePending !== null;
+  announcePending = el;
+  if (scheduled) return;
+  queueMicrotask(() => {
+    const target = announcePending;
+    announcePending = null;
+    if (target && target.isConnected && document.activeElement === target) {
+      const event = new FocusEvent('focusin', { bubbles: true, composed: true });
+      announced.add(event);
+      target.dispatchEvent(event);
+    }
+  });
+}
+
+/** True for the focusin sent by {@link announceFocusAfterCommit}: focus did not move, so it came from nowhere new. */
+export function isAnnouncedFocus(event: Event): boolean {
+  return announced.has(event);
+}
+
 /** True when the keyboard event comes from a text-entry element. */
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

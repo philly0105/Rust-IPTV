@@ -21,7 +21,8 @@ const { __resetInputModality, focusIfPlayerOwnsFocus, positionReadout, SEEK_STEP
 const { PlayerSurface } = await import('./PlayerSurface');
 const { Controls, ctlTitle } = await import('./Controls');
 const { SeekBar } = await import('./SeekBar');
-const { moveKeepingFocus } = await import('./PlayerDock');
+const { moveKeepingFocus, PlayerDock } = await import('./PlayerDock');
+const { toast, TOAST_AVOID_GAP, TOAST_AVOID_SELECTOR, ToastViewport, useToastStore } = await import('@/ui/Toast');
 
 const vod = { url: 'http://h/m.mp4', kind: 'direct' as const, title: 'Movie', isLive: false, isRadio: false };
 const live = { url: 'http://h/live.m3u8', kind: 'hls' as const, title: 'News', isLive: true, isRadio: false };
@@ -237,6 +238,18 @@ describe('DOM player overlay timing', () => {
 
   beforeEach(() => {
     act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 1, durationSeconds: 60 }));
+  });
+
+  it('the shade above the bar lets the pointer through to what is under it; only the bar takes it (L3-player-7)', () => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    const bar = document.querySelector('[data-player-controls]')!;
+    expect(screen.getByTestId('overlay-chrome').className).toContain('pointer-events-none');
+    expect(bar.className).toContain('pointer-events-none');
+    expect(bar.className).toContain('*:pointer-events-auto');
   });
 
   it('a mouse click that leaves focus on a control does not pin the chrome', async () => {
@@ -571,5 +584,48 @@ describe('focus across host moves', () => {
     expect(document.activeElement).toBe(retry);
     outside.remove();
     host.remove();
+  });
+});
+
+describe('toasts and the docked mini player (L3-player-ui-x1)', () => {
+  const box = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+  afterEach(() => {
+    act(() => useToastStore.setState({ toasts: [] }));
+    vi.restoreAllMocks();
+  });
+
+  /** Renders the dock and the toast stack, puts the mini frame in the stack's corner, then shows a toast. */
+  function showToastBesideDock(): HTMLElement | null {
+    render(
+      <>
+        <PlayerDock />
+        <ToastViewport />
+      </>,
+    );
+    const mini = document.querySelector<HTMLElement>('[role="region"]');
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this === mini) return box(700, 528, 308, 224);
+      if (this.tagName === 'SECTION') return box(628, 632, 380, 120);
+      return box(0, 0, 0, 0);
+    });
+    act(() => void toast({ title: 'Added to My List' }));
+    return document.querySelector<HTMLElement>('section[data-toast-viewport]');
+  }
+
+  it('a toast shown while the mini player is docked sits above it, clear of its controls', () => {
+    act(() => usePlayerStore.setState({ source: vod as never, mode: 'inline', status: 'playing', dock: 'mini' }));
+    const section = showToastBesideDock();
+    const mini = screen.getByRole('region', { name: 'Now playing' });
+    expect(mini.matches(TOAST_AVOID_SELECTOR)).toBe(true);
+    expect(section?.hasAttribute('data-clearing')).toBe(true);
+    expect(section?.style.getPropertyValue('--toast-clear')).toBe(`${window.innerHeight - 528 + TOAST_AVOID_GAP}px`);
+  });
+
+  it('with nothing docked the stack keeps its corner', () => {
+    const section = showToastBesideDock();
+    expect(screen.queryByRole('region', { name: 'Now playing' })).toBeNull();
+    expect(section?.hasAttribute('data-clearing')).toBe(false);
   });
 });

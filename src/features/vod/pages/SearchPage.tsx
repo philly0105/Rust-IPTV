@@ -16,15 +16,19 @@ import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } fr
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { itemLanguage } from '../lib/language';
 import {
   SEARCH_LIMIT,
   capSearchResult,
   groupSearchResults,
+  narrowsQuery,
   nextSearchLimit,
   normalizeQuery,
+  previewGroups,
   searchRequestLimit,
+  searchTerms,
   sourceFacets,
   splitStalkerResults,
   type SearchGroupKind,
@@ -41,6 +45,9 @@ import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, grid
  * (its query loses its observer, and `useRpcQuery` hands the signal to the transport).
  */
 const DEBOUNCE_MS = 100;
+
+/** The URL keeps the text as typed (spaces too); blank text removes `q`. */
+const keepTyped = (draft: string) => (draft.trim() ? draft : '');
 
 /** The shell header's search field, which this page feeds through `usePageHeader`. */
 const headerField = () => document.querySelector<HTMLInputElement>('[data-shell-search]');
@@ -135,25 +142,9 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const q = params.get('q') ?? '';
   const facet = scoped ? undefined : (params.get('source') ?? undefined);
   const typeParam = params.get('type');
-  const [draft, setDraft] = useState(q);
+  // The field's text, debounced into `q`; a write of its own never comes back over newer typing (L3-vod-1).
+  const [draft, setDraft] = useUrlSearchDraft({ delayMs: DEBOUNCE_MS, toParam: keepTyped });
   const query = normalizeQuery(q);
-
-  useEffect(() => setDraft(q), [q]);
-  useEffect(() => {
-    if (draft === q) return;
-    const h = setTimeout(() => {
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (draft.trim()) next.set('q', draft);
-          else next.delete('q');
-          return next;
-        },
-        { replace: true },
-      );
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(h);
-  }, [draft, q, setParams]);
 
   const sourcesQ = useSourcesList();
   const scopedSource = useSource(sourceId);
@@ -192,7 +183,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const capped = useMemo(() => capSearchResult(catalog.data, dataLimit), [catalog.data, dataLimit]);
   const loadingMore = catalog.isPlaceholderData && catalog.isFetching && cap.key === capKey && limit > settledLimit;
 
-  const groups = useMemo(
+  const answerGroups = useMemo(
     () =>
       groupSearchResults({
         result: capped.result,
@@ -203,6 +194,17 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       }),
     [capped.result, stalker.movies, stalker.series, allSources, searchSources, facet],
   );
+  // L3-vod-5: the query the results on screen answer (catalog.search keeps the last answer while a
+  // newer one loads). While the box holds a longer query than that, the results narrow to it at
+  // once, from the frame of the key, and the full answer replaces them when it arrives.
+  const [answered, setAnswered] = useState(query);
+  if (catalog.data && !catalog.isPlaceholderData && !catalog.isFetching && answered !== query) setAnswered(query);
+  const draftQuery = normalizeQuery(draft);
+  const previewTerms = useMemo(
+    () => (draftQuery && narrowsQuery(draftQuery, answered) ? searchTerms(draftQuery) : undefined),
+    [draftQuery, answered],
+  );
+  const groups = useMemo(() => (previewTerms ? previewGroups(answerGroups, previewTerms) : answerGroups), [answerGroups, previewTerms]);
   const facetCapped = useMemo(
     () => (facet ? capSearchResult(facetBase.data, SEARCH_LIMIT) : capped),
     [facet, facetBase.data, capped],
@@ -211,8 +213,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // source is searched alone just to count it. Where a type hit its cap those counts are lower
   // bounds ("N+"). The picked chip's own search is on screen already, so its count comes from it.
   const facetOwn = useMemo(
-    () => (facet && catalog.data && !catalog.isPlaceholderData ? new Map<string, SourceSearch>([[facet, { groups, more: capped.more }]]) : undefined),
-    [facet, catalog.data, catalog.isPlaceholderData, groups, capped.more],
+    () => (facet && catalog.data && !catalog.isPlaceholderData ? new Map<string, SourceSearch>([[facet, { groups: answerGroups, more: capped.more }]]) : undefined),
+    [facet, catalog.data, catalog.isPlaceholderData, answerGroups, capped.more],
   );
   const facets = useMemo(
     () =>

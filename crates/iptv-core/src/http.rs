@@ -37,8 +37,31 @@ use std::sync::Arc;
 use std::time::Duration;
 use url::{Host, Url};
 
-/// Connect timeout for every request.
+/// Connect timeout for every request outside [`interactive`].
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Connect timeout while the user waits on the answer ([`interactive`]:
+/// adding a source, testing a connection). An unreachable host fails after
+/// this, once, instead of after [`CONNECT_TIMEOUT`] (L3-app-2).
+pub const INTERACTIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+tokio::task_local! {
+    /// Set by [`interactive`].
+    static INTERACTIVE: ();
+}
+
+/// Runs `fut` as work the user is waiting on (adding a source, a connection
+/// test): the clients from [`guarded_client`] and its wrappers connect with
+/// [`INTERACTIVE_CONNECT_TIMEOUT`], and a connect timeout is final (not
+/// retried). Background refreshes keep [`CONNECT_TIMEOUT`] and their retries.
+/// Like every task-local, it does not reach tasks `fut` spawns.
+pub async fn interactive<F: Future>(fut: F) -> F::Output {
+    INTERACTIVE.scope((), fut).await
+}
+
+/// True inside [`interactive`].
+pub fn is_interactive() -> bool {
+    INTERACTIVE.try_with(|_| ()).is_ok()
+}
 /// Read (idle body) timeout for every request.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// Time allowed between sending a request and receiving the response head
@@ -202,6 +225,12 @@ pub fn transport_error(host: &str, err: reqwest::Error) -> CoreError {
         return CoreError::Invalid(blocked.0);
     }
     if err.is_timeout() {
+        // The user is waiting ([`interactive`]): a host that does not
+        // answer the connection within the short timeout is reported now,
+        // not after more tries.
+        if err.is_connect() && is_interactive() {
+            return CoreError::Network(format!("Could not reach {host}. {UNREACHABLE_HINT}"));
+        }
         return CoreError::Timeout(format!(
             "{host} did not respond in time. Check the address and that the server is online, then try again."
         ));
@@ -224,6 +253,8 @@ const REFUSED_HINT: &str = "The server refused the connection. Check the address
 const UNKNOWN_HOST_HINT: &str =
     "The host name was not found. Check the address for typos, then try again.";
 const CERTIFICATE_HINT: &str = "The server's security certificate is not valid. Check the address; if it is right, the provider has to fix its certificate.";
+/// A connect timeout while the user waits ([`interactive`]).
+const UNREACHABLE_HINT: &str = "The server did not answer. Check the address and port, and that the server is online, then try again.";
 
 /// True when a `Network` message from [`transport_error`] is a refused
 /// connection, an unknown host name or an invalid certificate: trying again
@@ -236,9 +267,14 @@ pub fn is_permanent_transport(message: &str) -> bool {
 /// The next step [`transport_error`] gave a connect failure a retry cannot
 /// fix, so callers that word their own message (Stalker) can keep it.
 pub fn permanent_transport_hint(message: &str) -> Option<&'static str> {
-    [REFUSED_HINT, UNKNOWN_HOST_HINT, CERTIFICATE_HINT]
-        .into_iter()
-        .find(|hint| message.contains(hint))
+    [
+        REFUSED_HINT,
+        UNKNOWN_HOST_HINT,
+        CERTIFICATE_HINT,
+        UNREACHABLE_HINT,
+    ]
+    .into_iter()
+    .find(|hint| message.contains(hint))
 }
 
 /// A connect failure a retry cannot fix.
@@ -781,6 +817,8 @@ fn guarded_redirect(guard: Arc<NetGuard>, trusted: Option<Authority>) -> reqwest
 pub struct ServerMode {
     pub guard: Arc<NetGuard>,
     clients: GuardedClients,
+    /// The same clients with [`INTERACTIVE_CONNECT_TIMEOUT`].
+    interactive: GuardedClients,
 }
 
 /// Extension key of [`ServerMode`].
@@ -793,22 +831,36 @@ impl ServerMode {
             return None;
         }
         let guard = Arc::new(NetGuard::new(allow_private));
-        let g = guard.clone();
-        let clients = GuardedClients::new(move |trusted| {
-            build(
-                builder(None)
-                    .redirect(guarded_redirect(g.clone(), trusted.cloned()))
-                    .dns_resolver(g.resolver(trusted)),
-            )
+        let guarded = |connect: Duration| {
+            let g = guard.clone();
+            GuardedClients::new(move |trusted| {
+                build(
+                    builder(None)
+                        .connect_timeout(connect)
+                        .redirect(guarded_redirect(g.clone(), trusted.cloned()))
+                        .dns_resolver(g.resolver(trusted)),
+                )
+            })
+        };
+        let clients = guarded(CONNECT_TIMEOUT);
+        let interactive = guarded(INTERACTIVE_CONNECT_TIMEOUT);
+        let mode = Arc::new(Self {
+            guard,
+            clients,
+            interactive,
         });
-        let mode = Arc::new(Self { guard, clients });
         state.set_ext(SERVER_MODE_EXT, mode.clone());
         Some(mode)
     }
 
-    /// The guarded client that trusts exactly `trusted` (or nothing).
+    /// The guarded client that trusts exactly `trusted` (or nothing); inside
+    /// [`interactive`] its short-connect twin.
     pub fn client(&self, trusted: Option<&Authority>) -> reqwest::Client {
-        self.clients.get(trusted)
+        if is_interactive() {
+            self.interactive.get(trusted)
+        } else {
+            self.clients.get(trusted)
+        }
     }
 }
 
@@ -832,8 +884,24 @@ pub fn is_server_mode(state: &AppState) -> bool {
 pub fn guarded_client(state: &AppState, trusted: Option<&Authority>) -> reqwest::Client {
     match server_mode(state) {
         Some(mode) => mode.client(trusted),
+        None if is_interactive() => interactive_client(state),
         None => state.http.clone(),
     }
+}
+
+/// Extension key of the desktop's short-connect client.
+const INTERACTIVE_CLIENT_EXT: &str = "http.interactive";
+
+/// `state.http` with [`INTERACTIVE_CONNECT_TIMEOUT`], built once.
+fn interactive_client(state: &AppState) -> reqwest::Client {
+    let client = state.ext_or_insert_with(INTERACTIVE_CLIENT_EXT, || {
+        Arc::new(build(
+            builder(None)
+                .connect_timeout(INTERACTIVE_CONNECT_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS)),
+        ))
+    });
+    reqwest::Client::clone(&client)
 }
 
 /// Client for fetching user-supplied URLs that trusts no source: the guarded

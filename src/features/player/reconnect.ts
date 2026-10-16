@@ -3,7 +3,8 @@
  *
  * Every playback failure of the built-in engines and embedded mpv lands here as a store
  * transition to `status: 'error'`; a stream whose position stops moving while it should be
- * playing counts as a failure too (a stall). Then, in order:
+ * playing counts as a failure too (a stall: STALL_MS, or LIVE_STALL_MS for a live stream the
+ * engine reports as buffering). Then, in order:
  *
  * 1. Errors that will not fix themselves (`errors.ts` classes auth, notFound, unsupported,
  *    connectionLimit, and server) switch a live channel to another copy at once
@@ -42,6 +43,7 @@ import { bindLiveFailover, failoverLive, failoverVod, isChannelRef, isUntriedSwi
 import { useMediaStore } from './media';
 import {
   errorMessage,
+  isPendingZap,
   knownSourceKind,
   MIN_RESUME_SECONDS,
   peekSettings,
@@ -60,6 +62,13 @@ export const RECONNECT_WINDOW_MS = 20_000;
 export const ATTEMPT_TIMEOUT_MS = 8_000;
 /** A playing stream whose position has not moved for this long has stalled. */
 export const STALL_MS = 12_000;
+/**
+ * A live stream whose engine says it is waiting for data (the element's `waiting`, mpv's
+ * `paused-for-cache`) has stalled once its position stood this long: live has no buffer left
+ * to come back to, and the frozen frame under a spinner is what the user watches meanwhile.
+ * VOD and catch-up keep STALL_MS (a slow server there often catches up).
+ */
+export const LIVE_STALL_MS = 5_000;
 /** Playback this long without a failure restores the full retry budget. */
 export const HEALTHY_MS = 30_000;
 /** Retries for a stream that never played (the full ladder is for streams that played and dropped). */
@@ -391,7 +400,8 @@ function tick(): void {
     lastMoveAt = now;
     return;
   }
-  if (now - lastMoveAt < STALL_MS || !(peekSettings()?.streamReconnect ?? true)) return;
+  const stallAfter = s.source.isLive && useMediaStore.getState().waiting ? LIVE_STALL_MS : STALL_MS;
+  if (now - lastMoveAt < stallAfter || !(peekSettings()?.streamReconnect ?? true)) return;
   lastMoveAt = now;
   const key = keyOf(s.source);
   if (!session || session.key !== key) session = newSession(key);
@@ -458,7 +468,8 @@ export async function tryAnotherSource(): Promise<boolean> {
 }
 
 function onPlayer(s: PlayerState, prev: PlayerState): void {
-  const src = s.source;
+  // A zap's placeholder (the last picture under the next channel's name) has no stream of its own to recover.
+  const src = isPendingZap(s.source) ? undefined : s.source;
   const key = src ? keyOf(src) : null;
   const prevKey = prev.source ? keyOf(prev.source) : null;
   if (session && session.key !== key) endSession();

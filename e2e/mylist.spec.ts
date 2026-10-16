@@ -84,7 +84,7 @@ test.describe('My List', () => {
     await expect(button).toHaveAttribute('aria-pressed', 'false');
     await button.click();
     await expect(button).toHaveAttribute('aria-pressed', 'true');
-    await expect(toastWith(page, `Added ${title} to My List`)).toBeVisible();
+    await expect(toastWith(page, `Added ${shown(title)} to My List`)).toBeVisible();
     await expect.poll(async () => titlesOf(await listed(request))).toEqual([title]);
 
     await page.goto('/dashboard');
@@ -137,7 +137,7 @@ test.describe('My List', () => {
 
     // Delete removes the focused row; Undo puts it back in its place.
     await page.keyboard.press('Delete');
-    await expect(toastWith(page, `Removed ${c.title} from My List`)).toBeVisible();
+    await expect(toastWith(page, `Removed ${shown(c.title)} from My List`)).toBeVisible();
     await expect(page.getByTestId('mylist-row')).toHaveCount(3);
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => titlesOf(await listed(request))).toEqual([series, b.title, c.title, a.title]);

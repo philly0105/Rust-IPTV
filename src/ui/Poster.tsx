@@ -1,9 +1,12 @@
 import { Clapperboard, Radio, Tv } from 'lucide-react';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { useCallback, type ReactNode } from 'react';
+
+import { sizedImageUrl } from '@/api/images';
 
 import { cn } from './cn';
 import { useImageChain } from './image';
-import { pauseWhenOffscreen } from './offscreen';
+import { gateImage, imageLoadedBefore, noteImageLoaded, resetImageGate } from './imageGate';
+import { pauseWhenOffscreen, releaseOffscreen } from './offscreen';
 
 export type PosterAspect = 'poster' | 'wide' | 'square';
 
@@ -32,6 +35,11 @@ export interface PosterProps {
   priority?: boolean;
   /** The source the artwork belongs to, so the image cache can apply that source's network rules. */
   sourceId?: string;
+  /**
+   * CSS px the picture is drawn at, for the cache's resized copy. Without it the frame is measured
+   * when the picture mounts; a `priority` picture (a detail hero) loads full size.
+   */
+  width?: number;
   /**
    * A second picture to try when `src` fails both through the cache and
    * directly (the TMDB poster behind a broken provider poster).
@@ -67,18 +75,28 @@ export function initialsOf(text: string): string {
 /** A load this soon after the picture mounted came from a cache: it shows at once, without the fade. */
 export const INSTANT_REVEAL_MS = 120;
 
-/** URLs that already loaded in this session; a remount (Back, a re-render of a rail) shows them at once. */
-const revealed = new Set<string>();
-const REVEALED_MAX = 2000;
-
-function rememberRevealed(url: string): void {
-  if (revealed.size >= REVEALED_MAX) revealed.clear();
-  revealed.add(url);
+/** Test hook: forget which pictures already loaded (imageGate.ts keeps the list). */
+export function forgetRevealedPosters(): void {
+  resetImageGate();
 }
 
-/** Test hook: forget which pictures already loaded. */
-export function forgetRevealedPosters(): void {
-  revealed.clear();
+/**
+ * Shows a loaded picture. Written on the DOM, not kept in React state, so an image arriving
+ * re-renders nothing (L3-perf-ui-7: a fast scroll of the movie grid made 486 Poster commits).
+ * CSS keys the fade off the attributes; the placeholder before the <img> is hidden and stops
+ * being watched for visibility.
+ */
+function reveal(img: HTMLImageElement, url: string, instant: boolean): void {
+  if (img.dataset['posterState'] === 'loaded') return;
+  noteImageLoaded(url);
+  // Set first, so the opacity change below never runs the transition.
+  if (instant) img.dataset['instant'] = '';
+  img.dataset['posterState'] = 'loaded';
+  const ph = img.previousElementSibling;
+  if (ph instanceof HTMLElement && ph.dataset['posterPlaceholder'] !== undefined) {
+    ph.hidden = true;
+    releaseOffscreen(ph);
+  }
 }
 
 /**
@@ -95,6 +113,8 @@ export function forgetRevealedPosters(): void {
  * session, or arrives within {@link INSTANT_REVEAL_MS} of mounting shows at
  * once, so cached artwork never waits on the fade (L2-perf-desktop-9). The
  * placeholder's shimmer stops while the frame is out of view (offscreen.ts).
+ * Cache-route pictures start through the fetch gate (imageGate.ts), which keeps
+ * connections free for RPCs and skips rows that only fly past in a fast scroll.
  */
 export function Poster({
   src,
@@ -110,26 +130,31 @@ export function Poster({
   sourceId,
   fallbackSrc,
   rounded = 'md',
+  width,
 }: PosterProps) {
-  const image = useImageChain([src, fallbackSrc], sourceId);
-  // Keyed by URL so a new attempt or a new picture never inherits the previous one's state.
-  const [loaded, setLoaded] = useState<{ url: string; instant: boolean } | null>(null);
+  const image = useImageChain([src, fallbackSrc], sourceId, width);
   const url = image.url;
-  const state: 'loading' | 'loaded' | 'error' = !url ? 'error' : loaded?.url === url ? 'loaded' : 'loading';
-  const instant = state === 'loaded' && loaded!.instant;
-  const mountedAt = useRef(0);
-  // One element per URL (key below), so this runs once per attempt.
+  // One element per URL (key below), so this runs once per attempt. React renders no `src`:
+  // the gate sets it when the picture may start, and holds it while the page scrolls.
   const imgRef = useCallback(
     (el: HTMLImageElement | null) => {
       if (!el || !url) return;
-      mountedAt.current = performance.now();
-      // Already decoded (memory cache): show it in this commit, before the first paint.
-      if (el.complete && el.naturalWidth > 0) {
-        rememberRevealed(url);
-        setLoaded({ url, instant: true });
-      }
+      // A card's width comes from its grid or rail, so the frame is measured once it is in the page
+      // (the <img> fills it) and the cache sends a copy that size (L3-serve-ui-1).
+      const sized = priority || width !== undefined ? url : sizedImageUrl(url, el.clientWidth);
+      const mountedAt = performance.now();
+      const before = imageLoadedBefore(sized);
+      const onLoad = () => reveal(el, sized, before || performance.now() - mountedAt < INSTANT_REVEAL_MS);
+      el.addEventListener('load', onLoad);
+      const cancel = gateImage(el, sized, priority || eager);
+      // Already decoded (memory cache): shown before the first paint.
+      if (el.complete && el.naturalWidth > 0) reveal(el, sized, true);
+      return () => {
+        el.removeEventListener('load', onLoad);
+        cancel();
+      };
     },
-    [url],
+    [url, priority, eager, width],
   );
 
   const fallbackText = label ?? alt;
@@ -148,35 +173,34 @@ export function Poster({
         className,
       )}
     >
-      {state !== 'loaded' && (
+      {url ? (
+        // Keyed with the <img>: each attempt starts with a shimmering placeholder, which reveal() hides.
+        <div
+          key={`placeholder:${url}`}
+          aria-hidden
+          data-poster-placeholder=""
+          className="skeleton-surface absolute inset-0 motion-safe:animate-shimmer"
+          ref={pauseWhenOffscreen}
+        />
+      ) : (
+        // A size container: the letters and glyph scale with the tile's shorter side, so a 36 px row
+        // thumbnail fits "WM" and its glyph; from about 70 px up they keep the full text-3xl / text-2xl.
         <div
           aria-hidden
-          className={cn(
-            'absolute inset-0 flex flex-col items-center justify-center gap-1',
-            state === 'loading' && 'skeleton-surface motion-safe:animate-shimmer',
-          )}
-          ref={state === 'loading' ? pauseWhenOffscreen : undefined}
-          style={
-            state === 'error'
-              ? {
-                  background: `linear-gradient(150deg, hsl(${hue} 45% 32%), hsl(${(hue + 40) % 360} 50% 18%))`,
-                }
-              : undefined
-          }
+          data-poster-fallback=""
+          className="absolute inset-0 flex flex-col items-center justify-center gap-1 [container-type:size]"
+          style={{ background: `linear-gradient(150deg, hsl(${hue} 45% 32%), hsl(${(hue + 40) % 360} 50% 18%))` }}
         >
-          {state === 'error' && (
-            <>
-              <span
-                className={cn(
-                  'font-display font-semibold tracking-wide text-white/90',
-                  aspect === 'poster' ? 'text-3xl' : 'text-2xl',
-                )}
-              >
-                {initialsOf(fallbackText)}
-              </span>
-              <Glyph size={16} className="text-white/60" />
-            </>
-          )}
+          <span
+            className={cn(
+              'font-display font-semibold tracking-wide text-white/90',
+              // text-3xl / text-2xl, with their line heights, capped by the tile.
+              aspect === 'poster' ? 'text-[length:min(1.875rem,40cqmin)] leading-[1.2]' : 'text-[length:min(1.5rem,40cqmin)] leading-[calc(4/3)]',
+            )}
+          >
+            {initialsOf(fallbackText)}
+          </span>
+          <Glyph size={16} className="size-[min(16px,30cqmin)] shrink-0 text-white/60" />
         </div>
       )}
       {url && (
@@ -184,25 +208,20 @@ export function Poster({
           // A new element per attempt: the browser never shows the failed attempt's broken-image box.
           key={url}
           ref={imgRef}
-          src={url}
           alt={alt}
           loading={priority || eager ? 'eager' : 'lazy'}
           fetchPriority={priority ? 'high' : undefined}
           decoding="async"
           draggable={false}
           referrerPolicy="no-referrer"
-          data-poster-state={state}
-          onLoad={() => {
-            const fast = revealed.has(url) || performance.now() - mountedAt.current < INSTANT_REVEAL_MS;
-            rememberRevealed(url);
-            setLoaded((prev) => (prev?.url === url ? prev : { url, instant: fast }));
-          }}
+          // Rendered once and never changed by React; reveal() writes 'loaded' on the element.
+          data-poster-state="loading"
           onError={image.onError}
           className={cn(
-            'absolute inset-0 h-full w-full',
+            'absolute inset-0 h-full w-full opacity-0 data-[poster-state=loaded]:opacity-100',
             fit === 'cover' ? 'object-cover' : 'object-contain p-[12%]',
-            !instant && 'motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-out',
-            state === 'loaded' ? 'opacity-100' : 'opacity-0',
+            // Only a slow network load fades; reveal() marks a fast one data-instant first.
+            'motion-safe:not-data-instant:transition-opacity motion-safe:not-data-instant:duration-150 motion-safe:not-data-instant:ease-out',
           )}
         />
       )}

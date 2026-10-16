@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { CHANNEL_PAGE_SIZE, channelPageArgs } from '@/api/bootPrefetch';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpcRaw, type RpcArgs } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type Page } from '@/api/types';
@@ -11,7 +12,8 @@ import { needsFallback } from '../lib/shortEpg';
 import { useShortEpgPreviews } from './useShortEpg';
 import { useStalkerPreviews } from './useStalkerPreviews';
 
-export const CHANNEL_PAGE_SIZE = 120;
+// The page args and size live with the boot prefetch (L3-ui-data-x7), so it asks for the same first page.
+export { CHANNEL_PAGE_SIZE };
 
 export interface PagedChannelsArgs {
   sourceId: string;
@@ -85,9 +87,13 @@ function channelPageOptions(args: ChannelsArgs) {
   };
 }
 
-/** `epg.nowNext` args for a page's refs, as {@link usePageExtras} asks them. */
+/**
+ * `epg.nowNext` args for a page's refs, as {@link usePageExtras} asks them. The rows show titles
+ * and times only (a play takes the title too), so the descriptions stay behind: about half the
+ * bytes (L3-serve-ui-5).
+ */
 function nowNextArgs(refs: ItemRef[], offsetMinutes: number): RpcArgs<'epg.nowNext'> {
-  return offsetMinutes ? { refs, offsetMinutes } : { refs };
+  return offsetMinutes ? { refs, offsetMinutes, withDescription: false } : { refs, withDescription: false };
 }
 
 /** How many pages to read at most while looking for an unloaded channel's row. */
@@ -127,12 +133,8 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   const { a, b } = pages.key === listKey ? pages : { a: 0, b: 0 };
 
   const query = useCallback(
-    (page: number): ChannelsArgs => ({
-      sourceId: args.sourceId,
-      categoryId: args.categoryId,
-      radio: args.radio || undefined,
-      query: { offset: page * size, limit: size, search: args.search || undefined },
-    }),
+    (page: number): ChannelsArgs =>
+      channelPageArgs({ sourceId: args.sourceId, categoryId: args.categoryId, radio: args.radio, search: args.search }, page, size),
     [args.sourceId, args.categoryId, args.radio, args.search, size],
   );
   // keepPrevious: a new search or group keeps the old rows up until its first page lands.

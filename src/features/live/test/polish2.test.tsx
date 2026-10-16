@@ -26,7 +26,7 @@ import { LivePage } from '../components/LivePage';
 import { cellTextPadPx } from '../guide/GuideRow';
 import { ManageCategoriesDialog } from '../components/ManageCategoriesDialog';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { addLocalDays, floorTo, MINUTE } from '../lib/epgTime';
+import { addLocalDays, cellTextMaxPx, floorTo, MINUTE } from '../lib/epgTime';
 import { resetStalkerPreviewSources } from '../lib/stalkerPreviewQueue';
 import { i18n, installDomStubs, makeChannel, program, settings } from './harness';
 
@@ -358,8 +358,9 @@ describe('channel logos in reused rows', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.textContent).toBe('AO');
     rerender(<ChannelLogo src="https://x/good.png" name="Beta" />);
-    // The next channel starts its own chain from the top: the cache route first.
-    expect(container.querySelector('img')?.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('https://x/good.png')}`);
+    // The next channel starts its own chain from the top: the cache route first, resized to the
+    // logo's 36 px (the 64 px bucket at 1x, L3-serve-ui-4).
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('https://x/good.png')}&w=64`);
   });
 
   it('logos load at low priority, so the guide RPCs are not queued behind them (XB2-10)', () => {
@@ -664,7 +665,10 @@ describe('guide grid', () => {
     const cells = await screen.findAllByRole('button', { name: /Breakfast Briefing/ });
     const cell = cells[0]!;
     const text = within(cell).getByTestId('cell-text');
-    expect(parseFloat(text.style.paddingInlineStart)).toBeGreaterThan(0);
+    // The title sticks at the visible edge (position: sticky, L3-perf-ui-4), narrowed to the
+    // part of the cell that is on screen so it ends in an ellipsis there.
+    expect(text.className).toContain('sticky');
+    expect(parseFloat(text.style.maxWidth)).toBeGreaterThan(0);
     // Kit Select: same accessible name, with the kit's chevron beside the native control.
     const source = screen.getByRole('combobox', { name: 'Source' });
     expect(source.parentElement!.querySelector('svg')).toBeTruthy();
@@ -764,7 +768,7 @@ describe('guide grid (round 2)', () => {
     expect(cellTextPadPx(500, 0, 60)).toBe(0);
   });
 
-  it('the grid pads the clipped cell from its inline-start scroll distance, in LTR and RTL, with no inherited variable', async () => {
+  it('the grid fits the clipped cell to its inline-start scroll distance, in LTR and RTL, with no inherited variable', async () => {
     const now = Date.now();
     rpcMock.handlers['epg.grid'] = (a) =>
       Object.fromEntries(
@@ -776,13 +780,15 @@ describe('guide grid (round 2)', () => {
     renderIn('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
     const cells = await screen.findAllByRole('button', { name: /Breakfast Briefing/ });
     const text = within(cells[0]!).getByTestId('cell-text');
-    // Not sticky any more: sticky text that fills its cell has no room to move.
-    expect(text.className).not.toContain('sticky');
-    // RTL scrollers report negative scrollLeft: the padding follows the distance from the inline start.
+    // Sticky again (L3-perf-ui-4): padding the text moved it in layout, a shift on every scroll
+    // frame. The text is capped instead, so the sticky text has room to move inside its cell.
+    expect(text.className).toContain('sticky');
+    // RTL scrollers report negative scrollLeft: the cap follows the distance from the inline start.
     Object.defineProperty(grid(), 'scrollLeft', { configurable: true, value: -420, writable: true });
     fireEvent.scroll(grid());
-    expect(text.style.paddingInlineStart).toBe(`${cellTextPadPx(420, Number(text.dataset.padLeft), Number(text.dataset.padWidth))}px`);
-    // Cells are padded one by one: the grid publishes no variable every cell would inherit (L2-guide-library-2).
+    expect(text.style.maxWidth).toBe(`${cellTextMaxPx(420, Number(text.dataset.padLeft), Number(text.dataset.padWidth))}px`);
+    expect(text.style.paddingInlineStart).toBe('');
+    // Cells are fitted one by one: the grid publishes no variable every cell would inherit (L2-guide-library-2).
     expect(grid().style.getPropertyValue('--grid-scroll')).toBe('');
   });
 

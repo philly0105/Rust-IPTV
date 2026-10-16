@@ -441,13 +441,23 @@ describe('hover holds', () => {
   });
 });
 
-describe('in a phone-width player', () => {
-  /** jsdom has no layout: the player (and its bar) as wide as a 390 px phone's screen. */
-  function narrowPlayer(): () => void {
-    const spy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.parentElement?.hasAttribute('data-player-host') || this.hasAttribute('data-player-controls') ? 390 : 0;
+describe('in a small player', () => {
+  /**
+   * jsdom has no layout: the player (and its bar) as wide as a 390 px phone's screen, and as tall
+   * as `height` (a phone's 16:9 dock by default).
+   */
+  function narrowPlayer(height = 219): () => void {
+    const player = (el: HTMLElement): boolean => !!el.parentElement?.hasAttribute('data-player-host');
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return player(this) || this.hasAttribute('data-player-controls') ? 390 : 0;
     });
-    return () => spy.mockRestore();
+    const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return player(this) ? height : 0;
+    });
+    return () => {
+      width.mockRestore();
+      tall.mockRestore();
+    };
   }
   const mount = (): void => {
     render(
@@ -458,6 +468,26 @@ describe('in a phone-width player', () => {
   };
   const bar = (): HTMLElement => document.querySelector<HTMLElement>('[data-player-controls]')!;
   const hidden = (): boolean => bar().className.includes('opacity-0');
+
+  // The error's own short layout: InlinePlayer.test (InlinePlayer is a stub here).
+  it('a stream error takes the title bar\'s place (L3-player-7)', async () => {
+    const restore = narrowPlayer();
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      act(() => {
+        zap.hideZapBanner();
+        usePlayerStore.setState({ status: 'error', error: 'HTTP 404' });
+      });
+      const title = () => screen.getByTestId('player-title').parentElement!.parentElement!.className;
+      expect(title()).toContain('opacity-0');
+      // The bar stays up over the error: Retry and the rest of it.
+      expect(hidden()).toBe(false);
+    } finally {
+      restore();
+    }
+  });
 
   it('shows a one-line chip: number, name and what airs now', async () => {
     const restore = narrowPlayer();
@@ -480,7 +510,7 @@ describe('in a phone-width player', () => {
     }
   });
 
-  it('keeps the bar down while the chip is up, unless the bar is reached for or playback pauses', async () => {
+  it('keeps the bar down after a zap while the chip is up, unless the bar is reached for or playback pauses', async () => {
     const restore = narrowPlayer();
     try {
       tune(news, { status: 'loading' });
@@ -492,10 +522,7 @@ describe('in a phone-width player', () => {
       act(() => usePlayerStore.setState({ status: 'playing' }));
       expect(hidden()).toBe(true);
       const chrome = screen.getByTestId('overlay-chrome');
-      // A move over the picture does not bring the bar over it ...
-      fireEvent.pointerMove(chrome.parentElement!);
-      expect(hidden()).toBe(true);
-      // ... reaching for the bar does, and so does a pause.
+      // Reaching for the bar brings it, and so does a pause.
       fireEvent.pointerEnter(chrome);
       expect(hidden()).toBe(false);
       fireEvent.pointerLeave(chrome);
@@ -507,6 +534,49 @@ describe('in a phone-width player', () => {
       await advance(ZAP_BANNER_MS);
       expect(screen.queryByTestId('zap-banner')).toBeNull();
       fireEvent.pointerMove(chrome.parentElement!);
+      expect(hidden()).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a move over the picture brings the bar back at once and the chip steps aside (L3-player-3)', async () => {
+    const restore = narrowPlayer();
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      expect(screen.getByTestId('zap-banner').getAttribute('data-variant')).toBe('chip');
+      expect(hidden()).toBe(true);
+      // Resting on the chip keeps it (and the bar stays down) ...
+      fireEvent.pointerMove(screen.getByTestId('zap-banner'));
+      expect(screen.getByTestId('zap-banner')).toBeTruthy();
+      expect(hidden()).toBe(true);
+      // ... a move over the picture brings the bar, and the title above it names the channel.
+      fireEvent.pointerMove(screen.getByTestId('overlay-chrome').parentElement!);
+      expect(hidden()).toBe(false);
+      expect(screen.queryByTestId('zap-banner')).toBeNull();
+      expect(visible()).toBe(false);
+      expect(screen.getByTestId('player-title').parentElement!.parentElement!.className).not.toContain('opacity-0');
+      // The next zap brings the chip back, alone again.
+      await advance(3000);
+      tune(sport);
+      await advance(0);
+      expect(screen.getByTestId('zap-banner').getAttribute('data-variant')).toBe('chip');
+      expect(hidden()).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a narrow but tall player (a desktop dock) keeps the full banner and its bar', async () => {
+    const restore = narrowPlayer(567);
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      expect(screen.getByTestId('zap-banner').getAttribute('data-variant')).toBeNull();
+      expect(screen.getByTestId('zap-next')).toBeTruthy();
       expect(hidden()).toBe(false);
     } finally {
       restore();

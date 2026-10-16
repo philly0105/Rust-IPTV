@@ -114,8 +114,10 @@ pub fn register(r: &mut RpcRouter) {
         crate::account::remember_xtream(&s, &a.source_id, info.clone()).await;
         Ok::<XtreamAccountInfo, RpcError>(info)
     });
+    // User-initiated: an unreachable host fails after the short connect timeout.
     r.add("xtream.test", |s, a: TestArgs| async move {
-        Ok::<ConnectionTestResult, RpcError>(service::test(&s, &a.config).await?)
+        let result = crate::http::interactive(service::test(&s, &a.config)).await;
+        Ok::<ConnectionTestResult, RpcError>(result?)
     });
 }
 
@@ -182,7 +184,13 @@ async fn sync(state: Arc<AppState>, a: SyncArgs) -> Result<ImportSummary, RpcErr
             }
             (Err(_), None) => {}
         }
-        sources::emit_changed(&state);
+        // A failed sync kept the previous rows: only the status moved.
+        let reason = if result.is_ok() {
+            sources::ChangeReason::Catalog
+        } else {
+            sources::ChangeReason::Status
+        };
+        sources::emit_changed(&state, Some(&id), reason);
         result
     })
     .await;

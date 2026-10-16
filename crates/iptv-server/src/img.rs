@@ -1,5 +1,12 @@
-//! `GET /api/img?url=<absolute http(s) url>&sourceId=<id?>`: posters, logos
-//! and backdrops through the core image cache (Run 3 contract C2).
+//! `GET /api/img?url=<absolute http(s) url>&sourceId=<id?>&w=<px?>`: posters,
+//! logos and backdrops through the core image cache (Run 3 contract C2).
+//!
+//! `w` is an optional width hint in device pixels (the element's CSS width
+//! times `devicePixelRatio`). It is rounded up to a bucket (64, 96, 128, 192,
+//! 256, 384, 512, 768 or 1024) and the reply is a JPEG or PNG copy at most
+//! that wide, cached on its own; SVG, GIF, WebP, animated PNG and images
+//! already narrow enough come back as stored. A missing, zero, non-numeric
+//! or over-1024 `w` serves the original (see `iptv_core::imagecache::resize`).
 //!
 //! Server mode mounts it at `/api/img`; the desktop loopback proxy mounts the
 //! same handler at `/<token>/api/img`. The first request for a URL fetches it
@@ -47,6 +54,7 @@ pub const X_IMAGE_CACHE: HeaderName = HeaderName::from_static("x-image-cache");
 struct ImgQuery {
     url: Option<String>,
     source_id: Option<String>,
+    width: Option<String>,
 }
 
 fn parse_query(query: Option<&str>) -> ImgQuery {
@@ -55,6 +63,7 @@ fn parse_query(query: Option<&str>) -> ImgQuery {
         let slot = match &*k {
             "url" => &mut q.url,
             "sourceId" => &mut q.source_id,
+            "w" => &mut q.width,
             _ => continue,
         };
         if slot.is_none() {
@@ -68,6 +77,16 @@ fn parse_query(query: Option<&str>) -> ImgQuery {
     q
 }
 
+impl ImgQuery {
+    /// The width hint, when it is a positive whole number.
+    fn width(&self) -> Option<u32> {
+        self.width
+            .as_deref()
+            .and_then(|w| w.trim().parse::<u32>().ok())
+            .filter(|w| *w > 0)
+    }
+}
+
 /// Route handler (server `/api/img`, desktop `/<token>/api/img`).
 pub async fn handler(State(s): State<Server>, req: Request) -> Response {
     let q = parse_query(req.uri().query());
@@ -76,7 +95,7 @@ pub async fn handler(State(s): State<Server>, req: Request) -> Response {
     let file_req = FileRequest::from(&req);
     drop(req);
     let mut res = match q.url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        Some(url) => serve(&s, url, q.source_id.as_deref(), &file_req).await,
+        Some(url) => serve(&s, url, q.source_id.as_deref(), q.width(), &file_req).await,
         None => error(
             StatusCode::BAD_REQUEST,
             RpcError::invalid("missing url query parameter"),
@@ -86,10 +105,16 @@ pub async fn handler(State(s): State<Server>, req: Request) -> Response {
     res
 }
 
-async fn serve(s: &Server, url: &str, source_id: Option<&str>, req: &FileRequest) -> Response {
+async fn serve(
+    s: &Server,
+    url: &str,
+    source_id: Option<&str>,
+    width: Option<u32>,
+    req: &FileRequest,
+) -> Response {
     let mut retried = false;
     loop {
-        let image = match imagecache::fetch(&s.app, url, source_id).await {
+        let image = match imagecache::fetch_sized(&s.app, url, source_id, width).await {
             Ok(image) => image,
             Err(err) => return image_error(url, err),
         };
@@ -203,6 +228,27 @@ mod tests {
         assert_eq!(q.source_id.as_deref(), Some("s1"));
         assert_eq!(parse_query(None), ImgQuery::default());
         assert_eq!(parse_query(Some("sourceId=")).source_id, None);
+    }
+
+    #[test]
+    fn the_width_hint_is_a_positive_whole_number() {
+        let w = |query: &str| parse_query(Some(query)).width();
+        assert_eq!(w("url=x&w=360"), Some(360));
+        assert_eq!(
+            w("url=x&w=%20180%20&w=999"),
+            Some(180),
+            "first wins, trimmed"
+        );
+        for bad in [
+            "url=x",
+            "url=x&w=",
+            "url=x&w=0",
+            "url=x&w=-5",
+            "url=x&w=1.5",
+            "url=x&w=big",
+        ] {
+            assert_eq!(w(bad), None, "{bad}");
+        }
     }
 
     #[test]

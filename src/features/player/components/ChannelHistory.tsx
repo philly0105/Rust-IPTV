@@ -22,7 +22,8 @@ function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string>
         const settings = await getSettings();
         const offset = settings?.epgOffsetMinutes;
         const refs = entries.map((e) => e.ref);
-        const res = await rpc('epg.nowNext', offset ? { refs, offsetMinutes: offset } : { refs });
+        // Titles only: no descriptions.
+        const res = await rpc('epg.nowNext', offset ? { refs, offsetMinutes: offset, withDescription: false } : { refs, withDescription: false });
         if (stale) return;
         const out: Record<string, string> = {};
         for (const e of entries) {

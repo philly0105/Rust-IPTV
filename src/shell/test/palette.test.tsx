@@ -101,6 +101,53 @@ describe('palette ranking (L1-visual-12)', () => {
   });
 });
 
+describe('settings words (L3-app-8)', () => {
+  /** The cmdk items left after typing, in order. */
+  const shown = (palette: HTMLElement) => Array.from(palette.querySelectorAll('[cmdk-item]'), (el) => el.textContent ?? '');
+
+  it.each([
+    ['language', 'Settings: General'],
+    ['arabic', 'Settings: General'],
+    ['theme', 'Settings: Appearance'],
+    ['dark', 'Settings: Appearance'],
+    ['pin', 'Settings: Parental controls'],
+    ['xmltv', 'Settings: TV guide'],
+    ['hotkeys', 'Settings: Shortcuts'],
+  ])("'%s' finds %s", async (query, title) => {
+    const { palette } = await openPaletteWith(query);
+    await waitFor(() => expect(shown(palette).some((s) => s.includes(title))).toBe(true));
+  });
+
+  it('words a section does not hold still find nothing there', async () => {
+    const { palette } = await openPaletteWith('arabic');
+    await waitFor(() => expect(shown(palette).some((s) => s.includes('Settings: General'))).toBe(true));
+    expect(shown(palette).some((s) => s.includes('Settings: Appearance'))).toBe(false);
+  });
+
+  it('in Arabic, both the Arabic and the English words find the section', async () => {
+    const { default: i18n, applyLanguage } = await import('@/i18n');
+    // The shell keeps the UI in the saved language, so save Arabic too.
+    rpcMock.handlers['settings.get'] = () => settings({ language: 'ar' });
+    await applyLanguage('ar');
+    try {
+      const general = i18n.t('shell:settingsSection', { section: i18n.t('shell:settingsGeneral') });
+      const appearance = i18n.t('shell:settingsSection', { section: i18n.t('shell:settingsAppearance') });
+      expect(general).not.toBe('Settings: General');
+      renderRoutes(routes, '/favorites');
+      await screen.findByText('favorites page');
+      act(() => useShellStore.getState().setPaletteOpen(true));
+      const palette = await screen.findByTestId('command-palette');
+      const input = palette.querySelector('input')!;
+      fireEvent.change(input, { target: { value: 'اللغة' } });
+      await waitFor(() => expect(shown(palette).some((s) => s.includes(general))).toBe(true));
+      fireEvent.change(input, { target: { value: 'theme' } });
+      await waitFor(() => expect(shown(palette).some((s) => s.includes(appearance))).toBe(true));
+    } finally {
+      await applyLanguage('en');
+    }
+  });
+});
+
 describe('palette favourites and recent (L1-visual-12)', () => {
   it("'bbc' leads with the BBC News favourite, ahead of any command, and Enter plays it", async () => {
     const { palette, input } = await openPaletteWith('bbc');

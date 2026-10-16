@@ -95,7 +95,7 @@ Chrome follows the broadcast multiviewer pattern:
 | Empty | Loading | A skeleton. |
 | Empty | Load failed | `ErrorState` with retry. |
 | Empty | None | `EmptyState` linking to `/sources`. |
-| Empty | Present | An intro with a layout choice, "Pick channels", and up to six quick picks (`QUICK_PICKS`) from recent and favorite live channels. While Recent and Favorites load, a one-row skeleton holds their place. |
+| Empty | Present | An intro with a layout choice, "Pick channels", and up to six quick picks (`QUICK_PICKS`) from recent and favorite live channels. Channels whose names match after NFKC, trimming, collapsed spaces and lower case (`pickName`) show once, as the first found, recent before favorites. While Recent and Favorites load, a one-row skeleton holds their place. |
 | Has tiles | | The toolbar (layouts, add, mute, volume, full screen, clear), banners and the wall. |
 
 Behaviour:

@@ -66,7 +66,7 @@ test.describe.serial('phone layout at 390x844', () => {
   test('in Arabic the palette and theme buttons stay on screen beside a page action', async ({ page }) => {
     await rpc<Settings>(page.request, 'settings.update', { patch: { language: 'ar' } });
     await page.setViewportSize(PHONE);
-    // Each page puts a labelled action in the header (Open queue, Clear history, Open My videos).
+    // Open queue and Open My videos stay in the header (icon only on a phone); Recent moves Clear history to a bar above the list there.
     for (const path of ['/my-videos', '/recent', '/downloads']) {
       await page.goto(path);
       await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');

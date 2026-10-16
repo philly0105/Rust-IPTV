@@ -269,7 +269,7 @@ describe('C5 cheaper blur', () => {
 
   it('Poster reveals with opacity only (source)', () => {
     const poster = file('src/ui/Poster.tsx').code;
-    expect(poster).toContain('motion-safe:transition-opacity');
+    expect(poster).toContain('motion-safe:not-data-instant:transition-opacity');
     expect(poster).not.toMatch(/(?<![\w-])(?:blur|scale-|transition-(?!opacity)|transition(?=['"\s]))|transform/);
   });
 
@@ -282,12 +282,15 @@ describe('C5 cheaper blur', () => {
       const img = container.querySelector('img')!;
       now += 2000;
       fireEvent.load(img);
+      // L3-perf-ui-7: the reveal is written on the DOM (no React commit) and CSS keys off it.
       const classes = img.className.split(/\s+/);
-      expect(classes).toContain('opacity-100');
+      expect(img.dataset['posterState']).toBe('loaded');
+      expect('instant' in img.dataset).toBe(false);
+      expect(classes).toContain('data-[poster-state=loaded]:opacity-100');
       expect(classes.filter((c) => /transition|blur|scale|transform|duration|ease/.test(c))).toEqual([
-        'motion-safe:transition-opacity',
-        'motion-safe:duration-150',
-        'motion-safe:ease-out',
+        'motion-safe:not-data-instant:transition-opacity',
+        'motion-safe:not-data-instant:duration-150',
+        'motion-safe:not-data-instant:ease-out',
       ]);
     } finally {
       clock.mockRestore();

@@ -9,6 +9,7 @@ import { RpcError } from '@/api/transport';
 import { Button } from '@/ui';
 import { importErrorCode, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
+import { STILL_TRYING_S } from './ImportProgressView';
 
 /** The core's text for a sign-in whose account has run out ("Signed in, but the account has expired."). */
 const EXPIRED = /\bexpired\b/i;
@@ -25,12 +26,15 @@ export function ConnectionTest({
   disabled,
   inputs,
   kind,
+  host,
 }: {
   run: () => Promise<ConnectionTestResult> | null;
   disabled?: boolean;
   inputs?: string;
   /** The tested source's kind, for sign-in advice that names its login. */
   kind?: SourceKind;
+  /** Server the test contacts, for "Still trying to reach <host>" on a slow answer. */
+  host?: string;
 }) {
   const { t } = useTranslation('sources');
   const [state, setState] = useState<TestState>({ status: 'idle' });
@@ -41,6 +45,23 @@ export function ConnectionTest({
     generation.current += 1;
     setState({ status: 'idle' });
   }, [inputs]);
+
+  // A test with no answer after a moment says it is still trying and offers to stop waiting (L3-import-ui-4).
+  const [slow, setSlow] = useState(false);
+  const running = state.status === 'running';
+  useEffect(() => {
+    setSlow(false);
+    if (!running) return;
+    const id = setTimeout(() => setSlow(true), STILL_TRYING_S * 1000);
+    return () => clearTimeout(id);
+  }, [running]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Drops the pending answer (the call itself cannot be recalled) and puts focus back on the test button.
+  const abandon = () => {
+    generation.current += 1;
+    setState({ status: 'idle' });
+    rootRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+  };
 
   const onClick = async () => {
     const pending = run();
@@ -95,7 +116,7 @@ export function ConnectionTest({
   const tone = verdict === 'ok' ? 'text-success' : verdict === 'warn' ? 'text-warning' : 'text-danger';
 
   return (
-    <div className="flex flex-wrap items-start gap-3" data-testid="connection-test" data-status={state.status} data-verdict={verdict ?? undefined}>
+    <div ref={rootRef} className="flex flex-wrap items-start gap-3" data-testid="connection-test" data-status={state.status} data-verdict={verdict ?? undefined}>
       <Button
         size="sm"
         variant="secondary"
@@ -107,6 +128,14 @@ export function ConnectionTest({
         {state.status === 'running' ? t('testing') : t('testConnection')}
       </Button>
       <div aria-live="polite" className="flex min-w-0 flex-1 flex-col gap-0.5 text-sm">
+        {running && slow ? (
+          <p className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2" data-testid="connection-test-still-trying">
+            <span className="min-w-0 break-words text-fg-muted">{host ? t('phaseStillTrying', { host }) : t('testing')}</span>
+            <Button size="sm" variant="ghost" onClick={abandon} data-testid="connection-test-cancel">
+              {t('cancel')}
+            </Button>
+          </p>
+        ) : null}
         {message ? (
           <>
             <p className="flex min-w-0 items-center gap-1.5">

@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "正在录制 {{count}} 个",
   "scheduledSummaryNow_other": "正在录制 {{count}} 个",
   "scheduledEmptyTitle": "没有预约",
-  "scheduledEmptyBody": "打开电视指南，在节目上选择提醒我或录制。",
+  "scheduledEmptyBody": "打开电视指南，在节目上选择提醒我、录制或录制系列。",
   "scheduledOpenGuide": "打开电视指南",
   "scheduledNow": "正在录制",
   "scheduledUpcoming": "即将进行",

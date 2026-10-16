@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "{{count}} εγγραφή σε εξέλιξη",
   "scheduledSummaryNow_other": "{{count}} εγγραφές σε εξέλιξη",
   "scheduledEmptyTitle": "Τίποτα προγραμματισμένο",
-  "scheduledEmptyBody": "Ανοίξτε τον οδηγό προγράμματος και επιλέξτε Υπενθύμιση ή Εγγραφή σε μια εκπομπή.",
+  "scheduledEmptyBody": "Ανοίξτε τον οδηγό προγράμματος και επιλέξτε Υπενθύμιση, Εγγραφή ή Εγγραφή σειράς σε μια εκπομπή.",
   "scheduledOpenGuide": "Άνοιγμα οδηγού προγράμματος",
   "scheduledNow": "Εγγραφή σε εξέλιξη",
   "scheduledUpcoming": "Επερχόμενα",

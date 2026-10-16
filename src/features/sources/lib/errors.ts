@@ -132,6 +132,16 @@ export function duplicateSourceId(err: Pick<RpcError, 'code' | 'details'>): stri
 }
 
 /**
+ * Name of the source a refused add duplicates, from the core's text (`this source already exists:
+ * "<name>" uses the same …`, `duplicate_error` in `crates/iptv-core/src/sources/mod.rs`), for when
+ * the source list does not have it yet. Null when the text does not name one.
+ */
+export function duplicateSourceName(err: Pick<RpcError, 'message'>): string | null {
+  const m = /already exists: "(.+)" uses the same\b/.exec(err.message ?? '');
+  return m?.[1]?.trim() || null;
+}
+
+/**
  * Error class of an `import.progress` error or a connection-test verdict. The core's classified
  * `code` (C10) wins when it says more than `internal`; older cores send only text, so the message
  * is matched as a fallback. Unknown text maps to `internal` (generic).

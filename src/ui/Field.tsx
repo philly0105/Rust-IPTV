@@ -155,12 +155,32 @@ export function Select({
 }: SelectProps) {
   const autoId = useId();
   const id = idProp ?? autoId;
+  const selectClass = cn(fieldBase, 'h-10 appearance-none ps-3 pe-9 text-sm', className);
+  // `w-auto` asks for a select as wide as its longest option. Chrome's own width for an
+  // `appearance: none` select falls a few px short at some UI scales and densities, which cut
+  // "Recently added" to "Recently adde" (L1-visual-20). An invisible copy of every label, with
+  // the same padding, border and type, sizes a one-cell grid instead, and the select fills it.
+  const fit = selectClass.split(' ').includes('w-auto');
   return (
     <FieldFrame id={id} label={label} hint={hint} error={error} className={wrapperClassName}>
-      <div className={cn('relative', !label && !hint && !error && wrapperClassName)}>
+      <div className={cn('relative', fit && 'grid', !label && !hint && !error && wrapperClassName)}>
+        {fit && (
+          <span
+            aria-hidden
+            data-select-sizer=""
+            className={cn(
+              selectClass,
+              'pointer-events-none invisible col-start-1 row-start-1 flex h-0 min-h-0 flex-col overflow-hidden border-transparent py-0 whitespace-nowrap',
+            )}
+          >
+            {options.map((o) => (
+              <span key={o.value}>{o.label}</span>
+            ))}
+          </span>
+        )}
         <select
           id={id}
-          className={cn(fieldBase, 'h-10 appearance-none ps-3 pe-9 text-sm', className)}
+          className={cn(selectClass, fit && 'col-start-1 row-start-1 justify-self-stretch')}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy(id, { hint, error })}
           onChange={(e) => {

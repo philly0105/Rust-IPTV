@@ -709,6 +709,23 @@ describe('empty wall', () => {
     expect(row.className).toContain('overflow-x-auto');
   });
 
+  it('shows a channel name once when two sources carry it, keeping the most recent (L3-visual-13)', async () => {
+    handlers['recent.list'] = () => [
+      { ref: channel(5, 'm3u1').ref, viewedAt: '2026-10-15T00:00:00Z', snapshot: { title: 'France 24 English', contentType: 'live' } },
+      { ref: channel(2, 'm3u1').ref, viewedAt: '2026-10-14T00:00:00Z', snapshot: { title: 'Channel 2', contentType: 'live' } },
+      { ref: { sourceId: 'xt9', contentType: 'live', itemId: '77' }, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: ' france 24  English', contentType: 'live' } },
+    ];
+    handlers['favorites.list'] = () => [
+      { ref: { sourceId: 'xt9', contentType: 'live', itemId: '78' }, addedAt: '2026-10-12T00:00:00Z', position: 0, snapshot: { title: 'FRANCE 24 ENGLISH', contentType: 'live' } },
+    ];
+    renderPage();
+    const row = await screen.findByTestId('multiview-quick-picks');
+    expect(within(row).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Add France 24 English to the wall',
+      'Add Channel 2 to the wall',
+    ]);
+  });
+
   it('drops the skeleton without a row when there is nothing recent or favorite', async () => {
     renderPage();
     await screen.findByTestId('multiview-empty');

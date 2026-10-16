@@ -262,7 +262,7 @@ pub async fn tick(state: &Arc<AppState>, clock: &dyn Clock, stagger: Duration) -
             // The import's own `sources.changed` fired before the backoff
             // above was stored; tell the UI again so `sources.schedule` shows
             // the real next attempt.
-            super::emit_changed(state);
+            super::emit_changed(state, Some(id), super::ChangeReason::Status);
         }
     }
     report

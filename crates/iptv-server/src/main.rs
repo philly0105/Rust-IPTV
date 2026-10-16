@@ -208,6 +208,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Running recordings close their files and rows ("stopped: shutdown")
     // instead of being left as "recording" for the next start to repair.
     iptv_core::recording::shutdown(&app).await;
+    // Lets the next start skip the large-database background check.
+    iptv_core::db::note_clean_shutdown(&app.db_path());
     tracing::info!("iptv-server stopped");
     Ok(())
 }

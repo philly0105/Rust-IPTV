@@ -143,7 +143,9 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
         Ok::<StalkerAccountInfo, RpcError>(info)
     });
     r.add("stalker.test", |s, a: TestArgs| async move {
-        Ok::<ConnectionTestResult, RpcError>(playback::test(&s, a.config).await)
+        Ok::<ConnectionTestResult, RpcError>(
+            crate::http::interactive(playback::test(&s, a.config)).await,
+        )
     });
 }
 

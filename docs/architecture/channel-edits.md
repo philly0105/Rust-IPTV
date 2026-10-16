@@ -33,7 +33,7 @@ After each write the touched source's category `item_count` values and `source_c
 
 - Rename (`renameInCache`): every cached `catalog.channels` row of the channel and its cached `catalog.item` answer take the new name. A reset does this only when the caller passes the provider name (`providerName`, from `ChannelEdit.originalName`); without it, nothing is patched and the refresh brings the name.
 - Hide (`hideInCache`): the row leaves the cached `catalog.channels` pages, the list's `total` drops by one, and later cached pages of the same list move up one place, so the rows below close the gap. Lists whose cached pages do not hold the channel are left to the refresh. `catalog.item` is not patched, since it still answers for a hidden channel.
-- Unhide (`patchHidden`): the channel leaves the cached hidden list, so its dialog row goes away.
+- Unhide (`patchHidden`, `unhideInCache`): the channel leaves the cached hidden list, so its dialog row goes away, and its row returns to the cached `catalog.channels` pages: where it stood before this window hid it, else by channel number. The list's `total` grows by one and later cached pages move down one place. Lists whose cached rows cannot place it (a search, another sort) are left to the refresh. When the provider has dropped the channel, the row is taken out again.
 
 When the core refuses, the saved entries are put back (`restoreCache`, `restoreHidden`) and an error toast says why.
 
@@ -63,7 +63,7 @@ The listener starts before the RPC, so an event that arrives before the answer s
 Counts:
 
 - `item_count` is stored without hidden channels. `CatalogWriter::finish` and every edit call `recount_categories`, which counts the items and subtracts the hidden ones per category.
-- A category that hiding empties is dropped from `catalog.categories` (its stored count is 0 but it had channels); with `includeHidden` (the manage-categories view) it stays, with 0.
+- A category that hiding empties is dropped from `catalog.categories` (its stored count is 0 but it had channels); with `includeHidden` (the manage-categories view) it stays, with 0 and `emptiedByEdits: true`. That answer sets `emptiedByEdits` on every category, true only for one that is not hidden, has 0 channels and holds hidden channels; answers without `includeHidden` carry no `emptiedByEdits` key. The Live page asks once with `includeHidden` and filters the sidebar itself (`shownGroups` in `LivePage.tsx`): it drops hidden groups and groups marked `emptiedByEdits`; without that flag, while the source has hidden channels, it drops every group with no channels.
 - English-only counts (`english_categories`) add the `scoped` clause to their count query.
 - Parental hide mode subtracts locked items from the counts; a channel that is both locked and hidden would be subtracted twice, so `visible_categories` adds back the overlap (`locked_hidden_counts`).
 
@@ -82,7 +82,7 @@ Because `items.title` keeps the provider name:
 - EPG resolution (`epg.resolve`, now/next, the guide) matches by the provider name, so renaming a channel does not break its guide data.
 - Sorting by name uses the provider name. A renamed channel keeps its place in a name-sorted list.
 - The FTS index stays on provider names. Search by custom name is a second pass:
-  - `catalog.search` (`search_groups`, one list per group: live and radio, movies, series) ranks the provider-name matches first (FTS word prefix, a substring `LIKE` for a group the prefix match finds nothing for). When a channel in scope is renamed (`has_any_names`), it then finds the channels whose custom name contains the text (`LIKE`, case-insensitive for ASCII, under the same hidden-group, English-only, parental and hidden-channel filters) and puts them at the head of their group's list, shortest custom name first. The provider-name matches follow without repeating them, and the list is cut back to `limit`. Searching by the old provider name still finds a renamed channel.
+  - `catalog.search` (`search_groups`, one list per group: live and radio, movies, series) ranks the provider-name matches first (FTS word prefix; a substring `LIKE` for every group when the prefix match finds nothing in any group, catalog.md). When a channel in scope is renamed (`has_any_names`), it then finds the channels whose custom name contains the text (`LIKE`, case-insensitive for ASCII, under the same hidden-group, English-only, parental and hidden-channel filters) and puts them at the head of their group's list, shortest custom name first. The provider-name matches follow without repeating them, and the list is cut back to `limit`. Searching by the old provider name still finds a renamed channel.
   - The in-list search of `catalog.channels` adds the rowids whose custom name matches (`named_rowids`) to both the FTS and the `LIKE` strategy.
 
 ## Cost rule and clause shapes

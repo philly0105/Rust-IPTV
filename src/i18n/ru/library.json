@@ -253,7 +253,7 @@
   "scheduledSummaryNow_many": "{{count}} записей идут",
   "scheduledSummaryNow_other": "{{count}} записи идут",
   "scheduledEmptyTitle": "Ничего не запланировано",
-  "scheduledEmptyBody": "Откройте телепрограмму и выберите «Напомнить» или «Записать» у передачи.",
+  "scheduledEmptyBody": "Откройте телепрограмму и выберите «Напомнить», «Записать» или «Записывать сериал» у передачи.",
   "scheduledOpenGuide": "Открыть телепрограмму",
   "scheduledNow": "Идёт запись",
   "scheduledUpcoming": "Скоро",

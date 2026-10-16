@@ -652,6 +652,10 @@ fn write_catalog(
     // Read before the writer deletes the old rows: lets user state follow
     // items whose id changed (token rotation) and tells a first import apart.
     let mut remapper = super::remap::Remapper::before(&tx, source_id)?;
+    if remapper.old_rows > 0 {
+        // The writer deletes the previous rows first (L3-perf-core-4).
+        sources::progress_step(state, source_id, sources::SaveStep::Replacing, 0);
+    }
     let (header, stats, summary) = {
         let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES, cancel.clone())?;
         let reader: Box<dyn std::io::BufRead + '_> = match &payload {
@@ -704,7 +708,9 @@ fn write_catalog(
             }));
         }
         remapper.apply(&tx, source_id)?;
-        sources::progress(state, source_id, "saving", n, Some(n), None);
+        // Every row is in: indexes, the search index and the counts follow.
+        // Clients without the step show "Saving n of n", as before.
+        sources::progress_step(state, source_id, sources::SaveStep::Indexing, n);
         let summary = ImportSummary {
             channels: (writer.inserted_of(ContentType::Live)
                 + writer.inserted_of(ContentType::Radio)) as i64,

@@ -253,7 +253,7 @@
   "scheduledSummaryNow_many": "{{count}} nagrań w toku",
   "scheduledSummaryNow_other": "{{count}} nagrania w toku",
   "scheduledEmptyTitle": "Nic nie zaplanowano",
-  "scheduledEmptyBody": "Otwórz przewodnik TV i wybierz Przypomnij mi lub Nagraj przy programie.",
+  "scheduledEmptyBody": "Otwórz przewodnik TV i wybierz Przypomnij mi, Nagraj lub Nagrywaj serial przy programie.",
   "scheduledOpenGuide": "Otwórz przewodnik TV",
   "scheduledNow": "Trwa nagrywanie",
   "scheduledUpcoming": "Wkrótce",

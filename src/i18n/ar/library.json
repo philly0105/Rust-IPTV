@@ -289,7 +289,7 @@
   "scheduledSummaryNow_many": "{{count}} تسجيلًا جاريًا",
   "scheduledSummaryNow_other": "{{count}} تسجيل جارٍ",
   "scheduledEmptyTitle": "لا شيء مجدول",
-  "scheduledEmptyBody": "افتح دليل البرامج واختر ذكّرني أو تسجيل لأحد البرامج.",
+  "scheduledEmptyBody": "افتح دليل البرامج واختر ذكّرني أو تسجيل أو تسجيل المسلسل لأحد البرامج.",
   "scheduledOpenGuide": "فتح دليل البرامج",
   "scheduledNow": "جارٍ التسجيل الآن",
   "scheduledUpcoming": "القادم",

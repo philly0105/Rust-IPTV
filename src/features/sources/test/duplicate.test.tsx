@@ -76,8 +76,13 @@ describe('adding a source that already exists (L1-sources-home-4)', () => {
   it('says it exists and offers Open and Refresh instead of a retry, leaving the existing source alone', async () => {
     await addDuplicate();
     const alert = await screen.findByTestId('add-source-error');
-    expect(alert.textContent).toContain('This source already exists.');
-    expect(alert.textContent).toContain('A source with these details already exists.');
+    // L3-app-7: it names the source it duplicates, once, with Open and Refresh before the technical details.
+    expect(alert.textContent).toContain('Already added as "Sample"');
+    expect(alert.textContent).not.toContain('This source already exists.');
+    expect(alert.textContent).not.toContain('A source with these details already exists.');
+    const open = within(alert).getByTestId('add-source-open-existing');
+    const details = alert.querySelector('details')!;
+    expect(open.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(alert).queryByTestId('add-source-retry')).toBeNull();
     expect(within(alert).queryByTestId('add-source-retry-note')).toBeNull();
     // Not a failed add: the footer still adds, and nothing is scheduled for removal.

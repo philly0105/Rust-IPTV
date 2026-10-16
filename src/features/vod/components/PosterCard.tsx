@@ -1,5 +1,6 @@
 import { Bookmark, BookmarkCheck, BookmarkPlus, Check, Lock, Star } from 'lucide-react';
 import { createContext, memo, useContext, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -134,11 +135,24 @@ export const PosterCard = memo(function PosterCard(props: PosterCardProps) {
   return <PosterCardView {...props} />;
 });
 
-/** My List for every card of one grid: read once by the grid, instead of three list observers per card (L2-vod-1). */
+/** The strings and locale a card draws with: the `vod` and `mylist` namespaces. */
+interface PosterText {
+  t: TFunction;
+  tm: TFunction;
+  language: string;
+}
+
+/**
+ * My List for every card of one grid: read once by the grid, instead of three list observers per
+ * card (L2-vod-1). The grid's strings come with it: three `useTranslation` calls per card made
+ * every mount copy the i18n instance three times, which a fast scroll paid for in GC pauses
+ * (L3-perf-ui-3).
+ */
 interface GridMyList {
   keys: ReadonlySet<string>;
   status: MyListStatus;
   toggle: ReturnType<typeof useMyListToggle>;
+  text: PosterText;
 }
 
 const GridMyListContext = createContext<GridMyList | null>(null);
@@ -150,8 +164,17 @@ const GridMyListContext = createContext<GridMyList | null>(null);
 export function GridMyListProvider({ children }: { children: ReactNode }) {
   const { keys, status } = useMyListState();
   const toggle = useMyListToggle();
-  const value = useMemo(() => ({ keys, status, toggle }), [keys, status, toggle]);
+  const text = usePosterText();
+  const value = useMemo(() => ({ keys, status, toggle, text }), [keys, status, toggle, text]);
   return <GridMyListContext.Provider value={value}>{children}</GridMyListContext.Provider>;
+}
+
+/** {@link PosterText} for the current language (`t` keeps its identity until the language changes). */
+function usePosterText(): PosterText {
+  const { t, i18n } = useTranslation('vod');
+  const { t: tm } = useTranslation('mylist');
+  const language = i18n.language;
+  return useMemo(() => ({ t, tm, language }), [t, tm, language]);
 }
 
 interface PosterCardViewProps extends PosterCardProps {
@@ -161,7 +184,13 @@ interface PosterCardViewProps extends PosterCardProps {
   artCorner?: ReactNode;
 }
 
-function PosterCardView({
+/** A card that reads its own strings (rails, search results): one `useTranslation` per card. */
+function PosterCardView(props: PosterCardViewProps) {
+  const { t, i18n } = useTranslation('vod');
+  return <PosterCardBody {...props} t={t} locale={i18n.language} />;
+}
+
+function PosterCardBody({
   title,
   fullTitle,
   href,
@@ -187,13 +216,14 @@ function PosterCardView({
   locked,
   extraLabel,
   artCorner,
-}: PosterCardViewProps) {
-  const { t, i18n } = useTranslation('vod');
+  t,
+  locale,
+}: PosterCardViewProps & { t: TFunction; locale: string }) {
   const ownIntent = usePrefetchIntent(intent ? null : (prefetch ?? null));
   const { onPointerEnter, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
   const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
-  const r = formatRating(rating, i18n.language);
-  const langName = language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
+  const r = formatRating(rating, locale);
+  const langName = language ? languageName(language, locale, (g) => t(`languageGroup_${g}`)) : undefined;
   const hasProgress = showsProgress(progress, watched);
   const progressLabel = hasProgress ? t('percentWatched', { percent: Math.max(1, Math.round(Math.min(1, progress) * 100)) }) : undefined;
   const label = posterCardLabel({
@@ -272,8 +302,8 @@ function PosterCardView({
           {secondary !== undefined && secondary !== null && secondary !== ''
             ? langName
               ? typeof secondary === 'string' || typeof secondary === 'number'
-                ? joinList([secondary, langName], i18n.language)
-                : <>{secondary}{listSeparator(i18n.language)}{langName}</>
+                ? joinList([secondary, langName], locale)
+                : <>{secondary}{listSeparator(locale)}{langName}</>
               : secondary
             : (langName ?? ' ')}
         </div>
@@ -353,23 +383,26 @@ function GridPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; s
   return shared ? <GridPosterCardWith {...props} list={shared} /> : <GridPosterCardOwn {...props} />;
 }
 
-/** Outside a GridMyListProvider: the card reads My List itself. */
+/** Outside a GridMyListProvider: the card reads My List and its strings itself. */
 function GridPosterCardOwn(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
   const { keys, status } = useMyListState();
   const toggle = useMyListToggle();
-  const list = useMemo(() => ({ keys, status, toggle }), [keys, status, toggle]);
+  const text = usePosterText();
+  const list = useMemo(() => ({ keys, status, toggle, text }), [keys, status, toggle, text]);
   return <GridPosterCardWith {...props} list={list} />;
 }
 
 function GridPosterCardWith({ list, ...props }: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot }; list: GridMyList }) {
-  const { t } = useTranslation('vod');
+  const { t, tm, language } = list.text;
   const { itemRef, snapshot } = props.myList;
   // Until the list is known nothing counts as saved (useInMyList's rule).
   const inList = list.status === 'ready' && list.keys.has(itemKey(itemRef));
   const hasProgress = showsProgress(props.progress, props.watched);
   return (
-    <PosterCardView
+    <PosterCardBody
       {...props}
+      t={t}
+      locale={language}
       extraLabel={inList ? t('posterInMyList') : undefined}
       artCorner={
         <GridMyListToggle
@@ -380,6 +413,7 @@ function GridPosterCardWith({ list, ...props }: PosterCardProps & { myList: { it
           toggle={list.toggle}
           raised={hasProgress}
           shown={!!props.active}
+          t={tm}
         />
       }
     />
@@ -401,6 +435,7 @@ function GridMyListToggle({
   toggle,
   raised,
   shown,
+  t,
 }: {
   itemRef: ItemRef;
   snapshot: ItemSnapshot;
@@ -411,8 +446,9 @@ function GridMyListToggle({
   raised: boolean;
   /** The grid's keyboard cursor rests on this card: show the toggle (S acts on it). */
   shown: boolean;
+  /** The `mylist` namespace. */
+  t: TFunction;
 }) {
-  const { t } = useTranslation('mylist');
   const [pending, setPending] = useState(false);
   // Like MyListButton: until the shared list is known the corner is busy, neither pressed nor saved.
   const ready = status === 'ready';

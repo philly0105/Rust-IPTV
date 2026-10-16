@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useShortcut } from '@/shell/shortcuts';
@@ -56,8 +57,9 @@ export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'play
 /**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down; and the player
  * slice's j/l, g/h, i, b, shift+b, shift+p, z for the sleep timer, shift+c for the
- * Subtitles menu, and s for a screenshot). Registered once by the dock; active while
- * something plays in-app.
+ * Subtitles menu, and s for a screenshot), and the keyboard's media keys, which also reach the
+ * player through the system's media controls (`mediaSession.ts`). Registered once by the dock;
+ * active while something plays in-app.
  */
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
   const { t, i18n } = useTranslation('player');
@@ -141,18 +143,19 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   useShortcut('shift+arrowleft', guard('arrow', seek(-SEEK_STEP_LARGE)), { ...base, description: t('shortcutSeekBackLarge') });
   useShortcut('shift+arrowright', guard('arrow', seek(SEEK_STEP_LARGE)), { ...base, description: t('shortcutSeekForwardLarge') });
   // Next episode (or the next item of whatever queue is playing), like the bar's Next button.
-  useShortcut(
-    'n',
-    once(
-      guard('letter', () => {
-        const next = nextInQueue();
-        if (!next) return;
-        showOsd(t('next'), next.subtitle ? `${next.subtitle} ${next.title}` : next.title);
-        s().next();
-      }),
-    ),
-    { ...base, enabled: active && hasNext, description: t('shortcutNextItem') },
-  );
+  const nextItem = (): void => {
+    const next = nextInQueue();
+    if (!next) return;
+    showOsd(t('next'), next.subtitle ? `${next.subtitle} ${next.title}` : next.title);
+    s().next();
+  };
+  const prevItem = (): void => {
+    const prev = prevInQueue();
+    if (!prev) return;
+    showOsd(t('previous'), prev.subtitle ? `${prev.subtitle} ${prev.title}` : prev.title);
+    s().prev();
+  };
+  useShortcut('n', once(guard('letter', nextItem)), { ...base, enabled: active && hasNext, description: t('shortcutNextItem') });
   useShortcut(
     'arrowup',
     guard('arrow', () => {
@@ -213,18 +216,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   useShortcut('j', guard('letter', seekJL(-SEEK_STEP_JL)), { ...base, description: t('shortcutSeekBack10') });
   useShortcut('l', guard('letter', seekJL(SEEK_STEP_JL)), { ...base, description: t('shortcutSeekForward10') });
   // Previous episode (or item), mirroring N.
-  useShortcut(
-    'shift+p',
-    once(
-      guard('letter', () => {
-        const prev = prevInQueue();
-        if (!prev) return;
-        showOsd(t('previous'), prev.subtitle ? `${prev.subtitle} ${prev.title}` : prev.title);
-        s().prev();
-      }),
-    ),
-    { ...base, enabled: active && hasPrev, description: t('shortcutPrevItem') },
-  );
+  useShortcut('shift+p', once(guard('letter', prevItem)), { ...base, enabled: active && hasPrev, description: t('shortcutPrevItem') });
   // Sync: G/H move the subtitles, Shift+G/H the sound, 100 ms per press (VLC's keys).
   const locale = i18n.language;
   useShortcut('g', guard('letter', () => stepSyncDelay('sub', -1, t, locale)), { ...base, description: t('shortcutSubDelayDown') });
@@ -273,4 +265,46 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     enabled: active && zappable,
     description: t('shortcutChannelDown'),
   });
+
+  // Media keys (L3-desktop-5). The track buttons step channels on live TV, else the queue.
+  const mediaTrack = (dir: 'next' | 'previous') => (): void => {
+    if (canZap(s())) void zap(dir === 'next' ? 'down' : 'up').catch(() => undefined);
+    else if (dir === 'next') nextItem();
+    else prevItem();
+  };
+  const buttons = { togglePlay: () => s().togglePlay(), stop: () => s().stop(), next: mediaTrack('next'), previous: mediaTrack('previous') };
+  /** A media key never types, so it works in a text field too; play/pause and stop once per press. */
+  const mediaKey =
+    (fn: () => void, repeats = false) =>
+    (e: KeyboardEvent): void => {
+      e.preventDefault();
+      if (repeats || !e.repeat) fn();
+    };
+  const mediaBase = { ...base, allowInInput: true };
+  useShortcut('mediaplaypause', mediaKey(buttons.togglePlay), { ...mediaBase, description: t('shortcutMediaPlayPause') });
+  useShortcut('mediastop', mediaKey(buttons.stop), { ...mediaBase, description: t('shortcutMediaStop') });
+  useShortcut('mediatracknext', mediaKey(buttons.next, true), {
+    ...mediaBase,
+    enabled: active && (zappable || hasNext),
+    description: t('shortcutMediaNext'),
+  });
+  useShortcut('mediatrackprevious', mediaKey(buttons.previous, true), {
+    ...mediaBase,
+    enabled: active && (zappable || hasPrev),
+    description: t('shortcutMediaPrevious'),
+  });
+  // The same buttons from the system's media controls, loaded apart to keep the entry chunk lean.
+  const buttonsRef = useRef(buttons);
+  buttonsRef.current = buttons;
+  useEffect(() => {
+    let unbind: (() => void) | undefined;
+    let gone = false;
+    void import('./mediaSession').then((m) => {
+      if (!gone) unbind = m.bindMediaSession(() => buttonsRef.current);
+    });
+    return () => {
+      gone = true;
+      unbind?.();
+    };
+  }, []);
 }

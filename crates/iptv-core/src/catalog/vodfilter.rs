@@ -81,14 +81,21 @@ const WATCHED_ROWIDS: &str = "SELECT it.rowid FROM playback_positions p JOIN ite
 /// A single bound is closed with the end of [`YEAR_RANGE`], so a junk year
 /// (`0`, `20210`) drops out like a missing one, as it does from the facets.
 pub fn vod_filter_sql(f: &VodFilter, args: &mut Vec<SqlValue>) -> String {
+    vod_filter_sql_on(f, "i.year", args)
+}
+
+/// [`vod_filter_sql`] comparing `year_col` (`i.year`, or `+i.year` in a page
+/// statement sorted by another key, which keeps the year range off the index
+/// choice so the sort's index answers the page without a temp b-tree).
+pub fn vod_filter_sql_on(f: &VodFilter, year_col: &str, args: &mut Vec<SqlValue>) -> String {
     let mut sql = String::new();
     if f.year_from.is_some() || f.year_to.is_some() {
         let from = f.year_from.unwrap_or(*YEAR_RANGE.start());
         let to = f.year_to.unwrap_or(*YEAR_RANGE.end());
         args.push(i64::from(from).into());
-        sql.push_str(&format!(" AND i.year >= ?{}", args.len()));
+        sql.push_str(&format!(" AND {year_col} >= ?{}", args.len()));
         args.push(i64::from(to).into());
-        sql.push_str(&format!(" AND i.year <= ?{}", args.len()));
+        sql.push_str(&format!(" AND {year_col} <= ?{}", args.len()));
     }
     if f.hide_watched {
         sql.push_str(" AND i.rowid NOT IN (");
@@ -316,5 +323,13 @@ mod tests {
         let mut args: Vec<SqlValue> = vec![];
         vod_filter_sql(&f(Some(2001), None, false), &mut args);
         assert_eq!(args, vec![SqlValue::Integer(2001), SqlValue::Integer(2100)]);
+    }
+
+    #[test]
+    fn page_statements_can_keep_the_year_off_the_index_choice() {
+        let mut args: Vec<SqlValue> = vec![];
+        let sql = vod_filter_sql_on(&f(Some(2020), Some(2029), false), "+i.year", &mut args);
+        assert_eq!(sql, " AND +i.year >= ?1 AND +i.year <= ?2");
+        assert_eq!(args, vec![SqlValue::Integer(2020), SqlValue::Integer(2029)]);
     }
 }

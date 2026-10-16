@@ -235,7 +235,7 @@
   "scheduledSummaryNow_many": "{{count}} enregistrements en cours",
   "scheduledSummaryNow_other": "{{count}} enregistrements en cours",
   "scheduledEmptyTitle": "Rien de programmé",
-  "scheduledEmptyBody": "Ouvrez le guide TV et choisissez Me rappeler ou Enregistrer sur un programme.",
+  "scheduledEmptyBody": "Ouvrez le guide TV et choisissez Me rappeler, Enregistrer ou Enregistrer la série sur un programme.",
   "scheduledOpenGuide": "Ouvrir le guide TV",
   "scheduledNow": "Enregistrement en cours",
   "scheduledUpcoming": "À venir",

@@ -1,5 +1,5 @@
-import { AlertTriangle, ChevronRight, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type RefObject } from 'react';
+import { AlertTriangle, ChevronRight, Lock, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
@@ -19,13 +19,14 @@ import {
   usePlayerStore,
 } from '../store';
 import { useStreamInfoStore } from '../streamInfo';
+import { hideZapBanner } from '../zapBanner';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { BarReadout, Controls, CtlButton, InlineSpinner, retryPlayback } from './Controls';
 import { InlinePlayer } from './InlinePlayer';
 import { FullscreenChannelPanel, RadioPlayer, SleepPrompt, StreamInfoPanel, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
-import { useNarrow } from './useNarrow';
+import { SHORT_PLAYER_PX, useNarrow, useSmallPlayer } from './useNarrow';
 import { useZapBannerShown, useZapHover } from './zapHooks';
 
 const HIDE_AFTER_MS = 2600;
@@ -104,11 +105,14 @@ function useTopClearOfZapBanner(ref: RefObject<HTMLElement | null>): number | un
 function Osd() {
   const osd = useMediaStore((s) => s.osd);
   if (!osd) return null;
-  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} />;
+  return <OsdReadout key={osd.key} primary={osd.primary} secondary={osd.secondary} locked={!!osd.locked} />;
 }
 
-function OsdReadout({ primary, secondary }: { primary: string; secondary?: string | undefined }) {
+/** `locked`: a zap passing a channel parental controls lock; a lock stands before its number. */
+function OsdReadout({ primary, secondary, locked = false }: { primary: string; secondary?: string | undefined; locked?: boolean }) {
+  const { t } = useTranslation('player');
   const ref = useRef<HTMLDivElement>(null);
+  const digits = /^\d+$/.test(primary);
   const top = useTopClearOfZapBanner(ref);
   return (
     <div
@@ -118,7 +122,19 @@ function OsdReadout({ primary, secondary }: { primary: string; secondary?: strin
       className="player-osd pointer-events-none absolute top-5 end-6 z-20 max-w-[min(40rem,calc(100%-3rem))] text-end text-white [overflow-wrap:anywhere] [text-shadow:0_2px_12px_rgb(0_0_0/0.8)]"
       style={top === undefined ? undefined : { top }}
     >
-      <div className={cn('font-display leading-none tabular-nums', /^\d+$/.test(primary) ? 'text-6xl text-accent-hover' : 'text-2xl')}>
+      <div
+        className={cn(
+          'font-display leading-none tabular-nums',
+          digits ? 'text-6xl text-accent-hover' : 'text-2xl',
+          locked && 'flex items-center justify-end gap-3',
+        )}
+      >
+        {locked && (
+          <span data-testid="osd-locked" className="contents">
+            <Lock aria-hidden className={cn('shrink-0 text-white', digits ? 'size-9' : 'size-5')} strokeWidth={2.25} />
+            <span className="sr-only">{t('zapLocked')}</span>
+          </span>
+        )}
         {primary}
       </div>
       {secondary && <div className="mt-1 line-clamp-2 text-lg">{secondary}</div>}
@@ -437,7 +453,7 @@ function MpvPlayer({ compact }: { compact: boolean }) {
     rootRef.current = el;
     setRootEl(el);
   }, []);
-  const narrow = useNarrow(rootEl);
+  const smallPlayer = useSmallPlayer(rootEl);
   const overlay = (isFullscreen || pip) && !compact;
   const small = compact || pip;
   const focusPin = useKeyboardFocusPin();
@@ -531,13 +547,13 @@ function MpvPlayer({ compact }: { compact: boolean }) {
       <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
       {/*
         Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
-        mini player says it in its header instead; a phone-width player gets the one-line chip.
+        mini player says it in its header instead; a small player gets the one-line chip.
       */}
       {!compact && (
         <ZapBanner
           compact={pip}
-          chip={narrow && !pip}
-          className={pip ? 'inset-x-2 top-11' : narrow ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
+          chip={smallPlayer && !pip}
+          className={pip ? 'inset-x-2 top-11' : smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
         />
       )}
       {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
@@ -637,13 +653,17 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
     rootRef.current = el;
     setRootEl(el);
   }, []);
-  const narrow = useNarrow(rootEl);
+  const smallPlayer = useSmallPlayer(rootEl);
+  /** Short (any width): a stream error packs into the room the bar leaves, over the title. */
+  const shortPlayer = useNarrow(rootEl, Number.POSITIVE_INFINITY, SHORT_PLAYER_PX);
+  const shortError = shortPlayer && !compact && status === 'error';
 
   const playing = status === 'playing';
-  // A phone-width player has no room for both the zap chip and the bar: while the chip is up the
-  // bar waits (unless it is in use, or playback paused or ended), the new channel's tuning
-  // included, and comes back when the chip goes or the stream fails.
-  const zapChip = narrow && !compact && !pip && zapShown;
+  // A small player has no room for both the zap chip and the bar: after a zap the chip shows alone
+  // (unless the bar is in use, or playback paused or ended), the new channel's tuning included.
+  // The bar comes back when the chip goes, the stream fails, or the pointer moves over the
+  // picture, which takes the chip down (see `onPointerActivity`).
+  const zapChip = smallPlayer && !compact && !pip && zapShown;
   const inUse = menuOpen || focusPin.pinned || onBar || panelOpen;
   const chromeVisible = inUse || (zapChip ? !playing && status !== 'loading' : !idle || !playing);
   // The title takes the pointer only while the chrome shows it.
@@ -653,6 +673,15 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
     setIdle(false);
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setIdle(true), HIDE_AFTER_MS);
+  };
+  /**
+   * The pointer moved or pressed over the player: the bar comes back. While the zap chip holds it
+   * down, the chip steps aside for it (the title above the bar names the channel), unless the
+   * pointer is on the chip itself, which keeps it up.
+   */
+  const onPointerActivity = (e: PointerEvent): void => {
+    if (zapChip && !chromeVisible && !(e.target instanceof Element && e.target.closest('[data-zap-banner]'))) hideZapBanner();
+    poke();
   };
 
   useEffect(() => {
@@ -732,8 +761,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
     <div
       ref={setRoot}
       className="relative h-full w-full overflow-hidden bg-black select-none"
-      onPointerMove={poke}
-      onPointerDown={poke}
+      onPointerMove={onPointerActivity}
+      onPointerDown={onPointerActivity}
       onFocus={(e) => {
         focusPin.onFocus(e);
         poke();
@@ -744,7 +773,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         if (playing) setIdle(true);
       }}
     >
-      <InlinePlayer as="video" compact={compact} />
+      <InlinePlayer as="video" compact={compact} short={shortPlayer} />
       {/* Click surface sits above the video so clicks never reach native controls. */}
       <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
       {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
@@ -755,8 +784,9 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         <div
           className={cn(
             'player-scrim-top pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pt-3 pb-10 text-white motion-safe:transition-opacity motion-safe:duration-200',
-            // The zap banner takes this corner while it is up: it says all the title says.
-            (!chromeVisible || zapShown) && 'opacity-0',
+            // The zap banner takes this corner while it is up: it says all the title says. A short
+            // player's stream error starts up here.
+            (!chromeVisible || zapShown || shortError) && 'opacity-0',
           )}
         >
           <div className="flex items-center gap-2">
@@ -795,15 +825,15 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
       <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
       {/*
         Zap banner (C5): the title's corner, or the far one while the channel list or stream info
-        holds it. The mini player says it in its header instead; a phone-width player gets the
+        holds it. The mini player says it in its header instead; a small player gets the
         one-line chip.
       */}
       {!compact && (
         <ZapBanner
           compact={pip}
-          chip={narrow && !pip}
+          chip={smallPlayer && !pip}
           className={
-            pip || narrow ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+            pip || smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
           }
         />
       )}
@@ -814,7 +844,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
       <div
         data-testid="overlay-chrome"
-        className="absolute inset-x-0 bottom-0 z-20"
+        // Only the bar's pane takes the pointer (Controls): the scrim above it lets it through.
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
         // Resting the pointer on the bar (volume slider, time, a held scrub) keeps it up.
         onPointerEnter={() => setOnBar(true)}
         onPointerLeave={() => setOnBar(false)}

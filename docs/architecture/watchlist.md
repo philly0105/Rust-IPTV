@@ -65,7 +65,7 @@ The import reports skipped entries as a warning and emits `watchlist.changed` wh
 
 On the movie and series category grids (`src/features/vod/pages/CategoryGridPage.tsx`), each poster shows a saved marker once the title is in My List and a corner toggle (`GridMyListToggle` in `src/features/vod/components/PosterCard.tsx`). A listbox option cannot hold a nested button, so the toggle is pointer only and hidden from assistive technology, and the option's name says "In My List" instead. S toggles My List on the title under the grid cursor, and the poster menu (right click, Shift+F10, or the context-menu key) offers Open details and Add to or Remove from My List.
 
-Every piece reads one shared `watchlist.list {}` query (`lib/cache.ts`: `LIST_KEY`), and writes patch that cache first. `watchlist.changed` should invalidate `watchlist.` through `EVENT_INVALIDATION`. Watched changes refresh positions, user state and the list together (`refreshWatched`).
+Every piece reads one shared `watchlist.list {}` query (`lib/cache.ts`: `LIST_KEY`), and writes patch that cache first. `watchlist.changed` should invalidate `watchlist.` through `EVENT_INVALIDATION`. Watched changes refresh positions, user state and the list together (`refreshWatched`). The /my-list page reads the list with a 5-minute stale time (`MY_LIST_STALE_MS`), so a visit within that time shows the cached list without asking again. Because some writes to playback rows only mark `positions.` stale, `lib/cache.ts` marks the list stale too whenever a `positions.` query is invalidated, without refetching, so the next page or rail mount reads the watched ticks again.
 
 ### The /my-list page
 

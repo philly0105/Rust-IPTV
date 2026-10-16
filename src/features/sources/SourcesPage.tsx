@@ -6,7 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
-import { RpcError, rpc, rpcRaw } from '@/api/transport';
+import { RpcError, rpc, rpcRaw, type CallOptions } from '@/api/transport';
 import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
@@ -353,9 +353,10 @@ export function SourcesPage() {
     const order = shown.map((s) => s.id);
     const at = order.indexOf(target.id);
     const neighbour = order[at + 1] ?? order[at - 1];
-    const sendRemove = async () => {
+    // `call` carries keepalive when the page unloads before the undo window passed.
+    const sendRemove = async (call?: CallOptions) => {
       try {
-        await rpc('sources.remove', { id: target.id });
+        await rpcRaw('sources.remove', { id: target.id }, call);
       } catch (e) {
         // Already gone (Remove all, another window): that is the outcome the user wanted.
         if (RpcError.from(e).code !== 'not_found') throw e;

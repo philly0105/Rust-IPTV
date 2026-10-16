@@ -11,7 +11,7 @@ import { RpcError, rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, SkeletonList, usePlayerStore, useToast } from '../deps';
+import { Button, EmptyState, ErrorState, SkeletonList, useMediaQuery, usePlayerStore, useToast } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
@@ -186,15 +186,18 @@ export function RecentPage() {
     }
   };
 
+  // On a phone the header has no room for Clear history beside the title and the search: even as an
+  // icon it cut "Recently watched" short (L3-visual-6). There it sits above the list, with the count
+  // the header's subtitle shows only on wider screens.
+  const phone = useMediaQuery('(width < 40rem)', false);
   const headerActions = useMemo(
     () =>
-      count > 0 ? (
+      count > 0 && !phone ? (
         <Button size="sm" variant="ghost" icon={<Trash size={15} aria-hidden />} onClick={() => setConfirmClear(true)}>
-          {/* Icon only on a phone, so the header keeps the palette and theme buttons on screen. */}
-          <span className="max-sm:sr-only">{t('clearHistory')}</span>
+          {t('clearHistory')}
         </Button>
       ) : undefined,
-    [count, t],
+    [count, phone, t],
   );
   const title = source ? t('sourceRecentTitle', { source: source.name }) : t('recentTitle');
   usePageHeader(title, query.data && count > 0 ? t('recentCount', { count }) : undefined, headerActions, {
@@ -278,6 +281,14 @@ export function RecentPage() {
       data-testid="recent-page"
     >
       <PageTitle>{title}</PageTitle>
+      {phone && count > 0 && !query.isLoading && !query.isError ? (
+        <div className="mb-2 flex min-h-8 items-center justify-between gap-3" data-testid="recent-phone-bar">
+          <p className="min-w-0 truncate text-sm tabular-nums text-fg-muted">{t('recentCount', { count })}</p>
+          <Button size="sm" variant="ghost" icon={<Trash size={15} aria-hidden />} onClick={() => setConfirmClear(true)}>
+            {t('clearHistory')}
+          </Button>
+        </div>
+      ) : null}
       {body}
       <ConfirmDialog
         open={confirmClear}

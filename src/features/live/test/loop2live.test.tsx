@@ -153,10 +153,14 @@ describe('number entry commits once no longer number exists (L2-live-7)', () => 
     expect(commits).toEqual([15000]);
     expect(result.current.buffer).toBe('');
 
+    // A digit right after an early commit belongs to the same typed number (L3-live-9): the next
+    // number starts after a pause.
+    act(() => void vi.advanceTimersByTime(DIGIT_COMMIT_MS));
     rerender({ max: 30 });
     act(() => result.current.push('7'));
     expect(commits).toEqual([15000, 7]);
 
+    act(() => void vi.advanceTimersByTime(DIGIT_COMMIT_MS));
     act(() => result.current.push('3'));
     expect(commits).toEqual([15000, 7]);
     act(() => void vi.advanceTimersByTime(DIGIT_COMMIT_MS));
@@ -361,14 +365,16 @@ describe('phone layout (L2-live-15, L2-visual-13)', () => {
     const stage = screen.getByTestId('live-stage');
     expect(stage.hasAttribute('data-idle')).toBe(true);
     expect(stage.className).toContain('max-md:h-14');
-    expect(stage.className).not.toContain('aspect-video');
+    // 16:9 from md up only (L3-player-4); a phone gets the slim bar.
+    expect(stage.className).not.toMatch(/(^|\s)aspect-video(\s|$)/);
+    expect(stage.className).toContain('md:aspect-video');
     expect(stage.nextElementSibling?.className).toContain('max-md:hidden');
 
     act(() =>
       fakes.usePlayerStore.setState({ source: { url: '', kind: 'hls', title: 'Channel 1', ref: makeChannel(1).ref, isLive: true, isRadio: false } }),
     );
     await waitFor(() => expect(screen.getByTestId('live-stage').hasAttribute('data-idle')).toBe(false));
-    expect(screen.getByTestId('live-stage').className).toContain('aspect-video');
+    expect(screen.getByTestId('live-stage').className).toMatch(/(^|\s)aspect-video(\s|$)/);
     expect(screen.getByTestId('live-stage').nextElementSibling?.className).not.toContain('max-md:hidden');
   });
 });
@@ -391,5 +397,24 @@ describe('Play in MPV from the list (L2-desktop-9)', () => {
     expect(state.source?.url).toBe('http://mock/live/2.ts');
     expect(state.source?.ref?.itemId).toBe('c2');
     expect(state.status).toBe('playing');
+    // Through the store, with the player chosen here, so the stage's Reopen uses it too (L3-live-ch-x4).
+    expect(fakes.recorded.play.at(-1)?.opts).toEqual({ mode: 'external', externalPlayer: 'mpv', queue: [] });
+  });
+
+  it('Play in VLC opens VLC and keeps it as the choice (L3-live-ch-x4)', async () => {
+    rpcMock.env.desktop = true;
+    rpcMock.handlers['parental.status'] = () => ({ enabled: false, mode: 'ask', unlocked: false, hasPin: false });
+    rpcMock.handlers['parental.check'] = () => ({ allowed: true });
+    rpcMock.handlers['xtream.streamUrl'] = () => ({ url: 'http://mock/live/3.ts', kind: 'mpegts' });
+    rpcMock.handlers['player.openExternal'] = () => null;
+    renderAt('/s/src1/live', ROUTE);
+    await screen.findByText('Channel 3');
+    const row = document.querySelector<HTMLElement>('[data-testid="channel-list"] [data-row-index="3"]')!.parentElement!;
+    fireEvent.contextMenu(row, { clientX: 40, clientY: 40 });
+    fireEvent.click(await screen.findByRole('menuitem', { name: /VLC/ }));
+    await waitFor(() => expect(fakes.usePlayerStore.getState().status).toBe('playing'));
+    expect(fakes.recorded.play.at(-1)?.opts).toEqual({ mode: 'external', externalPlayer: 'vlc', queue: [] });
+    expect(fakes.recorded.play.at(-1)?.source.ref?.itemId).toBe('c3');
+    expect(rpcMock.calls.filter((c) => c.cmd === 'player.openExternal').at(-1)?.args).toMatchObject({ player: 'vlc' });
   });
 });

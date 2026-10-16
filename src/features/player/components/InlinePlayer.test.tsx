@@ -61,6 +61,28 @@ describe('stream error overlay', () => {
     expect((alert.firstElementChild as HTMLElement).className).toContain('m-auto');
   });
 
+  it('keeps clear of the control bar, which stays up over an error (L3-player-7)', () => {
+    render(<InlinePlayer />);
+    fail('HTTP 403');
+    expect(screen.getByRole('alert').className).toContain('pb-16');
+  });
+
+  it('packs into a short player: one-line headline, two lines of hint, the details in a tooltip (L3-player-7)', () => {
+    render(<InlinePlayer short />);
+    fail('HTTP 403');
+    const alert = screen.getByRole('alert');
+    expect(alert.getAttribute('data-tight')).toBe('true');
+    // Bottom room for the bar's pane, no top room: the title bar steps aside (PlayerSurface).
+    expect(alert.className).toContain('pb-14');
+    expect(alert.className).toContain('pt-3');
+    const heading = screen.getByRole('heading', { level: 2 });
+    expect(heading.textContent).toBe('The provider refused this stream');
+    expect(heading.getAttribute('title')).toContain('HTTP 403');
+    expect(alert.querySelector('details')).toBeNull();
+    expect(alert.querySelector('p.line-clamp-2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
   it('uses the RPC error code when the message says nothing useful', () => {
     render(<InlinePlayer />);
     act(() => useMediaStore.setState({ errorCode: 'timeout' }));

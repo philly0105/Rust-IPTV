@@ -13,7 +13,10 @@
 //! SQLite WAL.
 
 mod boot;
+mod early_boot;
 mod geometry;
+#[cfg(windows)]
+mod helper_windows;
 #[cfg(windows)]
 mod memory;
 #[cfg(windows)]
@@ -40,6 +43,27 @@ pub const APP_EVENT: &str = "app-event";
 
 /// Forwards core events to the webview.
 struct TauriSink(AppHandle);
+
+/// The event sink of a state opened before the app handle exists
+/// (`early_boot`): events go to the webview once `setup` connects it. Nothing
+/// emits before then; the core modules start after the gate opens.
+#[derive(Default)]
+pub(crate) struct LateSink(std::sync::OnceLock<TauriSink>);
+
+impl LateSink {
+    fn connect(&self, handle: &AppHandle) {
+        let _ = self.0.set(TauriSink(handle.clone()));
+    }
+}
+
+impl EventSink for LateSink {
+    fn emit(&self, event: AppEvent) {
+        match self.0.get() {
+            Some(sink) => sink.emit(event),
+            None => tracing::debug!(kind = %event.kind, "event before the window existed dropped"),
+        }
+    }
+}
 
 impl EventSink for TauriSink {
     fn emit(&self, event: AppEvent) {
@@ -465,7 +489,21 @@ const SHOW_FALLBACK: std::time::Duration = std::time::Duration::from_secs(4);
 /// Set once the main window has been shown for the first time.
 static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Shows the main window the first time it is called (page loaded, or the
+/// How long after the page has loaded the window is shown anyway when the UI
+/// never asks (`reveal_window`): a page that failed before its first render.
+const PAGE_REVEAL_FALLBACK: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// `invoke('reveal_window')`: the UI has committed its first frame, so the
+/// window opens on the painted shell. Showing at page load instead put the
+/// show and focus (about 30 ms on the event-loop thread) right where the
+/// page's first IPC calls waited for that thread, which held up the first
+/// render; the webview paints while the window is still hidden.
+#[tauri::command]
+fn reveal_window(app: AppHandle) {
+    reveal_main(&app);
+}
+
+/// Shows the main window the first time it is called (the UI rendered, or a
 /// fallback timer); later calls do nothing, so reloads never steal focus.
 fn reveal_main(app: &AppHandle) {
     if SHOWN.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -570,24 +608,53 @@ fn fatal_dialog(message: &str) {
     }
 }
 
-fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let handle = app.handle().clone();
-    let data_dir = app.path().app_data_dir()?;
-    let guard = match iptv_core::logging::init(&data_dir) {
+/// Starts file logging under `data_dir` (None when it cannot).
+pub(crate) fn init_logging(data_dir: &std::path::Path) -> Option<LogGuard> {
+    match iptv_core::logging::init(data_dir) {
         Ok(g) => Some(g),
         Err(err) => {
             eprintln!("logging disabled: {err}");
             None
         }
+    }
+}
+
+fn setup(
+    app: &mut tauri::App,
+    early: Option<early_boot::EarlyBoot>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let handle = app.handle().clone();
+    let data_dir = app.path().app_data_dir()?;
+    // The database is already opening (`early_boot`) unless this process
+    // could not start it, or resolved another folder than Tauri does.
+    let early = match early {
+        Some(e) if e.data_dir == data_dir => Some(e),
+        Some(e) => {
+            tracing::warn!(early = %e.data_dir.display(), data_dir = %data_dir.display(), "early boot used another data folder; opening again");
+            None
+        }
+        None => None,
     };
+    let (guard, sink, opening) = match early {
+        Some(e) => (e.log_guard, e.sink, e.state),
+        None => {
+            let guard = init_logging(&data_dir);
+            let sink = Arc::new(LateSink::default());
+            let opening = tauri::async_runtime::spawn(open_state(
+                data_dir.clone(),
+                Arc::clone(&sink) as Arc<dyn EventSink>,
+            ));
+            (guard, sink, opening)
+        }
+    };
+    sink.connect(&handle);
     app.manage(LogGuardState {
         _guard: parking_lot::Mutex::new(guard),
     });
 
-    // The database opens on the runtime (`boot_state`) instead of blocking
-    // this thread: Tauri has already created the main window, and WebView2
-    // can only start and load the page while the event loop runs. `rpc`
-    // waits at the gate until the state is ready.
+    // The database opens on the runtime (`open_state`) instead of blocking
+    // this thread: WebView2 can only start and load the page while the event
+    // loop runs. `rpc` waits at the gate until the state is ready.
     let gate = StateGate::default();
     let waiter = gate.waiter();
     app.manage(gate);
@@ -617,8 +684,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .flatten()
         .map(|urls| urls.iter().map(|u| u.to_string()).collect());
 
-    let sink: Arc<dyn EventSink> = Arc::new(TauriSink(handle.clone()));
-    tauri::async_runtime::spawn(boot_state(handle.clone(), data_dir, sink, launch_links));
+    tauri::async_runtime::spawn(boot_state(handle.clone(), data_dir, opening, launch_links));
 
     #[cfg(all(
         feature = "updater",
@@ -628,12 +694,20 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     build_tray(app)?;
 
+    // Closing a hidden helper window from outside (taskkill while minimized)
+    // quits instead of leaving the app running without single-instance.
+    #[cfg(windows)]
+    {
+        let count = helper_windows::install(&handle);
+        tracing::info!(count, "helper windows quit on close");
+    }
+
     // The window is created hidden (tauri.conf.json `visible: false`, and the
     // window-state plugin does not restore visibility) so its geometry can be
-    // restored and corrected first. It is shown once the page has loaded
-    // (`on_page_load` in `run`), over the app's background colour, so there
-    // is neither a jump nor a white flash; the timer covers a page that never
-    // loads.
+    // restored and corrected first. It is shown once the UI has rendered its
+    // first frame (`reveal_window`), so there is neither a jump nor a white
+    // flash; `on_page_load` in `run` and this timer cover a page that never
+    // renders or never loads.
     if let Some(w) = app.get_webview_window("main") {
         unstick_fullscreen_size(&w);
         fit_restored_window(&w);
@@ -656,16 +730,46 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Builds `AppState` (opens and migrates the database) beside the webview's
-/// first load, wires the shell to it, delivers the launch deep links, opens
-/// the gate for `rpc`, then starts the core modules.
+/// Builds `AppState` (opens and migrates the database) and starts the
+/// loopback media proxy (inline playback with per-playlist headers): the
+/// part of the boot that needs no window, so it can run before the webview
+/// is built (`early_boot`).
+pub(crate) async fn open_state(
+    data_dir: std::path::PathBuf,
+    sink: Arc<dyn EventSink>,
+) -> iptv_core::CoreResult<Arc<AppState>> {
+    let state = AppState::new(data_dir, sink, true).await?;
+    let proxy_base = match proxy::start(Arc::clone(&state)) {
+        Ok(base) => Some(base),
+        Err(err) => {
+            tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
+            None
+        }
+    };
+    set_desktop_info(
+        &state,
+        DesktopInfo {
+            proxy_base,
+            updater_available: cfg!(feature = "updater"),
+        },
+    );
+    Ok(state)
+}
+
+/// Waits for `open_state` (started beside the webview's first load, or
+/// before it), wires the shell to the state, delivers the launch deep links,
+/// opens the gate for `rpc`, then starts the core modules.
 async fn boot_state(
     handle: AppHandle,
     data_dir: std::path::PathBuf,
-    sink: Arc<dyn EventSink>,
+    opening: tauri::async_runtime::JoinHandle<iptv_core::CoreResult<Arc<AppState>>>,
     launch_links: Option<Vec<String>>,
 ) {
-    let state = match AppState::new(data_dir.clone(), sink, true).await {
+    let opened = opening
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.map_err(|e| e.to_string()));
+    let state = match opened {
         Ok(s) => s,
         Err(err) => {
             tracing::error!(error = %err, data_dir = %data_dir.display(), "app state failed to initialize");
@@ -682,22 +786,6 @@ async fn boot_state(
     );
 
     tauri::async_runtime::spawn(allow_known_media_dirs(handle.clone(), Arc::clone(&state)));
-
-    // Loopback media proxy for inline playback with per-playlist headers.
-    let proxy_base = match proxy::start(Arc::clone(&state)) {
-        Ok(base) => Some(base),
-        Err(err) => {
-            tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
-            None
-        }
-    };
-    set_desktop_info(
-        &state,
-        DesktopInfo {
-            proxy_base,
-            updater_available: cfg!(feature = "updater"),
-        },
-    );
 
     // `shutdown` finds the state here.
     handle.manage(Arc::clone(&state));
@@ -783,6 +871,9 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
 
 /// Entry point used by `main.rs`.
 pub fn run() {
+    let context = tauri::generate_context!();
+    // Opens the database while Tauri builds the window and WebView2.
+    let early = early_boot::start(&context.config().identifier);
     let mut builder = tauri::Builder::default();
 
     // Single-instance must be registered first.
@@ -840,6 +931,7 @@ pub fn run() {
             pip_window_saved,
             pip_aspect,
             tray_labels,
+            reveal_window,
             quit_flush::flush_done,
             // recording:
             native_notify
@@ -849,11 +941,17 @@ pub fn run() {
             if payload.event() == tauri::webview::PageLoadEvent::Finished
                 && webview.label() == pip_state::MAIN_WINDOW
             {
-                reveal_main(webview.app_handle());
+                // The UI shows the window after its first render
+                // (`reveal_window`); this covers a page that never renders.
+                let handle = webview.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(PAGE_REVEAL_FALLBACK).await;
+                    reveal_main(&handle);
+                });
             }
         })
-        .setup(setup)
-        .build(tauri::generate_context!())
+        .setup(move |app| setup(app, early))
+        .build(context)
         .expect("error while building Tsrust IPTV");
 
     let mut cleaned_up = false;
@@ -892,6 +990,8 @@ fn shutdown(app: &AppHandle) {
         tracing::warn!("remote control did not stop cleanly on exit");
     }
     checkpoint_wal(&state);
+    // Lets the next start skip the large-database background check.
+    iptv_core::db::note_clean_shutdown(&state.db_path());
     tracing::info!("shutdown complete");
 }
 

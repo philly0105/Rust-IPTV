@@ -235,7 +235,7 @@
   "scheduledSummaryNow_many": "{{count}} registrazioni in corso",
   "scheduledSummaryNow_other": "{{count}} registrazioni in corso",
   "scheduledEmptyTitle": "Niente in programma",
-  "scheduledEmptyBody": "Apri la guida TV e scegli Ricordamelo o Registra su un programma.",
+  "scheduledEmptyBody": "Apri la guida TV e scegli Ricordamelo, Registra o Registra serie su un programma.",
   "scheduledOpenGuide": "Apri la guida TV",
   "scheduledNow": "In registrazione",
   "scheduledUpcoming": "Prossimamente",

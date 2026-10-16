@@ -109,11 +109,19 @@ describe('what blocks a screenshot', () => {
     await shot.takeScreenshot();
     expect(rpcMock).not.toHaveBeenCalled();
     expect(toastMock).toHaveBeenCalledWith({ title: 'Radio has no picture to capture.', variant: 'info' });
-    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Take screenshot', secondary: 'Radio has no picture to capture.' });
+    // One message: the toast shows in player full screen too, so no OSD copy (X-desk-3).
+    expect(useMediaStore.getState().osd).toBeUndefined();
 
     act(() => usePlayerStore.setState({ source: vod, mode: 'external' }));
     await shot.takeScreenshot();
     expect(toastMock).toHaveBeenLastCalledWith({ title: 'This plays in an external player. Use its own screenshot key.', variant: 'info' });
+  });
+
+  it('repeats the reason on the OSD in picture-in-picture, where the player covers its toasts', () => {
+    usePipStore.setState({ active: true });
+    shot.explainBlock('radio');
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Take screenshot', secondary: 'Radio has no picture to capture.' });
   });
 });
 

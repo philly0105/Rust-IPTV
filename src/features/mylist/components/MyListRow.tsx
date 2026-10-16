@@ -30,18 +30,23 @@ import { IconButton, Poster, cn } from '../deps';
  */
 export const ROW_HEIGHT = 104;
 
+/**
+ * The page's reorder handlers. One object serves every row and stays the same
+ * across renders, so a row re-renders only when its own props change.
+ */
 export interface RowReorder {
-  canUp: boolean;
-  canDown: boolean;
-  onMove: (delta: -1 | 1) => void;
-  dragging: boolean;
-  dropTarget: 'before' | 'after' | null;
-  onDragStart: (e: DragEvent<HTMLElement>) => void;
+  onMove: (entry: WatchlistEntry, delta: -1 | 1) => void;
+  onDragStart: (entry: WatchlistEntry, e: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
-  onDragOver: (e: DragEvent<HTMLElement>) => void;
-  onDrop: (e: DragEvent<HTMLElement>) => void;
+  onDragOver: (entry: WatchlistEntry, e: DragEvent<HTMLElement>) => void;
+  onDrop: (entry: WatchlistEntry, e: DragEvent<HTMLElement>) => void;
 }
 
+/**
+ * Every prop is a value or a handler the page keeps stable (the handlers take
+ * the entry), so the memoized row skips a re-render when a refetch returns
+ * the same list (L3-vod-7).
+ */
 export interface MyListRowProps {
   entry: WatchlistEntry;
   /** 1-based place in the user's order; omitted when another sort is active. */
@@ -51,10 +56,17 @@ export interface MyListRowProps {
   added: string;
   addedTitle: string;
   busy: boolean;
+  /** Set while the user's order is shown: the row can be moved. */
   reorder?: RowReorder;
-  onOpen: () => void;
-  onRemove: () => void;
-  onToggleWatched: () => void;
+  canUp?: boolean;
+  canDown?: boolean;
+  /** This row is being dragged. */
+  dragging?: boolean;
+  /** A drag hovers this row: the drop lands before or after it. */
+  dropTarget?: 'before' | 'after' | null;
+  onOpen: (entry: WatchlistEntry) => void;
+  onRemove: (entry: WatchlistEntry) => void;
+  onToggleWatched: (entry: WatchlistEntry) => void;
 }
 
 /**
@@ -64,13 +76,29 @@ export interface MyListRowProps {
 const revealOnFine =
   'sm:pointer-fine:opacity-0 sm:pointer-fine:group-hover:opacity-100 sm:pointer-fine:in-focus-visible:opacity-100 sm:pointer-fine:focus-within:opacity-100 motion-safe:transition-opacity';
 
-function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, onOpen, onRemove, onToggleWatched }: MyListRowProps) {
+function MyListRowImpl({
+  entry,
+  rank,
+  source,
+  added,
+  addedTitle,
+  busy,
+  reorder,
+  canUp = false,
+  canDown = false,
+  dragging = false,
+  dropTarget = null,
+  onOpen: openEntry,
+  onRemove: removeEntry,
+  onToggleWatched: toggleEntry,
+}: MyListRowProps) {
   const { t, i18n } = useTranslation('mylist');
   const { ref, snapshot, watched } = entry;
   // Older snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
   const title = snapshotTitle(ref, snapshot.title).title;
   const movie = ref.contentType === 'movie';
   const TypeIcon = movie ? Film : Clapperboard;
+  const onOpen = () => openEntry(entry);
 
   return (
     <div
@@ -79,23 +107,23 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
         'group relative grid h-full grid-cols-[3rem_minmax(0,1fr)] content-center items-center gap-x-3 gap-y-1 rounded-lg px-1.5',
         'sm:flex sm:gap-4 sm:px-3',
         'hover:bg-surface-2 in-focus-visible:bg-surface-2 motion-safe:transition-colors',
-        reorder?.dragging && 'opacity-40',
+        dragging && 'opacity-40',
         busy && 'cursor-progress',
       )}
       data-mylist-key={`${ref.sourceId}|${ref.contentType}|${ref.itemId}`}
       data-testid="mylist-row"
       data-content-type={ref.contentType}
       data-watched={watched || undefined}
-      onDragOver={reorder?.onDragOver}
-      onDrop={reorder?.onDrop}
+      onDragOver={reorder ? (e) => reorder.onDragOver(entry, e) : undefined}
+      onDrop={reorder ? (e) => reorder.onDrop(entry, e) : undefined}
       onDoubleClick={onOpen}
     >
-      {reorder?.dropTarget && (
+      {reorder && dropTarget && (
         <div
           aria-hidden
           className={cn(
             'pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-glow)]',
-            reorder.dropTarget === 'before' ? 'top-0' : 'bottom-0',
+            dropTarget === 'before' ? 'top-0' : 'bottom-0',
           )}
         />
       )}
@@ -120,7 +148,7 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
       {reorder && (
         <span
           draggable
-          onDragStart={reorder.onDragStart}
+          onDragStart={(e) => reorder.onDragStart(entry, e)}
           onDragEnd={reorder.onDragEnd}
           title={t('dragHandle')}
           aria-hidden
@@ -195,7 +223,7 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
             pressed={watched}
             disabled={busy}
             icon={watched ? <CircleCheck aria-hidden size={18} /> : <Circle aria-hidden size={18} />}
-            onClick={onToggleWatched}
+            onClick={() => toggleEntry(entry)}
             className={cn(watched ? 'bg-transparent text-success hover:text-success' : 'text-fg-subtle')}
             data-action="watched"
           />
@@ -210,8 +238,8 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
               tabIndex={-1}
               label={t('moveUp', { title })}
               icon={<ChevronUp aria-hidden size={16} />}
-              disabled={!reorder.canUp || busy}
-              onClick={() => reorder.onMove(-1)}
+              disabled={!canUp || busy}
+              onClick={() => reorder.onMove(entry, -1)}
               className="sm:h-7 sm:rounded-b-none"
               data-action="move-up"
             />
@@ -220,8 +248,8 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
               tabIndex={-1}
               label={t('moveDown', { title })}
               icon={<ChevronDown aria-hidden size={16} />}
-              disabled={!reorder.canDown || busy}
-              onClick={() => reorder.onMove(1)}
+              disabled={!canDown || busy}
+              onClick={() => reorder.onMove(entry, 1)}
               className="sm:h-7 sm:rounded-t-none"
               data-action="move-down"
             />
@@ -233,7 +261,7 @@ function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, 
           label={t('remove', { title })}
           icon={<X aria-hidden size={16} />}
           disabled={busy}
-          onClick={onRemove}
+          onClick={() => removeEntry(entry)}
           className="ms-auto hover:text-danger sm:ms-0"
           data-action="remove"
         />

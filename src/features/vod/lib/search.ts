@@ -108,6 +108,53 @@ export function normalizeQuery(q: string | null | undefined): string {
   return t.length >= MIN_QUERY_LENGTH ? t : '';
 }
 
+/** Lower case without accents, as the core's search index folds text. */
+function foldText(s: string): string {
+  return s.normalize('NFD').replace(/\p{M}+/gu, '').toLocaleLowerCase();
+}
+
+/** The words of a text or query, split where the core splits search terms (`fts_query`: at anything not a letter or digit). */
+export function searchTerms(text: string): string[] {
+  return foldText(text)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+/**
+ * True when every title matching `next` also matches `prev` (L3-vod-5): `next` only adds letters or
+ * words to the end of `prev`, so the answer to `prev` can preview the answer to `next`.
+ */
+export function narrowsQuery(next: string, prev: string): boolean {
+  if (!prev || next === prev) return false;
+  return foldText(next).startsWith(foldText(prev));
+}
+
+/**
+ * The core's word-prefix match, on the client: every term starts a word of the title. Stricter
+ * than the core (which also matches other fields, and substrings when no word matches), so a
+ * preview filtered with it holds only titles the new answer can hold too.
+ */
+export function previewMatches(title: string, terms: readonly string[]): boolean {
+  if (terms.length === 0) return false;
+  const words = searchTerms(title);
+  return terms.every((term) => words.some((w) => w.startsWith(term)));
+}
+
+/**
+ * The results on screen narrowed to a longer query while its answer loads (L3-vod-5): typing
+ * 'the' after 'th' answers within a frame of the key from what 'th' found. Groups left empty
+ * drop out; when nothing is left, the old results stay as they are rather than flash "No results".
+ */
+export function previewGroups(groups: SearchGroup[], terms: readonly string[]): SearchGroup[] {
+  const narrowed = groups
+    .map((g) => {
+      const hits = g.hits.filter((h) => previewMatches(h.title, terms));
+      return hits.length === g.hits.length ? g : { ...g, hits };
+    })
+    .filter((g) => g.hits.length > 0);
+  return narrowed.length > 0 ? narrowed : groups;
+}
+
 export function detailHref(ref: ItemRef): string | undefined {
   const sid = encodeURIComponent(ref.sourceId);
   const iid = encodeURIComponent(ref.itemId);

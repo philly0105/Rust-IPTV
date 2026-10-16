@@ -5,7 +5,7 @@ import { rpc } from '@/api/transport';
 
 import { Input, Toggle } from '@/ui';
 import { buildStalkerConfig, type DraftErrors, type StalkerDraft } from '../lib/draft';
-import { INFOMIR_MAC_OUI, formatMacInput, hasEdgeSpace, hasInfomirOui, looksLikeFullPortal, normalizeMac } from '../lib/validate';
+import { INFOMIR_MAC_OUI, formatMacInput, hasEdgeSpace, hasInfomirOui, inputHost, looksLikeFullPortal, normalizeMac } from '../lib/validate';
 import { ConnectionTest } from './ConnectionTest';
 import { Field } from './Field';
 import { HeadersFields } from './HeadersFields';
@@ -164,6 +164,7 @@ export function StalkerForm({
         kind="stalker"
         disabled={disabled}
         inputs={JSON.stringify(value)}
+        host={inputHost(value.portalUrl)}
         run={() => {
           const built = buildStalkerConfig(value, storedMac);
           onErrors(built.errors);

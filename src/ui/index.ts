@@ -28,6 +28,7 @@ export { Poster, hueOf, initialsOf } from './Poster';
 export type { PosterAspect, PosterProps } from './Poster';
 export { QUARTER_BLUR, useImageChain, whenIdle } from './image';
 export type { ImageChain } from './image';
+export { gateImage, pageIsScrolling } from './imageGate';
 export { Pagination, pageWindow } from './Pagination';
 export type { PaginationProps } from './Pagination';
 export { Menu } from './Menu';

@@ -754,7 +754,7 @@ pub async fn import_with(
                     Ok(())
                 })
                 .await?;
-            state.emit("sources.changed", json!({}));
+            crate::sources::emit_changed(state, None, crate::sources::ChangeReason::Catalog);
             // The import's own failure, without the "source was kept" tail
             // of its warning: the source was just rolled back.
             let reason = failures
@@ -804,7 +804,7 @@ pub async fn import_with(
     if locks_added {
         crate::parental::announce(state).await?;
     }
-    state.emit("sources.changed", json!({}));
+    crate::sources::emit_changed(state, None, crate::sources::ChangeReason::Catalog);
     tracing::info!(
         imported = report.imported,
         skipped = report.skipped,
@@ -1489,7 +1489,7 @@ async fn load_deferred(
                 }
             }
         }
-        state.emit("sources.changed", json!({}));
+        crate::sources::emit_changed(&state, Some(&d.id), crate::sources::ChangeReason::Catalog);
     }
     tracing::info!(failed, "backup import: background catalog loads finished");
 }

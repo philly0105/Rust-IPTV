@@ -253,3 +253,40 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     expect(badge.querySelector('span')?.className).toContain('truncate');
   });
 });
+
+describe('L3-vod-5: the results narrow to the typed query within a frame of the key', () => {
+  const titled = (i: number, title: string): VodItem => ({ ...movie(i), title });
+
+  it('filters the answered results at once while the longer query loads, then shows its answer', async () => {
+    let answerShort = true;
+    let release: (() => void) | undefined;
+    rpcMock.handlers['catalog.search'] = (a) => {
+      const q = (a as { query: string }).query;
+      if (q === 'black') return { live: [], movies: [titled(0, 'Black Harbor'), titled(1, 'Black Coast'), titled(2, 'Blackout')], series: [] };
+      answerShort = false;
+      return new Promise((r) => (release = () => r({ live: [], movies: [titled(0, 'Black Harbor'), titled(3, 'Black Hills')], series: [] })));
+    };
+    renderApp('/search?q=black');
+    await screen.findByText('Black Coast');
+    fireEvent.change(field(), { target: { value: 'black h' } });
+    // Same frame as the key: no debounce, no answer yet.
+    const grid = screen.getByTestId('vod-search-movies');
+    expect(within(grid).getByText('Black Harbor')).toBeTruthy();
+    expect(within(grid).queryByText('Black Coast')).toBeNull();
+    expect(within(grid).queryByText('Blackout')).toBeNull();
+    await waitFor(() => expect(answerShort).toBe(false));
+    release!();
+    await screen.findByText('Black Hills');
+    expect(screen.getByText('Black Harbor')).toBeTruthy();
+  });
+
+  it('keeps the old results when none of them match, and never says "No results" before the answer', async () => {
+    rpcMock.handlers['catalog.search'] = (a) =>
+      (a as { query: string }).query === 'black' ? { live: [], movies: [titled(0, 'Black Harbor')], series: [] } : never();
+    renderApp('/search?q=black');
+    await screen.findByText('Black Harbor');
+    fireEvent.change(field(), { target: { value: 'black z' } });
+    expect(screen.getByText('Black Harbor')).toBeTruthy();
+    expect(screen.queryByText(/No results/)).toBeNull();
+  });
+});

@@ -30,6 +30,17 @@
 //!    remembered per URL and scope for [`FAILURE_TTL`], so a broken poster
 //!    wall does not refetch on every scroll.
 //!
+//! Width hints (`fetch_sized`, `/api/img?...&w=<px>`): a request with a
+//! hint gets a copy no wider than the hint's bucket ([`resize::bucket`]),
+//! stored under its own key ([`variant_key`]) with its own row, so the cap
+//! counts what the grids actually show. A variant is made from the cached
+//! original when there is one (full-size files cached before hints existed
+//! are reused this way, then age out by LRU since the UI stops asking for
+//! them), else from one upstream fetch whose original is not kept. An image
+//! the resizer leaves alone (SVG, GIF, WebP, animated PNG, already narrow
+//! enough, see [`resize`]) is stored and served as the original, and the
+//! decision is remembered in memory so later hints skip the decode.
+//!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
 //! import hold one pooled connection waiting on the write lock, not fifty.
@@ -41,6 +52,7 @@
 pub mod rpc;
 
 mod fetch;
+pub mod resize;
 mod store;
 
 use crate::db::{self, DbPool};
@@ -54,7 +66,7 @@ use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -80,6 +92,8 @@ pub const MAX_URL_LEN: usize = 8 * 1024;
 pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
 /// Remembered failures kept at most (expired ones are pruned first).
 const MAX_FAILURES: usize = 4096;
+/// Variant keys remembered as "serve the original" at most.
+const MAX_KEPT: usize = 65_536;
 /// Extension key of the runtime singleton.
 const EXT_KEY: &str = "imagecache";
 
@@ -268,6 +282,18 @@ pub fn cache_key(url: &Url) -> String {
     hex::encode(Sha256::digest(url.as_str().as_bytes()))
 }
 
+/// Cache key of the `width`-px variant of a normalised URL. The URL never
+/// holds a fragment ([`normalize_url`] drops it), so `#w=` cannot collide
+/// with another image's key.
+pub fn variant_key(url: &Url, width: u32) -> String {
+    hex::encode(Sha256::digest(variant_label(url, width).as_bytes()))
+}
+
+/// What a variant's index row records as its URL.
+fn variant_label(url: &Url, width: u32) -> String {
+    format!("{}#w={width}", url.as_str())
+}
+
 /// The cached file of `key` under the cache folder `dir`.
 pub fn file_path(dir: &Path, key: &str) -> PathBuf {
     dir.join(&key[..2]).join(key)
@@ -395,7 +421,10 @@ type PendingRows = Arc<Mutex<HashMap<String, PendingRow>>>;
 /// What one fetch needs.
 struct Job {
     url: Url,
+    /// The key stored under: [`cache_key`], or [`variant_key`] with `width`.
     key: String,
+    /// `Some(bucket)` for a variant: `key` is its variant key.
+    width: Option<u32>,
     headers: RequestHeaders,
     client: reqwest::Client,
 }
@@ -417,6 +446,9 @@ struct ImageCache {
     failures: Mutex<HashMap<String, (Instant, ImageError)>>,
     /// Keys whose `last_access` write was queued, with the time it was.
     touched: Mutex<HashMap<String, i64>>,
+    /// Variant keys (first 64 bits) whose image the resizer leaves alone:
+    /// they are served from the original's entry.
+    kept: Mutex<HashSet<u64>>,
     next_flight: AtomicU64,
 }
 
@@ -437,6 +469,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
             pending: Arc::default(),
             failures: Mutex::default(),
             touched: Mutex::default(),
+            kept: Mutex::default(),
             next_flight: AtomicU64::new(1),
         })
     })
@@ -609,6 +642,20 @@ impl ImageCache {
         failures.insert(flight_key.to_owned(), (Instant::now(), err.clone()));
     }
 
+    /// True when the variant `key` is known to be served by the original.
+    fn is_kept(&self, key: &str) -> bool {
+        short_key(key).is_some_and(|k| self.kept.lock().contains(&k))
+    }
+
+    fn keep(&self, key: &str) {
+        let Some(k) = short_key(key) else { return };
+        let mut kept = self.kept.lock();
+        if kept.len() >= MAX_KEPT {
+            kept.clear();
+        }
+        kept.insert(k);
+    }
+
     /// Joins the flight for `job` (same URL and scope) or starts one.
     async fn join_or_start(
         self: &Arc<Self>,
@@ -700,7 +747,10 @@ impl ImageCache {
     }
 
     /// Fetches, validates and stores one image for flight `id`, and queues
-    /// its index row (pending until the writer's batch is done).
+    /// its index row (pending until the writer's batch is done). A variant
+    /// job resizes the cached original when there is one, else the fetched
+    /// body, and stores only the result (or only the original, when the
+    /// resizer leaves it alone).
     async fn download(&self, job: &Job, id: u64) -> Result<Done, ImageError> {
         // An earlier flight may have stored it after the caller looked.
         if let Some(image) = self.lookup(&job.key).await? {
@@ -708,6 +758,25 @@ impl ImageCache {
                 image,
                 fetched: false,
             });
+        }
+        let base_key = cache_key(&job.url);
+        if let Some(width) = job.width {
+            if let Some(original) = self.lookup(&base_key).await? {
+                // Evicted between the lookup and the read: fetch it below.
+                if let Ok(body) = tokio::fs::read(&original.path).await {
+                    if let Some(done) = self.store_variant(job, id, width, body).await? {
+                        return Ok(Done {
+                            fetched: false,
+                            ..done
+                        });
+                    }
+                    self.keep(&job.key);
+                    return Ok(Done {
+                        image: original,
+                        fetched: false,
+                    });
+                }
+            }
         }
         let host = job.url.host_str().unwrap_or("the image server").to_owned();
         let (content_type, body) = tokio::time::timeout(
@@ -721,14 +790,78 @@ impl ImageCache {
                 FETCH_DEADLINE.as_secs()
             ))
         })??;
+        let label = job.url.to_string();
+        let Some(width) = job.width else {
+            return self.store(&job.key, &label, id, content_type, body).await;
+        };
+        // Only the copy the caller shows is kept, not the original. The
+        // resizer borrows the body and hands it back when it keeps it.
+        let (shrunk, body) = tokio::task::spawn_blocking(move || {
+            let shrunk = resize::shrink(&body, width);
+            (shrunk, body)
+        })
+        .await
+        .map_err(|e| ImageError::local(CoreError::from(e)))?;
+        match shrunk {
+            resize::Shrunk::Resized {
+                content_type: small_type,
+                body: small,
+                ..
+            } => {
+                let label = variant_label(&job.url, width);
+                self.store(&job.key, &label, id, small_type.to_owned(), small)
+                    .await
+            }
+            resize::Shrunk::Keep => {
+                self.keep(&job.key);
+                self.store(&base_key, &label, id, content_type, body).await
+            }
+        }
+    }
+
+    /// Resizes a cached original for the variant job and stores the copy;
+    /// `None` when the resizer leaves the image alone.
+    async fn store_variant(
+        &self,
+        job: &Job,
+        id: u64,
+        width: u32,
+        body: Vec<u8>,
+    ) -> Result<Option<Done>, ImageError> {
+        let shrunk = tokio::task::spawn_blocking(move || resize::shrink(&body, width))
+            .await
+            .map_err(|e| ImageError::local(CoreError::from(e)))?;
+        match shrunk {
+            resize::Shrunk::Keep => Ok(None),
+            resize::Shrunk::Resized {
+                content_type, body, ..
+            } => {
+                let label = variant_label(&job.url, width);
+                self.store(&job.key, &label, id, content_type.to_owned(), body)
+                    .await
+                    .map(Some)
+            }
+        }
+    }
+
+    /// Writes `body` under `key` and queues its index row (`url` is what
+    /// the row records).
+    async fn store(
+        &self,
+        key: &str,
+        url: &str,
+        id: u64,
+        content_type: String,
+        body: Vec<u8>,
+    ) -> Result<Done, ImageError> {
         let bytes = body.len() as u64;
-        let path = store::write_file(&self.dir, &job.key, body)
+        let path = store::write_file(&self.dir, key, body)
             .await
             .map_err(ImageError::local)?;
         // Before the row is queued: an entry added after its batch was done
         // would never be dropped.
         self.pending.lock().insert(
-            job.key.clone(),
+            key.to_owned(),
             PendingRow {
                 flight: id,
                 content_type: content_type.clone(),
@@ -737,8 +870,8 @@ impl ImageCache {
         );
         self.send(Op::Insert {
             row: store::Row {
-                key: job.key.clone(),
-                url: job.url.to_string(),
+                key: key.to_owned(),
+                url: url.to_owned(),
                 content_type: content_type.clone(),
                 bytes,
                 at: unix_now(),
@@ -807,6 +940,11 @@ impl ImageCache {
     }
 }
 
+/// The first 64 bits of a cache key (the in-memory "kept" set).
+fn short_key(key: &str) -> Option<u64> {
+    u64::from_str_radix(key.get(..16)?, 16).ok()
+}
+
 /// [`get`] with the failure kind kept, for the HTTP routes (400/403/404/
 /// 415/502/500 per C2).
 pub async fn fetch(
@@ -814,8 +952,24 @@ pub async fn fetch(
     url: &str,
     source_id: Option<&str>,
 ) -> Result<CachedImage, ImageError> {
+    fetch_sized(state, url, source_id, None).await
+}
+
+/// [`fetch`] with a width hint in device pixels: `Some(w)` serves a copy at
+/// most [`resize::bucket`]`(w)` px wide (the original when the resizer
+/// leaves the image alone, or for hints above the largest bucket).
+pub async fn fetch_sized(
+    state: &Arc<AppState>,
+    url: &str,
+    source_id: Option<&str>,
+    width: Option<u32>,
+) -> Result<CachedImage, ImageError> {
     let url = normalize_url(url)?;
-    let key = cache_key(&url);
+    let width = width.and_then(resize::bucket);
+    let key = match width {
+        Some(w) => variant_key(&url, w),
+        None => cache_key(&url),
+    };
     let cache = cache(state);
     cache.ready().await?;
     let source = load_source(state, source_id).await?;
@@ -826,6 +980,11 @@ pub async fn fetch(
     if let Some(image) = cache.lookup(&key).await? {
         return Ok(image);
     }
+    if width.is_some() && cache.is_kept(&key) {
+        if let Some(image) = cache.lookup(&cache_key(&url)).await? {
+            return Ok(image);
+        }
+    }
     let scope = flight_scope(
         mode.as_ref().is_some_and(|m| !m.guard.allow_private),
         source.trusted.as_ref(),
@@ -835,6 +994,7 @@ pub async fn fetch(
     let job = Job {
         url,
         key,
+        width,
         headers: source.headers,
         client,
     };
@@ -871,6 +1031,7 @@ pub async fn clear(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
     cache.ready().await?;
     cache.failures.lock().clear();
     cache.touched.lock().clear();
+    cache.kept.lock().clear();
     cache.round_trip(|ack| Op::Clear { ack }).await?;
     cache.read_stats().await
 }

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type WatchlistEntry } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 
 import { captureWatched, undoWatched, useToast } from '../deps';
 import { errorText, patchList, readList, refreshMyList, refreshWatched, restoreEntry, rollbackList } from '../lib/cache';
@@ -51,7 +52,8 @@ export function useMyListActions(): MyListActions {
 
   const remove = useCallback(
     (entry: WatchlistEntry) => {
-      const title = entry.snapshot.title;
+      // The title as the row shows it ("Heat", not "EN - Heat (1995)").
+      const title = snapshotTitle(entry.ref, entry.snapshot.title).title;
       void run(itemKey(entry.ref), async () => {
         // The place in the full list, so Undo can put it back there.
         const index = readList()?.findIndex((e) => sameRef(e.ref, entry.ref)) ?? -1;
@@ -83,7 +85,8 @@ export function useMyListActions(): MyListActions {
 
   const toggleWatched = useCallback(
     (entry: WatchlistEntry) => {
-      const title = entry.snapshot.title;
+      // The title as the row shows it ("Heat", not "EN - Heat (1995)").
+      const title = snapshotTitle(entry.ref, entry.snapshot.title).title;
       const next = !entry.watched;
       const target = { ref: entry.ref };
       void run(itemKey(entry.ref), async () => {

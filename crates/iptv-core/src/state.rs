@@ -167,7 +167,11 @@ impl AppState {
             .try_with(|_| Arc::new(parking_lot::Mutex::new(CallState::Queued)))
             .ok();
         let _interrupt = slot.clone().map(InterruptOnDrop);
+        // Held until the closure ends: the background integrity check waits
+        // for a quiet database (L3-perf-core-7).
+        let activity = db::activity();
         tokio::task::spawn_blocking(move || {
+            let _activity = activity;
             pool.get()
                 .map_err(CoreError::from)
                 .and_then(|mut conn| {

@@ -13,7 +13,7 @@ import {
   Star,
   TriangleAlert,
 } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
@@ -37,6 +37,7 @@ import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
 import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { formatRating } from '../lib/format';
@@ -65,6 +66,15 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 /** Below this many visible titles, a rating-filtered Stalker grid keeps loading pages on its own. */
 const FILTERED_MIN_VISIBLE = 60;
+
+/** Characters of the query the no-results title echoes; a longer one ends in an ellipsis. */
+const ECHO_QUERY_MAX = 60;
+
+/** The query as the no-results title echoes it: at most {@link ECHO_QUERY_MAX} characters (code points). */
+function echoQuery(query: string): string {
+  const chars = Array.from(query);
+  return chars.length > ECHO_QUERY_MAX ? `${chars.slice(0, ECHO_QUERY_MAX - 1).join('')}…` : query;
+}
 
 /**
  * Grid cell for a page that failed to load (a later page timing out on a slow
@@ -188,7 +198,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   );
   const yearKey = yearRangeKey(years);
   const yearFiltered = hasYearRange(years);
-  const [searchDraft, setSearchDraft] = useState(search);
+  // URL is the source of truth for search; the input debounces into it (L3-vod-1: never over newer typing).
+  const [searchDraft, setSearchDraft] = useUrlSearchDraft({ delayMs: SEARCH_DEBOUNCE_MS });
   const settings = useSettings();
   const source = useSource(sourceId);
   const cats = useRpcQuery('catalog.categories', { sourceId, contentType: kind, includeHidden: true }, { enabled: !!sourceId });
@@ -206,24 +217,6 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     const h = setTimeout(warm, 500);
     return () => clearTimeout(h);
   }, [kind]);
-
-  // URL is the source of truth for search; the input debounces into it.
-  useEffect(() => setSearchDraft(search), [search]);
-  useEffect(() => {
-    if (searchDraft.trim() === search.trim()) return;
-    const h = setTimeout(() => {
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (searchDraft.trim()) next.set('q', searchDraft.trim());
-          else next.delete('q');
-          return next;
-        },
-        { replace: true },
-      );
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(h);
-  }, [searchDraft, search, setParams]);
 
   const setSort = (s: VodSortKey) =>
     setParams((prev) => {
@@ -373,6 +366,19 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // redirects, which replace the entry (StartupRedirect's <Navigate replace>). A link or a new sort
   // (PUSH) is a fresh visit and starts at the top.
   const returning = useNavigationType() !== 'PUSH';
+  // The grid stays mounted across a new sort, search or filter (L3-vod-3), so it goes back to the
+  // top itself; on a return, the scroll memory below then puts the old offset back. Not on Hide
+  // watched, which keeps the place (L2-vod-8).
+  const filterKey = `${sort}|${dir}|${search}|${minRating}|${englishOnly}|${yearKey}`;
+  const shownFilterKey = useRef(filterKey);
+  useLayoutEffect(() => {
+    if (shownFilterKey.current === filterKey) return;
+    shownFilterKey.current = filterKey;
+    const listbox = getListbox();
+    if (listbox) listbox.scrollTop = 0;
+  }, [filterKey]);
+  // The old titles stay while the new ones load: dimmed once the wait is long enough to notice.
+  const refreshing = !clientFiltered && first.isPlaceholderData && first.isFetching;
   useScrollMemory({
     key: memoryKey,
     getScroller: getListbox,
@@ -493,10 +499,18 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
             {kind === 'movie' ? t('movies') : t('series')}
           </Link>
-          <div className="me-auto flex min-w-0 items-baseline gap-3">
+          {/*
+            Takes only the room the row leaves (flex-basis 0), so the count arriving after load
+            truncates instead of wrapping the Filters button onto a new row (L3-visual-9).
+          */}
+          <div className="flex min-w-0 flex-1 basis-0 items-baseline gap-3">
             <h1 className="sr-only">{pageTitle}</h1>
             {/* The shell header carries the count from md up; below it the header has room for the title only. */}
-            {countText && <span className="tabular min-w-0 truncate text-sm text-fg-subtle md:hidden">{countText}</span>}
+            {countText && (
+              <span title={countText} className="tabular min-w-0 truncate text-sm text-fg-subtle md:hidden">
+                {countText}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -593,7 +607,12 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
         {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
         <div
           ref={gridWrapRef}
-          className="min-h-0 flex-1 px-4 pt-4 md:px-8"
+          aria-busy={refreshing || undefined}
+          data-refreshing={refreshing || undefined}
+          className={cn(
+            'min-h-0 flex-1 px-4 pt-4 md:px-8 motion-safe:transition-opacity motion-safe:duration-200',
+            refreshing && 'motion-safe:opacity-60 motion-safe:delay-150',
+          )}
           onContextMenu={onGridContextMenu}
           onFocus={(e) => setGridFocused(e.target.getAttribute('role') === 'listbox')}
           onBlur={(e) => {
@@ -629,7 +648,8 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             search ? (
               <EmptyState
                 icon={<SearchX size={32} />}
-                title={t('noSearchMatchTitle', { query: search })}
+                // A pasted paragraph would fill the page: the title echoes about 60 characters, the full query on hover.
+                title={<span title={echoQuery(search) !== search ? search : undefined}>{t('noSearchMatchTitle', { query: echoQuery(search) })}</span>}
                 description={t('noSearchMatchHint')}
                 action={
                   <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
@@ -682,14 +702,15 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             )
           ) : clientFiltered ? (
             <VirtualGrid<VodItem | SeriesItem>
-              // Not keyed on Hide watched (L2-vod-8): flipping it refills the cells and keeps the cursor.
-              key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${englishOnly}|${yearKey}`}
+              // Keyed on the category only (L3-vod-3): a new sort or filter refills the mounted cells.
+              key={categoryId}
               items={filteredItems}
               minColumnWidth={coverWidth}
               aspect="poster"
               label={categoryName}
               testId="vod-grid"
               initialActiveIndex={restoredIndex}
+              resetKey={filterKey}
               getKey={(item) => item.ref.itemId}
               render={(item, _index, state) => (
                 <GridPoster
@@ -717,14 +738,16 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             />
           ) : (
             <VirtualGrid<number>
-              // Not keyed on Hide watched (L2-vod-8): the pages keep their titles until the new ones arrive.
-              key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${yearKey}`}
+              // Keyed on the category only (L2-vod-8, L3-vod-3): a new sort, search or filter refills the
+              // mounted cells, whose pages keep their titles until the new ones arrive (useVodPage).
+              key={categoryId}
               items={indices}
               minColumnWidth={coverWidth}
               aspect="poster"
               label={categoryName}
               testId="vod-grid"
               initialActiveIndex={restoredIndex}
+              resetKey={filterKey}
               render={(i, _index, state) => (
                 <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} locks={locks} />
               )}

@@ -22,13 +22,13 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { type CSSProperties, type RefObject, useEffect, useId, useRef, useState } from 'react';
+import { type CSSProperties, type RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source, SourceKind } from '@/api/types';
-import { cn, hueOf, initialsOf, Menu, Skeleton } from '@/ui';
+import { cn, hueOf, initialsOf, Skeleton } from '@/ui';
 
 import { railLinks } from './railLinks';
 import { useShellStore } from './store';
@@ -132,8 +132,62 @@ export function railRevealDelta(box: { top: number; bottom: number }, target: { 
   return 0;
 }
 
+type MenuComponent = typeof import('@/ui/Menu').Menu;
+let railMenu: MenuComponent | null = null;
+let railMenuLoad: Promise<MenuComponent> | null = null;
+
+/**
+ * The collapsed rail's source menu loads in its own chunk: a static import put src/ui/Menu.tsx
+ * (about 10 kB) into the entry chunk for a menu only the collapsed rail shows (L2-checks-2).
+ * The collapsed rail asks for it as it mounts, before its sources load, so the entries normally
+ * render the real menu from the start.
+ */
+function loadRailMenu(): Promise<MenuComponent> {
+  railMenuLoad ??= import('@/ui/Menu').then((m) => (railMenu = m.Menu));
+  return railMenuLoad;
+}
+
+/** The menu component once loaded, and a function that asks for it again. */
+function useRailMenu(want: boolean): [MenuComponent | null, () => void] {
+  const [menu, setMenu] = useState(() => railMenu);
+  const live = useRef(true);
+  const request = useCallback(() => {
+    loadRailMenu().then(
+      (m) => {
+        if (live.current) setMenu(() => m);
+      },
+      () => {
+        // A failed chunk load leaves the look-alike button, and the next press tries again.
+        railMenuLoad = null;
+      },
+    );
+  }, []);
+  useEffect(() => {
+    live.current = true;
+    if (want && !menu) request();
+    return () => {
+      live.current = false;
+    };
+  }, [want, menu, request]);
+  return [menu, request];
+}
+
 function SourceEntry({ source, collapsed, active, tour }: { source: Source; collapsed: boolean; active: boolean; tour?: 'live' }) {
   const { t } = useTranslation('shell');
+  const [RailMenu, requestRailMenu] = useRailMenu(collapsed);
+  const collapsedItemRef = useRef<HTMLLIElement>(null);
+  // What the user did to the look-alike trigger before the menu arrived: focused it (focus moves
+  // to the real trigger) or pressed it (the menu opens as it arrives).
+  const intent = useRef<'focus' | 'open' | null>(null);
+  useLayoutEffect(() => {
+    const was = intent.current;
+    if (!RailMenu || !was) return;
+    intent.current = null;
+    const trigger = collapsedItemRef.current?.querySelector('button');
+    if (!trigger) return;
+    trigger.focus();
+    if (was === 'open') trigger.click();
+  }, [RailMenu]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [expanded, setExpanded] = useState(active);
@@ -180,30 +234,64 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
     // Icons only, so the monogram opens the source's own links (Live, Movies, Series, Radio,
     // Favorites, Recent) in a menu: below lg the rail never expands, and a lone link to Live
     // left a phone with no way to its movies or series.
+    const triggerClassName = cn(itemClass(active, true), 'w-full');
+    const trigger = (
+      <span title={label} className="inline-flex">
+        <SourceMark source={source} errorDot={!!source.lastError} />
+      </span>
+    );
+    const open = () => {
+      intent.current = 'open';
+      requestRailMenu();
+    };
     return (
-      <li data-tour={tour} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
-        <Menu
-          label={label}
-          align="start"
-          // Beside the monogram, not over the next ones: the rail is one icon wide.
-          placement="inline-end"
-          triggerClassName={cn(itemClass(active, true), 'w-full')}
-          trigger={
-            <span title={label} className="inline-flex">
-              <SourceMark source={source} errorDot={!!source.lastError} />
-            </span>
-          }
-          items={links.map((l) => {
-            const current = pathname === l.to || pathname.startsWith(`${l.to}/`);
-            return {
-              id: l.id,
-              label: t(l.labelKey),
-              icon: <l.icon size={15} className={cn(current && 'text-accent')} />,
-              hint: current ? <span className="sr-only">{t('railCurrentPage')}</span> : undefined,
-              onSelect: () => navigate(l.to),
-            };
-          })}
-        />
+      <li ref={collapsedItemRef} data-tour={tour} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
+        {RailMenu ? (
+          <RailMenu
+            label={label}
+            align="start"
+            // Beside the monogram, not over the next ones: the rail is one icon wide.
+            placement="inline-end"
+            triggerClassName={triggerClassName}
+            trigger={trigger}
+            items={links.map((l) => {
+              const current = pathname === l.to || pathname.startsWith(`${l.to}/`);
+              return {
+                id: l.id,
+                label: t(l.labelKey),
+                icon: <l.icon size={15} className={cn(current && 'text-accent')} />,
+                hint: current ? <span className="sr-only">{t('railCurrentPage')}</span> : undefined,
+                onSelect: () => navigate(l.to),
+              };
+            })}
+          />
+        ) : (
+          // The menu's own trigger, as it renders closed, until the menu's chunk is in.
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={false}
+            aria-label={label}
+            className={triggerClassName}
+            data-rail-menu-pending=""
+            onClick={open}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                open();
+              }
+            }}
+            onFocus={() => {
+              intent.current ??= 'focus';
+            }}
+            onBlur={(e) => {
+              // Focus moved on to another control; a blur with no next element is this button leaving.
+              if (e.relatedTarget && intent.current === 'focus') intent.current = null;
+            }}
+          >
+            {trigger}
+          </button>
+        )}
       </li>
     );
   }
@@ -225,7 +313,9 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
         )}
       >
         <SourceMark source={source} />
-        <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent font-medium">{source.name}</span>
+        <span dir="auto" title={source.name} className="min-w-0 flex-1 truncate text-match-parent font-medium">
+          {source.name}
+        </span>
         {source.lastError ? (
           // aria-label is not allowed on a plain span; the sr-only text joins the button's name.
           <span className="h-2 w-2 shrink-0 rounded-full bg-danger" title={t('sourceHasError')}>
@@ -269,6 +359,23 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
   );
 }
 
+/**
+ * The global links' most height: all of it while the sources keep RAIL_SOURCES_MIN (10rem: their
+ * heading and two or three sources), and never under half the rail, so a very short window
+ * splits the room. A percentage of the rail's middle, which has a definite flexed height.
+ */
+const RAIL_PRIMARY_MAX = 'max-h-[max(50%,calc(100%-10rem))]';
+
+/**
+ * The source the first-run tour's "Live TV" step points at: the first with live channels and no
+ * import error, else the first with live channels at all, else none (the step then shows as a
+ * centred card). The first in the list could be one that failed to import (L3-app-6).
+ */
+export function liveTourSource(sources: readonly Source[] | undefined): Source | undefined {
+  const watchable = (sources ?? []).filter((s) => s.channelCount > 0);
+  return watchable.find((s) => !s.lastError) ?? watchable[0];
+}
+
 /** Fade masks for the rail's scrolling list: a soft edge where links continue out of view. */
 const FADE = '24px';
 export function railFadeMask(top: boolean, bottom: boolean): CSSProperties | undefined {
@@ -280,8 +387,8 @@ export function railFadeMask(top: boolean, bottom: boolean): CSSProperties | und
 
 /**
  * At laptop heights the rail's links overflow: the edge that has more links fades out, and on
- * every route change the active link scrolls into the visible part of the rail (only the rail
- * scrolls, never the page).
+ * every route change the active link scrolls into the visible part of its list (only the rail
+ * scrolls, never the page). The global links and the sources scroll apart (see Rail).
  */
 function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string, deps: readonly unknown[]): { top: boolean; bottom: boolean } {
   const [fade, setFade] = useState({ top: false, bottom: false });
@@ -324,8 +431,16 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const location = useLocation();
   const activeSourceId = /^\/s\/([^/]+)/.exec(location.pathname)?.[1];
+  const primaryRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fade = useRailScroll(scrollRef, `${location.pathname}|${sources.data ? 'ready' : 'pending'}`, [sources.data, collapsed]);
+  const scrollKey = `${location.pathname}|${sources.data ? 'ready' : 'pending'}`;
+  const primaryFade = useRailScroll(primaryRef, scrollKey, [collapsed]);
+  const fade = useRailScroll(scrollRef, scrollKey, [sources.data, collapsed]);
+  const tourSourceId = liveTourSource(sources.data)?.id;
+  // Collapsed, each source is a menu: start its chunk now, while the sources still load.
+  useEffect(() => {
+    if (collapsed) void loadRailMenu().catch(() => {});
+  }, [collapsed]);
 
   return (
     <nav
@@ -347,85 +462,103 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
         </Link>
       </div>
 
-      <div
-        ref={scrollRef}
-        data-testid="rail-scroll"
-        data-fade-top={fade.top || undefined}
-        data-fade-bottom={fade.bottom || undefined}
-        style={railFadeMask(fade.top, fade.bottom)}
-        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden px-2 pb-3"
-      >
-        <ul className="flex flex-col gap-0.5">
-          {PRIMARY.map((l) => (
-            <li key={l.to}>
-              <RailNavLink {...l} collapsed={collapsed} tour={l.tour === 'search' && !autoCollapsed ? undefined : l.tour} />
-            </li>
-          ))}
-        </ul>
+      {/*
+        Two lists that scroll apart: the global links keep their full height (scrolling on their
+        own only when the window is too short to leave the sources 10rem), and the
+        sources take the rest. Opening a source's page reveals its link inside the sources list,
+        so Home, Search and the guide stay on screen (L3-visual-2); one shared scroller pushed
+        them out at every laptop height.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col gap-5">
+        <div
+          ref={primaryRef}
+          data-testid="rail-primary"
+          data-fade-top={primaryFade.top || undefined}
+          data-fade-bottom={primaryFade.bottom || undefined}
+          style={railFadeMask(primaryFade.top, primaryFade.bottom)}
+          className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2', RAIL_PRIMARY_MAX)}
+        >
+          <ul className="flex flex-col gap-0.5">
+            {PRIMARY.map((l) => (
+              <li key={l.to}>
+                <RailNavLink {...l} collapsed={collapsed} tour={l.tour === 'search' && !autoCollapsed ? undefined : l.tour} />
+              </li>
+            ))}
+          </ul>
+        </div>
 
-        <section aria-labelledby="rail-sources-heading" className="flex flex-col gap-1">
-          <div className={cn('flex items-center', collapsed ? 'justify-center' : 'justify-between px-3')}>
-            <h2 id="rail-sources-heading" className={cn('text-xs font-semibold text-fg-subtle', collapsed && 'sr-only')}>
-              {t('sources')}
-            </h2>
-            <Link
-              to="/sources?add=1"
-              title={t('addSource')}
-              aria-label={t('addSource')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
-            >
-              <Plus aria-hidden size={16} />
-            </Link>
-          </div>
-          {sources.isPending ? (
-            <div className="flex flex-col gap-2 px-3 py-1" aria-hidden>
-              <Skeleton className="h-6" />
-              <Skeleton className="h-6 w-4/5" />
-            </div>
-          ) : sources.isError ? (
-            <div
-              data-testid="rail-sources-error"
-              className={cn('flex items-center gap-2', collapsed ? 'justify-center' : 'justify-between ps-3 pe-1')}
-            >
-              <p role="alert" className={cn('min-w-0 text-sm text-danger', collapsed && 'sr-only')}>
-                {t('sourcesLoadFailed')}
-              </p>
-              <button
-                type="button"
-                onClick={() => void sources.refetch()}
-                disabled={sources.isFetching}
-                title={t('retry', { ns: 'common' })}
-                aria-label={t('retry', { ns: 'common' })}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors disabled:opacity-50"
+        <div
+          ref={scrollRef}
+          data-testid="rail-scroll"
+          data-fade-top={fade.top || undefined}
+          data-fade-bottom={fade.bottom || undefined}
+          style={railFadeMask(fade.top, fade.bottom)}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 pb-3"
+        >
+          <section aria-labelledby="rail-sources-heading" className="flex flex-col gap-1">
+            <div className={cn('flex items-center', collapsed ? 'justify-center' : 'justify-between px-3')}>
+              <h2 id="rail-sources-heading" className={cn('text-xs font-semibold text-fg-subtle', collapsed && 'sr-only')}>
+                {t('sources')}
+              </h2>
+              <Link
+                to="/sources?add=1"
+                title={t('addSource')}
+                aria-label={t('addSource')}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
               >
-                <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
-              </button>
+                <Plus aria-hidden size={16} />
+              </Link>
             </div>
-          ) : sources.data && sources.data.length > 0 ? (
-            <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
-              {sources.data.map((s, i) => (
-                <SourceEntry
-                  key={s.id}
-                  source={s}
-                  collapsed={collapsed}
-                  active={activeSourceId === encodeURIComponent(s.id) || activeSourceId === s.id}
-                  // The tour's "Live TV" step points at the first source: its channels live under it.
-                  tour={i === 0 ? 'live' : undefined}
-                />
-              ))}
-            </ul>
-          ) : (
-            !collapsed && (
-              <p className="px-3 text-sm text-fg-muted">
-                {t('noSourcesYet')}{' '}
-                <Link to="/sources?add=1" className="rounded-sm font-medium text-accent hover:underline active:text-accent-pressed">
-                  {t('addFirstSource')}
-                </Link>
-              </p>
-            )
-          )}
-          <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />
-        </section>
+            {sources.isPending ? (
+              <div className="flex flex-col gap-2 px-3 py-1" aria-hidden>
+                <Skeleton className="h-6" />
+                <Skeleton className="h-6 w-4/5" />
+              </div>
+            ) : sources.isError ? (
+              <div
+                data-testid="rail-sources-error"
+                className={cn('flex items-center gap-2', collapsed ? 'justify-center' : 'justify-between ps-3 pe-1')}
+              >
+                <p role="alert" className={cn('min-w-0 text-sm text-danger', collapsed && 'sr-only')}>
+                  {t('sourcesLoadFailed')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void sources.refetch()}
+                  disabled={sources.isFetching}
+                  title={t('retry', { ns: 'common' })}
+                  aria-label={t('retry', { ns: 'common' })}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors disabled:opacity-50"
+                >
+                  <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
+                </button>
+              </div>
+            ) : sources.data && sources.data.length > 0 ? (
+              <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
+                {sources.data.map((s) => (
+                  <SourceEntry
+                    key={s.id}
+                    source={s}
+                    collapsed={collapsed}
+                    active={activeSourceId === encodeURIComponent(s.id) || activeSourceId === s.id}
+                    // The tour's "Live TV" step points at a source whose channels are there to watch.
+                    tour={s.id === tourSourceId ? 'live' : undefined}
+                  />
+                ))}
+              </ul>
+            ) : (
+              !collapsed && (
+                <p className="px-3 text-sm text-fg-muted">
+                  {t('noSourcesYet')}{' '}
+                  <Link to="/sources?add=1" className="rounded-sm font-medium text-accent hover:underline active:text-accent-pressed">
+                    {t('addFirstSource')}
+                  </Link>
+                </p>
+              )
+            )}
+            <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />
+          </section>
+        </div>
       </div>
 
       <div className="flex shrink-0 flex-col gap-0.5 border-t border-divider p-2">

@@ -482,9 +482,14 @@ export interface RpcMap {
   /** All enabled, or one; runs in background; emits epg.progress and epg.changed. */
   'epg.refresh': Cmd<{ url?: string }, void>;
   /** `offsetMinutes` (`settings.epgOffsetMinutes`, -720..720): "now" is the programme airing at `now - offset`; times stay unshifted. */
-  'epg.nowNext': Cmd<{ refs: ItemRef[]; offsetMinutes?: number }, Record<ItemKey, EpgNowNext>>;
+  /**
+   * `withDescription: false` leaves `description` off every programme (about half the bytes);
+   * omitted or true keeps it. An older core ignores the flag and always sends descriptions.
+   */
+  'epg.nowNext': Cmd<{ refs: ItemRef[]; offsetMinutes?: number; withDescription?: boolean }, Record<ItemKey, EpgNowNext>>;
   'epg.programs': Cmd<{ ref: ItemRef; from: string; to: string }, EpgProgram[]>;
-  'epg.grid': Cmd<{ refs: ItemRef[]; from: string; to: string }, Record<ItemKey, EpgProgram[]>>;
+  /** `withDescription` as for `epg.nowNext`. */
+  'epg.grid': Cmd<{ refs: ItemRef[]; from: string; to: string; withDescription?: boolean }, Record<ItemKey, EpgProgram[]>>;
   'epg.channelsSearch': Cmd<{ query: string; limit?: number }, EpgChannelMatch[]>;
   /** `null` = explicitly unmapped. */
   'epg.setMapping': Cmd<{ ref: ItemRef; epgChannelId: string | null }, void>;

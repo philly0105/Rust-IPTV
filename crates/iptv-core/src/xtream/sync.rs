@@ -33,7 +33,7 @@ use super::url::{clean_extension, is_xmltv_url_for, xmltv_url};
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgLinks, ImportSummary, XtreamSourceConfig};
-use crate::sources::progress;
+use crate::sources::{progress, progress_step, SaveStep};
 use crate::state::AppState;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -250,8 +250,14 @@ pub async fn sync_source(
         // The run's token, read here (task-local) before waiting on the pool
         // or the write lock (C8; see `CatalogWriter::begin`).
         let cancel = crate::sources::import_cancel();
+        // A refresh deletes the previous rows first (seconds on a large
+        // account): say so instead of leaving "parsing" up (L3-perf-core-4).
+        let replacing = parts.iter().any(|p| previous.rows(p.content_type) > 0);
         state
             .db_call(move |conn| {
+                if replacing {
+                    progress_step(&state2, &sid, SaveStep::Replacing, 0);
+                }
                 let mut done = 0u64;
                 // No message: the phase label already says "Saving"; a raw
                 // content type under the bar is not translated (L2-sources-home-7).
@@ -261,10 +267,20 @@ pub async fn sync_source(
                         progress(&state2, &sid, "saving", done, Some(total), None);
                     }
                 };
-                let counts =
-                    replace_catalogs_with(conn, &sid, parts, cancel, &mut on_row, |tx, counts| {
-                        store_prints(tx, &sid, prints, &written, counts)
-                    })?;
+                // Every row is written: the indexes, the search index and the
+                // counts follow before the commit.
+                let mut on_finish = |written: u64| {
+                    progress_step(&state2, &sid, SaveStep::Indexing, written);
+                };
+                let counts = replace_catalogs_with(
+                    conn,
+                    &sid,
+                    parts,
+                    cancel,
+                    &mut on_row,
+                    &mut on_finish,
+                    |tx, counts| store_prints(tx, &sid, prints, &written, counts),
+                )?;
                 // The rewrite grew the WAL by about the catalog's size.
                 crate::db::checkpoint_truncate(conn);
                 Ok(counts)
@@ -662,6 +678,7 @@ pub(crate) struct CatalogPart {
 /// `cancel` is the run's token, taken by the caller before `db_call` (see
 /// [`catalog::CatalogWriter::begin`]); `None` falls back to the registered
 /// writer token.
+#[cfg(test)]
 pub(crate) fn replace_catalogs(
     conn: &mut Connection,
     source_id: &str,
@@ -669,19 +686,29 @@ pub(crate) fn replace_catalogs(
     cancel: Option<tokio_util::sync::CancellationToken>,
     on_row: &mut dyn FnMut(ContentType),
 ) -> CoreResult<HashMap<ContentType, u64>> {
-    replace_catalogs_with(conn, source_id, parts, cancel, on_row, |_, _| Ok(()))
+    replace_catalogs_with(
+        conn,
+        source_id,
+        parts,
+        cancel,
+        on_row,
+        &mut |_| {},
+        |_, _| Ok(()),
+    )
 }
 
 /// [`replace_catalogs`], with `before_commit` run inside the same
 /// transaction after the rows are written (given the counts), so state that
 /// describes the catalog (the Xtream fingerprints) commits or rolls back
-/// with it.
+/// with it. `on_finish` is called with the rows written once every row is
+/// in, before the writer builds its indexes and counts.
 pub(crate) fn replace_catalogs_with(
     conn: &mut Connection,
     source_id: &str,
     parts: Vec<CatalogPart>,
     cancel: Option<tokio_util::sync::CancellationToken>,
     on_row: &mut dyn FnMut(ContentType),
+    on_finish: &mut dyn FnMut(u64),
     before_commit: impl FnOnce(&Connection, &HashMap<ContentType, u64>) -> CoreResult<()>,
 ) -> CoreResult<HashMap<ContentType, u64>> {
     let cancel = cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id));
@@ -714,6 +741,7 @@ pub(crate) fn replace_catalogs_with(
         for ct in &types {
             counts.insert(*ct, w.inserted_of(*ct));
         }
+        on_finish(w.inserted());
         w.finish(&categories)?;
     }
     before_commit(&tx, &counts)?;

@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "{{count}} opname bezig",
   "scheduledSummaryNow_other": "{{count}} opnamen bezig",
   "scheduledEmptyTitle": "Niets gepland",
-  "scheduledEmptyBody": "Open de tv-gids en kies Herinner me of Opnemen bij een programma.",
+  "scheduledEmptyBody": "Open de tv-gids en kies Herinner me, Opnemen of Serie opnemen bij een programma.",
   "scheduledOpenGuide": "Tv-gids openen",
   "scheduledNow": "Wordt opgenomen",
   "scheduledUpcoming": "Binnenkort",

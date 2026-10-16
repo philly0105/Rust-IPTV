@@ -48,6 +48,11 @@ export function pauseWhenOffscreen(el: Element | null): (() => void) | undefined
   return () => io.unobserve(el);
 }
 
+/** Stops watching an element that no longer animates (a placeholder hidden once its poster loaded). */
+export function releaseOffscreen(el: Element): void {
+  observer?.unobserve(el);
+}
+
 /** Test hook: forget the shared observer so a stubbed IntersectionObserver is picked up. */
 export function resetOffscreenObserver(): void {
   observer?.disconnect();

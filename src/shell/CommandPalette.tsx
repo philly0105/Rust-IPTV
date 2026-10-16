@@ -1,4 +1,5 @@
 import { Command as Cmdk, defaultFilter } from 'cmdk';
+import type { TFunction } from 'i18next';
 import {
   AlarmClock,
   Bookmark,
@@ -195,9 +196,22 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
   }, [q, sources.data, favorites.data, recent.data, t, navigate]);
 }
 
+/**
+ * What a settings section holds, as search words: its i18n keyword list (`settingsGeneralKeywords`
+ * and so on) in the UI language and in English, so "language", "theme" or "pin" find the section
+ * whatever language the app is in (L3-app-8).
+ */
+function settingsKeywords(key: string, section: string, t: TFunction, en: TFunction): string[] {
+  const words = new Set(['settings', section]);
+  for (const list of [t(`${key}Keywords`), en(`${key}Keywords`)]) {
+    for (const w of list.split(',')) if (w.trim()) words.add(w.trim());
+  }
+  return [...words];
+}
+
 /** Built-in navigation, source, and settings commands. Exported for tests. */
 export function usePaletteItems(): PaletteItem[] {
-  const { t } = useTranslation(['shell', 'parental']);
+  const { t, i18n } = useTranslation(['shell', 'parental']);
   const navigate = useNavigate();
   const sources = useVisibleSources();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
@@ -267,6 +281,7 @@ export function usePaletteItems(): PaletteItem[] {
           ),
       });
     }
+    const en = i18n.getFixedT('en', 'shell');
     for (const section of SETTINGS_SECTIONS) {
       const key = `settings${section[0]!.toUpperCase()}${section.slice(1)}`;
       items.push({
@@ -275,7 +290,7 @@ export function usePaletteItems(): PaletteItem[] {
         group: set,
         icon: SettingsIcon,
         run: go(`/settings/${section}`),
-        keywords: ['settings', section],
+        keywords: settingsKeywords(key, section, t, en),
       });
     }
 

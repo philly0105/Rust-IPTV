@@ -1,7 +1,7 @@
 // The list page (/lists/:listId) and /lists: channels from several sources in
 // the Live ChannelList, play through Live's playChannel with zapping kept in
 // the list, the dropped-channels tray, and the designed empty states.
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { itemKey, type Channel, type ParentalLock, type SourceKind } from '@/api/types';
@@ -178,13 +178,63 @@ describe('list page', () => {
     expect(screen.getByTestId('list-ribbon').className).toContain('max-md:hidden');
   });
 
-  it('keeps the ribbon in place while the channels load (L2-vod-5: no shift when they arrive)', async () => {
+  // L3-visual-4 changed this test: it pinned a ribbon held in place on a phone while the channels
+  // load with nothing playing, which then hid itself on an empty list (CLS 0.15). The phone ribbon
+  // now comes with playback only, as on Live; the hold stays for a channel playing.
+  it('keeps the ribbon in place while the channels load and something plays (L2-vod-5: no shift when they arrive)', async () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
     stubLiveExtras();
     rpc.handlers['lists.items'] = () => new Promise(() => undefined);
+    usePlayerStore.setState({ source: { url: 'http://x/1.ts', kind: 'direct', title: 'BBC One', ref: BBC.ref, isLive: true, isRadio: false } });
     h.renderAt('/lists/L1', routes);
     const ribbon = await screen.findByTestId('list-ribbon');
     expect(ribbon.className).not.toContain('max-md:hidden');
+    expect(screen.getByTestId('list-stage').hasAttribute('data-idle')).toBe(false);
+  });
+
+  describe('on a phone with nothing playing (L3-visual-4, L3-visual-5)', () => {
+    const phoneHidden = (id: string) => screen.getByTestId(id).className.split(' ').includes('max-md:hidden');
+
+    it('a list with channels opens with a slim idle prompt and no ribbon, from the first frame', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+      stubLiveExtras();
+      rpc.handlers['lists.items'] = () => new Promise(() => undefined);
+      h.renderAt('/lists/L1', routes);
+      const stage = await screen.findByTestId('list-stage');
+      // The phone prompt is a 56 px bar, not a black 16:9 box; md and up keep the stage.
+      expect(stage.hasAttribute('data-idle')).toBe(true);
+      expect(stage.className.split(' ')).toEqual(expect.arrayContaining(['max-md:h-14', 'md:flex-1']));
+      expect(stage.className.split(' ')).not.toContain('aspect-video');
+      expect(within(stage).getByText('Pick a channel from the list.')).toBeTruthy();
+      expect(phoneHidden('list-ribbon')).toBe(true);
+      expect(phoneHidden('list-stage-section')).toBe(false);
+      await waitFor(() => expect(screen.getByTestId('channel-list-loading')).toBeTruthy());
+    });
+
+    it('an empty list drops the stage and the ribbon as soon as the lists say it is empty, before its rows load', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [])]);
+      stubLiveExtras();
+      rpc.handlers['lists.items'] = () => new Promise(() => undefined);
+      h.renderAt('/lists/L1', routes);
+      await waitFor(() => expect(phoneHidden('list-stage-section')).toBe(true));
+      expect(phoneHidden('list-ribbon')).toBe(true);
+      expect(screen.getByTestId('channel-list-loading')).toBeTruthy();
+    });
+
+    it('an empty list shows its empty state without a stage above it; playback brings the 16:9 stage back', async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [])]);
+      stubLiveExtras();
+      h.renderAt('/lists/L1', routes);
+      expect(await screen.findByText('This list is empty')).toBeTruthy();
+      expect(phoneHidden('list-stage-section')).toBe(true);
+      act(() =>
+        usePlayerStore.setState({ source: { url: 'http://x/1.ts', kind: 'direct', title: 'BBC One', ref: BBC.ref, isLive: true, isRadio: false } }),
+      );
+      await waitFor(() => expect(phoneHidden('list-stage-section')).toBe(false));
+      expect(screen.getByTestId('list-stage').className.split(' ')).toContain('aspect-video');
+      // No channel of this list to show: the ribbon's empty state stays off the phone.
+      expect(phoneHidden('list-ribbon')).toBe(true);
+    });
   });
 
   it('the header count adds up to the sidebar one, naming the dropped channels', async () => {
@@ -298,6 +348,43 @@ describe('list page', () => {
     });
     expect(await screen.findByTestId('edit-list-dialog')).toBeTruthy();
   });
+
+  it('L3-app-pages-x1: on a phone the header leaves the room to the list name', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Weekend picks', [BBC])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    const bar = screen.getByRole('button', { name: 'Edit channels' });
+    await waitFor(() => expect(useShellStore.getState().header?.actions).toBeTruthy());
+    const header = render(<>{useShellStore.getState().header!.actions}</>).container;
+    // Edit channels stays in the channels bar right under the header; the header's copy is wide-only.
+    const edit = within(header).getByRole('button', { name: 'Edit channels' });
+    expect(edit.className).toContain('max-sm:hidden');
+    expect(bar.className).not.toContain('max-sm:hidden');
+    // Manage lists shrinks to its icon there, keeping its name for screen readers and the tooltip.
+    const manage = within(header).getByRole('button', { name: 'Manage lists' });
+    expect(manage.getAttribute('title')).toBe('Manage lists');
+    expect(manage.className).toContain('max-sm:w-8');
+    expect(within(manage).getByText('Manage lists').className).toContain('max-sm:sr-only');
+  });
+
+  it('L3-live-ch-x2: PageUp/PageDown on a list row are left to channel up/down while a live channel plays', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    // Nothing plays: the list pages.
+    expect(fireEvent.keyDown(rows()[0]!, { key: 'PageDown' })).toBe(false);
+    act(() => usePlayerStore.setState({ source: { url: 'http://x/1.ts', kind: 'direct', title: 'BBC One', ref: BBC.ref, isLive: true, isRadio: false } }));
+    // A live channel plays: the key goes through to the playback shortcuts; Shift still pages.
+    expect(fireEvent.keyDown(rows()[0]!, { key: 'PageDown' })).toBe(true);
+    expect(fireEvent.keyDown(rows()[0]!, { key: 'PageUp' })).toBe(true);
+    expect(fireEvent.keyDown(rows()[0]!, { key: 'PageDown', shiftKey: true })).toBe(false);
+    // Played outside the app (MPV, VLC), there is nothing to zap here.
+    act(() => usePlayerStore.setState({ mode: 'external' }));
+    expect(fireEvent.keyDown(rows()[0]!, { key: 'PageDown' })).toBe(false);
+    usePlayerStore.setState({ mode: 'inline' });
+  });
 });
 
 describe('/lists', () => {
@@ -372,11 +459,25 @@ describe('Home rails', () => {
     expect(within(sports).getByRole('button', { name: /Arte/ })).toBeTruthy();
     expect(within(sports).queryByRole('button', { name: /CNN/ })).toBeNull();
     expect(within(sports).getByText('2 channels')).toBeTruthy();
-    // The rail asks the guide only for the channels it shows.
-    await waitFor(() => expect(rpc.callsOf('epg.nowNext').at(-1)).toEqual({ refs: [BBC.ref, ARTE.ref] }));
+    // The rail asks the guide only for the channels it shows, without descriptions (L3-serve-ui-7).
+    await waitFor(() => expect(rpc.callsOf('epg.nowNext').at(-1)).toEqual({ refs: [BBC.ref, ARTE.ref], withDescription: false }));
     act(() => usePendingRemovals.setState({ ids: new Set() }));
     expect(await within(sports).findByRole('button', { name: /CNN/ })).toBeTruthy();
     expect(within(sports).getByText('3 channels')).toBeTruthy();
+  });
+
+  // L3-vod-x4: an empty list's rail showed a skeleton row while its channels loaded, then
+  // collapsed, shifting the rest of Home.
+  it('while channels load, a list with channels shows its skeleton and an empty list shows nothing', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC], { onDashboard: true }), h.coreList('L2', 'Empty', [], { onDashboard: true })]);
+    // The channels never arrive, so both rails stay loading.
+    rpc.handlers['lists.items'] = () => new Promise(() => {});
+    h.renderAt('/dashboard', [{ path: '/dashboard', element: <CustomListRails /> }]);
+    const sports = await screen.findByTestId('dashboard-rail-list-L1');
+    expect(within(sports).getByLabelText('Loading Sports').getAttribute('aria-busy')).toBe('true');
+    await waitFor(() => expect(rpc.callsOf('lists.items')).toHaveLength(2));
+    expect(screen.queryByTestId('dashboard-rail-list-L2')).toBeNull();
+    expect(screen.queryByLabelText('Loading Empty')).toBeNull();
   });
 
   it('renders nothing when no list is on Home', async () => {

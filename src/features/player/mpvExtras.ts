@@ -9,6 +9,30 @@ import { peekSettings, subscribeSettings } from './store';
 import { setStatsProvider } from './streamInfo';
 import { useSyncStore } from './sync';
 
+/**
+ * Embedded mpv could not start in this session (not found, or it failed to start): later plays
+ * hand over to the built-in player at once instead of trying it again and posting another
+ * notice per zap. The verdict ends when the player choice or the mpv path in Settings changes,
+ * or with Try MPV again (`clearMpvUnavailable`).
+ */
+let unavailable: { player: string | undefined; mpvPath: string | undefined } | null = null;
+
+export function markMpvUnavailable(): void {
+  const s = peekSettings();
+  unavailable = { player: s?.player, mpvPath: s?.mpvPath };
+}
+
+export function clearMpvUnavailable(): void {
+  unavailable = null;
+}
+
+/** True while embedded mpv is known not to start (see `markMpvUnavailable`). */
+export function mpvUnavailable(): boolean {
+  const s = peekSettings();
+  if (unavailable && (s?.player !== unavailable.player || s?.mpvPath !== unavailable.mpvPath)) unavailable = null;
+  return unavailable !== null;
+}
+
 function sendDelay(name: 'audio-delay' | 'sub-delay', ms: number): void {
   // mpv takes seconds.
   void rpc('mpv.setProperty', { name, value: ms / 1000 }).catch(() => undefined);

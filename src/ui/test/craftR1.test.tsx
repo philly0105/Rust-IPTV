@@ -47,7 +47,8 @@ describe('toasts and centred dialogs', () => {
     // The layout rule itself: phone widths only, so desktop toasts stay beside the dialog.
     expect(viewport().className).toContain('max-sm:data-[over-dialog]:top-4');
     expect(viewport().className).toContain('max-sm:data-[over-dialog]:bottom-auto');
-    expect(viewport().className).toMatch(/(^|\s)bottom-4(\s|$)/);
+    // 16 px from the bottom, or above a [data-toast-avoid] mini player (L3-desktop-4).
+    expect(viewport().className).toContain('bottom-[max(calc(var(--spacing)*4),var(--toast-clear,0px))]');
     rerender(<Harness open={false} />);
     expect(viewport().hasAttribute('data-over-dialog')).toBe(false);
   });

@@ -118,7 +118,8 @@ export function overLimit(loads: readonly SourceLoad[]): SourceLoad[] {
 /** The programme on air per tile (guide data), refreshed every minute. */
 export function useNowPlaying(tiles: readonly MultiviewTile[]): Map<ItemKey, string> {
   const refs = useMemo(() => tiles.map((t) => t.ref), [tiles]);
-  const args = { refs };
+  // Titles only: the descriptions would be about half the bytes (L3-serve-ui-5).
+  const args = { refs, withDescription: false };
   const q = useQuery({
     queryKey: rpcKey('epg.nowNext', args),
     queryFn: async ({ signal }) => (await rpcRaw('epg.nowNext', args, { signal })) as Record<ItemKey, EpgNowNext>,

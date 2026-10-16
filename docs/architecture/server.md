@@ -21,14 +21,17 @@ iptv-server --port 7180 --data-dir ./data --static ./dist
 Logs go to stderr and to the rotating JSON log under `<data-dir>/logs`
 (`RUST_LOG` sets the filter). Ctrl-C (and SIGTERM on Unix) starts a graceful
 shutdown: event sockets get a close frame, new connections stop, and open
-requests get 10 s to finish.
+requests get 10 s to finish. Then running recordings are closed
+(`recording::shutdown`) and `db::note_clean_shutdown` removes the
+database's running marker, so the next start can skip the background check
+of a large database (SPEC C3).
 
 ## Layout
 
 | File | Role |
 | --- | --- |
 | `src/main.rs` | CLI (clap), boot (`logging::init`, `AppState::new` with a `BroadcastSink`, `rpc::init_all`), bind, shutdown |
-| `src/lib.rs` | `Server` (shared state), `ServerOptions`, `router()`, request tracing |
+| `src/lib.rs` | `Server` (shared state), `ServerOptions`, `router()`, request tracing, response compression (`compression()`) |
 | `src/api.rs` | `/api/rpc/{cmd}`, `/api/events`, `/api/health`, API 404 |
 | `src/guard.rs` | Origin / Host checks on `/api`, hardening headers |
 | `src/proxy/mod.rs` | `/api/proxy` handler, upstream client, redirects, streaming |
@@ -40,6 +43,7 @@ requests get 10 s to finish.
 | `tests/server.rs` | End-to-end tests over real sockets |
 | `tests/l2_import_detached.rs` | A `sources.add` whose client goes away still finishes |
 | `tests/l2_cross_cancel.rs` | Which commands stop when the client goes away (`CANCEL_ON_DISCONNECT`); every write runs detached |
+| `tests/l3_serve_compression.rs` | Which replies are compressed; precompressed files win; Range and images stay plain |
 
 ## Routes
 
@@ -91,13 +95,16 @@ The web UI (`startWeb` in `src/api/events.ts`) keeps one socket per page while
 anything is subscribed:
 
 - Reconnect backoff: 500 ms doubling, plus up to 30 % jitter, at most 4 s
-  between attempts, so a restarted server is noticed within about 5 s without
-  any nudge. An open resets it.
+  between attempts. An open resets it.
 - A waiting socket skips the rest of its wait and connects at once (backoff
   reset) on window `focus`, `online`, the page becoming visible, or an RPC the
   server answered. The transport reports an answer through
   `notifyServerAnswered` (`src/api/reachability.ts`) on a success or on one of
   the core's own error payloads, not on a proxy's 502.
+- While the wait before the next attempt is longer than 1 s
+  (`HEALTH_POLL_MS`), the page asks `GET /api/health` every second, and an
+  ok answer connects at once, so a restarted server is noticed within about a
+  second without any other nudge.
 - Any open that follows a closed socket or a failed attempt dispatches a local
   `events.lagged`, so every cached query is refetched: events sent while the
   socket was down are lost, and RPCs made while the server was unreachable
@@ -200,13 +207,19 @@ path from the request. Unknown id or missing file: 404. Range handling and
 headers as for `/api/files`.
 
 ### Everything else: the UI
-`ServeDir` over `--static` with precompressed `.br`/`.gz` support.
+`ServeDir` over `--static` (`precompressed_br`, `precompressed_gzip`). When
+the client accepts it and a file has a `.br` or `.gz` copy beside it (a web
+`pnpm build` writes them; see performance.md), that copy is sent as it is,
+with its `Content-Encoding`.
 
 - `/assets/*-<hash>.*` (Vite output): `Cache-Control: public, max-age=31536000, immutable`.
 - `index.html` and other root files (service worker, manifest): `no-cache`.
 - A miss on a path whose last segment has no extension and is outside
   `/assets/` returns `index.html` (client-side routes deep-link). Missing
-  assets stay 404, so a stale tab never gets HTML for a script.
+  assets stay 404, so a stale tab never gets HTML for a script. This
+  fallback (`serve_index`) serves `index.html` with `precompressed_br` and
+  `precompressed_gzip` too, so a deep link gets the build's
+  `index.html.br` or `.gz` like `/`.
 - If `index.html` is missing, a short 503 page says to run `pnpm build`; the
   API keeps working.
 - Only GET and HEAD; other methods 405.
@@ -215,6 +228,18 @@ headers as for `/api/files`.
   only in the web build (never in Tauri). It serves `/assets/*` cache-first,
   page navigations network-first with the cached shell as the offline
   fallback, and never touches `/api/*`.
+
+### Compression
+`compression()` in `src/lib.rs` (tower-http `CompressionLayer`) wraps only
+`POST /api/rpc/{cmd}` and the UI fallback. It sends brotli or gzip at level
+4 (`COMPRESS_LEVEL`), as the client's `Accept-Encoding` allows, for bodies of
+at least 1 KiB (`COMPRESS_MIN_BYTES`), and adds `Vary: Accept-Encoding`. It
+leaves alone images other than SVG, `text/event-stream`, fonts (`font/*`,
+`application/font-woff`), and replies that already carry `Content-Encoding`
+(the precompressed UI files) or `Content-Range` (a Range request).
+`/api/events`, `/api/proxy`, `/api/img`, `/api/files` and `/api/recordings`
+are outside the layer: they are streams, byte ranges or media that is
+already compressed. The desktop loopback proxy does not use it.
 
 ## Security
 

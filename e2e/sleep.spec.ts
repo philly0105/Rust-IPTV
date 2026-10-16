@@ -78,7 +78,8 @@ test.describe.serial('zap banner and sleep timer', () => {
     await expect(banner).toBeHidden({ timeout: 3_000 });
 
     // Fullscreen: a zap shows it inside the fullscreen element. The pointer leaves the corner
-    // first: in fullscreen the left edge opens the channel panel, whose search field takes keys.
+    // first: in fullscreen a dwell on the left edge opens the channel panel, which focuses the
+    // playing channel's row, and typed keys go on to its search field instead of zapping.
     const box = await stage.locator('video').first().boundingBox();
     if (!box) throw new Error('no video to point at');
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);

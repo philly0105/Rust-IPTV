@@ -285,7 +285,8 @@ describe('Tour', () => {
 
   it('shows a centred card over a plain scrim when the anchor is missing', () => {
     open();
-    expect(screen.getByTestId('tour-scrim')).toBeTruthy();
+    // data-scrim: mpv dims the native video to match it (mpvBounds SCRIM_SELECTOR, L3-cross-XB-6).
+    expect(screen.getByTestId('tour-scrim').hasAttribute('data-scrim')).toBe(true);
     expect(screen.queryByTestId('tour-spotlight')).toBeNull();
     expect(card().getAttribute('data-side')).toBe('center');
   });

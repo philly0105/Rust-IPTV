@@ -23,6 +23,7 @@ export {
   useToast,
 } from '@/ui';
 export { useShell, useShortcut } from '@/shell';
+export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 export { PlayerStage, playItem, playSource, usePlayerStore } from '@/features/player';
 // recording:
 export {

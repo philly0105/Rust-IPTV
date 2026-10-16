@@ -25,6 +25,13 @@ let stopUpstream: (() => void) | null = null;
 const BACKOFF_MIN_MS = 500;
 // Low cap: a restarted server is noticed within about 5 s even without a focus or RPC nudge.
 const BACKOFF_MAX_MS = 4_000;
+/**
+ * While a reconnect is further off than this, `GET /api/health` is asked every this often, and an
+ * answer reconnects at once (L3-app-10: a page that errored during an outage kept "Couldn't reach
+ * the server" for up to 4 s after the server was back). One small request a second, only while
+ * the socket is down.
+ */
+export const HEALTH_POLL_MS = 1_000;
 
 function setState(s: ConnectionState): void {
   if (s === connectionState) return;
@@ -90,6 +97,28 @@ function startWeb(): () => void {
   let stopped = false;
   // Set once a socket closed or failed to connect: the next open may have missed events.
   let tried = false;
+  let healthTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const stopHealth = (): void => {
+    if (healthTimer) clearTimeout(healthTimer);
+    healthTimer = null;
+  };
+  const armHealth = (): void => {
+    if (!healthTimer && typeof fetch === 'function') healthTimer = setTimeout(probeHealth, HEALTH_POLL_MS);
+  };
+  function probeHealth(): void {
+    healthTimer = null;
+    if (stopped || !timer) return;
+    fetch('/api/health', { cache: 'no-store' })
+      .then((r) => {
+        if (r.ok) retryNow();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        // Still waiting out the backoff: ask again in a second.
+        if (!stopped && timer) armHealth();
+      });
+  }
 
   const schedule = (): void => {
     tried = true;
@@ -98,10 +127,12 @@ function startWeb(): () => void {
     const delay = Math.min(BACKOFF_MAX_MS, base + Math.random() * base * 0.3);
     attempt += 1;
     timer = setTimeout(connect, delay);
+    if (delay > HEALTH_POLL_MS) armHealth();
   };
 
   function connect(): void {
     timer = null;
+    stopHealth();
     if (stopped) return;
     setState('connecting');
     let socket: WebSocket;
@@ -160,6 +191,7 @@ function startWeb(): () => void {
     window.removeEventListener('focus', retryNow);
     document.removeEventListener('visibilitychange', onVisible);
     offAnswered();
+    stopHealth();
     if (timer) clearTimeout(timer);
     if (ws) {
       ws.onclose = null;

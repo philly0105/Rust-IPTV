@@ -45,8 +45,11 @@ export interface MediaState {
   /** Embedded mpv: when the current `mpv.record` began (ms epoch), for the REC timer. */
   recordStartedAt?: number;
   upNext?: { source: PlayerSource; deadline: number };
-  /** `at`: when it was raised (ms epoch), so chrome that mounts a moment later still shows it. */
-  osd?: { primary: string; secondary?: string; key: number; at?: number };
+  /**
+   * `at`: when it was raised (ms epoch), so chrome that mounts a moment later still shows it.
+   * `locked`: a zap passing a locked channel (parental Ask mode); drawn with a lock glyph.
+   */
+  osd?: { primary: string; secondary?: string; key: number; at?: number; locked?: boolean };
   channelPanelOpen: boolean;
   externalRuns: ExternalRun[];
   commands: MediaCommands | null;
@@ -93,9 +96,11 @@ export function resetMedia(): void {
 }
 
 let osdKey = 0;
-export function showOsd(primary: string, secondary?: string): void {
+export function showOsd(primary: string, secondary?: string, opts?: { locked?: boolean }): void {
   const at = Date.now();
-  useMediaStore.setState({ osd: secondary ? { primary, secondary, key: ++osdKey, at } : { primary, key: ++osdKey, at } });
+  const osd: NonNullable<MediaState['osd']> = secondary ? { primary, secondary, key: ++osdKey, at } : { primary, key: ++osdKey, at };
+  if (opts?.locked) osd.locked = true;
+  useMediaStore.setState({ osd });
 }
 
 export const UP_NEXT_SECONDS = 10;

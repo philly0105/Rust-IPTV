@@ -205,7 +205,8 @@ describe('Downloads folder bar (L2-guide-library-14)', () => {
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
     const dir = await screen.findByTestId('downloads-dir');
     expect(dir.getAttribute('title')).toBe('D:\\Media\\Downloads\\Tsrust');
-    expect(screen.queryByText(/1 queued/)).toBeNull();
+    // Once: the fake header renders the subtitle since loop 3, so the summary is there and nowhere else.
+    expect(screen.getAllByText(/1 queued/).map((el) => el.dataset.testid)).toEqual(['page-subtitle']);
   });
 });
 

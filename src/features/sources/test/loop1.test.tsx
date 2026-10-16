@@ -100,12 +100,16 @@ describe('connection test verdict for an inactive account (L1-core-7)', () => {
 
 describe('waiting for the first progress (L1-sources-home-10)', () => {
   it('names the server and counts the seconds until data arrives', () => {
-    const { rerender } = render(<ImportProgressView entry={undefined} kind="m3u" host="lists.example.com" startedAt={Date.now() - 5_200} />);
+    const { rerender } = render(<ImportProgressView entry={undefined} kind="m3u" host="lists.example.com" startedAt={Date.now() - 1_200} />);
     expect(screen.getByTestId('import-progress-phase').textContent).toBe('Connecting to lists.example.com…');
+    expect(screen.getByTestId('import-progress-elapsed').textContent).toMatch(/^1\s?s/);
+    // Past 2 s it says it is still trying (L3-import-ui-4).
+    rerender(<ImportProgressView entry={undefined} kind="m3u" host="lists.example.com" startedAt={Date.now() - 5_200} />);
+    expect(screen.getByTestId('import-progress-phase').textContent).toBe('Still trying to reach lists.example.com…');
     expect(screen.getByTestId('import-progress-elapsed').textContent).toMatch(/^5\s?s/);
     // The core's `connecting` event, which opens every run, waits too.
     rerender(<ImportProgressView entry={{ sourceId: 's', phase: 'connecting', done: 0, at: 0 }} kind="m3u" host="lists.example.com" startedAt={Date.now() - 5_200} />);
-    expect(screen.getByTestId('import-progress-phase').textContent).toBe('Connecting to lists.example.com…');
+    expect(screen.getByTestId('import-progress-phase').textContent).toBe('Still trying to reach lists.example.com…');
     // A fetching event with no bytes yet still waits.
     rerender(<ImportProgressView entry={{ sourceId: 's', phase: 'fetching', done: 0, at: 0 }} kind="m3u" host="lists.example.com" startedAt={Date.now() - 5_200} />);
     expect(screen.getByTestId('import-progress').getAttribute('data-waiting')).toBe('true');

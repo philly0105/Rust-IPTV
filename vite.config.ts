@@ -1,7 +1,11 @@
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlib, gzip } from 'node:zlib';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 // Tauri dev on a device sets TAURI_DEV_HOST; desktop dev uses localhost.
 const host = process.env['TAURI_DEV_HOST'];
@@ -53,8 +57,59 @@ function chunkFileName(chunk: { name: string; facadeModuleId: string | null; mod
   return `assets/${dir && dir !== 'src' ? dir : 'chunk'}-index-[hash].js`;
 }
 
+const brotli = promisify(brotliCompress);
+const gz = promisify(gzip);
+/** Text assets worth compressing; the small ones cost more in headers than they save. */
+const COMPRESSIBLE = /\.(?:js|css|html|svg|json|webmanifest|txt|xml)$/;
+const COMPRESS_MIN_BYTES = 1024;
+
+async function filesUnder(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((e) => (e.isDirectory() ? filesUnder(join(dir, e.name)) : [join(dir, e.name)])));
+  return nested.flat();
+}
+
+/**
+ * Server mode (L3-serve-ui-3): writes `.br` (quality 11) and `.gz` (level 9) next to every text
+ * asset of a web build. The server's file service sends them instead of compressing each response
+ * itself, which saved about 25 ms of CPU per cold UI load on loopback, and quality 11 is about 25 %
+ * smaller than the on-the-fly level. A desktop build (`TAURI_ENV_PLATFORM`, set by `tauri build`)
+ * skips it: Tauri embeds the dist folder and compresses it itself.
+ */
+function precompress(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'tsrust-precompress',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    async closeBundle() {
+      if (process.env['TAURI_ENV_PLATFORM']) return;
+      const files = (await filesUnder(outDir)).filter((f) => COMPRESSIBLE.test(f));
+      await Promise.all(
+        files.map(async (file) => {
+          const data = await readFile(file);
+          if (data.length < COMPRESS_MIN_BYTES) return;
+          const [br, gzipped] = await Promise.all([
+            brotli(data, {
+              params: {
+                [zlib.BROTLI_PARAM_QUALITY]: 11,
+                [zlib.BROTLI_PARAM_MODE]: zlib.BROTLI_MODE_TEXT,
+                [zlib.BROTLI_PARAM_SIZE_HINT]: data.length,
+              },
+            }),
+            gz(data, { level: 9 }),
+          ]);
+          await Promise.all([writeFile(`${file}.br`, br), writeFile(`${file}.gz`, gzipped)]);
+        }),
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), precompress()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
@@ -90,12 +145,16 @@ export default defineConfig({
         // imports and keep their own lazy chunks, so they are not listed.
         manualChunks: vendorChunk,
         chunkFileNames: chunkFileName,
-        // Merge app chunks under 10 kB into a neighbour (L2-perf-ui-7). Measured in
-        // server mode, cold dashboard: 68 JS requests (39 under 4 kB), 1,270 kB before;
-        // 33 requests (4 under 4 kB), 1,313 kB (+3 %) after; all routes in one session
-        // 97 -> 49 requests; entry 139 kB -> 163 kB, 144 kB with the pure wrappers above (budget 268 kB). 12 kB gained nothing
-        // more; without per-language locale chunks 10 kB cost +11 % bytes.
-        experimentalMinChunkSize: 10_000,
+        // Merge app chunks under 4 kB into a neighbour (L2-perf-ui-7: 68 JS requests on a cold
+        // dashboard, 39 of them under 4 kB). Rollup merges a small chunk shared by several lazy
+        // pages into the entry, because the entry is always loaded: at 10 kB that put 40 kB of
+        // lazy-only code (subtitle style fields, Tabs, VirtualRows, the file pickers) in the
+        // entry. Measured on the loop 3 tree (L3 "need XB2 vite"): entry 162.0 kB at 10 kB,
+        // 143.0 kB at 4 kB, 141.0 kB with no merging; 84 / 117 / 160 JS chunks (1 / 22 / 75
+        // under 4 kB); every route visited in one session 59 / 88 requests; cold first paint on
+        // loopback the same within noise. Without per-language locale chunks merging cost +11 %
+        // bytes.
+        experimentalMinChunkSize: 4_000,
       },
     },
   },

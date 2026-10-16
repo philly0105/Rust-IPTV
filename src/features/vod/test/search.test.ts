@@ -4,7 +4,18 @@ import type { CatalogSearchResult } from '@/api/rpc';
 import type { Source } from '@/api/types';
 
 import { targetIndex } from '../lib/gridNav';
-import { detailHref, groupSearchResults, normalizeQuery, sourceFacets, splitStalkerResults } from '../lib/search';
+import {
+  detailHref,
+  groupSearchResults,
+  narrowsQuery,
+  normalizeQuery,
+  previewGroups,
+  previewMatches,
+  searchTerms,
+  sourceFacets,
+  splitStalkerResults,
+  type SearchGroup,
+} from '../lib/search';
 
 const src = (id: string, name: string, kind: Source['kind']) => ({ id, name, kind }) as Source;
 const sources = [src('a', 'Alpha IPTV', 'xtream'), src('b', 'Beta Portal', 'stalker')];
@@ -99,5 +110,39 @@ describe('grid keyboard targets', () => {
     expect(targetIndex('Home', 4, 5, 12)).toBe(0);
     expect(targetIndex('Enter', 4, 5, 12)).toBeNull();
     expect(targetIndex('ArrowRight', 0, 5, 0)).toBeNull();
+  });
+});
+
+describe('L3-vod-5: narrowing the results on screen to a longer query', () => {
+  it('splits terms where the core does and folds case and accents', () => {
+    expect(searchTerms('Spider-Man: Café  2')).toEqual(['spider', 'man', 'cafe', '2']);
+  });
+
+  it('narrows only when the new query extends the answered one', () => {
+    expect(narrowsQuery('the', 'th')).toBe(true);
+    expect(narrowsQuery('black h', 'black')).toBe(true);
+    expect(narrowsQuery('Black Harbor', 'black')).toBe(true);
+    expect(narrowsQuery('th', 'the')).toBe(false);
+    expect(narrowsQuery('the', 'the')).toBe(false);
+    expect(narrowsQuery('blue', '')).toBe(false);
+    expect(narrowsQuery('bla', 'blu')).toBe(false);
+  });
+
+  it('matches like the core word-prefix search: every term starts a word', () => {
+    expect(previewMatches('Black Harbor (2024)', searchTerms('black har'))).toBe(true);
+    expect(previewMatches('Black Harbor', searchTerms('harbor bl'))).toBe(true);
+    expect(previewMatches('Northbound', searchTerms('bound'))).toBe(false);
+    expect(previewMatches('Café Society', searchTerms('cafe'))).toBe(true);
+    expect(previewMatches('Anything', [])).toBe(false);
+  });
+
+  it('keeps the old results whole when nothing would be left, instead of an empty list', () => {
+    const hit = (title: string) => ({ key: title, title }) as SearchGroup['hits'][number];
+    const groups: SearchGroup[] = [
+      { kind: 'movies', hits: [hit('The Rover'), hit('Thunder Road')] },
+      { kind: 'live', hits: [hit('Thai TV')] },
+    ];
+    expect(previewGroups(groups, searchTerms('the'))).toEqual([{ kind: 'movies', hits: [hit('The Rover')] }]);
+    expect(previewGroups(groups, searchTerms('zzz'))).toBe(groups);
   });
 });

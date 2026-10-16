@@ -204,7 +204,12 @@ function DashboardBody() {
 
   const nowRefs = useMemo(() => liveFavorites.map((f) => f.ref), [liveFavorites]);
   const epgOffset = settings.data?.epgOffsetMinutes ?? 0;
-  const nowNext = useRpcQuery('epg.nowNext', epgOffset ? { refs: nowRefs, offsetMinutes: epgOffset } : { refs: nowRefs }, { enabled: nowRefs.length > 0, staleTime: 60_000 });
+  // The cards read only the programme's title and times: no descriptions, about half the bytes (L3-serve-ui-8).
+  const nowNext = useRpcQuery(
+    'epg.nowNext',
+    epgOffset ? { refs: nowRefs, offsetMinutes: epgOffset, withDescription: false } : { refs: nowRefs, withDescription: false },
+    { enabled: nowRefs.length > 0, staleTime: 60_000 },
+  );
 
   // Rail queries actually on screen (each query once), for the shared-error collapse.
   const railQueries = [

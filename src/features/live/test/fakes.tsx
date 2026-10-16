@@ -254,9 +254,12 @@ export interface PlayerState {
   durationSeconds?: number;
   queue: PlayerSource[];
   zapContext?: { sourceId: string; categoryId?: string };
+  play(source: PlayerSource, opts?: PlayOpts): Promise<void>;
+  stop(): void;
 }
+type PlayOpts = { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc' };
 
-export const usePlayerStore = create<PlayerState>(() => ({
+export const usePlayerStore = create<PlayerState>((set) => ({
   mode: 'inline',
   status: 'idle',
   isFullscreen: false,
@@ -265,10 +268,30 @@ export const usePlayerStore = create<PlayerState>(() => ({
   muted: false,
   positionSeconds: 0,
   queue: [],
+  // As the real store: an external play opens the chosen player (MPV by default) and hands the stage to it.
+  async play(source, opts) {
+    recorded.play.push({ source, opts });
+    const mode = opts?.mode ?? 'inline';
+    set({ source, mode, queue: opts?.queue ?? [], status: 'loading', error: undefined, dock: mode === 'external' ? 'hidden' : 'stage' });
+    if (mode !== 'external') return;
+    try {
+      await rpc('player.openExternal', { player: opts?.externalPlayer ?? 'mpv', source });
+      set({ status: 'playing' });
+    } catch (err) {
+      set({ status: 'error', error: err instanceof Error ? err.message : String(err), dock: 'stage' });
+    }
+  },
+  stop() {
+    set({ source: undefined, status: 'idle', error: undefined, queue: [], dock: 'hidden', mode: 'inline' });
+  },
 }));
 
 /** Recorded calls, for assertions. */
-export const recorded = { playItem: [] as PlayItemArgs[], playSource: [] as PlayerSource[] };
+export const recorded = {
+  playItem: [] as PlayItemArgs[],
+  playSource: [] as PlayerSource[],
+  play: [] as { source: PlayerSource; opts?: PlayOpts }[],
+};
 
 export async function playSource(source: PlayerSource): Promise<void> {
   recorded.playSource.push(source);

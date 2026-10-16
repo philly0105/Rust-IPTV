@@ -13,11 +13,13 @@
  *   `{ combo: 'shift+delete', descKey: 'channels:shortcutHide', area: 'Live' }`.
  *
  * The dialogs download on first use, so the entry chunk only carries the
- * hooks, the host and the store.
+ * hooks, the host and the store. `preloadChannelEditDialogs()` fetches them
+ * ahead of time (the Live page does at idle), so the first F2 opens at once.
  */
 
 export { ChannelEditDialogHost } from './DialogHost';
 export { HiddenChannelsDialog } from './HiddenChannelsDialog';
+export { preloadChannelEditDialogs } from './preload';
 export type { HiddenChannelsDialogProps } from './HiddenChannelsDialog';
 export { useHiddenChannelCount } from './edits';
 export { HIDE_COMBO, RENAME_COMBO, useChannelEditMenuItems } from './menu';

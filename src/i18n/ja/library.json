@@ -217,7 +217,7 @@
   "scheduledSummaryNow_one": "録画中 {{count}} 件",
   "scheduledSummaryNow_other": "録画中 {{count}} 件",
   "scheduledEmptyTitle": "予定はありません",
-  "scheduledEmptyBody": "番組表を開き、番組で「リマインド」または「録画」を選んでください。",
+  "scheduledEmptyBody": "番組表を開き、番組で「リマインド」「録画」または「シリーズ録画」を選んでください。",
   "scheduledOpenGuide": "番組表を開く",
   "scheduledNow": "録画中",
   "scheduledUpcoming": "今後の予定",

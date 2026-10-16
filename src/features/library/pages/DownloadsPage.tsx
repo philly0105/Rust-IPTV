@@ -91,15 +91,16 @@ export function DownloadsPage() {
   useShortcut('delete', () => runFocused(() => 'remove'), { description: t('shortcutRemove'), area });
   useShortcut('o', () => runFocused(() => 'reveal'), { description: t('shortcutReveal'), area, enabled: isDesktop });
 
-  const headerActions = useMemo(
-    () => (
-      <Link to="/my-videos" className={buttonClass('ghost', 'sm')}>
+  const headerActions = useMemo(() => {
+    const label = completedCount > 0 ? t('openMyVideosCount', { count: completedCount }) : t('openMyVideos');
+    return (
+      // Icon only on a phone, so neither the label nor the page title is cut (L3-visual-6).
+      <Link to="/my-videos" className={buttonClass('ghost', 'sm')} title={label}>
         <Library size={16} aria-hidden />
-        {completedCount > 0 ? t('openMyVideosCount', { count: completedCount }) : t('openMyVideos')}
+        <span className="max-sm:sr-only">{label}</span>
       </Link>
-    ),
-    [completedCount, t],
-  );
+    );
+  }, [completedCount, t]);
   const title = t('title');
   usePageHeader(title, summary || undefined, headerActions);
 

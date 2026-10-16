@@ -17,7 +17,7 @@ import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
-import { currentLocation, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
+import { currentLocation, installDomStubs, keyboardFocus, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -172,7 +172,7 @@ describe('CategoryGridPage: back from a detail view', () => {
     renderAt('/s/src1/movies/c/c1', [gridRoute, detailStub]);
     await screen.findByText('Movie 0');
     const lb = listbox();
-    act(() => lb.focus());
+    keyboardFocus(lb);
     fireEvent.keyDown(lb, { key: 'ArrowRight' });
     fireEvent.keyDown(lb, { key: 'Enter' });
     await screen.findByText('back-stub');
@@ -493,7 +493,7 @@ describe('focus is always visible', () => {
   it('the keyboard cursor draws the focus ring on the artwork', async () => {
     renderAt('/s/src1/movies/c/c1', [gridRoute]);
     await screen.findByText('Movie 0');
-    act(() => listbox().focus());
+    keyboardFocus(listbox());
     await waitFor(() => expect(optionAt(0)?.getAttribute('data-active')).toBe('true'));
     expect(optionAt(0)!.querySelector('.ring-focus')).not.toBeNull();
   });

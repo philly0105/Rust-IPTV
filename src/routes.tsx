@@ -1,7 +1,7 @@
 import { Compass } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createBrowserRouter, isRouteErrorResponse, Link, Navigate, useRouteError, type RouteObject } from 'react-router';
+import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, useRouteError, type RouteObject } from 'react-router';
 
 import { getConnectionState, onConnectionState } from '@/api/events';
 import { isDesktop, RpcError } from '@/api/transport';
@@ -201,6 +201,19 @@ export const routes: RouteObject[] = [
     ],
   },
 ];
+
+/**
+ * Starts downloading the lazy page chunks of `path` without rendering anything (L3-ui-data-x5).
+ * The router starts a deep link's chunks itself as it is created, but `/` only redirects to the
+ * saved screen once settings are in and the shell has rendered, so main.tsx calls this as soon as
+ * settings arrive: the page chunk then downloads alongside the language and the first render. A
+ * failed download is left to the route, which tries again and shows the error.
+ */
+export function preloadRoute(path: string): void {
+  for (const { route } of matchRoutes(routes, path) ?? []) {
+    if (typeof route.lazy === 'function') void route.lazy().catch(() => undefined);
+  }
+}
 
 export function createAppRouter() {
   const router = createBrowserRouter(routes);

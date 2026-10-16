@@ -88,11 +88,13 @@ export function boundsClear(b: Bounds, reserved: Rect[]): boolean {
 
 /**
  * Chrome inside the player host that the native window must never cover. Docked, the window
- * shrinks around it (the options menu grows the dock upward); in fullscreen it is cut out.
+ * shrinks around it; in fullscreen it is cut out. Menus are not chrome but overlays: one that
+ * opens over the docked video (the playback options, the track and sleep views) is cut out as
+ * a hole, so the picture keeps its size instead of shrinking while the menu is open.
  */
-export const RESERVED_SELECTOR = '[data-player-controls], [data-mpv-reserved], [role="menu"]';
+export const RESERVED_SELECTOR = '[data-player-controls], [data-mpv-reserved]';
 
-/** The player's own popovers over the video: always holes, even inside the host. */
+/** The player's own popovers over the video: always holes, even inside reserved chrome. */
 export const PLAYER_OVERLAY_SELECTOR = '[data-mpv-overlay]';
 
 /**
@@ -106,8 +108,8 @@ export const GLOBAL_RESERVED_SELECTOR = '[data-toast-viewport] [data-toast-id], 
  * Transient UI that floats over the video, anywhere in the document: the player's own popovers
  * (`data-mpv-overlay`: the video's context menu, the zap banner, stream info), every menu and
  * tooltip (most are portalled to the body), and dialogs (the command palette, the tour card).
- * They are cut out of the native window as holes, so the video keeps its size and place.
- * A menu inside the player host stays reserved chrome (`RESERVED_SELECTOR`).
+ * They are cut out of the native window as holes, so the video keeps its size and place,
+ * inside the player host too.
  */
 export const OVERLAY_SELECTOR = `${PLAYER_OVERLAY_SELECTOR}, [role="menu"], [role="tooltip"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]`;
 
@@ -118,10 +120,72 @@ export const MODAL_SELECTOR = '[aria-modal="true"], dialog[open]';
 export const MODAL_HIDE_SHARE = 0.5;
 
 /**
+ * Full-window backdrops: a modal dialog's scrim (the command palette's), a drawer's or a sheet's.
+ * The native video sits above the DOM, so a scrim cannot darken it; mpv dims itself to match
+ * instead (`measureScrim`, `dimOverlayCommand`). Layers mark themselves with `data-scrim`; the
+ * class match stays for a backdrop that does not carry the attribute yet.
+ */
+export const SCRIM_SELECTOR = '[data-scrim], .fixed.inset-0.bg-scrim';
+
+/**
  * Anything whose arrival or removal can change the layout: the mutation filter in MpvSurface
  * re-measures only for these (simple selectors: they are matched against detached nodes too).
  */
-export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer]`;
+export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, ${SCRIM_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer]`;
+
+/** A scrim colour: 0-255 channels and 0-1 alpha. */
+export interface Dim {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/** `rgb()`/`rgba()` as computed styles report it (comma or space syntax), or null. */
+export function parseRgb(css: string): Dim | null {
+  const m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+)(%?))?\s*\)$/.exec(css.trim());
+  if (!m) return null;
+  const alpha = m[4] === undefined ? 1 : Number(m[4]) / (m[5] ? 100 : 1);
+  return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: Math.min(1, Math.max(0, alpha)) };
+}
+
+/**
+ * The colour of the scrim over the video, or null when none is up. In fullscreen or PiP only a
+ * scrim inside that layer is seen. With several, the last (topmost) wins.
+ */
+export function measureScrim(surface: Element): Dim | null {
+  const layer = topLayer();
+  let dim: Dim | null = null;
+  for (const node of Array.from(document.querySelectorAll(SCRIM_SELECTOR))) {
+    if (node.contains(surface) || (layer && !layer.contains(node))) continue;
+    const b = node.getBoundingClientRect();
+    if (b.width <= 0 || b.height <= 0) continue;
+    const c = parseRgb(getComputedStyle(node).backgroundColor);
+    if (c && c.a > 0) dim = c;
+  }
+  return dim;
+}
+
+/** The mpv OSD overlay id the dim uses (mpv allows 0-63; the core accepts only `osd-overlay` this narrow). */
+export const DIM_OVERLAY_ID = 63;
+
+/**
+ * The `mpv.command` that dims the video like `dim` (an ASS rectangle over the whole window,
+ * letterbox included), or removes the dim when null.
+ */
+export function dimOverlayCommand(dim: Dim | null): (string | number)[] {
+  if (!dim) return ['osd-overlay', DIM_OVERLAY_ID, 'none', ''];
+  const hex = (n: number): string =>
+    Math.round(Math.min(255, Math.max(0, n)))
+      .toString(16)
+      .padStart(2, '0')
+      .toUpperCase();
+  // ASS colours are &HBBGGRR&, and its alpha counts transparency (00 is opaque).
+  const color = `&H${hex(dim.b)}${hex(dim.g)}${hex(dim.r)}&`;
+  const alpha = `&H${hex(255 * (1 - dim.a))}&`;
+  const rect = 'm -10 -10 l 10000 -10 10000 10000 -10 10000';
+  return ['osd-overlay', DIM_OVERLAY_ID, 'ass-events', `{\\an7\\pos(0,0)\\bord0\\shad0\\1c${color}\\1a${alpha}\\p1}${rect}{\\p0}`, 0, 720, 0];
+}
 
 /**
  * Measure the live DOM: the surface, every clipping ancestor up to the viewport, the
@@ -188,7 +252,7 @@ function measureParts(surface: Element): Parts {
     return b.width > 0 && b.height > 0 ? rectOf(b) : null;
   };
   const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
-  /** The player's own popovers are holes; other host chrome (its menus too) is reserved. */
+  /** The player's own popovers are holes; other host chrome (the control bar) is reserved. */
   const reservedInHost = (node: Element): boolean =>
     host.contains(node) && node.matches(RESERVED_SELECTOR) && !node.matches(PLAYER_OVERLAY_SELECTOR);
   const overlays: Rect[] = [];

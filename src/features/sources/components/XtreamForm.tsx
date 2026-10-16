@@ -4,7 +4,7 @@ import { rpc } from '@/api/transport';
 
 import { Input } from '@/ui';
 import { buildXtreamConfig, type DraftErrors, type XtreamDraft } from '../lib/draft';
-import { hasEdgeSpace, parseXtreamLink } from '../lib/validate';
+import { hasEdgeSpace, inputHost, parseXtreamLink } from '../lib/validate';
 import { ConnectionTest } from './ConnectionTest';
 import { Field } from './Field';
 import { SecretInput } from './SecretInput';
@@ -84,6 +84,7 @@ export function XtreamForm({
         kind="xtream"
         disabled={disabled}
         inputs={JSON.stringify(value)}
+        host={inputHost(value.serverUrl)}
         run={() => {
           const built = buildXtreamConfig(value);
           onErrors(built.errors);

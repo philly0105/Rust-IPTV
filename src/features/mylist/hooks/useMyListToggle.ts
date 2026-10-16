@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router';
 
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type ItemRef, type ItemSnapshot } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 
 import { useToast } from '../deps';
 import { useMyList } from './useMyList';
@@ -52,7 +53,8 @@ export function useMyListToggle(): (itemRef: ItemRef, snapshot: ItemSnapshot) =>
     async (itemRef: ItemRef, snapshot: ItemSnapshot) => {
       const key = itemKey(itemRef);
       if (!canSave(itemRef) || inFlight.has(key)) return undefined;
-      const title = snapshot.title;
+      // The title as My List's rows show it ("Heat", not "EN - Heat (1995)").
+      const title = snapshotTitle(itemRef, snapshot.title).title;
       const list = readList();
       if (!list) {
         // Unknown state: a toggle now could remove a saved title. Nothing is sent.

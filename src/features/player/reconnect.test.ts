@@ -225,6 +225,38 @@ describe('smart reconnect', () => {
     expect(usePlayerStore.getState().status).toBe('loading');
   });
 
+  it('reconnects a live stream the engine reports as buffering after LIVE_STALL_MS, not STALL_MS (L3-desktop-3, L3-live-3)', () => {
+    const { LIVE_STALL_MS } = reconnect;
+    expect(LIVE_STALL_MS).toBeLessThanOrEqual(6_000);
+    for (const mode of ['inline', 'embedded-mpv'] as const) {
+      usePlayerStore.setState({ source: live, mode, status: 'playing', positionSeconds: 10 });
+      // The element's `waiting` / mpv's paused-for-cache; the status stays `playing`.
+      media.useMediaStore.setState({ waiting: true });
+      vi.advanceTimersByTime(LIVE_STALL_MS - 1000);
+      expect(phase()).toBe('idle');
+      vi.advanceTimersByTime(2000);
+      expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1 });
+      store.__resetPlayerForTests();
+      reconnect.__resetReconnect();
+      media.resetMedia();
+    }
+  });
+
+  it('keeps STALL_MS for a live stream that is not buffering, and for VOD that is', () => {
+    const { LIVE_STALL_MS } = reconnect;
+    start(live, 10);
+    vi.advanceTimersByTime(LIVE_STALL_MS + 2000);
+    expect(phase()).toBe('idle');
+    store.__resetPlayerForTests();
+    reconnect.__resetReconnect();
+    start(movie, 600);
+    media.useMediaStore.setState({ waiting: true });
+    vi.advanceTimersByTime(LIVE_STALL_MS + 2000);
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(STALL_MS);
+    expect(phase()).toBe('retrying');
+  });
+
   it('embedded mpv: a stalled stream that keeps saying playing is still reloaded, and gives up', () => {
     usePlayerStore.setState({ source: live, mode: 'embedded-mpv', status: 'playing', positionSeconds: 10 });
     vi.advanceTimersByTime(STALL_MS + 1000);

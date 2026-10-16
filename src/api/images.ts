@@ -168,10 +168,34 @@ function cacheable(src: string): boolean {
 }
 
 /**
+ * Widths in device px that the image cache resizes artwork to (`w=`, L3-serve). The client rounds a
+ * picture's width up to one of them, so a card keeps one URL, and one browser-cache entry, across
+ * small layout changes. A core without resizing ignores `w` and sends the full picture.
+ */
+export const IMAGE_WIDTH_BUCKETS: readonly number[] = [64, 96, 128, 192, 256, 384, 512, 768, 1024];
+
+function pixelRatio(): number {
+  const r = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+  return Number.isFinite(r) && r > 0 ? r : 1;
+}
+
+/**
+ * The `w` bucket for a picture drawn `cssWidth` CSS px wide on this screen (36 -> 64 at 1x, 96 at
+ * 2x; 180 -> 192 at 1x, 384 at 2x). Undefined, meaning full size, without a usable width or when
+ * the picture needs more than the largest bucket.
+ */
+export function imageWidthBucket(cssWidth: number | null | undefined, ratio: number = pixelRatio()): number | undefined {
+  if (!cssWidth || !Number.isFinite(cssWidth) || cssWidth <= 0) return undefined;
+  const px = Math.ceil(cssWidth * ratio);
+  return IMAGE_WIDTH_BUCKETS.find((b) => b >= px);
+}
+
+/**
  * http(s) URL -> cache route URL; data:, blob:, asset: and relative URLs unchanged. Desktop uses the same base as
  * proxiedUrl (desktopProxyBase with /proxy -> /img) and returns the original URL until it is known; web uses '/api/img'.
+ * `width` (CSS px the picture is drawn at) asks the cache for a resized copy; leave it off for backdrops and heroes.
  */
-export function imageUrl(src: string | null | undefined, sourceId?: string): string | undefined {
+export function imageUrl(src: string | null | undefined, sourceId?: string, width?: number): string | undefined {
   if (!src) return undefined;
   const trimmed = src.trim();
   if (!trimmed) return undefined;
@@ -180,7 +204,20 @@ export function imageUrl(src: string | null | undefined, sourceId?: string): str
   const params = new URLSearchParams({ url: trimmed });
   if (sourceId) params.set('sourceId', sourceId);
   if (generation > 0) params.set('gen', String(generation));
+  const w = imageWidthBucket(width);
+  if (w) params.set('w', String(w));
   return `${base}?${params.toString()}`;
+}
+
+/**
+ * Adds the `w` bucket for `cssWidth` to a cache URL made without one (a poster measures its frame
+ * once it is in the page). The result equals `imageUrl(src, sourceId, cssWidth)`. Any other URL,
+ * or one that already has a width, is returned as is.
+ */
+export function sizedImageUrl(url: string, cssWidth: number | null | undefined): string {
+  const w = imageWidthBucket(cssWidth);
+  if (!w || !isImageCacheUrl(url) || /[?&]w=/.test(url)) return url;
+  return `${url}&w=${w}`;
 }
 
 /** True when `url` is a cache route URL made by `imageUrl`. */
@@ -195,8 +232,8 @@ export function isImageCacheUrl(url: string | null | undefined): boolean {
  * cache URL and then the original (once), duplicates dropped. A poster with a
  * TMDB stand-in passes both: `[provider, tmdb]`.
  */
-export function imageCandidates(sources: readonly (string | null | undefined)[], sourceId?: string): string[] {
-  return imageAttempts(sources, sourceId).map((a) => a.url);
+export function imageCandidates(sources: readonly (string | null | undefined)[], sourceId?: string, width?: number): string[] {
+  return imageAttempts(sources, sourceId, width).map((a) => a.url);
 }
 
 /** One URL to try and the source picture it stands for (the cache URL and the original share a source). */
@@ -205,13 +242,16 @@ export interface ImageAttempt {
   source: string;
 }
 
-/** `imageCandidates` with the source each URL belongs to, so a caller can style a stand-in differently. */
-export function imageAttempts(sources: readonly (string | null | undefined)[], sourceId?: string): ImageAttempt[] {
+/**
+ * `imageCandidates` with the source each URL belongs to, so a caller can style a stand-in differently.
+ * `width` sizes the cache URLs only; the original URL is the provider's picture as it is.
+ */
+export function imageAttempts(sources: readonly (string | null | undefined)[], sourceId?: string, width?: number): ImageAttempt[] {
   const out: ImageAttempt[] = [];
   for (const s of sources) {
     const original = s?.trim();
     if (!original) continue;
-    for (const url of [imageUrl(original, sourceId), original]) {
+    for (const url of [imageUrl(original, sourceId, width), original]) {
       if (url && !out.some((a) => a.url === url)) out.push({ url, source: original });
     }
   }
@@ -227,8 +267,8 @@ const WARMED_MAX = 500;
  * at low priority, so it paints at once when it is shown. Once per URL per
  * session; a no-op without `Image` (tests, workers). Returns the URL used.
  */
-export function preloadImage(src: string | null | undefined, sourceId?: string): string | undefined {
-  const url = imageUrl(src, sourceId);
+export function preloadImage(src: string | null | undefined, sourceId?: string, width?: number): string | undefined {
+  const url = imageUrl(src, sourceId, width);
   if (!url || warmed.has(url) || typeof Image === 'undefined') return url;
   if (warmed.size >= WARMED_MAX) warmed.clear();
   warmed.add(url);

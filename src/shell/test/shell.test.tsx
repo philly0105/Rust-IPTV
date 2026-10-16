@@ -155,7 +155,11 @@ describe('ShellLayout', () => {
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     expect(await within(nav).findByText('Night Portal')).toBeTruthy();
     expect(within(nav).getByText('Backup 1')).toBeTruthy();
-    expect(screen.getByTestId('player-dock')).toBeTruthy();
+    // L3-perf-ui-6: the player chunks wait PLAYER_PREFETCH_DELAY_MS past the first route, so the
+    // dock is not there yet; the first press loads it at once.
+    expect(screen.queryByTestId('player-dock')).toBeNull();
+    fireEvent.pointerDown(window);
+    expect(await screen.findByTestId('player-dock')).toBeTruthy();
   });
 
   it('startup redirect sends / to the dashboard, or lastRoute when restoring', async () => {
@@ -415,6 +419,13 @@ describe('DashboardPage', () => {
     const live = await screen.findByTestId('dashboard-rail-live-favorites');
     expect(within(live).getByText('Harbor News')).toBeTruthy();
     expect(await within(live).findByText('Morning Bulletin')).toBeTruthy();
+    // The cards show titles and times only, so the programme descriptions stay off the wire (L3-serve-ui-8).
+    const nowNextArgs = rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext').map((c) => c.args as { withDescription?: boolean });
+    expect(nowNextArgs.length).toBeGreaterThan(0);
+    for (const a of nowNextArgs) expect(a.withDescription).toBe(false);
+    // A still LIVE pill per card: an infinite pulse on every card kept an idle dashboard compositing (L3-perf-desktop-1).
+    expect(within(live).getAllByText('Live').length).toBeGreaterThan(0);
+    expect(live.querySelector('[class*="animate-live-pulse"]')).toBeNull();
     expect(within(await screen.findByTestId('dashboard-rail-recent-live')).getByText('Metro Sport')).toBeTruthy();
     expect(within(await screen.findByTestId('dashboard-rail-favorite-vod')).getByText('Quiet Coast')).toBeTruthy();
     expect(within(await screen.findByTestId('dashboard-rail-recently-added')).getByText('Fresh Arrival')).toBeTruthy();
@@ -985,6 +996,23 @@ describe('B7 review round 2', () => {
     // Same skeleton card as the loading state: the rail's card width and aspect.
     expect((spacer.firstElementChild as HTMLElement).style.width).toBe('232px');
     expect(within(box).getByRole('alert').className).toContain('flex-row');
+  });
+
+  it('a loading rail stands as tall as the loaded one (L3-visual-14)', async () => {
+    rpcMock.handlers['recent.list'] = () => new Promise(() => undefined);
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-live');
+    const busy = rail.querySelector<HTMLElement>('[aria-busy="true"]')!;
+    // The track's padding, then per card the art and two caption lines one text-sm line tall,
+    // the first after the cards' mt-2: no thinner bars that come up short and shift the page.
+    expect(busy.className).toMatch(/\bpt-1\b/);
+    expect(busy.className).toMatch(/\bpb-3\b/);
+    const card = busy.querySelector<HTMLElement>('[data-rail-skeleton-card]')!;
+    const title = card.children[1] as HTMLElement;
+    const subtitle = card.children[2] as HTMLElement;
+    for (const line of [title, subtitle]) expect(line.className).toMatch(/\bh-\[1lh\].*\btext-sm\b/);
+    expect(title.className).toMatch(/\bmt-2\b/);
+    expect(card.className).not.toMatch(/\bgap-/);
   });
 
   it('the one favorites query shows one error panel, not two', async () => {

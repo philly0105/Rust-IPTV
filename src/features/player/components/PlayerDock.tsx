@@ -274,6 +274,8 @@ export function PlayerDock() {
         ref={miniRef}
         role="region"
         aria-label={t('nowPlaying')}
+        // Toasts lift above the docked mini player instead of covering its controls (ui/Toast.tsx).
+        data-toast-avoid=""
         hidden={!inMini}
         className={cn(
           'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-2',

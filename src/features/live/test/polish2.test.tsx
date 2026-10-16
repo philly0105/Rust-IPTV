@@ -19,10 +19,11 @@ import { CategorySidebar } from '../components/CategorySidebar';
 import { ACTIVE_SETTLE_MS, ChannelList, resetChannelListMemory } from '../components/ChannelList';
 import { CHANNEL_ROW_HEIGHT, ChannelRow } from '../components/ChannelRow';
 import { ChannelLogo } from '../components/ChannelLogo';
-import { cellTextPad, EpgGridPage, GRID_SCROLL_VAR } from '../components/EpgGridPage';
+import { EpgGridPage } from '../components/EpgGridPage';
 import { EpgMappingDialog } from '../components/EpgMappingDialog';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage } from '../components/LivePage';
+import { cellTextPadPx } from '../guide/GuideRow';
 import { ManageCategoriesDialog } from '../components/ManageCategoriesDialog';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { addLocalDays, floorTo, MINUTE } from '../lib/epgTime';
@@ -361,6 +362,14 @@ describe('channel logos in reused rows', () => {
     expect(container.querySelector('img')?.getAttribute('src')).toBe(`/api/img?url=${encodeURIComponent('https://x/good.png')}`);
   });
 
+  it('logos load at low priority, so the guide RPCs are not queued behind them (XB2-10)', () => {
+    const { container } = render(<ChannelLogo src="https://x/logo.png" name="Alpha" />);
+    const img = container.querySelector('img')!;
+    expect(img.getAttribute('loading')).toBe('lazy');
+    expect(img.getAttribute('decoding')).toBe('async');
+    expect(img.getAttribute('fetchpriority')).toBe('low');
+  });
+
   it('initials keep whole characters (emoji, astral letters)', () => {
     const { container } = render(<ChannelLogo name="🎵 Music" />);
     expect(container.textContent).toBe('🎵M');
@@ -655,7 +664,7 @@ describe('guide grid', () => {
     const cells = await screen.findAllByRole('button', { name: /Breakfast Briefing/ });
     const cell = cells[0]!;
     const text = within(cell).getByTestId('cell-text');
-    expect(text.getAttribute('style') ?? '').toContain('var(--grid-scroll');
+    expect(parseFloat(text.style.paddingInlineStart)).toBeGreaterThan(0);
     // Kit Select: same accessible name, with the kit's chevron beside the native control.
     const source = screen.getByRole('combobox', { name: 'Source' });
     expect(source.parentElement!.querySelector('svg')).toBeTruthy();
@@ -746,15 +755,16 @@ describe('Live list: keys survive row recycling (round 2)', () => {
 describe('guide grid (round 2)', () => {
   const grid = () => screen.getByTestId('epg-grid');
 
-  it('cell text padding follows the scroll from a CSS variable: past the channel column, never past the cell', () => {
+  it('cell text padding follows the scroll: past the channel column, never past the cell', () => {
     // A cell 100 px into the track, 300 px wide: text starts at left + 10, so it is padded by scroll - 102,
     // and keeps at least 48 px of text (300 - 20 - 48 = 232 max).
-    expect(cellTextPad(100, 300)).toBe(`clamp(0px, calc(var(${GRID_SCROLL_VAR}, 0px) - 102px), 232px)`);
+    expect(cellTextPadPx(200, 100, 300)).toBe(98);
+    expect(cellTextPadPx(1000, 100, 300)).toBe(232);
     // A cell too narrow to keep 48 px is never padded.
-    expect(cellTextPad(0, 60)).toBe(`clamp(0px, calc(var(${GRID_SCROLL_VAR}, 0px) - 2px), 0px)`);
+    expect(cellTextPadPx(500, 0, 60)).toBe(0);
   });
 
-  it('the grid publishes its inline-start scroll distance at first paint and on scroll, in LTR and RTL', async () => {
+  it('the grid pads the clipped cell from its inline-start scroll distance, in LTR and RTL, with no inherited variable', async () => {
     const now = Date.now();
     rpcMock.handlers['epg.grid'] = (a) =>
       Object.fromEntries(
@@ -768,16 +778,12 @@ describe('guide grid (round 2)', () => {
     const text = within(cells[0]!).getByTestId('cell-text');
     // Not sticky any more: sticky text that fills its cell has no room to move.
     expect(text.className).not.toContain('sticky');
-    expect(text.getAttribute('style') ?? '').toContain(`var(${GRID_SCROLL_VAR}`);
-    // First paint: the layout effect scrolled to just before now and published it.
-    expect(grid().style.getPropertyValue(GRID_SCROLL_VAR)).toMatch(/^\d+(\.\d+)?px$/);
-    // RTL scrollers report negative scrollLeft: the variable is the distance from the inline start.
+    // RTL scrollers report negative scrollLeft: the padding follows the distance from the inline start.
     Object.defineProperty(grid(), 'scrollLeft', { configurable: true, value: -420, writable: true });
     fireEvent.scroll(grid());
-    expect(grid().style.getPropertyValue(GRID_SCROLL_VAR)).toBe('420px');
-    Object.defineProperty(grid(), 'scrollLeft', { configurable: true, value: 610, writable: true });
-    fireEvent.scroll(grid());
-    expect(grid().style.getPropertyValue(GRID_SCROLL_VAR)).toBe('610px');
+    expect(text.style.paddingInlineStart).toBe(`${cellTextPadPx(420, Number(text.dataset.padLeft), Number(text.dataset.padWidth))}px`);
+    // Cells are padded one by one: the grid publishes no variable every cell would inherit (L2-guide-library-2).
+    expect(grid().style.getPropertyValue('--grid-scroll')).toBe('');
   });
 
   it('PageDown onto a row that is not rendered yet keeps focus on the grid, then lands on the row', async () => {
@@ -971,5 +977,23 @@ describe('guide ribbon follows the list it came from (round 3)', () => {
     const played = fakes.recorded.playItem[0]!;
     expect(played.ref.sourceId).toBe('src2');
     expect(played.sourceKind).toBe('m3u');
+  });
+});
+
+describe('list click: the row goes to the player (XB2-12)', () => {
+  it('passes the channel row, url included, and sends no catalog.item for the playing channel', async () => {
+    rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'Playlist', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
+    rpcMock.handlers['catalog.channels'] = serve(Array.from({ length: 30 }, (_, i) => ({ ...makeChannel(i), url: `https://cdn.example.com/${i}.m3u8` })));
+    renderIn('/s/src1/live', LIVE);
+    await screen.findByText('Channel 3');
+    fireEvent.click(rowButton(3)!);
+    await waitFor(() => expect(fakes.recorded.playItem).toHaveLength(1));
+    const played = fakes.recorded.playItem[0]!;
+    // resolveSource plays an M3U channel from this row instead of asking the catalog for it.
+    expect(played.channel).toMatchObject({ ref: makeChannel(3).ref, url: 'https://cdn.example.com/3.m3u8' });
+    // The page's playing-channel lookup finds the row in the cache.
+    await waitFor(() => expect(fakes.usePlayerStore.getState().source?.ref).toEqual(makeChannel(3).ref));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(calls('catalog.item')).toHaveLength(0);
   });
 });

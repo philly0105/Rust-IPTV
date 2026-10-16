@@ -32,6 +32,12 @@ import type { MultiviewChannelInput } from './types';
 export const START_TIMEOUT_MS = 25_000;
 /** A playing stream that waits for data this long counts as failed. */
 export const STALL_TIMEOUT_MS = 30_000;
+/**
+ * Tiles that start together (the wall opening, a parental check answering) start this far
+ * apart, in slot order: each engine's parse and media attach gets its own frames instead of
+ * all of them landing in one long task.
+ */
+export const TILE_START_STAGGER_MS = 32;
 
 export type TilePhase = 'locked' | 'resolving' | 'loading' | 'playing' | 'error';
 
@@ -51,6 +57,8 @@ export interface TilePlaybackOptions {
   volume: number;
   /** Parental controls lock the channel: no lookup, no engine. */
   locked: boolean;
+  /** Wait this long before the first start (see TILE_START_STAGGER_MS); retries start at once. */
+  startDelayMs?: number;
 }
 
 export interface TilePlayback extends TilePlaybackState {
@@ -93,6 +101,10 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
   const key = itemKey(ch.ref);
   const chRef = useRef(ch);
   chRef.current = ch;
+  const startDelayRef = useRef(opts.startDelayMs ?? 0);
+  startDelayRef.current = opts.startDelayMs ?? 0;
+  /** The engine has been asked for once: later builds (retry, unlock, replace) skip the stagger. */
+  const startedRef = useRef(false);
 
   const startPlay = useCallback((el: HTMLVideoElement, isCurrent: () => boolean) => {
     // Sound refused earlier, but the page has had a gesture since (a click on Retry is one):
@@ -132,6 +144,7 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
 
     let startTimer: ReturnType<typeof setTimeout> | undefined;
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let beginTimer: ReturnType<typeof setTimeout> | undefined;
     const clearTimers = (): void => {
       clearTimeout(startTimer);
       clearTimeout(stallTimer);
@@ -183,22 +196,30 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
       const engineKind = engineRef.current?.kind;
       if (engineKind ? engineKind !== 'native' : s.kind === 'hls' || s.kind === 'dash' || looksLikeMpegTs(s)) return;
       const code = el.error.code;
-      // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through mpegts.js.
-      if (code === 4 && sniffedRef.current !== s.url && mseSupported() && worthSniffingAsMpegTs(s)) {
-        sniffedRef.current = s.url;
-        failed = true;
-        setNonce((n) => n + 1);
-        return;
-      }
       const kind = code === 2 ? 'network' : code === 4 ? 'unsupported' : 'media';
       const message = el.error.message || `Media error ${code}`;
       if (code !== 2 && code !== 4) {
         fail({ kind, message });
         return;
       }
-      // The element hides the HTTP status; our own server's answer says why when it refused.
+      // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through mpegts.js.
+      const sniff = code === 4 && sniffedRef.current !== s.url && mseSupported() && worthSniffingAsMpegTs(s);
+      // The element hides the HTTP status and reports a refusal (a 503, a 404) as code 4 too; our own
+      // server's answer says why. A refusal fails now instead of going through mpegts.js, which would
+      // only be refused again. A 2xx answer, or none to read, still gets the mpegts.js retry.
       void fetchFailureReason(proxiedUrl(s)).then((r) => {
-        fail(r ? { kind: 'network', message: withReason(message, r.reason, r.status) } : { kind, message });
+        if (!isCurrent()) return;
+        if (r) {
+          fail({ kind: 'network', message: withReason(message, r.reason, r.status) });
+          return;
+        }
+        if (!sniff) {
+          fail({ kind, message });
+          return;
+        }
+        sniffedRef.current = s.url;
+        failed = true;
+        setNonce((n) => n + 1);
       });
     };
 
@@ -208,38 +229,45 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
     el.addEventListener('ended', onEnded);
     el.addEventListener('error', onError);
 
-    resolveTileSource(chRef.current)
-      .then(async (src) => {
-        if (!isCurrent()) return;
-        source = src;
-        setState((s) => (s.phase === 'resolving' ? { ...s, phase: 'loading' } : s));
-        const engine = await createEngine(
-          el,
-          src,
-          proxiedUrl(src),
-          {
-            onTracks: () => undefined,
-            onError: (err) => {
-              if (err.fatal) fail({ kind: err.kind, message: err.message });
+    const begin = (): void => {
+      startedRef.current = true;
+      resolveTileSource(chRef.current)
+        .then(async (src) => {
+          if (!isCurrent()) return;
+          source = src;
+          setState((s) => (s.phase === 'resolving' ? { ...s, phase: 'loading' } : s));
+          const engine = await createEngine(
+            el,
+            src,
+            proxiedUrl(src),
+            {
+              onTracks: () => undefined,
+              onError: (err) => {
+                if (err.fatal) fail({ kind: err.kind, message: err.message });
+              },
             },
-          },
-          { captions: false, signal: abort.signal, forceMpegts: sniffedRef.current === src.url },
-        );
-        if (!isCurrent()) {
-          engine.destroy();
-          return;
-        }
-        engineRef.current = engine;
-        startPlay(el, isCurrent);
-      })
-      .catch((err: unknown) => {
-        const code = rpcErrorCode(err);
-        fail(code ? { code, message: errorText(err) } : { message: errorText(err) });
-      });
+            { captions: false, signal: abort.signal, forceMpegts: sniffedRef.current === src.url },
+          );
+          if (!isCurrent()) {
+            engine.destroy();
+            return;
+          }
+          engineRef.current = engine;
+          startPlay(el, isCurrent);
+        })
+        .catch((err: unknown) => {
+          const code = rpcErrorCode(err);
+          fail(code ? { code, message: errorText(err) } : { message: errorText(err) });
+        });
+    };
+    const delay = startedRef.current ? 0 : startDelayRef.current;
+    if (delay > 0) beginTimer = setTimeout(begin, delay);
+    else begin();
 
     return () => {
       disposed = true;
       abort.abort();
+      clearTimeout(beginTimer);
       clearTimers();
       el.removeEventListener('playing', onPlaying);
       el.removeEventListener('waiting', onWaiting);

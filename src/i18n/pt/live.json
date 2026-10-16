@@ -189,5 +189,11 @@
   "locked": "Bloqueado",
   "lockedGuide": "Bloqueado. Digite o PIN para ver o que está passando.",
   "unlock": "Desbloquear",
-  "ribbonFailed": "Não foi possível carregar o guia deste canal"
+  "ribbonFailed": "Não foi possível carregar o guia deste canal",
+  "parentalHiddenChannels": "O controlo parental está a ocultar os canais desta fonte",
+  "parentalHiddenStations": "O controlo parental está a ocultar as estações desta fonte",
+  "parentalHiddenHint": "Os grupos estão bloqueados. Introduza o PIN para os mostrar nesta sessão.",
+  "parentalUnlock": "Desbloquear",
+  "parentalUnlockTitle": "Mostrar canais bloqueados",
+  "parentalUnlockBody": "Introduza o PIN para mostrar grupos e canais bloqueados até o controlo parental voltar a bloquear."
 }

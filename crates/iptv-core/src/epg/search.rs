@@ -317,23 +317,23 @@ struct SourceChannel {
     category_id: String,
 }
 
-type ChannelMap = HashMap<String, Vec<Arc<SourceChannel>>>;
+type ChannelMap = HashMap<Arc<str>, Vec<Arc<SourceChannel>>>;
 
 /// Channel resolutions that depend only on the guide, kept on the EPG
 /// runtime and reused by every search until its generation moves (a
 /// refresh, a clear, a prune, a url enabled or disabled). Without it each
 /// search probed `epg_programs` once per unknown `epg_channel_id` and
 /// normalized every unmatched channel name: about 140 ms at 50k channels.
-/// The channels themselves are read on every search, so catalog changes,
-/// channel edits and parental locks apply at once.
+/// The channels themselves are read on every search that has hits, so
+/// catalog changes, channel edits and parental locks apply at once.
 #[derive(Default)]
 pub(crate) struct SearchMemo {
     generation: u64,
     /// Trimmed `items.epg_channel_id` -> the guide channel it names (known
     /// to the guide, case-insensitive, or with programmes), else `None`.
-    ids: HashMap<String, Option<String>>,
+    ids: HashMap<String, Option<Arc<str>>>,
     /// Channel title -> the guide channel with that exact normalized name.
-    names: HashMap<String, Option<String>>,
+    names: HashMap<String, Option<Arc<str>>>,
 }
 
 impl SearchMemo {
@@ -364,27 +364,51 @@ impl SearchMemo {
         conn: &Connection,
         dir: &ChannelDirectory,
         id: &str,
-    ) -> CoreResult<Option<String>> {
+    ) -> CoreResult<Option<Arc<str>>> {
         if let Some(found) = self.ids.get(id) {
             return Ok(found.clone());
         }
-        let found = match dir.find_id(id) {
-            Some(canonical) => Some(canonical.to_string()),
-            None if resolve::has_programmes(conn, id)? => Some(id.to_string()),
+        let found: Option<Arc<str>> = match dir.find_id(id) {
+            Some(canonical) => Some(canonical.into()),
+            None if resolve::has_programmes(conn, id)? => Some(id.into()),
             None => None,
         };
         self.ids.insert(id.to_string(), found.clone());
         Ok(found)
     }
 
-    fn by_name(&mut self, dir: &ChannelDirectory, title: &str) -> Option<String> {
+    fn by_name(&mut self, dir: &ChannelDirectory, title: &str) -> Option<Arc<str>> {
         if let Some(found) = self.names.get(title) {
             return found.clone();
         }
-        let found = dir.find_name_exact(title).map(str::to_owned);
+        let found: Option<Arc<str>> = dir.find_name_exact(title).map(Into::into);
         self.names.insert(title.to_string(), found.clone());
         found
     }
+
+    /// The guide channel of a channel without a manual mapping: its
+    /// `epg_channel_id` when that resolves, else its exact normalized name.
+    fn resolve(
+        &mut self,
+        conn: &Connection,
+        dir: &ChannelDirectory,
+        item_epg: Option<&str>,
+        title: &str,
+    ) -> CoreResult<Option<Arc<str>>> {
+        if let Some(id) = item_epg.map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(found) = self.by_id(conn, dir, id)? {
+                return Ok(Some(found));
+            }
+        }
+        Ok(self.by_name(dir, title))
+    }
+}
+
+/// Text column `idx` without copying it.
+fn text<'r>(r: &'r rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Option<&'r str>> {
+    r.get_ref(idx)?.as_str_or_null().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
+    })
 }
 
 /// The source's visible channels by the guide channel id each resolves to:
@@ -392,15 +416,21 @@ impl SearchMemo {
 /// the guide, case-insensitive, or with programmes), then the exact
 /// normalized name. Channels hidden by a channel edit are left out, and so,
 /// while hide mode is on, are locked and adult channels: in SQL, so they
-/// never take a candidate slot from a visible channel.
+/// never take a candidate slot from a visible channel. With `wanted` (the
+/// guide channels of the matching programmes), every channel is still
+/// resolved (a name can lead to any guide channel) but only those on a
+/// wanted one are copied out of their row.
 fn source_channels(
     conn: &Connection,
     rt: &EpgRuntime,
     dir: &ChannelDirectory,
     source_id: &str,
     hide: Option<Hide>,
+    wanted: Option<&HashSet<&str>>,
 ) -> CoreResult<ChannelMap> {
-    let manual: HashMap<(ContentType, String), Option<String>> = {
+    // Manual mappings of live and radio channels, by item id.
+    let mut manual: [HashMap<String, Option<String>>; 2] = Default::default();
+    {
         let mut stmt = conn.prepare_cached(
             "SELECT content_type, item_id, epg_channel_id FROM epg_channel_map WHERE source_id = ?1",
         )?;
@@ -411,20 +441,23 @@ fn source_channels(
                 r.get::<_, Option<String>>(2)?,
             ))
         })?;
-        let mut out = HashMap::new();
         for row in rows {
             let (ct, item_id, epg) = row?;
-            if let Ok(ct) = ct.parse::<ContentType>() {
-                out.insert((ct, item_id), epg);
-            }
+            match ct.parse::<ContentType>() {
+                Ok(ContentType::Live) => manual[0].insert(item_id, epg),
+                Ok(ContentType::Radio) => manual[1].insert(item_id, epg),
+                _ => None,
+            };
         }
-        out
-    };
+    }
     let mut memo = SearchMemo::take(rt, dir.generation());
     let mut out = ChannelMap::new();
-    for content_type in [ContentType::Live, ContentType::Radio] {
+    for (content_type, manual) in [ContentType::Live, ContentType::Radio]
+        .into_iter()
+        .zip(&manual)
+    {
         let mut sql = String::from(
-            "SELECT i.item_id, i.title, i.number, i.logo_url, i.category_id, i.epg_channel_id
+            "SELECT i.item_id, i.title, i.epg_channel_id, i.number, i.logo_url, i.category_id
              FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2",
         );
         sql.push_str(&crate::channeledit::scoped(
@@ -447,42 +480,35 @@ fn source_channels(
         let mut stmt = conn.prepare_cached(&sql)?;
         let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
         while let Some(r) = rows.next()? {
-            let item_id: String = r.get(0)?;
-            let title: String = r.get(1)?;
-            let item_epg: Option<String> = r.get(5)?;
-            let mapped = if manual.is_empty() {
-                None
-            } else {
-                manual.get(&(content_type, item_id.clone()))
-            };
-            let channel: Option<String> = match mapped {
-                Some(m) => m
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned),
+            // Borrowed: most channels resolve to no wanted guide channel.
+            let item_id = text(r, 0)?.unwrap_or_default();
+            let title = text(r, 1)?.unwrap_or_default();
+            let resolved: Option<Arc<str>>;
+            let channel: Option<&str> = match manual.get(item_id) {
+                Some(m) => m.as_deref().map(str::trim).filter(|s| !s.is_empty()),
                 None => {
-                    let by_id = match item_epg.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                        Some(id) => memo.by_id(conn, dir, id)?,
-                        None => None,
-                    };
-                    match by_id {
-                        Some(found) => Some(found),
-                        None => memo.by_name(dir, &title),
-                    }
+                    let item_epg = text(r, 2)?;
+                    resolved = memo.resolve(conn, dir, item_epg, title)?;
+                    resolved.as_deref()
                 }
             };
-            let Some(channel) = channel else { continue };
-            let logo_url: Option<String> = r.get(3)?;
-            out.entry(channel)
-                .or_default()
-                .push(Arc::new(SourceChannel {
-                    item_ref: ItemRef::new(source_id, content_type, item_id),
-                    name: title,
-                    number: r.get(2)?,
-                    logo_url: logo_url.filter(|s| !s.trim().is_empty()),
-                    category_id: r.get(4)?,
-                }));
+            let Some(channel) = channel.filter(|c| wanted.is_none_or(|w| w.contains(c))) else {
+                continue;
+            };
+            let logo_url: Option<String> = r.get(4)?;
+            let entry = Arc::new(SourceChannel {
+                item_ref: ItemRef::new(source_id, content_type, item_id),
+                name: title.to_owned(),
+                number: r.get(3)?,
+                logo_url: logo_url.filter(|s| !s.trim().is_empty()),
+                category_id: r.get(5)?,
+            });
+            match out.get_mut(channel) {
+                Some(list) => list.push(entry),
+                None => {
+                    out.insert(channel.into(), vec![entry]);
+                }
+            }
         }
     }
     memo.put_back(rt);
@@ -558,6 +584,12 @@ fn hit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
 /// of them when there are, plus every other one starting at the same time
 /// as the last (so the tie order by channel number is complete). Returns
 /// whether the index was used.
+///
+/// With the index, the matching programmes are read first and only the
+/// source's channels on their guide channels are kept: a query without
+/// hits never reads the channels, one with hits copies out only those it
+/// needs. The scan reads the channels first so it folds only the titles of
+/// guide channels the source has.
 fn candidates(
     conn: &Connection,
     rt: &EpgRuntime,
@@ -566,56 +598,73 @@ fn candidates(
     hide: Option<Hide>,
 ) -> CoreResult<(Vec<Candidate>, bool)> {
     let want = q.limit;
-    let channels = source_channels(conn, rt, dir, &q.source_id, hide)?;
-    if channels.is_empty() || q.words.is_empty() {
+    if q.words.is_empty() {
         return Ok((Vec::new(), false));
     }
     let used_index = index_ready(conn)?;
     let mut rows: Vec<ProgrammeRow> = Vec::new();
-    if used_index {
+    let channels = if used_index {
+        // Ordered by (start, feed) in SQL: the statement sorts every hit
+        // before the first row comes out, so reading them all costs little.
         let mut stmt = conn.prepare_cached(FTS_SQL)?;
-        let mut it = stmt.query(params![
-            fts_expression(&q.words),
-            q.from,
-            q.to,
-            STAGING_ORIGIN
-        ])?;
+        let it = stmt.query_map(
+            params![fts_expression(&q.words), q.from, q.to, STAGING_ORIGIN],
+            map_row,
+        )?;
+        for row in it {
+            rows.push(row?);
+        }
+        if rows.is_empty() {
+            return Ok((Vec::new(), true));
+        }
+        let wanted: HashSet<&str> = rows.iter().map(|r| r.channel_id.as_str()).collect();
+        let channels = source_channels(conn, rt, dir, &q.source_id, hide, Some(&wanted))?;
+        // Stop after the start time at which the limit is reached.
+        let mut end = rows.len();
         let mut kept = 0usize;
         let mut cut: Option<i64> = None;
         // A slot listed by two feeds counts once.
-        let mut slots: HashSet<(String, i64)> = HashSet::new();
-        while let Some(r) = it.next()? {
-            let row = map_row(r)?;
+        let mut slots: HashSet<(&str, i64)> = HashSet::new();
+        for (i, row) in rows.iter().enumerate() {
             if cut.is_some_and(|c| row.start > c) {
+                end = i;
                 break;
             }
-            let Some(list) = channels.get(&row.channel_id) else {
+            let Some(list) = channels.get(row.channel_id.as_str()) else {
                 continue;
             };
-            if slots.insert((row.channel_id.clone(), row.start)) {
+            if slots.insert((row.channel_id.as_str(), row.start)) {
                 kept += list.len();
             }
             if kept >= want && cut.is_none() {
                 cut = Some(row.start);
             }
-            rows.push(row);
         }
+        drop((wanted, slots));
+        rows.truncate(end);
+        channels
     } else {
+        let channels = source_channels(conn, rt, dir, &q.source_id, hide, None)?;
+        if channels.is_empty() {
+            return Ok((Vec::new(), false));
+        }
         let mut stmt = conn.prepare_cached(SCAN_SQL)?;
         let it = stmt.query_map(params![q.from, q.to, STAGING_ORIGIN], map_row)?;
         for row in it {
             let row = row?;
-            if channels.contains_key(&row.channel_id) && title_matches(&row.title, &q.words) {
+            if channels.contains_key(row.channel_id.as_str()) && title_matches(&row.title, &q.words)
+            {
                 rows.push(row);
             }
         }
         rows.sort_by_key(|r| (r.start, r.feed));
-    }
+        channels
+    };
     let mut seen: HashSet<(String, i64)> = HashSet::new();
     let mut out: Vec<Candidate> = Vec::new();
     for row in rows {
         let row = Arc::new(row);
-        if let Some(list) = channels.get(&row.channel_id) {
+        if let Some(list) = channels.get(row.channel_id.as_str()) {
             for ch in list {
                 if seen.insert((ch.item_ref.key(), row.start)) {
                     out.push(Candidate {
@@ -635,12 +684,14 @@ fn candidates(
     Ok((out, used_index))
 }
 
-/// Reads descriptions, categories and icons, and applies custom channel
-/// names (C2).
+/// Reads descriptions, categories and icons, applies custom channel names
+/// (C2), and moves each hit by its channel's `tvg-shift` as the grid does
+/// (L1-core-11).
 fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearchHit>> {
     let mut details = conn
         .prepare_cached("SELECT description, category, icon FROM epg_programs WHERE rowid = ?1")?;
     let mut names: HashMap<String, Option<String>> = HashMap::new();
+    let mut shifts: HashMap<String, i64> = HashMap::new();
     let mut out = Vec::with_capacity(found.len());
     for c in found {
         type Details = (Option<String>, Option<String>, Option<String>);
@@ -649,6 +700,14 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
             .optional()?
             .unwrap_or((None, None, None));
         let key = c.channel.item_ref.key();
+        let shift = match shifts.get(&key) {
+            Some(s) => *s,
+            None => {
+                let s = query::item_shift(conn, &c.channel.item_ref)?;
+                shifts.insert(key.clone(), s);
+                s
+            }
+        };
         let custom = match names.get(&key) {
             Some(n) => n.clone(),
             None => {
@@ -657,24 +716,30 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
                 n
             }
         };
-        out.push(GuideSearchHit {
-            item_ref: c.channel.item_ref.clone(),
-            channel_name: custom.unwrap_or_else(|| c.channel.name.clone()),
-            channel_number: c.channel.number,
-            logo_url: c.channel.logo_url.clone(),
-            category_id: Some(c.channel.category_id.clone()).filter(|s| !s.is_empty()),
-            program: EpgProgram {
-                channel_id: c.row.channel_id.clone(),
-                start: query::to_rfc3339(c.row.start),
-                end: query::to_rfc3339(c.row.stop),
-                title: c.row.title.clone(),
-                description: description.filter(|s| !s.trim().is_empty()),
-                category: category.filter(|s| !s.trim().is_empty()),
-                icon: icon.filter(|s| !s.trim().is_empty()),
+        out.push((
+            c.row.start + shift,
+            GuideSearchHit {
+                item_ref: c.channel.item_ref.clone(),
+                channel_name: custom.unwrap_or_else(|| c.channel.name.clone()),
+                channel_number: c.channel.number,
+                logo_url: c.channel.logo_url.clone(),
+                category_id: Some(c.channel.category_id.clone()).filter(|s| !s.is_empty()),
+                program: EpgProgram {
+                    channel_id: c.row.channel_id.clone(),
+                    start: query::to_rfc3339(c.row.start + shift),
+                    end: query::to_rfc3339(c.row.stop + shift),
+                    title: c.row.title.clone(),
+                    description: description.filter(|s| !s.trim().is_empty()),
+                    category: category.filter(|s| !s.trim().is_empty()),
+                    icon: icon.filter(|s| !s.trim().is_empty()),
+                },
             },
-        });
+        ));
     }
-    Ok(out)
+    // A shift can move a hit past others: keep start order (stable, so the
+    // channel-number order of equal starts stays).
+    out.sort_by_key(|(start, _)| *start);
+    Ok(out.into_iter().map(|(_, hit)| hit).collect())
 }
 
 fn ensure_source(conn: &Connection, source_id: &str) -> CoreResult<()> {

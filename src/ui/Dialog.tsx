@@ -15,6 +15,7 @@ import { create } from 'zustand';
 
 import { cn } from './cn';
 import { focusableIn } from './focus';
+import { portalContainer } from './portal';
 
 export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 /** `center`: floating card. `end`: full-height drawer on the inline-end edge (right in LTR, left in RTL). */
@@ -54,7 +55,47 @@ const sizes: Record<DialogSize, string> = {
   full: 'max-w-[min(1200px,calc(100vw-48px))] h-[calc(100vh-96px)]',
 };
 
-let openCount = 0;
+interface OpenDialog {
+  /** The `data-dialog-layer` element (scrim and panel). */
+  layer: HTMLElement | null;
+  panel: HTMLElement | null;
+  /** What had focus before the dialog opened. */
+  previous: HTMLElement | null;
+}
+
+/** Open dialogs, oldest first. */
+const openDialogs: OpenDialog[] = [];
+/** Dialogs closed in the current commit (a prompt and the dialog it guards); cleared on the next microtask. */
+let closedNow: OpenDialog[] = [];
+/** The page's own `overflow` before the first dialog locked scrolling. */
+let pageOverflow = '';
+
+/** Attached, outside every dialog closing in this commit, and inside an open dialog while one stays open. */
+function canHoldFocus(el: HTMLElement): boolean {
+  if (el === document.body || !el.isConnected) return false;
+  if (closedNow.some((d) => d.layer?.contains(el))) return false;
+  return openDialogs.length === 0 || openDialogs.some((d) => d.layer?.contains(el));
+}
+
+/**
+ * Puts focus back after `self` closed. Dialogs closing together run their cleanups in either
+ * order, and a closing dialog's DOM can still be attached while its cleanup runs, so each
+ * target is checked with canHoldFocus. In order: the element focused before `self` opened,
+ * the nearest dialog still open, the openers of dialogs closed in the same commit, then #main
+ * (skipped when the dialog opened from <body>, e.g. at startup).
+ */
+function restoreFocus(self: OpenDialog): void {
+  const active = document.activeElement;
+  // A dialog that stays open (stacked over this one) holds focus: leave it there.
+  if (active && openDialogs.some((d) => d.layer?.contains(active))) return;
+  const candidates = [self.previous, openDialogs.at(-1)?.panel, ...closedNow.map((d) => d.previous).reverse()];
+  if (self.previous && self.previous !== document.body) candidates.push(document.getElementById('main'));
+  for (const el of candidates) {
+    if (!el || !canHoldFocus(el)) continue;
+    el.focus({ preventScroll: true });
+    if (document.activeElement === el) return;
+  }
+}
 
 /**
  * How many centred (floating card) dialogs are open. The toast viewport reads
@@ -96,8 +137,8 @@ export function reportToastStackBottom(stackBottom: number): void {
 }
 
 /**
- * Modal dialog: portal to body, focus trap, Escape and backdrop close,
- * focus restore, scroll lock, aria-modal with labelled title.
+ * Modal dialog: portal to body (or the fullscreen element, see portalContainer), focus trap,
+ * Escape and backdrop close, focus restore, scroll lock, aria-modal with labelled title.
  */
 export function Dialog({
   open,
@@ -132,8 +173,8 @@ export function Dialog({
   useLayoutEffect(() => {
     if (!open) return;
     closingRef.current = false;
-    const previous = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
+    const self: OpenDialog = { layer: panel?.parentElement ?? null, panel, previous: document.activeElement as HTMLElement | null };
     if (panel) {
       const target =
         initialFocus?.current ??
@@ -142,21 +183,26 @@ export function Dialog({
         panel;
       target.focus({ preventScroll: true });
     }
-    openCount += 1;
     const html = document.documentElement;
-    const prevOverflow = html.style.overflow;
-    html.style.overflow = 'hidden';
+    if (openDialogs.length === 0) {
+      pageOverflow = html.style.overflow;
+      html.style.overflow = 'hidden';
+    }
+    openDialogs.push(self);
     return () => {
       closingRef.current = true;
-      openCount -= 1;
-      if (openCount === 0) html.style.overflow = prevOverflow;
-      if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
-      const landed = document.activeElement;
-      if (previous && previous !== document.body && openCount === 0 && (!landed || landed === document.body)) {
-        // The opener is gone (a menu item, a row that re-rendered) or can no longer take focus (it became
-        // disabled): land on the main region instead of <body>, so the next Tab starts somewhere sensible.
-        document.getElementById('main')?.focus({ preventScroll: true });
+      const i = openDialogs.indexOf(self);
+      if (i >= 0) openDialogs.splice(i, 1);
+      if (openDialogs.length === 0) html.style.overflow = pageOverflow;
+      if (closedNow.length === 0) {
+        queueMicrotask(() => {
+          closedNow = [];
+        });
       }
+      closedNow.push(self);
+      // The opener may be gone (a menu item, a row that re-rendered), disabled, or inside a dialog
+      // closing with this one: restoreFocus falls back so focus never drops to <body>.
+      restoreFocus(self);
     };
     // initialFocus is a ref; it is read once on open.
   }, [open]);
@@ -233,7 +279,12 @@ export function Dialog({
       <div
         aria-hidden
         className="fixed inset-0 bg-scrim motion-safe:animate-fade-in"
-        onMouseDown={() => dismissible && onCloseRef.current()}
+        onMouseDown={(e) => {
+          // The press's default would move focus to <body> after the close put it back on the
+          // opener (or, when not dismissible, out of the dialog).
+          e.preventDefault();
+          if (dismissible) onCloseRef.current();
+        }}
       />
       {/* Plain divs for the title row and footer: a portaled <header>/<footer> would map to a second banner/contentinfo landmark. */}
       <div
@@ -296,6 +347,6 @@ export function Dialog({
         )}
       </div>
     </div>,
-    document.body,
+    portalContainer(),
   );
 }

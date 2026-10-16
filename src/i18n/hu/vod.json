@@ -204,5 +204,8 @@
   "categoryMissingTitle": "A kategória nem található",
   "categoryMissingBody": "Ennek a forrásnak nincs ilyen hivatkozású kategóriája. Lehet, hogy a szolgáltató átnevezte vagy törölte.",
   "namedMarkedWatched": "{{name}} megtekintettnek jelölve",
-  "namedMarkedUnwatched": "{{name}} nem megtekintettnek jelölve"
+  "namedMarkedUnwatched": "{{name}} nem megtekintettnek jelölve",
+  "filters": "Szűrők",
+  "filtersActive": "Aktív szűrők: {{n}}",
+  "locked": "Zárolva"
 }

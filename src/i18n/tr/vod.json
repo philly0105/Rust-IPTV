@@ -204,5 +204,8 @@
   "categoryMissingTitle": "Kategori bulunamadı",
   "categoryMissingBody": "Bu kaynakta bu bağlantıya sahip bir kategori yok. Sağlayıcı onu yeniden adlandırmış veya kaldırmış olabilir.",
   "namedMarkedWatched": "{{name}} izlendi olarak işaretlendi",
-  "namedMarkedUnwatched": "{{name}} izlenmedi olarak işaretlendi"
+  "namedMarkedUnwatched": "{{name}} izlenmedi olarak işaretlendi",
+  "filters": "Filtreler",
+  "filtersActive": "Etkin filtreler: {{n}}",
+  "locked": "Kilitli"
 }

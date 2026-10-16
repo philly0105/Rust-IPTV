@@ -224,8 +224,9 @@ describe('SetPinDialog', () => {
     step(dialog, 'New PIN again', PIN, 'Set PIN');
 
     await waitFor(() => expect(onDone).toHaveBeenCalled());
-    expect(core.callsOf('parental.setPin')).toEqual([{ newPin: PIN }]);
-    expect(onDone.mock.calls[0]![0]).toMatchObject({ enabled: true });
+    // L1-settings-5: the first PIN asks the core to unlock the session too.
+    expect(core.callsOf('parental.setPin')).toEqual([{ newPin: PIN, unlock: true }]);
+    expect(onDone.mock.calls[0]![0]).toMatchObject({ enabled: true, unlocked: true });
     expect(queryClient.getQueryData(['parental.status', null])).toMatchObject({ enabled: true });
   });
 

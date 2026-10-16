@@ -184,5 +184,11 @@
   "locked": "ロック中",
   "lockedGuide": "ロック中です。PINを入力すると放送中の番組が表示されます。",
   "unlock": "ロック解除",
-  "ribbonFailed": "このチャンネルの番組表を読み込めませんでした"
+  "ribbonFailed": "このチャンネルの番組表を読み込めませんでした",
+  "parentalHiddenChannels": "ペアレンタルコントロールがこのソースのチャンネルを非表示にしています",
+  "parentalHiddenStations": "ペアレンタルコントロールがこのソースの局を非表示にしています",
+  "parentalHiddenHint": "グループがロックされています。PIN を入力すると、このセッションの間表示されます。",
+  "parentalUnlock": "ロック解除",
+  "parentalUnlockTitle": "ロック中のチャンネルを表示",
+  "parentalUnlockBody": "PIN を入力すると、ペアレンタルコントロールが再びロックするまで、ロック中のグループとチャンネルを表示します。"
 }

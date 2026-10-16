@@ -6,6 +6,7 @@ import type { Channel, EpgNowNext, ItemRef, RemoteCommandEvent } from '@/api/typ
 
 import { claimRemoteChannelCommands } from '@/features/player/remote';
 import { usePlayerStore } from '@/features/player';
+import { peekSettings } from '@/features/player/store';
 
 /** When to look for a freshly started remote server after a settings change. */
 export const REPUBLISH_DELAYS_MS = [0, 1_000, 3_000];
@@ -136,6 +137,9 @@ export function useRemoteBridge(args: Args): void {
   useEffect(() => {
     const a = live.current;
     if (!a.current) return;
+    // Nobody listens while remote control is off (unknown settings count as on): no remote.status
+    // round trip per zap. The setting is read at each change, so turning it on later reports again.
+    if (peekSettings()?.remoteControl?.enabled === false) return;
     let cancelled = false;
     (async () => {
       try {

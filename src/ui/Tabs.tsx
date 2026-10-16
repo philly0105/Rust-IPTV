@@ -1,4 +1,4 @@
-import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
 
@@ -26,6 +26,54 @@ export interface TabsProps {
   panelIdPrefix?: string;
 }
 
+/** Fade length at an edge that hides tabs; a selected tab is pulled this far clear of it. */
+const FADE_PX = 24;
+
+/** Physical edges of a sideways scroller that hide content. RTL scrollLeft runs from 0 to negative. */
+export function hiddenTabEdges(b: { scrollLeft: number; scrollWidth: number; clientWidth: number; rtl: boolean }): {
+  left: boolean;
+  right: boolean;
+} {
+  const max = b.scrollWidth - b.clientWidth;
+  if (max <= 1) return { left: false, right: false };
+  const x = b.rtl ? b.scrollLeft + max : b.scrollLeft;
+  return { left: x > 1, right: x < max - 1 };
+}
+
+/**
+ * An underline tab row too wide for its box (long labels in a narrow dialog, many seasons)
+ * scrolls sideways with its scrollbar hidden. The edge that hides tabs fades out, so a cut label
+ * reads as "more this way", and the selected tab is scrolled clear of the fade.
+ */
+function useOverflowFade(list: HTMLDivElement | null, enabled: boolean): CSSProperties {
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    if (!list || !enabled) return;
+    const measure = () => {
+      const next = hiddenTabEdges({
+        scrollLeft: list.scrollLeft,
+        scrollWidth: list.scrollWidth,
+        clientWidth: list.clientWidth,
+        rtl: getComputedStyle(list).direction === 'rtl',
+      });
+      setEdges((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+    };
+    measure();
+    list.addEventListener('scroll', measure, { passive: true });
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    ro?.observe(list);
+    return () => {
+      list.removeEventListener('scroll', measure);
+      ro?.disconnect();
+    };
+  }, [list, enabled]);
+  if (!enabled || (!edges.left && !edges.right)) return {};
+  const start = edges.left ? `transparent 0, #000 ${FADE_PX}px` : '#000 0';
+  const end = edges.right ? `#000 calc(100% - ${FADE_PX}px), transparent 100%` : '#000 100%';
+  const mask = `linear-gradient(to right, ${start}, ${end})`;
+  return { maskImage: mask, WebkitMaskImage: mask };
+}
+
 /**
  * WAI-ARIA tabs with roving focus: ArrowLeft/Right (and Up/Down), Home, End
  * move focus and activate (automatic activation).
@@ -35,6 +83,19 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
   const prefix = panelIdPrefix ?? autoId;
   const refs = useRef(new Map<string, HTMLButtonElement>());
   const enabled = items.filter((i) => !i.disabled);
+  const [list, setList] = useState<HTMLDivElement | null>(null);
+  const fade = useOverflowFade(list, variant === 'underline');
+
+  // Keep the selected tab whole and clear of the fades (a click on a cut tab, arrow keys, opening on a later tab).
+  useLayoutEffect(() => {
+    const tab = refs.current.get(value);
+    if (!list || !tab || list.scrollWidth - list.clientWidth <= 1) return;
+    const box = list.getBoundingClientRect();
+    const r = tab.getBoundingClientRect();
+    if (box.width <= 0) return;
+    if (r.left < box.left + FADE_PX) list.scrollLeft -= box.left + FADE_PX - r.left;
+    else if (r.right > box.right - FADE_PX) list.scrollLeft += r.right - (box.right - FADE_PX);
+  }, [list, value]);
 
   const move = (e: KeyboardEvent<HTMLDivElement>) => {
     const idx = enabled.findIndex((i) => i.id === value);
@@ -76,10 +137,12 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
 
   return (
     <div
+      ref={setList}
       role="tablist"
       aria-label={label}
       aria-orientation="horizontal"
       onKeyDown={move}
+      style={fade}
       className={cn(
         'flex max-w-full items-center overflow-x-auto scrollbar-none',
         variant === 'underline' ? 'gap-1 border-b border-divider' : 'gap-1 rounded-md bg-surface-2 p-1',

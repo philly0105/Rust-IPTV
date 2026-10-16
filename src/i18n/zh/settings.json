@@ -238,7 +238,7 @@
   "backupNoSecrets": "此备份不含密码。Xtream 和 Stalker 播放源需要重新输入密码。",
   "backupMode": "导入模式",
   "backupMerge": "合并",
-  "backupMergeHint": "添加文件中的播放源，并保留现有播放源。",
+  "backupMergeHint": "添加文件中的播放源。现有播放源会保留其名称和设置。",
   "backupReplace": "替换",
   "backupReplaceHint": "先导入备份，备份中有一个源加载成功后才移除当前的源。",
   "backupImportButton": "导入备份",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "替换",
   "backupImportFailed": "无法导入备份",
   "backupResult": "已添加或更新：{{imported}}。已跳过：{{skipped}}。",
+  "backupRefreshing_one": "仍有 {{count, number}} 个播放列表正在加载，完成后会显示其收藏和历史记录。",
+  "backupRefreshing_other": "仍有 {{count, number}} 个播放列表正在加载，每个完成后会显示其收藏和历史记录。",
   "backupWarnings_one": "{{count}} 条警告",
   "backupWarnings_other": "{{count}} 条警告",
   "backupNotJson": "此文件不是有效的 JSON。",
@@ -352,10 +354,10 @@
   "railsOffHint": "开启仪表板后才能使用这些行。",
 
   "resetGroup": "重置",
-  "resetHint": "将所有设置恢复为默认值。来源、收藏、历史记录和下载会保留。",
+  "resetHint": "将所有设置恢复为默认值。来源、收藏、历史记录和下载会保留。节目指南地址和 TMDB 密钥也会保留。",
   "resetButton": "重置设置",
   "resetConfirmTitle": "要重置所有设置吗？",
-  "resetConfirmBody": "所有设置都会恢复为默认值，包括语言、主题和播放器路径。来源、收藏、历史记录和下载会保留。",
+  "resetConfirmBody": "所有设置都会恢复为默认值，包括语言、主题和播放器路径。来源、收藏、历史记录和下载会保留。节目指南地址和 TMDB 密钥也会保留。",
   "resetConfirm": "重置",
   "resetDone": "设置已恢复为默认值",
   "resetFailed": "无法重置设置",
@@ -443,5 +445,10 @@
   "backupOldVersion": "此备份使用无法读取的旧格式。请导出新的备份后再导入。",
   "backupImportDone": "已导入备份",
   "backupReplacePinTitle": "输入 PIN 以替换源",
-  "backupReplacePinText": "替换会移除当前的源及其家长锁定，因此需要家长控制 PIN。"
+  "backupReplacePinText": "替换会移除当前的源及其家长锁定，因此需要家长控制 PIN。",
+  "backupParentalTitle": "此备份会更改家长控制",
+  "backupParentalBody": "家长控制已锁定，备份中的家长控制选项需要 PIN。输入 PIN 以导入全部内容，或只导入其余部分并保留当前选项。",
+  "backupParentalSkip": "不导入这些选项",
+  "backupParentalUnlock": "输入 PIN 并导入",
+  "backupParentalPinTitle": "输入 PIN 以导入家长控制选项"
 }

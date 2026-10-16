@@ -242,6 +242,16 @@ export function withReason(fallback: string, reason: string | null, status?: num
  * Never contacts anything but our own server; null on 2xx, network failure or timeout.
  */
 export async function fetchFailureReason(url: string): Promise<{ status: number; reason: string } | null> {
+  const r = await fetchFailureStatus(url);
+  return r?.reason ? { status: r.status, reason: r.reason } : null;
+}
+
+/**
+ * `fetchFailureReason` that also answers without a reason: the status of a non-2xx answer from
+ * our own server, and its reason when the body has one. Null on 2xx, failure, timeout, or any
+ * URL that is not our own server's.
+ */
+export async function fetchFailureStatus(url: string): Promise<{ status: number; reason: string | null } | null> {
   if (!isOwnServerUrl(url)) return null;
   try {
     const signal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(5000) : undefined;
@@ -250,8 +260,7 @@ export async function fetchFailureReason(url: string): Promise<{ status: number;
       void res.body?.cancel().catch(() => undefined);
       return null;
     }
-    const reason = reasonFromBody(await res.text());
-    return reason ? { status: res.status, reason } : null;
+    return { status: res.status, reason: reasonFromBody(await res.text()) };
   } catch {
     return null;
   }
@@ -785,6 +794,8 @@ async function mpegtsEngine(
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stableTimer: ReturnType<typeof setTimeout> | null = null;
   let loadComplete = false;
+  /** The stream produced media once: only then is a dropped connection restarted here. */
+  let hadMedia = false;
   /** Live only: element time lost to reconnects, so the displayed position keeps running. */
   let offset = 0;
   /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
@@ -837,16 +848,19 @@ async function mpegtsEngine(
       const http = info?.code && info.code > 0 ? ` (HTTP ${info.code})` : '';
       const message = `${detail || type}${http}`;
       if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
-        // A 4xx will not fix itself; anything else gets bounded restarts.
-        if (info?.code && info.code >= 400 && info.code < 500) {
+        // An HTTP answer (404, 503, ...) is the provider's verdict: it goes up at once, and the
+        // player's reconnect decides whether a retry is worth it (`reconnect.ts`, one layer
+        // owning retries). Restarts here are for a stream that played and then dropped.
+        if (info?.code && info.code > 0) {
           const status = info.code;
-          // mpegts.js drops the body; our own server (proxy guard, relayed 4xx) is asked once for the reason.
+          // mpegts.js drops the body; our own server (proxy guard, relayed status) is asked once for the reason.
           if (isOwnServerUrl(absolute)) {
             void fetchFailureReason(absolute).then((r) => {
               if (player === p) fail({ message: withReason(message, r?.reason ?? null, r?.status ?? status), fatal: true, kind: 'network' });
             });
           } else fail({ message, fatal: true, kind: 'network' });
-        } else restart({ message, fatal: true, kind: 'network' });
+        } else if (hadMedia) restart({ message, fatal: true, kind: 'network' });
+        else fail({ message, fatal: true, kind: 'network' });
         return;
       }
       if (type === mpegts.ErrorTypes.MEDIA_ERROR) {
@@ -903,9 +917,13 @@ async function mpegtsEngine(
     anchor = null;
   };
   // Listener order does not matter: until rebased, `timeOffset()` holds the display at the anchor.
+  const onData = (): void => {
+    hadMedia = true;
+  };
   el.addEventListener('timeupdate', rebase);
   el.addEventListener('loadedmetadata', rebase);
   el.addEventListener('timeupdate', markStable);
+  el.addEventListener('loadeddata', onData);
   start();
 
   return {
@@ -955,6 +973,7 @@ async function mpegtsEngine(
       el.removeEventListener('timeupdate', markStable);
       el.removeEventListener('timeupdate', rebase);
       el.removeEventListener('loadedmetadata', rebase);
+      el.removeEventListener('loadeddata', onData);
       if (player) teardown(player);
       player = null;
       el.removeAttribute('src');

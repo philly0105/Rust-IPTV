@@ -65,7 +65,8 @@ export function SetPinDialog({ open, mode, onDone, onCancel, testId = 'set-pin-d
   const send = async (currentPin: string | undefined, newPin: string) => {
     setBusy(true);
     try {
-      const status = await rpc('parental.setPin', currentPin === undefined ? { newPin } : { currentPin, newPin });
+      // A first PIN also unlocks the session, so the user who just set it can go on configuring without typing it again.
+      const status = await rpc('parental.setPin', currentPin === undefined ? { newPin, unlock: true } : { currentPin, newPin });
       applyStatus(status);
       onDone(status);
     } catch (err) {

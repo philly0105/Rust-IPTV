@@ -204,5 +204,8 @@
   "categoryMissingTitle": "找不到該分類",
   "categoryMissingBody": "此來源中沒有對應該連結的分類。提供者可能已將其重新命名或刪除。",
   "namedMarkedWatched": "已將{{name}}標記為已看",
-  "namedMarkedUnwatched": "已將{{name}}標記為未看"
+  "namedMarkedUnwatched": "已將{{name}}標記為未看",
+  "filters": "篩選",
+  "filtersActive": "已啟用的篩選：{{n}}",
+  "locked": "已鎖定"
 }

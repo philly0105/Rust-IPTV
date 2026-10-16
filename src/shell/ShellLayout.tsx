@@ -11,6 +11,7 @@ import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
 
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
+import { focusSearchWhenReady } from './focusSearch';
 import { Header } from './Header';
 import { Rail } from './Rail';
 import { useOutletScrollMemory } from './scrollMemory';
@@ -150,14 +151,19 @@ export function openShortcutHelp(): void {
 let playbackRestored = false;
 
 /**
- * Focuses the search field once it exists. The search page loads lazily, so on a first visit its
- * field (in the header) mounts only after the chunk arrives, which can take well over a frame:
- * poll briefly instead of guessing one delay.
+ * F11 (L2-desktop-8). With a source in the dock it is the player's fullscreen, as `f` is.
+ * Otherwise it fills the screen with the whole app: element fullscreen on the page, which the
+ * desktop window follows (bindWindowFullscreen in main.tsx), so the key works on the desktop,
+ * where WebView2 has no F11 of its own, and in the browser alike. Exported for tests.
  */
-function focusSearchWhenReady(deadline = Date.now() + 3000) {
-  const field = document.querySelector<HTMLInputElement>('[data-page-search], [data-shell-search]');
-  if (field) field.focus();
-  else if (Date.now() < deadline) setTimeout(() => focusSearchWhenReady(deadline), 50);
+export function toggleFullscreenKey(): void {
+  const player = loadedPlayer?.usePlayerStore?.getState();
+  if (player?.source && player.mode !== 'external') {
+    player.toggleFullscreen();
+    return;
+  }
+  if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => undefined);
+  else void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
 }
 
 function GlobalShortcuts() {
@@ -211,6 +217,7 @@ function GlobalShortcuts() {
     { description: t('scTheme'), area, allowInInput: true },
   );
   useShortcut('f8', () => focusToasts(), { description: t('scNotifications'), area, allowInInput: true });
+  useShortcut('f11', toggleFullscreenKey, { description: t('scFullscreen'), area, allowInInput: true, allowInModal: true });
   useShortcut(
     'escape',
     () => {

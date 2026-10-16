@@ -276,17 +276,18 @@ describe('mpegts.js engine recovery', () => {
     expect(FakeTsPlayer.created).toHaveLength(3);
   });
 
-  it('maps errors: 4xx fails at once, codec errors are unsupported, 5xx retries', async () => {
+  it('maps errors: any HTTP status fails at once (the player reconnect owns retries), codec errors are unsupported', async () => {
     vi.useFakeTimers();
     const callbacks = cb();
     await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
-    const p = FakeTsPlayer.created[0]!;
-    p.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 503 });
-    expect(callbacks.onError).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
-    const p2 = FakeTsPlayer.created[1]!;
-    p.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 404 }); // stale player: ignored
-    expect(callbacks.onError).not.toHaveBeenCalled();
+    const p2 = FakeTsPlayer.created[0]!;
+    // A 503 used to restart here as well, stacking on the player's own retries (L2-live-5).
+    p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 503 });
+    expect(callbacks.onError).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 503)' }),
+    );
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1) * 4);
+    expect(FakeTsPlayer.created).toHaveLength(1);
     p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 403 });
     expect(callbacks.onError).toHaveBeenLastCalledWith(
       expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 403)' }),
@@ -342,10 +343,31 @@ describe('mpegts.js engine recovery', () => {
     vi.useFakeTimers();
     const el = video();
     const engine = await createEngine(el, src('http://h/v.ts', { isLive: false }), 'http://h/v.ts', cb(), { captions: false });
+    el.dispatchEvent(new Event('loadeddata'));
     FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
     await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
     expect(FakeTsPlayer.created).toHaveLength(2);
     expect(engine.timeOffset?.()).toBe(0);
+  });
+
+  it('a connection error restarts only a stream that produced media; before that it fails at once', async () => {
+    vi.useFakeTimers();
+    const el = video();
+    const callbacks = cb();
+    await createEngine(el, src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
+    FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
+    expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'network', fatal: true }));
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1) * 4);
+    expect(FakeTsPlayer.created).toHaveLength(1);
+
+    const el2 = video();
+    const callbacks2 = cb();
+    await createEngine(el2, src('http://h/b.ts'), 'http://h/b.ts', callbacks2, { captions: false });
+    el2.dispatchEvent(new Event('loadeddata'));
+    FakeTsPlayer.created[1]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
+    expect(callbacks2.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
+    expect(FakeTsPlayer.created).toHaveLength(3);
   });
 
   it('destroy cancels a pending restart', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 
 /** Where a scroller was left: its offset and the item last opened from it. */
 export interface ScrollSpot {
@@ -173,12 +173,30 @@ export function useScrollMemory({ key, getScroller, ready, onRestored, restore =
     };
   }, [key, ready]);
 
-  useEffect(() => {
+  // A layout effect, so its cleanup runs while the scroller is still in the page (React detaches
+  // the DOM after the layout cleanups of a removed tree) and can still read the last offset.
+  useLayoutEffect(() => {
     if (!ready) return;
     const el = getRef.current();
     if (!el) return;
-    const onScroll = () => rememberSpot(key, { scrollTop: el.scrollTop });
+    // One read per frame, at its start (L2-perf-ui-9): reading scrollTop inside every scroll
+    // event, right after a virtualizer changed the DOM, forced a layout per event.
+    let frame = 0;
+    const record = () => {
+      frame = 0;
+      rememberSpot(key, { scrollTop: el.scrollTop });
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(record);
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      // Leaving within the frame of the last scroll: keep that offset.
+      if (frame) {
+        cancelAnimationFrame(frame);
+        if (el.isConnected) record();
+      }
+    };
   }, [key, ready]);
 }

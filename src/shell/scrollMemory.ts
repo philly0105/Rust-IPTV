@@ -110,6 +110,16 @@ export function useOutletScrollMemory(getMain: () => HTMLElement | null = () => 
   const prev = useRef<{ key: string; pathname: string } | null>(null);
   const getRef = useRef(getMain);
   getRef.current = getMain;
+  // #main's offset as of its last scroll event or our own write. A new page skips the reset while
+  // it is already 0: writing scrollTop (like reading it) forces a synchronous layout of the page
+  // that just mounted (17 ms for a series page, XB2-25). Every offset change fires a scroll event,
+  // so this stays current without reading layout.
+  const seenTop = useRef(0);
+  const toTop = (main: HTMLElement) => {
+    if (seenTop.current === 0) return;
+    main.scrollTop = 0;
+    seenTop.current = 0;
+  };
 
   // Record while the page is in use: scroll events carry the offset, focusin the control.
   // A layout effect, so a page change never records the next page's clamped offset under
@@ -118,7 +128,10 @@ export function useOutletScrollMemory(getMain: () => HTMLElement | null = () => 
     const main = getRef.current();
     if (!main) return;
     const key = location.key;
-    const onScroll = () => remember(key, { top: main.scrollTop });
+    const onScroll = () => {
+      seenTop.current = main.scrollTop;
+      remember(key, { top: seenTop.current });
+    };
     const onFocus = (e: FocusEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       const focus = target && target !== main ? focusSelector(target) : undefined;
@@ -141,10 +154,10 @@ export function useOutletScrollMemory(getMain: () => HTMLElement | null = () => 
     if (navType === 'POP') {
       const spot = spots.get(location.key);
       if (spot && (spot.top > 0 || spot.focus)) return restore(main, spot);
-      main.scrollTop = 0;
+      toTop(main);
       return;
     }
     // A filter or query change on the same page keeps its place; a new page starts at the top.
-    if (before.pathname !== location.pathname) main.scrollTop = 0;
+    if (before.pathname !== location.pathname) toTop(main);
   }, [location.key, location.pathname, navType]);
 }

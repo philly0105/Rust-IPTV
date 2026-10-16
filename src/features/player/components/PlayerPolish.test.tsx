@@ -418,6 +418,42 @@ describe('up next focus', () => {
   });
 });
 
+describe('up next card', () => {
+  it('leads with the episode line and puts the series name on its own quieter line', () => {
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'paused', positionSeconds: 60, durationSeconds: 60 }));
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    const episode = { ...vod, url: 'http://h/e2.mp4', title: 'Harbor Lights', subtitle: 'S01E02 · Low Tide' };
+    act(() => useMediaStore.setState({ upNext: { source: episode, deadline: Date.now() + 10_000 } }));
+    const title = screen.getByTestId('up-next-title');
+    const series = screen.getByTestId('up-next-series');
+    expect(title.textContent).toBe('S01E02 · Low Tide');
+    expect(series.textContent).toBe('Harbor Lights');
+    // Two lines, never run together into one; the series is the quieter one.
+    expect(title.contains(series)).toBe(false);
+    expect(title.tagName).toBe('P');
+    expect(series.tagName).toBe('P');
+    expect(series.className).toContain('player-on-glass-muted');
+    // Hover shows the whole name in reading order.
+    expect(title.getAttribute('title')).toBe('S01E02 · Low Tide · Harbor Lights');
+  });
+
+  it('a movie has just its title', () => {
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'paused', positionSeconds: 60, durationSeconds: 60 }));
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    act(() => useMediaStore.setState({ upNext: { source: { ...vod, url: 'http://h/m2.mp4', title: 'The Sequel' }, deadline: Date.now() + 10_000 } }));
+    expect(screen.getByTestId('up-next-title').textContent).toBe('The Sequel');
+    expect(screen.queryByTestId('up-next-series')).toBeNull();
+  });
+});
+
 describe('fullscreen channel panel focus', () => {
   it('gives focus back to the control that had it when the panel closes', async () => {
     const { FullscreenChannelPanel } = await import('./FullscreenChannelPanel');

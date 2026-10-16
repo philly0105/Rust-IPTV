@@ -184,5 +184,11 @@
   "locked": "Locked",
   "lockedGuide": "Locked. Enter the PIN to see what is on.",
   "unlock": "Unlock",
-  "ribbonFailed": "Could not load this channel's guide"
+  "ribbonFailed": "Could not load this channel's guide",
+  "parentalHiddenChannels": "Parental controls are hiding this source's channels",
+  "parentalHiddenStations": "Parental controls are hiding this source's stations",
+  "parentalHiddenHint": "Its groups are locked. Enter your PIN to show them for this session.",
+  "parentalUnlock": "Unlock",
+  "parentalUnlockTitle": "Show locked channels",
+  "parentalUnlockBody": "Enter your PIN to show locked groups and channels until parental controls lock again."
 }

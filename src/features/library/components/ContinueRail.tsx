@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { PlaybackPosition } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 
 import { IconButton, Poster, ProgressBar } from '../deps';
 import { formatClock } from '../lib/format';
@@ -54,9 +55,11 @@ export function ContinueRail({
       <h2 id="continue-heading" className="font-display text-[calc(15rem/15)] font-semibold text-fg">
         {t('continueWatching')}
       </h2>
-      <ul className="-mx-1 flex min-h-0 flex-1 snap-x gap-4 overflow-x-auto px-1 pb-2" data-testid="continue-rail">
+      {/* scroll-px-1 matches px-1: snap-start then aligns the first card with the heading, not the padding edge. */}
+      <ul className="-mx-1 flex min-h-0 flex-1 snap-x scroll-px-1 gap-4 overflow-x-auto px-1 pb-2" data-testid="continue-rail">
         {positions.map((p) => {
-          const title = p.snapshot?.title ?? p.ref.itemId;
+          // Older snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
+          const title = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
           const fraction = watchedFraction(p);
           const left = p.durationSeconds ? Math.max(0, p.durationSeconds - p.positionSeconds) : undefined;
           return (
@@ -83,9 +86,12 @@ export function ContinueRail({
                   <Poster src={p.snapshot?.posterUrl} sourceId={p.ref.sourceId} alt="" label={title} aspect="poster" />
                 </div>
                 {fraction !== undefined && <ProgressBar value={fraction * 100} max={100} size="xs" label={t('watchedPercent', { percent: Math.round(fraction * 100) })} />}
+                {/* dir="auto": a Latin title in an RTL UI truncates at its end and keeps its brackets (cards.tsx). */}
                 <span className="flex flex-col">
-                  <span className="truncate text-[calc(13rem/15)] font-medium text-fg">{title}</span>
-                  <span className="truncate text-xs text-fg-muted">
+                  <span dir="auto" className="truncate text-match-parent text-[calc(13rem/15)] font-medium text-fg" title={title}>
+                    {title}
+                  </span>
+                  <span dir="auto" className="truncate text-match-parent text-xs text-fg-muted">
                     {p.snapshot?.subtitle ?? (left !== undefined ? t('minutesLeft', { count: Math.max(1, Math.round(left / 60)) }) : formatClock(p.positionSeconds))}
                   </span>
                 </span>

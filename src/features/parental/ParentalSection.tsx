@@ -1,4 +1,5 @@
 import {
+  ChevronDown,
   Clapperboard,
   Film,
   FolderLock,
@@ -13,7 +14,7 @@ import {
   Tv,
   X,
 } from 'lucide-react';
-import { useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
@@ -530,11 +531,14 @@ function SourceLocks({
   const sourceId = source?.id ?? locks[0]?.sourceId ?? '';
 
   // Adult groups, per content type: for the badges on group locks, and for the count of
-  // groups the automatic rule locks on top of the list (only while it applies).
+  // groups the automatic rule locks on top of the list (only while it applies). The count
+  // loads when the user opens it, so the page does not ask for every type of every source.
   const autoApplies = status.enabled && status.autoAdult && !!source;
+  const [autoOpen, setAutoOpen] = useState(false);
+  const autoId = useId();
   const counts = source ? contentCounts(source) : null;
-  const wantAdult = (ct: ContentType) =>
-    locks.some((l) => l.kind === 'category' && l.contentType === ct) || (autoApplies && (counts?.[ct] ?? 0) > 0);
+  const wantCount = (ct: ContentType) => autoApplies && autoOpen && (counts?.[ct] ?? 0) > 0;
+  const wantAdult = (ct: ContentType) => locks.some((l) => l.kind === 'category' && l.contentType === ct) || wantCount(ct);
   const adultLive = useRpcQuery('parental.adultCategories', { sourceId, contentType: 'live' }, { enabled: wantAdult('live') });
   const adultRadio = useRpcQuery('parental.adultCategories', { sourceId, contentType: 'radio' }, { enabled: wantAdult('radio') });
   const adultMovie = useRpcQuery('parental.adultCategories', { sourceId, contentType: 'movie' }, { enabled: wantAdult('movie') });
@@ -548,10 +552,17 @@ function SourceLocks({
 
   // Adult groups locked by the rule alone: not also in the list as a group lock.
   let autoCount = 0;
-  if (autoApplies) {
+  let autoLoading = false;
+  if (autoApplies && autoOpen) {
     for (const ct of CONTENT_TYPES) {
+      if (!wantCount(ct)) continue;
+      const ids = adult[ct];
+      if (!ids) {
+        autoLoading = true;
+        continue;
+      }
       const explicit = new Set(locks.filter((l) => l.kind === 'category' && l.contentType === ct).map((l) => l.targetId));
-      autoCount += (adult[ct] ?? []).filter((id) => !explicit.has(id)).length;
+      autoCount += ids.filter((id) => !explicit.has(id)).length;
     }
   }
 
@@ -583,14 +594,35 @@ function SourceLocks({
           </Button>
         ) : null}
       </div>
-      {autoCount > 0 ? (
-        <p className="flex items-center gap-2 text-sm text-fg-muted" data-testid="parental-auto-adult-count">
-          <ShieldAlert aria-hidden size={16} className="shrink-0 text-danger" />
-          {t('autoAdultCount', { count: autoCount })}
-        </p>
+      {autoApplies ? (
+        <div className="flex flex-col items-start gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="-ms-2"
+            icon={<ShieldAlert aria-hidden size={16} className="text-danger" />}
+            iconRight={<ChevronDown aria-hidden size={14} className={cn('motion-safe:transition-transform', autoOpen && 'rotate-180')} />}
+            aria-expanded={autoOpen}
+            aria-controls={autoId}
+            onClick={() => setAutoOpen((v) => !v)}
+            data-testid="parental-auto-adult-toggle"
+          >
+            {t('autoAdultRule')}
+          </Button>
+          <div id={autoId} hidden={!autoOpen} aria-live="polite" className="ps-7 text-sm text-fg-muted">
+            {!autoOpen ? null : autoLoading ? (
+              <div aria-busy="true">
+                <Skeleton className="h-5 w-56 max-w-full" />
+                <span className="sr-only">{t('loadingGroups')}</span>
+              </div>
+            ) : (
+              <p data-testid="parental-auto-adult-count">{autoCount > 0 ? t('autoAdultCount', { count: autoCount }) : t('autoAdultNone')}</p>
+            )}
+          </div>
+        </div>
       ) : null}
       {locks.length === 0 ? (
-        autoCount > 0 ? null : <p className="text-sm text-fg-subtle">{t('sourceNoLocks')}</p>
+        autoApplies ? null : <p className="text-sm text-fg-subtle">{t('sourceNoLocks')}</p>
       ) : (
         <ul ref={listRef} className="flex flex-col" aria-label={t('locksIn', { source: name })}>
           {shown.map((l, i) => {

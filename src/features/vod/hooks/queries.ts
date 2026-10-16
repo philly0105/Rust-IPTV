@@ -8,7 +8,7 @@ import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, 
 import { useEffect, useMemo, useRef } from 'react';
 
 import { onAppEvent } from '@/api/events';
-import { invalidate, queryDefaultsFor, useRpcQuery } from '@/api/query';
+import { invalidate, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type {
   ItemRef,
@@ -85,27 +85,60 @@ export function useResumeLookup(enabled = true, accept?: (ref: ItemRef) => boole
   }, [q.data, filterKey]);
 }
 
+/**
+ * One source. Seeded from the cached `sources.list` (the sidebar loads it at startup), so a VOD
+ * page knows the source's name and kind in its first frame instead of after a `sources.get`
+ * round trip: its shelves and toolbars mount at once and nothing shifts when the record arrives
+ * (L2-vod-5). The seed counts as old as the list, so the usual staleness rules still refetch it.
+ */
 export function useSource(sourceId: string | undefined): UseQueryResult<Source, RpcError> {
-  return useRpcQuery('sources.get', { id: sourceId ?? '' }, { enabled: !!sourceId });
+  const qc = useQueryClient();
+  const args = { id: sourceId ?? '' };
+  const listKey = rpcKey('sources.list', undefined);
+  return useQuery<Source, RpcError>({
+    queryKey: rpcKey('sources.get', args),
+    queryFn: async ({ signal }) => (await rpcRaw('sources.get', args, { signal })) as Source,
+    enabled: !!sourceId,
+    initialData: () => (sourceId ? qc.getQueryData<Source[]>(listKey)?.find((s) => s.id === sourceId) : undefined),
+    initialDataUpdatedAt: () => qc.getQueryState(listKey)?.dataUpdatedAt,
+  });
 }
 
 export function useSourcesList(): UseQueryResult<Source[], RpcError> {
   return useRpcQuery('sources.list', undefined);
 }
 
-/** One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected. */
+/** True when two page-query keys differ in `hideWatched` at most (same command, page and filters). */
+export function sameButHideWatched(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a[0] !== b[0]) return false;
+  const strip = (k: unknown) => {
+    if (typeof k !== 'object' || k === null) return k;
+    const { hideWatched: _drop, ...rest } = k as Record<string, unknown>;
+    return rest;
+  };
+  return JSON.stringify(strip(a[1])) === JSON.stringify(strip(b[1]));
+}
+
+/**
+ * One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected.
+ * Flipping "Hide watched" keeps each page's previous titles on screen until the new page answers
+ * (L2-vod-8), so the grid, its scroll offset and its keyboard cursor stay put while the titles
+ * refill, instead of the whole grid dropping to skeletons and remounting.
+ */
 export function useVodPage(
   input: GridQueryInput | undefined,
   pageIndex: number,
 ): UseQueryResult<Page<VodItem | SeriesItem>, RpcError> {
   const req = input ? buildPageRequest(input, pageIndex) : undefined;
+  const queryKey = req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'];
   return useQuery<Page<VodItem | SeriesItem>, RpcError>({
-    queryKey: req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'],
+    queryKey,
     queryFn: async ({ signal }) => {
       if (!req) throw new RpcError('invalid', 'No source');
       return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
     enabled: !!req,
+    placeholderData: (prev, prevQuery) => (prev && prevQuery && sameButHideWatched(prevQuery.queryKey, queryKey) ? prev : undefined),
     ...PAGE_TIMING,
   });
 }
@@ -173,19 +206,31 @@ function plainRef(ref: ItemRef): ItemRef {
 }
 
 /**
- * Movie detail query: provider detail for portals; for m3u the catalog row wrapped as a detail.
- * Shared by useMovieDetail and the hover prefetch (C4), so both use one key and fn.
+ * An m3u playlist has no provider detail: the detail query caches the bare `catalog.item` row
+ * under `['catalog.item', { ref }]`, the key flat `useRpcQuery('catalog.item')` readers (the
+ * player, live pages) share, so the two never hold different shapes for one ref; `select`
+ * wraps it as a detail (L2 XB2-34).
+ */
+function toMovieDetail(data: VodDetail | VodItem): VodDetail {
+  return 'item' in data ? data : { item: data, cast: [], backdrops: [], providerDetailsUnavailable: false };
+}
+
+/** As {@link toMovieDetail}; m3u playlists have no series metadata, so the row has no episodes. */
+function toSeriesDetail(data: SeriesDetail | SeriesItem): SeriesDetail {
+  return 'item' in data ? data : { item: data, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
+}
+
+/**
+ * Movie detail query: provider detail for portals; for m3u the catalog row, wrapped as a detail
+ * by `select`. Shared by useMovieDetail and the hover prefetch (C4), so both use one key and fn.
  */
 export function movieDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
   const cmd = sourceKind ? detailCommand(sourceKind, 'movie') : 'catalog.item';
   const args = { ref: plainRef(ref) };
-  return queryOptions<VodDetail, RpcError>({
+  return queryOptions<VodDetail | VodItem, RpcError, VodDetail>({
     queryKey: [cmd, args],
-    queryFn: async ({ signal }) => {
-      const res = await rpcRaw(cmd, args, { signal });
-      if (cmd === 'catalog.item') return { item: res as VodItem, cast: [], backdrops: [], providerDetailsUnavailable: false };
-      return res as VodDetail;
-    },
+    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal })) as VodDetail | VodItem,
+    select: toMovieDetail,
     staleTime: DETAIL_STALE_MS,
   });
 }
@@ -194,16 +239,10 @@ export function movieDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRe
 export function seriesDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
   const cmd = sourceKind ? detailCommand(sourceKind, 'series') : 'xtream.seriesDetail';
   const args = { ref: plainRef(ref) };
-  return queryOptions<SeriesDetail, RpcError>({
+  return queryOptions<SeriesDetail | SeriesItem, RpcError, SeriesDetail>({
     queryKey: [cmd, args],
-    queryFn: async ({ signal }) => {
-      if (cmd === 'catalog.item') {
-        // m3u playlists have no series metadata; show the row with no episodes.
-        const item = (await rpcRaw(cmd, args, { signal })) as SeriesItem;
-        return { item, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
-      }
-      return (await rpcRaw(cmd, args, { signal })) as SeriesDetail;
-    },
+    queryFn: async ({ signal }) => (await rpcRaw(cmd, args, { signal })) as SeriesDetail | SeriesItem,
+    select: toSeriesDetail,
     staleTime: DETAIL_STALE_MS,
   });
 }

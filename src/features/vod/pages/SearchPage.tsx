@@ -1,12 +1,11 @@
 import { useQueries } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Radio, RotateCw, Search, SearchX, TriangleAlert, Tv } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useParams, useSearchParams } from 'react-router';
+import { useLocation, useNavigationType, useParams, useSearchParams } from 'react-router';
 
-import { rpcKey, useRpcQuery } from '@/api/query';
-import type { CatalogSearchResult } from '@/api/rpc';
+import { useRpcQuery } from '@/api/query';
 import { RpcError, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
@@ -14,7 +13,7 @@ import { playItem } from '@/features/player';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { isSourceMissing, SourceMissing } from '../components/SourceMissing';
 import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
-import { useScrollMemory } from '../hooks/useScrollMemory';
+import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { handleGridKeyDown } from '../lib/gridNav';
@@ -36,7 +35,58 @@ import {
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useToast } from '@/ui';
 
-const DEBOUNCE_MS = 250;
+/**
+ * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
+ * under 50 ms this answers inside the 150 ms budget. A request a newer query replaced is aborted
+ * (its query loses its observer, and `useRpcQuery` hands the signal to the transport).
+ */
+const DEBOUNCE_MS = 100;
+
+/** The shell header's search field, which this page feeds through `usePageHeader`. */
+const headerField = () => document.querySelector<HTMLInputElement>('[data-shell-search]');
+
+/**
+ * Focuses the header search field once it exists and holds focus (the header mounts or swaps
+ * it after this page publishes its header), checking every 50 ms for a moment. Focus the user
+ * has moved anywhere else meanwhile is left alone; only `<body>` and the control that opened
+ * the page (a rail link) give way. Returns the cancel function.
+ */
+function focusFieldWhenReady(timeoutMs = 1500): () => void {
+  const opener = document.activeElement;
+  const deadline = Date.now() + timeoutMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const step = () => {
+    const field = headerField();
+    const active = document.activeElement;
+    if (field && active === field) return;
+    if (active && active !== document.body && active !== opener) return;
+    field?.focus();
+    if (Date.now() < deadline) timer = setTimeout(step, 50);
+  };
+  step();
+  return () => clearTimeout(timer);
+}
+
+/**
+ * Focuses result `index` once its row is mounted (rows are virtualized, so a row scrolled to a
+ * moment ago mounts a frame or two later). `reveal` scrolls it into view; without it, focus
+ * already taken elsewhere is never stolen.
+ */
+function focusResult(scroller: HTMLElement, index: number, reveal: boolean, frames = 10): void {
+  if (!reveal) {
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+  }
+  const cell = scroller.querySelector<HTMLElement>(`[data-grid-index="${index}"]`);
+  if (cell) {
+    cell.focus({ preventScroll: true });
+    if (reveal) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  } else if (frames > 0) {
+    requestAnimationFrame(() => focusResult(scroller, index, reveal, frames - 1));
+  }
+}
+
+const EMPTY_STALKER = splitStalkerResults([]);
 
 /** Stalker portals keep VOD out of SQLite, so their movies and series are searched on the portal. */
 function useStalkerSearch(sources: Source[], query: string) {
@@ -47,18 +97,29 @@ function useStalkerSearch(sources: Source[], query: string) {
         const args = { sourceId: s.id, query, contentType };
         return {
           queryKey: ['stalker.search', args],
-          queryFn: async () => (await rpcRaw('stalker.search', args)) as Page<VodItem | SeriesItem>,
+          // The signal aborts a portal search that a newer query replaced.
+          queryFn: async ({ signal }) => (await rpcRaw('stalker.search', args, { signal })) as Page<VodItem | SeriesItem>,
           enabled: !!query,
           staleTime: 60_000,
         };
       }),
     ),
   });
-  const items = results.flatMap((r) => r.data?.items ?? []);
+  const pending = !!query && results.some((r) => r.isPending);
+  // The same answers give the same arrays, so the result groups only rebuild when a portal answers.
+  const stamp = `${query}\u0000${targets.map((s) => s.id).join(',')}\u0000${results.map((r) => r.dataUpdatedAt).join(',')}`;
+  const fresh = useMemo(
+    () => (query ? splitStalkerResults(results.flatMap((r) => r.data?.items ?? [])) : EMPTY_STALKER),
+    [stamp], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  // While the portals answer a new query, the last answered results stay on screen (useQueries
+  // has no keepPreviousData across keys), so the list never flashes short or empty.
+  const [settled, setSettled] = useState(fresh);
+  if (!pending && settled !== fresh) setSettled(fresh);
   const failed = results.filter((r) => r.isError);
   return {
-    ...splitStalkerResults(items),
-    pending: !!query && results.some((r) => r.isPending),
+    ...(pending ? settled : fresh),
+    pending,
     error: failed[0]?.error ?? undefined,
     retry: () => failed.forEach((r) => void r.refetch()),
   };
@@ -113,11 +174,12 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const searchSourceId = sourceId ?? facet;
   const catalogArgs = searchSourceId ? { query, sourceId: searchSourceId, limit: requestLimit } : { query, limit: requestLimit };
   const catalog = useRpcQuery('catalog.search', catalogArgs, { enabled: !!query, staleTime: 30_000, keepPrevious: true });
-  // The chips keep counting every source while a facet narrows the results.
+  // The chips keep counting every source while a facet narrows the results (the same args as the
+  // unfiltered first page, so picking a chip reads it from the cache).
   const facetBase = useRpcQuery(
     'catalog.search',
     { query, limit: searchRequestLimit(SEARCH_LIMIT) },
-    { enabled: !!query && !!facet, staleTime: 30_000 },
+    { enabled: !!query && !!facet, staleTime: 30_000, keepPrevious: true },
   );
   const stalker = useStalkerSearch(searchSources, query);
 
@@ -145,35 +207,13 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     () => (facet ? capSearchResult(facetBase.data, SEARCH_LIMIT) : capped),
     [facet, facetBase.data, capped],
   );
-  // When a type hits its cap, the global list cannot tell how many hits each
-  // source lost, so every source is also searched alone, with exactly the args
-  // its facet uses (choosing a chip then reads the cache). Chips count from these.
-  const anyCapped = facetCapped.more.live || facetCapped.more.movies || facetCapped.more.series;
-  const perSourceTargets = useMemo(() => (!scoped && !!query && anyCapped ? allSources : []), [scoped, query, anyCapped, allSources]);
-  const perSourceQ = useQueries({
-    queries: perSourceTargets.map((s) => {
-      const args = { query, sourceId: s.id, limit: searchRequestLimit(SEARCH_LIMIT) };
-      return {
-        queryKey: rpcKey('catalog.search', args),
-        queryFn: async () => (await rpcRaw('catalog.search', args)) as CatalogSearchResult,
-        staleTime: 30_000,
-      };
-    }),
-  });
-  const perSourceStamp = perSourceQ.map((r) => r.dataUpdatedAt).join(',');
-  const perSource = useMemo(() => {
-    const map = new Map<string, SourceSearch>();
-    perSourceTargets.forEach((s, i) => {
-      const data = perSourceQ[i]?.data;
-      if (!data) return;
-      const own = capSearchResult(data, SEARCH_LIMIT);
-      map.set(s.id, {
-        groups: groupSearchResults({ result: own.result, extraMovies: stalker.movies, extraSeries: stalker.series, sources: allSources, sourceFilter: s.id }),
-        more: own.more,
-      });
-    });
-    return map;
-  }, [perSourceStamp, perSourceTargets, stalker.movies, stalker.series, allSources]); // eslint-disable-line react-hooks/exhaustive-deps
+  // L2-perf-desktop-11: chips count from the all-sources result (every hit names its source); no
+  // source is searched alone just to count it. Where a type hit its cap those counts are lower
+  // bounds ("N+"). The picked chip's own search is on screen already, so its count comes from it.
+  const facetOwn = useMemo(
+    () => (facet && catalog.data && !catalog.isPlaceholderData ? new Map<string, SourceSearch>([[facet, { groups, more: capped.more }]]) : undefined),
+    [facet, catalog.data, catalog.isPlaceholderData, groups, capped.more],
+  );
   const facets = useMemo(
     () =>
       scoped
@@ -181,18 +221,29 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         : sourceFacets(
             groupSearchResults({ result: facetCapped.result, extraMovies: stalker.movies, extraSeries: stalker.series, sources: allSources }),
             facetCapped.more,
-            perSource,
+            facetOwn,
           ),
-    [scoped, facetCapped.result, facetCapped.more, stalker.movies, stalker.series, allSources, perSource],
+    [scoped, facetCapped.result, facetCapped.more, stalker.movies, stalker.series, allSources, facetOwn],
   );
 
   const scopeName = scopedSource.data?.name;
   const placeholder = scoped && scopeName ? t('searchInSource', { source: scopeName }) : t('searchEverything');
+  // ArrowDown in the header field moves into the results (when there are any on screen).
+  // Reads only refs, so the header the shell holds never calls a stale copy.
+  const onFieldKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'ArrowDown' || e.defaultPrevented || e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const scroller = scrollRef.current;
+    if (!scroller?.querySelector('[data-grid-index]')) return;
+    e.preventDefault();
+    // Scrolled far down, the first row is not mounted: go back up to it.
+    if (!scroller.querySelector('[data-grid-index="0"]')) scroller.scrollTop = 0;
+    focusResult(scroller, 0, true);
+  };
   usePageHeader(
     {
       title: t('search'),
       subtitle: scoped ? scopeName : undefined,
-      search: { value: draft, onChange: setDraft, placeholder, onSubmit: (v) => setDraft(v) },
+      search: { value: draft, onChange: setDraft, placeholder, onSubmit: (v) => setDraft(v), onKeyDown: onFieldKeyDown },
     },
     [draft, placeholder, scopeName],
   );
@@ -218,13 +269,17 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       { replace: true },
     );
 
-  const playChannel = (c: Channel, hit: SearchHit) => {
-    if (!hit.sourceKind) return;
-    const args: Parameters<typeof playItem>[0] = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
-    if (c.logoUrl) args.posterUrl = c.logoUrl;
-    if (c.categoryId) args.categoryId = c.categoryId;
-    playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' }));
-  };
+  // Stable, so typing in the field does not re-render the result grids.
+  const playChannel = useCallback(
+    (c: Channel, hit: SearchHit) => {
+      if (!hit.sourceKind) return;
+      const args: Parameters<typeof playItem>[0] = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
+      if (c.logoUrl) args.posterUrl = c.logoUrl;
+      if (c.categoryId) args.categoryId = c.categoryId;
+      playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' }));
+    },
+    [toast, t],
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const coverWidth = useCoverWidth(useSettings().coverSize);
@@ -233,9 +288,34 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
-  // Back from a title: the results open where you left them (same query, type and source in the URL).
+  // Back from a title: the results open where you left them (same query, type and source in the
+  // URL), with focus on the title you opened. A link here (PUSH) is a fresh visit from the top.
   const location = useLocation();
-  useScrollMemory({ key: `${location.pathname}${location.search}`, getScroller: () => scrollRef.current, ready: !!query && !loading && groups.length > 0 });
+  const navigationType = useNavigationType();
+  const memoryKey = `${location.pathname}${location.search}`;
+  useScrollMemory({
+    key: memoryKey,
+    getScroller: () => scrollRef.current,
+    ready: !!query && !loading && groups.length > 0,
+    restore: navigationType !== 'PUSH',
+    onRestored: (spot, scroller) => {
+      if (spot.index !== undefined) focusResult(scroller, spot.index, false);
+    },
+  });
+  // Enter on a focused result also fires click, so this covers the keyboard too.
+  const rememberResult = (e: MouseEvent<HTMLElement>) => {
+    const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
+    const index = Number(cell?.dataset['gridIndex']);
+    if (cell && Number.isInteger(index)) rememberSpot(memoryKey, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
+  };
+
+  // L1-vod-3: opened from a link, the rail or the palette, the cursor lands in the field, so
+  // typing searches at once. Back (POP) leaves focus to the restore above; typing replaces.
+  useEffect(() => {
+    if (navigationType !== 'PUSH') return;
+    return focusFieldWhenReady();
+  }, [location.key, navigationType]);
+
   // Some results arrived but one lookup failed (the library or a portal): say so instead of showing a silently short list.
   const partialError = groups.length > 0 ? (catalog.isError ? catalog.error : stalker.error) : undefined;
 
@@ -303,7 +383,11 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
           }))}
         />
         {activeGroup && (
-          <div {...tabPanelProps('search-results', activeGroup.kind)} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          <div
+            {...tabPanelProps('search-results', activeGroup.kind)}
+            onClickCapture={rememberResult}
+            className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
             {activeGroup.kind === 'live' ? (
               <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} onPlayChannel={playChannel} scrollRef={scrollRef} />
             ) : (
@@ -344,19 +428,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   );
 }
 
+/** A source filter pill: one line however long the name (it truncates, the tooltip has it all). */
 function FacetChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number | string }) {
   return (
     <button
       type="button"
       aria-pressed={active}
       onClick={onClick}
+      title={label}
       className={cn(
-        'inline-flex h-8 items-center gap-2 rounded-full border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus',
+        'inline-flex h-8 max-w-[min(100%,16rem)] items-center gap-2 rounded-full border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus',
         active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface text-fg-muted hover:text-fg',
       )}
     >
-      {label}
-      {count !== undefined && <span className="tabular text-xs opacity-80">{count}</span>}
+      <span dir="auto" className="min-w-0 truncate">
+        {label}
+      </span>
+      {count !== undefined && <span className="tabular shrink-0 text-xs opacity-80">{count}</span>}
     </button>
   );
 }
@@ -430,7 +518,8 @@ const POSTER_CAPTION_HEIGHT = 64;
  * Hits in a responsive grid whose rows are virtualized against the page
  * scroller, so a 1000-result step mounts only the rows near the viewport.
  * Arrow keys still move by cell and row (`handleGridKeyDown` scrolls the page
- * when the target row is not mounted yet).
+ * when the target row is not mounted yet); ArrowUp on the first row returns
+ * to the search field, where ArrowDown came in.
  */
 function HitGrid({
   hits,
@@ -446,7 +535,7 @@ function HitGrid({
   gap: number;
   /** Estimated row height (without the gap) for a cell width. */
   rowHeight: (cellWidth: number) => number;
-  renderCell: (hit: SearchHit, index: number) => ReactNode;
+  renderCell: (hit: SearchHit, index: number, cellWidth: number) => ReactNode;
   scrollRef: RefObject<HTMLDivElement | null>;
   testId: string;
 }) {
@@ -498,7 +587,19 @@ function HitGrid({
       data-testid={testId}
       data-columns={columns}
       style={{ position: 'relative', height: virtualizer.getTotalSize() }}
-      onKeyDown={(e) => handleGridKeyDown(e, { count: hits.length })}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowUp' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
+          const index = Number(cell?.dataset['gridIndex']);
+          const field = Number.isInteger(index) && index < columns ? headerField() : null;
+          if (field) {
+            e.preventDefault();
+            field.focus();
+            return;
+          }
+        }
+        handleGridKeyDown(e, { count: hits.length });
+      }}
     >
       {virtualizer.getVirtualItems().map((row) => {
         const first = row.index * columns;
@@ -524,7 +625,7 @@ function HitGrid({
               const i = first + j;
               return (
                 <div key={h.key} role="listitem" aria-posinset={i + 1} aria-setsize={hits.length} className="min-w-0">
-                  {renderCell(h, i)}
+                  {renderCell(h, i, cellWidth)}
                 </div>
               );
             })}
@@ -535,8 +636,15 @@ function HitGrid({
   );
 }
 
-/** Movie or series hits as poster cards, with the language the provider gives each title. */
-function PosterGrid({
+/** Widest a poster's source badge gets; a narrower poster (phones) keeps its 6px inset on both sides. */
+const POSTER_BADGE_MAX = 120;
+const POSTER_BADGE_INSETS = 12;
+
+/**
+ * Movie or series hits as poster cards, with the language the provider gives each title.
+ * Memoized: typing in the field re-renders the page, not the cards.
+ */
+const PosterGrid = memo(function PosterGrid({
   kind,
   hits,
   showBadges,
@@ -563,7 +671,7 @@ function PosterGrid({
       rowHeight={(w) => w * 1.5 + POSTER_CAPTION_HEIGHT}
       scrollRef={scrollRef}
       testId={`vod-search-${kind}`}
-      renderCell={(h, i) => {
+      renderCell={(h, i, cellWidth) => {
         const item = h.item as VodItem | SeriesItem;
         return (
           <PosterCard
@@ -576,7 +684,20 @@ function PosterGrid({
             progress={resume.get(resumeKey(item.ref))}
             watched={watched.has(itemKey(item.ref))}
             language={itemLanguage(item.title, item.categoryName)}
-            badge={showBadges ? <Badge variant="neutral" className="max-w-[120px] truncate bg-scrim text-white">{h.sourceName}</Badge> : undefined}
+            badge={
+              showBadges ? (
+                // Badge is inline-flex, so the ellipsis needs a block inside it (L2-visual-8).
+                <Badge
+                  variant="neutral"
+                  dir="auto"
+                  title={h.sourceName}
+                  className="bg-scrim text-white"
+                  style={{ maxWidth: Math.max(0, Math.min(POSTER_BADGE_MAX, cellWidth - POSTER_BADGE_INSETS)) }}
+                >
+                  {h.sourceName}
+                </Badge>
+              ) : undefined
+            }
             badgeLabel={showBadges ? h.sourceName : undefined}
             myList={myListTarget(item)}
             // C4: warm the detail page on hover or focus (needs the source kind for its command).
@@ -586,10 +707,10 @@ function PosterGrid({
       }}
     />
   );
-}
+});
 
-/** Channel hits; choosing one plays it. */
-function ChannelGrid({
+/** Channel hits; choosing one plays it. Memoized like PosterGrid. */
+const ChannelGrid = memo(function ChannelGrid({
   hits,
   showBadges,
   onPlayChannel,
@@ -625,14 +746,18 @@ function ChannelGrid({
               <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>
               <div className="tabular truncate text-xs text-fg-subtle">{h.meta}</div>
             </div>
-            {showBadges && <Badge variant="outline" className="max-w-[110px] shrink-0 truncate">{h.sourceName}</Badge>}
+            {showBadges && (
+              <Badge variant="outline" dir="auto" title={h.sourceName} className="max-w-[110px] shrink-0">
+                {h.sourceName}
+              </Badge>
+            )}
             {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
           </button>
         );
       }}
     />
   );
-}
+});
 
 function SearchSkeleton() {
   const { t } = useTranslation('vod');

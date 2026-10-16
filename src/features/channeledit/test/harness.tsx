@@ -69,12 +69,34 @@ export function installDomStubs(): void {
   Element.prototype.scrollIntoView ??= function scrollIntoView() {};
 }
 
-/** Stand-in for `@/api/events`: the edits UI listens to nothing itself. */
+/**
+ * The event connection the edits see. Closed by default: tests have no event
+ * socket, so a write refreshes its queries itself. `open()` plus `emit()`
+ * stand in for the core's `channels.changed` coming back.
+ */
+export const events = {
+  state: 'closed' as 'connecting' | 'open' | 'closed',
+  handlers: new Map<string, Set<(payload: unknown) => void>>(),
+  emit(type: string, payload?: unknown) {
+    for (const h of [...(this.handlers.get(type) ?? [])]) h(payload);
+  },
+  reset() {
+    this.state = 'closed';
+    this.handlers.clear();
+  },
+};
+
+/** Stand-in for `@/api/events`, driven by {@link events}. */
 export const eventsMock = {
-  onAppEvent: () => () => undefined,
+  onAppEvent: (type: string, handler: (payload: unknown) => void) => {
+    const set = events.handlers.get(type) ?? new Set();
+    set.add(handler);
+    events.handlers.set(type, set);
+    return () => void set.delete(handler);
+  },
   onAnyAppEvent: () => () => undefined,
   onConnectionState: () => () => undefined,
-  getConnectionState: () => 'open',
+  getConnectionState: () => events.state,
 };
 
 // ---------------------------------------------------------------------------

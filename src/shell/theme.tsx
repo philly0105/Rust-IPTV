@@ -12,8 +12,10 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 
+import { onConnectionState, type ConnectionState } from '@/api/events';
 import { queryClient, rpcKey } from '@/api/query';
-import { rpc } from '@/api/transport';
+import { onServerAnswered } from '@/api/reachability';
+import { RpcError, rpc } from '@/api/transport';
 import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
 import type { Accent, Density, Settings, Theme } from '@/api/types';
 import { setUiScaleState } from '@/ui/scale';
@@ -236,13 +238,54 @@ export interface ThemeApi {
 let persistSeq = 0;
 
 /**
+ * The newest theme choice the server has not confirmed yet: in flight, or
+ * written while the server was unreachable (web mode, server down). While it
+ * is set, ThemeSync ignores the server's theme, so the settings refetch that
+ * follows a reconnect (`events.lagged`) cannot flip the theme back.
+ */
+let pendingTheme: Theme | null = null;
+let stopReplayWatch: (() => void) | null = null;
+
+function stopWatching(): void {
+  stopReplayWatch?.();
+  stopReplayWatch = null;
+}
+
+/**
+ * Writes the pending theme again once the server is back: when the event
+ * socket reopens (before that reconnect's settings refetch goes out, which
+ * waits for the event burst), or when any RPC gets an answer. Not on the
+ * state reported at subscribe time: only a reconnect proves anything.
+ */
+function watchForReplay(): void {
+  if (stopReplayWatch) return;
+  const replay = () => {
+    stopWatching();
+    if (pendingTheme) void persistTheme(pendingTheme);
+  };
+  let last: ConnectionState | null = null;
+  const offState = onConnectionState((s) => {
+    const was = last;
+    last = s;
+    if (s === 'open' && was !== null && was !== 'open') replay();
+  });
+  const offAnswered = onServerAnswered(replay);
+  stopReplayWatch = () => {
+    offState();
+    offAnswered();
+  };
+}
+
+/**
  * Persists a theme choice: local first (instant), then settings.update. Only
  * the newest call writes its response to the settings cache: with Ctrl+Shift+L
  * pressed twice quickly, an older reply arriving last would otherwise flow
- * back through ThemeSync and undo the second press.
+ * back through ThemeSync and undo the second press. A write that cannot reach
+ * the server keeps the choice and replays it when the server is back.
  */
 export async function persistTheme(theme: Theme): Promise<void> {
   const mine = ++persistSeq;
+  pendingTheme = theme;
   useThemeStore.getState().set(theme);
   const key = rpcKey('settings.get');
   const prev = queryClient.getQueryData<Settings>(key);
@@ -250,9 +293,19 @@ export async function persistTheme(theme: Theme): Promise<void> {
   try {
     const next = await rpc('settings.update', { patch: { theme } });
     if (mine !== persistSeq) return;
+    pendingTheme = null;
+    stopWatching();
     queryClient.setQueryData(key, next);
-  } catch {
-    // Keep the local choice; settings will reconcile on the next load.
+  } catch (err) {
+    if (mine !== persistSeq) return;
+    const { code } = RpcError.from(err);
+    if (code === 'network' || code === 'timeout') {
+      watchForReplay();
+      return;
+    }
+    // The server answered and refused: keep the local choice; settings reconcile on the next load.
+    pendingTheme = null;
+    stopWatching();
   }
 }
 
@@ -283,7 +336,8 @@ export interface ThemeSyncProps {
 export function ThemeSync({ settingsTheme, appearance }: ThemeSyncProps) {
   const setLocal = useThemeStore((s) => s.set);
   useEffect(() => {
-    if (settingsTheme) setLocal(settingsTheme);
+    // An unconfirmed choice stands over the server's older theme (persistTheme).
+    if (settingsTheme && pendingTheme === null) setLocal(settingsTheme);
   }, [settingsTheme, setLocal]);
 
   const setAppearance = useAppearanceStore((s) => s.set);

@@ -20,13 +20,17 @@ const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly s
   ['vendor-tauri', ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
 ];
 
-/** `src/i18n/en/*.json`, the eager fallback locale. */
-const EN_LOCALE = /[\\/]src[\\/]i18n[\\/]en[\\/][^\\/]+\.json$/;
+/** `src/i18n/<folder>/*.json`; group 1 is the language folder. */
+const LOCALE = /[\\/]src[\\/]i18n[\\/]([^\\/]+)[\\/][^\\/]+\.json$/;
 
 function vendorChunk(id: string): string | undefined {
   // English strings change on every copy edit; their own chunk keeps the app
-  // code cache warm and loads in parallel with the entry.
-  if (EN_LOCALE.test(id)) return 'locale-en';
+  // code cache warm and loads in parallel with the entry. Every other language
+  // gets one chunk too (`locale-de`): `loadLanguage` fetches all of a folder's
+  // namespaces at once, and a manual chunk stays out of the
+  // experimentalMinChunkSize merge, so no foreign strings end up in app chunks.
+  const locale = LOCALE.exec(id);
+  if (locale) return `locale-${locale[1]}`;
   const at = id.lastIndexOf('node_modules');
   if (at < 0) return undefined;
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);
@@ -73,6 +77,11 @@ export default defineConfig({
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
+      // React's component wrappers have no side effects, but Rollup cannot prove it, so a module
+      // with a top-level `memo(...)` reached through a barrel (`@/ui`) was kept whole in the
+      // importer's chunk: VirtualGrid landed in the entry. With both marked pure the entry went
+      // from 162.7 kB to 143.8 kB (src/ui/test/bundlePurity.test.ts keeps this list complete).
+      treeshake: { manualPureFunctions: ['memo', 'lazy'] },
       output: {
         // SC8: split the always-needed vendors out of the entry chunk so the
         // app code changes without busting the vendor cache, and the browser
@@ -81,6 +90,12 @@ export default defineConfig({
         // imports and keep their own lazy chunks, so they are not listed.
         manualChunks: vendorChunk,
         chunkFileNames: chunkFileName,
+        // Merge app chunks under 10 kB into a neighbour (L2-perf-ui-7). Measured in
+        // server mode, cold dashboard: 68 JS requests (39 under 4 kB), 1,270 kB before;
+        // 33 requests (4 under 4 kB), 1,313 kB (+3 %) after; all routes in one session
+        // 97 -> 49 requests; entry 139 kB -> 163 kB, 144 kB with the pure wrappers above (budget 268 kB). 12 kB gained nothing
+        // more; without per-language locale chunks 10 kB cost +11 % bytes.
+        experimentalMinChunkSize: 10_000,
       },
     },
   },

@@ -214,7 +214,7 @@ export function DownloadsPage() {
       <PageTitle>{title}</PageTitle>
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
-          <FolderBar summary={summary} pageError={query.isError} />
+          <FolderBar pageError={query.isError} />
         </div>
         {attention.length > 0 && (
           <Button variant="ghost" icon={<Eraser size={16} aria-hidden />} onClick={() => setConfirm({ action: 'clear' })}>

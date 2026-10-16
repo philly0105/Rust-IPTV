@@ -149,7 +149,9 @@ test.describe('sources: cancel and undo', () => {
     const name = 'Remove Me';
     const keep = 'Keep Me';
     const source = await rpc<Source>(page.request, 'sources.add', m3uArgs(name, M3U_URL));
-    await rpc<Source>(page.request, 'sources.add', m3uArgs(keep, M3U_URL));
+    // sources.add refuses a second source on one address; the mock serves the same playlist
+    // whatever the query, and the query makes it a different address.
+    await rpc<Source>(page.request, 'sources.add', m3uArgs(keep, `${M3U_URL}?copy=keep`));
     await page.goto('/sources');
     await expect(card(page, name)).toBeVisible();
 

@@ -11,7 +11,7 @@ import { itemKey, type ItemKey, type ItemRef, type PlayerSource } from '@/api/ty
 import { failoverSwitchKey } from './failover';
 import { showOsd } from './media';
 import { onPlaybackHidden } from './parentalLocks';
-import { getSettings, nowTitle, sourceKindOf, startItem, usePlayerStore, type PlayItemArgs } from './store';
+import { isPendingZap, nowTitle, sourceKindOf, startItem, usePlayerStore, type PlayItemArgs } from './store';
 
 export const HISTORY_LIMIT = 10;
 
@@ -83,7 +83,8 @@ function replacedBy(source: PlayerSource | undefined, prev: PlayerSource | undef
 let lastSource = usePlayerStore.getState().source;
 recordVisit(lastSource);
 usePlayerStore.subscribe((s) => {
-  if (s.source === lastSource) return;
+  // A zap's placeholder (channels passed on the way) is not a visit; the channel it tunes is.
+  if (s.source === lastSource || isPendingZap(s.source)) return;
   const prev = lastSource;
   lastSource = s.source;
   recordVisit(s.source, replacedBy(s.source, prev));
@@ -105,13 +106,13 @@ onPlaybackHidden((item) => dropHistoryEntries(new Set([itemKey(item.ref)])));
 
 /** Plays a history entry, titled like a zap: the channel name, subtitled with what airs now. */
 export async function playHistoryEntry(entry: HistoryEntry): Promise<void> {
-  const settings = await getSettings();
-  const [sourceKind, subtitle] = await Promise.all([sourceKindOf(entry.ref.sourceId), nowTitle(entry.ref, settings?.epgOffsetMinutes)]);
+  // The guide is asked alongside the gate and the stream lookup (the player's shared cache).
+  const subtitle = nowTitle(entry.ref);
+  const sourceKind = await sourceKindOf(entry.ref.sourceId);
   const args: PlayItemArgs = { ref: entry.ref, title: entry.title, isLive: true, isRadio: entry.isRadio, sourceKind };
   if (entry.posterUrl) args.posterUrl = entry.posterUrl;
-  if (subtitle) args.subtitle = subtitle;
   // The readout only once the parental gate let it through (no locked name behind a PIN prompt).
-  await startItem(args, { onAllowed: () => showOsd(entry.title) });
+  await startItem(args, { onAllowed: () => showOsd(entry.title), subtitle });
 }
 
 /** Switches to the previous channel. Returns it, or undefined when there is none yet. */

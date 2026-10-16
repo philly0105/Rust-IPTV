@@ -149,10 +149,9 @@ pub fn ingest_reader(
         tracing::warn!(error = %e, "could not restore connection pragmas after EPG ingest");
     }
     // Fold the bulk write back into the database file now rather than on the
-    // next unrelated commit.
-    if let Err(e) = conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(())) {
-        tracing::warn!(error = %e, "EPG post-ingest checkpoint failed");
-    }
+    // next unrelated commit, and truncate the WAL: a 100-250 MB guide grows it
+    // the most (L2-perf-core-12). Never waits on readers.
+    crate::db::checkpoint_truncate(conn);
     result
 }
 

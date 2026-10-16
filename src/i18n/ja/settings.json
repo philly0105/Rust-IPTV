@@ -238,7 +238,7 @@
   "backupNoSecrets": "このバックアップにはパスワードが含まれていません。XtreamとStalkerのソースは再入力が必要です。",
   "backupMode": "インポート方法",
   "backupMerge": "結合",
-  "backupMergeHint": "ファイルのソースを追加し、既存のソースは残します。",
+  "backupMergeHint": "ファイルのソースを追加します。既存のソースは名前と設定をそのまま保ちます。",
   "backupReplace": "置き換え",
   "backupReplaceHint": "先にバックアップを読み込み、その中のソースが1つでも読み込めたら現在のソースを削除します。",
   "backupImportButton": "バックアップをインポート",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "置き換え",
   "backupImportFailed": "バックアップをインポートできませんでした",
   "backupResult": "追加または更新: {{imported}}。スキップ: {{skipped}}。",
+  "backupRefreshing_one": "{{count, number}} 件のプレイリストを読み込み中です。完了するとお気に入りと履歴が表示されます。",
+  "backupRefreshing_other": "{{count, number}} 件のプレイリストを読み込み中です。それぞれ完了するとお気に入りと履歴が表示されます。",
   "backupWarnings_one": "警告{{count}}件",
   "backupWarnings_other": "警告{{count}}件",
   "backupNotJson": "このファイルは有効なJSONではありません。",
@@ -352,10 +354,10 @@
   "railsOffHint": "これらの行を使うにはダッシュボードをオンにしてください。",
 
   "resetGroup": "リセット",
-  "resetHint": "すべての設定を既定値に戻します。ソース、お気に入り、履歴、ダウンロードは残ります。",
+  "resetHint": "すべての設定を既定値に戻します。ソース、お気に入り、履歴、ダウンロードは残ります。番組表のアドレスと TMDB キーも残ります。",
   "resetButton": "設定をリセット",
   "resetConfirmTitle": "すべての設定をリセットしますか？",
-  "resetConfirmBody": "言語、テーマ、プレーヤーのパスを含むすべての設定が既定値に戻ります。ソース、お気に入り、履歴、ダウンロードは残ります。",
+  "resetConfirmBody": "言語、テーマ、プレーヤーのパスを含むすべての設定が既定値に戻ります。ソース、お気に入り、履歴、ダウンロードは残ります。番組表のアドレスと TMDB キーも残ります。",
   "resetConfirm": "リセット",
   "resetDone": "設定を既定値に戻しました",
   "resetFailed": "設定をリセットできませんでした",
@@ -443,5 +445,10 @@
   "backupOldVersion": "このバックアップは古い形式のため読み込めません。新しいバックアップを書き出して読み込んでください。",
   "backupImportDone": "バックアップを読み込みました",
   "backupReplacePinTitle": "ソースを置き換えるには PIN を入力してください",
-  "backupReplacePinText": "置き換えると現在のソースとそのペアレンタルロックが削除されるため、ペアレンタル PIN が必要です。"
+  "backupReplacePinText": "置き換えると現在のソースとそのペアレンタルロックが削除されるため、ペアレンタル PIN が必要です。",
+  "backupParentalTitle": "このバックアップはペアレンタルコントロールを変更します",
+  "backupParentalBody": "ペアレンタルコントロールがロック中のため、バックアップ内の設定には PIN が必要です。PIN を入力してすべてをインポートするか、それ以外をインポートして現在の設定を残してください。",
+  "backupParentalSkip": "それ以外をインポート",
+  "backupParentalUnlock": "PIN を入力してインポート",
+  "backupParentalPinTitle": "ペアレンタルコントロールの設定をインポートするには PIN を入力してください"
 }

@@ -1,8 +1,9 @@
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, PlugZap } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate } from '@/api/query';
+import type { ConnectionTestResult, SourcePatch } from '@/api/rpc';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 import type { EpgLinks, Source } from '@/api/types';
 
@@ -19,7 +20,7 @@ import {
 } from '../lib/draft';
 import { epgPatch } from '../lib/epgLinks';
 import { newlyEnabledEpgUrls, refreshGuides } from '../lib/epgRefresh';
-import { fieldForError, nextStepKey, summaryKey } from '../lib/errors';
+import { fieldForError, importErrorCode, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
 import { AccountPanel, hasAccountInfo } from './AccountPanel';
@@ -31,6 +32,26 @@ import { StalkerForm } from './StalkerForm';
 import { XtreamForm } from './XtreamForm';
 
 export type EditTab = 'details' | 'epg' | 'account';
+
+/**
+ * Signs in with the edited connection details, as the Add dialog's import does, before they are
+ * saved. Null when the patch leaves the connection alone (or it is an M3U address, which has no
+ * sign-in to test), or when the details work; otherwise the reason they do not.
+ */
+export async function checkConnection(patch: SourcePatch): Promise<RpcError | null> {
+  let run: Promise<ConnectionTestResult>;
+  if (patch.xtream) run = rpc('xtream.test', { config: patch.xtream });
+  else if (patch.stalker) run = rpc('stalker.test', { config: patch.stalker });
+  else return null;
+  try {
+    const r = await run;
+    // Signed in, even to an account the provider marks inactive: the Add dialog imports those too.
+    if (r.ok) return null;
+    return new RpcError(importErrorCode(r.message), r.message ?? '');
+  } catch (e) {
+    return RpcError.from(e);
+  }
+}
 
 export function EditSourceDialog({
   source,
@@ -51,6 +72,9 @@ export function EditSourceDialog({
   const [errors, setErrors] = useState<DraftErrors>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<RpcError | null>(null);
+  // The edited sign-in details did not work, so nothing was saved (Save anyway skips the check).
+  const [checkError, setCheckError] = useState<RpcError | null>(null);
+  const [checking, setChecking] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const nextFrame = useNextFrame();
 
@@ -61,6 +85,7 @@ export function EditSourceDialog({
     setEpg(source.epg);
     setErrors({});
     setSaveError(null);
+    setCheckError(null);
     setTab(initialTab === 'account' && !hasAccountInfo(source) ? 'details' : initialTab);
     // Only re-seed when a different source opens, not on background refetches.
   }, [sourceId, initialTab]);
@@ -70,15 +95,20 @@ export function EditSourceDialog({
   useEffect(() => {
     const prev = prevDraft.current;
     prevDraft.current = draft;
-    if (prev && draft && prev !== draft) setErrors((e) => clearChangedErrors(prev, draft, e));
+    if (prev && draft && prev !== draft) {
+      setErrors((e) => clearChangedErrors(prev, draft, e));
+      // A verdict on other details no longer applies.
+      setCheckError(null);
+    }
   }, [draft]);
 
   if (!source || !draft || !epg) return null;
 
   const onFieldBlur = (path: string) => setErrors((e) => withFieldError(e, path, blurError(draft, path, source.stalker?.macAddress)));
 
-  const save = async () => {
+  const save = async ({ skipCheck = false }: { skipCheck?: boolean } = {}) => {
     setSaveError(null);
+    setCheckError(null);
     const built = buildUpdatePatch(source, draft, { isDesktop });
     setErrors(built.errors);
     if (!built.ok) {
@@ -94,6 +124,22 @@ export function EditSourceDialog({
       return;
     }
     setSaving(true);
+    if (!skipCheck && (patch.xtream || patch.stalker)) {
+      setChecking(true);
+      const failure = await checkConnection(patch);
+      setChecking(false);
+      if (failure) {
+        setSaving(false);
+        setCheckError(failure);
+        const field = fieldForError(failure, source.kind, source.m3u?.origin);
+        if (field) {
+          setErrors((prev) => ({ ...prev, [field]: summaryKey(failure) }));
+          setTab('details');
+          nextFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+        }
+        return;
+      }
+    }
     try {
       const updated = await rpc('sources.update', { id: source.id, patch });
       // A new or re-enabled guide URL loads at once; the source card shows its progress.
@@ -139,7 +185,7 @@ export function EditSourceDialog({
             {t('cancel')}
           </Button>
           <Button variant="primary" loading={saving} onClick={() => void save()} data-testid="edit-source-save">
-            {t('saveChanges')}
+            {checking ? t('testing') : t('saveChanges')}
           </Button>
         </>
       }
@@ -224,6 +270,36 @@ export function EditSourceDialog({
           <AccountPanel source={source} />
         )}
 
+        {checkError ? (
+          <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm" data-testid="edit-source-check-failed">
+            <PlugZap aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="font-medium text-fg">{t('checkFailedTitle')}</p>
+              <p className="text-fg">
+                {/* An unclassified refusal: the portal's own words say more than a generic summary. */}
+                {checkError.code !== 'internal' ? t(summaryKey(checkError)) : checkError.message ? redactText(checkError.message) : t('testFailedGeneric')}
+              </p>
+              <p className="text-fg-muted">{t(nextStepKey(checkError, source.kind))}</p>
+              <p className="text-fg-muted">{t('checkFailedNote')}</p>
+              {checkError.message && checkError.code !== 'internal' ? (
+                <details className="text-fg-muted">
+                  <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
+                  <p className="mt-1 break-words font-mono text-xs" dir="ltr">
+                    {redactText(checkError.message)}
+                  </p>
+                </details>
+              ) : null}
+              <div className="mt-1 flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" loading={saving} onClick={() => void save()} data-testid="edit-source-check-again">
+                  {t('tryAgain')}
+                </Button>
+                <Button size="sm" variant="ghost" disabled={saving} onClick={() => void save({ skipCheck: true })} data-testid="edit-source-save-anyway">
+                  {t('saveAnyway')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {saveError ? (
           <div role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm" data-testid="edit-source-error">
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
@@ -245,7 +321,7 @@ export function EditSourceDialog({
               )}
               <p className="text-fg-muted">{t(nextStepKey(saveError, source.kind))}</p>
               <div className="mt-1 flex flex-wrap gap-2">
-                <Button size="sm" variant="secondary" loading={saving} onClick={() => void save()} data-testid="edit-source-retry">
+                <Button size="sm" variant="secondary" loading={saving} onClick={() => void save({ skipCheck: true })} data-testid="edit-source-retry">
                   {t('tryAgain')}
                 </Button>
               </div>

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CalendarClock,
   Copy,
@@ -5,6 +6,7 @@ import {
   History,
   Link2,
   ListTree,
+  Lock,
   Play,
   Radio as RadioIcon,
   Search,
@@ -12,11 +14,21 @@ import {
   Tv,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
-import { invalidate, useRpcQuery } from '@/api/query';
+import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import { itemKey, sameRef, type Category, type Channel, type ContentType, type EpgNowNext, type ItemKey, type ItemRef } from '@/api/types';
 
@@ -28,8 +40,9 @@ import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/cha
 import { ListsSidebarSection, useAddToListMenuItem, useAddToListShortcut } from '@/features/lists';
 import { channelInput } from '@/features/multiview/addChannel';
 import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
+import { requestPin } from '@/features/parental/gate';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
-import { useParentalStatus } from '@/features/parental/status';
+import { applyStatus, hidesContent, useParentalStatus } from '@/features/parental/status';
 import { registerCommands, useShell, useShortcut } from '@/shell';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -60,6 +73,60 @@ import { ManageCategoriesDialog } from './ManageCategoriesDialog';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
+/**
+ * Typing pauses this long before the list searches. `catalog.channels` answers a 20k list in
+ * 5-17 ms, so the wait is almost all of the time to results: short, and the old rows stay up
+ * meanwhile (keepPrevious), so typing never flashes a skeleton (L2-live-2).
+ */
+export const SEARCH_DEBOUNCE_MS = 90;
+
+/** The row index that holds DOM focus in the list, outside React state: arrows must not re-render the page. */
+function createRowStore() {
+  let value: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set(next: number | null) {
+      if (next === value) return;
+      value = next;
+      for (const l of listeners) l();
+    },
+    subscribe(l: () => void) {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+  };
+}
+type RowStore = ReturnType<typeof createRowStore>;
+
+/**
+ * Run 2: the row that has DOM focus, read from the focus event so a key pressed right after an
+ * arrow acts on that row, not on the cursor channel that settles ACTIVE_SETTLE_MS later. Only this
+ * component re-renders as focus moves (L2-perf-ui-8).
+ */
+function FocusedRowShortcuts({
+  store,
+  getChannel,
+  fallback,
+  listShown,
+}: {
+  store: RowStore;
+  getChannel(index: number): Channel | undefined;
+  fallback: Channel | undefined;
+  listShown: boolean;
+}) {
+  const row = useSyncExternalStore(store.subscribe, store.get);
+  const focusedChannel = row !== null && listShown ? (getChannel(row) ?? fallback) : undefined;
+  // C2 F2 / Shift+Delete: rename / hide it.
+  useChannelEditShortcuts(focusedChannel);
+  return null;
+}
+
+const MemoRibbon = memo(EpgRibbon);
+const MemoSidebar = memo(CategorySidebar);
+const MemoManageDialog = memo(ManageCategoriesDialog);
+const MemoMappingDialog = memo(EpgMappingDialog);
+const MemoContextMenu = memo(ContextMenu);
 
 export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const { t, i18n } = useTranslation('live');
@@ -88,7 +155,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   useEffect(() => {
     const value = search.trim();
-    const timer = setTimeout(() => setDebouncedSearch(value), 250);
+    const timer = setTimeout(() => setDebouncedSearch(value), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [search]);
   const commitSearch = useCallback((raw: string) => setDebouncedSearch(raw.trim()), []);
@@ -123,6 +190,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- playback -----------------------------------------------------------
   const playerSource = usePlayerStore((s) => s.source);
+  const stageBusy = !!playerSource;
   const playingRef =
     playerSource?.ref && playerSource.ref.sourceId === sourceId && (playerSource.ref.contentType === 'live' || playerSource.ref.contentType === 'radio')
       ? playerSource.ref
@@ -142,20 +210,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const activeChannel =
     listShown && reported.key === listKey && reported.channel?.ref.sourceId === sourceId ? reported.channel : undefined;
   const ribbonChannel = playingChannel ?? activeChannel;
-  // Run 2: the row that has DOM focus, read from the focus event so a key pressed right after
-  // an arrow acts on that row, not on the cursor channel that settles ACTIVE_SETTLE_MS later.
-  const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const [focusedRows] = useState(createRowStore);
   const rowIndexOf = (el: EventTarget | null): number | null => {
     const row = el instanceof Element ? el.closest<HTMLElement>('[data-testid="channel-list"] [data-row-index]') : null;
     const i = row ? Number(row.dataset.rowIndex) : NaN;
     return Number.isInteger(i) ? i : null;
   };
-  const focusedChannel = focusedRow !== null && listShown ? (paged.getChannel(focusedRow) ?? activeChannel) : undefined;
-  // C3 `l`: add the focused row to a list. C2 F2 / Shift+Delete: rename / hide it.
+  // C3 `l`: add the focused row to a list.
   useAddToListShortcut(activeChannel, paged.getChannel);
-  useChannelEditShortcuts(focusedChannel);
   const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   const watchingArchive = !!playerSource && !playerSource.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
+  // The guide ribbon follows a tune in a background render: the click's own commit (row marked,
+  // player up) paints first, and the ribbon's programmes come right after (L1-live-20).
+  const ribbon = useDeferredValue(
+    useMemo(() => ({ channel: ribbonChannel, watchingLive, watchingArchive }), [ribbonChannel, watchingLive, watchingArchive]),
+  );
   const offset = prefs.epgOffsetMinutes;
   const playingNowNext = useRpcQuery(
     'epg.nowNext',
@@ -182,6 +251,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   }, [sourceId, categoryId]);
 
   const zap = useChannelZap();
+  const queryClient = useQueryClient();
 
   const play = useCallback(
     (channel: Channel, nn?: EpgNowNext) => {
@@ -189,11 +259,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       // row left over from before a source switch would be played as the wrong kind).
       if (!kind || source.data?.id !== channel.ref.sourceId) return;
       const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+      // The row is what `catalog.item` answers for it: the playing channel's lookup above (and the
+      // player's) finds it instead of asking the catalog again (XB2-12).
+      const itemQuery = rpcKey('catalog.item', { ref: channel.ref });
+      if (queryClient.getQueryData(itemQuery) === undefined) queryClient.setQueryData(itemQuery, channel);
       playChannel(channel, kind, nn?.now?.title, name).catch((err: unknown) =>
         toast({ title: t('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
       );
     },
-    [kind, source.data?.id, prefs.stripCountryPrefix, t, toast],
+    [kind, source.data?.id, prefs.stripCountryPrefix, t, toast, queryClient],
   );
 
   // ---- number entry -------------------------------------------------------
@@ -229,7 +303,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     },
     [sourceId, isRadio, flashOsd, play, t, toast],
   );
-  const digits = useDigitEntry((n) => void selectNumber(n));
+  // The highest channel number, asked once digits are typed: a number that no longer number can
+  // extend commits at once instead of waiting out the pause (L2-live-7).
+  const [digitsUsed, setDigitsUsed] = useState(false);
+  const topNumber = useRpcQuery(
+    'catalog.channels',
+    { sourceId, radio: isRadio || undefined, query: { offset: 0, limit: 1, sort: 'number', dir: 'desc' } },
+    { enabled: !!sourceId && digitsUsed, staleTime: 5 * 60_000 },
+  );
+  const maxNumber = topNumber.data ? (topNumber.data.items[0]?.number ?? 0) : undefined;
+  const digits = useDigitEntry((n) => void selectNumber(n), undefined, maxNumber);
   useEffect(() => {
     if (digits.buffer) {
       if (osdTimer.current) clearTimeout(osdTimer.current);
@@ -301,7 +384,11 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   };
 
   const [manageOpen, setManageOpen] = useState(false);
+  const openManage = useCallback(() => setManageOpen(true), []);
+  const closeManage = useCallback(() => setManageOpen(false), []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const [mapping, setMapping] = useState<Channel | null>(null);
+  const closeMapping = useCallback(() => setMapping(null), []);
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ pos: { x: number; y: number }; category: Category } | null>(null);
 
@@ -317,6 +404,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   }, { description: t('shortcutFocusSearch'), area: shortcutArea });
   useShortcut('digit', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    setDigitsUsed(true);
     digits.push(e.key);
   }, { description: t('shortcutDigits'), area: shortcutArea });
 
@@ -468,6 +556,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         const s = await openChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
         if (!s) return;
         await rpc('player.openExternal', { player, source: s });
+        // The stage says what plays where, with Stop and Reopen (the player's ExternalStage), instead
+        // of "Nothing playing"; the in-app player gives way to it (L2-desktop-9).
+        const store = usePlayerStore.getState();
+        if (store.source && store.mode !== 'external') store.stop();
+        // The ref marks the row and the ribbon as playing, as an inline play does.
+        const playing = { ...s, ref: s.ref ?? ch.ref };
+        usePlayerStore.setState({ source: playing, mode: 'external', status: 'playing', error: undefined, dock: 'hidden', queue: [] });
       } catch (err) {
         toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
       }
@@ -525,6 +620,33 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     ];
   }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate, multiviewItem, addToListItem, editItems, lockItems]);
 
+  const hrefForCategory = useCallback(
+    (cid?: string) =>
+      isRadio
+        ? `/s/${encodeURIComponent(sourceId)}/radio${cid ? `?category=${encodeURIComponent(cid)}` : ''}`
+        : `/s/${encodeURIComponent(sourceId)}/live${cid ? `/${encodeURIComponent(cid)}` : ''}`,
+    [isRadio, sourceId],
+  );
+  const refetchCategories = categories.refetch;
+  const retryCategories = useCallback(() => void refetchCategories(), [refetchCategories]);
+  const onPlayLive = useCallback((c: Channel) => play(c), [play]);
+
+  // Parental Hide mode can leave a source's list empty: say so, and offer the PIN, rather than
+  // pointing at Sources as if the source were broken (L2-settings-4).
+  const parentalStatus = useParentalStatus().data;
+  const parentalHiding = !!parentalStatus && hidesContent(parentalStatus);
+  const sourceCount = source.data ? (isRadio ? (source.data.radioCount ?? 0) : source.data.channelCount) : 0;
+  const unlockParental = useCallback(() => {
+    void requestPin({
+      title: t('parentalUnlockTitle'),
+      description: t('parentalUnlockBody'),
+      confirmLabel: t('parentalUnlock'),
+      submit: async (pin) => {
+        applyStatus(await rpc('parental.unlock', { pin }));
+      },
+    });
+  }, [t]);
+
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
   const heading = <h1 className="sr-only">{title || (isRadio ? t('stations') : t('channels'))}</h1>;
@@ -537,24 +659,23 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     );
   }
 
-  const hrefFor = (cid?: string) =>
-    isRadio ? `/s/${encodeURIComponent(sourceId)}/radio${cid ? `?category=${encodeURIComponent(cid)}` : ''}` : `/s/${encodeURIComponent(sourceId)}/live${cid ? `/${encodeURIComponent(cid)}` : ''}`;
+  const hrefFor = hrefForCategory;
 
   // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
   const sidebar = (
     <>
-      <ListsSidebarSection onNavigate={() => setDrawerOpen(false)} />
+      <ListsSidebarSection onNavigate={closeDrawer} />
       <div className="flex min-h-0 flex-1 flex-col">
-        <CategorySidebar
+        <MemoSidebar
           categories={categories.data}
           hiddenCount={hiddenCount}
           isLoading={categories.isLoading}
           error={categories.error}
-          onRetry={() => void categories.refetch()}
+          onRetry={retryCategories}
           activeId={categoryId}
           hrefFor={hrefFor}
-          onManage={() => setManageOpen(true)}
-          onNavigate={() => setDrawerOpen(false)}
+          onManage={openManage}
+          onNavigate={closeDrawer}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
           onGroupMenu={parentalOn ? openGroupMenu : undefined}
           isLocked={locks.categoryLocked}
@@ -612,8 +733,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         icon={<ListTree className="size-6" />}
         title={t('allGroupsHidden')}
         action={
-          <Button size="sm" onClick={() => setManageOpen(true)}>
+          <Button size="sm" onClick={openManage}>
             {t('showGroups')}
+          </Button>
+        }
+      />
+    );
+  } else if (listEmpty && parentalHiding && (sourceCount > 0 || (allCategories.data?.length ?? 0) > 0)) {
+    listBody = (
+      <EmptyState
+        icon={<Lock className="size-6" />}
+        title={t(isRadio ? 'parentalHiddenStations' : 'parentalHiddenChannels')}
+        description={t('parentalHiddenHint')}
+        action={
+          <Button size="sm" icon={<Lock className="size-3.5" />} onClick={unlockParental} data-testid="live-parental-unlock">
+            {t('parentalUnlock')}
           </Button>
         }
       />
@@ -637,6 +771,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         paged={paged}
         resetKey={listKey}
         playingRef={playingRef}
+        playingNumber={playingChannel?.number}
         openOnDoubleClick={settings.data?.openStreamOnDoubleClick ?? false}
         now={now}
         compact={false}
@@ -680,11 +815,11 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       {/* channel list: beside the stage from 768 px, under it on a phone */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        onFocus={(e) => setFocusedRow(rowIndexOf(e.target))}
+        onFocus={(e) => focusedRows.set(rowIndexOf(e.target))}
         onBlur={(e) => {
-          if (rowIndexOf(e.relatedTarget) === null) setFocusedRow(null);
+          if (rowIndexOf(e.relatedTarget) === null) focusedRows.set(null);
         }}
-        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:min-w-60 md:flex-initial md:border-e"
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
           <IconButton
@@ -746,48 +881,60 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           </span>
         </div>
         {listBody}
+        <FocusedRowShortcuts store={focusedRows} getChannel={paged.getChannel} fallback={activeChannel} listShown={listShown} />
       </section>
 
-      {/* stage: on top on a phone, as wide as the screen */}
-      <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:flex-1">
+      {/* stage: on top on a phone, as wide as the screen. Beside the list it keeps about 300 px for
+          the player's controls; the list gives way first, down to 240 px (XB2-16). */}
+      <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:min-w-[min(300px,40%)] md:flex-1">
         {isRadio ? (
           <RadioStage channel={playingChannel} stripPrefix={prefs.stripCountryPrefix} />
         ) : (
           <>
-            <div className="relative aspect-video min-h-0 bg-black md:aspect-auto md:flex-1">
-              <PlayerStage className="h-full w-full">
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70">
-                  <Tv className="size-8" aria-hidden />
-                  <p className="text-sm">{t('stageIdle')}</p>
-                  <p className="text-xs text-white/50">{t('stageIdleHint')}</p>
+            {/* On a phone nothing playing is a slim prompt above the list, not a black 16:9 box (L2-visual-13). */}
+            <div
+              data-testid="live-stage"
+              data-idle={stageBusy ? undefined : ''}
+              className={`relative min-h-0 bg-black md:aspect-auto md:flex-1 ${stageBusy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2'}`}
+            >
+              <PlayerStage className={stageBusy ? 'h-full w-full' : 'h-full w-full max-md:bg-transparent'}>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70 max-md:flex-row max-md:justify-start max-md:gap-3 max-md:px-4 max-md:text-start max-md:text-fg-muted">
+                  <Tv className="size-8 max-md:size-5 max-md:shrink-0" aria-hidden />
+                  <div className="flex min-w-0 flex-col gap-2 max-md:gap-0">
+                    <p className="text-sm max-md:truncate max-md:font-medium max-md:text-fg">{t('stageIdle')}</p>
+                    <p className="text-xs text-white/50 max-md:truncate max-md:text-fg-subtle">{t('stageIdleHint')}</p>
+                  </div>
                 </div>
               </PlayerStage>
               <DigitOsd state={osd} />
             </div>
-            <EpgRibbon
-              channel={ribbonChannel}
-              sourceKind={ribbonChannel && source.data?.id === ribbonChannel.ref.sourceId ? kind : undefined}
-              watchingLive={watchingLive}
-              watchingArchive={watchingArchive}
-              onPlayLive={(c) => play(c)}
-              onMapEpg={setMapping}
-              guideHref={guideHref}
-            />
+            {/* On a phone the ribbon comes with a channel playing; until then the list starts near the top. */}
+            <div className={stageBusy ? 'contents' : 'contents max-md:hidden'}>
+              <MemoRibbon
+                channel={ribbon.channel}
+                sourceKind={ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined}
+                watchingLive={ribbon.watchingLive}
+                watchingArchive={ribbon.watchingArchive}
+                onPlayLive={onPlayLive}
+                onMapEpg={setMapping}
+                guideHref={guideHref}
+              />
+            </div>
           </>
         )}
         {isRadio ? <DigitOsd state={osd} /> : null}
       </section>
 
-      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
+      <MemoContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
       {/* C2: a group's menu only has entries while parental controls are on. */}
-      <ContextMenu
+      <MemoContextMenu
         pos={groupMenu && groupLockItems.length > 0 ? groupMenu.pos : null}
         items={groupLockItems}
         label={groupMenu?.category.name ?? ''}
         onClose={closeGroupMenu}
       />
-      <ManageCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
-      <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
+      <MemoManageDialog open={manageOpen} onClose={closeManage} sourceId={sourceId} contentType={contentType} />
+      <MemoMappingDialog channel={mapping} onClose={closeMapping} />
     </div>
   );
 }

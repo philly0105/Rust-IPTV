@@ -11,6 +11,7 @@ import { Play } from 'lucide-react';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useRpcQuery } from '@/api/query';
 import type { Channel, ItemRef, ItemSnapshot } from '@/api/types';
 import { useChannelEditMenuItems } from '@/features/channeledit';
 import { useAddToListMenuItem } from '@/features/lists/hooks/useAddToList';
@@ -18,13 +19,15 @@ import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMe
 import { channelInput } from '@/features/multiview/addChannel';
 import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
+import { useParentalStatus } from '@/features/parental/status';
 
 import { ChannelMenuContext, type ChannelMenuRequest } from './cards';
 
 /**
  * The channel a favorite or recent entry stands for, from its saved snapshot:
  * enough for the menu (the ref, the name, the logo, the group name the list
- * picker shows). Category ids are not saved, so multi-view groups it with none.
+ * picker shows). Category ids are not saved, so multi-view groups it with none;
+ * the menu looks the id up for its parental lock items (ChannelMenuHost).
  */
 export function snapshotChannel(ref: ItemRef, snapshot: ItemSnapshot): Channel {
   const channel: Channel = {
@@ -38,6 +41,10 @@ export function snapshotChannel(ref: ItemRef, snapshot: ItemSnapshot): Channel {
   return channel;
 }
 
+const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
+/** A channel's group rarely changes; the lookup below is kept this long. */
+const GROUP_STALE_MS = 5 * 60_000;
+
 /** Provides the channel card menu to the cards below it and draws it. Mount once around the rails. */
 export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const { t } = useTranslation('shell');
@@ -49,12 +56,18 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const multiviewItem = useMultiviewMenuItem(channel && channel.ref.contentType === 'live' ? channelInput(channel) : null);
   const addToListItem = useAddToListMenuItem(channel);
   const editItems = useChannelEditMenuItems(channel);
+  // Snapshot channels (favourites, recents) carry no category id. With parental controls on, the
+  // open menu looks the channel up so its lock items can say 'Locked with its group'; the plain
+  // lock shows until the answer comes (cached, so the next open has it at once). Off, no lookup.
+  const parental = useParentalStatus();
+  const lookUp = !!channel && !channel.categoryId && parental.data?.enabled === true;
+  const row = useRpcQuery('catalog.item', { ref: channel?.ref ?? NO_REF }, { enabled: lookUp, staleTime: GROUP_STALE_MS });
+  const categoryId = channel?.categoryId || (lookUp ? row.data?.categoryId : undefined) || undefined;
   const lockItems = useLockMenuItems(
     channel
       ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name: channel.name }
       : null,
-    // Empty for snapshot channels (snapshots save no category id): the menu then offers the plain lock.
-    { categoryId: channel?.categoryId },
+    { categoryId },
   );
 
   const items = useMemo((): MenuItem[] => {

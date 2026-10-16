@@ -40,6 +40,8 @@ export function ChannelLogo({ src, name, size = 36, sourceId }: { src?: string; 
         alt=""
         loading="lazy"
         decoding="async"
+        // Low priority: a screen of logos must not hold the guide's RPCs behind it on the connection pool.
+        fetchPriority="low"
         draggable={false}
         onError={image.onError}
         className="max-h-full max-w-full object-contain p-0.5"

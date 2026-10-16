@@ -9,7 +9,7 @@ import { classifyTileFault, retriesWhenOnline, tileFaultCopy } from '../errors';
 import { GLASS, GLASS_ACCENT_BORDER, GLASS_ACCENT_FILL, GLASS_ACCENT_TEXT, GLASS_BLUR, GLASS_BUTTON, GLASS_STRONG, ON_GLASS_MUTED } from '../styles';
 import type { MultiviewTile } from '../types';
 import { useRetryWhenOnline } from '../useRetryWhenOnline';
-import { useTilePlayback } from '../useTilePlayback';
+import { TILE_START_STAGGER_MS, useTilePlayback } from '../useTilePlayback';
 import type { LockGate } from '../useWallData';
 import { ChannelMark } from './ChannelMark';
 
@@ -136,7 +136,7 @@ export const Tile = memo(function Tile({
 }: TileProps) {
   const { t } = useTranslation(['multiview', 'common']);
   const blocked = lock !== 'open' || sourceMissing;
-  const playback = useTilePlayback(tile, { audible, volume, locked: blocked });
+  const playback = useTilePlayback(tile, { audible, volume, locked: blocked, startDelayMs: slot * TILE_START_STAGGER_MS });
   const { phase, fault, buffering, soundBlocked, videoRef, retry, unblockSound } = playback;
   const [dropTarget, setDropTarget] = useState(false);
   const number = slot + 1;
@@ -458,12 +458,13 @@ export const Tile = memo(function Tile({
           </span>
           <ChannelMark src={tile.logo} sourceId={tile.ref.sourceId} name={name} className="hidden size-6 @[14rem]/tile:inline-flex" />
           <span className="flex min-w-0 flex-col leading-tight">
-            <span dir="auto" className="truncate text-start text-sm font-medium">
+            {/* text-match-parent: with dir="auto" a Latin name in an RTL UI keeps to the parent's start edge. */}
+            <span dir="auto" className="truncate text-match-parent text-sm font-medium">
               {tile.number !== undefined ? <span className="me-1.5 font-display tabular-nums opacity-80">{tile.number}</span> : null}
               {name}
             </span>
             {programme ? (
-              <span dir="auto" className={cn('hidden truncate text-start text-xs @[18rem]/tile:block', ON_GLASS_MUTED)}>
+              <span dir="auto" className={cn('hidden truncate text-match-parent text-xs @[18rem]/tile:block', ON_GLASS_MUTED)}>
                 {programme}
               </span>
             ) : null}

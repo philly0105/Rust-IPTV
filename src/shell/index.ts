@@ -25,4 +25,5 @@ export {
 export type { Appearance, ResolvedTheme, ThemeApi } from './theme';
 export { useSettings } from './useSettings';
 export { ShellLayout, openPalette, openShortcutHelp } from './ShellLayout';
+export { focusSearchWhenReady, openSearch } from './focusSearch';
 export { DOCUMENTED_SHORTCUTS, SHORTCUT_AREA_KEYS, groupShortcuts } from './ShortcutOverlay';

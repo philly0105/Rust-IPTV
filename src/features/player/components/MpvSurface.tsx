@@ -3,18 +3,19 @@ import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
 import { isDesktop, rpc } from '@/api/transport';
-import type { Bounds, MpvState, MpvTrack, PlayerSource } from '@/api/types';
+import { itemKey, type Bounds, type MpvState, type MpvTrack, type PlayerSource } from '@/api/types';
 
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import type { EngineTracks, TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
-import { modalOpen } from '../format';
+import { useAlternatesStore } from '../failover';
 import { setMediaCommands, useMediaStore } from '../media';
 import { bindMpvExtras, sendSubtitleStyle } from '../mpvExtras';
 import { useStreamInfoStore } from '../streamInfo';
-import { measureMpvBounds, measureMpvLayout } from '../mpvBounds';
+import { LAYOUT_WATCH_SELECTOR, measureMpvLayout, OVERLAY_SELECTOR } from '../mpvBounds';
 import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
+import { tryAnotherSource, useReconnectStore } from '../reconnect';
 import {
   DOUBLE_CLICK_MS,
   ENDED_EPSILON,
@@ -28,19 +29,44 @@ import {
   usePlayerStore,
 } from '../store';
 import { stepVolume } from '../usePlaybackShortcuts';
+import { usePlayerSettings } from '../useSettings';
 import { VideoContextMenu } from './lazyParts';
 
-/** Off-screen bounds while a modal dialog needs the whole window (the native surface paints above the DOM). */
+/** Off-screen bounds while a modal dialog covers most of the video (the native surface paints above the DOM). */
 export const HIDDEN_BOUNDS: Bounds = { x: -16000, y: -16000, width: 16, height: 16 };
 
 /**
  * The rectangle for the native window: the surface minus anything the player reserves for
- * DOM chrome (controls, notices, menus), clipped to its scroll containers and the viewport.
- * Hidden off screen when a modal is open or nothing of the surface is visible.
+ * DOM chrome (controls, notices), clipped to its scroll containers and the viewport, with
+ * floating overlays (menus, tooltips, dialogs) as holes. Hidden off screen when a modal
+ * covers most of it or nothing of the surface is visible.
+ */
+export function surfaceLayout(el: Element): { bounds: Bounds; holes: Bounds[] } {
+  const layout = el.getClientRects().length === 0 ? null : measureMpvLayout(el);
+  return layout?.bounds ? { bounds: layout.bounds, holes: layout.holes } : { bounds: HIDDEN_BOUNDS, holes: [] };
+}
+
+/**
+ * The rectangle `mpv.attach` opens the window at. Attach carries no holes, so a window that
+ * needs some (a menu or dialog over the video) starts hidden; the first layout pass after the
+ * attach shows it with them.
  */
 export function surfaceBounds(el: Element): Bounds {
-  if (modalOpen() || el.getClientRects().length === 0) return HIDDEN_BOUNDS;
-  return measureMpvBounds(el) ?? HIDDEN_BOUNDS;
+  const { bounds, holes } = surfaceLayout(el);
+  return holes.length > 0 ? HIDDEN_BOUNDS : bounds;
+}
+
+/** A node that may hold or be layout chrome (a menu, a dialog, a toast) came or went. */
+function touchesNode(n: Node): boolean {
+  return n instanceof Element && (n.matches(LAYOUT_WATCH_SELECTOR) || n.querySelector(LAYOUT_WATCH_SELECTOR) !== null);
+}
+
+/** The mutation can move the native window's rectangle or holes. */
+function touchesLayout(r: MutationRecord): boolean {
+  if (r.type === 'attributes') return true;
+  for (const n of Array.from(r.addedNodes)) if (touchesNode(n)) return true;
+  for (const n of Array.from(r.removedNodes)) if (touchesNode(n)) return true;
+  return false;
 }
 
 /**
@@ -152,10 +178,9 @@ export function MpvSurface({ className }: { className?: string }) {
     const send = (): void => {
       raf = 0;
       if (disposed || !ref.current) return;
-      // Fullscreen chrome over the video is cut out of the native window (holes) instead of shrinking it.
-      const layout = modalOpen() || ref.current.getClientRects().length === 0 ? null : measureMpvLayout(ref.current);
-      const b = layout?.bounds ?? HIDDEN_BOUNDS;
-      const holes = layout?.bounds ? layout.holes : [];
+      // Menus, tooltips and dialogs over the video (and fullscreen chrome) are cut out of the
+      // native window as holes instead of shrinking or hiding it.
+      const { bounds: b, holes } = surfaceLayout(ref.current);
       const holesKey = JSON.stringify(holes);
       if (boundsEqual(lastSent, b) && holesKey === lastHoles) return;
       lastSent = b;
@@ -171,13 +196,21 @@ export function MpvSurface({ className }: { className?: string }) {
     window.addEventListener('resize', schedule);
     window.addEventListener('scroll', schedule, true);
     document.addEventListener('fullscreenchange', schedule);
-    // Moves without resize (layout shifts, the mini player being dragged) and dialogs opening.
+    // Moves without resize (layout shifts, the mini player being dragged).
     const poll = setInterval(schedule, 400);
-    const mo = new MutationObserver(schedule);
-    mo.observe(document.body, { childList: true, subtree: false, attributes: true, attributeFilter: ['aria-modal', 'open'] });
-    // Toasts come and go inside their own portal: re-measure as soon as one appears or leaves.
-    const toastViewport = document.querySelector('[data-toast-viewport]');
-    if (toastViewport) mo.observe(toastViewport, { childList: true, subtree: true });
+    // Menus, tooltips, dialogs and toasts appear anywhere (portals, the live row menu in the
+    // page): re-measure in the next frame when one comes or goes, and only then, so list
+    // scrolling and other DOM churn cost a selector match per added node.
+    const mo = new MutationObserver((records) => {
+      if (records.some(touchesLayout)) schedule();
+    });
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal', 'open', 'hidden', 'role'] });
+    // A popover that pops in (or the tour card that glides) settles at its final rect: measure it again then.
+    const onSettle = (e: Event): void => {
+      if (e.target instanceof Element && e.target.closest(OVERLAY_SELECTOR)) schedule();
+    };
+    document.addEventListener('animationend', onSettle, true);
+    document.addEventListener('transitionend', onSettle, true);
     let dpr = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
     const onDpr = (): void => {
       dpr.removeEventListener('change', onDpr);
@@ -379,6 +412,8 @@ export function MpvSurface({ className }: { className?: string }) {
       window.removeEventListener('resize', schedule);
       window.removeEventListener('scroll', schedule, true);
       document.removeEventListener('fullscreenchange', schedule);
+      document.removeEventListener('animationend', onSettle, true);
+      document.removeEventListener('transitionend', onSettle, true);
       dpr.removeEventListener('change', onDpr);
       unState();
       unClick();
@@ -472,7 +507,53 @@ export function MpvSurface({ className }: { className?: string }) {
         </div>
       )}
     </div>
+    {/* A sibling, not a child: the surface's own content is never cut out of the native window. */}
+    <MpvConnectingNotice source={source} />
     {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
     </>
+  );
+}
+
+/**
+ * A slow start (`reconnect.ts` phase `connecting`) over the native video: "Still connecting",
+ * and another copy of a live channel right away. The pill is a `data-mpv-overlay` hole, so it
+ * shows through the native window, which is black until the stream starts.
+ */
+function MpvConnectingNotice({ source }: { source: PlayerSource | null | undefined }) {
+  const { t } = useTranslation('player');
+  const settings = usePlayerSettings();
+  const connecting = useReconnectStore((s) => s.phase === 'connecting');
+  const key = source?.isLive && source.ref ? itemKey(source.ref) : undefined;
+  const alternates = useAlternatesStore((s) => s.status === 'ready' && !!key && s.forKey === key && !!s.data?.alternates.length);
+  const [busy, setBusy] = useState(false);
+  if (!connecting || !source?.url) return null;
+  const offerSwitch = alternates && settings?.liveFailover !== false;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex justify-center pt-12">
+      <p
+        role="status"
+        aria-live="polite"
+        data-mpv-overlay=""
+        data-testid="connecting-notice"
+        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-sm', offerSwitch ? 'pr-1 pl-3' : 'px-3')}
+      >
+        <span className="truncate">{t('stillConnecting')}</span>
+        {offerSwitch && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              setBusy(true);
+              void tryAnotherSource().finally(() => setBusy(false));
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className="pointer-events-auto shrink-0 rounded-full bg-white/12 px-2.5 py-0.5 font-medium hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/70 disabled:opacity-60"
+          >
+            {t('tryAnotherSource')}
+          </button>
+        )}
+      </p>
+    </div>
   );
 }

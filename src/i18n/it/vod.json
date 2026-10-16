@@ -213,5 +213,8 @@
   "categoryMissingTitle": "Categoria non trovata",
   "categoryMissingBody": "Questa sorgente non ha una categoria con questo link. Il fornitore potrebbe averla rinominata o rimossa.",
   "namedMarkedWatched": "{{name}} segnato come visto",
-  "namedMarkedUnwatched": "{{name}} segnato come non visto"
+  "namedMarkedUnwatched": "{{name}} segnato come non visto",
+  "filters": "Filtri",
+  "filtersActive": "Filtri attivi: {{n}}",
+  "locked": "Bloccato"
 }

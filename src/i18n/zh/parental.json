@@ -96,6 +96,8 @@
   "adultAutoHint": "已作为成人内容自动锁定",
   "adultOffHint": "名称类似成人内容。成人内容自动锁定已关闭。",
   "autoAdultCount_other": "另有 {{count}} 个成人分组已自动锁定。",
+  "autoAdultRule": "自动锁定的成人分组",
+  "autoAdultNone": "此源中没有看起来像成人内容的分组。",
   "removeLockNamed": "移除 {{name}} 的锁定",
   "showAllLocks_other": "显示全部 {{count}} 个锁定",
   "showFewer": "收起",

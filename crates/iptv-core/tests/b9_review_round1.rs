@@ -122,8 +122,8 @@ async fn desktop_sees_the_tmdb_key() {
 }
 
 /// Review round 2: in server mode, Reset then Undo (which resends the
-/// pre-reset settings, mask included) restores the TMDB key. A mask of some
-/// other key restores nothing.
+/// pre-reset settings, mask included) keeps the TMDB key. A reset keeps the
+/// key (L2-settings-9), and a mask of some other key does not replace it.
 #[tokio::test]
 async fn server_mode_reset_then_undo_restores_the_tmdb_key() {
     let env = env().await; // server mode
@@ -139,11 +139,11 @@ async fn server_mode_reset_then_undo_restores_the_tmdb_key() {
         .unwrap();
     assert_eq!(before["tmdb"]["apiKey"], MASKED);
 
-    // A wrong mask after a reset does not bring the key back.
+    // A reset keeps the key (L2-settings-9); a wrong mask does not replace it.
     r.dispatch(st.clone(), "settings.reset", json!(null))
         .await
         .unwrap();
-    assert_eq!(st.settings_snapshot().tmdb.api_key, None);
+    assert_eq!(st.settings_snapshot().tmdb.api_key.as_deref(), Some(KEY));
     let mut wrong = before.clone();
     wrong["tmdb"]["apiKey"] = json!("\u{2022}\u{2022}\u{2022}\u{2022}9999");
     r.dispatch(
@@ -153,7 +153,7 @@ async fn server_mode_reset_then_undo_restores_the_tmdb_key() {
     )
     .await
     .unwrap();
-    assert_eq!(st.settings_snapshot().tmdb.api_key, None);
+    assert_eq!(st.settings_snapshot().tmdb.api_key.as_deref(), Some(KEY));
 
     // Undo: the whole pre-reset document goes back as the patch.
     r.dispatch(st.clone(), "settings.reset", json!(null))

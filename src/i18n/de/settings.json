@@ -238,7 +238,7 @@
   "backupNoSecrets": "Dieses Backup enthält keine Passwörter. Für Xtream- und Stalker-Quellen müssen sie neu eingegeben werden.",
   "backupMode": "Importmodus",
   "backupMerge": "Zusammenführen",
-  "backupMergeHint": "Fügt die Quellen aus der Datei hinzu und behält Ihre vorhandenen.",
+  "backupMergeHint": "Fügt die Quellen aus der Datei hinzu. Vorhandene Quellen behalten ihre Namen und Einstellungen.",
   "backupReplace": "Ersetzen",
   "backupReplaceHint": "Importiert zuerst das Backup und entfernt Ihre aktuellen Quellen erst, wenn eine seiner Quellen geladen ist.",
   "backupImportButton": "Backup importieren",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "Ersetzen",
   "backupImportFailed": "Das Backup konnte nicht importiert werden",
   "backupResult": "Hinzugefügt oder aktualisiert: {{imported}}. Übersprungen: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} Playlist wird noch geladen; ihre Favoriten und ihr Verlauf erscheinen, sobald sie fertig ist.",
+  "backupRefreshing_other": "{{count, number}} Playlists werden noch geladen; Favoriten und Verlauf erscheinen, sobald jede fertig ist.",
   "backupWarnings_one": "{{count}} Warnung",
   "backupWarnings_other": "{{count}} Warnungen",
   "backupNotJson": "Diese Datei ist kein gültiges JSON.",
@@ -352,10 +354,10 @@
   "railsOffHint": "Schalte das Dashboard ein, um diese Zeilen zu nutzen.",
 
   "resetGroup": "Zurücksetzen",
-  "resetHint": "Setzt alle Einstellungen auf den Standard zurück. Quellen, Favoriten, Verlauf und Downloads bleiben.",
+  "resetHint": "Setzt alle Einstellungen auf den Standard zurück. Quellen, Favoriten, Verlauf und Downloads bleiben. Auch die Programmführer-Adressen und der TMDB-Schlüssel bleiben.",
   "resetButton": "Einstellungen zurücksetzen",
   "resetConfirmTitle": "Alle Einstellungen zurücksetzen?",
-  "resetConfirmBody": "Jede Einstellung kehrt zum Standard zurück, auch Sprache, Design und Player-Pfade. Quellen, Favoriten, Verlauf und Downloads bleiben.",
+  "resetConfirmBody": "Jede Einstellung kehrt zum Standard zurück, auch Sprache, Design und Player-Pfade. Quellen, Favoriten, Verlauf und Downloads bleiben. Auch die Programmführer-Adressen und der TMDB-Schlüssel bleiben.",
   "resetConfirm": "Zurücksetzen",
   "resetDone": "Einstellungen auf Standard zurückgesetzt",
   "resetFailed": "Einstellungen konnten nicht zurückgesetzt werden",
@@ -443,5 +445,10 @@
   "backupOldVersion": "Diese Sicherung hat ein älteres Format, das nicht gelesen werden kann. Exportiere eine neue Sicherung und importiere diese.",
   "backupImportDone": "Sicherung importiert",
   "backupReplacePinTitle": "PIN eingeben, um Quellen zu ersetzen",
-  "backupReplacePinText": "Beim Ersetzen werden deine aktuellen Quellen und ihre Jugendschutz-Sperren entfernt, daher ist die Jugendschutz-PIN nötig."
+  "backupReplacePinText": "Beim Ersetzen werden deine aktuellen Quellen und ihre Jugendschutz-Sperren entfernt, daher ist die Jugendschutz-PIN nötig.",
+  "backupParentalTitle": "Diese Sicherung ändert den Jugendschutz",
+  "backupParentalBody": "Der Jugendschutz ist gesperrt, daher brauchen seine Optionen aus der Sicherung die PIN. Gib sie ein, um alles zu importieren, oder importiere den Rest und behalte deine aktuellen Optionen.",
+  "backupParentalSkip": "Ohne sie importieren",
+  "backupParentalUnlock": "PIN eingeben und importieren",
+  "backupParentalPinTitle": "PIN eingeben, um die Jugendschutz-Optionen zu importieren"
 }

@@ -21,6 +21,7 @@ vi.mock('@/api/events', () => ({
   onAppEvent: () => () => undefined,
   onAnyAppEvent: () => () => undefined,
   onConnectionState: () => () => undefined,
+  getConnectionState: () => 'closed',
 }));
 vi.mock('@/features/player', () => ({
   playItem: (...a: unknown[]) => (playerMock.playItem as (...x: unknown[]) => Promise<void>)(...a),
@@ -133,5 +134,31 @@ describe('dashboard channel card menu', () => {
     await waitFor(() => expect(itemNames(menu)).toContain('Hide station'));
     expect(itemNames(menu)).not.toContain('Add to multi-view');
     expect(itemNames(menu)).toContain('Add to list…');
+  });
+});
+
+describe('dashboard channel card menu, parental locks (XB2-31)', () => {
+  it("looks up a favourite's group, so a channel in a locked group says 'Locked with its group'", async () => {
+    const h = rpcMock.handlers;
+    h['parental.status'] = () => ({ enabled: true, mode: 'ask', autoAdult: false, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    h['parental.locks'] = () => [{ sourceId: 's1', contentType: 'live', kind: 'category', targetId: 'g-news', name: 'News', createdAt: '2026-10-15T00:00:00Z' }];
+    h['catalog.item'] = () => ({ ref: newsRef, name: 'News 24', categoryId: 'g-news', categoryName: 'News', isRadio: false });
+    renderRoutes(routes(), '/dashboard');
+    const card = await newsCard();
+    fireEvent.contextMenu(card, { clientX: 40, clientY: 60 });
+    const menu = await screen.findByRole('menu', { name: 'News 24' });
+    const entry = await within(menu).findByRole<HTMLButtonElement>('menuitem', { name: 'Locked with its group' });
+    expect(entry.disabled).toBe(true);
+    expect(within(menu).queryByRole('menuitem', { name: 'Lock channel' })).toBeNull();
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item').map((c) => c.args)).toEqual([{ ref: newsRef }]);
+  });
+
+  it('does not look the channel up while parental controls are off', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const card = await newsCard();
+    fireEvent.contextMenu(card, { clientX: 40, clientY: 60 });
+    const menu = await screen.findByRole('menu', { name: 'News 24' });
+    await waitFor(() => expect(itemNames(menu)).toContain('Hide channel'));
+    expect(rpcMock.calls.some((c) => c.cmd === 'catalog.item')).toBe(false);
   });
 });

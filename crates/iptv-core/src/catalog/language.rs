@@ -17,8 +17,13 @@
 //! category-id sets built once per statement. Readers across sources use
 //! [`ENGLISH_ONLY_SQL`] (`non_english(title, category_name)`), whose category
 //! half is memoized per connection. Both are registered on every connection
-//! by [`register`]; `catalog_perf` holds them to the 100 ms budget on 50k
-//! channels.
+//! by [`register`].
+//!
+//! Since migration 0018 the verdict is also stored with each item
+//! (`items.non_english`, written by the catalog writer), and readers filter
+//! on it ([`STORED_SQL`]); the SQL rule is only used for catalogs written
+//! before the migration until [`backfill_pending`] stores theirs.
+//! `catalog_perf` and `l2_query_perf` hold the readers to their budgets.
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -394,26 +399,112 @@ fn keep_predicate(src: &str, ty: &str) -> String {
     )
 }
 
+/// `AND` clause over the verdict stored with each item (`items.non_english`,
+/// migration 0018): a column of every catalog index, so pages and counts stay
+/// index-only scans whatever else the database writes. Valid for every
+/// (source, type) that is not [`is_pending`].
+pub const STORED_SQL: &str = " AND i.non_english = 0";
+
+/// The stored verdict of an item before its category is known: what
+/// [`combine`] answers for a category whose name says nothing. The catalog
+/// writer stores it per row and corrects the few rows a category decides
+/// once the categories are written (see [`category_changes`]).
+pub fn title_guess(title: i64) -> bool {
+    combine(title, CATEGORY_UNDECIDED)
+}
+
+/// Which stored guesses a category's verdict overturns: `(undecided titles
+/// become hidden, foreign-script titles become shown)`. Titles with their own
+/// tag never change.
+pub fn category_changes(category: i64) -> (bool, bool) {
+    (
+        combine(TITLE_UNDECIDED, category) != title_guess(TITLE_UNDECIDED),
+        combine(TITLE_UNDECIDED_FOREIGN, category) != title_guess(TITLE_UNDECIDED_FOREIGN),
+    )
+}
+
+/// True while the items of `source_id` / `content_type` were written before
+/// migration 0018 and their stored verdicts are not computed yet (see
+/// [`backfill_pending`]). Readers use [`hidden_rowids`] for such a pair.
+pub fn is_pending(
+    conn: &Connection,
+    source_id: &str,
+    content_type: &str,
+) -> rusqlite::Result<bool> {
+    conn.prepare_cached(
+        "SELECT EXISTS(SELECT 1 FROM english_pending WHERE source_id = ?1 AND content_type = ?2)",
+    )?
+    .query_row(rusqlite::params![source_id, content_type], |r| r.get(0))
+}
+
+/// True while any catalog waits for its stored verdicts.
+pub fn any_pending(conn: &Connection) -> rusqlite::Result<bool> {
+    conn.prepare_cached("SELECT EXISTS(SELECT 1 FROM english_pending)")?
+        .query_row([], |r| r.get(0))
+}
+
+/// `AND` clause of English-only for readers across sources whose query joins
+/// categories as `c`: the stored verdict, or the per-row rule
+/// ([`ENGLISH_ONLY_SQL`]) while a catalog is still pending.
+pub fn english_only_joined(conn: &Connection) -> rusqlite::Result<&'static str> {
+    Ok(if any_pending(conn)? {
+        ENGLISH_ONLY_SQL
+    } else {
+        STORED_SQL
+    })
+}
+
+/// Computes the stored verdicts of every pending catalog (written before
+/// migration 0018), one write transaction per (source, type) so user writes
+/// interleave. Only the hidden rows are written: the column defaults to 0.
+/// Returns the number of catalogs done. Runs in the background at boot.
+pub fn backfill_pending(conn: &mut Connection) -> rusqlite::Result<usize> {
+    let pairs: Vec<(String, String)> = {
+        let mut stmt = conn.prepare("SELECT source_id, content_type FROM english_pending")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut done = 0;
+    for (source_id, content_type) in pairs {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // A catalog rewrite since the list was read already stored them.
+        if is_pending(&tx, &source_id, &content_type)? {
+            tx.execute(
+                &format!(
+                    "UPDATE items AS i SET non_english = 1 WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.non_english = 0 AND NOT {}",
+                    keep_predicate("?1", "?2")
+                ),
+                rusqlite::params![source_id, content_type],
+            )?;
+            tx.execute(
+                "DELETE FROM english_pending WHERE source_id = ?1 AND content_type = ?2",
+                rusqlite::params![source_id, content_type],
+            )?;
+            done += 1;
+        }
+        tx.commit()?;
+    }
+    Ok(done)
+}
+
 /// The `AND` clause [`hidden_rowids`] returns.
 pub const HIDDEN_ROWIDS_SQL: &str =
     " AND i.rowid NOT IN (SELECT item_rowid FROM temp.english_hidden)";
 
 /// `AND` clause dropping the rows of `items i` that English-only hides, for
-/// readers of one source and content type (catalog pages and counts,
-/// categories, neighbors, the zap list).
+/// a (source, type) whose stored verdicts are still [`is_pending`]; every
+/// other reader uses [`STORED_SQL`].
 ///
 /// Testing every row on every call costs a count over 50k channels about
 /// 20 ms in release and 50 ms in a debug build, twice per deep page. So the
 /// hidden rowids of the source and type last asked for are kept in a temp
 /// table of this connection, `temp.english_hidden`, built with
-/// [`english_only_scoped`] and probed through its primary key; the readers'
-/// counts stay index-only scans, as without the filter.
+/// [`english_only_scoped`] and probed through its primary key.
 ///
 /// The set is rebuilt when anything may have changed it: another source or
 /// type, a commit by another connection (`PRAGMA data_version`) or any
-/// write by this one (`total_changes()`). The build records the change count
-/// its own writes leave behind, so a set stays valid until the next real
-/// write, of any table.
+/// write by this one (`total_changes()`). That is after almost every write
+/// to the database, which is why the verdict is stored instead (loop 2).
 pub fn hidden_rowids(
     conn: &Connection,
     source_id: &str,
@@ -690,6 +781,29 @@ mod tests {
                 assert_eq!(
                     is_non_english(title, category),
                     reference(title, category),
+                    "{title:?} in {category:?}"
+                );
+            }
+        }
+    }
+
+    /// The writer's stored guess, corrected by the category as
+    /// [`category_changes`] says, is the whole rule for every shape.
+    #[test]
+    fn stored_guess_and_category_correction_match_the_rule() {
+        for title in TITLES {
+            for category in CATEGORIES {
+                let t = title_verdict(title);
+                let c = category.map_or(CATEGORY_UNDECIDED, category_verdict);
+                let (hide_untagged, show_foreign) = category_changes(c);
+                let stored = match t {
+                    TITLE_UNDECIDED if hide_untagged => true,
+                    TITLE_UNDECIDED_FOREIGN if show_foreign => false,
+                    _ => title_guess(t),
+                };
+                assert_eq!(
+                    stored,
+                    is_non_english(title, category),
                     "{title:?} in {category:?}"
                 );
             }

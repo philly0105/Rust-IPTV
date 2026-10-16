@@ -577,13 +577,9 @@ async fn removing_a_rule_cancels_its_scheduled_recordings() {
 
     r.call("recordings.removeRule", json!({"id": show["id"]}))
         .await;
-    assert_eq!(
-        r.of_rule(&show).await,
-        vec![
-            (HOUR, RecordingStatus::Cancelled),
-            (25 * HOUR, RecordingStatus::Cancelled)
-        ]
-    );
+    // L2-guide-library-9: the rule's airings that never started are deleted,
+    // not left behind as cancelled rows.
+    assert!(r.of_rule(&show).await.is_empty());
     assert_eq!(r.scheduled(&news).await, vec![2 * HOUR, 26 * HOUR]);
     r.call(
         "recordings.removeRule",
@@ -648,15 +644,12 @@ async fn a_rule_added_again_reschedules_what_its_removal_cancelled() {
     assert_eq!(first["upcoming"], 2);
     r.call("recordings.removeRule", json!({"id": first["id"]}))
         .await;
-    let cancelled = r.titled(SHOW).await;
-    assert_eq!(cancelled.len(), 2);
-    for x in &cancelled {
-        assert_eq!(x.status, RecordingStatus::Cancelled);
-        assert_eq!(x.error_code.as_deref(), Some("ruleRemoved"), "{x:?}");
-    }
+    // L2-guide-library-9: removal deletes the unstarted airings (no
+    // ruleRemoved rows are left).
+    assert!(r.titled(SHOW).await.is_empty());
 
     // The user removed the rule, not the airings: the same rule added again
-    // schedules them again, in place of the cancelled rows.
+    // schedules them again.
     let again = r.add_rule(SHOW).await;
     assert_eq!(again["upcoming"], 2, "{again}");
     assert_eq!(

@@ -164,6 +164,61 @@ describe('HeroCarousel', () => {
     expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
   });
 
+  it('stops turning and freezes the dial while the window is hidden or the hero is scrolled away (idle CPU)', () => {
+    vi.useFakeTimers();
+    let report: ((entries: { isIntersecting: boolean }[]) => void) | undefined;
+    const io = vi.fn(function (this: object, cb: (entries: { isIntersecting: boolean }[]) => void) {
+      report = cb;
+      return Object.assign(this, { observe() {}, disconnect() {} });
+    });
+    vi.stubGlobal('IntersectionObserver', io);
+    let hidden = false;
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => (hidden ? 'hidden' : 'visible'));
+    try {
+      const { hero } = renderHero();
+      const dial = () => hero.querySelector<HTMLElement>('[data-hero-dial]')!;
+      expect(dial().style.animationPlayState).toBe('running');
+
+      hidden = true;
+      act(() => void document.dispatchEvent(new Event('visibilitychange')));
+      expect(hero.dataset['rotating']).toBeUndefined();
+      expect(dial().style.animationPlayState).toBe('paused');
+      tick(DWELL * 5);
+      expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+
+      hidden = false;
+      act(() => void document.dispatchEvent(new Event('visibilitychange')));
+      act(() => report!([{ isIntersecting: false }]));
+      expect(hero.dataset['rotating']).toBeUndefined();
+      expect(dial().style.animationPlayState).toBe('paused');
+      tick(DWELL * 5);
+      expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+
+      act(() => report!([{ isIntersecting: true }]));
+      expect(hero.dataset['rotating']).toBe('true');
+      tick(DWELL);
+      expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+    } finally {
+      visibility.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('an automatic turn swaps the ticks without their main-thread width transition; a user change keeps it', () => {
+    vi.useFakeTimers();
+    renderHero();
+    const tickBar = (label: string) => screen.getByRole('tab', { name: label }).firstElementChild!;
+    expect(tickBar('Title a').className).toContain('motion-safe:transition-[width,background-color]');
+    tick(DWELL);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+    for (const label of ['Title a', 'Title b', 'Title c']) expect(tickBar(label).className).not.toContain('transition');
+    // The fill itself still runs (a transform, on the compositor).
+    expect(tickBar('Title b').querySelector<HTMLElement>('[data-hero-dial]')!.className).toContain('motion-safe:animate-dial-fill');
+    fireEvent.click(screen.getByTestId('hero-next'));
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title c');
+    expect(tickBar('Title c').className).toContain('motion-safe:transition-[width,background-color]');
+  });
+
   it('pauses while focus is inside, and the live region speaks only then', () => {
     vi.useFakeTimers();
     const { hero } = renderHero();

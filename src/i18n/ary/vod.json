@@ -240,5 +240,8 @@
   "categoryMissingTitle": "ما لقيناش هاد الفئة",
   "categoryMissingBody": "هاد المصدر ما فيهش فئة بهاد الرابط. يمكن المزوّد بدّل سميتها ولا حيّدها.",
   "namedMarkedWatched": "{{name}} تعلّم بلي تشاف",
-  "namedMarkedUnwatched": "{{name}} تعلّم بلي ما تشافش"
+  "namedMarkedUnwatched": "{{name}} تعلّم بلي ما تشافش",
+  "filters": "الفلاتر",
+  "filtersActive": "الفلاتر المخدّمة: {{n}}",
+  "locked": "مسدود"
 }

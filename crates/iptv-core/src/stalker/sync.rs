@@ -63,6 +63,30 @@ pub async fn fetch_all_pages(client: &StalkerClient, base: Req) -> CoreResult<Ve
     Ok(out)
 }
 
+/// A radio, VOD or series answer that failed. A temporary failure (the
+/// network or the portal did not answer) gives `None`: that section keeps
+/// its previous rows, and a warning is noted for `lastError`. Any other
+/// failure means the portal does not serve the section: an empty one, as
+/// before. A cancelled run stops.
+fn optional_section<T: Default>(err: CoreError, what: &str, label: &str) -> CoreResult<Option<T>> {
+    if crate::sources::is_cancelled_error(&err) {
+        return Err(err);
+    }
+    if matches!(
+        err,
+        CoreError::Network(_) | CoreError::Server(_) | CoreError::Timeout(_)
+    ) {
+        tracing::warn!(error = %err, what, "stalker portal did not answer; previous rows kept");
+        crate::sources::note_import_warning(
+            &format!("The {label} could not be loaded from the portal, so the previous ones were kept. Refresh the source to try again."),
+            err.code(),
+        );
+        return Ok(None);
+    }
+    tracing::info!(error = %err, what, "stalker portal does not serve this section");
+    Ok(Some(T::default()))
+}
+
 async fn list(client: &StalkerClient, req: Req) -> CoreResult<Vec<Value>> {
     Ok(into_list(client.call(req).await?))
 }
@@ -137,42 +161,39 @@ async fn run(
         None,
         Some("Loading radio"),
     );
+    // Radio, VOD and series: a portal that does not serve one (an error
+    // answer) gets an empty section, as before. A temporary failure (the
+    // portal or the network did not answer) keeps that section's previous
+    // rows instead of wiping them (L1-core-14), and says so in lastError.
     let radio = match fetch_all_pages(
         client,
         Req::new("radio", "get_ordered_list").p("sortby", "number"),
     )
     .await
     {
-        Ok(r) => r,
+        Ok(r) => Some(r),
         Err(err @ CoreError::Auth(_)) => return Err(err),
-        Err(err) => {
-            tracing::info!(error = %err, "stalker portal has no radio list");
-            Vec::new()
-        }
+        Err(err) => optional_section(err, "radio", "radio stations")?,
     };
 
     emit(
         "fetching",
-        (channels.len() + radio.len()) as u64,
+        (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
         None,
         Some("Loading movie and series categories"),
     );
     let vod_categories = match list(client, Req::new("vod", "get_categories")).await {
-        Ok(c) => mapping::categories(&c),
+        Ok(c) => Some(mapping::categories(&c)),
         Err(err @ CoreError::Auth(_)) => return Err(err),
-        Err(err) => {
-            tracing::info!(error = %err, "stalker portal has no VOD categories");
-            Vec::new()
-        }
+        Err(err) => optional_section(err, "VOD categories", "movie categories")?,
     };
     let series_categories = match list(client, Req::new("series", "get_categories")).await {
-        Ok(c) => mapping::categories(&c),
+        Ok(c) => Some(mapping::categories(&c)),
         Err(err @ CoreError::Auth(_)) => return Err(err),
-        Err(err) => {
-            tracing::info!(error = %err, "stalker portal has no series categories");
-            Vec::new()
-        }
+        Err(err) => optional_section(err, "series categories", "series categories")?,
     };
+    let keep_radio = radio.is_none();
+    let radio = radio.unwrap_or_default();
 
     // Map rows.
     let total = (channels.len() + radio.len()) as u64;
@@ -258,25 +279,47 @@ async fn run(
         categories,
         rows,
     };
-    let parts = vec![
-        part(ContentType::Live, live_categories, live_rows),
-        part(ContentType::Radio, radio_categories, radio_rows),
-        part(ContentType::Movie, vod_categories, Vec::new()),
-        part(ContentType::Series, series_categories, Vec::new()),
-    ];
+    // A section that failed for now is left out: replace_catalogs does not
+    // touch the types it is not given.
+    let mut parts = vec![part(ContentType::Live, live_categories, live_rows)];
+    if !keep_radio {
+        parts.push(part(ContentType::Radio, radio_categories, radio_rows));
+    }
+    if let Some(cats) = vod_categories {
+        parts.push(part(ContentType::Movie, cats, Vec::new()));
+    }
+    if let Some(cats) = series_categories {
+        parts.push(part(ContentType::Series, cats, Vec::new()));
+    }
     // The run's token, read here (task-local) before waiting on the pool or
     // the write lock (C8; see `CatalogWriter::begin`).
     let cancel = crate::sources::import_cancel();
-    let counts = state
-        .db_call(move |conn| replace_catalogs(conn, &sid, parts, cancel, &mut |_| {}))
+    let (counts, kept_radio) = state
+        .db_call(move |conn| {
+            let counts = replace_catalogs(conn, &sid, parts, cancel, &mut |_| {})?;
+            // The rewrite grew the WAL by about the catalog's size.
+            crate::db::checkpoint_truncate(conn);
+            // Kept radio rows still count towards the summary's channels.
+            let kept_radio: i64 = if keep_radio {
+                conn.query_row(
+                    "SELECT count(*) FROM items WHERE source_id = ?1 AND content_type = 'radio'",
+                    [&sid],
+                    |r| r.get(0),
+                )?
+            } else {
+                0
+            };
+            Ok((counts, kept_radio))
+        })
         .await?;
-    let count = |ct: ContentType| counts.get(&ct).copied().unwrap_or(0);
+    let count = |ct: ContentType| counts.get(&ct).copied().unwrap_or(0) as i64;
     let (channel_count, radio_count) = (count(ContentType::Live), count(ContentType::Radio));
+    let radio_count = radio_count + kept_radio;
     // Plans and page sizes may have changed; listed rows stay usable.
     Runtime::get(state).forget_listings(source_id);
 
     Ok(ImportSummary {
-        channels: (channel_count + radio_count) as i64,
+        channels: channel_count + radio_count,
         movies,
         series,
         unchanged: false,

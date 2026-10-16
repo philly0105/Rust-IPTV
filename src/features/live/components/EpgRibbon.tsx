@@ -128,9 +128,11 @@ export function EpgRibbon(props: EpgRibbonProps) {
 
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
   const header = (
-    <div className="flex min-w-0 items-start gap-3 px-4 pt-3 pb-2">
+    // Below 480 px the programme lines take the full width and the buttons wrap under them, so the
+    // time range and title are not cut to "01:45 AM – 0…" beside five buttons (L2-live-15).
+    <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1 px-4 pt-3 pb-2" data-testid="ribbon-header">
       {/* Three lines tall with or without a programme (time, title, description), so a zap never moves the video. */}
-      <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center">
+      <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center max-[480px]:basis-full">
         {shown ? (
           <>
             {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
@@ -175,7 +177,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
           </p>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1 max-[480px]:ms-auto">
         {/* recording: */}
         {channel ? <RibbonActions channel={channel} channelName={channelName} program={shown} now={now} /> : null}
         {channel && !props.watchingLive ? (

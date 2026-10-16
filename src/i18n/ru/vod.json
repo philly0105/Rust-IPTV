@@ -222,5 +222,8 @@
   "categoryMissingTitle": "Категория не найдена",
   "categoryMissingBody": "В этом источнике нет категории с такой ссылкой. Возможно, провайдер переименовал или удалил её.",
   "namedMarkedWatched": "{{name}}: отмечено как просмотренное",
-  "namedMarkedUnwatched": "{{name}}: отмечено как непросмотренное"
+  "namedMarkedUnwatched": "{{name}}: отмечено как непросмотренное",
+  "filters": "Фильтры",
+  "filtersActive": "Активные фильтры: {{n}}",
+  "locked": "Заблокировано"
 }

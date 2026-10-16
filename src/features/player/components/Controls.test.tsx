@@ -11,7 +11,7 @@ vi.mock('@/api/transport', () => ({
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
-const { Controls } = await import('./Controls');
+const { Controls, RecordControl, keepSpares, playerMenuJustClosed } = await import('./Controls');
 const { usePipStore } = await import('../pip');
 
 const commands = {
@@ -224,5 +224,218 @@ describe('Controls volume', () => {
   it('the compact bar has no room for the readout', () => {
     render(<Controls variant="dock" visible compact />);
     expect(screen.queryByTestId('volume-readout')).toBeNull();
+  });
+});
+
+describe('Controls live status', () => {
+  const live = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false };
+
+  it('on air: the red dot pulses a few times, then holds still', () => {
+    act(() => usePlayerStore.setState({ source: live, status: 'playing', durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByTestId('live-badge').getAttribute('data-state')).toBe('on-air');
+    const dot = screen.getByTestId('live-dot');
+    expect(dot.className).toContain('animate-live-pulse');
+    // Never an endless animation over the video: it keeps the compositor redrawing.
+    expect(String(dot.style.animationIterationCount)).toBe('3');
+  });
+
+  it('starting: a still, dim dot', () => {
+    act(() => usePlayerStore.setState({ source: live, status: 'loading', durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByTestId('live-badge').getAttribute('data-state')).toBe('standby');
+    expect(screen.getByTestId('live-dot').className).not.toContain('animate');
+  });
+
+  it('failed: "No signal" instead of the red badge, and Retry instead of Play', () => {
+    act(() => usePlayerStore.setState({ source: live, status: 'error', error: 'HTTP 404', durationSeconds: undefined }));
+    render(<Controls variant="dock" visible />);
+    const badge = screen.getByTestId('live-badge');
+    expect(badge.textContent).toBe('No signal');
+    expect(badge.getAttribute('data-state')).toBe('no-signal');
+    expect(screen.getByTestId('live-dot').className).not.toMatch(/bg-live|animate/);
+    expect(screen.queryByRole('button', { name: 'Play' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(commands.retry).toHaveBeenCalledTimes(1);
+    expect(usePlayerStore.getState().status).toBe('loading');
+    expect(usePlayerStore.getState().error).toBeUndefined();
+    // Trying again: back to the plain badge, still, until the stream plays.
+    expect(screen.getByTestId('live-badge').getAttribute('data-state')).toBe('standby');
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+  });
+
+  it('a failed stream behind the live edge shows the status, not Jump to live', () => {
+    act(() => {
+      usePlayerStore.setState({ source: live, mode: 'embedded-mpv', status: 'error', error: 'x', durationSeconds: undefined, positionSeconds: 1000 });
+      useMediaStore.setState({ seekable: { start: 900, end: 1090 } });
+    });
+    render(<Controls variant="dock" visible />);
+    expect(screen.getByTestId('live-badge').textContent).toBe('No signal');
+    expect(screen.queryByRole('button', { name: 'Jump to live' })).toBeNull();
+  });
+
+  it('a failed movie offers Retry in the play spot too', () => {
+    act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 500' }));
+    render(<Controls variant="overlay" visible />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(commands.retry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RecordControl', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('blinks its dot with the timer tick instead of a CSS animation', () => {
+    vi.useFakeTimers({ now: 10_000 });
+    act(() => useMediaStore.setState({ mpv: { recording: true, recordPath: 'C:/rec.ts' } as never, recordStartedAt: 10_000 }));
+    render(<RecordControl compact />);
+    const dot = (): HTMLElement => screen.getByTestId('rec-dot');
+    expect(dot().className).not.toContain('animate');
+    expect(dot().className).not.toContain('opacity-35');
+    act(() => vi.advanceTimersByTime(1000));
+    expect(dot().className).toContain('opacity-35');
+    act(() => vi.advanceTimersByTime(1000));
+    expect(dot().className).not.toContain('opacity-35');
+  });
+});
+
+describe('Controls menu focus', () => {
+  it('Escape closes the menu and puts focus back on Playback options', () => {
+    render(<Controls variant="overlay" visible />);
+    const trigger = screen.getByRole('button', { name: 'Playback options' });
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+    expect(menu()!.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // A page-level Escape (close the player) lets the next key go for a moment.
+    expect(playerMenuJustClosed()).toBe(true);
+  });
+
+  it('choosing a value leaves focus on the trigger, not the page', () => {
+    render(<Controls variant="dock" visible />);
+    const trigger = screen.getByRole('button', { name: 'Playback options' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
+    const choice = screen.getByRole('menuitemradio', { name: '1.5x' });
+    act(() => choice.focus());
+    fireEvent.click(choice);
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe('Controls in a narrow player', () => {
+  let restore: () => void = () => undefined;
+  beforeEach(() => {
+    // jsdom has no layout: give the bar the width of the player on a 390 px phone.
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-player-controls') ? 358 : 0;
+    });
+    restore = () => spy.mockRestore();
+    act(() => useMediaStore.setState({ canPip: true }));
+  });
+  afterEach(() => restore());
+
+  it('keeps the core controls in the row and moves the rest into the options menu', async () => {
+    render(<Controls variant="overlay" visible />);
+    for (const name of ['Pause', 'Mute', 'Playback options', 'Fullscreen']) expect(screen.getByRole('button', { name })).toBeTruthy();
+    for (const name of ['Stop', 'Picture in picture', 'Take screenshot']) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.queryByTestId('volume-readout')).toBeNull();
+
+    openMenu();
+    // The camera button loads on demand.
+    await screen.findByRole('menuitem', { name: 'Take screenshot' });
+    const moved = screen.getByTestId('moved-controls');
+    const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['Picture in picture', 'Take screenshot', 'Stop']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
+    expect(commands.togglePip).toHaveBeenCalledTimes(1);
+    expect(menu()).toBeNull();
+  });
+
+  it('keeps the spare buttons the row has room for, most useful first', async () => {
+    restore();
+    // A row with 100 px to spare, laid out like a flex row: each spare shown takes 42 px of it.
+    const spares = (row: Element): number => row.querySelectorAll(':scope > [data-ctl="stop"], :scope > [data-ctl="pip"], :scope > [data-ctl="screenshot"]').length;
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute('data-player-controls')) return 358;
+        if (this.hasAttribute('data-row-free')) return Math.max(0, 100 - 42 * spares(this.parentElement!));
+        return 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-ctl-row') ? 330 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-ctl-row') ? 330 + Math.max(0, 42 * spares(this) - 100) : 0;
+      }),
+    ];
+    restore = () => spies.forEach((s) => s.mockRestore());
+    const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
+
+    render(<Controls variant="overlay" visible />);
+    await frame();
+    await frame();
+    // Room for two: picture in picture, then stop; the camera goes to the menu.
+    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Take screenshot' })).toBeNull();
+    openMenu();
+    await screen.findByRole('menuitem', { name: 'Take screenshot' });
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    expect(names).toEqual(['Take screenshot']);
+  });
+
+  it('a wide player keeps the full row and a menu without moved controls', () => {
+    restore();
+    render(<Controls variant="overlay" visible />);
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
+    openMenu();
+    expect(screen.queryByTestId('moved-controls')).toBeNull();
+  });
+});
+
+describe('Controls dock menu height', () => {
+  it('is not cut to a small box: the menu takes its own height, up to part of the player', () => {
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const h = this.hasAttribute('data-player-host') ? 800 : 0;
+      return { top: 0, bottom: h, left: 0, right: 1000, width: 1000, height: h, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    try {
+      render(
+        <div data-player-host="">
+          <Controls variant="dock" visible />
+        </div>,
+      );
+      openMenu();
+      const m = screen.getByTestId('player-options-menu');
+      expect(m.parentElement!.className).not.toMatch(/max-h-|overflow/);
+      // 55 % of the 800 px player.
+      expect(m.getAttribute('style') ?? '').toContain('440px');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('keepSpares', () => {
+  const groups = [
+    ['captions', 0],
+    ['pip', 1],
+    ['skip', 2],
+    ['stop', 1],
+    ['screenshot', 1],
+    ['history', 1],
+  ] as const;
+
+  it('keeps the most useful groups that fit, skipping one too big for what is left', () => {
+    expect([...keepSpares(groups, 0)]).toEqual([]);
+    expect([...keepSpares(groups, 2)]).toEqual(['pip', 'stop']);
+    expect([...keepSpares(groups, 3)]).toEqual(['pip', 'skip']);
+    expect([...keepSpares(groups, 6)]).toEqual(['pip', 'skip', 'stop', 'screenshot', 'history']);
   });
 });

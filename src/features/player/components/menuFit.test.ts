@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { roomAbove } from './Controls';
+import { roomAbove, roomInDock } from './Controls';
 
 const rect = (top: number, bottom: number): DOMRect => ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: () => ({}) });
 
@@ -31,5 +31,31 @@ describe('options menu height', () => {
 
   it('cannot measure an element that is not laid out', () => {
     expect(roomAbove(el(0, 0))).toBeNull();
+  });
+});
+
+describe('options menu in a player', () => {
+  function host(top: number, bottom: number): HTMLElement {
+    const node = el(top, bottom);
+    node.dataset.playerHost = '';
+    return node;
+  }
+  function menuIn(parent: HTMLElement, top: number, bottom: number): HTMLElement {
+    const node = el(top, bottom);
+    parent.appendChild(node);
+    return node;
+  }
+
+  it('a floating menu stops at the top of the player that clips it', () => {
+    el(0, 56, 'shell-header');
+    // A docked stage from 300 to 520 px: the menu above the bar may reach 308, not the header.
+    expect(roomAbove(menuIn(host(300, 520), 200, 480))).toBe(172);
+  });
+
+  it('a docked menu may take up to 55 % of the player height', () => {
+    expect(roomInDock(menuIn(host(100, 500), 0, 0))).toBe(220);
+    // Outside a player (or not laid out): no limit of its own.
+    expect(roomInDock(el(0, 200))).toBeNull();
+    expect(roomInDock(menuIn(host(0, 0), 0, 0))).toBeNull();
   });
 });

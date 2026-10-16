@@ -65,7 +65,10 @@ export async function openChannelSource(
   return resolveChannelSource(channel, source, displayName);
 }
 
-/** `displayName`: the name the live views show (`settings.stripCountryPrefix`); it titles the player and history. */
+/**
+ * `displayName`: the name the live views show (`settings.stripCountryPrefix`); it titles the player and history.
+ * The row goes along, so an M3U channel with its URL plays without a `catalog.item` lookup.
+ */
 export function playChannel(channel: Channel, kind: SourceKind, nowTitle?: string, displayName: string = channel.name): Promise<void> {
   return playItem({
     ref: channel.ref,
@@ -77,6 +80,7 @@ export function playChannel(channel: Channel, kind: SourceKind, nowTitle?: strin
     sourceKind: kind,
     // The parental gate checks group locks with it (C2).
     ...(channel.categoryId ? { categoryId: channel.categoryId } : {}),
+    channel,
   });
 }
 

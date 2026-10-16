@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyStreamError, errorCopyKeys, httpStatusOf, rpcErrorCode, type StreamErrorClass } from './errors';
+import { classifyStreamError, errorCopyKeys, httpStatusOf, NO_VIDEO_MESSAGE, rpcErrorCode, type StreamErrorClass } from './errors';
 
 import en from '@/i18n/en/player.json';
 
@@ -82,5 +82,22 @@ describe('parental refusal', () => {
     const strings = en as Record<string, string>;
     expect(strings.parentalHiddenTitle).toBeTruthy();
     expect(strings.parentalHidden).toBeTruthy();
+  });
+});
+
+describe('plain copy for what the provider said (L2-player-13)', () => {
+  it('a live channel the provider does not have, a busy provider, a stream with no video', () => {
+    expect(errorCopyKeys('notFound', { message: 'HTTP 404', live: true })).toEqual({
+      title: 'errorChannelUnavailableTitle',
+      hint: 'errorChannelUnavailable',
+    });
+    expect(errorCopyKeys('notFound', { message: 'HTTP 404', live: false })).toEqual({ title: 'errorNotFoundTitle', hint: 'errorNotFound' });
+    expect(errorCopyKeys('server', { message: 'HttpStatusCodeInvalid (HTTP 503)' })).toEqual({ title: 'errorBusyTitle', hint: 'errorBusy' });
+    expect(errorCopyKeys('server', { message: 'HTTP 500' })).toEqual({ title: 'errorServerTitle', hint: 'errorServer' });
+    expect(errorCopyKeys('unsupported', { message: NO_VIDEO_MESSAGE })).toEqual({ title: 'errorNoVideoTitle', hint: 'errorNoVideo' });
+    const strings = en as Record<string, string>;
+    for (const key of ['errorChannelUnavailableTitle', 'errorChannelUnavailable', 'errorBusyTitle', 'errorBusy', 'errorNoVideoTitle', 'errorNoVideo']) {
+      expect(strings[key]).toBeTruthy();
+    }
   });
 });

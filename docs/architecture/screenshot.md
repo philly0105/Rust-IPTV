@@ -65,10 +65,9 @@ Tests use `screenshot::set_folder_override` so nothing is written to the real Pi
 
 ## Capture in the UI
 
-`takeScreenshot()` never rejects. Every outcome is shown twice:
+`takeScreenshot()` never rejects. Every outcome is shown as a toast. The saved, downloaded and failed results are repeated on the player's OSD only in picture-in-picture, where the toast cannot be seen; the "nothing to capture" message (`explainBlock`) always shows on both.
 
-- as a toast
-- on the player's OSD, because toasts portal into `document.body` and cannot be seen while the player is in element fullscreen
+Toasts, dialogs and menus portal into the fullscreen element while one is set (`portalContainer()` in `src/ui/portal.ts`), and the player's fullscreen element is its host (`PlayerDock`), so in player fullscreen the toast is visible without an OSD copy. Only when a `<video>` or `<iframe>` is itself the fullscreen element, which paints none of its children, do toasts stay in `document.body`.
 
 A second press while a capture is running is ignored.
 

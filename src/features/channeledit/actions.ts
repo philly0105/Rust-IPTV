@@ -17,7 +17,7 @@ import { isParentalLocked, rpc, RpcError } from '@/api/transport';
 import { itemKey, sameRef, type ChannelEdit, type ItemRef } from '@/api/types';
 import { toast } from '@/ui';
 
-import { afterEditChange, ITEM_STALE_MS, patchHidden, restoreHidden } from './edits';
+import { editRefresh, hideInCache, ITEM_STALE_MS, patchHidden, renameInCache, restoreCache, restoreHidden } from './edits';
 
 export type T = TFunction<'channels'>;
 
@@ -165,19 +165,24 @@ async function once(ref: ItemRef, run: () => Promise<boolean>): Promise<boolean>
 }
 
 /**
- * Hides one channel: it leaves every list, search and the guide. The toast
- * offers Undo and points at where hidden channels are kept. Resolves true
- * once hidden.
+ * Hides one channel: it leaves every list, search and the guide. Its row
+ * leaves the cached channel pages at once and comes back if the core
+ * refuses. The toast offers Undo and points at where hidden channels are
+ * kept. Resolves true once hidden.
  */
 export function hideChannel(target: EditTarget, t: T): Promise<boolean> {
   return once(target.ref, async () => {
+    const refresh = editRefresh();
+    const before = hideInCache(target.ref);
     try {
       await rpc('channels.setHidden', { refs: [target.ref], hidden: true });
     } catch (err) {
+      refresh.cancel();
+      restoreCache(before);
       toast({ variant: 'error', title: t('hideFailed', { name: target.name }), description: failureText(err, t) });
       return false;
     }
-    void afterEditChange();
+    void refresh.settle();
     toast({
       variant: 'success',
       title: t('hiddenToast', { name: target.name }),
@@ -199,17 +204,19 @@ export function hideChannel(target: EditTarget, t: T): Promise<boolean> {
 export function unhideChannel(target: EditTarget, t: T, opts: { undo?: boolean } = {}): Promise<boolean> {
   const { undo = true } = opts;
   return once(target.ref, async () => {
+    const refresh = editRefresh();
     const before = patchHidden(target.ref.sourceId, (l) => l.filter((e) => !sameRef(e.ref, target.ref)));
     try {
       await rpc('channels.setHidden', { refs: [target.ref], hidden: false });
     } catch (err) {
+      refresh.cancel();
       restoreHidden(target.ref.sourceId, before);
       toast({ variant: 'error', title: t('unhideFailed', { name: target.name }), description: failureText(err, t) });
       return false;
     }
     // Before the refresh below, which would mark the cached answer stale.
     const { gone } = await splitByPresence([target.ref]);
-    void afterEditChange();
+    void refresh.settle();
     if (gone.length > 0) {
       toast({ variant: 'info', title: t('removedToast', { name: target.name }), description: t('goneText') });
       return true;
@@ -236,6 +243,7 @@ export function unhideChannel(target: EditTarget, t: T, opts: { undo?: boolean }
  * the toast promised nothing for them.
  */
 async function hideAgain(refs: readonly ItemRef[], t: T, maybeGone: readonly ItemRef[] = []): Promise<void> {
+  const refresh = editRefresh();
   try {
     const { failed } = await setHiddenMany(refs, true);
     for (let i = 0; i < maybeGone.length; i += HIDE_BATCH) {
@@ -249,7 +257,7 @@ async function hideAgain(refs: readonly ItemRef[], t: T, maybeGone: readonly Ite
       description: other ? other.error.message : goneText(failed.length, t),
     });
   } finally {
-    void afterEditChange();
+    void refresh.settle();
   }
 }
 
@@ -279,10 +287,12 @@ export async function unhideMany(sourceId: string, refs: readonly ItemRef[]): Pr
     const keys = new Set(gone.map(itemKey));
     patchHidden(sourceId, (l) => l.filter((e) => !keys.has(itemKey(e.ref))));
   };
+  const refresh = editRefresh();
   const { done, failed } = await setHiddenMany(refs, false, drop);
   // Before the refresh below, so the rows' cached catalog.item answers are reused.
   const { listed, gone } = await splitByPresence(done);
-  void afterEditChange();
+  if (done.length > 0) void refresh.settle();
+  else refresh.cancel();
   return { back: listed, removed: gone, failed };
 }
 
@@ -313,25 +323,39 @@ export function reportUnhideMany(result: UnhideManyResult, t: T): void {
   }
 }
 
-/** Sets (or, with `null`, removes) a custom name. Throws the core's error. */
-export async function renameChannel(ref: ItemRef, name: string | null): Promise<ChannelEdit | null> {
-  const row = await rpc('channels.rename', { ref, name });
-  void afterEditChange();
-  return row;
+/**
+ * Sets (or, with `null`, removes) a custom name. Throws the core's error.
+ * Cached rows show the new name before the core answers and go back if it
+ * refuses; a reset does that only when `providerName` (the provider's own
+ * name, as `ChannelEdit.originalName` keeps it) says what to show.
+ */
+export async function renameChannel(ref: ItemRef, name: string | null, providerName?: string): Promise<ChannelEdit | null> {
+  const refresh = editRefresh();
+  const shown = name ?? providerName;
+  const before = shown !== undefined && shown.trim() !== '' ? renameInCache(ref, shown.trim()) : [];
+  try {
+    const row = await rpc('channels.rename', { ref, name });
+    void refresh.settle();
+    return row;
+  } catch (err) {
+    refresh.cancel();
+    restoreCache(before);
+    throw err;
+  }
 }
 
 /**
  * The toast after a rename or reset, with Undo back to `previous` (the
- * custom name before, or null for the provider's name).
+ * custom name before, or null for the provider's name, `providerName`).
  */
-export function renamedToast(ref: ItemRef, shown: string, previous: string | null, wasReset: boolean, t: T): void {
+export function renamedToast(ref: ItemRef, shown: string, previous: string | null, wasReset: boolean, t: T, providerName?: string): void {
   toast({
     variant: 'success',
     title: wasReset ? t('nameResetToast', { name: shown }) : t('renamedToast', { name: shown }),
     action: {
       label: t('undo'),
       onClick: () =>
-        void renameChannel(ref, previous).catch((err: unknown) =>
+        void renameChannel(ref, previous, providerName).catch((err: unknown) =>
           toast({ variant: 'error', title: t('undoFailed'), description: failureText(err, t) }),
         ),
     },
@@ -341,7 +365,7 @@ export function renamedToast(ref: ItemRef, shown: string, previous: string | nul
 /** "Reset name" from a menu: back to the provider's name, with Undo. */
 export async function resetName(ref: ItemRef, edit: ChannelEdit, provider: string, t: T): Promise<boolean> {
   try {
-    await renameChannel(ref, null);
+    await renameChannel(ref, null, edit.originalName);
   } catch (err) {
     toast({ variant: 'error', title: t('renameFailed'), description: failureText(err, t) });
     return false;

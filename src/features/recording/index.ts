@@ -1,8 +1,8 @@
 /** Public surface of the recording feature: guide reminders and scheduled recordings. */
 
-export { ProgramActions } from './components/ProgramActions';
+export { ProgramActions, ProgramActionsView, useProgramActionsShared, type ProgramActionsShared } from './components/ProgramActions';
 export { RibbonActions } from './components/RibbonActions';
-export { ScheduleMark } from './components/ScheduleMark';
+export { ScheduleMark, ScheduleMarkView } from './components/ScheduleMark';
 export { RecordingWatcher } from './components/RecordingWatcher';
 // Run 2 C5: series recording rules.
 export { RecordingRulesPanel } from './components/RulesPanel';
@@ -19,6 +19,7 @@ export {
   useRuleActions,
   useRuleIndex,
   useCancelPending,
+  usePrefetchSchedule,
   useScheduleActions,
   useScheduleIndex,
 } from './hooks';

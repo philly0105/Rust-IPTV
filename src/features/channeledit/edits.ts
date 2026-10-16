@@ -5,10 +5,12 @@
  * count beside "Manage categories" and the hidden-channels dialog).
  */
 
+import type { QueryKey } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
+import { getConnectionState, onAppEvent } from '@/api/events';
 import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
-import { sameRef, type ChannelEdit, type ItemRef } from '@/api/types';
+import { sameRef, type Channel, type ChannelEdit, type ItemRef, type Page } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { useSettings } from '@/shell/useSettings';
 
@@ -62,9 +64,167 @@ export function findEdit(edits: readonly ChannelEdit[] | undefined, ref: ItemRef
   return ref ? edits?.find((e) => sameRef(e.ref, ref)) : undefined;
 }
 
-/** Refreshes everything a channel edit changes. */
+/** Refreshes everything a channel edit changes, now. */
 export function afterEditChange(): Promise<void> {
   return Promise.all(EDIT_INVALIDATES.map((p) => invalidate(p))).then(() => undefined);
+}
+
+/** How long a write waits for its `channels.changed` event before refreshing on its own. */
+export const EDIT_EVENT_WAIT_MS = 400;
+
+/**
+ * The event connection is open. Stand-ins for `@/api/events` that leave
+ * `getConnectionState` out (several test files) throw on the call: no
+ * connection, refresh here.
+ */
+function eventsOpen(): boolean {
+  try {
+    return getConnectionState() === 'open';
+  } catch {
+    return false;
+  }
+}
+
+/** The refresh of one write: {@link EditRefresh.settle} once it landed, {@link EditRefresh.cancel} when it failed. */
+export interface EditRefresh {
+  settle(): Promise<void>;
+  cancel(): void;
+}
+
+/**
+ * One refresh per write. The core emits `channels.changed` after every channel
+ * write and the app's event binding (`src/api/query.ts`) invalidates the same
+ * prefixes as {@link afterEditChange}, so refreshing here as well fetched
+ * every query twice. With the event connection open, a write leaves the
+ * refresh to its event and refreshes on its own only when the event has not
+ * come within {@link EDIT_EVENT_WAIT_MS}; with the connection down it
+ * refreshes at once. Start it before the write: an event that beats the RPC
+ * answer still counts.
+ */
+export function editRefresh(): EditRefresh {
+  let seen = false;
+  let wake: (() => void) | undefined;
+  let off: (() => void) | null =
+    eventsOpen()
+      ? onAppEvent('channels.changed', () => {
+          seen = true;
+          wake?.();
+        })
+      : null;
+  const stop = () => {
+    off?.();
+    off = null;
+  };
+  return {
+    cancel: stop,
+    settle() {
+      if (!off) return afterEditChange();
+      if (seen) {
+        stop();
+        return Promise.resolve();
+      }
+      if (!eventsOpen()) {
+        stop();
+        return afterEditChange();
+      }
+      return new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          stop();
+          void afterEditChange().then(resolve);
+        }, EDIT_EVENT_WAIT_MS);
+        wake = () => {
+          clearTimeout(timer);
+          stop();
+          resolve();
+        };
+      });
+    },
+  };
+}
+
+/** Cached query entries as they were, for a rollback. */
+export type CacheSnapshot = [QueryKey, unknown][];
+
+/** Puts back entries saved by {@link renameInCache} or {@link hideInCache}. */
+export function restoreCache(snapshot: CacheSnapshot): void {
+  for (const [key, data] of snapshot) queryClient.setQueryData(key, data);
+}
+
+const isChannelPage = (data: unknown): data is Page<Channel> =>
+  typeof data === 'object' && data !== null && Array.isArray((data as Page<Channel>).items) && typeof (data as Page<Channel>).offset === 'number';
+
+/** The cached `catalog.channels` pages of a source. */
+function cachedPages(sourceId: string): [QueryKey, Page<Channel>][] {
+  return queryClient
+    .getQueriesData<Page<Channel>>({
+      predicate: (q) => q.queryKey[0] === 'catalog.channels' && (q.queryKey[1] as { sourceId?: unknown } | undefined)?.sourceId === sourceId,
+    })
+    .filter((e): e is [QueryKey, Page<Channel>] => isChannelPage(e[1]));
+}
+
+/**
+ * Shows a new name at once: every cached `catalog.channels` row of the
+ * channel and its cached `catalog.item` answer take `name` before the write
+ * lands. Returns what it changed, for {@link restoreCache}.
+ */
+export function renameInCache(ref: ItemRef, name: string): CacheSnapshot {
+  const saved: CacheSnapshot = [];
+  for (const [key, page] of cachedPages(ref.sourceId)) {
+    if (!page.items.some((c) => sameRef(c.ref, ref))) continue;
+    saved.push([key, page]);
+    queryClient.setQueryData<Page<Channel>>(key, { ...page, items: page.items.map((c) => (sameRef(c.ref, ref) ? { ...c, name } : c)) });
+  }
+  const entry = rpcKey('catalog.item', { ref });
+  const item = queryClient.getQueryData<Channel>(entry);
+  if (item && typeof item.name === 'string') {
+    saved.push([entry, item]);
+    queryClient.setQueryData<Channel>(entry, { ...item, name });
+  }
+  return saved;
+}
+
+/** A page's list without its paging: pages of one list share it. */
+function listOf(key: QueryKey): string {
+  const { query, ...rest } = (key[1] ?? {}) as { query?: Record<string, unknown> };
+  const q = { ...query };
+  delete q['offset'];
+  delete q['limit'];
+  return JSON.stringify([rest, q]);
+}
+
+/**
+ * Takes a channel out of the cached `catalog.channels` pages at once: its row
+ * goes, the list's `total` drops by one, and later pages of the same list
+ * move up a place, so the rows below close the gap. Lists whose cached pages
+ * do not hold the channel are left to the refresh. Returns what it changed,
+ * for {@link restoreCache}.
+ */
+export function hideInCache(ref: ItemRef): CacheSnapshot {
+  const saved: CacheSnapshot = [];
+  const byList = new Map<string, [QueryKey, Page<Channel>][]>();
+  for (const entry of cachedPages(ref.sourceId)) {
+    const list = listOf(entry[0]);
+    byList.set(list, [...(byList.get(list) ?? []), entry]);
+  }
+  for (const pages of byList.values()) {
+    let at = -1;
+    for (const [, page] of pages) {
+      const i = page.items.findIndex((c) => sameRef(c.ref, ref));
+      if (i >= 0) at = page.offset + i;
+    }
+    if (at < 0) continue;
+    for (const [key, page] of pages) {
+      const items = page.items.filter((c) => !sameRef(c.ref, ref));
+      saved.push([key, page]);
+      queryClient.setQueryData<Page<Channel>>(key, {
+        ...page,
+        items,
+        total: Math.max(0, page.total - 1),
+        offset: page.offset > at ? page.offset - 1 : page.offset,
+      });
+    }
+  }
+  return saved;
 }
 
 /**

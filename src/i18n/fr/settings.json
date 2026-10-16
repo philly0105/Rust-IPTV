@@ -240,7 +240,7 @@
   "backupNoSecrets": "Cette sauvegarde ne contient aucun mot de passe. Il faudra les ressaisir pour les sources Xtream et Stalker.",
   "backupMode": "Mode d'importation",
   "backupMerge": "Fusionner",
-  "backupMergeHint": "Ajoute les sources du fichier et conserve celles que vous avez.",
+  "backupMergeHint": "Ajoute les sources du fichier. Celles que vous avez déjà gardent leurs noms et leurs réglages.",
   "backupReplace": "Remplacer",
   "backupReplaceHint": "Importe d’abord la sauvegarde, puis retire vos sources actuelles dès qu’une de ses sources se charge.",
   "backupImportButton": "Importer la sauvegarde",
@@ -250,6 +250,9 @@
   "backupReplaceConfirm": "Remplacer",
   "backupImportFailed": "Impossible d'importer la sauvegarde",
   "backupResult": "Ajoutées ou mises à jour : {{imported}}. Ignorées : {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} playlist est encore en chargement ; ses favoris et son historique apparaîtront une fois terminée.",
+  "backupRefreshing_many": "{{count, number}} playlists sont encore en chargement ; les favoris et l’historique de chacune apparaîtront une fois terminée.",
+  "backupRefreshing_other": "{{count, number}} playlists sont encore en chargement ; les favoris et l’historique de chacune apparaîtront une fois terminée.",
   "backupWarnings_one": "{{count}} avertissement",
   "backupWarnings_many": "{{count}} avertissements",
   "backupWarnings_other": "{{count}} avertissements",
@@ -356,10 +359,10 @@
   "railsOffHint": "Activez le tableau de bord pour utiliser ces rangées.",
 
   "resetGroup": "Réinitialiser",
-  "resetHint": "Remet chaque réglage à sa valeur par défaut. Sources, favoris, historique et téléchargements restent.",
+  "resetHint": "Remet chaque réglage à sa valeur par défaut. Sources, favoris, historique et téléchargements restent. Les adresses du guide et la clé TMDB sont aussi conservées.",
   "resetButton": "Réinitialiser les réglages",
   "resetConfirmTitle": "Réinitialiser tous les réglages ?",
-  "resetConfirmBody": "Chaque réglage revient à sa valeur par défaut, y compris la langue, le thème et les chemins des lecteurs. Sources, favoris, historique et téléchargements restent.",
+  "resetConfirmBody": "Chaque réglage revient à sa valeur par défaut, y compris la langue, le thème et les chemins des lecteurs. Sources, favoris, historique et téléchargements restent. Les adresses du guide et la clé TMDB sont aussi conservées.",
   "resetConfirm": "Réinitialiser",
   "resetDone": "Réglages réinitialisés",
   "resetFailed": "Impossible de réinitialiser les réglages",
@@ -448,5 +451,10 @@
   "backupOldVersion": "Cette sauvegarde utilise un ancien format illisible. Exportez une nouvelle sauvegarde et importez-la.",
   "backupImportDone": "Sauvegarde importée",
   "backupReplacePinTitle": "Saisissez le code PIN pour remplacer les sources",
-  "backupReplacePinText": "Le remplacement supprime vos sources actuelles et leurs verrous parentaux ; il faut donc le code PIN du contrôle parental."
+  "backupReplacePinText": "Le remplacement supprime vos sources actuelles et leurs verrous parentaux ; il faut donc le code PIN du contrôle parental.",
+  "backupParentalTitle": "Cette sauvegarde modifie le contrôle parental",
+  "backupParentalBody": "Le contrôle parental est verrouillé : ses options dans la sauvegarde demandent le code PIN. Saisissez-le pour tout importer, ou importez le reste et gardez vos options actuelles.",
+  "backupParentalSkip": "Importer sans elles",
+  "backupParentalUnlock": "Saisir le PIN et importer",
+  "backupParentalPinTitle": "Saisissez le code PIN pour importer les options du contrôle parental"
 }

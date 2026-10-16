@@ -12,6 +12,7 @@
 //! kills embedded mpv, stops the remote control server, and checkpoints the
 //! SQLite WAL.
 
+mod boot;
 mod geometry;
 #[cfg(windows)]
 mod memory;
@@ -27,7 +28,7 @@ use iptv_core::events::{AppEvent, EventSink};
 use iptv_core::logging::LogGuard;
 use iptv_core::rpc::app::{deliver_deep_links, set_desktop_info, DesktopInfo};
 use iptv_core::rpc::{build_router, init_all, RpcRouter};
-use iptv_core::{AppState, RpcError};
+use iptv_core::{AppState, RpcError, RpcErrorCode};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -208,15 +209,24 @@ fn pip_window_saved(
     pip.saved()
 }
 
-/// The single IPC entry point: `invoke('rpc', { cmd, args })`.
+/// `AppState` once `boot_state` has built it (`boot`).
+type StateGate = boot::BootGate<Arc<AppState>>;
+
+/// The single IPC entry point: `invoke('rpc', { cmd, args })`. Calls made
+/// while the database is still opening wait for it.
 #[tauri::command]
 async fn rpc(
-    state: tauri::State<'_, Arc<AppState>>,
+    boot: tauri::State<'_, StateGate>,
     router: tauri::State<'_, Arc<RpcRouter>>,
     cmd: String,
     args: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, RpcError> {
-    let state = Arc::clone(&state);
+    let Some(state) = boot.get().await else {
+        return Err(RpcError::new(
+            RpcErrorCode::Internal,
+            "Tsrust IPTV did not finish starting.",
+        ));
+    };
     let router = Arc::clone(&router);
     router
         .dispatch(state, &cmd, args.unwrap_or(serde_json::Value::Null))
@@ -574,41 +584,13 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         _guard: parking_lot::Mutex::new(guard),
     });
 
-    let sink: Arc<dyn EventSink> = Arc::new(TauriSink(handle.clone()));
-    let state = match tauri::async_runtime::block_on(AppState::new(data_dir.clone(), sink, true)) {
-        Ok(s) => s,
-        Err(err) => {
-            tracing::error!(error = %err, data_dir = %data_dir.display(), "app state failed to initialize");
-            fatal_dialog(&format!("{err}\n\nData folder: {}", data_dir.display()));
-            return Err(Box::new(err));
-        }
-    };
-
-    #[cfg(windows)]
-    iptv_core::player::set_window_factory(
-        &state,
-        Arc::new(crate::mpv_window::MpvWindowFactory::new(handle.clone())),
-    );
-
-    tauri::async_runtime::spawn(allow_known_media_dirs(handle.clone(), Arc::clone(&state)));
-
-    // Loopback media proxy for inline playback with per-playlist headers.
-    let proxy_base = match proxy::start(Arc::clone(&state)) {
-        Ok(base) => Some(base),
-        Err(err) => {
-            tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
-            None
-        }
-    };
-    set_desktop_info(
-        &state,
-        DesktopInfo {
-            proxy_base,
-            updater_available: cfg!(feature = "updater"),
-        },
-    );
-
-    app.manage(Arc::clone(&state));
+    // The database opens on the runtime (`boot_state`) instead of blocking
+    // this thread: Tauri has already created the main window, and WebView2
+    // can only start and load the page while the event loop runs. `rpc`
+    // waits at the gate until the state is ready.
+    let gate = StateGate::default();
+    let waiter = gate.waiter();
+    app.manage(gate);
     app.manage(Arc::new(build_router()));
     app.manage(pip_state::PipState::default());
     app.manage(quit_flush::FlushGate::default());
@@ -619,32 +601,30 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // go out live as `deeplink.open`. Scheme registration happens in the NSIS
     // installer; we deliberately do not call `register_all()` at runtime (it
     // writes to the registry).
-    {
-        let state = Arc::clone(&state);
-        app.deep_link().on_open_url(move |event| {
-            let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
-            log_and_deliver_deep_links(&state, "open", urls);
+    app.deep_link().on_open_url(move |event| {
+        let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
+        let waiter = waiter.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Some(state) = waiter.get().await {
+                log_and_deliver_deep_links(&state, "open", urls);
+            }
         });
-    }
-    if let Ok(Some(urls)) = app.deep_link().get_current() {
-        log_and_deliver_deep_links(
-            &state,
-            "launch",
-            urls.iter().map(|u| u.to_string()).collect(),
-        );
-    }
+    });
+    let launch_links = app
+        .deep_link()
+        .get_current()
+        .ok()
+        .flatten()
+        .map(|urls| urls.iter().map(|u| u.to_string()).collect());
+
+    let sink: Arc<dyn EventSink> = Arc::new(TauriSink(handle.clone()));
+    tauri::async_runtime::spawn(boot_state(handle.clone(), data_dir, sink, launch_links));
 
     #[cfg(all(
         feature = "updater",
         not(any(target_os = "android", target_os = "ios"))
     ))]
     app.add_capability(include_str!("../capabilities-updater/updater.json"))?;
-
-    tauri::async_runtime::spawn(async move {
-        if let Err(err) = init_all(state).await {
-            tracing::error!(error = %err, "module init failed");
-        }
-    });
 
     build_tray(app)?;
 
@@ -676,6 +656,61 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Builds `AppState` (opens and migrates the database) beside the webview's
+/// first load, wires the shell to it, delivers the launch deep links, opens
+/// the gate for `rpc`, then starts the core modules.
+async fn boot_state(
+    handle: AppHandle,
+    data_dir: std::path::PathBuf,
+    sink: Arc<dyn EventSink>,
+    launch_links: Option<Vec<String>>,
+) {
+    let state = match AppState::new(data_dir.clone(), sink, true).await {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::error!(error = %err, data_dir = %data_dir.display(), "app state failed to initialize");
+            fatal_dialog(&format!("{err}\n\nData folder: {}", data_dir.display()));
+            handle.exit(1);
+            return;
+        }
+    };
+
+    #[cfg(windows)]
+    iptv_core::player::set_window_factory(
+        &state,
+        Arc::new(crate::mpv_window::MpvWindowFactory::new(handle.clone())),
+    );
+
+    tauri::async_runtime::spawn(allow_known_media_dirs(handle.clone(), Arc::clone(&state)));
+
+    // Loopback media proxy for inline playback with per-playlist headers.
+    let proxy_base = match proxy::start(Arc::clone(&state)) {
+        Ok(base) => Some(base),
+        Err(err) => {
+            tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
+            None
+        }
+    };
+    set_desktop_info(
+        &state,
+        DesktopInfo {
+            proxy_base,
+            updater_available: cfg!(feature = "updater"),
+        },
+    );
+
+    // `shutdown` finds the state here.
+    handle.manage(Arc::clone(&state));
+    if let Some(urls) = launch_links {
+        log_and_deliver_deep_links(&state, "launch", urls);
+    }
+    handle.state::<StateGate>().open(Arc::clone(&state));
+
+    if let Err(err) = init_all(state).await {
+        tracing::error!(error = %err, "module init failed");
+    }
+}
+
 /// Feeds the main window's current geometry and mode to the normal-geometry
 /// tracker (`pip_state`), which fixes the saved state after a quit in
 /// fullscreen.
@@ -703,7 +738,8 @@ fn observe_window(window: &tauri::Window) {
 
 /// Tracks the normal geometry; background windows ask WebView2 for its low
 /// memory target and trim the app's working set; focus restores the normal
-/// target.
+/// target. A minimized main window tells WebView2 it is hidden (the page
+/// stops rendering); restore or focus shows it again.
 fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
     // Closing the window ends the app: save playback (and other pending work)
     // first, exactly like tray Quit.
@@ -721,6 +757,7 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return;
         };
+        let main = window.label() == pip_state::MAIN_WINDOW;
         match event {
             WindowEvent::Focused(false) => {
                 memory::set_webview_memory_low(&webview, true);
@@ -732,6 +769,12 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
                 memory::trim_working_set();
             }
             _ => {}
+        }
+        if main {
+            let minimized = || window.is_minimized().unwrap_or(false);
+            if let Some(visible) = memory::visibility_after(event, minimized) {
+                memory::set_webview_visible(&webview, visible);
+            }
         }
     }
     #[cfg(not(windows))]

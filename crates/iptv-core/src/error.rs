@@ -184,9 +184,17 @@ pub enum CoreError {
 pub type CoreResult<T> = Result<T, CoreError>;
 
 impl CoreError {
-    /// True for errors `http::with_retry` retries (Network, Timeout, Server).
+    /// True for errors `http::with_retry` retries (Network, Timeout, Server),
+    /// except transport failures a retry cannot fix: a refused connection, a
+    /// host name that does not exist, an invalid certificate
+    /// ([`crate::http::is_permanent_transport`]). The RPC `retryable` flag
+    /// is unchanged: the user may fix the cause and try again.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::Network(_) | Self::Timeout(_) | Self::Server(_))
+        match self {
+            Self::Network(m) => !crate::http::is_permanent_transport(m),
+            Self::Timeout(_) | Self::Server(_) => true,
+            _ => false,
+        }
     }
 
     /// Shorthand constructors.
@@ -420,5 +428,23 @@ mod tests {
             assert_eq!(serde_json::to_value(code).unwrap(), code.as_str());
         }
         assert_eq!(RpcErrorCode::parse("bogus"), None);
+    }
+
+    /// L1-sources-home-7: a refused, unknown-host or bad-certificate failure
+    /// is final for the retry loops but stays retryable for the user.
+    #[test]
+    fn permanent_transport_failures_are_not_retried() {
+        let refused = CoreError::Network(
+            "Could not reach h. The server refused the connection. Check the address and port, and that the server is running, then try again. (refused)".into(),
+        );
+        assert!(!refused.is_retryable());
+        assert!(RpcError::from(refused).retryable);
+        let reset = CoreError::Network(
+            "Could not reach h. Check the address and that the server is online, then try again. (connection reset)".into(),
+        );
+        assert!(reset.is_retryable());
+        assert!(CoreError::Timeout("t".into()).is_retryable());
+        assert!(CoreError::Server("s".into()).is_retryable());
+        assert!(!CoreError::Invalid("i".into()).is_retryable());
     }
 }

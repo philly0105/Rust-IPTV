@@ -22,7 +22,7 @@ vi.mock('@/api/transport', async (orig) => ({
   rpcRaw: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
   isDesktop: true,
 }));
-vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined, getConnectionState: () => 'closed' }));
 vi.mock('@/shell', async () => await import('../../test/fakes'));
 vi.mock('@/features/player', async () => await import('../../test/fakes'));
 vi.mock('@/features/player/remote', async () => await import('../../test/fakes'));

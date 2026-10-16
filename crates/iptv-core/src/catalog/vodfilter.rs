@@ -128,18 +128,33 @@ pub fn year_facets_filtered(
         i64::from(*YEAR_RANGE.start()).into(),
         i64::from(*YEAR_RANGE.end()).into(),
     ];
-    let mut where_sql =
-        String::from("i.source_id = ?1 AND i.content_type = ?2 AND i.year BETWEEN ?3 AND ?4");
+    let mut where_sql = String::from("i.source_id = ?1 AND i.content_type = ?2");
+    let mut year_key = "i.year";
     match category_id {
         Some(cat) => {
+            // `+` keeps the year (range and grouping) off the index choice:
+            // without table statistics SQLite took idx_items_year for it and
+            // walked every title of the source (about 40-80 ms on 100k)
+            // instead of the category's few hundred through idx_items_cat,
+            // which holds the year since migration 0018.
+            year_key = "+i.year";
             args.push(cat.to_string().into());
-            where_sql.push_str(&format!(" AND i.category_id = ?{}", args.len()));
+            where_sql.push_str(&format!(
+                " AND +i.year BETWEEN ?3 AND ?4 AND i.category_id = ?{}",
+                args.len()
+            ));
         }
         None => {
-            // Same rows as `query_named`'s hidden-category filter.
-            where_sql.push_str(
-                " AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
-            );
+            // All titles: idx_items_year walks them in year order (no sort
+            // for the GROUP BY) and holds every filter column.
+            where_sql.push_str(" AND i.year BETWEEN ?3 AND ?4");
+            // Same rows as `query_named`'s hidden-category filter, and like
+            // it only when a category is hidden.
+            if super::has_hidden_categories(conn, source_id, ct)? {
+                where_sql.push_str(
+                    " AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
+                );
+            }
         }
     }
     where_sql.push_str(english_scoped(conn, english_only, source_id, ct)?);
@@ -157,7 +172,7 @@ pub fn year_facets_filtered(
         &mut args,
     ));
     let sql = format!(
-        "SELECT i.year, count(*) FROM items i WHERE {where_sql} GROUP BY i.year ORDER BY i.year DESC"
+        "SELECT i.year, count(*) FROM items i WHERE {where_sql} GROUP BY {year_key} ORDER BY {year_key} DESC"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params_from_iter(args.iter()), |r| {

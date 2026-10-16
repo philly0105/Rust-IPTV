@@ -173,21 +173,27 @@ describe('L1-vod-10: Escape on a grid', () => {
 });
 
 describe('L1-vod-15: Shift+W keeps focus in the grid', () => {
-  it('after Shift+W the new grid has focus and the arrow keys move its cursor', async () => {
+  it('after Shift+W the grid keeps focus and its cursor, and the arrow keys still move it', async () => {
     watchedIds = new Set(['f0']);
     renderAt('/s/src1/movies/c/c1', gridRoute);
     await screen.findByText('Film 0');
     const before = screen.getByTestId('vod-grid');
     before.focus();
     fireEvent.keyDown(before, { key: 'ArrowRight' });
+    fireEvent.keyDown(before, { key: 'ArrowRight' });
+    const cursor = before.getAttribute('aria-activedescendant');
+    expect(cursor).toBeTruthy();
     fireEvent.keyDown(before, { key: 'W', shiftKey: true });
     await waitFor(() => expect(callsOf('catalog.movies').some((c) => (c.args as { hideWatched?: boolean }).hideWatched)).toBe(true));
     await waitFor(() => expect(screen.queryByText('Film 0')).toBeNull());
-    const after = await screen.findByTestId('vod-grid');
-    expect(after).not.toBe(before);
-    await waitFor(() => expect(document.activeElement).toBe(after));
+    // L2-vod-8: the same grid stays (the toggle is not part of its key), so the cursor is not
+    // thrown back to the start; loop 1 pinned a remount here.
+    const after = screen.getByTestId('vod-grid');
+    expect(after).toBe(before);
+    expect(document.activeElement).toBe(after);
+    expect(after.getAttribute('aria-activedescendant')).toBe(cursor);
     fireEvent.keyDown(after, { key: 'ArrowRight' });
-    await waitFor(() => expect(after.getAttribute('aria-activedescendant')).toBeTruthy());
+    await waitFor(() => expect(after.getAttribute('aria-activedescendant')).not.toBe(cursor));
   });
 
   it('does not pull focus back when Shift+W was pressed outside the grid', async () => {

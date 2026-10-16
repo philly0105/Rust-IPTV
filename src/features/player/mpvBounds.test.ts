@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { boundsClear, computeMpvBounds, computeMpvOverlay, intersect, measureMpvBounds, measureMpvLayout, rectOf, subtract, type Rect } from './mpvBounds';
+import {
+  boundsClear,
+  computeMpvBounds,
+  computeMpvLayout,
+  computeMpvOverlay,
+  intersect,
+  measureMpvBounds,
+  measureMpvLayout,
+  modalCovers,
+  rectOf,
+  subtract,
+  type Rect,
+} from './mpvBounds';
 
 const R = (left: number, top: number, width: number, height: number): Rect => rectOf({ left, top, width, height });
 
@@ -242,5 +254,117 @@ describe('measureMpvLayout in picture-in-picture', () => {
     // A hidden layer (PiP off) is ignored: the bar is subtracted as when docked.
     document.getElementById('layer')!.hidden = true;
     expect(measureMpvLayout(surface)).toEqual({ bounds: { x: 0, y: 0, width: 480, height: 220 }, holes: [] });
+  });
+});
+
+describe('computeMpvLayout: overlays over the docked video (L2-desktop-3, L2-desktop-7)', () => {
+  const surface = { left: 0, top: 0, right: 1000, bottom: 600 };
+  const bar = { left: 0, top: 560, right: 1000, bottom: 600 };
+
+  it('shrinks by reserved chrome and cuts floating overlays out as holes', () => {
+    const tooltip = { left: 400.5, top: 100, right: 520, bottom: 130.2 };
+    expect(computeMpvLayout(surface, { reserved: [bar], overlays: [tooltip] })).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 400, y: 100, width: 120, height: 31 }],
+    });
+  });
+
+  it('keeps the video around a small dialog and hides it under one that covers most of it', () => {
+    const small = { left: 300, top: 150, right: 700, bottom: 400 };
+    expect(computeMpvLayout(surface, { overlays: [small], modals: [small] })).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 600 },
+      holes: [{ x: 300, y: 150, width: 400, height: 250 }],
+    });
+    const big = { left: -50, top: -50, right: 900, bottom: 700 };
+    expect(computeMpvLayout(surface, { overlays: [big], modals: [big] })).toEqual({ bounds: null, holes: [] });
+  });
+
+  it('measures the share a modal covers against the visible video only', () => {
+    const b = { x: 0, y: 0, width: 100, height: 100 };
+    expect(modalCovers(b, [])).toBe(false);
+    expect(modalCovers(b, [R(0, 0, 49, 100)])).toBe(false);
+    expect(modalCovers(b, [R(0, 0, 50, 100)])).toBe(true);
+    // Most of this dialog lies outside the video.
+    expect(modalCovers(b, [R(80, 0, 900, 900)])).toBe(false);
+  });
+});
+
+describe('measureMpvLayout: menus, tooltips and dialogs anywhere in the document', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  function layout(extra: string, rects: Record<string, { left: number; top: number; width: number; height: number }>): Element {
+    document.body.innerHTML = `
+      <div data-player-host="" id="host">
+        <div data-mpv-surface="" id="surface"></div>
+        <div data-player-controls="" id="controls"></div>
+      </div>${extra}`;
+    const all = {
+      surface: { left: 0, top: 0, width: 1000, height: 560 },
+      controls: { left: 0, top: 560, width: 1000, height: 40 },
+      ...rects,
+    };
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1280);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const r = all[this.id as keyof typeof all] ?? { left: 0, top: 0, width: 1280, height: 800 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => r } as DOMRect;
+    });
+    return document.getElementById('surface')!;
+  }
+
+  it('cuts holes for a body-portalled menu and tooltip instead of covering them', () => {
+    const surface = layout('<div role="menu" id="menu"></div><div role="tooltip" id="tip"></div>', {
+      menu: { left: 600, top: 300, width: 225, height: 283 },
+      tip: { left: 100, top: 20, width: 80, height: 24 },
+    });
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [
+        { x: 600, y: 300, width: 225, height: 260 },
+        { x: 100, y: 20, width: 80, height: 24 },
+      ],
+    });
+  });
+
+  it('keeps a menu inside the player host as reserved chrome (the dock grows around it)', () => {
+    const surface = layout('', { menu: { left: 700, top: 360, width: 300, height: 200 } });
+    document.getElementById('host')!.insertAdjacentHTML('beforeend', '<div role="menu" id="menu"></div>');
+    const { bounds, holes } = measureMpvLayout(surface);
+    expect(holes).toEqual([]);
+    expect(boundsClear(bounds!, [R(700, 360, 300, 200)])).toBe(true);
+  });
+
+  it("treats the player's own popover (data-mpv-overlay) as a hole even inside the host", () => {
+    const surface = layout('', { ctx: { left: 400, top: 380, width: 225, height: 283 } });
+    document.getElementById('host')!.insertAdjacentHTML('beforeend', '<div role="menu" data-mpv-overlay="" id="ctx"></div>');
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 400, y: 380, width: 225, height: 180 }],
+    });
+  });
+
+  it('keeps the video around a small modal and hides it under a large one', () => {
+    const surface = layout('<div role="dialog" aria-modal="true" id="dlg"></div>', {
+      dlg: { left: 350, top: 150, width: 300, height: 200 },
+    });
+    expect(measureMpvLayout(surface)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 560 },
+      holes: [{ x: 350, y: 150, width: 300, height: 200 }],
+    });
+    vi.restoreAllMocks();
+    const covered = layout('<div role="dialog" aria-modal="true" id="dlg"></div>', {
+      dlg: { left: 0, top: 0, width: 1280, height: 800 },
+    });
+    expect(measureMpvLayout(covered)).toEqual({ bounds: null, holes: [] });
+  });
+
+  it('skips an overlay that is laid out hidden before it is placed', () => {
+    const surface = layout('<div role="menu" id="menu" style="visibility: hidden"></div>', {
+      menu: { left: 600, top: 300, width: 225, height: 283 },
+    });
+    expect(measureMpvLayout(surface).holes).toEqual([]);
   });
 });

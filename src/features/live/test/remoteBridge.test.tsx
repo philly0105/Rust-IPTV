@@ -35,6 +35,9 @@ vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('
 vi.mock('@/shell', async () => await import('./fakes'));
 vi.mock('@/features/player', async () => await import('./fakes'));
 vi.mock('@/features/player/remote', async () => await import('./fakes'));
+// The player's settings cache: null until loaded (counts as on).
+const settingsMock = vi.hoisted(() => ({ value: null as null | { remoteControl: { enabled: boolean; port: number } } }));
+vi.mock('@/features/player/store', () => ({ peekSettings: () => settingsMock.value }));
 
 const fakes = await import('./fakes');
 
@@ -51,6 +54,7 @@ beforeEach(() => {
   rpcMock.channels = 2;
   rpcMock.calls.length = 0;
   bus.listeners.clear();
+  settingsMock.value = null;
 });
 afterEach(() => {
   cleanup();
@@ -116,5 +120,29 @@ describe('useRemoteBridge', () => {
     expect(selectRef).toHaveBeenCalledWith({ sourceId: 'src1', contentType: 'live', itemId: 'c4' });
     hook.unmount();
     expect(fakes.remoteClaims.count).toBe(0);
+  });
+
+  it('asks for the remote status on a channel change only while remote control is on (XB2-13)', async () => {
+    settingsMock.value = { remoteControl: { enabled: false, port: 7310 } };
+    const statusCalls = () => rpcMock.calls.filter((c) => c.cmd === 'remote.status').length;
+    const reports = () => rpcMock.calls.filter((c) => c.cmd === 'remote.reportStatus');
+    const spies = { up: vi.fn(), down: vi.fn(), selectNumber: vi.fn(), selectRef: vi.fn() };
+    const hook = renderHook((p: { current: number }) => useRemoteBridge({ sourceId: 'src1', ...spies, current: makeChannel(p.current) }), {
+      initialProps: { current: 1 },
+    });
+    // The mount's publish check is the only one.
+    await waitFor(() => expect(statusCalls()).toBe(1));
+    hook.rerender({ current: 2 });
+    hook.rerender({ current: 3 });
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(statusCalls()).toBe(1);
+    expect(reports()).toHaveLength(0);
+
+    // Turned on later: the next channel change finds the server and reports the channel.
+    settingsMock.value = { remoteControl: { enabled: true, port: 7310 } };
+    rpcMock.running = true;
+    hook.rerender({ current: 4 });
+    await waitFor(() => expect(reports()).toHaveLength(1));
+    expect((reports()[0]!.args as { status: { channelName: string } }).status.channelName).toBe('Channel 4');
   });
 });

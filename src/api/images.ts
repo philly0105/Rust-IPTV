@@ -28,7 +28,7 @@
  * here.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { desktopAppInfo } from './bootInfo';
 
 /** The server-mode cache route. */
 export const WEB_IMAGE_ROUTE = '/api/img';
@@ -47,12 +47,10 @@ export function setDesktopImageBase(proxyBase: string | null | undefined): void 
   desktopImageBase = typeof proxyBase === 'string' && /\/proxy\/?$/.test(proxyBase) ? proxyBase.replace(/\/proxy\/?$/, '/img') : null;
 }
 
-/** Settles once the desktop base request answered or failed; already settled on the web. */
-const baseSettled: Promise<void> = isDesktopWindow
-  ? invoke('rpc', { cmd: 'app.info', args: null })
-      .then((info) => setDesktopImageBase((info as { proxyBase?: unknown } | null)?.proxyBase as string | null | undefined))
-      .catch(() => undefined)
-  : Promise.resolve();
+/** Settles once the launch's one `app.info` request (bootInfo.ts) answered or failed; already settled on the web. */
+const baseSettled: Promise<void> = desktopAppInfo.then((info) => {
+  if (isDesktopWindow) setDesktopImageBase(info?.proxyBase);
+});
 
 /**
  * Resolves once the desktop cache base is known (or its request failed), and

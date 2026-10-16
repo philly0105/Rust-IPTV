@@ -9,9 +9,13 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock }
 
 import type { PlayerSource } from '@/api/types';
 
+import { queryClient, rpcKey } from '@/api/query';
+
+import { addToWall } from '../addChannel';
 import { MultiviewPage } from '../components/MultiviewPage';
 import { useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewChannelInput } from '../types';
+import { TILE_START_STAGGER_MS } from '../useTilePlayback';
 import { channel, input, installMediaStubs, renderWithApp, resetWall, source } from './harness';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +27,8 @@ interface EngineCallbacks {
 }
 interface FakeEngine {
   url: string;
+  /** performance.now() when the tile asked for it. */
+  at: number;
   el: HTMLVideoElement;
   cb: EngineCallbacks;
   destroy: Mock;
@@ -83,7 +89,7 @@ vi.mock('../engine', async () => {
   return {
     createEngine: async (el: HTMLVideoElement, src: PlayerSource, _url: string, cb: EngineCallbacks) => {
       const engine = { kind: 'hls', destroy: v.fn() };
-      h.engines.push({ url: src.url, el, cb, destroy: engine.destroy });
+      h.engines.push({ url: src.url, at: performance.now(), el, cb, destroy: engine.destroy });
       if (h.failUrls.has(src.url)) queueMicrotask(() => cb.onError({ fatal: true, kind: 'network', message: 'HTTP 404 Not Found' }));
       return engine;
     },
@@ -474,6 +480,24 @@ describe('connection limit', () => {
     expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
   });
 
+  it('lies over the toolbar instead of pushing the wall down when it arrives late (XB2-32)', async () => {
+    seed([1, 2, 3], 'src1');
+    renderPage();
+    const toolbarBox = () => screen.getByTestId('multiview-toolbar').parentElement!;
+    expect(toolbarBox().hasAttribute('inert')).toBe(false);
+    const banner = await screen.findByTestId('multiview-limit-banner');
+    // Out of the flow: an absolute layer at the top of the stage, not a block above the wall.
+    const layer = screen.getByTestId('multiview-limit-layer');
+    expect(layer.contains(banner)).toBe(true);
+    expect(layer.className).toContain('absolute');
+    expect(layer.parentElement).toBe(screen.getByTestId('multiview-stage'));
+    expect(screen.getByTestId('multiview-banners').contains(banner)).toBe(false);
+    // The covered toolbar takes no focus until the warning goes.
+    expect(toolbarBox().hasAttribute('inert')).toBe(true);
+    fireEvent.click(within(banner).getByRole('button', { name: 'Dismiss' }));
+    expect(toolbarBox().hasAttribute('inert')).toBe(false);
+  });
+
   it('counts only tiles that open a stream: a locked tile uses no connection (L1-live-10)', async () => {
     handlers['parental.status'] = () => ({ enabled: true, mode: 'ask', autoAdult: false, unlockMinutes: 15, unlocked: false });
     handlers['parental.check'] = (args) =>
@@ -513,6 +537,36 @@ describe('connection limit', () => {
     await waitFor(() => expect(calls.some((c) => c.cmd === 'account.status')).toBe(true));
     expect(calls.filter((c) => c.cmd === 'account.status').map((c) => c.args)).toEqual([{ sourceId: 'src1' }]);
     expect(screen.queryByTestId('multiview-limit-banner')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Opening the wall (L2-live-13)
+// ---------------------------------------------------------------------------
+
+describe('opening the wall', () => {
+  it('starts the tiles one after another in slot order, not all in one task', async () => {
+    seed([1, 2, 3, 4]);
+    renderPage();
+    await waitFor(() => expect(h.engines).toHaveLength(4));
+    expect(h.engines.map((e) => e.url)).toEqual([1, 2, 3, 4].map((i) => `http://mock/c${i}.m3u8`));
+    // Timers never fire early (a millisecond of rounding aside).
+    expect(h.engines[3]!.at - h.engines[0]!.at).toBeGreaterThanOrEqual(3 * TILE_START_STAGGER_MS - 2);
+  });
+
+  it("asks an Xtream account's limit when a channel goes on the wall, so the wall opens with its banner in place", async () => {
+    // What the shell has cached by then: the sources, the parental state, recordings.
+    queryClient.setQueryData(rpcKey('sources.list'), defaultHandlers()['sources.list']!({}));
+    queryClient.setQueryData(rpcKey('parental.status'), defaultHandlers()['parental.status']!({}));
+    queryClient.setQueryData(rpcKey('recordings.list'), []);
+    for (const i of [1, 2, 3]) await addToWall(input(i, 'src1'));
+    await addToWall(input(4, 'm3u1'));
+    await waitFor(() => expect(queryClient.getQueryData(rpcKey('account.status', { sourceId: 'src1' }))).toBeTruthy());
+    // Only the Xtream account is asked.
+    expect(calls.filter((c) => c.cmd === 'account.status').map((c) => c.args)).toEqual([{ sourceId: 'src1' }]);
+    renderPage();
+    // In the first commit: no banner arriving later to push the tiles down.
+    expect(screen.getByTestId('multiview-limit-banner').textContent).toContain('Demo TV allows 2 streams at a time and the wall uses 3');
   });
 });
 
@@ -629,6 +683,39 @@ describe('empty wall', () => {
     expect(engineFor(1)).toHaveLength(0);
   });
 
+  it('holds the quick picks in place with a chip-height skeleton while Recent and Favorites load (L2-visual-2)', async () => {
+    let answer!: (entries: unknown[]) => void;
+    handlers['recent.list'] = () => new Promise((r) => (answer = r));
+    handlers['favorites.list'] = () => [{ ref: channel(3, 'm3u1').ref, addedAt: '2026-10-13T00:00:00Z', position: 0, snapshot: { title: 'Channel 3', contentType: 'live' } }];
+    renderPage();
+
+    const skeleton = await screen.findByTestId('multiview-quick-picks-skeleton');
+    expect(skeleton.getAttribute('aria-hidden')).toBe('true');
+    expect(skeleton.className).toContain('motion-safe:animate-pulse');
+    // Chips at the real chips' height, on the real chips' surface.
+    const chips = [...skeleton.querySelectorAll<HTMLElement>('.h-10')];
+    expect(chips.length).toBeGreaterThan(0);
+    for (const c of chips) expect(c.className).toContain('bg-surface-2');
+    // Favorites alone have answered: still the skeleton, not a partial row.
+    expect(screen.queryByTestId('multiview-quick-picks')).toBeNull();
+
+    act(() => answer([{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'Channel 1', contentType: 'live' } }]));
+    const row = await screen.findByTestId('multiview-quick-picks');
+    expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull();
+    expect(within(row).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Add Channel 1 to the wall', 'Add Channel 3 to the wall']);
+    for (const b of within(row).getAllByRole('button')) expect(b.className).toContain('h-10');
+    // One row whatever the count, so the skeleton's height is the row's: no wrapping.
+    expect(row.className.split(/\s+/)).not.toContain('flex-wrap');
+    expect(row.className).toContain('overflow-x-auto');
+  });
+
+  it('drops the skeleton without a row when there is nothing recent or favorite', async () => {
+    renderPage();
+    await screen.findByTestId('multiview-empty');
+    await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
+    expect(screen.queryByTestId('multiview-quick-picks')).toBeNull();
+  });
+
   it('names the layouts for screen readers while they show only their glyphs', async () => {
     renderPage();
     await screen.findByTestId('multiview-empty');
@@ -680,6 +767,16 @@ describe('tile panels', () => {
     expect(hint.className).toContain('@[26rem]/tile:block');
     // Tile 1 is still tuning: its pill is centred on the whole tile.
     expect(within(tileEl(1)).getByTestId('multiview-tile-centre').className.split(/\s+/)).toContain('inset-0');
+  });
+
+  it("aligns the channel name to the strip's start edge in either direction (L2-visual-7)", async () => {
+    seed([1]);
+    renderPage();
+    const name = await waitFor(() => within(tileEl(1)).getByText('Channel 1'));
+    // dir="auto": a Latin name in an RTL UI truncates at its own end; text-match-parent keeps it on the parent's start.
+    expect(name.getAttribute('dir')).toBe('auto');
+    expect(name.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'text-match-parent']));
+    expect(name.className.split(/\s+/)).not.toContain('text-start');
   });
 });
 

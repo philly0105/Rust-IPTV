@@ -123,9 +123,16 @@ test.describe.serial('parental controls', () => {
 
     await expect(dialog).toBeHidden();
     await expect(toast(page, 'Parental controls are on')).toBeVisible();
-    await expect(section.getByTestId('parental-status')).toHaveAttribute('data-state', 'locked');
-    const st = await status(page.request);
-    expect(st).toMatchObject({ enabled: true, unlocked: false, failedAttempts: 0 });
+    // The first PIN also unlocks the session (L1-settings-5), so setting up goes on without typing it again.
+    const panel = section.getByTestId('parental-status');
+    await expect(panel).toHaveAttribute('data-state', 'unlocked');
+    await expect(panel.getByTestId('parental-unlock-left')).toBeVisible();
+    expect(await status(page.request)).toMatchObject({ enabled: true, unlocked: true, failedAttempts: 0 });
+
+    // The next tests start locked.
+    await rpc(page.request, 'parental.lockNow');
+    await expect(panel).toHaveAttribute('data-state', 'locked');
+    expect(await status(page.request)).toMatchObject({ enabled: true, unlocked: false });
   });
 
   test('Hide mode drops locked and adult groups from the live list', async ({ page }) => {
@@ -220,6 +227,11 @@ test.describe.serial('parental controls', () => {
   test('adult groups are badged and locked automatically', async ({ page }) => {
     const section = await openSettings(page);
     const block = section.getByTestId('parental-source-locks').filter({ hasText: M3U_NAME });
+    // The count loads only once the automatic rule is opened (L2-settings-10).
+    const rule = block.getByTestId('parental-auto-adult-toggle');
+    await expect(rule).toHaveAttribute('aria-expanded', 'false');
+    await rule.click();
+    await expect(rule).toHaveAttribute('aria-expanded', 'true');
     await expect(block.getByTestId('parental-auto-adult-count')).toHaveText('1 adult group is also locked automatically.');
 
     await block.getByTestId('parental-choose-groups').click();

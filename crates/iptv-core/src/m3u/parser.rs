@@ -5,13 +5,16 @@
 //! counted as skipped), so memory stays flat no matter how large the playlist
 //! is. Edge cases handled (mined from the old app's parser and real lists):
 //!
+//! - Gzip input (`1F 8B`) is decompressed, at most [`MAX_PLAYLIST_BYTES`] of output.
 //! - UTF-8 BOM, LF / CRLF / CR-only (classic Mac) line endings, blank lines, leading junk before `#EXTM3U`,
 //!   several `#EXTM3U` lines (concatenated playlists). UTF-16 LE/BE input (with
 //!   a byte order mark, or BOM-less starting with `#`) is transcoded; bytes
 //!   that are not valid UTF-8 are decoded as Windows-1252 (Latin-1 playlists),
 //!   while the valid UTF-8 runs around them stay UTF-8.
 //! - Header attributes and detected EPG URLs are deduplicated with sets and
-//!   capped ([`MAX_HEADER_ATTRS`], [`MAX_EPG_URLS`]).
+//!   capped ([`MAX_HEADER_ATTRS`], [`MAX_EPG_URLS`]). Unquoted header values
+//!   run to the next space (`url-tvg=http://a/e.xml,http://b/e.xml`), and the
+//!   first header `tvg-shift` is the default of entries without their own.
 //! - `#EXTINF:-1`, `#EXTINF:0`, `#EXTINF:-1.000`, `#extinf:` in any case.
 //! - Attribute values quoted with `"` or `'`, unquoted (`tvg-chno=5`), and quoted
 //!   values containing commas (`group-title="News, UK"`); the display name is
@@ -24,7 +27,8 @@
 //! - An `#EXTINF` with no URL before the next `#EXTINF` is skipped and counted.
 //! - Bare URL lines without `#EXTINF` become entries named after the URL.
 
-use std::io::BufRead;
+use super::body::MAX_PLAYLIST_BYTES;
+use std::io::{BufRead, Read};
 
 /// Longest line kept; longer lines are truncated (and the entry is still parsed
 /// from the kept prefix, or skipped when it is a URL line).
@@ -77,7 +81,7 @@ pub struct ParseStats {
     pub skipped: u64,
     /// True once an `#EXTM3U` line was seen.
     pub saw_header: bool,
-    /// Bytes read from the underlying reader.
+    /// Bytes read from the underlying reader (after decompression for gzip input).
     pub bytes: u64,
 }
 
@@ -85,9 +89,11 @@ pub struct ParseStats {
 /// and [`M3uReader::stats`] afterwards (header attrs can appear on later lines
 /// in concatenated playlists).
 pub struct M3uReader<R: BufRead> {
-    reader: R,
+    reader: Input<R>,
     buf: Vec<u8>,
     header: M3uHeader,
+    /// The first header `tvg-shift`: the default of entries without one.
+    header_shift: Option<String>,
     stats: ParseStats,
     pending: Option<M3uEntry>,
     pending_kodi: Vec<(String, String)>,
@@ -116,9 +122,10 @@ pub struct M3uReader<R: BufRead> {
 impl<R: BufRead> M3uReader<R> {
     pub fn new(reader: R) -> Self {
         Self {
-            reader,
+            reader: Input::Plain(reader),
             buf: Vec::with_capacity(1024),
             header: M3uHeader::default(),
+            header_shift: None,
             stats: ParseStats::default(),
             pending: None,
             pending_kodi: Vec::new(),
@@ -158,7 +165,7 @@ impl<R: BufRead> M3uReader<R> {
         let mut truncated = false;
         let mut any = false;
         if let Some(b) = self.carry.take() {
-            // 0xFF / 0xFE / `#` / NUL: never a line break.
+            // 0xFF / 0xFE / `#` / NUL / 0x1F: never a line break.
             self.buf.push(b);
             any = true;
         }
@@ -271,8 +278,7 @@ impl<R: BufRead> M3uReader<R> {
                     self.stats.skipped += 1;
                     return None;
                 }
-                finalize_name(&mut entry);
-                self.stats.entries += 1;
+                self.finish_entry(&mut entry);
                 Some(entry)
             }
             None if line.contains("://") => {
@@ -286,8 +292,7 @@ impl<R: BufRead> M3uReader<R> {
                     self.stats.skipped += 1;
                     return None;
                 }
-                finalize_name(&mut entry);
-                self.stats.entries += 1;
+                self.finish_entry(&mut entry);
                 Some(entry)
             }
             None => {
@@ -295,6 +300,15 @@ impl<R: BufRead> M3uReader<R> {
                 None
             }
         }
+    }
+
+    /// Name fallback, the header `tvg-shift` as default, and the count.
+    fn finish_entry(&mut self, entry: &mut M3uEntry) {
+        finalize_name(entry);
+        if entry.tvg_shift.is_none() {
+            entry.tvg_shift.clone_from(&self.header_shift);
+        }
+        self.stats.entries += 1;
     }
 
     fn parse_header(&mut self, rest: &str) {
@@ -305,8 +319,11 @@ impl<R: BufRead> M3uReader<R> {
         {
             return;
         }
-        let (attrs, _) = parse_attrs(rest);
+        let (attrs, _) = parse_attrs_in(rest, true);
         for (k, v) in attrs {
+            if k == "tvg-shift" && self.header_shift.is_none() {
+                self.header_shift = non_empty(&v);
+            }
             if matches!(k.as_str(), "url-tvg" | "x-tvg-url" | "tvg-url") {
                 for url in extract_urls(&v) {
                     if self.header.epg_urls.len() >= MAX_EPG_URLS {
@@ -325,15 +342,27 @@ impl<R: BufRead> M3uReader<R> {
 
     /// Detects UTF-16 at the very start of the input: a byte order mark, or a
     /// NUL-interleaved `#` (BOM-less UTF-16 `#EXTM3U`); see [`utf16_start`].
+    ///
+    /// Gzip input (the `1F 8B` magic: a `.m3u.gz`, or a server that sends a
+    /// compressed playlist without `Content-Encoding`) is decompressed first,
+    /// and the check runs on the decompressed text.
     fn sniff_bom(&mut self) -> std::io::Result<()> {
         self.sniffed = true;
         let first = match self.peek()? {
-            Some(b @ (0xFF | 0xFE | b'#' | 0)) => b,
+            Some(b @ (0xFF | 0xFE | b'#' | 0 | GZIP_MAGIC0)) => b,
             _ => return Ok(()),
         };
         // The mark may straddle two reads (tiny buffers): take the first
         // byte, and hand it back to the line reader when no mark follows.
         self.reader.consume(1);
+        if first == GZIP_MAGIC0 {
+            if self.peek()? == Some(GZIP_MAGIC1) && self.reader.gunzip(first) {
+                return self.sniff_bom();
+            }
+            self.stats.bytes += 1;
+            self.carry = Some(first);
+            return Ok(());
+        }
         self.stats.bytes += 1;
         match self.peek()?.and_then(|next| utf16_start(first, next)) {
             Some((le, bom)) => {
@@ -432,6 +461,104 @@ pub const MAX_HEADER_ATTRS: usize = 256;
 /// Most EPG URLs detected from the header.
 pub const MAX_EPG_URLS: usize = 32;
 
+const GZIP_MAGIC0: u8 = 0x1F;
+const GZIP_MAGIC1: u8 = 0x8B;
+
+/// True when `bytes` start with the gzip magic (`1F 8B`).
+pub fn is_gzip(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[GZIP_MAGIC0, GZIP_MAGIC1])
+}
+
+/// Fails once more than `left` bytes came out of `inner`, so a small gzip
+/// file cannot expand past [`MAX_PLAYLIST_BYTES`] (the download limit).
+struct Capped<R> {
+    inner: R,
+    left: u64,
+}
+
+impl<R: Read> Read for Capped<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.left = self.left.checked_sub(n as u64).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "the playlist is larger than {} MB once decompressed, which is too large to be a channel list",
+                    MAX_PLAYLIST_BYTES / (1024 * 1024)
+                ),
+            )
+        })?;
+        Ok(n)
+    }
+}
+
+/// Gunzipped input: the consumed first magic byte put back in front.
+type Gunzip<R> = std::io::BufReader<
+    Capped<flate2::bufread::MultiGzDecoder<std::io::Chain<std::io::Cursor<[u8; 1]>, R>>>,
+>;
+
+/// The bytes under [`M3uReader`]: the input as given, or decompressed
+/// (boxed: the inflate state is large and most playlists are plain).
+enum Input<R: BufRead> {
+    Plain(R),
+    Gzip(Box<Gunzip<R>>),
+    /// Only while [`Input::gunzip`] swaps the reader.
+    Swapping,
+}
+
+impl<R: BufRead> Input<R> {
+    /// Switches plain input whose first byte (`first`, already consumed)
+    /// began the gzip magic to its decompressed bytes. False when the input
+    /// is already decompressed (a doubly compressed file is not unpacked twice).
+    fn gunzip(&mut self, first: u8) -> bool {
+        match std::mem::replace(self, Input::Swapping) {
+            Input::Plain(r) => {
+                let raw = std::io::Cursor::new([first]).chain(r);
+                *self = Input::Gzip(Box::new(std::io::BufReader::with_capacity(
+                    64 * 1024,
+                    Capped {
+                        inner: flate2::bufread::MultiGzDecoder::new(raw),
+                        left: MAX_PLAYLIST_BYTES,
+                    },
+                )));
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+}
+
+impl<R: BufRead> Read for Input<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Input::Plain(r) => r.read(buf),
+            Input::Gzip(r) => r.read(buf),
+            Input::Swapping => Ok(0),
+        }
+    }
+}
+
+impl<R: BufRead> BufRead for Input<R> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        match self {
+            Input::Plain(r) => r.fill_buf(),
+            Input::Gzip(r) => r.fill_buf(),
+            Input::Swapping => Ok(&[]),
+        }
+    }
+
+    fn consume(&mut self, n: usize) {
+        match self {
+            Input::Plain(r) => r.consume(n),
+            Input::Gzip(r) => r.consume(n),
+            Input::Swapping => {}
+        }
+    }
+}
+
 /// Windows-1252 code points for bytes 0x80..=0x9F (the rest is Latin-1).
 const CP1252_HIGH: [char; 32] = [
     '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
@@ -518,10 +645,22 @@ fn line_text(buf: &[u8], truncated: bool) -> std::borrow::Cow<'_, str> {
 }
 
 /// A whole playlist file as text, decoded the way [`M3uReader`] decodes it:
-/// UTF-16 (byte order mark or BOM-less `#EXTM3U`) is transcoded, a UTF-8 BOM
-/// is dropped, and bytes that are not valid UTF-8 are Windows-1252 (see
-/// [`line_text`]).
+/// gzip is decompressed (what decoded before a corrupt or oversized part is
+/// kept), UTF-16 (byte order mark or BOM-less `#EXTM3U`) is transcoded, a
+/// UTF-8 BOM is dropped, and bytes that are not valid UTF-8 are Windows-1252
+/// (see [`line_text`]).
 pub fn decode_playlist_text(bytes: Vec<u8>) -> String {
+    let bytes = if is_gzip(&bytes) {
+        let mut out = Vec::new();
+        let _ = Capped {
+            inner: flate2::read::MultiGzDecoder::new(&bytes[..]),
+            left: MAX_PLAYLIST_BYTES,
+        }
+        .read_to_end(&mut out);
+        out
+    } else {
+        bytes
+    };
     if let Some(text) = utf16_text(&bytes) {
         return text;
     }
@@ -637,6 +776,13 @@ fn apply_header_opt(entry: &mut M3uEntry, key: &str, value: &str) {
 /// Returns the attributes (keys lowercased) and the byte index just past that
 /// comma (or `s.len()` when there is none).
 pub(crate) fn parse_attrs(s: &str) -> (Vec<(String, String)>, Option<usize>) {
+    parse_attrs_in(s, false)
+}
+
+/// [`parse_attrs`]; with `header` (an `#EXTM3U` line, which has no display
+/// name) a comma ends neither the attributes nor an unquoted value, so
+/// `url-tvg=http://a/e.xml,http://b/e.xml` keeps both guides.
+fn parse_attrs_in(s: &str, header: bool) -> (Vec<(String, String)>, Option<usize>) {
     let bytes = s.as_bytes();
     let mut attrs = Vec::new();
     let mut i = 0;
@@ -644,6 +790,10 @@ pub(crate) fn parse_attrs(s: &str) -> (Vec<(String, String)>, Option<usize>) {
     while i < n {
         let c = bytes[i];
         if c == b',' {
+            if header {
+                i += 1;
+                continue;
+            }
             return (attrs, Some(i + 1));
         }
         if c.is_ascii_whitespace() {
@@ -686,7 +836,7 @@ pub(crate) fn parse_attrs(s: &str) -> (Vec<(String, String)>, Option<usize>) {
             } else {
                 let start = j;
                 let mut k = start;
-                while k < n && !bytes[k].is_ascii_whitespace() && bytes[k] != b',' {
+                while k < n && !bytes[k].is_ascii_whitespace() && (header || bytes[k] != b',') {
                     k += 1;
                 }
                 (&s[start..k], k)

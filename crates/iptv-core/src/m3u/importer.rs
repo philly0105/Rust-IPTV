@@ -379,6 +379,14 @@ impl RowBuilder {
             })
             .collect()
     }
+
+    /// The categories of `ct` after the first `from`, in first-seen order.
+    pub fn categories_from(&self, ct: ContentType, from: usize) -> &[CategoryRow] {
+        self.categories
+            .get(&ct)
+            .and_then(|(v, _)| v.get(from..))
+            .unwrap_or_default()
+    }
 }
 
 /// Where the playlist bytes are for one import.
@@ -655,8 +663,17 @@ fn write_catalog(
         };
         let mut parser = M3uReader::new(reader);
         let mut n = 0u64;
+        // Categories already declared to the writer, per type: a row's group
+        // is known before the row is written, so its verdict is final.
+        let mut declared: HashMap<ContentType, usize> = HashMap::new();
         for entry in parser.by_ref() {
             let row = builder.row(entry);
+            let seen = declared.entry(row.content_type).or_default();
+            let new = builder.categories_from(row.content_type, *seen);
+            if !new.is_empty() {
+                writer.declare_categories(row.content_type, new);
+                *seen += new.len();
+            }
             if writer.insert(&row)? {
                 remapper.saw(&row);
             }
@@ -712,12 +729,21 @@ fn write_catalog(
             )?;
         }
         Payload::File { path: p, temp } => {
+            // The limit applies to the decoded text: a small gzip file can
+            // unpack far past it (L1-core-17). A file already over the limit
+            // is not read just to measure it.
             let size = std::fs::metadata(p).map_err(|e| file_error(p, e))?.len();
-            let raw = if size <= RAW_INLINE_MAX {
-                read_text_lossy(p)?
+            let text = if size <= RAW_INLINE_MAX {
+                Some(read_text_lossy(p)?)
             } else {
-                keep_copy = Some((p.clone(), *temp));
-                String::new()
+                None
+            };
+            let raw = match text {
+                Some(text) if text.len() as u64 <= RAW_INLINE_MAX => text,
+                _ => {
+                    keep_copy = Some((p.clone(), *temp));
+                    String::new()
+                }
             };
             tx.execute(
                 "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, ?3, ?4)
@@ -751,6 +777,9 @@ fn write_catalog(
     // Last check: a cancelled run never commits.
     check_cancel()?;
     tx.commit()?;
+    // The catalog rewrite grew the WAL by about the catalog's size: fold it
+    // back so it does not stay hundreds of MB (never waits on a busy reader).
+    crate::db::checkpoint_truncate(conn);
     let cache = cached_playlist_path(&state.data_dir, source_id);
     match keep_copy {
         // Already the cached copy (a large text playlist): nothing to move.
@@ -918,6 +947,28 @@ pub(crate) fn after_tries(err: CoreError, tries: u32) -> CoreError {
     }
 }
 
+/// How often download progress is reported: the first chunk at once (so a
+/// slow host never reads "Connecting…" while bytes flow), then at most
+/// every [`ProgressGate::EVERY`], however fast or slow the chunks arrive.
+#[derive(Debug, Default)]
+struct ProgressGate {
+    last: Option<std::time::Instant>,
+}
+
+impl ProgressGate {
+    const EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
+    fn due(&mut self, now: std::time::Instant) -> bool {
+        match self.last {
+            Some(t) if now.saturating_duration_since(t) < Self::EVERY => false,
+            _ => {
+                self.last = Some(now);
+                true
+            }
+        }
+    }
+}
+
 /// Downloads `url` with the source headers into `dest` (streamed, never held
 /// in memory), retrying transient failures, but not a server that stalled in
 /// the middle of the body or sent it slower than [`MinRate`] allows. Stops
@@ -966,7 +1017,7 @@ async fn fetch_to_file(
             .map_err(|e| (e.into(), false))?;
         let mut hasher = playlist_hasher();
         let mut done: u64 = 0;
-        let mut last_report: u64 = 0;
+        let mut gate = ProgressGate::default();
         let mut rate = MinRate::standard();
         // The first bytes, until judged by `sniff` (None once judged).
         let mut head: Option<Vec<u8>> = Some(Vec::with_capacity(SNIFF_BYTES));
@@ -999,8 +1050,7 @@ async fn fetch_to_file(
                 .await
                 .map_err(|e| (e.into(), false))?;
             done += chunk.len() as u64;
-            if done - last_report >= 1024 * 1024 {
-                last_report = done;
+            if gate.due(std::time::Instant::now()) {
                 sources::progress(state, source_id, "fetching", done, total, None);
             }
         }
@@ -1104,6 +1154,98 @@ mod tests {
         let started = std::time::Instant::now();
         let r = fetch_to_file(&state, "s", url, &cfg, &tmp.path().join("x.part")).await;
         (r, started.elapsed())
+    }
+
+    /// L2-sources-home-8: progress is due on the first chunk, then at most
+    /// every 250 ms, however small or large the chunks are.
+    #[test]
+    fn download_progress_gate_reports_first_chunk_then_every_250ms() {
+        let t0 = std::time::Instant::now();
+        let ms = |n| t0 + std::time::Duration::from_millis(n);
+        let mut gate = ProgressGate::default();
+        assert!(gate.due(t0), "first chunk reported at once");
+        assert!(!gate.due(ms(100)));
+        assert!(!gate.due(ms(249)));
+        assert!(gate.due(ms(250)));
+        assert!(!gate.due(ms(300)));
+        assert!(gate.due(ms(600)));
+    }
+
+    /// L2-sources-home-8: a slow host (64 KiB every 150 ms) shows bytes
+    /// arriving from the first chunk on, not only after each full MiB.
+    #[tokio::test]
+    async fn slow_download_reports_progress_from_the_first_chunk() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            let chunk = {
+                let mut c = b"#EXTM3U\n".to_vec();
+                let line = b"#EXTINF:-1,Ch\nhttp://h/a.ts\n";
+                while c.len() + line.len() <= 64 * 1024 {
+                    c.extend_from_slice(line);
+                }
+                c
+            };
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/x-mpegurl\r\nContent-Length: {}\r\n\r\n",
+                chunk.len() * 6
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            for _ in 0..6 {
+                if sock.write_all(&chunk).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let (sink, mut rx) = crate::events::BroadcastSink::channel(256);
+        let state = AppState::new(tmp.path().to_path_buf(), Arc::new(sink), false)
+            .await
+            .unwrap();
+        let url = format!("http://127.0.0.1:{port}/slow.m3u");
+        let cfg = M3uSourceConfig {
+            origin: M3uOrigin::Url,
+            url: Some(url.clone()),
+            file_path: None,
+            headers: Default::default(),
+            catchup: None,
+        };
+        let started = std::time::Instant::now();
+        let first = tokio::spawn(async move {
+            loop {
+                let ev = rx.recv().await.unwrap();
+                if ev.kind == "import.progress"
+                    && ev.payload["phase"] == "fetching"
+                    && ev.payload["done"].as_u64().unwrap_or(0) > 0
+                {
+                    return (started.elapsed(), rx);
+                }
+            }
+        });
+        fetch_to_file(&state, "s", &url, &cfg, &tmp.path().join("x.part"))
+            .await
+            .unwrap();
+        let (at, mut rx) = first.await.unwrap();
+        assert!(
+            at < std::time::Duration::from_millis(500),
+            "first byte progress at {at:?}"
+        );
+        let mut more = 0;
+        while let Ok(ev) = rx.try_recv() {
+            if ev.payload["phase"] == "fetching" {
+                more += 1;
+            }
+        }
+        assert!(more >= 2, "progress kept coming while bytes flowed: {more}");
     }
 
     /// R7-r2 F4: a server that sends the head and then stalls fails once,

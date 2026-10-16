@@ -119,14 +119,102 @@ export function applyStatus(next: ParentalStatus): void {
 }
 
 /**
+ * How long `parental.changed` events are gathered before they refresh
+ * anything. Saving many group locks sends one event per lock; each would
+ * otherwise refetch the lock list and every filtered list.
+ */
+export const EVENT_COALESCE_MS = 50;
+
+/**
+ * An event that only reports a lock-list change, arriving this soon after this
+ * window refreshed for its own lock change, is that change: nothing to redo.
+ */
+const LOCAL_ABSORB_MS = 400;
+
+/** Lock changes this window is making right now ({@link trackLockChange}). */
+let localChanges = 0;
+/** `performance.now()` of the last {@link afterLockChange}. */
+let localRefreshAt = Number.NEGATIVE_INFINITY;
+
+/** Events gathered since the last flush. */
+interface PendingEvents {
+  /** Some event could change what Hide mode filters. */
+  affected: boolean;
+  /** Every event repeated the status it found: a lock added or removed, nothing else. */
+  lockListOnly: boolean;
+}
+let pending: PendingEvents | null = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function sameStatus(a: ParentalStatus | undefined, b: ParentalStatus): boolean {
+  if (!a) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof ParentalStatus>;
+  for (const k of keys) if (a[k] !== b[k]) return false;
+  return true;
+}
+
+function localChangeCovers(): boolean {
+  return localChanges > 0 || performance.now() - localRefreshAt < LOCAL_ABSORB_MS;
+}
+
+function flushEvents(): void {
+  flushTimer = null;
+  const p = pending;
+  pending = null;
+  if (!p) return;
+  // This window's own lock change refreshes (or just refreshed) the same things.
+  if (p.lockListOnly && localChangeCovers()) return;
+  for (const prefix of PARENTAL_PREFIXES) void invalidate(prefix);
+  const s = queryClient.getQueryData<ParentalStatus>(STATUS_KEY);
+  if (p.affected && s) refreshFiltered(hidesContent(s));
+}
+
+/**
+ * A `parental.changed` event: the payload becomes the cached status at once,
+ * and the refreshes it calls for run once per {@link EVENT_COALESCE_MS}.
+ */
+function onStatusEvent(next: ParentalStatus): void {
+  const prev = queryClient.getQueryData<ParentalStatus>(STATUS_KEY);
+  queryClient.setQueryData(STATUS_KEY, next);
+  pending ??= { affected: false, lockListOnly: true };
+  if (catalogAffected(prev, next)) pending.affected = true;
+  if (!sameStatus(prev, next)) pending.lockListOnly = false;
+  flushTimer ??= setTimeout(flushEvents, EVENT_COALESCE_MS);
+}
+
+/** Drops gathered events and local-change marks (tests). */
+export function resetStatusEventsForTests(): void {
+  if (flushTimer !== null) clearTimeout(flushTimer);
+  flushTimer = null;
+  pending = null;
+  localChanges = 0;
+  localRefreshAt = Number.NEGATIVE_INFINITY;
+}
+
+/**
  * Refreshes what a lock added or removed can change, without waiting for the
  * `parental.changed` event: the lock list and checks, and the catalog while
- * Hide mode filters it.
+ * Hide mode filters it. Events that only echo this change are absorbed.
  */
 export function afterLockChange(): void {
+  localRefreshAt = performance.now();
   for (const p of PARENTAL_PREFIXES) void invalidate(p);
   const s = queryClient.getQueryData<ParentalStatus>(STATUS_KEY);
   if (s && hidesContent(s)) refreshFiltered(true);
+}
+
+/**
+ * Runs a batch of lock changes, then {@link afterLockChange} once. The events
+ * the core sends meanwhile (one per lock) refresh nothing on their own.
+ */
+export async function trackLockChange<T>(work: () => Promise<T>): Promise<T> {
+  localChanges += 1;
+  try {
+    return await work();
+  } finally {
+    localChanges -= 1;
+    afterLockChange();
+  }
 }
 
 /** Fetches the status from the core and applies it. */
@@ -205,7 +293,7 @@ const EXPIRY_GRACE_MS = 750;
  * in the shell's effects.
  */
 export function useParentalEvents(): void {
-  useEffect(() => onAppEvent('parental.changed', (status) => applyStatus(status)), []);
+  useEffect(() => onAppEvent('parental.changed', onStatusEvent), []);
   useEffect(() => {
     const refresh = () => {
       for (const p of SOURCE_PREFIXES) void invalidate(p);

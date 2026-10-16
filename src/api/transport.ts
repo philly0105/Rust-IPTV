@@ -5,6 +5,7 @@
 
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
+import { desktopAppInfo } from './bootInfo';
 import { notifyServerAnswered } from './reachability';
 import type { RpcMap } from './rpc';
 import type { PlayerSource, RpcErrorCode, RpcErrorPayload, SourceRunErrorDetails } from './types';
@@ -204,8 +205,8 @@ function hasHeaders(source: PlayerSource): boolean {
 
 /**
  * Desktop: base of the loopback media proxy inside the Tauri process
- * (`app.info.proxyBase`), fetched once at startup. Null until known or when
- * the proxy could not start.
+ * (`app.info.proxyBase`, from the launch's one `app.info` request in
+ * bootInfo.ts). Null until known or when the proxy could not start.
  */
 let desktopProxyBase: string | null = null;
 
@@ -215,12 +216,23 @@ export function setDesktopProxyBase(base: string | null): void {
 }
 
 if (isDesktop) {
-  callDesktop('app.info', null)
-    .then((info) => {
-      const base = (info as { proxyBase?: unknown } | null)?.proxyBase;
-      setDesktopProxyBase(typeof base === 'string' && base ? base : null);
-    })
-    .catch(() => undefined);
+  void desktopAppInfo.then((info) => {
+    const base = info?.proxyBase;
+    setDesktopProxyBase(typeof base === 'string' && base ? base : null);
+  });
+}
+
+/**
+ * True for URLs the desktop webview must load itself: Tauri's own
+ * `*.localhost` hosts (asset files, IPC) and the loopback proxy's own URLs.
+ */
+function desktopLoadsDirect(url: string, proxyBase: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname.endsWith('.localhost') || u.origin === new URL(proxyBase).origin;
+  } catch {
+    return true;
+  }
 }
 
 /** Query string for a proxy request: the target plus the per-item header overrides. */
@@ -236,16 +248,19 @@ function proxyParams(source: PlayerSource, url: string): URLSearchParams {
 
 /**
  * URL a player element should load.
- * Desktop: a local `file` path goes through the asset protocol; an http(s)
- * stream that needs request headers goes through the loopback proxy
- * (`app.info.proxyBase`), everything else loads directly.
+ * Desktop: a local `file` path goes through the asset protocol; every remote
+ * http(s) stream goes through the loopback proxy (`app.info.proxyBase`), so
+ * the source's request headers apply and a provider that sends no CORS
+ * headers still plays in the inline player (hls.js, mpegts.js and shaka
+ * fetch cross-origin from `http://tauri.localhost`). Until the proxy base is
+ * known, or when the proxy did not start, streams load directly.
  * Web: through `/api/proxy` when source headers are needed or the page would block mixed content.
  */
 export function proxiedUrl(source: PlayerSource): string {
   const { url } = source;
   if (isDesktop) {
     if (source.kind === 'file' && !/^(https?|asset):/i.test(url)) return convertFileSrc(url);
-    if (desktopProxyBase && /^https?:/i.test(url) && (hasHeaders(source) || isMixedContent(url))) {
+    if (desktopProxyBase && /^https?:/i.test(url) && !desktopLoadsDirect(url, desktopProxyBase)) {
       return `${desktopProxyBase}?${proxyParams(source, url).toString()}`;
     }
     return url;

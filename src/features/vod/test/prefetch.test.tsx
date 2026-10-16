@@ -18,7 +18,7 @@ import {
   useSearchPrefetchIntent,
   type PrefetchTarget,
 } from '../hooks/prefetch';
-import { useMovieDetail } from '../hooks/queries';
+import { movieDetailQuery, useMovieDetail } from '../hooks/queries';
 import { makeSource } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -373,14 +373,33 @@ describe('prefetchVodDetail (C4)', () => {
     expect(detailCalls()).toHaveLength(1);
   });
 
-  it('wraps the catalog row for m3u sources, like useMovieDetail', async () => {
+  it('caches the bare catalog row for m3u sources under the flat catalog.item key; the detail query wraps it', async () => {
     rpcMock.handlers['catalog.item'] = (args) => ({ ref: (args as { ref: ItemRef }).ref, title: 'Row' });
     prefetchVodDetail(client, { ref: { ...movieRef, sourceId: 'm1' }, sourceKind: 'm3u' });
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(rpcMock.calls.map((c) => c.cmd)).toEqual(['catalog.item']);
-    const data = client.getQueryData<VodDetail>(['catalog.item', { ref: { ...movieRef, sourceId: 'm1' } }]);
-    expect(data?.cast).toEqual([]);
-    expect(data?.item.title).toBe('Row');
+    // The shape useRpcQuery('catalog.item') readers (player, live pages) expect at the same key (XB2-34).
+    const key = ['catalog.item', { ref: { ...movieRef, sourceId: 'm1' } }];
+    expect(client.getQueryData<{ title: string; item?: unknown }>(key)).toEqual({ ref: { ...movieRef, sourceId: 'm1' }, title: 'Row' });
+    const q = movieDetailQuery('m3u', { ...movieRef, sourceId: 'm1' });
+    const detail: VodDetail = q.select!(client.getQueryData(q.queryKey)!);
+    expect(detail.cast).toEqual([]);
+    expect(detail.item.title).toBe('Row');
+  });
+
+  it('an m3u detail page reads a catalog.item row a flat reader cached, wrapped, without a second call (XB2-34)', async () => {
+    const ref: ItemRef = { sourceId: 'm1', contentType: 'movie', itemId: '42' };
+    client.setQueryData(['catalog.item', { ref }], { ref, title: 'Flat row' });
+    const source = makeSource('m1', 'm3u', 'M') as Source;
+    let detail: VodDetail | undefined;
+    function Detail() {
+      detail = useMovieDetail(source, { ...ref }).data;
+      return null;
+    }
+    render(wrap(<Detail />));
+    expect(detail?.item.title).toBe('Flat row');
+    expect(detail?.backdrops).toEqual([]);
+    expect(rpcMock.calls).toHaveLength(0);
   });
 
   it('uses the series command and chunk for a series ref', async () => {

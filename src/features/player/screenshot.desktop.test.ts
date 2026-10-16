@@ -18,7 +18,7 @@ vi.mock('@/ui/Toast', () => ({ toast: vi.fn(() => 'toast') }));
 const { rpc } = await import('@/api/transport');
 const { toast } = await import('@/ui/Toast');
 const { usePlayerStore, __resetPlayerForTests } = await import('./store');
-const { resetMedia } = await import('./media');
+const { resetMedia, useMediaStore } = await import('./media');
 const shot = await import('./screenshot');
 
 const rpcMock = rpc as unknown as Mock;
@@ -61,6 +61,8 @@ describe('takeScreenshot in the desktop app', () => {
     expect(rpcMock).toHaveBeenCalledWith('screenshot.save', { dataBase64: 'iVBORw==', format: 'png', title: 'Movie' });
     const opts = toastMock.mock.calls[0]![0] as { title: string; description: string; action: { label: string; onClick: () => void } };
     expect(opts).toMatchObject({ title: 'Screenshot saved', description: SAVED.fileName, variant: 'success' });
+    // One report: the toast shows in player full screen too, so the OSD stays quiet.
+    expect(useMediaStore.getState().osd).toBeUndefined();
     opts.action.onClick();
     expect(rpcMock).toHaveBeenLastCalledWith('screenshot.open', { path: SAVED.path });
   });

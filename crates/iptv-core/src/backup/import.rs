@@ -472,42 +472,73 @@ fn usable_id(id: &str) -> bool {
 /// inside i64 for every later `sources.add`).
 const MAX_IMPORTED_POSITION: i64 = 1_000_000;
 
-/// Config keys a backup made without secrets omits.
-const SECRET_CONFIG_KEYS: &[&str] = &["password", "signature1", "signature2"];
+/// M3U config keys a merge may fill: the origin, URL and file path describe
+/// where the existing source reads its playlist and always stay.
+const M3U_FILL_KEYS: &[&str] = &["headers", "catchup"];
 
-/// Merging a backup made without secrets into an existing source keeps the
-/// source's saved secrets instead of blanking them.
-fn keep_saved_secrets(existing_json: &str, incoming_json: &str) -> String {
-    let (Ok(Value::Object(old)), Ok(Value::Object(mut new))) = (
-        serde_json::from_str::<Value>(existing_json),
-        serde_json::from_str::<Value>(incoming_json),
+/// Merging a backup into an existing source (L2-settings-7): the source's
+/// saved config wins, so an older backup never undoes later edits or blanks
+/// a saved secret; the backup only fills top-level keys the saved config
+/// lacks (missing, null, "" or {}). `keys` limits which keys may be filled.
+fn fill_blanks(saved_json: &str, backup_json: &str, keys: Option<&[&str]>) -> String {
+    let (Ok(Value::Object(mut saved)), Ok(Value::Object(backup))) = (
+        serde_json::from_str::<Value>(saved_json),
+        serde_json::from_str::<Value>(backup_json),
     ) else {
-        return incoming_json.to_string();
+        return saved_json.to_string();
     };
-    for key in SECRET_CONFIG_KEYS {
-        let missing = match new.get(*key) {
-            None | Some(Value::Null) => true,
-            Some(Value::String(v)) => v.is_empty(),
-            Some(_) => false,
-        };
-        if missing {
-            if let Some(saved) = old.get(*key).filter(|v| !v.is_null()) {
-                new.insert((*key).to_string(), saved.clone());
-            }
+    let blank = |v: Option<&Value>| match v {
+        None | Some(Value::Null) => true,
+        Some(Value::String(s)) => s.is_empty(),
+        Some(Value::Object(o)) => o.is_empty(),
+        Some(_) => false,
+    };
+    for (key, value) in backup {
+        if keys.is_some_and(|k| !k.contains(&key.as_str())) || blank(Some(&value)) {
+            continue;
+        }
+        if blank(saved.get(&key)) {
+            saved.insert(key, value);
         }
     }
-    Value::Object(new).to_string()
+    Value::Object(saved).to_string()
+}
+
+/// True when the two config documents are equal as JSON.
+fn same_config(a: &str, b: &str) -> bool {
+    match (
+        serde_json::from_str::<Value>(a),
+        serde_json::from_str::<Value>(b),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Import
 // ---------------------------------------------------------------------------
 
-/// `backup.import`.
+/// `backup.import`: every catalog loads before it returns.
 pub async fn import(
     state: &Arc<AppState>,
     json: &str,
     mode: ImportMode,
+) -> CoreResult<ImportReport> {
+    import_with(state, json, mode, false).await
+}
+
+/// `backup.import` with `background`: a merge returns once the source rows
+/// and the user state that needs no catalog are written; the catalogs that
+/// must load (named in [`ImportReport::refreshing`]) load afterwards, one at
+/// a time, and each source's favorites and history follow its catalog
+/// (L2-settings-3). Replace ignores `background`: it keeps the old sources
+/// only until a new catalog loaded, so it has to wait for them.
+pub async fn import_with(
+    state: &Arc<AppState>,
+    json: &str,
+    mode: ImportMode,
+    background: bool,
 ) -> CoreResult<ImportReport> {
     let manifest = parse_manifest(json)?;
     // parental: Replace removes every source and their parental locks with
@@ -519,10 +550,11 @@ pub async fn import(
     // only around database writes so a portal that hangs during its catalog
     // sync never blocks refreshes or `sources.add` (they take it to apply
     // parked state).
-    let run = run_lock(state);
-    let _run = run.lock().await;
+    let run = run_lock(state).lock_owned().await;
     let lock = import_lock(state);
     let mut report = ImportReport::default();
+    let defer = background && mode == ImportMode::Merge;
+    let mut deferred: Vec<Deferred> = Vec::new();
 
     // Every entry is read before anything is changed: Replace must not wipe
     // the user's sources for a backup none of whose playlists can be used.
@@ -668,13 +700,18 @@ pub async fn import(
             &entry,
             &target_id,
             matched.is_some(),
+            defer,
             &mut report.warnings,
         )
         .await
         {
-            Ok(failure) => {
+            Ok(outcome) => {
                 report.imported += 1;
-                failures.extend(failure);
+                failures.extend(outcome.failure);
+                if let Some(d) = outcome.deferred {
+                    report.refreshing.push(d.name.clone());
+                    deferred.push(d);
+                }
                 locks_added |=
                     restore_locks(state, &lock, &entry, &target_id, &mut report.warnings).await?;
                 collect_watchlist(&entry, &target_id, &mut watch, &mut report.warnings);
@@ -772,25 +809,29 @@ pub async fn import(
         imported = report.imported,
         skipped = report.skipped,
         warnings = report.warnings.len(),
+        refreshing = deferred.len(),
         ?mode,
         "backup imported"
     );
+    if !deferred.is_empty() {
+        tokio::spawn(load_deferred(state.clone(), deferred, run));
+    }
     Ok(report)
 }
 
 /// True when source `id` holds a catalog (channels, movies or series).
 async fn has_catalog(state: &AppState, id: &str) -> CoreResult<bool> {
     let id = id.to_string();
-    state
-        .db_call(move |c| {
-            Ok(c.query_row(
-                "SELECT COALESCE((SELECT channel_count + movie_count + series_count FROM source_counts WHERE source_id = ?1), 0) > 0
-                     OR EXISTS(SELECT 1 FROM items WHERE source_id = ?1)",
-                [id],
-                |r| r.get(0),
-            )?)
-        })
-        .await
+    state.db_call(move |c| catalog_loaded(c, &id)).await
+}
+
+fn catalog_loaded(c: &Connection, id: &str) -> CoreResult<bool> {
+    Ok(c.query_row(
+        "SELECT COALESCE((SELECT channel_count + movie_count + series_count FROM source_counts WHERE source_id = ?1), 0) > 0
+             OR EXISTS(SELECT 1 FROM items WHERE source_id = ?1)",
+        [id],
+        |r| r.get(0),
+    )?)
 }
 
 /// Restores the backup's EPG URLs and app settings (Replace: only after the
@@ -1172,32 +1213,50 @@ async fn restore_custom_lists(
     Ok(())
 }
 
+/// What [`import_entry`] did with an entry's catalog.
+struct EntryOutcome {
+    /// Plain reason the catalog did not load.
+    failure: Option<String>,
+    /// The catalog load a background merge runs after the RPC returned.
+    deferred: Option<Deferred>,
+}
+
+/// A catalog load left for [`load_deferred`]; the entry's user state is
+/// parked until it succeeds.
+struct Deferred {
+    id: String,
+    /// The source's name (a merge keeps the existing one).
+    name: String,
+    kind: SourceKind,
+    run_cfg: Option<M3uSourceConfig>,
+}
+
 async fn import_entry(
     state: &Arc<AppState>,
     lock: &tokio::sync::Mutex<()>,
     entry: &Entry,
     id: &str,
     is_merge: bool,
+    defer: bool,
     warnings: &mut Vec<String>,
-) -> CoreResult<Option<String>> {
-    // 1. Source row (+ raw text for m3u). The m3u row starts as a `text`
-    //    source so the importer parses the embedded playlist instead of
-    //    fetching it; its real origin is written after the import. A URL
-    //    entry without channels in its text is fetched from its URL.
+) -> CoreResult<EntryOutcome> {
+    // 1. Source row (+ raw text for m3u), with its real config. A URL entry
+    //    without channels in its text is fetched from its URL; any other m3u
+    //    entry imports its embedded text (step 2).
+    //
+    //    A merge keeps the existing source's name, auto refresh, position and
+    //    config; the backup only fills what the source lacks (L2-settings-7).
+    //    When the source already holds a catalog and the merge changed
+    //    nothing in its config, the catalog is not imported again and the
+    //    user state applies to the loaded one (L2-settings-3).
     let fetch_url = matches!(&entry.config, Config::M3u { by_url: true, final_cfg, .. } if final_cfg.origin == M3uOrigin::Url);
-    let config_json = match &entry.config {
-        Config::M3u { final_cfg, .. } if fetch_url => serde_json::to_string(final_cfg)?,
-        Config::M3u { final_cfg, .. } => serde_json::to_string(&M3uSourceConfig {
-            origin: M3uOrigin::Text,
-            url: None,
-            file_path: None,
-            headers: final_cfg.headers.clone(),
-            catchup: final_cfg.catchup.clone(),
-        })?,
+    let is_m3u = entry.kind == SourceKind::M3u;
+    let backup_json = match &entry.config {
+        Config::M3u { final_cfg, .. } => serde_json::to_string(final_cfg)?,
         Config::Xtream(c) => serde_json::to_string(c)?,
         Config::Stalker(c) => serde_json::to_string(c)?,
     };
-    let stored_config = {
+    let (config_json, skip, stored_name) = {
         let id = id.to_string();
         let kind = entry.kind.as_str();
         let name = entry.title.clone();
@@ -1209,50 +1268,72 @@ async fn import_entry(
         };
         let _guard = lock.lock().await;
         let data_dir = state.data_dir.clone();
-        let sid = id.clone();
-        let stored_config = state
+        state
             .db_call(move |c| {
+                let saved: Option<(String, String)> = if is_merge {
+                    c.query_row(
+                        "SELECT name, config_json FROM sources WHERE id = ?1 AND kind = ?2",
+                        params![id, kind],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?
+                } else {
+                    None
+                };
+                let (config_json, skip) = match &saved {
+                    Some((_, saved_cfg)) => {
+                        let fill = is_m3u.then_some(M3U_FILL_KEYS);
+                        let merged = fill_blanks(saved_cfg, &backup_json, fill);
+                        let skip = same_config(&merged, saved_cfg) && catalog_loaded(c, &id)?;
+                        (merged, skip)
+                    }
+                    None => (backup_json, false),
+                };
                 // Over RAW_INLINE_MAX the text goes to the playlist cache
                 // with raw = '', exactly as an import of a large file does.
                 let raw = match &raw {
-                    Some(text) => Some((
-                        crate::m3u::place_raw_text(&data_dir, &sid, text)?,
+                    Some(text) if !skip => Some((
+                        crate::m3u::place_raw_text(&data_dir, &id, text)?,
                         text.as_str(),
                     )),
-                    None => None,
+                    _ => None,
                 };
                 let tx = c.transaction()?;
                 let now = crate::db::now_rfc3339();
-                let mut config_json = config_json;
-                if is_merge {
-                    let saved: Option<String> = tx
-                        .query_row(
-                            "SELECT config_json FROM sources WHERE id = ?1 AND kind = ?2",
-                            params![id, kind],
-                            |r| r.get(0),
-                        )
-                        .optional()?;
-                    if let Some(saved) = saved {
-                        config_json = keep_saved_secrets(&saved, &config_json);
+                let name = match saved {
+                    Some((saved_name, _)) => {
+                        let name = if saved_name.trim().is_empty() {
+                            name
+                        } else {
+                            saved_name
+                        };
+                        tx.execute(
+                            "UPDATE sources SET name = ?2, updated_at = ?3, config_json = ?4 WHERE id = ?1",
+                            params![id, name, now, config_json],
+                        )?;
+                        name
                     }
-                }
-                let pos = match position {
-                    Some(p) => p,
-                    None => tx.query_row(
-                        "SELECT COALESCE(MAX(position), -1) + 1 FROM sources",
-                        [],
-                        |r| r.get(0),
-                    )?,
+                    None => {
+                        let pos = match position {
+                            Some(p) => p,
+                            None => tx.query_row(
+                                "SELECT COALESCE(MAX(position), -1) + 1 FROM sources",
+                                [],
+                                |r| r.get(0),
+                            )?,
+                        };
+                        tx.execute(
+                            "INSERT INTO sources(id, kind, name, position, auto_refresh, created_at, updated_at, config_json)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7)
+                             ON CONFLICT(id) DO UPDATE SET
+                               name = excluded.name, auto_refresh = excluded.auto_refresh,
+                               position = CASE WHEN ?8 THEN excluded.position ELSE sources.position END,
+                               updated_at = excluded.updated_at, config_json = excluded.config_json",
+                            params![id, kind, name, pos, auto_refresh as i64, now, config_json, position.is_some()],
+                        )?;
+                        name
+                    }
                 };
-                tx.execute(
-                    "INSERT INTO sources(id, kind, name, position, auto_refresh, created_at, updated_at, config_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7)
-                     ON CONFLICT(id) DO UPDATE SET
-                       name = excluded.name, auto_refresh = excluded.auto_refresh,
-                       position = CASE WHEN ?8 THEN excluded.position ELSE sources.position END,
-                       updated_at = excluded.updated_at, config_json = excluded.config_json",
-                    params![id, kind, name, pos, auto_refresh as i64, now, config_json, position.is_some()],
-                )?;
                 if let Some((stored, text)) = raw {
                     // sha256 stays empty unless the text is unchanged, so the
                     // m3u importer's "unchanged since last import" shortcut
@@ -1272,10 +1353,9 @@ async fn import_entry(
                     )?;
                 }
                 tx.commit()?;
-                Ok(config_json)
+                Ok((config_json, skip, name))
             })
-            .await?;
-        stored_config
+            .await?
     };
     if is_merge {
         warnings.push(format!(
@@ -1284,24 +1364,60 @@ async fn import_entry(
         ));
     }
 
-    // 2. Catalog. `failure` is the plain reason it did not load.
+    // 2. Catalog. An m3u entry's importer runs with a `text` origin so it
+    //    parses the embedded playlist instead of fetching it; the row keeps
+    //    its real origin. `failure` is the plain reason it did not load.
+    let run_cfg = if is_m3u && !fetch_url && !skip {
+        let cfg: M3uSourceConfig = serde_json::from_str(&config_json)?;
+        Some(M3uSourceConfig {
+            origin: M3uOrigin::Text,
+            url: None,
+            file_path: None,
+            headers: cfg.headers,
+            catchup: cfg.catchup,
+        })
+    } else {
+        None
+    };
     let mut failure = None;
-    let synced = match &entry.config {
+    let no_password = entry.kind == SourceKind::Xtream
         // The stored config: a merge may have kept the saved password.
-        Config::Xtream(_)
-            if serde_json::from_str::<XtreamSourceConfig>(&stored_config)
-                .map_or(true, |c| c.password.is_empty()) =>
-        {
-            let msg = "The backup has no password for this account; edit the source to add it, then refresh";
-            set_error_coded(state, id, Some((msg, crate::error::RpcErrorCode::Auth))).await?;
-            warnings.push(format!("{}: catalog not loaded: {msg}", entry.label));
-            failure = Some(format!("{}: {msg}", entry.label));
-            false
-        }
+        && serde_json::from_str::<XtreamSourceConfig>(&config_json)
+            .map_or(true, |c| c.password.is_empty());
+    let synced = if skip {
+        true
+    } else if no_password {
+        let msg =
+            "The backup has no password for this account; edit the source to add it, then refresh";
+        set_error_coded(state, id, Some((msg, crate::error::RpcErrorCode::Auth))).await?;
+        warnings.push(format!("{}: catalog not loaded: {msg}", entry.label));
+        failure = Some(format!("{}: {msg}", entry.label));
+        false
+    } else if defer {
+        // Background merge: the user state waits, parked, for the catalog.
+        let _guard = lock.lock().await;
+        let (id_s, kind, user_state) = (id.to_string(), entry.kind, entry.user_state.clone());
+        state
+            .db_call(move |c| park(c, &id_s, kind, &user_state))
+            .await?;
+        return Ok(EntryOutcome {
+            failure: None,
+            deferred: Some(Deferred {
+                id: id.to_string(),
+                name: stored_name,
+                kind: entry.kind,
+                run_cfg,
+            }),
+        });
+    } else {
         // Through the per-source lock (never the global one): the same
         // serialization `sources.refresh` uses, without blocking other sources.
-        _ => match crate::sources::run_import_with(state, id, run_importer(state, id, entry.kind))
-            .await
+        match crate::sources::run_import_with(
+            state,
+            id,
+            run_importer(state, id, entry.kind, run_cfg),
+        )
+        .await
         {
             Ok(()) => true,
             Err(msg) => {
@@ -1312,28 +1428,11 @@ async fn import_entry(
                 failure = Some(format!("{}: {msg}", entry.label));
                 false
             }
-        },
+        }
     };
 
-    // 3. Final m3u origin (url / file) now that the text is imported.
+    // 3. User state.
     let _guard = lock.lock().await;
-    if let Config::M3u { final_cfg, .. } = &entry.config {
-        if final_cfg.origin != M3uOrigin::Text && !fetch_url {
-            let cfg = serde_json::to_string(final_cfg)?;
-            let id = id.to_string();
-            state
-                .db_call(move |c| {
-                    c.execute(
-                        "UPDATE sources SET config_json = ?2 WHERE id = ?1",
-                        params![id, cfg],
-                    )?;
-                    Ok(())
-                })
-                .await?;
-        }
-    }
-
-    // 4. User state.
     let kind = entry.kind;
     let user_state = entry.user_state.clone();
     let label = entry.label.clone();
@@ -1352,7 +1451,47 @@ async fn import_entry(
         })
         .await?;
     warnings.append(&mut w);
-    Ok(failure)
+    Ok(EntryOutcome {
+        failure,
+        deferred: None,
+    })
+}
+
+/// Background merge (L2-settings-3): loads the deferred catalogs one at a
+/// time, as `sources.refreshAll` does, each through the per-source lock and
+/// with the usual `import.progress` events, then applies the source's parked
+/// user state (it still follows its catalog). Holds the backup run lock, so
+/// the next `backup.import` waits for it.
+async fn load_deferred(
+    state: Arc<AppState>,
+    deferred: Vec<Deferred>,
+    _run: tokio::sync::OwnedMutexGuard<()>,
+) {
+    let mut failed = 0usize;
+    for d in deferred {
+        let ok = crate::sources::run_import_with(
+            &state,
+            &d.id,
+            run_importer(&state, &d.id, d.kind, d.run_cfg),
+        )
+        .await
+        .is_ok();
+        failed += usize::from(!ok);
+        // As in the foreground: Stalker state applies even without a catalog.
+        if ok || d.kind == SourceKind::Stalker {
+            match restore_parked(&state, &d.id, d.kind != SourceKind::Stalker).await {
+                Ok(w) if !w.is_empty() => {
+                    tracing::info!(source_id = %d.id, warnings = w.len(), "backup state restored after its catalog loaded");
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(source_id = %d.id, %err, "parked backup state could not be applied");
+                }
+            }
+        }
+        state.emit("sources.changed", json!({}));
+    }
+    tracing::info!(failed, "backup import: background catalog loads finished");
 }
 
 /// Records an import outcome with its classified code (C10).
@@ -1380,8 +1519,15 @@ async fn set_error_coded(
 }
 
 /// Runs the registered importer for `kind` on source `id`, recording the
-/// outcome on the row. Returns a user-facing message on failure.
-async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Result<(), String> {
+/// outcome on the row. Returns a user-facing message on failure. `run_cfg`
+/// replaces the stored m3u config for this run only (the `text` origin that
+/// parses the embedded playlist).
+async fn run_importer(
+    state: &Arc<AppState>,
+    id: &str,
+    kind: SourceKind,
+    run_cfg: Option<M3uSourceConfig>,
+) -> Result<(), String> {
     let Some(imp) = crate::sources::importer(state, kind) else {
         let msg = format!("no {kind} importer is available");
         let code = crate::error::RpcErrorCode::Unsupported;
@@ -1391,7 +1537,12 @@ async fn run_importer(state: &Arc<AppState>, id: &str, kind: SourceKind) -> Resu
     let source = {
         let id = id.to_string();
         match state.db_call(move |c| load_source(c, &id)).await {
-            Ok(Some(s)) => s,
+            Ok(Some(mut s)) => {
+                if run_cfg.is_some() {
+                    s.m3u = run_cfg;
+                }
+                s
+            }
             Ok(None) => return Err("source row vanished during import".into()),
             Err(e) => return Err(e.to_string()),
         }
@@ -1454,6 +1605,17 @@ pub async fn apply_pending_restore(
     state: &Arc<AppState>,
     source_id: &str,
 ) -> CoreResult<Vec<String>> {
+    restore_parked(state, source_id, true).await
+}
+
+/// [`apply_pending_restore`]; `require_items: false` applies the state even
+/// to an empty catalog (a Stalker portal whose sync failed, as a foreground
+/// import does).
+async fn restore_parked(
+    state: &Arc<AppState>,
+    source_id: &str,
+    require_items: bool,
+) -> CoreResult<Vec<String>> {
     // Nothing parked (the common case after every refresh): return without
     // touching the import lock.
     let key = format!("{PENDING_PREFIX}{source_id}");
@@ -1487,7 +1649,7 @@ pub async fn apply_pending_restore(
             let has_items = c
                 .prepare("SELECT 1 FROM items WHERE source_id = ?1 LIMIT 1")?
                 .exists([&id])?;
-            if !has_items {
+            if require_items && !has_items {
                 return Ok(Vec::new());
             }
             let parked: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);

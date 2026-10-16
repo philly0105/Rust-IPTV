@@ -4,8 +4,11 @@ import type { ItemRef, PlayerSource, Recording, Reminder, ReminderFiredEvent } f
 
 import { FIRE_TOAST_MS, claimFiring, handleReminderFired, type FireDeps, type FireText } from '../lib/fire';
 import {
+  airingLabel,
   buildScheduleIndex,
   clockDuration,
+  clockTime,
+  dayLabel,
   elapsedSeconds,
   finishedRecordings,
   groupByDay,
@@ -227,5 +230,29 @@ describe('claimFiring', () => {
     // The live event and the mount-time `reminders.unhandled` fetch bring the same firing.
     expect(claimFiring(fired('2026-10-12T18:30:00Z'))).toBe(false);
     expect(claimFiring(fired('2026-10-12T19:30:00Z'))).toBe(true);
+  });
+});
+
+describe('airingLabel (L2-guide-library-13)', () => {
+  // Local times, so the day maths does not depend on the test machine's zone.
+  const now = new Date(2026, 9, 16, 1, 0).getTime();
+  const at = (day: number, h: number, m: number) => new Date(2026, 9, day, h, m).getTime();
+
+  it('words a series rule\'s next airing the way the Scheduled list does', () => {
+    const today = at(16, 2, 45);
+    // The list shows the day heading and the row's clock time; the rule's line joins the two.
+    expect(airingLabel(today, now, 'en-US')).toBe(`${dayLabel(today, now, 'en-US')} ${clockTime(today, 'en-US')}`);
+    expect(airingLabel(today, now, 'en-US')).toBe('today 02:45 AM');
+    expect(airingLabel(at(17, 21, 0), now, 'en-US')).toBe('tomorrow 09:00 PM');
+  });
+
+  it('names the day in full past tomorrow, as the list heading does', () => {
+    const later = at(19, 2, 45);
+    expect(dayLabel(later, now, 'en-US')).toBe('Monday, October 19');
+    expect(airingLabel(later, now, 'en-US')).toMatch(/^Monday, October 19.*02:45 AM$/);
+  });
+
+  it('uses the locale\'s own words for today', () => {
+    expect(airingLabel(at(16, 2, 45), now, 'de')).toBe('heute 02:45');
   });
 });

@@ -18,7 +18,7 @@ The file format is the old app's `PlaylistBackupManifestV1` (`libs/shared/interf
 | `mod.rs` | Types (`ImportMode`, `ImportReport`, `ExportResult`). Direct reads of C3 `sources` rows. Source fingerprints. Import lock. `init`, which retries parked state at boot. |
 | `export.rs` | `export` and `build_manifest`. |
 | `import.rs` | `import` and `apply_pending_restore`. |
-| `rpc.rs` | `backup.export {includeSecrets?, path?}` returns `{json, fileName, path?}` (see Export to a file below). `backup.import {json, mode?}` returns `{imported, skipped, warnings}`, where `mode` is `merge` (the default) or `replace`. |
+| `rpc.rs` | `backup.export {includeSecrets?, path?}` returns `{json, fileName, path?}` (see Export to a file below). `backup.import {json, mode?, background?}` returns `{imported, skipped, warnings, refreshing?}`, where `mode` is `merge` (the default) or `replace`, and `background: true` makes a merge return before its catalogs load (step 9 of Import). |
 
 ## Export
 
@@ -87,7 +87,35 @@ Without `path`, `backup.export` returns the manifest as `json` and a suggested `
 
 A UI that gets a non-empty `json` back (a core that predates `path`) falls back to the download.
 
-`settings` always carries `epgUrls` (possibly empty; IPTVnator reads it unconditionally) plus the 24 app-level preferences in `backup::APP_SETTING_KEYS`: `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`, `sourceRefreshIntervalHours`, `accountExpiryWarnDays`, `epgShortFallback`, `recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`, `accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`, `subtitleSize`, `subtitleColor`, `subtitleBackground`, `subtitlePosition` and `vodHideWatched`, and `tsrustParental` (above). Player paths, arguments and folders are machine specific and never exported. `liveFailover`, `streamReconnect` and `remoteLanEnabled` are deliberately excluded too: they describe this machine's playback and network setup, and importing a backup must never open the remote control to the LAN. The remote pairing token is a secret and never appears in a backup.
+`settings` always carries `epgUrls` (possibly empty; IPTVnator reads it unconditionally), the 39 app-level preferences in `backup::APP_SETTING_KEYS`, and `tsrustParental` (above). The keys, in the groups the code lists them:
+
+- general: `language`, `theme`, `showDashboard`, `dashboardRails`, `startupBehavior`, `openStreamOnDoubleClick`, `showCaptions`, `coverSize`, `epgViewMode`;
+- player: `streamFormat`, `playerAmbientMode`, `playerAutoplayNextEpisode`, `playerUpNextRail`, `fullscreenChannelPanel`, `vodAutoFailover`, `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`;
+- account: `sourceRefreshIntervalHours`, `accountExpiryWarnDays`;
+- guide: `epgShortFallback`;
+- recording: `recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`;
+- appearance: `accent`, `oledBlack`, `density`, `uiScale`, `zapBanner`;
+- subtitles: `subtitleSize`, `subtitleColor`, `subtitleBackground`, `subtitlePosition`;
+- vod: `vodHideWatched`.
+
+Every other settings field is in `backup::APP_SETTING_EXCLUDED` with its reason, and `tests/l2_data_backup_settings.rs` fails for a field in neither list:
+
+| Field | Reason it stays out |
+| --- | --- |
+| `epgUrls` | Exported as the manifest's own `settings.epgUrls` (listed only so the test accounts for it). |
+| `player` | Depends on the players installed here; embedded mpv is desktop-only. |
+| `mpvPath`, `vlcPath` | A path on this machine. |
+| `mpvArgs`, `vlcArgs` | Tuned for this machine's player build. |
+| `downloadsDir`, `recordingsDir` | A folder on this machine. |
+| `lastRoute` | Navigation state, not a preference. |
+| `tmdb` | Holds the TMDB API key, a secret; `enabled` and `language` need it. |
+| `remoteControl` | Network exposure: a restore must never open a port. |
+| `remoteLanEnabled` | Network exposure: a restore must never open the remote control to the LAN. |
+| `liveFailover`, `streamReconnect` | Describe this machine's playback setup. |
+| `imageCacheMaxMb` | Sizes this machine's disk cache. |
+| `tourCompleted`, `lastSeenVersion` | Record what this install has shown. |
+
+The remote pairing token is a secret and never appears in a backup.
 
 Secrets (the Xtream password, and the Stalker password and signatures) are written only when `includeSecrets` is true. Nothing in this module logs a connection or a secret. Log lines carry counts and source ids only.
 
@@ -105,12 +133,13 @@ Secrets (the Xtream password, and the Stalker password and signatures) are writt
    - xtream: server plus username.
    - stalker: portal plus lowercased MAC.
 
-   A match is updated in place (`merge`). Otherwise a new source is created with `exportedId` as its id when that id is safe and free, or a new UUID. A duplicate fingerprint inside the same file is skipped.
+   A match (`merge`) keeps its name (the backup's title is used only when the name is empty), auto refresh, position and config. The backup only fills top-level config keys the saved config lacks (missing, null, `""` or `{}`; for m3u only `headers` and `catchup`, so the origin, URL and file path stay), so an older backup never blanks a saved password or undoes later edits (`fill_blanks`). When the match already holds a catalog and filling changed nothing in its config, step 5 is skipped and step 6 applies the user state to the loaded catalog. Otherwise a new source is created with `exportedId` as its id when that id is safe and free, or a new UUID. A duplicate fingerprint inside the same file is skipped.
 5. Catalog:
-   - m3u: the source is created with `origin = text`, and `rawM3u` is stored in `m3u_raw` with an empty `sha256`, so the m3u importer parses the embedded text and never downloads anything. Text over `RAW_INLINE_MAX` (8 MB) goes through `m3u::place_raw_text`: it is written to `data_dir/playlists/<id>.m3u` and `m3u_raw.raw` stays `''`, the same layout an import of a large file produces; a text source with `raw = ''` and a cached copy is parsed from that file. On re-import the stored `sha256` survives only when the text is unchanged (inline text compared directly, a cached copy compared by sha). After the import the config is switched to its real origin: `url`, `file` (only when `filePathHint` exists on disk), or `text`. Exception: a `url` entry whose `rawM3u` is empty or only a header (for example a URL source whose first import failed) is imported by fetching its URL instead.
+   - m3u: a new source row is written with its real origin up front: `url`, `file` (only when `filePathHint` exists on disk), or `text` (a match keeps its own, step 4). `rawM3u` is stored in `m3u_raw` with an empty `sha256`, and the m3u importer runs with a `text` origin for this run only, so it parses the embedded text and never downloads anything. Text over `RAW_INLINE_MAX` (8 MB) goes through `m3u::place_raw_text`: it is written to `data_dir/playlists/<id>.m3u` and `m3u_raw.raw` stays `''`, the same layout an import of a large file produces; a text source with `raw = ''` and a cached copy is parsed from that file. On re-import the stored `sha256` survives only when the text is unchanged (inline text compared directly, a cached copy compared by sha). Exception: a `url` entry whose `rawM3u` is empty or only a header (for example a URL source whose first import failed) is imported by fetching its URL instead.
    - xtream and stalker: the registered importer runs against the portal.
    - Success sets `last_refresh_at` and clears `last_error`. Failure stores `last_error`, and the source is kept with a warning.
-   - An Xtream entry without a password (exported without secrets) skips the sync with a warning asking the user to add the password.
+   - An Xtream entry without a password (exported without secrets, and no saved one on a match) skips the sync with a warning asking the user to add the password.
+   - A background merge does not load the catalog here; see step 9.
 6. User state is applied by provider id inside one transaction per source:
    - m3u: favorites and recent are matched by channel URL, and groups are hidden by name.
    - xtream: categories are matched by `(type, xtreamId)`. The listed types are unhidden first, so the backup is authoritative. Favorites keep their saved order. Positions map `vod` to the movie, and `episode` to the series row with `episode_id`, with a snapshot subtitle `S{n} E{m}`. `watched` (optional, default false) restores the flag; a watched position is kept even when complete. `sourcePins`, when present, replace the source's pins; when absent they are left alone.
@@ -118,10 +147,11 @@ Secrets (the Xtream password, and the Stalker password and signatures) are writt
    - Items that are not in the catalog are skipped. One warning per kind lists the count and up to five ids.
 7. When the catalog could not be loaded (m3u or xtream), the entry's user state is parked in `app_state` under `backup_pending:<sourceId>` and is not applied yet. `apply_pending_restore(state, id)` applies it once the source has items, and then deletes the key. `backup::init` retries every parked key at boot.
 8. After every entry (and, for `replace`, after the old sources are gone): the recording rules (see the Tsrust keys above), My List, then the custom lists (see Custom lists above).
+9. Background merge (`background: true`). `replace` ignores the flag: it removes the old sources only once a new catalog has loaded, so it has to wait for them. In a `merge`, an entry whose catalog must load (not a match skipped in step 4, not an Xtream entry without a password) gets its source row, its user state is parked as in step 7, and its source name is added to `refreshing`. Its parental locks, recording rules, My List rows and custom list items are restored before the call returns, as for any entry. A background task then loads the deferred catalogs one at a time through `sources::run_import_with`, with the usual `import.progress` events. After each load it applies the parked state (a Stalker entry's even when the load failed, as in the foreground) and emits `sources.changed`; a failed m3u or Xtream load leaves the state parked, as in step 7. The task holds `backup_import_run_lock` until the last load, so the next `backup.import` waits for it.
 
-`imported` counts entries created or merged. `sources.changed` is emitted once at the end.
+`imported` counts entries created or merged. `refreshing` names the sources a background merge is still loading and is left out when empty. `sources.changed` is emitted once at the end of the call, and again after each background load (step 9).
 
-Locking: whole imports are serialized against each other by `backup_import_run_lock`, which nothing else takes. The write lock shared with `apply_pending_restore` (`backup_import_lock`) is held only around database writes (the replace wipe, each entry's source row, its final config and its user state), never across a catalog sync. Each entry's sync runs through `sources::run_import_with`, the same per-source lock `sources.refresh` takes. `apply_pending_restore` returns without locking when nothing is parked for the source. A portal that hangs during a restore therefore blocks only that one source; `sources.add` and refreshes of other sources proceed.
+Locking: whole imports are serialized against each other by `backup_import_run_lock`, which nothing else takes. The write lock shared with `apply_pending_restore` (`backup_import_lock`) is held only around database writes (the replace wipe, each entry's source row with its config, and its user state), never across a catalog sync. Each entry's sync runs through `sources::run_import_with`, the same per-source lock `sources.refresh` takes. `apply_pending_restore` returns without locking when nothing is parked for the source. A portal that hangs during a restore therefore blocks only that one source; `sources.add` and refreshes of other sources proceed.
 
 ## Round trip
 

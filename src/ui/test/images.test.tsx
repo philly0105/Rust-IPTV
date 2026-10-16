@@ -190,10 +190,15 @@ describe('Poster', () => {
   });
 
   it('reveals with opacity only', () => {
-    const { container } = render(<Poster src={provider} alt="Alpha" />);
+    // A slow network load (a fast one shows at once, without the fade: posterReveal.test.tsx).
+    let now = 1000;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { container } = render(<Poster src="http://cdn.example/alpha-slow.jpg" alt="Alpha" />);
     const el = img(container)!;
     expect(el.className).toContain('opacity-0');
+    now += 2000;
     fireEvent.load(el);
+    clock.mockRestore();
     expect(el.className).toContain('opacity-100');
     expect(el.className).toContain('motion-safe:transition-opacity');
     expect(el.className).not.toMatch(/blur|scale-|transition-(all|transform|\[)|(^|\s)(motion-safe:)?transition(\s|$)/);

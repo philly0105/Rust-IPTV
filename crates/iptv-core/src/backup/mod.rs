@@ -25,7 +25,7 @@ mod import;
 pub mod rpc;
 
 pub use export::{build_manifest, export};
-pub use import::{apply_pending_restore, import};
+pub use import::{apply_pending_restore, import, import_with};
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
@@ -78,9 +78,27 @@ pub const EXT_CUSTOM_LISTS: &str = "tsrustCustomLists";
 /// (`{mode, autoAdult, unlockMinutes}`). Never the PIN, its hash or salt.
 pub const EXT_PARENTAL_SETTINGS: &str = "tsrustParental";
 /// App-level settings carried in the manifest's `settings` object next to
-/// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Machine
-/// specific values (player paths, folders) are deliberately not exported.
-pub const APP_SETTING_KEYS: [&str; 24] = [
+/// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Every
+/// other settings field is in [`APP_SETTING_EXCLUDED`] with its reason; a
+/// test fails for a field in neither list.
+pub const APP_SETTING_KEYS: [&str; 39] = [
+    // general:
+    "language",
+    "theme",
+    "showDashboard",
+    "dashboardRails",
+    "startupBehavior",
+    "openStreamOnDoubleClick",
+    "showCaptions",
+    "coverSize",
+    "epgViewMode",
+    // player:
+    "streamFormat",
+    "playerAmbientMode",
+    "playerAutoplayNextEpisode",
+    "playerUpNextRail",
+    "fullscreenChannelPanel",
+    "vodAutoFailover",
     "stripCountryPrefix",
     "epgOffsetMinutes",
     "playerReuseInstance",
@@ -113,12 +131,49 @@ pub const APP_SETTING_KEYS: [&str; 24] = [
     "vodHideWatched",
 ];
 
+/// Settings fields a backup never carries, each with the reason. `epgUrls`
+/// travels on its own (IPTVnator's field) and is listed here only so the
+/// completeness test accounts for it.
+pub const APP_SETTING_EXCLUDED: [(&str, &str); 17] = [
+    ("epgUrls", "exported as the manifest's own settings.epgUrls"),
+    (
+        "player",
+        "depends on the players installed here; embedded mpv is desktop-only",
+    ),
+    ("mpvPath", "a path on this machine"),
+    ("vlcPath", "a path on this machine"),
+    ("mpvArgs", "tuned for this machine's player build"),
+    ("vlcArgs", "tuned for this machine's player build"),
+    ("downloadsDir", "a folder on this machine"),
+    ("recordingsDir", "a folder on this machine"),
+    ("lastRoute", "navigation state, not a preference"),
+    (
+        "tmdb",
+        "holds the TMDB API key, a secret; enabled and language need it",
+    ),
+    (
+        "remoteControl",
+        "network exposure: a restore must never open a port",
+    ),
+    (
+        "remoteLanEnabled",
+        "network exposure: a restore must never open the remote to the LAN",
+    ),
+    ("liveFailover", "describes this machine's playback setup"),
+    ("streamReconnect", "describes this machine's playback setup"),
+    ("imageCacheMaxMb", "sizes this machine's disk cache"),
+    ("tourCompleted", "records what this install has shown"),
+    ("lastSeenVersion", "records what this install has shown"),
+];
+
 /// `backup.import` mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImportMode {
     /// Keep existing sources; entries matching an existing source (same URL /
-    /// server + user / portal + MAC / identical M3U text) update it in place.
+    /// server + user / portal + MAC / identical M3U text) merge into it: the
+    /// source keeps its name, auto refresh, position and config, the backup
+    /// fills only what it lacks, and its user state is applied.
     #[default]
     Merge,
     /// Delete every existing source (and its user state) first.
@@ -135,6 +190,11 @@ pub struct ImportReport {
     pub skipped: i64,
     /// Human-readable notes: unmatched items, unreachable portals, ...
     pub warnings: Vec<String>,
+    /// Background merge: names of the sources whose catalogs load after the
+    /// call returned (`import.progress` reports each; their favorites and
+    /// history follow). Absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refreshing: Vec<String>,
 }
 
 /// `backup.export` result.

@@ -93,8 +93,9 @@ describe('ParentalSection', () => {
     fireEvent.change(await within(dialog).findByLabelText('New PIN again'), { target: { value: PIN } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Set PIN' }));
 
-    await waitFor(() => expect(statusPanel().dataset.state).toBe('locked'));
-    expect(core.callsOf('parental.setPin')).toEqual([{ newPin: PIN }]);
+    // L1-settings-5: the first PIN also unlocks the session, so the next setting needs no PIN.
+    await waitFor(() => expect(statusPanel().dataset.state).toBe('unlocked'));
+    expect(core.callsOf('parental.setPin')).toEqual([{ newPin: PIN, unlock: true }]);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(lastToast()?.title).toBe('Parental controls are on');
     expect(screen.getByText('How locks work')).toBeTruthy();
@@ -181,13 +182,34 @@ describe('ParentalSection', () => {
     expect(await within(rows[0]!).findByText('Adult')).toBeTruthy();
     expect(within(rows[1]!).getByText('Channel')).toBeTruthy();
     expect(within(rows[1]!).queryByText('Adult')).toBeNull();
-    // "yyy" is locked by the automatic rule alone.
+    // "yyy" is locked by the automatic rule alone; the count loads when the rule is opened.
+    fireEvent.click(within(home).getByTestId('parental-auto-adult-toggle'));
     expect(await within(home).findByText('1 adult group is also locked automatically.')).toBeTruthy();
 
-    expect(within(backup).getByText('Nothing in this source is locked.')).toBeTruthy();
+    fireEvent.click(within(backup).getByTestId('parental-auto-adult-toggle'));
+    expect(await within(backup).findByText("None of this source's groups look like adult content.")).toBeTruthy();
     expect(within(removed).getByRole('heading', { name: 'Removed source' })).toBeTruthy();
     expect(within(removed).getByText('Old Film')).toBeTruthy();
     expect(within(removed).queryByTestId('parental-choose-groups')).toBeNull();
+  });
+
+  it('asks for adult groups only for a row whose rule is opened (L2-settings-10)', async () => {
+    given({ pin: PIN, adult: { 'src2|live': ['a1', 'a2'] } });
+    renderUi(<Section />, queryClient);
+    await waitFor(() => expect(screen.getAllByTestId('parental-source-locks')).toHaveLength(2));
+    // Opening the page asks for nothing: no source has a group lock.
+    expect(core.callsOf('parental.adultCategories')).toEqual([]);
+
+    const backup = screen.getAllByTestId('parental-source-locks')[1]!;
+    const toggle = within(backup).getByTestId('parental-auto-adult-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(await within(backup).findByText('2 adult groups are also locked automatically.')).toBeTruthy();
+    // Only the opened source, and only the types it has.
+    const asked = core.callsOf('parental.adultCategories') as { sourceId: string }[];
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((a) => a.sourceId === 'src2')).toBe(true);
   });
 
   it('asks for the PIN to remove a lock while locked', async () => {
@@ -239,12 +261,32 @@ describe('ParentalSection', () => {
 
     const pin = await screen.findByRole('dialog', { name: 'Enter the PIN to remove locks' });
     expect(within(pin).getByText('1 group will open without the PIN.')).toBeTruthy();
-    expect(core.callsOf('parental.setLocked')).toEqual([]);
+    expect(core.callsOf('parental.setLockedMany')).toEqual([]);
     enterPin(pin, PIN, 'Save locks');
 
     await waitFor(() => expect(core.state.locks.map((l) => l.targetId)).toEqual(['kids']));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(lastToast()?.title).toBe('2 lock changes saved');
+    // L2-settings-2: one call (one transaction, one parental.changed) for the whole Save.
+    const group = (id: string, name: string): ParentalLockTarget => ({ sourceId: 'src1', contentType: 'live', kind: 'category', targetId: id, name });
+    expect(core.callsOf('parental.setLockedMany')).toEqual([{ add: [group('kids', 'Kids')], remove: [group('news', 'News')], pin: PIN }]);
+    expect(core.callsOf('parental.setLocked')).toEqual([]);
+  });
+
+  it('lists locked groups in provider order with counts in Hide mode while locked, without the PIN (L1-settings-13)', async () => {
+    given({ pin: PIN });
+    core.lock({ sourceId: 'src1', contentType: 'live', kind: 'category', targetId: 'news', name: 'News' });
+    const all = [cat('news', 'News'), cat('kids', 'Kids'), cat('xxx', 'XXX Live')];
+    // As the core does in Hide mode while locked: locked groups leave the list unless includeLocked asks for them.
+    core.handle('catalog.categories', (raw) => ((raw as { includeLocked?: boolean }).includeLocked ? all : all.filter((c) => c.id !== 'news')));
+    renderUi(<Section />, queryClient);
+    await waitFor(() => expect(screen.getAllByTestId('parental-choose-groups')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('parental-choose-groups')[0]!);
+    const dialog = await screen.findByRole('dialog', { name: 'Lock groups in Home IPTV' });
+    const names = () => within(dialog).getAllByTestId('lock-group-row').map((r) => r.textContent);
+    await waitFor(() => expect(names()).toEqual(['News12', 'Kids12', 'XXX Live12']));
+    expect(core.callsOf('parental.unlock')).toEqual([]);
+    expect(core.callsOf('catalog.categories')).toContainEqual({ sourceId: 'src1', contentType: 'live', includeHidden: true, includeLocked: true });
   });
 
   it('asks before dropping ticked groups, and closes at once with nothing changed', async () => {
@@ -274,6 +316,48 @@ describe('ParentalSection', () => {
     const again = await screen.findByRole('dialog', { name: 'Lock groups in Home IPTV' });
     fireEvent.click(within(again).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('gives focus back to Choose groups after Discard (L2-settings-11)', async () => {
+    given({ pin: PIN });
+    renderUi(<Section />, queryClient);
+    await waitFor(() => expect(screen.getAllByTestId('parental-choose-groups')).toHaveLength(2));
+    const choose = screen.getAllByTestId('parental-choose-groups')[0]!;
+    choose.focus();
+    fireEvent.click(choose);
+    const dialog = await screen.findByRole('dialog', { name: 'Lock groups in Home IPTV' });
+    await waitFor(() => expect(within(dialog).getAllByTestId('lock-group-row')).toHaveLength(3));
+    const kids = within(dialog).getAllByTestId('lock-group-row').find((r) => r.textContent?.includes('Kids'))!;
+    fireEvent.click(within(kids).getByRole('checkbox'));
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    fireEvent.click(cancel);
+    const ask = await screen.findByRole('dialog', { name: 'Discard your changes?' });
+    fireEvent.click(within(ask).getByTestId('lock-groups-discard-confirm'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(choose);
+  });
+
+  it('gives focus back to Choose groups after saving with the PIN', async () => {
+    given({ pin: PIN });
+    core.lock({ sourceId: 'src1', contentType: 'live', kind: 'category', targetId: 'news', name: 'News' });
+    renderUi(<Section />, queryClient);
+    await waitFor(() => expect(screen.getAllByTestId('parental-choose-groups')).toHaveLength(2));
+    const choose = screen.getAllByTestId('parental-choose-groups')[0]!;
+    choose.focus();
+    fireEvent.click(choose);
+    const dialog = await screen.findByRole('dialog', { name: 'Lock groups in Home IPTV' });
+    await waitFor(() => expect(within(dialog).getAllByTestId('lock-group-row')).toHaveLength(3));
+    const news = within(dialog).getAllByTestId('lock-group-row').find((r) => r.textContent?.includes('News'))!;
+    await waitFor(() => expect((within(news).getByRole('checkbox') as HTMLInputElement).checked).toBe(true));
+    fireEvent.click(within(news).getByRole('checkbox'));
+    const save = within(dialog).getByTestId('lock-groups-save');
+    save.focus();
+    fireEvent.click(save);
+    const pin = await screen.findByRole('dialog', { name: 'Enter the PIN to remove locks' });
+    enterPin(pin, PIN, 'Save locks');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(choose);
   });
 
   it('turns parental controls off with the PIN and keeps the locks', async () => {

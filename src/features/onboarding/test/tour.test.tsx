@@ -44,6 +44,12 @@ function open() {
 }
 
 const card = () => screen.getByTestId('tour-card');
+/** Where an element sits: the tour positions by transform (no layout shift), not top/left. */
+const at = (el: HTMLElement) => {
+  const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(el.style.transform);
+  if (!m) throw new Error(`no translate in "${el.style.transform}"`);
+  return { x: Number(m[1]), y: Number(m[2]) };
+};
 const step = () => screen.getByTestId('tour').getAttribute('data-tour-step');
 const key = (k: string, init: Partial<KeyboardEventInit> = {}) => fireEvent.keyDown(document.activeElement ?? card(), { key: k, ...init });
 
@@ -288,19 +294,33 @@ describe('Tour', () => {
     addAnchor('live');
     open();
     const spot = screen.getByTestId('tour-spotlight');
-    expect(spot.style.left).toBe('2px');
-    expect(spot.style.top).toBe('114px');
+    expect(at(spot)).toEqual({ x: 2, y: 114 });
     expect(card().getAttribute('data-side')).toBe('end');
-    expect(Number.parseFloat(card().style.left)).toBeGreaterThan(64);
+    expect(at(card()).x).toBeGreaterThan(64);
+  });
+
+  it('moves the spotlight and card by transform only, so the motion is no layout shift (L2-sources-home-11)', () => {
+    addAnchor('live');
+    open();
+    for (const el of [screen.getByTestId('tour-spotlight'), card()]) {
+      // Pinned at the corner; only the transform (and the spotlight's size) changes between steps.
+      expect(el.className).toMatch(/\btop-0\b/);
+      expect(el.className).toMatch(/\bleft-0\b/);
+      expect(el.style.top).toBe('');
+      expect(el.style.left).toBe('');
+      expect(el.className).not.toMatch(/transition-\[[^\]]*\b(top|left)\b/);
+    }
+    expect(screen.getByTestId('tour-spotlight').className).toContain('motion-safe:transition-[transform,width,height]');
+    expect(card().className).toContain('motion-safe:transition-transform');
   });
 
   it('moves to the next anchor, and centres again when a step has none', () => {
     addAnchor('live');
     addAnchor('vod', { top: 180, left: 8, width: 56, height: 44 });
     open();
-    expect(screen.getByTestId('tour-spotlight').style.top).toBe('114px');
+    expect(at(screen.getByTestId('tour-spotlight')).y).toBe(114);
     key('ArrowRight');
-    expect(screen.getByTestId('tour-spotlight').style.top).toBe('174px');
+    expect(at(screen.getByTestId('tour-spotlight')).y).toBe(174);
     key('ArrowRight');
     expect(screen.queryByTestId('tour-spotlight')).toBeNull();
     expect(card().getAttribute('data-side')).toBe('center');

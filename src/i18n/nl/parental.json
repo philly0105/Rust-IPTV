@@ -102,6 +102,8 @@
   "adultOffHint": "Heeft een naam als inhoud voor volwassenen. Automatisch vergrendelen staat uit.",
   "autoAdultCount_one": "Daarnaast is {{count}} groep voor volwassenen automatisch vergrendeld.",
   "autoAdultCount_other": "Daarnaast zijn {{count}} groepen voor volwassenen automatisch vergrendeld.",
+  "autoAdultRule": "Automatisch vergrendelde groepen voor volwassenen",
+  "autoAdultNone": "Geen enkele groep van deze bron lijkt op inhoud voor volwassenen.",
   "removeLockNamed": "Vergrendeling van {{name}} verwijderen",
   "showAllLocks_one": "{{count}} vergrendeling tonen",
   "showAllLocks_other": "Alle {{count}} vergrendelingen tonen",

@@ -108,6 +108,8 @@
   "autoAdultCount_one": "{{count}} groupe pour adultes est aussi verrouillé automatiquement.",
   "autoAdultCount_many": "{{count}} groupes pour adultes sont aussi verrouillés automatiquement.",
   "autoAdultCount_other": "{{count}} groupes pour adultes sont aussi verrouillés automatiquement.",
+  "autoAdultRule": "Groupes pour adultes verrouillés automatiquement",
+  "autoAdultNone": "Aucun groupe de cette source ne ressemble à du contenu pour adultes.",
   "removeLockNamed": "Retirer le verrou de {{name}}",
   "showAllLocks_one": "Afficher {{count}} verrou",
   "showAllLocks_many": "Afficher les {{count}} verrous",

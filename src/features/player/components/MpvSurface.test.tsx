@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
@@ -82,6 +82,8 @@ const { useMediaStore } = await import('../media');
 const { boundsClear, rectOf } = await import('../mpvBounds');
 const { HIDDEN_BOUNDS } = await import('./MpvSurface');
 const { PlayerSurface } = await import('./PlayerSurface');
+const reconnect = await import('../reconnect');
+const { useAlternatesStore } = await import('../failover');
 
 /**
  * A deliberately hostile layout: the surface element claims the full 800x500 box, so the
@@ -92,9 +94,12 @@ const RECTS: [string, { left: number; top: number; width: number; height: number
   ['[data-mpv-surface]', { left: 0, top: 0, width: 800, height: 500 }],
   ['[data-player-controls]', { left: 0, top: 440, width: 800, height: 60 }],
   ['[data-mpv-reserved]', { left: 0, top: 400, width: 800, height: 40 }],
+  // Overlays the tests add over the video.
+  ['[data-test-rect="small"]', { left: 300, top: 100, width: 200, height: 150 }],
+  ['[data-test-rect="menu"]', { left: 500, top: 200, width: 225, height: 283 }],
 ];
 const BOX = { left: 0, top: 0, width: 800, height: 500 };
-const reservedRects = RECTS.slice(1).map(([, r]) => rectOf(r));
+const reservedRects = RECTS.slice(1, 3).map(([, r]) => rectOf(r));
 
 function domRect(r: { left: number; top: number; width: number; height: number }): DOMRect {
   return {
@@ -208,6 +213,104 @@ describe('MpvSurface bounds', () => {
     document.body.appendChild(dialog);
     await tick(100);
     expect(sent().at(-1)).toEqual(HIDDEN_BOUNDS);
+  });
+
+  const lastLayout = (): { bounds: Bounds; holes: Bounds[] } | undefined =>
+    rpcMock.mock.calls.filter((c) => c[0] === 'mpv.setBounds').at(-1)?.[1] as { bounds: Bounds; holes: Bounds[] } | undefined;
+
+  it('keeps the video around a small dialog and cuts the dialog out of it (L2-desktop-7)', async () => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    await tick(100);
+    const before = sent().at(-1);
+    document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true" data-test-rect="small"></div>');
+    await tick(100);
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 300, y: 100, width: 200, height: 150 }] });
+    // Closing it gives the whole video back.
+    document.querySelector('[data-test-rect="small"]')!.remove();
+    await tick(100);
+    expect(lastLayout()).toEqual({ bounds: before, holes: [] });
+  });
+
+  it('cuts a menu portalled to the body out of the video instead of covering it (L2-desktop-3)', async () => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    await tick(100);
+    document.body.insertAdjacentHTML('beforeend', '<div role="menu" data-test-rect="menu"></div>');
+    await tick(100);
+    const last = lastLayout()!;
+    expect(last.bounds).toEqual({ x: 0, y: 0, width: 800, height: 400 });
+    expect(last.holes).toEqual([{ x: 500, y: 200, width: 225, height: 200 }]);
+    document.querySelector('[data-test-rect="menu"]')!.remove();
+  });
+
+  it('says a slow live start is still connecting over the native video and offers another source (X-desk-1)', async () => {
+    const ref = { sourceId: 's1', contentType: 'live' as const, itemId: '7' };
+    act(() => {
+      usePlayerStore.setState({ source: { url: 'http://h/live/7.ts', kind: 'direct', title: 'News', isLive: true, isRadio: false, ref }, status: 'loading' });
+      useAlternatesStore.setState({ forKey: 's1|live|7', status: 'ready', data: { alternates: [{}] } as never });
+    });
+    const swap = vi.spyOn(reconnect, 'tryAnotherSource').mockResolvedValue(true);
+    onTestFinished(() => {
+      swap.mockRestore();
+      reconnect.__resetReconnect();
+      useAlternatesStore.setState({ forKey: undefined, status: 'idle', data: undefined });
+    });
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    await tick();
+    expect(screen.queryByTestId('connecting-notice')).toBeNull();
+    act(() => reconnect.useReconnectStore.setState({ phase: 'connecting' }));
+    const notice = screen.getByTestId('connecting-notice');
+    expect(notice.textContent).toContain('Still connecting');
+    // A hole in the native window: outside the surface (whose own content is never cut out).
+    expect(notice.hasAttribute('data-mpv-overlay')).toBe(true);
+    expect(notice.closest('[data-mpv-surface]')).toBeNull();
+    fireEvent.click(within(notice).getByRole('button', { name: 'Try another source' }));
+    expect(swap).toHaveBeenCalledTimes(1);
+  });
+
+  it('cuts a player overlay (the zap chip) out of the video as soon as it mounts, not at the next poll (X-desk-2)', async () => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    await tick(100);
+    const before = lastLayout()!.bounds;
+    document.querySelector('[data-player-host]')!.insertAdjacentHTML('beforeend', '<div data-mpv-overlay="" data-test-rect="small"></div>');
+    // Well under the 400 ms poll: the mount itself re-measures in the next frame.
+    await tick(40);
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 300, y: 100, width: 200, height: 150 }] });
+    document.querySelector('[data-test-rect="small"]')!.remove();
+    await tick(40);
+    expect(lastLayout()).toEqual({ bounds: before, holes: [] });
+  });
+
+  it('a live stream that mpv reports as dropped becomes a player error, so recovery can retry it (L2-desktop-2)', async () => {
+    act(() => {
+      usePlayerStore.setState({
+        source: { url: 'http://h/live/1.ts', kind: 'direct', title: 'News', isLive: true, isRadio: false },
+        status: 'loading',
+      });
+    });
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true, timePos: 30 }));
+    expect(usePlayerStore.getState().status).toBe('playing');
+    // `end-file` eof on a live item (core `mpv_state::LIVE_ENDED`): not a pause.
+    act(() => emitState({ ...mpvState, loaded: false, error: 'The live stream stopped: the provider closed the connection.' }));
+    expect(usePlayerStore.getState()).toMatchObject({ status: 'error', error: 'The live stream stopped: the provider closed the connection.' });
+    expect(screen.getByRole('alert').getAttribute('data-error-class')).toBe('generic');
   });
 
   it('shows ended state and errors in the reserved strip, not over the surface', async () => {
@@ -627,7 +730,7 @@ describe('embedded mpv readouts and errors', () => {
     render(surfaceTree);
     await tick();
     act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 404' }));
-    const retry = screen.getByRole('button', { name: 'Retry' });
+    const retry = within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' });
     expect(document.activeElement).toBe(retry);
     // A headline says what happened (classified: a 404 is a removed stream); mpv's terse reason follows.
     expect(screen.getByRole('alert').textContent).toContain('This stream no longer exists');
@@ -655,7 +758,7 @@ describe('embedded mpv recovery', () => {
     expect(alert.getAttribute('data-error-class')).toBe('crashed');
     expect(alert.textContent).toContain('MPV stopped unexpectedly');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
     await tick();
     expect(calls('mpv.attach')).toHaveLength(2);
     expect(calls('mpv.load').length).toBe(loadsBefore + 1);
@@ -667,12 +770,12 @@ describe('embedded mpv recovery', () => {
     await tick();
     act(() => emitState({ ...mpvState, attached: false, error: 'Lost the connection to mpv.' }));
     attachError = Object.assign(new Error('mpv exited during startup'), { code: 'internal' });
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
     await tick();
     // Retry really started a second session; it failed, so the error stays.
     expect(calls('mpv.attach')).toHaveLength(2);
     expect(usePlayerStore.getState()).toMatchObject({ status: 'error', mode: 'embedded-mpv' });
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 
   it.each([
@@ -691,7 +794,7 @@ describe('embedded mpv recovery', () => {
     await tick();
     act(() => emitState({ ...mpvState, attached: false, error: 'Lost the connection to mpv.' }));
     attachError = err;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
     await tick();
     expect(usePlayerStore.getState()).toMatchObject({ mode: 'inline', error: undefined });
     expect(screen.queryByText(/no longer exists/i)).toBeNull();
@@ -813,6 +916,16 @@ describe('wheel and context menu over the native video', () => {
     await tick(30);
     const last = calls('mpv.setBounds').at(-1)?.[1] as { bounds: Bounds; holes: Bounds[] } | undefined;
     expect(last?.holes.length).toBeGreaterThan(0);
+  });
+
+  it('portals the menu to the body so strips below the player never paint over it (L2-desktop-6)', async () => {
+    await attached();
+    openMenu(200, 380);
+    const m = menu()!;
+    expect(m.parentElement).toBe(document.body);
+    expect(m.closest('[data-player-host]')).toBeNull();
+    // It stays a player popover: a hole in the video, not chrome that shrinks it.
+    expect(m.hasAttribute('data-mpv-overlay')).toBe(true);
   });
 
   it('sets the sleep timer from the menu like the options menu does (C5)', async () => {

@@ -10,8 +10,9 @@
  *   mode downloads it as a file.
  * - External players and radio have no frame here: the caller shows why instead.
  *
- * Every outcome is reported twice: a toast, and the player's OSD, because toasts portal into
- * the document body and so cannot be seen while the player itself is fullscreen.
+ * Every outcome is a toast. Toasts portal into the fullscreen element (ui/portal.ts), so they
+ * show in player full screen too; the player's OSD repeats a result only in picture-in-picture,
+ * where the player covers the window and its toasts.
  */
 
 import i18next from 'i18next';
@@ -21,6 +22,7 @@ import type { PlayerSource, ScreenshotResult } from '@/api/types';
 import { toast } from '@/ui/Toast';
 
 import { showOsd } from './media';
+import { usePipStore } from './pip';
 import { errorMessage, usePlayerStore, type PlayerMode } from './store';
 
 /** The core's limit on one picture (`screenshot::MAX_SCREENSHOT_BYTES`). */
@@ -162,8 +164,13 @@ export function openScreenshot(path: string): void {
   );
 }
 
+/** The OSD copy of a result, only where its toast cannot be seen (picture-in-picture). */
+function osdIfToastHidden(primary: string, secondary: string): void {
+  if (usePipStore.getState().active) showOsd(primary, secondary);
+}
+
 function reportSaved(res: ScreenshotResult): void {
-  showOsd(t('screenshotSaved'), res.fileName);
+  osdIfToastHidden(t('screenshotSaved'), res.fileName);
   toast({
     title: t('screenshotSaved'),
     description: res.fileName,
@@ -173,7 +180,7 @@ function reportSaved(res: ScreenshotResult): void {
 }
 
 function reportDownloaded(fileName: string): void {
-  showOsd(t('screenshotSaved'), fileName);
+  osdIfToastHidden(t('screenshotSaved'), fileName);
   toast({ title: t('screenshotDownloaded'), description: fileName, variant: 'success' });
 }
 
@@ -186,7 +193,7 @@ function reportFailure(err: unknown): void {
   } else {
     detail = errorMessage(err);
   }
-  showOsd(t('screenshotFailed'), detail);
+  osdIfToastHidden(t('screenshotFailed'), detail);
   toast({ title: t('screenshotFailed'), description: detail, variant: 'error' });
 }
 
@@ -207,7 +214,7 @@ export function screenshotBusy(): boolean {
 
 /**
  * Takes a screenshot of what plays now and reports the result. Never rejects: every failure
- * ends in a toast (and the OSD) that names the cause.
+ * ends in a toast (and, in picture-in-picture, the OSD) that names the cause.
  */
 export async function takeScreenshot(): Promise<void> {
   if (busy) return;

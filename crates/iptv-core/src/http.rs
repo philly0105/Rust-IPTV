@@ -94,9 +94,10 @@ pub fn backoff_delay(attempt: u32) -> Duration {
     (base + jitter).min(Duration::from_secs(10))
 }
 
-/// Runs `op` up to `attempts` times (at least once). Retries only
-/// `CoreError::Network` and `CoreError::Timeout`, sleeping [`backoff_delay`]
-/// between tries. Returns the last error.
+/// Runs `op` up to `attempts` times (at least once). Retries only errors
+/// [`CoreError::is_retryable`] accepts (Network, Timeout, Server, but not a
+/// refused connection, an unknown host or a bad certificate), sleeping
+/// [`backoff_delay`] between tries. Returns the last error.
 pub async fn with_retry<T, F, Fut>(attempts: u32, op: F) -> CoreResult<T>
 where
     F: Fn() -> Fut,
@@ -189,9 +190,13 @@ pub fn status_error_with_hint(status: reqwest::StatusCode, context: &str, hint: 
     }
 }
 
-/// Turns a transport failure into an actionable error. Timeouts stay
-/// `Timeout` and everything else `Network`, so both remain retryable; a
-/// request refused by the server-mode guard becomes `Invalid` (not retried).
+/// Turns a transport failure into an actionable error: "Could not reach
+/// {host}. {next step} ({OS detail})". Timeouts stay `Timeout` and everything
+/// else `Network`. A refused connection, an unknown host name or an invalid
+/// certificate gets its own next step, which also marks it as not retryable
+/// ([`is_permanent_transport`]); other network failures (a reset, a closed
+/// connection) stay retryable. A request refused by the server-mode guard
+/// becomes `Invalid` (not retried).
 pub fn transport_error(host: &str, err: reqwest::Error) -> CoreError {
     if let Some(blocked) = find_blocked(&err) {
         return CoreError::Invalid(blocked.0);
@@ -201,11 +206,90 @@ pub fn transport_error(host: &str, err: reqwest::Error) -> CoreError {
             "{host} did not respond in time. Check the address and that the server is online, then try again."
         ));
     }
+    let hint = if err.is_connect() {
+        connect_failure(&err).map_or(RETRY_HINT, ConnectFailure::hint)
+    } else {
+        RETRY_HINT
+    };
     let detail = root_cause(&err.without_url());
     let detail = crate::logging::redact_text(&detail);
-    CoreError::Network(format!(
-        "Could not reach {host}. Check the address and that the server is online, then try again. ({detail})"
-    ))
+    CoreError::Network(format!("Could not reach {host}. {hint} ({detail})"))
+}
+
+/// Next step of a network failure worth retrying.
+const RETRY_HINT: &str = "Check the address and that the server is online, then try again.";
+/// Next steps of connect failures a retry cannot fix. Each is unique to
+/// [`transport_error`]; [`is_permanent_transport`] looks for them.
+const REFUSED_HINT: &str = "The server refused the connection. Check the address and port, and that the server is running, then try again.";
+const UNKNOWN_HOST_HINT: &str =
+    "The host name was not found. Check the address for typos, then try again.";
+const CERTIFICATE_HINT: &str = "The server's security certificate is not valid. Check the address; if it is right, the provider has to fix its certificate.";
+
+/// True when a `Network` message from [`transport_error`] is a refused
+/// connection, an unknown host name or an invalid certificate: trying again
+/// a moment later meets the same answer, so the retry loops stop at once
+/// ([`CoreError::is_retryable`]).
+pub fn is_permanent_transport(message: &str) -> bool {
+    permanent_transport_hint(message).is_some()
+}
+
+/// The next step [`transport_error`] gave a connect failure a retry cannot
+/// fix, so callers that word their own message (Stalker) can keep it.
+pub fn permanent_transport_hint(message: &str) -> Option<&'static str> {
+    [REFUSED_HINT, UNKNOWN_HOST_HINT, CERTIFICATE_HINT]
+        .into_iter()
+        .find(|hint| message.contains(hint))
+}
+
+/// A connect failure a retry cannot fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectFailure {
+    /// Nothing listens at the address and port (the OS refused).
+    Refused,
+    /// The host name does not resolve (not a temporary resolver failure).
+    UnknownHost,
+    /// TLS rejected the server's certificate.
+    Certificate,
+}
+
+impl ConnectFailure {
+    const fn hint(self) -> &'static str {
+        match self {
+            Self::Refused => REFUSED_HINT,
+            Self::UnknownHost => UNKNOWN_HOST_HINT,
+            Self::Certificate => CERTIFICATE_HINT,
+        }
+    }
+}
+
+/// Classifies a connect error by its source chain: an `io::Error` of kind
+/// `ConnectionRefused`; rustls' "invalid peer certificate" (or any
+/// certificate complaint); hyper-util's "dns error" unless the resolver
+/// called it temporary (`EAI_AGAIN`, Windows `WSATRY_AGAIN` 11002), which a
+/// retry can fix.
+fn connect_failure(err: &(dyn std::error::Error + 'static)) -> Option<ConnectFailure> {
+    let mut dns = false;
+    let mut text = String::new();
+    let mut cur = Some(err);
+    while let Some(e) = cur {
+        if e.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::ConnectionRefused)
+        {
+            return Some(ConnectFailure::Refused);
+        }
+        let shown = e.to_string().to_ascii_lowercase();
+        dns |= shown.starts_with("dns error");
+        text.push_str(&shown);
+        text.push('\n');
+        cur = e.source();
+    }
+    if text.contains("certificate") {
+        Some(ConnectFailure::Certificate)
+    } else if dns && !(text.contains("temporar") || text.contains("os error 11002")) {
+        Some(ConnectFailure::UnknownHost)
+    } else {
+        None
+    }
 }
 
 /// The innermost cause of a transport error ("connection refused", "dns
@@ -260,7 +344,17 @@ pub async fn send_checked(
     req: reqwest::RequestBuilder,
     context: &str,
 ) -> CoreResult<reqwest::Response> {
-    let resp = send(req).await?;
+    send_checked_within(req, HEADER_TIMEOUT, context).await
+}
+
+/// [`send_checked`] with a caller-chosen response-head deadline
+/// ([`send_within`]).
+pub async fn send_checked_within(
+    req: reqwest::RequestBuilder,
+    header_timeout: Duration,
+    context: &str,
+) -> CoreResult<reqwest::Response> {
+    let resp = send_within(req, header_timeout).await?;
     let status = resp.status();
     if status.is_success() {
         Ok(resp)
@@ -990,14 +1084,159 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CoreError::Network(_)), "{err:?}");
-        assert!(err.is_retryable());
+        // L1-sources-home-7: a refused connection is final (it was retried
+        // three times); the RPC error still offers Try again.
+        assert!(!err.is_retryable());
+        assert!(crate::error::RpcError::from(CoreError::Network(err.to_string())).retryable);
         assert!(
             err.to_string()
-                .contains("Could not reach 127.0.0.1. Check the address"),
+                .contains(&format!("Could not reach 127.0.0.1. {REFUSED_HINT} (")),
             "{err}"
         );
         // The detail is the OS-level cause, not reqwest's generic wrapper.
         assert!(!err.to_string().contains("error sending request"), "{err}");
+    }
+
+    /// Error with a fixed text and an optional cause, to build source chains.
+    #[derive(Debug)]
+    struct Layer(
+        &'static str,
+        Option<Box<dyn std::error::Error + Send + Sync>>,
+    );
+
+    impl fmt::Display for Layer {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1
+                .as_deref()
+                .map(|e| e as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    fn chain(outer: &'static str, inner: impl std::error::Error + Send + Sync + 'static) -> Layer {
+        Layer(
+            "client error (Connect)",
+            Some(Box::new(Layer(outer, Some(Box::new(inner))))),
+        )
+    }
+
+    #[test]
+    fn connect_failures_are_classified_by_their_cause() {
+        use std::io::{Error as IoError, ErrorKind};
+        let refused = chain(
+            "tcp connect error",
+            IoError::from(ErrorKind::ConnectionRefused),
+        );
+        assert_eq!(connect_failure(&refused), Some(ConnectFailure::Refused));
+        let windows_dns = chain(
+            "dns error",
+            IoError::other("No such host is known. (os error 11001)"),
+        );
+        assert_eq!(
+            connect_failure(&windows_dns),
+            Some(ConnectFailure::UnknownHost)
+        );
+        let unix_dns = chain(
+            "dns error",
+            IoError::other("failed to lookup address information: Name or service not known"),
+        );
+        assert_eq!(
+            connect_failure(&unix_dns),
+            Some(ConnectFailure::UnknownHost)
+        );
+        // A resolver that could not ask right now may answer on the next try.
+        for temporary in [
+            "failed to lookup address information: Temporary failure in name resolution",
+            "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server. (os error 11002)",
+        ] {
+            let e = chain("dns error", IoError::other(temporary));
+            assert_eq!(connect_failure(&e), None, "{temporary}");
+        }
+        // rustls wraps its error in an io::Error whose text is rustls' own.
+        let cert = chain(
+            "tcp connect error",
+            IoError::new(
+                ErrorKind::InvalidData,
+                Layer("invalid peer certificate: UnknownIssuer", None),
+            ),
+        );
+        assert_eq!(connect_failure(&cert), Some(ConnectFailure::Certificate));
+        // A reset or an unreachable network is worth another try.
+        let reset = chain(
+            "tcp connect error",
+            IoError::from(ErrorKind::ConnectionReset),
+        );
+        assert_eq!(connect_failure(&reset), None);
+        let unreachable = chain(
+            "tcp connect error",
+            IoError::new(ErrorKind::NotConnected, "Network unreachable"),
+        );
+        assert_eq!(connect_failure(&unreachable), None);
+    }
+
+    /// Resolver that fails every lookup with `msg` (no real DNS).
+    struct FailingResolver(&'static str);
+
+    impl Resolve for FailingResolver {
+        fn resolve(&self, _name: Name) -> Resolving {
+            let msg = self.0;
+            Box::pin(async move {
+                Err(Box::new(std::io::Error::other(msg))
+                    as Box<dyn std::error::Error + Send + Sync>)
+            })
+        }
+    }
+
+    /// The real reqwest chain of a failed lookup: an unknown host is final
+    /// and says to check the address; a temporary failure stays retryable.
+    #[tokio::test]
+    async fn unknown_host_is_final_and_temporary_dns_failure_is_retried() {
+        let lookup = |msg: &'static str| {
+            reqwest::Client::builder()
+                .dns_resolver(Arc::new(FailingResolver(msg)))
+                .build()
+                .unwrap()
+        };
+        let err = send(
+            lookup("No such host is known. (os error 11001)").get("http://tv.example.invalid/x"),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CoreError::Network(_)), "{err:?}");
+        assert!(!err.is_retryable(), "{err}");
+        assert!(
+            err.to_string().contains(&format!(
+                "Could not reach tv.example.invalid. {UNKNOWN_HOST_HINT} ("
+            )),
+            "{err}"
+        );
+        let err =
+            send(lookup("Temporary failure in name resolution").get("http://tv.example.invalid/x"))
+                .await
+                .unwrap_err();
+        assert!(err.is_retryable(), "{err}");
+        assert!(
+            err.to_string().contains(&format!(
+                "Could not reach tv.example.invalid. {RETRY_HINT} ("
+            )),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn permanent_hints_are_recognised_after_a_suffix() {
+        for hint in [REFUSED_HINT, UNKNOWN_HOST_HINT, CERTIFICATE_HINT] {
+            let msg = format!("Could not reach h. {hint} (x) The download failed after 1 tries.");
+            assert!(is_permanent_transport(&msg), "{hint}");
+        }
+        assert!(!is_permanent_transport(&format!(
+            "Could not reach h. {RETRY_HINT} (connection reset)"
+        )));
     }
 
     fn u(s: &str) -> Url {

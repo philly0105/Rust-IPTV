@@ -323,7 +323,8 @@ async fn requeue(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         })
         .await?;
     if claimed {
-        manager::enqueue(state, id);
+        // Ahead of downloads queued since it was paused or failed.
+        manager::enqueue_front(state, id);
         notify(state);
     }
     Ok(())

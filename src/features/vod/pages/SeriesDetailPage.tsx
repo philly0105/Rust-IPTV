@@ -14,6 +14,7 @@ import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero'
 import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
+import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { WatchStage } from '../components/detail/WatchStage';
@@ -169,6 +170,12 @@ export function SeriesDetailPage() {
   // Back from an actor or a similar title: the page opens where you left it.
   const { pathname } = useLocation();
   useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item });
+  // L2-vod-9: opened from a grid or a rail, focus lands on Play (or Resume), or on the title when nothing plays.
+  const playRef = useRef<HTMLButtonElement>(null);
+  useFocusOnOpen(
+    gate.state === 'open' && !!model && !!item && !watch.active,
+    () => playRef.current ?? scrollRef.current?.querySelector<HTMLElement>('#vod-detail-title'),
+  );
 
   // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
   const pageTitle = (gate.state === 'open' ? (model?.titleBase ?? model?.title) : undefined) ?? t('series');
@@ -314,7 +321,14 @@ export function SeriesDetailPage() {
           actions={
             <>
               {start && (
-                <Button size="lg" variant="primary" icon={<Play aria-hidden size={18} className="fill-current" />} onClick={() => playEpisode(start.episode)}>
+                <Button
+                  ref={playRef}
+                  size="lg"
+                  variant="primary"
+                  icon={<Play aria-hidden size={18} className="fill-current" />}
+                  aria-describedby="vod-detail-title"
+                  onClick={() => playEpisode(start.episode)}
+                >
                   {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: episodeCode(start.episode.season, start.episode.episode) })}
                 </Button>
               )}

@@ -330,3 +330,56 @@ describe('recoveryFor', () => {
     expect(reconnect.recoveryFor('offline')).toEqual({ retry: false, canSwitch: false, switchNow: false });
   });
 });
+
+describe('streams that never played (L2-live-5, L2-player-4)', () => {
+  /** A play that has not shown a frame yet. */
+  function begin(src: PlayerSource): void {
+    usePlayerStore.setState({ source: src, mode: 'inline', status: 'loading', positionSeconds: 0 });
+  }
+
+  it('a 503 before the first frame gets one quiet retry, then the error (no stacked ladders)', () => {
+    begin(live);
+    fail('HTTP 503');
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1, max: reconnect.STARTUP_RETRIES });
+    vi.advanceTimersByTime(RECONNECT_DELAYS_MS[0]);
+    expect(retry).toHaveBeenCalledTimes(1);
+    fail('HTTP 503');
+    expect(usePlayerStore.getState()).toMatchObject({ status: 'error', error: 'HTTP 503' });
+    vi.advanceTimersByTime(60_000);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 4xx before the first frame is not retried', () => {
+    begin(live);
+    fail('HTTP 404');
+    expect(usePlayerStore.getState()).toMatchObject({ status: 'error', error: 'HTTP 404' });
+    vi.advanceTimersByTime(60_000);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('a stream that played keeps the full ladder', () => {
+    start(live);
+    fail('HTTP 503');
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1, max: RECONNECT_DELAYS_MS.length });
+  });
+
+  it('says it is still connecting after SLOW_START_MS, until the first frame', () => {
+    begin(live);
+    vi.advanceTimersByTime(reconnect.SLOW_START_MS - 1);
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(1);
+    expect(phase()).toBe('connecting');
+    reportStatus('playing');
+    expect(phase()).toBe('idle');
+  });
+
+  it('Try another source with no other copy keeps waiting on this one', async () => {
+    settings({ liveFailover: true });
+    begin(live);
+    vi.advanceTimersByTime(reconnect.SLOW_START_MS);
+    expect(phase()).toBe('connecting');
+    await expect(reconnect.tryAnotherSource()).resolves.toBe(false);
+    expect(phase()).toBe('connecting');
+    expect(usePlayerStore.getState().source).toEqual(live);
+  });
+});

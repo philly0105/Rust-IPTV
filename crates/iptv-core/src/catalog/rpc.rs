@@ -22,6 +22,12 @@ pub struct CategoriesArgs {
     pub content_type: ContentType,
     #[serde(default)]
     pub include_hidden: bool,
+    /// Also list groups that parental hide mode leaves out while locked,
+    /// with their full counts, for the parental settings page (Lock groups
+    /// in provider order, L1-settings-13). Categories carry names and counts
+    /// only; no item is ever returned through this flag.
+    #[serde(default)]
+    pub include_locked: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,7 +211,11 @@ pub async fn categories(
     a: CategoriesArgs,
 ) -> Result<Vec<Category>, RpcError> {
     let english = english_only(&state);
-    let hide = hide(&state).await?;
+    let hide = if a.include_locked {
+        None
+    } else {
+        hide(&state).await?
+    };
     Ok(state
         .db_call(move |c| {
             super::visible_categories(
@@ -413,50 +423,32 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                 .copied()
                 .filter(|t| matches!(t, ContentType::Live | ContentType::Radio))
                 .collect();
-            if !live_types.is_empty() {
-                out.live = super::search_named(
-                    c,
-                    &a.query,
-                    a.source_id.as_deref(),
-                    &live_types,
-                    limit,
-                    english,
-                    hide,
-                )?
-                .into_iter()
-                .map(NamedRow::into_channel)
-                .collect();
+            let movies = wanted.contains(&ContentType::Movie);
+            let series = wanted.contains(&ContentType::Series);
+            // One ranked pass for every list (search_groups).
+            let groups: [&[ContentType]; 3] = [
+                &live_types,
+                if movies { &[ContentType::Movie] } else { &[] },
+                if series { &[ContentType::Series] } else { &[] },
+            ];
+            let mut found = super::search_groups(
+                c,
+                &a.query,
+                a.source_id.as_deref(),
+                &groups,
+                limit,
+                english,
+                hide,
+            )?
+            .into_iter();
+            let mut next = || found.next().unwrap_or_default();
+            out.live = next().into_iter().map(NamedRow::into_channel).collect();
+            out.movies = next().into_iter().map(NamedRow::into_vod).collect();
+            out.series = next().into_iter().map(NamedRow::into_series).collect();
+            if !out.live.is_empty() {
                 // guide: M3U catch-up overrides are applied on read.
                 crate::catchup::m3u::apply_overrides(c, &mut out.live)?;
                 crate::channeledit::apply_names(c, &mut out.live)?;
-            }
-            if wanted.contains(&ContentType::Movie) {
-                out.movies = super::search_named(
-                    c,
-                    &a.query,
-                    a.source_id.as_deref(),
-                    &[ContentType::Movie],
-                    limit,
-                    english,
-                    hide,
-                )?
-                .into_iter()
-                .map(NamedRow::into_vod)
-                .collect();
-            }
-            if wanted.contains(&ContentType::Series) {
-                out.series = super::search_named(
-                    c,
-                    &a.query,
-                    a.source_id.as_deref(),
-                    &[ContentType::Series],
-                    limit,
-                    english,
-                    hide,
-                )?
-                .into_iter()
-                .map(NamedRow::into_series)
-                .collect();
             }
             Ok(out)
         })

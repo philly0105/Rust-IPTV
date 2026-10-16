@@ -20,6 +20,7 @@ const { rpc } = await import('@/api/transport');
 const { toast } = await import('@/ui/Toast');
 const { usePlayerStore, __resetPlayerForTests } = await import('./store');
 const { useMediaStore, resetMedia } = await import('./media');
+const { usePipStore } = await import('./pip');
 const shot = await import('./screenshot');
 
 const rpcMock = rpc as unknown as Mock;
@@ -66,6 +67,7 @@ afterEach(() => {
   document.body.replaceChildren();
   __resetPlayerForTests();
   resetMedia();
+  usePipStore.setState({ active: false });
 });
 
 describe('file names', () => {
@@ -173,7 +175,8 @@ describe('takeScreenshot in server mode', () => {
     // The link is gone; the object URL lives a minute for slow download starts.
     expect(document.querySelector('a[download]')).toBeNull();
     expect(toastMock).toHaveBeenCalledWith({ title: 'Saved to your downloads', description: name, variant: 'success' });
-    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Screenshot saved', secondary: name });
+    // The toast shows in player full screen too (ui/portal.ts): no second copy on the OSD.
+    expect(useMediaStore.getState().osd).toBeUndefined();
     expect(revoke).not.toHaveBeenCalled();
     vi.advanceTimersByTime(60_000);
     expect(revoke).toHaveBeenCalledWith('blob:shot');
@@ -188,7 +191,18 @@ describe('takeScreenshot in server mode', () => {
     await shot.takeScreenshot();
     const cors = "The stream's server does not allow its picture to be copied (no CORS permission).";
     expect(toastMock).toHaveBeenCalledWith({ title: 'Screenshot not saved', description: cors, variant: 'error' });
-    expect(useMediaStore.getState().osd).toMatchObject({ primary: 'Screenshot not saved', secondary: cors });
+    expect(useMediaStore.getState().osd).toBeUndefined();
+  });
+
+  it('repeats the result on the OSD in picture-in-picture, where the player covers its toasts', async () => {
+    usePipStore.setState({ active: true });
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'loading' }));
+    await shot.takeScreenshot();
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(useMediaStore.getState().osd).toMatchObject({
+      primary: 'Screenshot not saved',
+      secondary: 'There is no picture yet. Try again once the video plays.',
+    });
   });
 
   it('says there is no picture when the player has no video yet', async () => {

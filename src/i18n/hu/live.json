@@ -184,5 +184,11 @@
   "locked": "Zárolva",
   "lockedGuide": "Zárolva. Adja meg a PIN-kódot, hogy lássa, mi megy rajta.",
   "unlock": "Feloldás",
-  "ribbonFailed": "Nem sikerült betölteni a csatorna műsorát"
+  "ribbonFailed": "Nem sikerült betölteni a csatorna műsorát",
+  "parentalHiddenChannels": "A szülői felügyelet elrejti ennek a forrásnak a csatornáit",
+  "parentalHiddenStations": "A szülői felügyelet elrejti ennek a forrásnak az állomásait",
+  "parentalHiddenHint": "A csoportjai zárolva vannak. Add meg a PIN-kódot, hogy ebben a munkamenetben megjelenjenek.",
+  "parentalUnlock": "Feloldás",
+  "parentalUnlockTitle": "Zárolt csatornák megjelenítése",
+  "parentalUnlockBody": "Add meg a PIN-kódot, hogy a zárolt csoportok és csatornák látszódjanak, amíg a szülői felügyelet újra nem zárol."
 }

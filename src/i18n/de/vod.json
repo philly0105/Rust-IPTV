@@ -204,5 +204,8 @@
   "categoryMissingTitle": "Kategorie nicht gefunden",
   "categoryMissingBody": "Diese Quelle hat keine Kategorie mit diesem Link. Der Anbieter hat sie vielleicht umbenannt oder entfernt.",
   "namedMarkedWatched": "{{name}} als gesehen markiert",
-  "namedMarkedUnwatched": "{{name}} als nicht gesehen markiert"
+  "namedMarkedUnwatched": "{{name}} als nicht gesehen markiert",
+  "filters": "Filter",
+  "filtersActive": "Aktive Filter: {{n}}",
+  "locked": "Gesperrt"
 }

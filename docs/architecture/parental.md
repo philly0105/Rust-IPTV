@@ -23,7 +23,7 @@ The config row is cached in memory (never with PIN material) and refreshed after
 
 ## Wrong-PIN lockout
 
-Every PIN check (`unlock`, `disable`, `configure`, `setLocked` removal, `setPin` current PIN) goes through one place, serialized by a write mutex so concurrent tries are all counted.
+Every PIN check (`unlock`, `disable`, `configure`, `setLocked` and `setLockedMany` removal, `setPin` current PIN) goes through one place, serialized by a write mutex so concurrent tries are all counted.
 
 - A wrong PIN increments `failed_attempts`. Tries 1 to 4 fail with `auth` ("Wrong PIN. 3 tries left before a pause.").
 - From the 5th wrong PIN on, `lockout_until` is set to now + 30 s, doubling with each further wrong PIN (60, 120, 240) up to 300 s. The try that starts a lockout already fails with `conflict`, `retryable: true`, `details: {retryAfterSeconds}` ("Too many wrong PINs. Try again in 30 seconds.").
@@ -41,13 +41,13 @@ Every PIN check (`unlock`, `disable`, `configure`, `setLocked` removal, `setPin`
 
 ## Events
 
-`parental.changed`, payload `ParentalStatus`, after every change: PIN set or changed, disable, configure, unlock, lock now, an expired unlock, a wrong PIN (new counter or lockout; a try refused during a lockout re-sends the same status), a lock added or removed (only when the table changed: adding an existing lock with the same name emits nothing), and a backup import that added locks or applied options. A read emits only when it is the first to notice an expired unlock. The payload never carries PIN material.
+`parental.changed`, payload `ParentalStatus`, after every change: PIN set or changed, disable, configure, unlock, lock now, an expired unlock, a wrong PIN (new counter or lockout; a try refused during a lockout re-sends the same status), a lock added or removed (only when the table changed: adding an existing lock with the same name emits nothing; a `setLockedMany` call emits once), and a backup import that added locks or applied options. A read emits only when it is the first to notice an expired unlock. The payload never carries PIN material.
 
 In the UI, `src/features/parental/status.ts` handles the event. When Hide mode's filter changes, or a lock is added or removed while it filters, every filtered reader is refetched (`FILTERED_PREFIXES`): `catalog.`, `favorites.`, `recent.`, `positions.`, `watchlist.`, `lists.`, `epg.search` and `stats.`, plus the provider pages and details cached under `stalker.movies`, `stalker.series`, `stalker.search`, `stalker.vodDetail`, `stalker.seriesDetail`, `xtream.vodDetail` and `xtream.seriesDetail`. When filtering starts, cached copies that nothing on screen reads are removed, so a just-locked title cannot come back from the cache; copies on screen refetch in place. `sources.changed` and a finished `import.progress` refresh `parental.adultCategories` and `parental.check`, because an import can add adult categories.
 
 ## Modes
 
-- `hide` (default): the core drops locked content from the readers below. Nothing to gate in the UI because nothing locked is listed.
+- `hide` (default): the core drops locked content from the readers below. Nothing to gate in the UI because nothing locked is listed. When the filter empties a source's Live or Radio list (the source has channels or groups, but none are left), `LivePage.tsx` says "Parental controls are hiding this source's channels" ("stations" on Radio) instead of pointing at Sources, and offers Unlock: `requestPin`, then `parental.unlock`, which shows the rows for the session. A source that is truly empty keeps its usual message.
 - `ask`: the core filters nothing. The UI marks and gates locked items using `parental.check` (and `parental.adultCategories` for badges) and asks for the PIN before it plays or opens one.
 - Both apply only while a PIN is set and no unlock is active. `parental.check` returns the locked refs in either mode, and nothing while controls are off or unlocked.
 
@@ -72,7 +72,7 @@ An item is locked when any of these holds:
 | `item_row` | `catalog.recentlyAdded`, `catalog.sameTitle`, `catalog.channelByNumber` (null when the channel is hidden), `catalog.item` | Correlated primary-key probes of `parental_locks` and `NOT adult_category(c.name)` on the joined category. |
 | `by_ref` | `favorites.list`, `recent.list`, `positions.continueWatching`, `watchlist.list` | The row's own item lock; its category's lock and adult name when the item's category is known: from `items`, or for Stalker movies and series (never in `items`) from the remembered portal row, `stalker_items.category_id`. Entries whose item is gone from both are hidden only by an item lock. |
 
-`catalog.categories` drops locked categories and (with `autoAdult`) adult ones, subtracts locked items from each remaining category's `itemCount` (counting only items the catalog has, and with English-only only items that filter keeps), and drops a category that this empties. `includeHidden: true` (category management) gets the same treatment: a locked category cannot be found and unhidden there either.
+`catalog.categories` drops locked categories and (with `autoAdult`) adult ones, subtracts locked items from each remaining category's `itemCount` (counting only items the catalog has, and with English-only only items that filter keeps), and drops a category that this empties. `includeHidden: true` (category management) gets the same treatment: a locked category cannot be found and unhidden there either. `includeLocked: true` skips the parental filter for this one command: locked and adult groups are listed, in provider order and with their full counts, while hide mode is locked. The Lock groups dialog (`LockGroupsDialog.tsx`) asks for it with `includeHidden`. It returns category names and counts only; the items stay hidden (`catalog.item` is still `NotFound`).
 
 `catalog.item` on a hidden item fails with `not_found` ("catalog item X is locked by parental controls; unlock them to open it"), so a deep link or a stale reference cannot open it.
 
@@ -96,17 +96,18 @@ The Sources page asks first: `removalMayNeedPin()` reads the cached status, and 
 | Command | Args | Result | PIN needed |
 | --- | --- | --- | --- |
 | `parental.status` | none | `ParentalStatus` | no |
-| `parental.setPin` | `{currentPin?, newPin}` | `ParentalStatus` | the current PIN when one is set (`auth` without it) |
+| `parental.setPin` | `{currentPin?, newPin, unlock?}` | `ParentalStatus` | the current PIN when one is set (`auth` without it); `unlock: true` with the first PIN also starts a session unlock of `unlockMinutes` (0 = until restart), and a PIN change leaves the session as it is whatever `unlock` says |
 | `parental.disable` | `{pin}` | `ParentalStatus` | yes; removes PIN and unlock, keeps locks and options; no-op when already off |
 | `parental.configure` | `{pin?, mode?, autoAdult?, unlockMinutes?}` | `ParentalStatus` | `pin` or an active unlock while a PIN is set; absent fields keep their value; `unlockMinutes` 0..720 |
 | `parental.unlock` | `{pin}` | `ParentalStatus` | yes; `invalid` when no PIN is set |
 | `parental.lockNow` | none | `ParentalStatus` | no |
 | `parental.locks` | `{sourceId?}` | `ParentalLock[]` (source, type, kind, name, target id order) | no |
 | `parental.setLocked` | `{target: ParentalLockTarget, locked, pin?}` | null | adding: never; removing: `pin` or an active unlock while a PIN is set |
+| `parental.setLockedMany` | `{add?: ParentalLockTarget[], remove?: ParentalLockTarget[], pin?}` (at most 5000 targets in all) | `{changed}`: locks added, renamed or removed | any `remove`: `pin` or an active unlock while a PIN is set, checked before anything is written; one transaction (removals first), one `parental.changed` when anything changed; a lock on an unknown source rolls the whole call back |
 | `parental.check` | `{items: [{ref, categoryId?}]}` (at most 500) | `ItemRef[]` locked now, input order, duplicates collapsed | no |
 | `parental.adultCategories` | `{sourceId, contentType}` | category ids whose name is adult, whether or not `autoAdult` is on | no |
 
-Errors use the existing codes: `invalid` (malformed args, bad PIN format, out-of-range `unlockMinutes`, empty or over-long (512) target ids, more than 500 check items), `auth` (missing or wrong PIN), `conflict` (lockout, retryable, `details.retryAfterSeconds`), `not_found` (lock on a source that does not exist). `parental.check` looks `categoryId` up from the catalog when it is absent or empty.
+Errors use the existing codes: `invalid` (malformed args, bad PIN format, out-of-range `unlockMinutes`, empty or over-long (512) target ids, more than 500 check items or 5000 `setLockedMany` targets), `auth` (missing or wrong PIN), `conflict` (lockout, retryable, `details.retryAfterSeconds`), `not_found` (lock on a source that does not exist). `parental.check` looks `categoryId` up from the catalog when it is absent or empty.
 
 ## Backup
 
@@ -135,5 +136,6 @@ Measured on 50k channels in 250 groups, 10 groups adult by name, 2 locked, 200 c
 ## Tests
 
 - `crates/iptv-core/tests/parental.rs`: registration; config defaults; PIN rules and storage (salted hash, new salt per PIN, nothing in status or events); setPin, disable, configure rules; the lockout timeline 30/60/120/240/300/300 and its persistence across a restart; unlock, lock now, `unlockMinutes: 0`; lazy and timer expiry; events; locks (add without PIN, remove with PIN or unlock, validation, unknown source, cascade on source removal); `check` and `adultCategories`; every reader above in hide mode, hide mode without `autoAdult`, ask mode, unlocked and without a PIN; paging totals; `catalog.item` and the four provider detail commands; the backup round trip with no PIN material in the file, a locked app refusing weaker options and Replace, unreadable rows; and the 50k-channel budget.
+- `crates/iptv-core/tests/l2_data_parental.rs`: `setLockedMany` (84 groups in one call and one event, removals refused without the PIN change nothing, a bad target rolls the call back) and `setPin` with `unlock` (the first PIN unlocks, a PIN change keeps the session as it was).
 - Unit tests in `parental/mod.rs`, `store.rs`, `pin.rs` (PBKDF2 against known vectors, constant-time compare) and `rpc.rs` (registration, malformed args, PINs never echoed).
 - `tests/watchlist.rs` covers My List in hide mode.

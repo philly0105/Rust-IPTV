@@ -1,7 +1,7 @@
 /**
  * i18n (SPEC C9). Keys are flat camelCase per namespace. English is bundled
- * eagerly as the fallback; every other `./<lang>/<ns>.json` is a lazy chunk
- * loaded on demand (`loadLanguage`) before i18next switches to it, so the
+ * eagerly as the fallback; every other language is one lazy chunk
+ * (`locale-<lang>`, all its namespaces) loaded on demand (`loadLanguage`) before i18next switches to it, so the
  * main bundle carries one locale instead of nineteen.
  *
  * Importing this module initializes i18next once and starts loading the

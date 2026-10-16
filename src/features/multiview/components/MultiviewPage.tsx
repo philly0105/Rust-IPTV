@@ -165,7 +165,8 @@ export function MultiviewPage() {
 
   const openPicker = useCallback(
     (mode: PickerMode) => {
-      // Dialogs render outside the wall; full screen would hide them.
+      // The picker would show in full screen too (dialogs portal into the fullscreen element,
+      // ui/portal.ts); full screen is for watching, so changing the wall's channels leaves it.
       if (fsActive) void fsExit();
       setSwapFrom(null);
       setPicker(mode);
@@ -353,13 +354,18 @@ export function MultiviewPage() {
     />
   );
 
-  const showBanners = shownOver.length > 0 || mainPlaying;
+  const limitBanners = <LimitBanners over={shownOver} onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))} />;
   const banners = (
-    <div className={cn('flex flex-col gap-2', !fsActive && showBanners && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
+    <div className={cn('flex flex-col gap-2', !fsActive && mainPlaying && 'px-3 pt-3 sm:px-4')} data-testid="multiview-banners">
       {mainPlaying ? <MainPlayingBanner onStop={stopMain} /> : null}
-      <LimitBanners over={shownOver} onDismiss={(l) => setDismissed((d) => new Set(d).add(loadKey(l)))} />
+      {/* Full screen: under the toolbar in the overlay, which already floats over the wall. */}
+      {fsActive ? limitBanners : null}
     </div>
   );
+  // Out of full screen the connection-limit warning lies over the toolbar instead of pushing the
+  // wall down: after a cold load the account's limit can answer after the tiles are up (XB2-32).
+  // The toolbar under it is inert until the warning is dismissed, so focus never hides beneath it.
+  const limitOver = !fsActive && count > 0 && shownOver.length > 0;
 
   const wall = (
     <Wall
@@ -419,7 +425,15 @@ export function MultiviewPage() {
           onKeyDownCapture={fsActive ? chrome.poke : undefined}
           className={cn('relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
         >
-          {count > 0 && !fsActive ? toolbar(false) : null}
+          {count > 0 && !fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
+          {!fsActive ? (
+            <div
+              data-testid="multiview-limit-layer"
+              className={cn('absolute inset-x-0 top-0 z-40', limitOver && 'bg-surface px-3 py-1 shadow-md sm:px-4')}
+            >
+              {limitBanners}
+            </div>
+          ) : null}
           {!fsActive ? banners : null}
           <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size]', fsActive ? 'p-0' : 'p-1 @2xl:p-2')}>{wall}</div>
           {fsActive ? (

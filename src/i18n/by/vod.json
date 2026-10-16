@@ -222,5 +222,8 @@
   "categoryMissingTitle": "Катэгорыю не знойдзена",
   "categoryMissingBody": "У гэтай крыніцы няма катэгорыі з такой спасылкай. Магчыма, пастаўшчык перайменаваў або выдаліў яе.",
   "namedMarkedWatched": "{{name}}: адзначана як прагледжанае",
-  "namedMarkedUnwatched": "{{name}}: адзначана як непрагледжанае"
+  "namedMarkedUnwatched": "{{name}}: адзначана як непрагледжанае",
+  "filters": "Фільтры",
+  "filtersActive": "Актыўныя фільтры: {{n}}",
+  "locked": "Заблакіравана"
 }

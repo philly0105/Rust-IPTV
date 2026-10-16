@@ -451,8 +451,10 @@ export function ListPage() {
           </PlayerStage>
         </div>
         {/* With no channel to show the ribbon is only an empty state; on a phone
-            it would push the list's own empty state and dropped channels below the fold. */}
-        <div className={cn('contents', !ribbonChannel && 'max-md:hidden')} data-testid="list-ribbon">
+            it would push the list's own empty state and dropped channels below the fold.
+            While the list loads it holds its place, so the channels don't jump down when
+            the first one arrives (L2-vod-5, CLS 0.12 at 390 px). */}
+        <div className={cn('contents', !ribbonChannel && !paged.isLoading && !paged.total && 'max-md:hidden')} data-testid="list-ribbon">
           <EpgRibbon
             channel={ribbonChannel}
             sourceKind={ribbonKind}

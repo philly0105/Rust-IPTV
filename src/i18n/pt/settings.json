@@ -240,7 +240,7 @@
   "backupNoSecrets": "Este backup não contém senhas. Será preciso informá-las novamente nas fontes Xtream e Stalker.",
   "backupMode": "Modo de importação",
   "backupMerge": "Mesclar",
-  "backupMergeHint": "Adiciona as fontes do arquivo e mantém as que você já tem.",
+  "backupMergeHint": "Adiciona as fontes do arquivo. As que você já tem mantêm seus nomes e configurações.",
   "backupReplace": "Substituir",
   "backupReplaceHint": "Importa primeiro o backup e remove as suas fontes atuais quando uma das fontes dele carrega.",
   "backupImportButton": "Importar backup",
@@ -250,6 +250,9 @@
   "backupReplaceConfirm": "Substituir",
   "backupImportFailed": "Não foi possível importar o backup",
   "backupResult": "Adicionadas ou atualizadas: {{imported}}. Ignoradas: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} lista ainda está carregando; os favoritos e o histórico dela aparecem quando terminar.",
+  "backupRefreshing_many": "{{count, number}} listas ainda estão carregando; os favoritos e o histórico de cada uma aparecem quando ela terminar.",
+  "backupRefreshing_other": "{{count, number}} listas ainda estão carregando; os favoritos e o histórico de cada uma aparecem quando ela terminar.",
   "backupWarnings_one": "{{count}} aviso",
   "backupWarnings_many": "{{count}} avisos",
   "backupWarnings_other": "{{count}} avisos",
@@ -356,10 +359,10 @@
   "railsOffHint": "Ative o painel para usar estas linhas.",
 
   "resetGroup": "Redefinir",
-  "resetHint": "Volta cada configuração ao padrão. Fontes, favoritos, histórico e downloads ficam.",
+  "resetHint": "Volta cada configuração ao padrão. Fontes, favoritos, histórico e downloads ficam. Os endereços do guia e a chave do TMDB também ficam.",
   "resetButton": "Redefinir configurações",
   "resetConfirmTitle": "Redefinir todas as configurações?",
-  "resetConfirmBody": "Cada configuração volta ao padrão, incluindo idioma, tema e caminhos dos players. Fontes, favoritos, histórico e downloads ficam.",
+  "resetConfirmBody": "Cada configuração volta ao padrão, incluindo idioma, tema e caminhos dos players. Fontes, favoritos, histórico e downloads ficam. Os endereços do guia e a chave do TMDB também ficam.",
   "resetConfirm": "Redefinir",
   "resetDone": "Configurações redefinidas",
   "resetFailed": "Não foi possível redefinir as configurações",
@@ -448,5 +451,10 @@
   "backupOldVersion": "Esta cópia de segurança usa um formato antigo que não pode ser lido. Exporte uma cópia nova e importe-a.",
   "backupImportDone": "Cópia de segurança importada",
   "backupReplacePinTitle": "Introduza o PIN para substituir as fontes",
-  "backupReplacePinText": "Substituir remove as suas fontes atuais e os respetivos bloqueios parentais, por isso é preciso o PIN do controlo parental."
+  "backupReplacePinText": "Substituir remove as suas fontes atuais e os respetivos bloqueios parentais, por isso é preciso o PIN do controlo parental.",
+  "backupParentalTitle": "Esta cópia de segurança altera o controlo parental",
+  "backupParentalBody": "O controlo parental está bloqueado, por isso as respetivas opções na cópia de segurança precisam do PIN. Introduza-o para importar tudo, ou importe o resto e mantenha as opções atuais.",
+  "backupParentalSkip": "Importar sem elas",
+  "backupParentalUnlock": "Introduzir PIN e importar",
+  "backupParentalPinTitle": "Introduza o PIN para importar as opções do controlo parental"
 }

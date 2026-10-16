@@ -184,5 +184,11 @@
   "locked": "Gesperrt",
   "lockedGuide": "Gesperrt. Geben Sie die PIN ein, um zu sehen, was läuft.",
   "unlock": "Entsperren",
-  "ribbonFailed": "Das Programm dieses Senders konnte nicht geladen werden"
+  "ribbonFailed": "Das Programm dieses Senders konnte nicht geladen werden",
+  "parentalHiddenChannels": "Der Jugendschutz blendet die Sender dieser Quelle aus",
+  "parentalHiddenStations": "Der Jugendschutz blendet die Radiosender dieser Quelle aus",
+  "parentalHiddenHint": "Ihre Gruppen sind gesperrt. Gib deine PIN ein, um sie für diese Sitzung anzuzeigen.",
+  "parentalUnlock": "Entsperren",
+  "parentalUnlockTitle": "Gesperrte Sender anzeigen",
+  "parentalUnlockBody": "Gib deine PIN ein, um gesperrte Gruppen und Sender anzuzeigen, bis der Jugendschutz wieder sperrt."
 }

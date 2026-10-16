@@ -38,6 +38,13 @@ async function openAllMovies(page: Page, search = ''): Promise<void> {
   await expect(grid(page)).toBeVisible();
 }
 
+/** Below 640 px the sort and the filter bar sit behind one Filters button (L2-vod-7). */
+async function openPhoneFilters(page: Page): Promise<void> {
+  const toggle = page.getByTestId('vod-filters-toggle');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function setHideWatched(page: Page, on: boolean): Promise<void> {
   await rpc(page.request, 'settings.update', { patch: { vodHideWatched: on } });
 }
@@ -142,6 +149,7 @@ test.describe('VOD year filter and watched', () => {
       const at = `${size.width} px`;
       await page.setViewportSize(size);
       await openAllMovies(page);
+      if (size.width < 640) await openPhoneFilters(page);
       const chips = yearGroup(page);
       await expect(chips.getByRole('button', { name: /^1920s, / })).toBeAttached();
       await settle(page);
@@ -173,6 +181,7 @@ test.describe('VOD year filter and watched', () => {
   test('the filter row fits a phone without scrolling the page sideways', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openAllMovies(page);
+    await openPhoneFilters(page);
     await expect(yearGroup(page)).toBeVisible();
     await settle(page);
     await expectNoHorizontalScroll(page, 'vod grid with filters at 390 px');

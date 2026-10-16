@@ -82,8 +82,41 @@ pub fn too_large_error(host: &str) -> CoreError {
 ///
 /// UTF-16 (a `FF FE` / `FE FF` byte order mark, or a NUL-interleaved
 /// `#EXTM3U`) is transcoded before any check, so its NUL bytes are not taken
-/// for binary data.
+/// for binary data. A gzip head (`1F 8B`: a compressed playlist served
+/// without `Content-Encoding`, the parser decompresses it) is judged by the
+/// bytes it decompresses to, whatever the content type says.
 pub fn sniff(head: &[u8], content_type: Option<&str>, host: &str) -> Option<CoreError> {
+    if crate::m3u::parser::is_gzip(head) {
+        let text = gunzip_head(head);
+        if text.is_empty() {
+            return Some(CoreError::Invalid(format!(
+                "{host} sent a compressed file that could not be unpacked, not an M3U playlist. Check the playlist URL."
+            )));
+        }
+        // The content type describes the compressed bytes.
+        return sniff_plain(&text, None, host);
+    }
+    sniff_plain(head, content_type, host)
+}
+
+/// The first [`SNIFF_BYTES`] that the start of a gzip stream decompresses to
+/// (the head is cut, so decoding stops with an error at its end).
+fn gunzip_head(head: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    let mut d = flate2::read::MultiGzDecoder::new(head);
+    let mut buf = [0u8; 1024];
+    while out.len() < SNIFF_BYTES {
+        match d.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+        }
+    }
+    out.truncate(SNIFF_BYTES);
+    out
+}
+
+fn sniff_plain(head: &[u8], content_type: Option<&str>, host: &str) -> Option<CoreError> {
     match crate::m3u::parser::utf16_text(head) {
         Some(text) => sniff_text(text.as_bytes(), content_type, host),
         None => sniff_text(head, content_type, host),

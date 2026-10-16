@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
+import { portalContainer } from './portal';
 
 export interface MenuAction {
   id: string;
@@ -31,6 +32,12 @@ export interface MenuProps {
   trigger?: ReactNode;
   triggerClassName?: string;
   align?: 'start' | 'end';
+  /**
+   * `block` (default): below the trigger (or above it). `inline-end`: beside the trigger on its
+   * inline-end side (right in LTR, left in RTL), top edges lined up; for a trigger in a narrow
+   * column such as the collapsed rail. `align` applies to `block` only.
+   */
+  placement?: 'block' | 'inline-end';
   className?: string;
 }
 
@@ -41,6 +48,21 @@ function isAction(i: MenuItem): i is MenuAction {
 /** Gap between trigger and menu, and the minimum distance kept from the viewport edge. */
 const GAP = 6;
 const MARGIN = 8;
+
+/** What takes focus when pressed: a press outside the menu on one of these keeps it there. */
+const CONTROL = [
+  'a[href]',
+  'area[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'iframe',
+  'audio[controls]',
+  'video[controls]',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 interface MenuAnchor {
   top: number;
@@ -53,22 +75,38 @@ interface MenuAnchor {
  * Where a menu of `size` opens next to its trigger. It drops below the
  * trigger, or opens upward when it would leave the viewport and there is more
  * room above; `align` lines it up with the trigger's start or end edge
- * (logical, so `end` is the left edge in RTL). The result is clamped so the
- * menu stays fully on screen. Exported for tests.
+ * (logical, so `end` is the left edge in RTL). With `placement: 'inline-end'`
+ * it opens beside the trigger instead, on its inline-end side (the other side
+ * when that has more room), top edges lined up, or bottom edges near the
+ * bottom of the screen. The result is clamped so the menu stays fully on
+ * screen. Exported for tests.
  */
 export function placeMenu(
   anchor: MenuAnchor,
   size: { width: number; height: number },
   viewport: { width: number; height: number },
-  opts: { align: 'start' | 'end'; rtl: boolean },
-): { top: number; left: number; side: 'below' | 'above' } {
+  opts: { align: 'start' | 'end'; rtl: boolean; placement?: 'block' | 'inline-end' },
+): { top: number; left: number; side: 'below' | 'above' | 'inline-end' | 'inline-start' } {
+  const clamp = (v: number, max: number) => Math.max(MARGIN, Math.min(v, max - MARGIN));
+  if (opts.placement === 'inline-end') {
+    const roomRight = viewport.width - anchor.right - GAP - MARGIN;
+    const roomLeft = anchor.left - GAP - MARGIN;
+    const endRoom = opts.rtl ? roomLeft : roomRight;
+    const startRoom = opts.rtl ? roomRight : roomLeft;
+    const side = size.width > endRoom && startRoom > endRoom ? 'inline-start' : 'inline-end';
+    const toRight = (side === 'inline-end') !== opts.rtl;
+    const left = toRight ? anchor.right + GAP : anchor.left - GAP - size.width;
+    const below = viewport.height - anchor.top - MARGIN;
+    const above = anchor.bottom - MARGIN;
+    const top = size.height > below && above > below ? anchor.bottom - size.height : anchor.top;
+    return { top: clamp(top, viewport.height - size.height), left: clamp(left, viewport.width - size.width), side };
+  }
   const below = viewport.height - anchor.bottom - GAP - MARGIN;
   const above = anchor.top - GAP - MARGIN;
   const side = size.height > below && above > below ? 'above' : 'below';
   let top = side === 'below' ? anchor.bottom + GAP : anchor.top - GAP - size.height;
   const alignRight = (opts.align === 'end') !== opts.rtl;
   let left = alignRight ? anchor.right - size.width : anchor.left;
-  const clamp = (v: number, max: number) => Math.max(MARGIN, Math.min(v, max - MARGIN));
   left = clamp(left, viewport.width - size.width);
   top = clamp(top, viewport.height - size.height);
   return { top, left, side };
@@ -79,7 +117,7 @@ export function placeMenu(
  * first item, ArrowUp opens on the last; roving focus with arrows, Home/End,
  * type-ahead; Escape/Tab close and restore focus to the trigger.
  */
-export function Menu({ items, label, trigger, triggerClassName, align = 'end', className }: MenuProps) {
+export function Menu({ items, label, trigger, triggerClassName, align = 'end', placement = 'block', className }: MenuProps) {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ rect: MenuAnchor; rtl: boolean } | null>(null);
@@ -109,9 +147,10 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
       placeMenu(anchor.rect, { width: size.width, height: size.height }, { width: window.innerWidth, height: window.innerHeight }, {
         align,
         rtl: anchor.rtl,
+        placement,
       }),
     );
-  }, [open, anchor, align, items.length]);
+  }, [open, anchor, align, placement, items.length]);
 
   const openMenu = (where: 'first' | 'last') => {
     focusOnOpen.current = where;
@@ -141,6 +180,12 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      // A press on another control leaves focus to it. Anywhere else (empty page, text, #main) the
+      // press would move focus to <body> or a container, so the trigger takes it back instead.
+      if (!(target instanceof Element && target.closest(CONTROL))) {
+        e.preventDefault();
+        triggerRef.current?.focus({ preventScroll: true });
+      }
       setOpen(false);
     };
     const onScroll = () => place();
@@ -297,7 +342,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', c
               <div className="px-3 py-2 text-sm text-fg-subtle">{t('noActions')}</div>
             )}
           </div>,
-          document.body,
+          portalContainer(),
         )}
     </>
   );

@@ -1,10 +1,11 @@
 //! Read side: programmes of a channel in a time range, now/next, grid rows,
-//! channel search. Only urls that are enabled contribute.
+//! channel search. Only urls that are enabled contribute, and one channel's
+//! programmes come from one url. A channel's `tvg-shift` moves its programmes.
 
 use super::store::STAGING_ORIGIN;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{EpgNowNext, EpgProgram};
-use rusqlite::{params, Connection};
+use crate::model::{EpgNowNext, EpgProgram, ItemRef};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 /// Programmes longer than this may be missed by range queries that start
@@ -56,8 +57,68 @@ struct Row {
     icon: Option<String>,
 }
 
+/// Largest `tvg-shift` applied, in hours either way.
+pub const MAX_SHIFT_HOURS: f64 = 24.0;
+
+/// A `tvg-shift` value (hours, may be fractional or signed: "1", "+1.5",
+/// "-2", "0,5") in seconds; 0 when unusable or beyond [`MAX_SHIFT_HOURS`].
+pub fn parse_shift(value: &str) -> i64 {
+    value
+        .trim()
+        .replace(',', ".")
+        .parse::<f64>()
+        .ok()
+        .filter(|h| h.is_finite() && h.abs() <= MAX_SHIFT_HOURS)
+        .map_or(0, |h| (h * 3600.0).round() as i64)
+}
+
+/// The `tvg-shift` of a catalog item in seconds (`extraJson.tvgShift`, set
+/// by the M3U import); 0 for items without one.
+pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
+    let extra: Option<String> = conn
+        .query_row(
+            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+            params![r.source_id, r.content_type.as_str(), r.item_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let shift = extra
+        .and_then(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
+        .and_then(|v| match v.get("tvgShift")? {
+            serde_json::Value::String(s) => Some(parse_shift(s)),
+            serde_json::Value::Number(n) => Some(parse_shift(&n.to_string())),
+            _ => None,
+        });
+    Ok(shift.unwrap_or(0))
+}
+
+/// The feed a channel's programmes come from: the first enabled url (by
+/// rowid) with a programme of channel `?1` that starts in `[?2, ?3)` (the
+/// range plus the lookback before it) and still runs after `?4` (the range
+/// start). `+p.stop` keeps the plan on the `(channel_id, start)` index.
+pub const FEED_SQL: &str = "SELECT p.epg_url FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
+     WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND +p.stop > ?4 AND p.stop > p.start
+       AND s.enabled = 1 AND s.origin <> ?5
+     ORDER BY s.rowid LIMIT 1";
+/// The last programme of the feed starting in the lookback (zero-length rows
+/// are skipped here as [`tidy`] skips them: they clip nothing).
+pub const BEFORE_SQL: &str =
+    "SELECT start, stop, title, description, category, icon FROM epg_programs
+     WHERE epg_url = ?1 AND channel_id = ?2 AND start >= ?3 AND start < ?4 AND stop > start
+     ORDER BY start DESC LIMIT 1";
+/// The feed's programmes starting in the range.
+pub const INSIDE_SQL: &str =
+    "SELECT start, stop, title, description, category, icon FROM epg_programs
+     WHERE epg_url = ?1 AND channel_id = ?2 AND start >= ?3 AND start < ?4
+     ORDER BY start LIMIT ?5";
+
 /// Tidied programmes of `channel_id` overlapping `[from, to)`, at most
-/// `limit`.
+/// `limit`, moved by `shift` seconds (the channel's `tvg-shift`): the range
+/// is in channel time, the guide is read at `[from - shift, to - shift)`.
+///
+/// Every row comes from one feed ([`FEED_SQL`]): two guide urls covering
+/// the same channel cut the schedule differently, and tidying their rows
+/// against each other left sliver programmes.
 ///
 /// After [`tidy`], a programme that starts before `from` can only still be
 /// running at `from` when it is the LAST one to start before `from` (any
@@ -72,7 +133,25 @@ fn rows(
     from: i64,
     to: i64,
     limit: i64,
+    shift: i64,
 ) -> CoreResult<Vec<Row>> {
+    let (from, to) = (from - shift, to - shift);
+    let feed: Option<String> = conn
+        .prepare_cached(FEED_SQL)?
+        .query_row(
+            params![
+                channel_id,
+                from - MAX_PROGRAMME_SECS,
+                to,
+                from,
+                STAGING_ORIGIN
+            ],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(feed) = feed else {
+        return Ok(Vec::new());
+    };
     let map = |r: &rusqlite::Row<'_>| {
         Ok(Row {
             start: r.get(0)?,
@@ -83,34 +162,25 @@ fn rows(
             icon: r.get(5)?,
         })
     };
-    // Zero-length rows are skipped here as tidy skips them: they clip nothing.
-    let mut before = conn.prepare_cached(
-        "SELECT p.start, p.stop, p.title, p.description, p.category, p.icon
-         FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
-         WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND p.stop > p.start
-           AND s.enabled = 1 AND s.origin <> ?4
-         ORDER BY p.start DESC, s.rowid LIMIT 1",
-    )?;
+    let mut before = conn.prepare_cached(BEFORE_SQL)?;
     let mut list: Vec<Row> = before
         .query_map(
-            params![channel_id, from - MAX_PROGRAMME_SECS, from, STAGING_ORIGIN],
+            params![feed, channel_id, from - MAX_PROGRAMME_SECS, from],
             map,
         )?
         .collect::<Result<_, _>>()?;
-    let mut inside = conn.prepare_cached(
-        "SELECT p.start, p.stop, p.title, p.description, p.category, p.icon
-         FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
-         WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3
-           AND s.enabled = 1 AND s.origin <> ?4
-         ORDER BY p.start, s.rowid LIMIT ?5",
-    )?;
-    for r in inside.query_map(params![channel_id, from, to, STAGING_ORIGIN, limit], map)? {
+    let mut inside = conn.prepare_cached(INSIDE_SQL)?;
+    for r in inside.query_map(params![feed, channel_id, from, to, limit], map)? {
         list.push(r?);
     }
     let mut out = tidy(list);
     // A clipped programme may now end before the range.
     out.retain(|r| r.stop > from);
     out.truncate(limit.max(0) as usize);
+    for r in &mut out {
+        r.start += shift;
+        r.stop += shift;
+    }
     Ok(out)
 }
 
@@ -148,23 +218,31 @@ fn to_program(channel_id: &str, r: Row) -> EpgProgram {
     }
 }
 
-/// Programmes of `channel_id` overlapping `[from, to)`, in start order.
+/// Programmes of `channel_id` overlapping `[from, to)`, in start order,
+/// moved by `shift` seconds (the channel's `tvg-shift`, see [`item_shift`]).
 pub fn programs(
     conn: &Connection,
     channel_id: &str,
     from: i64,
     to: i64,
+    shift: i64,
 ) -> CoreResult<Vec<EpgProgram>> {
-    Ok(rows(conn, channel_id, from, to, MAX_PER_CHANNEL)?
+    Ok(rows(conn, channel_id, from, to, MAX_PER_CHANNEL, shift)?
         .into_iter()
         .map(|r| to_program(channel_id, r))
         .collect())
 }
 
-/// Current and next programme of `channel_id` at `now`.
-pub fn now_next(conn: &Connection, channel_id: &str, now: i64) -> CoreResult<EpgNowNext> {
+/// Current and next programme of `channel_id` at `now`, moved by `shift`
+/// seconds (the channel's `tvg-shift`).
+pub fn now_next(
+    conn: &Connection,
+    channel_id: &str,
+    now: i64,
+    shift: i64,
+) -> CoreResult<EpgNowNext> {
     // A day ahead is plenty to find "next"; the limit bounds the work.
-    let list = rows(conn, channel_id, now, now + 86_400, 16)?;
+    let list = rows(conn, channel_id, now, now + 86_400, 16, shift)?;
     let mut out = EpgNowNext::default();
     let mut it = list.into_iter().peekable();
     while let Some(r) = it.next() {
@@ -297,14 +375,14 @@ mod tests {
             .collect();
         progs.push((now + h, now + 2 * h, "later"));
         let conn = guide(&progs);
-        let nn = now_next(&conn, "c", now).unwrap();
+        let nn = now_next(&conn, "c", now, 0).unwrap();
         let on = nn.now.expect("a programme is on");
         assert_eq!(on.title, "p19");
         assert_eq!(on.start, to_rfc3339(now - h));
         assert_eq!(on.end, to_rfc3339(now + h), "clipped at the next start");
         assert_eq!(nn.next.unwrap().title, "later");
         // epg.programs agrees.
-        let list = programs(&conn, "c", now, now + 1).unwrap();
+        let list = programs(&conn, "c", now, now + 1, 0).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "p19");
     }
@@ -319,7 +397,7 @@ mod tests {
             (from - 3600, from + 3600, "on"),
             (from + 3600, from + 7200, "after"),
         ]);
-        let list = programs(&conn, "c", from, from + 7200).unwrap();
+        let list = programs(&conn, "c", from, from + 7200, 0).unwrap();
         let titles: Vec<_> = list.iter().map(|p| p.title.as_str()).collect();
         assert_eq!(titles, ["on", "after"]);
         // A zero-length last row before the range does not hide the one on air.
@@ -327,7 +405,10 @@ mod tests {
             (from - 3600, from + 3600, "on"),
             (from - 60, from - 60, "zero"),
         ]);
-        assert_eq!(now_next(&conn, "c", from).unwrap().now.unwrap().title, "on");
+        assert_eq!(
+            now_next(&conn, "c", from, 0).unwrap().now.unwrap().title,
+            "on"
+        );
     }
 
     #[test]

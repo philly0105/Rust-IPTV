@@ -13,7 +13,7 @@ Code: `crates/iptv-core/src/epg/search.rs` (core), migration `crates/iptv-core/s
 - `query`: 2 to 100 characters after trimming. Every word of the query (a run of letters and digits, lowercased, diacritics removed, final sigma read as sigma) must start a word of the title, so `cafe soc` finds "Café Society" and "CAFE SOCIETY" but `afe` finds nothing. Diacritics are removed as Unicode NFD does (`tmdb::normalize::strip_diacritics`, a table generated from the Unicode decomposition data), so `ελληνικα` finds "Ελληνικά" and `thoi su` finds "Thời sự".
 - `from` and `to`: RFC 3339. `from` defaults to now, `to` to `from` + 14 days; `to` must be after `from` and at most 16 days later. A programme matches when it overlaps the window (`stop > from` and `start < to`), so the one on air at `from` counts.
 - `limit`: 1 to 200, default 50.
-- `program.start` and `program.end` are raw guide times, like `epg.programs`; the UI applies `epgOffsetMinutes`.
+- `program.start` and `program.end` are guide times moved by the hit channel's `tvg-shift` (`query::item_shift`, read once per channel), as `epg.programs` and `epg.grid` return them, so a hit shows the same time as the grid cell it opens. The UI applies `epgOffsetMinutes`.
 - Errors: `invalid` for bad arguments (including an empty `sourceId`), `not_found` for an unknown source.
 
 ## Which channels a hit belongs to
@@ -31,7 +31,7 @@ Left out:
 - parental-locked channels and channels in locked or adult categories while hide mode is on (`parental::filter::scoped` in the same query). They never become candidates, so any number of hits on locked channels cannot push a visible hit past the limit;
 - disabled feeds and the staging rows of a refresh in progress.
 
-Order: programme start, then channel number (channels without one last), then channel name, then item id.
+Order: programme start, then channel number (channels without one last), then channel name, then item id. Because a shift can move a hit past others, the hits are sorted again by their shifted start (a stable sort, so equal starts keep the channel order).
 
 ## The index
 

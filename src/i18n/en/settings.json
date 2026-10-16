@@ -238,7 +238,7 @@
   "backupNoSecrets": "This backup has no passwords. Xtream and Stalker sources will need them re-entered.",
   "backupMode": "Import mode",
   "backupMerge": "Merge",
-  "backupMergeHint": "Adds sources from the file and keeps the ones you have.",
+  "backupMergeHint": "Adds sources from the file. Sources you already have keep their names and settings.",
   "backupReplace": "Replace",
   "backupReplaceHint": "Imports the backup first, then removes your current sources once one of its sources loads.",
   "backupImportButton": "Import backup",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "Replace",
   "backupImportFailed": "Couldn't import the backup",
   "backupResult": "Added or updated: {{imported}}. Skipped: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} playlist is still loading; its favorites and history appear when it finishes.",
+  "backupRefreshing_other": "{{count, number}} playlists are still loading; their favorites and history appear as each one finishes.",
   "backupWarnings_one": "{{count}} warning",
   "backupWarnings_other": "{{count}} warnings",
   "backupNotJson": "This file isn't valid JSON.",
@@ -352,10 +354,10 @@
   "railsOffHint": "Turn on the dashboard to use these rows.",
 
   "resetGroup": "Reset",
-  "resetHint": "Puts every setting back to its default. Sources, favorites, history and downloads stay.",
+  "resetHint": "Puts every setting back to its default. Sources, favorites, history, downloads, guide addresses and the TMDB key stay.",
   "resetButton": "Reset settings",
   "resetConfirmTitle": "Reset all settings?",
-  "resetConfirmBody": "Every setting goes back to its default, including language, theme and player paths. Sources, favorites, history and downloads stay.",
+  "resetConfirmBody": "Every setting goes back to its default, including language, theme and player paths. Sources, favorites, history, downloads, guide addresses and the TMDB key stay.",
   "resetConfirm": "Reset",
   "resetDone": "Settings reset to defaults",
   "resetFailed": "Couldn't reset settings",
@@ -443,5 +445,10 @@
   "backupOldVersion": "This backup uses an older format that can't be read. Export a new backup and import that.",
   "backupImportDone": "Backup imported",
   "backupReplacePinTitle": "Enter the PIN to replace sources",
-  "backupReplacePinText": "Replacing removes your current sources and their parental locks, so it needs the parental PIN."
+  "backupReplacePinText": "Replacing removes your current sources and their parental locks, so it needs the parental PIN.",
+  "backupParentalTitle": "This backup changes parental controls",
+  "backupParentalBody": "Parental controls are locked, so the backup's parental options need the PIN. Enter it to import everything, or import the rest and keep your current parental options.",
+  "backupParentalSkip": "Import without them",
+  "backupParentalUnlock": "Enter PIN and import",
+  "backupParentalPinTitle": "Enter the PIN to import parental options"
 }

@@ -177,14 +177,16 @@ export interface SourceSearch {
  * Per-source hit counts across all groups, largest first, for the source
  * filter chips.
  *
- * The global search ranks every source together, so when a type hits its cap
- * (`more`, from `capSearchResult`) a source's share of that list says nothing
- * about how many of its own hits were cut. `perSource` holds each source
- * searched alone (the same query its facet runs); where a type is capped,
- * a source with an entry there takes its count from it, reading "N+" only
- * when its own search hit the cap (then the larger of the two counts), and a source with no global hits can
- * still get a chip. A source without an entry yet falls back to its global
- * share, marked partial when it contributes to a capped type.
+ * Counts come from the global search, whose hits each carry their source. It
+ * ranks every source together, so when a type hits its cap (`more`, from
+ * `capSearchResult`) a source's share of that list is only a lower bound:
+ * every source with hits in a capped type is marked partial ("N+").
+ * `perSource` holds sources already searched alone (the search page passes
+ * the picked facet, whose own results are on screen; no source is searched
+ * just to count it). Where a type is capped, a source with an entry takes its
+ * count from it, reading "N+" only when its own search hit the cap (then the
+ * larger of the two counts), and a source with no global hits can still get a
+ * chip.
  */
 export function sourceFacets(groups: SearchGroup[], more?: SearchMore, perSource?: ReadonlyMap<string, SourceSearch>): SourceFacet[] {
   const map = new Map<string, SourceFacet>();

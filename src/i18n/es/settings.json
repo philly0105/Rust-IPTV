@@ -240,7 +240,7 @@
   "backupNoSecrets": "Esta copia de seguridad no tiene contraseñas. Tendrás que volver a introducirlas en las fuentes Xtream y Stalker.",
   "backupMode": "Modo de importación",
   "backupMerge": "Combinar",
-  "backupMergeHint": "Añade las fuentes del archivo y conserva las que ya tienes.",
+  "backupMergeHint": "Añade las fuentes del archivo. Las que ya tienes conservan sus nombres y ajustes.",
   "backupReplace": "Reemplazar",
   "backupReplaceHint": "Importa primero la copia y quita tus fuentes actuales cuando una de sus fuentes se carga.",
   "backupImportButton": "Importar copia de seguridad",
@@ -250,6 +250,9 @@
   "backupReplaceConfirm": "Reemplazar",
   "backupImportFailed": "No se pudo importar la copia de seguridad",
   "backupResult": "Añadidas o actualizadas: {{imported}}. Omitidas: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} lista sigue cargando; sus favoritos e historial aparecerán cuando termine.",
+  "backupRefreshing_many": "{{count, number}} listas siguen cargando; los favoritos e historial de cada una aparecerán cuando termine.",
+  "backupRefreshing_other": "{{count, number}} listas siguen cargando; los favoritos e historial de cada una aparecerán cuando termine.",
   "backupWarnings_one": "{{count}} advertencia",
   "backupWarnings_many": "{{count}} advertencias",
   "backupWarnings_other": "{{count}} advertencias",
@@ -356,10 +359,10 @@
   "railsOffHint": "Activa el panel de inicio para usar estas filas.",
 
   "resetGroup": "Restablecer",
-  "resetHint": "Devuelve cada ajuste a su valor predeterminado. Fuentes, favoritos, historial y descargas se mantienen.",
+  "resetHint": "Devuelve cada ajuste a su valor predeterminado. Fuentes, favoritos, historial y descargas se mantienen. También se conservan las direcciones de la guía y la clave de TMDB.",
   "resetButton": "Restablecer ajustes",
   "resetConfirmTitle": "¿Restablecer todos los ajustes?",
-  "resetConfirmBody": "Cada ajuste vuelve a su valor predeterminado, incluidos idioma, tema y rutas de reproductores. Fuentes, favoritos, historial y descargas se mantienen.",
+  "resetConfirmBody": "Cada ajuste vuelve a su valor predeterminado, incluidos idioma, tema y rutas de reproductores. Fuentes, favoritos, historial y descargas se mantienen. También se conservan las direcciones de la guía y la clave de TMDB.",
   "resetConfirm": "Restablecer",
   "resetDone": "Ajustes restablecidos",
   "resetFailed": "No se pudieron restablecer los ajustes",
@@ -448,5 +451,10 @@
   "backupOldVersion": "Esta copia de seguridad usa un formato antiguo que no se puede leer. Exporta una copia nueva e impórtala.",
   "backupImportDone": "Copia de seguridad importada",
   "backupReplacePinTitle": "Introduce el PIN para reemplazar las fuentes",
-  "backupReplacePinText": "Reemplazar elimina tus fuentes actuales y sus bloqueos parentales, así que necesita el PIN del control parental."
+  "backupReplacePinText": "Reemplazar elimina tus fuentes actuales y sus bloqueos parentales, así que necesita el PIN del control parental.",
+  "backupParentalTitle": "Esta copia cambia el control parental",
+  "backupParentalBody": "El control parental está bloqueado, así que sus opciones de la copia necesitan el PIN. Introdúcelo para importarlo todo, o importa el resto y conserva tus opciones actuales.",
+  "backupParentalSkip": "Importar sin ellas",
+  "backupParentalUnlock": "Introducir PIN e importar",
+  "backupParentalPinTitle": "Introduce el PIN para importar las opciones del control parental"
 }

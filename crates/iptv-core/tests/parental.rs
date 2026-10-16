@@ -2337,3 +2337,85 @@ async fn hide_mode_queries_on_50k_channels_stay_fast() {
     assert!(n["next"].is_object() && n["prev"].is_object(), "{n}");
     assert!(took < QUERY_BUDGET, "neighbors took {took:?}");
 }
+
+/// L1-settings-13: the Lock groups dialog asks for every group, locked ones
+/// included, in provider order and with their full counts, without the PIN.
+/// Only categories (names and counts) come back; item reads stay filtered.
+#[tokio::test]
+async fn include_locked_lists_every_group_in_provider_order_while_locked() {
+    let a = hidden_app().await;
+    let rows = |cats: &Value| -> Vec<(String, i64)> {
+        cats.as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    c["id"].as_str().unwrap().to_string(),
+                    c["itemCount"].as_i64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let hidden = a
+        .call(
+            "catalog.categories",
+            json!({"sourceId": "s1", "contentType": "live"}),
+        )
+        .await;
+    assert_eq!(
+        rows(&hidden),
+        [("news".into(), 1), ("kids".into(), 1), ("swim".into(), 1)]
+    );
+    let all = a
+        .call(
+            "catalog.categories",
+            json!({"sourceId": "s1", "contentType": "live", "includeLocked": true}),
+        )
+        .await;
+    assert_eq!(
+        rows(&all),
+        [
+            ("news".into(), 2),
+            ("kids".into(), 1),
+            ("xxx".into(), 1),
+            ("swim".into(), 1),
+            ("sports".into(), 2)
+        ]
+    );
+    // The flag reveals no item: the locked group's channels stay out.
+    let e = a
+        .err("catalog.item", json!({"ref": rf("s1", "live", "p1")}))
+        .await;
+    assert_eq!(e.code, RpcErrorCode::NotFound);
+}
+
+/// L2-settings-8: while locked, a backup whose parental options match the
+/// current ones applies nothing and warns about nothing; one that would
+/// change them still says it was skipped.
+#[tokio::test]
+async fn a_locked_restore_of_matching_options_does_not_warn() {
+    let a = hidden_app().await;
+    let status = a.call("parental.status", Value::Null).await;
+    let same = json!({
+        "mode": status["mode"],
+        "autoAdult": status["autoAdult"],
+        "unlockMinutes": status["unlockMinutes"],
+    });
+    let mut warnings = Vec::new();
+    let applied = iptv_core::parental::restore_options(&a.state, &same, &mut warnings)
+        .await
+        .unwrap();
+    assert!(!applied);
+    assert!(warnings.is_empty(), "{warnings:?}");
+
+    let other = !status["autoAdult"].as_bool().unwrap();
+    let changed = json!({ "mode": status["mode"], "autoAdult": other });
+    let applied = iptv_core::parental::restore_options(&a.state, &changed, &mut warnings)
+        .await
+        .unwrap();
+    assert!(!applied);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("not applied"), "{warnings:?}");
+    let after = a.call("parental.status", Value::Null).await;
+    assert_eq!(after["autoAdult"], status["autoAdult"]);
+}

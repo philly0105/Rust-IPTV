@@ -1,6 +1,6 @@
 # Xtream Codes
 
-Code: `crates/iptv-core/src/xtream/`. Tests: `crates/iptv-core/tests/xtream_registry.rs`, `xtream_flow.rs`, `xtream_errors.rs`, `xtream_sync_lock.rs` (shared harness and embedded stub in `xtream_stub.rs`), plus unit tests in every module.
+Code: `crates/iptv-core/src/xtream/`. Tests: `crates/iptv-core/tests/xtream_registry.rs`, `xtream_flow.rs`, `xtream_errors.rs`, `xtream_sync_lock.rs` (shared harness and embedded stub in `xtream_stub.rs`), `l2_import_sync.rs` (unchanged refresh, partial failures), plus unit tests in every module.
 
 The client talks to `player_api.php` on an Xtream panel, imports live channels, radio, movies and series into the shared catalog, and builds stream, catch-up and EPG data on demand. Panels disagree about types, so every wire field is parsed leniently.
 
@@ -38,12 +38,28 @@ The client talks to `player_api.php` on an Xtream panel, imports live channels, 
 
 1. Fetch the account (`player_api.php` with no action). `user_info.auth == 0` (or missing user info) is an `Auth` error and aborts.
 2. Store `ServerMeta` in memory and in `app_state` under `xtream_meta:<sourceId>`, so URLs work after a restart without a fresh login.
-3. For live, movies, then series: fetch categories and the list concurrently, decode on the blocking pool, map rows and write with `catalog::replace_catalog`. Live rows with `stream_type` `radio_streams` go to the radio content type. One type at a time keeps peak memory to a single list.
-4. Auth, Network and Timeout abort the sync. Any other failure in one type logs a warning and moves on; the sync fails only if every type failed.
-5. Add `{server}/xmltv.php?username=..&password=..` to `epg.detectedUrls`, replacing an older xmltv link for the same server.
-6. Progress events (`fetching`, `parsing`, `saving`) are emitted every 2000 items.
+3. For live, movies, then series: fetch categories and the list concurrently, decode on the blocking pool and map rows. Live rows with `stream_type` `radio_streams` go to the radio content type. Each type's raw body is dropped before the next type is fetched; the mapped rows are held until the write.
+4. Write every type that changed in one Immediate transaction (`sync::replace_catalogs_with`, through `CatalogWriter`), together with the fingerprints (see Unchanged refresh). A cancel or failure before the commit leaves the previous catalog of every type whole.
+5. Auth, Network, Server and Timeout abort the sync, and nothing is written. Any other failure in one type logs a warning and keeps that type's previous rows (see Partial failures); the sync fails only if every type failed.
+6. Add `{server}/xmltv.php?username=..&password=..` to `epg.detectedUrls`, replacing an older xmltv link for the same server.
+7. Progress events (`fetching`, `parsing`, `saving`) are emitted every 2000 items.
 
-Each `replace_catalog` call runs in its own Immediate transaction (through `CatalogWriter`), so a failed type keeps its previous rows. The importer never emits `done` / `error` progress and never writes `last_refresh_at` / `last_error`: `sources::run_import` owns the outcome, `sources.changed`, and the per-source lock. `xtream.sync` with `contentTypes` cannot go through the importer, so it runs inside `sources::run_import_with`, which takes the same per-source lock as `run_import`, and records the outcome itself with `sources::store::record_import`, `sources::progress` and `sources::emit_changed`. A subset sync and a full refresh of the same source therefore never interleave; whichever starts second waits. The source row is re-read under the lock. The lock is not reentrant, so nothing inside that block calls `run_import`.
+Types that are not written (unchanged, kept or failed) are left out of the transaction, so their rows stay as they were. The importer never emits `done` / `error` progress and never writes `last_refresh_at` / `last_error`: `sources::run_import` owns the outcome, `sources.changed`, and the per-source lock. `xtream.sync` with `contentTypes` cannot go through the importer, so it runs inside `sources::run_import_with`, which takes the same per-source lock as `run_import`, and records the outcome itself with `sources::store::record_import`, `sources::progress` and `sources::emit_changed`. A subset sync and a full refresh of the same source therefore never interleave; whichever starts second waits. The source row is re-read under the lock. The lock is not reentrant, so nothing inside that block calls `run_import`.
+
+### Unchanged refresh
+
+`sync::kind_hash` takes a sha256 of each type's panel answers: `SYNC_VERSION`, the type, its mapped categories (id, name, position) and the raw list body. The hash and the rows written per content type are stored as JSON in `app_state` under `xtream_fp:<sourceId>`, inside the catalog's write transaction, so they commit or roll back with the rows. On the next sync, a type whose hash matches and whose stored row counts still match the rows in `items` is neither decoded nor written; its summary counts come from the rows already there.
+
+When the sync has nothing to write, it takes no write lock and sets `ImportSummary.unchanged`. `run_import` then emits `done` with `message: "unchanged"` (`sources::UNCHANGED_MESSAGE`) and no `sources.changed`, so clients keep their catalog queries (sources.md). A subset `xtream.sync` skips unchanged types the same way, but its `done` carries no message and it always emits `sources.changed`.
+
+`SYNC_VERSION` (now 1) is part of every hash. Bump it whenever a change alters the rows a sync writes, as with `m3u::importer::IMPORT_VERSION`; otherwise panels whose answers did not change keep rows mapped by the old rules. The fingerprints are deleted with the source (`sources::store::delete`). A type written without its categories (below) loses its fingerprint, so the next refresh writes it again.
+
+### Partial failures
+
+- A type whose list fails with anything but Auth, Network, Server or Timeout (`NotFound`, unreadable JSON) keeps its previous rows. Unless the error is `NotFound` or `Unsupported`, which mean the panel does not serve the type, the sync notes a warning: "Movies could not be loaded from the server, so the previous movies were kept. Refresh the source to try again."
+- A type whose categories come back unreadable (a login or error page) keeps its previous rows and categories when it has rows. On a first import, its items are written under "Uncategorized" and no fingerprint is stored, so the next good refresh rewrites them with their real categories. Both cases note a warning naming the categories.
+- Warnings go through `sources::note_import_warning(message, code)`; only the first one of a run is kept. `run_import` records it as `lastError` (with `lastErrorCode` and `lastErrorAt`) right after recording the success, so the source says what is stale instead of looking fully refreshed. The run still ends with `done`.
+- A subset `xtream.sync` keeps rows the same way but does not record the warning: it clears `lastError` on success.
 
 Rows never store a stream URL, because it would contain the password. URLs are built at play time from the source config.
 
@@ -72,7 +88,7 @@ Guide fallback (`catchup/`): `epg.shortEpg {ref, limit?}` returns the programmes
 
 ## Errors, retries, secrets
 
-- Requests go through `http::with_retry` (3 attempts; 1 for `xtream.test`) and retry only Network and Timeout errors, which include 5xx responses.
+- Requests are retried like `http::with_retry` (3 attempts; 1 for `xtream.test`), only for errors `CoreError::is_retryable` accepts: Network, Timeout and Server (5xx). A refused connection, an unknown host and a bad certificate are Network errors that fail at once with their own next step. A request that used up its whole time budget is not retried either. The account check waits at most 10 s for the response head (`client::ACCOUNT_HEADER_TIMEOUT`), so a silent panel fails in about 10 s.
 - `From<reqwest::Error>` strips URLs, so error messages never contain the query string. Logs carry the server, a masked username (first character and `***`) and the action only. `XtreamClient` and `XtreamSourceConfig` redact the password in `Debug`.
 - `xtream.test` turns every error into a sentence naming the next step (check credentials, check the URL, try later).
 

@@ -22,11 +22,11 @@ interface QuickPick {
   logo?: string;
 }
 
-/** Live channels from Recent, then Favorites, without repeats. */
-function useQuickPicks(): QuickPick[] {
+/** Live channels from Recent, then Favorites, without repeats; `loading` until both lists answered. */
+function useQuickPicks(): { picks: QuickPick[]; loading: boolean } {
   const recent = useRpcQuery('recent.list', { limit: 24 }, { staleTime: 30_000 });
   const favorites = useRpcQuery('favorites.list', {}, { staleTime: 30_000 });
-  return useMemo(() => {
+  const picks = useMemo(() => {
     const out: QuickPick[] = [];
     const seen = new Set<string>();
     for (const e of [...(recent.data ?? []), ...(favorites.data ?? [])]) {
@@ -39,6 +39,33 @@ function useQuickPicks(): QuickPick[] {
     }
     return out;
   }, [recent.data, favorites.data]);
+  return { picks, loading: recent.isPending || favorites.isPending };
+}
+
+/** Name widths of the placeholder chips, varied like real channel names. */
+const SKELETON_NAMES = ['w-20', 'w-14', 'w-24', 'w-16'];
+
+/**
+ * The quick picks' shape while Recent and Favorites load: the title line and one row of chips
+ * at the chips' own height, so the picks take its place without moving the wall below
+ * (L2-visual-2). Decorative only; the picks announce themselves when they come.
+ */
+function QuickPicksSkeleton() {
+  return (
+    <div aria-hidden data-testid="multiview-quick-picks-skeleton" className="flex flex-col gap-2 motion-safe:animate-pulse">
+      <div className="flex h-[1lh] items-center text-sm">
+        <div className="h-3 w-48 max-w-full rounded-sm bg-surface-3" />
+      </div>
+      <div className="flex gap-2 overflow-hidden">
+        {SKELETON_NAMES.map((w) => (
+          <div key={w} className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-border bg-surface-2 ps-1 pe-3">
+            <div className="size-8 rounded-sm bg-surface-3" />
+            <div className={cn('h-3 rounded-sm bg-surface-3', w)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export interface EmptyIntroProps {
@@ -54,7 +81,7 @@ export interface EmptyIntroProps {
  */
 export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
   const { t } = useTranslation('multiview');
-  const picks = useQuickPicks();
+  const { picks, loading } = useQuickPicks();
   const [pending, setPending] = useState<string | null>(null);
 
   const quickAdd = async (p: QuickPick) => {
@@ -118,20 +145,30 @@ export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
         </div>
       </div>
 
-      {picks.length > 0 ? (
+      {loading ? (
+        <QuickPicksSkeleton />
+      ) : picks.length > 0 ? (
         <div className="flex flex-col gap-2">
           <h3 id="multiview-quick-title" className="text-sm font-medium text-fg-muted">
             {t('quickPicksTitle')}
           </h3>
-          <ul aria-labelledby="multiview-quick-title" className="flex flex-wrap gap-2" data-testid="multiview-quick-picks">
+          {/* One row at the skeleton's height whatever the count: narrow it scrolls sideways
+              (the padding keeps focus rings unclipped), with room the chips shorten their
+              names to fit instead of wrapping. */}
+          <ul
+            aria-labelledby="multiview-quick-title"
+            className="-m-0.5 flex gap-2 overflow-x-auto p-0.5 scrollbar-none @2xl/intro:overflow-visible"
+            data-testid="multiview-quick-picks"
+          >
             {picks.map((p) => {
               const k = itemKey(p.ref);
               const busy = pending === k;
               return (
-                <li key={k} className="min-w-0 max-w-full">
+                <li key={k} className="max-w-[14rem] min-w-0 shrink-0 @2xl/intro:max-w-full @2xl/intro:shrink">
                   <button
                     type="button"
                     aria-label={t('pickerAddLabel', { name: p.title })}
+                    title={p.title}
                     aria-busy={busy || undefined}
                     disabled={pending !== null && !busy}
                     onClick={() => void quickAdd(p)}

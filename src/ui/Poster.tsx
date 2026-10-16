@@ -1,8 +1,9 @@
 import { Clapperboard, Radio, Tv } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 
 import { cn } from './cn';
 import { useImageChain } from './image';
+import { pauseWhenOffscreen } from './offscreen';
 
 export type PosterAspect = 'poster' | 'wide' | 'square';
 
@@ -63,6 +64,23 @@ export function initialsOf(text: string): string {
   return (words[0]![0]! + words[1]![0]!).toUpperCase();
 }
 
+/** A load this soon after the picture mounted came from a cache: it shows at once, without the fade. */
+export const INSTANT_REVEAL_MS = 120;
+
+/** URLs that already loaded in this session; a remount (Back, a re-render of a rail) shows them at once. */
+const revealed = new Set<string>();
+const REVEALED_MAX = 2000;
+
+function rememberRevealed(url: string): void {
+  if (revealed.size >= REVEALED_MAX) revealed.clear();
+  revealed.add(url);
+}
+
+/** Test hook: forget which pictures already loaded. */
+export function forgetRevealedPosters(): void {
+  revealed.clear();
+}
+
 /**
  * Artwork frame with lazy loading, a fade-in reveal, and a designed fallback
  * tile (initials on a per-title tint plus a glyph) when the image is missing
@@ -72,7 +90,11 @@ export function initialsOf(text: string): string {
  * route errors, the original URL is tried once, then `fallbackSrc` the same
  * way, and only then the initials tile. The reveal animates opacity only: a
  * blur or scale transition on every card of a grid costs a filter pass per
- * card per frame (C5, src/perf-budget.test.ts).
+ * card per frame (C5, src/perf-budget.test.ts). Only a slow network load
+ * fades (150 ms): a picture that is already decoded, loaded before in this
+ * session, or arrives within {@link INSTANT_REVEAL_MS} of mounting shows at
+ * once, so cached artwork never waits on the fade (L2-perf-desktop-9). The
+ * placeholder's shimmer stops while the frame is out of view (offscreen.ts).
  */
 export function Poster({
   src,
@@ -91,9 +113,24 @@ export function Poster({
 }: PosterProps) {
   const image = useImageChain([src, fallbackSrc], sourceId);
   // Keyed by URL so a new attempt or a new picture never inherits the previous one's state.
-  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<{ url: string; instant: boolean } | null>(null);
   const url = image.url;
-  const state: 'loading' | 'loaded' | 'error' = !url ? 'error' : loadedUrl === url ? 'loaded' : 'loading';
+  const state: 'loading' | 'loaded' | 'error' = !url ? 'error' : loaded?.url === url ? 'loaded' : 'loading';
+  const instant = state === 'loaded' && loaded!.instant;
+  const mountedAt = useRef(0);
+  // One element per URL (key below), so this runs once per attempt.
+  const imgRef = useCallback(
+    (el: HTMLImageElement | null) => {
+      if (!el || !url) return;
+      mountedAt.current = performance.now();
+      // Already decoded (memory cache): show it in this commit, before the first paint.
+      if (el.complete && el.naturalWidth > 0) {
+        rememberRevealed(url);
+        setLoaded({ url, instant: true });
+      }
+    },
+    [url],
+  );
 
   const fallbackText = label ?? alt;
   const hue = hueOf(fallbackText);
@@ -118,6 +155,7 @@ export function Poster({
             'absolute inset-0 flex flex-col items-center justify-center gap-1',
             state === 'loading' && 'skeleton-surface motion-safe:animate-shimmer',
           )}
+          ref={state === 'loading' ? pauseWhenOffscreen : undefined}
           style={
             state === 'error'
               ? {
@@ -145,6 +183,7 @@ export function Poster({
         <img
           // A new element per attempt: the browser never shows the failed attempt's broken-image box.
           key={url}
+          ref={imgRef}
           src={url}
           alt={alt}
           loading={priority || eager ? 'eager' : 'lazy'}
@@ -153,12 +192,16 @@ export function Poster({
           draggable={false}
           referrerPolicy="no-referrer"
           data-poster-state={state}
-          onLoad={() => setLoadedUrl(url)}
+          onLoad={() => {
+            const fast = revealed.has(url) || performance.now() - mountedAt.current < INSTANT_REVEAL_MS;
+            rememberRevealed(url);
+            setLoaded((prev) => (prev?.url === url ? prev : { url, instant: fast }));
+          }}
           onError={image.onError}
           className={cn(
             'absolute inset-0 h-full w-full',
             fit === 'cover' ? 'object-cover' : 'object-contain p-[12%]',
-            'motion-safe:transition-opacity motion-safe:duration-300 motion-safe:ease-out',
+            !instant && 'motion-safe:transition-opacity motion-safe:duration-150 motion-safe:ease-out',
             state === 'loaded' ? 'opacity-100' : 'opacity-0',
           )}
         />

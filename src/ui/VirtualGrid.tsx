@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
 import { scalePx, useDensity, useUiScale } from './scale';
@@ -18,6 +18,39 @@ export function gridLayout(width: number, minColumnWidth: number, gap: number): 
   const cellWidth = columns > 0 ? (width - gap * (columns - 1)) / columns : width;
   return { columns, cellWidth: Math.max(0, cellWidth) };
 }
+
+interface GridSlotProps {
+  item: unknown;
+  index: number;
+  id: string;
+  active: boolean;
+  selected: boolean;
+  setSize: number;
+  render: (item: unknown, index: number, state: VirtualItemState) => ReactNode;
+  onPick: (index: number) => void;
+}
+
+/**
+ * One cell. Memoised with primitive props and a stable click handler, so a scroll that only
+ * moves the window re-renders the rows that enter it, not every cell already on screen.
+ */
+const GridSlot = memo(function GridSlot({ item, index, id, active, selected, setSize, render, onPick }: GridSlotProps) {
+  return (
+    <div
+      id={id}
+      role="option"
+      aria-selected={active || selected}
+      aria-posinset={index + 1}
+      aria-setsize={setSize}
+      data-index={index}
+      data-active={active || undefined}
+      className="min-w-0"
+      onClick={() => onPick(index)}
+    >
+      {render(item, index, { active, selected })}
+    </div>
+  );
+});
 
 export interface VirtualGridProps<T> {
   items: readonly T[];
@@ -114,6 +147,9 @@ export function VirtualGrid<T>({
     estimateSize: () => rowHeight + gap,
     overscan,
     initialRect,
+    // A scroll event renders in the next frame with the others, not synchronously inside the
+    // event (L2-vod-1: flushSync per event made a fast scroll a string of 50-100 ms tasks).
+    useFlushSync: false,
   });
 
   useEffect(() => {
@@ -185,6 +221,15 @@ export function VirtualGrid<T>({
   };
 
   const cellId = (i: number) => `${baseId}-cell-${i}`;
+  // The latest items and onSelect for the cells' shared, stable click handler.
+  const latest = useRef({ items, onSelect });
+  latest.current = { items, onSelect };
+  const onPick = useCallback((index: number) => {
+    const { items: list, onSelect: select } = latest.current;
+    setActive(index);
+    if (index < list.length) select?.(list[index]!, index);
+  }, []);
+  const renderCell = render as GridSlotProps['render'];
 
   return (
     <div
@@ -224,25 +269,18 @@ export function VirtualGrid<T>({
             >
               {cells.map((item, j) => {
                 const index = start + j;
-                const state = { active: index === active, selected: index === selectedIndex };
                 return (
-                  <div
+                  <GridSlot
                     key={getKey ? getKey(item, index) : index}
+                    item={item}
+                    index={index}
                     id={cellId(index)}
-                    role="option"
-                    aria-selected={state.active || state.selected}
-                    aria-posinset={index + 1}
-                    aria-setsize={items.length}
-                    data-index={index}
-                    data-active={state.active || undefined}
-                    className="min-w-0"
-                    onClick={() => {
-                      setActive(index);
-                      onSelect?.(item, index);
-                    }}
-                  >
-                    {render(item, index, state)}
-                  </div>
+                    active={index === active}
+                    selected={index === selectedIndex}
+                    setSize={items.length}
+                    render={renderCell}
+                    onPick={onPick}
+                  />
                 );
               })}
             </div>

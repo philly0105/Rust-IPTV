@@ -14,6 +14,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 
+import { desktopAppInfo } from './bootInfo';
 import { onAnyAppEvent } from './events';
 import { RpcError, rpcRaw, type RpcArgs, type RpcName, type RpcResult } from './transport';
 import type { Settings } from './types';
@@ -51,9 +52,11 @@ const QUERY_TIMINGS: readonly (readonly [prefix: string, staleTime: number, gcTi
   ['catalog.movies', 2 * MINUTE, 10 * MINUTE],
   ['catalog.series', 2 * MINUTE, 10 * MINUTE],
   ['catalog.yearFacets', 2 * MINUTE, 10 * MINUTE],
-  // Guide windows are large; drop them soon after the guide closes.
-  ['epg.grid', 5 * MINUTE, 2 * MINUTE],
-  ['epg.programs', 5 * MINUTE, 2 * MINUTE],
+  // Guide windows: kept as long as they count as fresh, so reopening the guide
+  // within 5 min shows the cached window instead of refetching a fresh one
+  // that was already dropped (L2-perf-ui-10).
+  ['epg.grid', 5 * MINUTE, 5 * MINUTE],
+  ['epg.programs', 5 * MINUTE, 5 * MINUTE],
   ['tmdb.', Infinity, 30 * MINUTE],
   ['positions.', 15 * SECOND, DEFAULT_QUERY_TIMING.gcTime],
   ['stats.', 15 * SECOND, DEFAULT_QUERY_TIMING.gcTime],
@@ -96,6 +99,12 @@ export const queryClient: QueryClient = new RpcQueryClient({
 export function rpcKey<K extends RpcName>(cmd: K, args?: RpcArgs<K>): readonly unknown[] {
   return [cmd, args ?? null];
 }
+
+// Desktop: the launch's one `app.info` answer (bootInfo.ts) fills the cache before the first
+// render, so `useRpcQuery('app.info')` readers never send a second request (L2-perf-desktop-10).
+void desktopAppInfo.then((info) => {
+  if (info && queryClient.getQueryData(rpcKey('app.info')) === undefined) queryClient.setQueryData(rpcKey('app.info'), info);
+});
 
 export interface RpcQueryOptions {
   enabled?: boolean;
@@ -198,7 +207,8 @@ export const DEFAULT_EVENT_INVALIDATION: Readonly<Record<string, readonly string
   'sources.changed': ['catalog.', 'sources.', 'lists.'],
   'import.progress': ['catalog.', 'sources.', 'lists.'],
   'epg.changed': ['epg.'],
-  'downloads.update': ['downloads.', 'myvideos.'],
+  // The list only: a progress tick cannot change downloads.dir, and the prefix refetched it on every burst.
+  'downloads.update': ['downloads.list', 'myvideos.'],
   // Only without a payload: the event normally carries the full settings, written into the cache.
   'settings.changed': ['settings.'],
   // C7: My List writes (this window or another).

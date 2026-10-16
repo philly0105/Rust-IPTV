@@ -6,6 +6,7 @@
 
 import type { Channel, ItemRef } from '@/api/types';
 
+import { prefetchAccountStatus } from './accountStatus';
 import { MAX_TILES } from './layout';
 import { ensureUnlocked } from './parentalGate';
 import { useMultiviewStore } from './store';
@@ -55,7 +56,9 @@ export async function addToWall(ch: MultiviewChannelInput): Promise<AddOutcome> 
   if (before.tiles.length >= MAX_TILES) return 'full';
   const gate = await passGate(ch);
   if (gate !== 'ok') return gate;
-  return useMultiviewStore.getState().add(ch);
+  const added = useMultiviewStore.getState().add(ch);
+  if (added === 'added') prefetchAccountStatus(ch.ref.sourceId);
+  return added;
 }
 
 export async function replaceOnWall(key: string, ch: MultiviewChannelInput): Promise<ReplaceOutcome> {
@@ -71,5 +74,6 @@ export async function replaceOnWall(key: string, ch: MultiviewChannelInput): Pro
   if (!after.tiles.some((t) => t.key === key)) return 'missing';
   if (after.tiles.some((t) => t.key !== key && sameRef(t.ref, ch.ref))) return 'duplicate';
   after.replace(key, ch);
+  prefetchAccountStatus(ch.ref.sourceId);
   return 'replaced';
 }

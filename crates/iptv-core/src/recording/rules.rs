@@ -12,13 +12,14 @@
 //! `recordings` for the channel (any status, so a cancelled, failed or
 //! finished one counts) or listed in `recording_rule_skips` is left alone.
 //! Cancelling a rule-made recording writes a skip row, so removing the
-//! cancelled row from the list does not bring the airing back. The one
-//! exception is a recording cancelled because its rule was removed
-//! ([`super::RULE_REMOVED_MESSAGE`]): the user cancelled the rule, not the
-//! airing, so a rule added again for the title schedules it again.
+//! cancelled row from the list does not bring the airing back. Removing a
+//! rule deletes its airings that have not started, leaving no row and no
+//! skip, so a rule added again for the title schedules them again. Rows an
+//! older build cancelled on rule removal ([`super::RULE_REMOVED_MESSAGE`])
+//! do not count either: the user cancelled the rule, not the airing.
 
 use super::scheduler::title_key;
-use super::store::{self, RecordingRow};
+use super::store::RecordingRow;
 use super::{
     capabilities, changed, check_engine, check_live, insert_scheduled, rfc3339, runtime,
     RecordingKind, RecordingRuleBackup, RecordingStatus, Runtime, EVENT_RECORDINGS_UPDATE,
@@ -451,14 +452,14 @@ pub async fn set_enabled(
     Ok(rule)
 }
 
-/// `recordings.removeRule`: deletes the rule (and its skips) and cancels
-/// its scheduled recordings unless `keep_scheduled`; running ones go on.
-/// Recordings that stay (kept, or running) lose their `rule_id`: they are
-/// one-off recordings from then on, so a rule added later for the same
-/// title neither counts them nor cancels them when it is removed.
+/// `recordings.removeRule`: deletes the rule (and its skips) and, unless
+/// `keep_scheduled`, the scheduled recordings it made that have not started;
+/// running ones go on. Recordings that stay (kept, or running) lose their
+/// `rule_id`: they are one-off recordings from then on, so a rule added
+/// later for the same title neither counts them nor cancels them when it is
+/// removed.
 pub async fn remove(state: &Arc<AppState>, id: &str, keep_scheduled: bool) -> CoreResult<()> {
     let rt = runtime(state);
-    let now = rt.now();
     let key = id.to_string();
     state
         .db_call(move |c| {
@@ -471,23 +472,15 @@ pub async fn remove(state: &Arc<AppState>, id: &str, keep_scheduled: bool) -> Co
                 )));
             }
             if !keep_scheduled {
-                let ids: Vec<String> = {
-                    let mut s = tx.prepare(
-                        "SELECT id FROM recordings WHERE rule_id = ?1 AND status = 'scheduled'",
-                    )?;
-                    let rows = s.query_map([&key], |r| r.get(0))?;
-                    rows.collect::<Result<_, _>>()?
-                };
-                for rec in ids {
-                    store::transition(
-                        &tx,
-                        &rec,
-                        &[RecordingStatus::Scheduled],
-                        RecordingStatus::Cancelled,
-                        Some(now),
-                        Some(RULE_REMOVED_MESSAGE),
-                    )?;
-                }
+                // Airings that never started leave no trace: a cancelled row
+                // per airing would only crowd Recent recordings (sorted by
+                // when it ended, so above real recordings) and each would
+                // need its own delete. No skip row either, so a rule added
+                // again for the title schedules them again.
+                tx.execute(
+                    "DELETE FROM recordings WHERE rule_id = ?1 AND status = 'scheduled'",
+                    [&key],
+                )?;
             }
             tx.execute(
                 "UPDATE recordings SET rule_id = NULL

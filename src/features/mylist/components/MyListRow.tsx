@@ -19,6 +19,7 @@ import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Source, WatchlistEntry } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 import { joinList } from '@/shell/dashboard/cards';
 
 import { IconButton, Poster, cn } from '../deps';
@@ -66,7 +67,8 @@ const revealOnFine =
 function MyListRowImpl({ entry, rank, source, added, addedTitle, busy, reorder, onOpen, onRemove, onToggleWatched }: MyListRowProps) {
   const { t, i18n } = useTranslation('mylist');
   const { ref, snapshot, watched } = entry;
-  const title = snapshot.title;
+  // Older snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
+  const title = snapshotTitle(ref, snapshot.title).title;
   const movie = ref.contentType === 'movie';
   const TypeIcon = movie ? Film : Clapperboard;
 

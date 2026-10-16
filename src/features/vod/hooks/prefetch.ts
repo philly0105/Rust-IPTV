@@ -85,6 +85,7 @@ let listening = false;
 /** Forgets every prefetch and pending rest, so the next intent fires again. For tests. */
 export function resetPrefetchMemory(): void {
   prefetched.clear();
+  detailChunks.clear();
   for (const s of [...pointerRests]) cancel(s);
   if (focusRest) cancel(focusRest);
   parked.clear();
@@ -107,6 +108,27 @@ function warmChunk(load: () => Promise<unknown>): void {
   load().catch(() => undefined);
 }
 
+/** Detail chunk loads started this session, so hover, focus and the grids' idle warm-up share one. */
+const detailChunks = new Map<'movie' | 'series', Promise<unknown>>();
+
+/**
+ * Downloads and evaluates the movie or series detail page chunk (the same
+ * `import()` the route opens, so Vite shares one chunk), at most once per
+ * session. A failure is swallowed and forgotten, so a later call tries again
+ * (the route loads it on click anyway). The grids call it at idle on mount
+ * (L2-vod-10); a hover or focus prefetch calls it with the data.
+ */
+export function preloadDetailChunk(kind: 'movie' | 'series'): void {
+  if (detailChunks.has(kind)) return;
+  const load = kind === 'movie' ? loadMovieDetailPage : loadSeriesDetailPage;
+  detailChunks.set(
+    kind,
+    load().catch(() => {
+      detailChunks.delete(kind);
+    }),
+  );
+}
+
 /**
  * Detail query with the same key and fn as useMovieDetail/useSeriesDetail
  * (staleTime 5 min), the detail route chunk, and the poster/backdrop through
@@ -120,17 +142,17 @@ export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget): void {
   if (ref.contentType !== 'movie' && ref.contentType !== 'series') return;
   preloadImage(t.posterUrl, ref.sourceId);
   preloadImage(t.backdropUrl, ref.sourceId);
-  const afterData = (detail: { item: { backdropUrl?: string }; backdrops: string[] } | undefined) => {
-    if (t.backdropUrl || !detail) return;
-    preloadImage(detail.item.backdropUrl ?? detail.backdrops[0], ref.sourceId);
+  // A provider detail, or for m3u the bare catalog row the detail query caches (queries.ts).
+  const afterData = (data: { item?: { backdropUrl?: string }; backdrops?: string[]; backdropUrl?: string } | undefined) => {
+    if (t.backdropUrl || !data) return;
+    preloadImage(data.item ? (data.item.backdropUrl ?? data.backdrops?.[0]) : data.backdropUrl, ref.sourceId);
   };
+  preloadDetailChunk(ref.contentType);
   // retry: false: a failed prefetch costs nothing; the page asks again (with retries) on open.
   if (ref.contentType === 'movie') {
-    warmChunk(loadMovieDetailPage);
     const q = movieDetailQuery(t.sourceKind, ref);
     void qc.prefetchQuery({ ...q, retry: false }).then(() => afterData(qc.getQueryData(q.queryKey)));
   } else {
-    warmChunk(loadSeriesDetailPage);
     const q = seriesDetailQuery(t.sourceKind, ref);
     void qc.prefetchQuery({ ...q, retry: false }).then(() => afterData(qc.getQueryData(q.queryKey)));
   }

@@ -114,6 +114,8 @@
   "autoAdultCount_few": "Jeszcze {{count}} grupy dla dorosłych są blokowane automatycznie.",
   "autoAdultCount_many": "Jeszcze {{count}} grup dla dorosłych jest blokowanych automatycznie.",
   "autoAdultCount_other": "Jeszcze {{count}} grupy dla dorosłych są blokowane automatycznie.",
+  "autoAdultRule": "Grupy dla dorosłych blokowane automatycznie",
+  "autoAdultNone": "Żadna grupa tego źródła nie wygląda na treści dla dorosłych.",
   "removeLockNamed": "Usuń blokadę z „{{name}}”",
   "showAllLocks_one": "Pokaż {{count}} blokadę",
   "showAllLocks_few": "Pokaż wszystkie {{count}} blokady",

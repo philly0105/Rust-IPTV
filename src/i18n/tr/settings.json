@@ -238,7 +238,7 @@
   "backupNoSecrets": "Bu yedekte parola yok. Xtream ve Stalker kaynakları için parolaların yeniden girilmesi gerekecek.",
   "backupMode": "İçe aktarma modu",
   "backupMerge": "Birleştir",
-  "backupMergeHint": "Dosyadaki kaynakları ekler ve mevcut kaynaklarınızı korur.",
+  "backupMergeHint": "Dosyadaki kaynakları ekler. Mevcut kaynaklarınız adlarını ve ayarlarını korur.",
   "backupReplace": "Değiştir",
   "backupReplaceHint": "Önce yedeği içe aktarır, yedekteki kaynaklardan biri yüklendiğinde mevcut kaynaklarınızı kaldırır.",
   "backupImportButton": "Yedeği içe aktar",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "Değiştir",
   "backupImportFailed": "Yedek içe aktarılamadı",
   "backupResult": "Eklenen veya güncellenen: {{imported}}. Atlanan: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} oynatma listesi hâlâ yükleniyor; favorileri ve geçmişi yükleme bitince görünür.",
+  "backupRefreshing_other": "{{count, number}} oynatma listesi hâlâ yükleniyor; her birinin favorileri ve geçmişi yüklemesi bitince görünür.",
   "backupWarnings_one": "{{count}} uyarı",
   "backupWarnings_other": "{{count}} uyarı",
   "backupNotJson": "Bu dosya geçerli bir JSON değil.",
@@ -352,10 +354,10 @@
   "railsOffHint": "Bu satırları kullanmak için panoyu açın.",
 
   "resetGroup": "Sıfırla",
-  "resetHint": "Tüm ayarları varsayılana döndürür. Kaynaklar, favoriler, geçmiş ve indirmeler kalır.",
+  "resetHint": "Tüm ayarları varsayılana döndürür. Kaynaklar, favoriler, geçmiş ve indirmeler kalır. Rehber adresleri ve TMDB anahtarı da korunur.",
   "resetButton": "Ayarları sıfırla",
   "resetConfirmTitle": "Tüm ayarlar sıfırlansın mı?",
-  "resetConfirmBody": "Dil, tema ve oynatıcı yolları dahil her ayar varsayılana döner. Kaynaklar, favoriler, geçmiş ve indirmeler kalır.",
+  "resetConfirmBody": "Dil, tema ve oynatıcı yolları dahil her ayar varsayılana döner. Kaynaklar, favoriler, geçmiş ve indirmeler kalır. Rehber adresleri ve TMDB anahtarı da korunur.",
   "resetConfirm": "Sıfırla",
   "resetDone": "Ayarlar varsayılana döndü",
   "resetFailed": "Ayarlar sıfırlanamadı",
@@ -443,5 +445,10 @@
   "backupOldVersion": "Bu yedek okunamayan eski bir biçimde. Yeni bir yedek dışa aktarın ve onu içe aktarın.",
   "backupImportDone": "Yedek içe aktarıldı",
   "backupReplacePinTitle": "Kaynakları değiştirmek için PIN'i girin",
-  "backupReplacePinText": "Değiştirme mevcut kaynaklarınızı ve ebeveyn kilitlerini kaldırır, bu yüzden ebeveyn denetimi PIN'i gerekir."
+  "backupReplacePinText": "Değiştirme mevcut kaynaklarınızı ve ebeveyn kilitlerini kaldırır, bu yüzden ebeveyn denetimi PIN'i gerekir.",
+  "backupParentalTitle": "Bu yedek ebeveyn denetimini değiştiriyor",
+  "backupParentalBody": "Ebeveyn denetimi kilitli olduğundan yedekteki seçenekleri için PIN gerekiyor. Her şeyi içe aktarmak için PIN'i girin ya da geri kalanını içe aktarıp mevcut seçeneklerinizi koruyun.",
+  "backupParentalSkip": "Onlar olmadan içe aktar",
+  "backupParentalUnlock": "PIN'i gir ve içe aktar",
+  "backupParentalPinTitle": "Ebeveyn denetimi seçeneklerini içe aktarmak için PIN'i girin"
 }

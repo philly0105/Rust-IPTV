@@ -282,9 +282,19 @@ pub const LIVE_TIMESHIFT_OPTIONS: &[(&str, &str)] = &[
 /// Per-file options for `loadfile` in embedded mode: `force-media-title`,
 /// `user-agent`, `referrer`, `http-header-fields`, and `start=+<seconds>`
 /// for a resume position (live sources never seek).
+///
+/// Every item starts playing (`pause=no`): mpv's `pause` is global, so a
+/// user pause, or `keep-open` pausing at the end of an episode, would
+/// otherwise carry over to the next channel or the Up next episode.
+///
+/// Live items end instead of pausing at the end (`keep-open=no`): a live
+/// stream only ends when the provider drops it, and the resulting `end-file`
+/// (reason `eof`) is reported as an error, so the player reconnects or fails
+/// over instead of freezing on the last frame (`mpv_state::apply_event`).
 pub fn loadfile_options(source: &PlayerSource) -> serde_json::Map<String, serde_json::Value> {
     use serde_json::Value;
     let mut opts = serde_json::Map::new();
+    opts.insert("pause".into(), Value::String("no".into()));
     let title = source.title.trim();
     if !title.is_empty() {
         opts.insert("force-media-title".into(), Value::String(title.to_string()));
@@ -313,6 +323,49 @@ pub fn loadfile_options(source: &PlayerSource) -> serde_json::Map<String, serde_
         for (k, v) in LIVE_TIMESHIFT_OPTIONS {
             opts.insert((*k).into(), Value::String((*v).to_string()));
         }
+        opts.insert("keep-open".into(), Value::String("no".into()));
     }
     opts
+}
+
+#[cfg(test)]
+mod loadfile_tests {
+    use super::loadfile_options;
+    use crate::model::{PlayerKind, PlayerSource};
+    use serde_json::json;
+
+    fn source(is_live: bool) -> PlayerSource {
+        PlayerSource {
+            url: "http://h/x".into(),
+            kind: PlayerKind::Direct,
+            headers: None,
+            title: "X".into(),
+            subtitle: None,
+            poster_url: None,
+            item_ref: None,
+            episode_id: None,
+            resume_seconds: None,
+            is_live,
+            is_radio: false,
+        }
+    }
+
+    /// L2-desktop-1: mpv's pause is global. A zap after a user pause, and the
+    /// Up next episode after `keep-open` paused at the end, must start playing.
+    #[test]
+    fn every_item_starts_playing() {
+        for live in [true, false] {
+            assert_eq!(loadfile_options(&source(live))["pause"], json!("no"));
+        }
+        let legacy = crate::player::embedded::legacy_options(&loadfile_options(&source(false)));
+        assert!(legacy.contains("pause=%2%no"), "{legacy}");
+    }
+
+    /// L2-desktop-2: a live stream ends (`end-file`) instead of freezing paused
+    /// on its last frame; VOD keeps the global `keep-open` (pause at the end).
+    #[test]
+    fn live_items_end_instead_of_pausing_at_the_end() {
+        assert_eq!(loadfile_options(&source(true))["keep-open"], json!("no"));
+        assert!(!loadfile_options(&source(false)).contains_key("keep-open"));
+    }
 }

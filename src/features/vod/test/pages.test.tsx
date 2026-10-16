@@ -735,27 +735,32 @@ describe('U4-fix4: backdrop stacking, capped search, localized runtimes', () => 
       };
       rpcMock.handlers['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
       renderAt('/search?q=movie', [{ path: '/search', element: <SearchPage /> }]);
-      // Each chip counts its own source's capped search (R6-r3 F8): 60 shown of 100, so "60+",
-      // not the 30 rows each source holds in the interleaved all-sources page.
+      // Chips count from the one all-sources search (L2-perf-desktop-11): each source holds 30 of
+      // its 60 capped rows, a lower bound, so "30+". No source is searched alone to count it.
       const chips = await screen.findByRole('group', { name: 'Filter by source' });
-      expect(await within(chips).findByRole('button', { name: /Beta Portal\s*60\+/ })).toBeTruthy();
-      expect(within(chips).getByRole('button', { name: /Alpha IPTV\s*60\+/ })).toBeTruthy();
+      expect(await within(chips).findByRole('button', { name: /Beta Portal\s*30\+/ })).toBeTruthy();
+      expect(within(chips).getByRole('button', { name: /Alpha IPTV\s*30\+/ })).toBeTruthy();
+      expect(callsOf('catalog.search').map((c) => c.args)).toEqual([{ query: 'movie', limit: 61 }]);
 
       fireEvent.click(within(chips).getByRole('button', { name: /Beta Portal/ }));
       await screen.findByRole('tab', { name: /Movies\s*60\+/ });
       expect(currentLocation).toBe('/search?q=movie&source=src2');
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 61 });
-      // Every card belongs to the facet's source, and the chips still list both sources.
+      // Every card belongs to the facet's source, and the chips still list both sources: the
+      // picked one counts from its own search on screen, the other keeps its global share.
       expect(document.querySelectorAll('a[href^="/s/src1/movie/"]')).toHaveLength(0);
       expect(document.querySelectorAll('a[href^="/s/src2/movie/"]').length).toBeGreaterThan(30);
       const after = screen.getByRole('group', { name: 'Filter by source' });
-      expect(within(after).getByRole('button', { name: /Alpha IPTV\s*60\+/ }).getAttribute('aria-pressed')).toBe('false');
-      expect(within(after).getByRole('button', { name: /Beta Portal\s*60\+/ }).getAttribute('aria-pressed')).toBe('true');
+      expect(within(after).getByRole('button', { name: /Alpha IPTV\s*30\+/ }).getAttribute('aria-pressed')).toBe('false');
+      expect((await within(after).findByRole('button', { name: /Beta Portal\s*60\+/ })).getAttribute('aria-pressed')).toBe('true');
+      // The chips' all-sources counts come from the cache: the facet added one search, its own.
+      expect(callsOf('catalog.search')).toHaveLength(2);
 
-      // "Show more" steps the facet's own search.
+      // "Show more" steps the facet's own search, and its chip becomes exact.
       fireEvent.click(within(screen.getByTestId('vod-search-capped')).getByRole('button', { name: 'Show up to 200' }));
       await screen.findByRole('tab', { name: /Movies\s*100$/ });
       expect(callsOf('catalog.search').at(-1)!.args).toEqual({ query: 'movie', sourceId: 'src2', limit: 201 });
+      expect(within(screen.getByRole('group', { name: 'Filter by source' })).getByRole('button', { name: /Beta Portal\s*100$/ })).toBeTruthy();
     });
   });
 });

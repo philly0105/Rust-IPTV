@@ -184,5 +184,11 @@
   "locked": "已锁定",
   "lockedGuide": "已锁定。输入 PIN 码即可查看正在播出的节目。",
   "unlock": "解锁",
-  "ribbonFailed": "无法加载此频道的节目指南"
+  "ribbonFailed": "无法加载此频道的节目指南",
+  "parentalHiddenChannels": "家长控制正在隐藏此来源的频道",
+  "parentalHiddenStations": "家长控制正在隐藏此来源的电台",
+  "parentalHiddenHint": "其分组已锁定。输入 PIN 即可在本次会话中显示。",
+  "parentalUnlock": "解锁",
+  "parentalUnlockTitle": "显示已锁定的频道",
+  "parentalUnlockBody": "输入 PIN，在家长控制重新锁定前显示已锁定的分组和频道。"
 }

@@ -14,7 +14,9 @@
 //! combined total therefore goes over the cap by at most what they insert
 //! between two resyncs, instead of by a whole cap per process.
 
-use super::{file_path, is_key, max_bytes, Flights, EVICT_TARGET_PERCENT, MAX_IMAGE_BYTES};
+use super::{
+    file_path, is_key, max_bytes, Flights, PendingRows, EVICT_TARGET_PERCENT, MAX_IMAGE_BYTES,
+};
 use crate::db::{self, DbPool};
 use crate::error::{CoreError, CoreResult};
 use crate::model::Settings;
@@ -50,8 +52,9 @@ pub(super) struct Row {
 
 /// One queued write.
 pub(super) enum Op {
-    /// Index a stored file; `ack` fires once the row is committed.
-    Insert { row: Row, ack: oneshot::Sender<()> },
+    /// Index a stored file written by `flight`; its pending entry is dropped
+    /// once the batch is done (committed or failed).
+    Insert { row: Row, flight: u64 },
     /// Move `last_access` forward.
     Touch { key: String, at: i64 },
     /// Drop rows whose file is missing or has the wrong size (re-checked
@@ -186,6 +189,7 @@ pub(super) struct Writer {
     pub dir: PathBuf,
     pub settings: Arc<RwLock<Settings>>,
     pub flights: Flights,
+    pub pending: PendingRows,
     /// Running `SUM(bytes)`, kept by this task alone: its own writes, plus
     /// whatever other processes had written at the last resync.
     pub total: u64,
@@ -208,15 +212,24 @@ pub(super) async fn run(mut w: Writer, mut rx: mpsc::UnboundedReceiver<Op>) {
         let inserting = ops.iter().any(|o| matches!(o, Op::Insert { .. }));
         let resync = barrier || (inserting && w.synced_at.elapsed() >= RESYNC_INTERVAL);
         let cap = max_bytes(&w.settings.read());
-        // Files of running fetches survive a clear or an eviction of their
-        // key: the fetch may have renamed a fresh copy into place already.
-        let protected: HashSet<String> = w
+        let settled: Vec<(String, u64)> = ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::Insert { row, flight } => Some((row.key.clone(), *flight)),
+                _ => None,
+            })
+            .collect();
+        // Files of running fetches, and stored files whose rows are not
+        // committed yet, survive a clear or an eviction of their key: the
+        // fetch may have renamed a fresh copy into place already.
+        let mut protected: HashSet<String> = w
             .flights
             .lock()
             .keys()
             .filter_map(|k| k.split('|').next())
             .map(str::to_owned)
             .collect();
+        protected.extend(w.pending.lock().keys().cloned());
         let batch = Batch {
             pool: w.pool.clone(),
             db_path: w.db_path.clone(),
@@ -235,6 +248,17 @@ pub(super) async fn run(mut w: Writer, mut rx: mpsc::UnboundedReceiver<Op>) {
             }
             Err(err) => tracing::error!(%err, "image cache write batch panicked"),
         }
+        // Committed or not, these rows are no longer pending: lookups read
+        // the index again, and the files are ordinary entries (or, when the
+        // batch failed, orphans that a refetch or the reconcile replaces).
+        if !settled.is_empty() {
+            let mut pending = w.pending.lock();
+            for (key, flight) in settled {
+                if pending.get(&key).is_some_and(|p| p.flight == flight) {
+                    pending.remove(&key);
+                }
+            }
+        }
     }
 }
 
@@ -245,7 +269,7 @@ struct Batch {
     dir: PathBuf,
     total: u64,
     cap: u64,
-    /// Keys with a fetch still running (until its row is acknowledged).
+    /// Keys with a fetch still running or a row still pending.
     protected: HashSet<String>,
     /// Start from `SUM(bytes)` read inside the transaction instead of
     /// `total`, so rows other processes wrote count against the cap.
@@ -297,15 +321,11 @@ impl Batch {
                 };
             }
         }
-        let mut inserted = Vec::new();
         let mut waiting = Vec::new();
         let mut work = Vec::with_capacity(ops.len());
         for op in ops {
             match op {
-                Op::Insert { row, ack } => {
-                    inserted.push(ack);
-                    work.push(Work::Insert(row));
-                }
+                Op::Insert { row, .. } => work.push(Work::Insert(row)),
                 Op::Touch { key, at } => work.push(Work::Touch(key, at)),
                 Op::Forget { keys } => work.push(Work::Forget(keys)),
                 Op::Evict { ack } => waiting.push(ack),
@@ -334,9 +354,6 @@ impl Batch {
                 for ack in waiting {
                     let _ = ack.send(Ok(()));
                 }
-                for ack in inserted {
-                    let _ = ack.send(());
-                }
                 Applied {
                     total,
                     synced: self.resync,
@@ -351,7 +368,6 @@ impl Batch {
                         "the image cache index could not be updated: {msg}"
                     ))));
                 }
-                // Dropping the insert acks tells their flights the batch is done.
                 Applied {
                     total: self.total,
                     synced: false,
@@ -686,7 +702,6 @@ mod tests {
             protected: [b.clone()].into_iter().collect(),
             resync: false,
         };
-        let (ack, _rx) = oneshot::channel();
         let row = Row {
             key: c.clone(),
             url: c.clone(),
@@ -695,7 +710,7 @@ mod tests {
             at: 3,
         };
         // 1,200 bytes against a 500 cap: a and b go (down to 450).
-        let applied = batch.apply(vec![Op::Insert { row, ack }]);
+        let applied = batch.apply(vec![Op::Insert { row, flight: 1 }]);
         assert_eq!(applied.total, 400);
         let mut conn = pool.get().unwrap();
         assert_eq!(totals(&mut conn).unwrap(), (400, 1));
@@ -791,10 +806,9 @@ mod tests {
         let (tmp, pool, dir) = other_process_rows(&[('a', 400, 1), ('b', 400, 2)]);
         // Between resyncs this process counts its own 300 bytes only, so the
         // table may go over the cap (1,100 against 1,000).
-        let (ack, _rx) = oneshot::channel();
         let applied = batch(&tmp, &pool, 0, false).apply(vec![Op::Insert {
             row: row('c', 300, 3),
-            ack,
+            flight: 1,
         }]);
         assert_eq!(
             applied,
@@ -806,10 +820,9 @@ mod tests {
         assert_eq!(totals(&mut pool.get().unwrap()).unwrap(), (1100, 3));
 
         // A resync reads 1,100, adds 300 and evicts a and b (down to 600).
-        let (ack, _rx) = oneshot::channel();
         let applied = batch(&tmp, &pool, 300, true).apply(vec![Op::Insert {
             row: row('d', 300, 4),
-            ack,
+            flight: 1,
         }]);
         assert_eq!(
             applied,

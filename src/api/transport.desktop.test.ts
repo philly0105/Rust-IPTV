@@ -55,13 +55,31 @@ describe('proxiedUrl (desktop)', () => {
     expect(new URL('/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/proxy?url=seg.ts', out).pathname).toBe(u.pathname);
   });
 
-  it('loads header-less streams and local files directly', () => {
-    setDesktopProxyBase('http://127.0.0.1:5555/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/proxy');
-    expect(proxiedUrl(base)).toBe(base.url);
-    expect(proxiedUrl({ ...base, headers: { userAgent: '' } })).toBe(base.url);
+  // L2-desktop-4: a provider that sends no CORS headers only plays in the inline player through
+  // the proxy, so header-less streams go through it too (this test used to pin the direct load).
+  it('routes header-less http(s) streams through the loopback proxy too', () => {
+    const proxy = 'http://127.0.0.1:5555/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/proxy';
+    setDesktopProxyBase(proxy);
+    const vod: PlayerSource = { ...base, url: 'https://cdn.example/m.mp4', kind: 'direct', isLive: false };
+    for (const s of [base, { ...base, headers: { userAgent: '' } }, vod]) {
+      const out = new URL(proxiedUrl(s));
+      expect(`${out.origin}${out.pathname}`).toBe(proxy);
+      expect(out.searchParams.get('url')).toBe(s.url);
+      expect(out.searchParams.has('ua')).toBe(false);
+    }
+  });
+
+  it("keeps local files, Tauri's own hosts and the proxy's own URLs direct", () => {
+    const proxy = 'http://127.0.0.1:5555/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/proxy';
+    setDesktopProxyBase(proxy);
     expect(proxiedUrl({ ...base, kind: 'file', url: 'C:\\v\\a.mkv' })).toBe(
       `http://asset.localhost/${encodeURIComponent('C:\\v\\a.mkv')}`,
     );
+    const asset = 'http://asset.localhost/C%3A%5Cv%5Ca.mkv';
+    expect(proxiedUrl({ ...base, kind: 'file', url: asset })).toBe(asset);
+    const already = `${proxy}?url=${encodeURIComponent(base.url)}`;
+    expect(proxiedUrl({ ...base, url: already })).toBe(already);
+    expect(proxiedUrl({ ...base, url: 'blob:http://tauri.localhost/1' })).toBe('blob:http://tauri.localhost/1');
   });
 
   it('falls back to the direct URL when the proxy is unavailable', () => {

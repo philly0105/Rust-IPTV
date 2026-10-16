@@ -176,6 +176,24 @@ pub fn enqueue(state: &Arc<AppState>, id: i64) {
     pump(state, &mgr);
 }
 
+/// [`enqueue`] at the head of the queue, for a download the user resumes or
+/// retries: it was queued before anything added since, so it takes the next
+/// free slot instead of waiting behind newer downloads. An id already queued
+/// moves to the front; a running one is left alone.
+pub fn enqueue_front(state: &Arc<AppState>, id: i64) {
+    let mgr = manager(state);
+    {
+        let mut inner = mgr.inner.lock();
+        if !inner.active.contains_key(&id) {
+            if let Some(pos) = inner.queue.iter().position(|q| *q == id) {
+                inner.queue.remove(pos);
+            }
+            inner.queue.push_front(id);
+        }
+    }
+    pump(state, &mgr);
+}
+
 fn pump(state: &Arc<AppState>, mgr: &Arc<DownloadManager>) {
     loop {
         let (id, ctl) = {

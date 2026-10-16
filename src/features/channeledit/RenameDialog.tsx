@@ -78,8 +78,8 @@ export function RenameDialog({ channel, onClose }: RenameDialogProps) {
     setSaving(true);
     try {
       const next = plan.kind === 'reset' ? null : plan.name;
-      await renameChannel(channel.ref, next);
-      renamedToast(channel.ref, display(next ?? provider), edit?.name ?? null, next === null, t);
+      await renameChannel(channel.ref, next, provider);
+      renamedToast(channel.ref, display(next ?? provider), edit?.name ?? null, next === null, t, provider);
       onClose();
     } catch (err) {
       const e = RpcError.from(err);

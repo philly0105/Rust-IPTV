@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { MyListButton, canSave, useInMyList } from '@/features/mylist';
+import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { CARD_ART, CARD_ROOT, LiveBadge, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
@@ -427,6 +428,19 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
     source.movieCount > 0 && t('countMovies', { count: source.movieCount }),
     source.seriesCount > 0 && t('countSeries', { count: source.seriesCount }),
   ];
+  // A running import or refresh shows its phase and share here and as a bar on the tile, as on
+  // the Sources page: "Nothing imported yet" read like a failure while the first import ran.
+  useImportProgressFeed();
+  const progress = useSourceProgress(source.id);
+  const importing = progress && isRunningPhase(progress.phase) ? progress : undefined;
+  const fraction = importing ? progressFraction(importing) : undefined;
+  const phaseLabel =
+    importing && (importing.phase === 'fetching' || importing.phase === 'parsing' || importing.phase === 'saving')
+      ? t(`importPhase_${importing.phase}`)
+      : t('sourceCardImporting');
+  const caption = importing
+    ? joinList([phaseLabel, fraction !== undefined && new Intl.NumberFormat(i18n.language, { style: 'percent' }).format(fraction)], i18n.language)
+    : joinList(counts, i18n.language) || t('emptySource');
   return (
     <Link to={`/s/${encodeURIComponent(source.id)}/live`} {...rail} className={cardRoot}>
       <div
@@ -439,6 +453,12 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
         {source.lastError && (
           <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
         )}
+        {importing && (
+          // Visual only: the caption below carries the same phase and share for the link's name.
+          <span className="absolute inset-x-0 bottom-0" aria-hidden data-testid="source-card-progress">
+            <ProgressBar value={(fraction ?? 0) * 100} indeterminate={fraction === undefined} size="xs" tone="glass" className="rounded-none" />
+          </span>
+        )}
       </div>
       <span dir="auto" className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
         {source.name}
@@ -446,7 +466,9 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
       {/* A title alone is never read on a link; these join the card's name after the source name. */}
       <span className="sr-only" data-testid="source-card-kind">{`, ${KIND_NAMES[source.kind]}`}</span>
       {source.lastError && <span className="sr-only">{`, ${t('sourceHasError')}`}</span>}
-      <span className="block truncate text-sm text-fg-muted">{joinList(counts, i18n.language) || t('emptySource')}</span>
+      <span className={cn('block truncate text-sm tabular', importing ? 'text-fg' : 'text-fg-muted')} data-testid="source-card-caption">
+        {caption}
+      </span>
     </Link>
   );
 }

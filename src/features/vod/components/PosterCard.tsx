@@ -1,11 +1,11 @@
-import { Bookmark, BookmarkCheck, BookmarkPlus, Check, Star } from 'lucide-react';
-import { useState, type MouseEvent, type ReactNode } from 'react';
+import { Bookmark, BookmarkCheck, BookmarkPlus, Check, Lock, Star } from 'lucide-react';
+import { createContext, memo, useContext, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { itemKey, type ItemRef, type ItemSnapshot, type SeriesItem, type VodItem } from '@/api/types';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
-import { useInMyList, useMyListState } from '@/features/mylist/hooks/useMyList';
+import { useMyListState, type MyListStatus } from '@/features/mylist/hooks/useMyList';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 
 import { usePrefetchIntent, type PrefetchIntent, type PrefetchTarget } from '../hooks/prefetch';
@@ -68,6 +68,8 @@ export interface PosterCardProps {
   intent?: PrefetchIntent | undefined;
   /** The source the artwork belongs to, when `prefetch` and `myList` do not name it. */
   sourceId?: string | undefined;
+  /** Parental Ask mode: the title asks for the PIN before it opens (a lock on the poster, and in its name). */
+  locked?: boolean | undefined;
 }
 
 /**
@@ -104,6 +106,8 @@ export function posterCardLabel(parts: {
   progressLabel?: string | undefined;
   /** "Watched" when the title is watched as a whole. */
   watchedLabel?: string | undefined;
+  /** "Locked" when the title asks for the PIN. */
+  lockedLabel?: string | undefined;
 }): string {
   const yearText = parts.year !== undefined ? String(parts.year) : undefined;
   const name = yearText && !parts.title.includes(yearText) ? `${parts.title} (${yearText})` : parts.title;
@@ -115,6 +119,7 @@ export function posterCardLabel(parts: {
   if (parts.rating) out.push(parts.ratedLabel(parts.rating));
   if (parts.watchedLabel) out.push(parts.watchedLabel);
   if (parts.progressLabel) out.push(parts.progressLabel);
+  if (parts.lockedLabel) out.push(parts.lockedLabel);
   return out.join(', ');
 }
 
@@ -123,10 +128,30 @@ export function posterCardLabel(parts: {
  * caption is quiet. Hover, focus, press and the grid's keyboard cursor are the
  * shared card states (src/ui/card.ts), drawn on the artwork only.
  */
-export function PosterCard(props: PosterCardProps) {
+export const PosterCard = memo(function PosterCard(props: PosterCardProps) {
   // A grid cell's My List corner needs the shared list; only those cards subscribe to it.
   if (props.myList && props.interactive === false) return <GridPosterCard {...props} myList={props.myList} />;
   return <PosterCardView {...props} />;
+});
+
+/** My List for every card of one grid: read once by the grid, instead of three list observers per card (L2-vod-1). */
+interface GridMyList {
+  keys: ReadonlySet<string>;
+  status: MyListStatus;
+  toggle: ReturnType<typeof useMyListToggle>;
+}
+
+const GridMyListContext = createContext<GridMyList | null>(null);
+
+/**
+ * Wrap a poster grid in this so its cards share one subscription to My List. A grid card outside
+ * it subscribes on its own (slower on a large grid, same behaviour).
+ */
+export function GridMyListProvider({ children }: { children: ReactNode }) {
+  const { keys, status } = useMyListState();
+  const toggle = useMyListToggle();
+  const value = useMemo(() => ({ keys, status, toggle }), [keys, status, toggle]);
+  return <GridMyListContext.Provider value={value}>{children}</GridMyListContext.Provider>;
 }
 
 interface PosterCardViewProps extends PosterCardProps {
@@ -159,6 +184,7 @@ function PosterCardView({
   prefetch,
   intent,
   sourceId,
+  locked,
   extraLabel,
   artCorner,
 }: PosterCardViewProps) {
@@ -180,6 +206,7 @@ function PosterCardView({
     ratedLabel: (v) => t('posterRated', { rating: v }),
     progressLabel,
     watchedLabel: watched ? t('watched') : undefined,
+    lockedLabel: locked ? t('locked') : undefined,
   });
   const fullLabel = extraLabel ? `${label}, ${extraLabel}` : label;
   const secondary = meta ?? year;
@@ -188,8 +215,17 @@ function PosterCardView({
       <div className={cn(CARD_ART, interactive && myList && WRAPPER_HOVER_ART, active && CARD_ART_CURSOR)}>
         {/* The frame's ring is the edge; the poster's own hairline would double it. */}
         <Poster src={posterUrl} sourceId={artSourceId} alt="" label={title} aspect="poster" className="after:hidden" />
-        {badge && (
-          <div aria-hidden className="pointer-events-none absolute start-1.5 top-1.5 flex gap-1">
+        {(badge || locked) && (
+          <div aria-hidden className="pointer-events-none absolute start-1.5 top-1.5 flex min-w-0 max-w-[calc(100%-0.75rem)] gap-1">
+            {locked && (
+              // The lock Live's groups carry (CategorySidebar), on the glass every poster chip uses.
+              <div
+                data-testid="poster-locked"
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-glass-strong text-on-glass"
+              >
+                <Lock aria-hidden size={12} strokeWidth={2.5} />
+              </div>
+            )}
             {badge}
           </div>
         )}
@@ -313,15 +349,39 @@ function PosterCardView({
  * stays on the poster once it is, and pointer users toggle it from the corner.
  */
 function GridPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
+  const shared = useContext(GridMyListContext);
+  return shared ? <GridPosterCardWith {...props} list={shared} /> : <GridPosterCardOwn {...props} />;
+}
+
+/** Outside a GridMyListProvider: the card reads My List itself. */
+function GridPosterCardOwn(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
+  const { keys, status } = useMyListState();
+  const toggle = useMyListToggle();
+  const list = useMemo(() => ({ keys, status, toggle }), [keys, status, toggle]);
+  return <GridPosterCardWith {...props} list={list} />;
+}
+
+function GridPosterCardWith({ list, ...props }: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot }; list: GridMyList }) {
   const { t } = useTranslation('vod');
   const { itemRef, snapshot } = props.myList;
-  const inList = useInMyList([itemRef]).has(itemKey(itemRef));
+  // Until the list is known nothing counts as saved (useInMyList's rule).
+  const inList = list.status === 'ready' && list.keys.has(itemKey(itemRef));
   const hasProgress = showsProgress(props.progress, props.watched);
   return (
     <PosterCardView
       {...props}
       extraLabel={inList ? t('posterInMyList') : undefined}
-      artCorner={<GridMyListToggle itemRef={itemRef} snapshot={snapshot} inList={inList} raised={hasProgress} shown={!!props.active} />}
+      artCorner={
+        <GridMyListToggle
+          itemRef={itemRef}
+          snapshot={snapshot}
+          inList={inList}
+          status={list.status}
+          toggle={list.toggle}
+          raised={hasProgress}
+          shown={!!props.active}
+        />
+      }
     />
   );
 }
@@ -337,20 +397,22 @@ function GridMyListToggle({
   itemRef,
   snapshot,
   inList,
+  status,
+  toggle,
   raised,
   shown,
 }: {
   itemRef: ItemRef;
   snapshot: ItemSnapshot;
   inList: boolean;
+  status: MyListStatus;
+  toggle: GridMyList['toggle'];
   /** Above the progress bar. */
   raised: boolean;
   /** The grid's keyboard cursor rests on this card: show the toggle (S acts on it). */
   shown: boolean;
 }) {
   const { t } = useTranslation('mylist');
-  const toggle = useMyListToggle();
-  const { status } = useMyListState();
   const [pending, setPending] = useState(false);
   // Like MyListButton: until the shared list is known the corner is busy, neither pressed nor saved.
   const ready = status === 'ready';

@@ -124,6 +124,83 @@ pub fn get(conn: &Connection, id: &str) -> CoreResult<Source> {
     find(conn, id)?.ok_or_else(|| CoreError::NotFound(format!("source {id} not found")))
 }
 
+/// Address a source is known by, for the duplicate check of `sources.add` /
+/// `sources.update`: the backup merge fingerprints (playlist URL, Xtream
+/// server + username, Stalker portal + MAC) and the resolved path of a
+/// playlist file. Pasted text has none: it has no address, and pasting the
+/// same lines twice can be deliberate.
+pub fn identity(config: &SourceConfig) -> Option<String> {
+    use crate::model::M3uOrigin;
+    match config {
+        SourceConfig::M3u(c) => match c.origin {
+            M3uOrigin::Url => c
+                .url
+                .as_deref()
+                .filter(|u| !u.trim().is_empty())
+                .map(crate::backup::fp_m3u_url),
+            M3uOrigin::File => c
+                .file_path
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .map(|p| format!("m3u|file|{}", file_identity(p))),
+            M3uOrigin::Text => None,
+        },
+        SourceConfig::Xtream(c) => Some(crate::backup::fp_xtream(&c.server_url, &c.username)),
+        SourceConfig::Stalker(c) => Some(crate::backup::fp_stalker(&c.portal_url, &c.mac_address)),
+    }
+}
+
+/// A playlist path as one key per file: resolved when it exists, and on
+/// Windows without case or separator differences.
+fn file_identity(path: &str) -> String {
+    let p = std::path::Path::new(path.trim());
+    let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let s = p.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('/', "\\").to_lowercase()
+    } else {
+        s.into_owned()
+    }
+}
+
+/// The first source other than `except` with the same [`identity`] as
+/// `config`, as `(id, name)`. `None` when `config` has no identity.
+pub fn find_same(
+    conn: &Connection,
+    config: &SourceConfig,
+    except: Option<&str>,
+) -> CoreResult<Option<(String, String)>> {
+    let Some(key) = identity(config) else {
+        return Ok(None);
+    };
+    let kind = config.kind();
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, name, config_json FROM sources WHERE kind = ?1 ORDER BY position, created_at, id",
+    )?;
+    let rows = stmt.query_map([kind.as_str()], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, name, json) = row?;
+        if except == Some(id.as_str()) {
+            continue;
+        }
+        let stored = match kind {
+            SourceKind::M3u => serde_json::from_str(&json).ok().map(SourceConfig::M3u),
+            SourceKind::Xtream => serde_json::from_str(&json).ok().map(SourceConfig::Xtream),
+            SourceKind::Stalker => serde_json::from_str(&json).ok().map(SourceConfig::Stalker),
+        };
+        if stored.as_ref().and_then(identity).as_deref() == Some(key.as_str()) {
+            return Ok(Some((id, name)));
+        }
+    }
+    Ok(None)
+}
+
 /// Inserts a new source at the end of the list. `raw_text` is pasted m3u
 /// text with the data dir: it is stored in `m3u_raw` in the same transaction,
 /// inline up to `m3u::RAW_INLINE_MAX` and otherwise in the playlist cache
@@ -300,6 +377,8 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         "DELETE FROM app_state WHERE key = 'account_status:' || ?1",
         [id],
     )?;
+    // xtream: per-type fingerprints of the last import (unchanged check).
+    tx.execute("DELETE FROM app_state WHERE key = 'xtream_fp:' || ?1", [id])?;
     tx.commit()?;
     Ok(())
 }

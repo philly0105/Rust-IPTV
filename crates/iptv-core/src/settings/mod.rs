@@ -117,44 +117,19 @@ pub fn for_client(state: &AppState, mut s: Settings) -> Settings {
     s
 }
 
-/// `AppState.extensions` key of the TMDB key cleared by the last
-/// [`reset`] (server mode only; in memory, never persisted or sent).
-const RESET_KEY_STASH: &str = "settings_reset_tmdb_key";
-
-#[derive(Default)]
-struct ResetKeyStash(parking_lot::Mutex<Option<String>>);
-
-fn reset_stash(state: &AppState) -> Arc<ResetKeyStash> {
-    state.ext_or_insert_with(RESET_KEY_STASH, || Arc::new(ResetKeyStash::default()))
-}
-
 /// Server mode: a patch that sends back the masked key (the UI resends the
-/// whole `tmdb` object) keeps the stored key instead of overwriting it.
-/// After a reset cleared the key, the mask of that key (an Undo resending
-/// the pre-reset settings) restores it.
-fn unmask_key(state: &AppState, current: &Settings, patch: &mut Value) {
+/// whole `tmdb` object, and an Undo after [`reset`] the pre-reset settings)
+/// keeps the stored key instead of overwriting it.
+fn unmask_key(patch: &mut Value) {
     let Some(tmdb) = patch.get_mut("tmdb").and_then(Value::as_object_mut) else {
         return;
     };
-    let Some(sent) = tmdb
+    let masked = tmdb
         .get("apiKey")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|k| k.starts_with(SECRET_MASK))
-        .map(str::to_owned)
-    else {
-        return;
-    };
-    let stash = reset_stash(state);
-    let mut stashed = stash.0.lock();
-    match stashed.as_deref() {
-        Some(old) if current.tmdb.api_key.is_none() && mask_secret(old) == sent => {
-            tmdb.insert("apiKey".into(), Value::String(old.to_owned()));
-            *stashed = None;
-        }
-        _ => {
-            tmdb.remove("apiKey");
-        }
+        .is_some_and(|k| k.trim().starts_with(SECRET_MASK));
+    if masked {
+        tmdb.remove("apiKey");
     }
 }
 
@@ -175,7 +150,7 @@ pub async fn update(state: &Arc<AppState>, mut patch: Value) -> CoreResult<Setti
 
     let current = state.settings_snapshot();
     if !state.is_desktop {
-        unmask_key(state, &current, &mut patch);
+        unmask_key(&mut patch);
     }
     let merged = merge(&current, &patch)?;
     if !state.is_desktop {
@@ -207,6 +182,11 @@ pub async fn update(state: &Arc<AppState>, mut patch: Value) -> CoreResult<Setti
 /// they record what the user has already seen, not a preference, so a reset
 /// must not replay the first-run tour or show "What's new" for a version
 /// that did not change (Run 3 C7).
+///
+/// The added guide addresses (`epgUrls`) and the TMDB key (`tmdb.apiKey`)
+/// are kept everywhere too: like sources, they are data the user entered,
+/// not preferences, and a lost key or guide list cannot be restored from a
+/// default (L2-settings-9). `tmdb.enabled` and `tmdb.language` reset.
 pub async fn reset(state: &Arc<AppState>) -> CoreResult<Settings> {
     let lock = write_lock(state);
     let _guard = lock.lock().await;
@@ -214,14 +194,11 @@ pub async fn reset(state: &Arc<AppState>) -> CoreResult<Settings> {
     let mut next = Settings {
         tour_completed: current.tour_completed,
         last_seen_version: current.last_seen_version.clone(),
+        epg_urls: current.epg_urls.clone(),
         ..Settings::default()
     };
+    next.tmdb.api_key = current.tmdb.api_key.clone();
     if !state.is_desktop {
-        // Server clients only ever saw the mask, so an Undo cannot resend
-        // the key: keep it in memory for [`unmask_key`].
-        if current.tmdb.api_key.is_some() {
-            *reset_stash(state).0.lock() = current.tmdb.api_key.clone();
-        }
         next.mpv_path = current.mpv_path;
         next.vlc_path = current.vlc_path;
         next.mpv_args = current.mpv_args;
@@ -273,13 +250,32 @@ pub fn check_desktop_only(current: &Settings, next: &Settings, fields: &[&str]) 
     Ok(())
 }
 
+/// Persists `next` (a user write: through the write gate), refreshes the
+/// cache, and emits `settings.changed`, except when only `lastRoute` changed:
+/// that is one window's navigation state, and broadcasting it made every
+/// window refetch and re-render its settings readers on each navigation.
+/// The caller gets the new settings in its reply.
 async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
     let json = serde_json::to_string(&next)?;
-    state.db_call(move |conn| persist_json(conn, &json)).await?;
-    *state.settings.write() = next.clone();
+    state
+        .db_write(move |conn| persist_json(conn, &json))
+        .await?;
+    let previous = std::mem::replace(&mut *state.settings.write(), next.clone());
     tracing::info!("settings updated");
-    state.emit("settings.changed", for_client(state, next.clone()));
+    if !only_last_route_changed(&previous, &next) {
+        state.emit("settings.changed", for_client(state, next.clone()));
+    }
     Ok(next)
+}
+
+/// True when `a` and `b` differ in `lastRoute` alone.
+fn only_last_route_changed(a: &Settings, b: &Settings) -> bool {
+    a.last_route != b.last_route
+        && *a
+            == Settings {
+                last_route: a.last_route.clone(),
+                ..b.clone()
+            }
 }
 
 /// Merges `patch` over `current` and returns validated, normalized settings.
@@ -908,6 +904,51 @@ mod tests {
             assert!(after.tour_completed, "desktop={desktop}");
             assert_eq!(after.last_seen_version, "0.1.0", "desktop={desktop}");
             assert_eq!(get(&state), after, "the cache holds what was stored");
+        }
+    }
+
+    /// L2-settings-9: the guide addresses and the TMDB key are user data and
+    /// survive a reset in both modes; the rest of `tmdb` resets.
+    #[tokio::test]
+    async fn reset_keeps_epg_urls_and_the_tmdb_key() {
+        for desktop in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let state = AppState::new(
+                dir.path().to_path_buf(),
+                Arc::new(crate::events::NoopSink),
+                desktop,
+            )
+            .await
+            .unwrap();
+            update(
+                &state,
+                json!({
+                    "epgUrls": ["http://a/guide.xml"],
+                    "tmdb": {"enabled": true, "apiKey": "abcdefghijklmnop1234", "language": "de-DE"}
+                }),
+            )
+            .await
+            .unwrap();
+            let after = reset(&state).await.unwrap();
+            assert_eq!(
+                after.epg_urls,
+                vec!["http://a/guide.xml"],
+                "desktop={desktop}"
+            );
+            assert_eq!(
+                after.tmdb.api_key.as_deref(),
+                Some("abcdefghijklmnop1234"),
+                "desktop={desktop}"
+            );
+            let defaults = Settings::default();
+            assert_eq!(
+                after.tmdb.enabled, defaults.tmdb.enabled,
+                "desktop={desktop}"
+            );
+            assert_eq!(
+                after.tmdb.language, defaults.tmdb.language,
+                "desktop={desktop}"
+            );
         }
     }
 

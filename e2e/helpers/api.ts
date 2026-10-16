@@ -74,11 +74,38 @@ export function addArgs(kind: SourceKindName, name: string): Record<string, unkn
   }
 }
 
-/** Adds a source over rpc (fast path for specs that do not test the add flow). Reuses one with the same name. */
+/**
+ * Adds a source over rpc (fast path for specs that do not test the add flow). Reuses a working one
+ * with the same name, else the one that already uses this mock address: `sources.add` refuses a
+ * second source on one address (409, `details.existingSourceId`). A reused source is renamed to
+ * `name`; one whose import failed is removed and added again.
+ */
 export async function ensureSource(request: APIRequestContext, kind: SourceKindName, name: string): Promise<Source> {
   const existing = (await listSources(request)).find((s) => s.name === name && s.kind === kind && !s.lastError);
   if (existing) return existing;
-  return rpc<Source>(request, 'sources.add', addArgs(kind, name));
+  try {
+    return await rpc<Source>(request, 'sources.add', addArgs(kind, name));
+  } catch (err) {
+    const id = existingSourceId(err);
+    const same = id ? (await listSources(request)).find((s) => s.id === id) : undefined;
+    if (!same) throw err;
+    if (same.lastError) {
+      await rpc(request, 'sources.remove', { id: same.id });
+      return rpc<Source>(request, 'sources.add', addArgs(kind, name));
+    }
+    return same.name === name ? same : rpc<Source>(request, 'sources.update', { id: same.id, patch: { name } });
+  }
+}
+
+/** The source a refused duplicate `sources.add` names (409 with `details.existingSourceId`). */
+function existingSourceId(err: unknown): string | undefined {
+  if (!(err instanceof RpcCallError) || err.status !== 409) return undefined;
+  try {
+    const id = (JSON.parse(err.body) as { details?: { existingSourceId?: unknown } }).details?.existingSourceId;
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function favorites(request: APIRequestContext): Promise<FavoriteEntry[]> {

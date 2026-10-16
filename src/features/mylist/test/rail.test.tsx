@@ -61,6 +61,19 @@ describe('MyListRail', () => {
     expect(names).toEqual(['Arrival, Movie, Watched', 'Dark, Series', 'Heat, 1995']);
   });
 
+  it('cleans provider tags from old movie and series snapshot titles (L2-visual-3)', async () => {
+    h.installCore(rpc, [h.entry(m('m1'), 'EN - The Matrix (1999) [4K]'), h.entry(s('s1'), '|FR| Le Bureau FHD')]);
+    renderRail();
+    await screen.findByTestId('mylist-rail-count');
+    const rail = screen.getByTestId('dashboard-rail-my-list');
+    const names = within(rail)
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('aria-label')?.replace(/[⁨⁩]/g, ''))
+      .filter(Boolean);
+    expect(names).toEqual(['The Matrix, Movie', 'Le Bureau, Series']);
+    expect(within(rail).queryByText(/EN - The Matrix/)).toBeNull();
+  });
+
   it('renders nothing when the list is empty', async () => {
     h.installCore(rpc, []);
     const { container } = renderRail();

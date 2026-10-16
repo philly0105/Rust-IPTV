@@ -96,6 +96,8 @@
   "adultAutoHint": "已自動鎖定為成人內容",
   "adultOffHint": "名稱類似成人內容。成人內容自動鎖定已關閉。",
   "autoAdultCount_other": "另有 {{count}} 個成人群組已自動鎖定。",
+  "autoAdultRule": "自動鎖定的成人群組",
+  "autoAdultNone": "此來源中沒有看起來像成人內容的群組。",
   "removeLockNamed": "移除 {{name}} 的鎖定",
   "showAllLocks_other": "顯示全部 {{count}} 個鎖定",
   "showFewer": "顯示較少",

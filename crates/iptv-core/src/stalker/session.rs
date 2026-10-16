@@ -470,7 +470,9 @@ impl StalkerClient {
                 "No Stalker portal answered at this address. Check the portal URL (it usually ends in /c/).".into(),
             ),
             // Nothing answered at all (refused, DNS): say so plainly.
-            Some(CoreError::Network(_)) => unreachable_error(&self.config.portal_url),
+            Some(CoreError::Network(m)) => {
+                send_error(CoreError::Network(m), &self.config.portal_url)
+            }
             // The host took the connection and then stayed silent.
             Some(CoreError::Timeout(_)) => slow_error(&self.config.portal_url),
             Some(other) => other,
@@ -644,11 +646,18 @@ const SLOW_PREFIX: &str = "The portal at ";
 
 /// Maps a failed send (no HTTP answer, from [`crate::http::send_within`]) to
 /// a portal-specific message; the URL is reduced to its host. A request the
-/// server-mode guard refused (`Invalid`) keeps its own explanation.
+/// server-mode guard refused (`Invalid`) keeps its own explanation. A
+/// refused connection, an unknown host or a bad certificate keeps its own
+/// next step, which also stops the retries ([`CoreError::is_retryable`]).
 fn send_error(err: CoreError, url: &str) -> CoreError {
     match err {
         CoreError::Timeout(_) => slow_error(url),
-        CoreError::Network(_) => unreachable_error(url),
+        CoreError::Network(m) => match crate::http::permanent_transport_hint(&m) {
+            Some(hint) => {
+                CoreError::network(format!("{UNREACHABLE_PREFIX}{}. {hint}", portal_host(url)))
+            }
+            None => unreachable_error(url),
+        },
         other => other,
     }
 }
@@ -802,6 +811,26 @@ mod tests {
             "{err}"
         );
         assert_eq!(redact_mac("x 001A79000001 y", mac), "x this MAC y");
+    }
+
+    #[test]
+    fn refused_portal_keeps_its_next_step_and_is_not_retried() {
+        let refused = CoreError::network(
+            "Could not reach 127.0.0.1:9. The server refused the connection. Check the address and port, and that the server is running, then try again. (os error 10061)",
+        );
+        let err = send_error(refused, "http://127.0.0.1:9/stalker/c/");
+        assert!(is_unreachable(&err), "{err}");
+        assert!(!err.is_retryable(), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "network: Could not reach the portal at 127.0.0.1:9. The server refused the connection. Check the address and port, and that the server is running, then try again."
+        );
+        // A reset or a closed connection stays retryable.
+        let reset = send_error(
+            CoreError::network("Could not reach 127.0.0.1:9. connection reset"),
+            "http://127.0.0.1:9/stalker/c/",
+        );
+        assert!(reset.is_retryable(), "{reset}");
     }
 
     #[test]

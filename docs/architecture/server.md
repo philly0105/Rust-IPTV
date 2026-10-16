@@ -38,6 +38,8 @@ requests get 10 s to finish.
 | `src/recordings.rs` | `/api/recordings/{id}` (recording slice) |
 | `src/static_files.rs` | Built UI, SPA fallback, cache headers |
 | `tests/server.rs` | End-to-end tests over real sockets |
+| `tests/l2_import_detached.rs` | A `sources.add` whose client goes away still finishes |
+| `tests/l2_cross_cancel.rs` | Which commands stop when the client goes away (`CANCEL_ON_DISCONNECT`); every write runs detached |
 
 ## Routes
 
@@ -49,6 +51,28 @@ Conflict 409, and Io, Db or Internal 500 (`RpcErrorCode::http_status` in error.r
 A body that is not JSON is 400 `invalid`. Limit 256 MiB (backup imports,
 pasted playlists). Errors are logged with the command name and message, never
 the args.
+
+Each call runs on its own task (`api::dispatch_detached`: `tokio::spawn`,
+then the handler awaits the `JoinHandle`). Axum drops a handler's future when
+the client goes away (a reload, Back, a closed tab), and a call awaited
+inline would stop at its next await point: `sources.add` or `sources.refresh`
+left a source with no catalog, no `lastError` and no final progress event.
+On its own task the call finishes and emits its events whatever the client
+does, as on the desktop. A task that panics or is cancelled is a 500
+`internal` ("the request failed inside the server"). The server-mode
+refusals (see Security) and the JSON check run before the task starts.
+
+The exceptions are the read-only queries the UI supersedes and aborts while the
+user scrolls or types, listed in `api::CANCEL_ON_DISCONNECT`: `epg.grid`,
+`epg.programs`, `epg.search`, `epg.nowNext`, `epg.channelsSearch`,
+`catalog.search`, `catalog.channels`, `catalog.movies`, `catalog.series`,
+`catalog.categories` and `catalog.yearFacets`. They run inline under
+`iptv_core::state::cancel_on_drop`. When the client goes away, axum drops the
+call, and `AppState::db_call` interrupts its SQLite statement (or skips it
+while it still waits for a pooled connection) instead of running it for
+nobody. Writes are never on the list, because an interrupted write rolls
+back; they finish as above. The desktop app does not use this path.
+`crates/iptv-core/tests/l2_cross_core.rs` covers the interrupt.
 
 ### `GET /api/events` (WebSocket)
 Each text frame is one `AppEvent` JSON (`{"type", "payload"}`) from the

@@ -52,7 +52,10 @@ vi.mock('@/api/events', () => ({
   onAnyAppEvent: () => () => undefined,
   onConnectionState: () => () => undefined,
 }));
+/** What the mocked player store reports to F11 (L2-desktop-8). */
+const playerState = vi.hoisted(() => ({ source: null as unknown, mode: 'web', toggleFullscreen: () => {} }));
 vi.mock('@/features/player', () => ({
+  usePlayerStore: { getState: () => playerState },
   playItem: (...a: unknown[]) => (playerMock.playItem as (...x: unknown[]) => Promise<void>)(...a),
   restorePlayback: async () => false,
   PlayerDock: () => <div data-testid="player-dock" />,
@@ -444,7 +447,31 @@ describe('DashboardPage', () => {
     baseHandlers({ sources: 0 });
     renderRoutes(routes(), '/dashboard');
     const welcome = await screen.findByTestId('dashboard-welcome');
-    expect(within(welcome).getByRole('link', { name: 'Add your first source' }).getAttribute('href')).toBe('/sources?add=1');
+    expect(within(welcome).getByRole('link', { name: 'Add your first source' }).getAttribute('href')).toBe('/sources?add=1&from=%2Fdashboard');
+  });
+
+  it('warms the playback engines at idle once there is something to play (XB2-14)', async () => {
+    const { __setEngineLoadersForTests } = await import('@/features/player/enginePreload');
+    const hls = vi.fn(async () => ({}));
+    const mpegts = vi.fn(async () => ({}));
+    __setEngineLoadersForTests({ hls, mpegts });
+    try {
+      baseHandlers({ sources: 0 });
+      renderRoutes(routes(), '/dashboard');
+      await screen.findByTestId('dashboard-welcome');
+      // jsdom has no requestIdleCallback: the preload falls back to a 300 ms timer.
+      await new Promise((r) => setTimeout(r, 400));
+      expect(hls).not.toHaveBeenCalled();
+      cleanup();
+      (await import('@/api/query')).queryClient.clear();
+      baseHandlers();
+      renderRoutes(routes(), '/dashboard');
+      await screen.findByTestId('dashboard-hero');
+      await waitFor(() => expect(hls).toHaveBeenCalledTimes(1));
+      expect(mpegts).toHaveBeenCalledTimes(1);
+    } finally {
+      __setEngineLoadersForTests(null);
+    }
   });
 
   it('shows a rail error with retry', async () => {
@@ -803,7 +830,8 @@ describe('B7 shell fixes', () => {
     act(() => useShellStore.setState({ railCollapsed: true }));
     renderRoutes(routes(), '/favorites');
     const nav2 = screen.getByRole('navigation', { name: 'Main navigation' });
-    expect(await within(nav2).findByRole('link', { name: 'Broken One, The last refresh failed' })).toBeTruthy();
+    // Collapsed, the monogram opens the source's links in a menu (L2-shell-2); the error rides on its name.
+    expect(await within(nav2).findByRole('button', { name: 'Broken One, The last refresh failed' })).toBeTruthy();
   });
 
   it('saves the last screen at once when the window hides inside the debounce', async () => {
@@ -1322,5 +1350,133 @@ describe('L1 shell polish', () => {
     } finally {
       act(() => usePendingRemovals.setState({ ids: new Set() }));
     }
+  });
+});
+
+describe('L2 shell header', () => {
+  it("the header's Search everything button lands in the search field, not on the leaving page's own filter (L2-shell-5)", async () => {
+    const shellRoute = routes()[0]!;
+    const tree = [
+      {
+        ...shellRoute,
+        children: [
+          ...shellRoutes,
+          // Distinct trees, so React mounts a new field rather than relabelling the old one.
+          { path: 'mine', element: <section><input data-page-search="" aria-label="My filter" /></section> },
+          { path: 'search', element: <Page><input data-page-search="" aria-label="Search field" /></Page> },
+        ],
+      },
+    ];
+    const { router } = renderRoutes(tree, '/mine');
+    await screen.findByLabelText('My filter');
+    fireEvent.click(screen.getByRole('button', { name: /Search everything/ }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    const field = await screen.findByLabelText('Search field');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  it('page actions sit in a shrinking wrapper, so the palette and theme buttons stay on screen (L2-visual-4)', async () => {
+    function ActionsPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({ title: 'My videos', subtitle: 'Recordings and downloads', actions: <button type="button">Open queue</button> });
+      }, [shell]);
+      return <Page>videos</Page>;
+    }
+    const shellRoute = routes()[0]!;
+    renderRoutes([{ ...shellRoute, children: [...shellRoutes, { path: 'videos', element: <ActionsPage /> }] }], '/videos');
+    const actions = await screen.findByTestId('header-actions');
+    // Shrinkable (min-w-0, no shrink-0) and clipped sideways only: the shell buttons never are.
+    expect(actions.className).toContain('min-w-0');
+    expect(actions.className).not.toContain('shrink-0');
+    expect(actions.className).toContain('overflow-x-clip');
+    expect(screen.getByTestId('open-palette').parentElement!.className).toContain('shrink-0');
+    // The subtitle gives way before the title (L2-visual-9) and shows its whole text on hover.
+    const subtitle = screen.getByTestId('page-subtitle');
+    expect(subtitle.className).toContain('basis-0');
+    expect(subtitle.getAttribute('title')).toBe('Recordings and downloads');
+  });
+
+  it("the header search passes keys to the page's onKeyDown, and a claimed key skips its own Escape (XB2-23)", async () => {
+    const keys: string[] = [];
+    const onChange = vi.fn();
+    function KeysPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({
+          title: 'Keys',
+          search: {
+            value: 'abc',
+            onChange,
+            onKeyDown: (e) => {
+              keys.push(e.key);
+              if (e.key === 'Escape') e.preventDefault();
+            },
+          },
+        });
+      }, [shell]);
+      return <Page>keys</Page>;
+    }
+    const shellRoute = routes()[0]!;
+    renderRoutes([{ ...shellRoute, children: [...shellRoutes, { path: 'keys', element: <KeysPage /> }] }], '/keys');
+    await screen.findByText('keys');
+    const field = document.querySelector<HTMLInputElement>('input[data-shell-search]')!;
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(keys).toEqual(['ArrowDown', 'Escape']);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('F11 (L2-desktop-8)', () => {
+  afterEach(() => {
+    playerState.source = null;
+    playerState.mode = 'web';
+  });
+
+  it('fills the screen with the app when nothing plays, and with the player while something does', async () => {
+    const request = vi.fn(async () => {});
+    document.documentElement.requestFullscreen = request as never;
+    const toggle = vi.fn();
+    playerState.toggleFullscreen = toggle;
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    // The player chunk loads on the first idle moment; F11 reads its store once it is in.
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    const e = new KeyboardEvent('keydown', { key: 'F11', bubbles: true, cancelable: true });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(toggle).not.toHaveBeenCalled();
+    playerState.source = { url: 'http://x' };
+    key('F11');
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
+    // External playback has no in-app fullscreen: the app takes it.
+    playerState.mode = 'external';
+    key('F11');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('dashboard base titles (L2-visual-3)', () => {
+  it('Continue watching and favourite VOD cards drop the provider tags an old snapshot still carries', async () => {
+    rpcMock.handlers['positions.continueWatching'] = (): PlaybackPosition[] => [
+      { ref: { sourceId: 's1', contentType: 'movie', itemId: '10' }, positionSeconds: 1800, durationSeconds: 5400, watched: false, updatedAt: '2026-10-10T20:00:00Z', snapshot: snapshot('|EN| 4K - Night Train [MULTI-SUB] (2019)') },
+    ];
+    rpcMock.handlers['favorites.list'] = (): FavoriteEntry[] => [
+      { ref: { sourceId: 's1', contentType: 'live', itemId: '1' }, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: snapshot('US: Harbor News', 'live') },
+      { ref: { sourceId: 's1', contentType: 'series', itemId: '7' }, addedAt: '2026-10-01T00:00:00Z', position: 1, snapshot: snapshot('EN: Quiet Coast - 2021', 'series') },
+    ];
+    renderRoutes(routes(), '/dashboard');
+    const cont = await screen.findByTestId('dashboard-rail-continue-watching');
+    expect(await within(cont).findByText('Night Train')).toBeTruthy();
+    expect(within(cont).queryByText(/MULTI-SUB|\|EN\|/)).toBeNull();
+    const vod = await screen.findByTestId('dashboard-rail-favorite-vod');
+    expect(within(vod).getByText('Quiet Coast')).toBeTruthy();
+    // The stripped year moves under the title.
+    expect(within(vod).getByText('2021')).toBeTruthy();
+    // A channel's prefix is part of its name and stays.
+    expect(within(await screen.findByTestId('dashboard-rail-live-favorites')).getByText('US: Harbor News')).toBeTruthy();
   });
 });

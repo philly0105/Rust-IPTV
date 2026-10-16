@@ -36,6 +36,8 @@ Every position carries `watched` (column added by migration 0004, default 0). `p
 
 Writes against a source id that does not exist return `NotFound` (foreign-key failure mapped), not an internal error.
 
+`favorites.toggle`, `recent.add` and `positions.set`, the writes a user makes most often, go through `AppState::db_write` (`state.rs`) rather than `db_call`. It is a process-wide gate (a one-permit semaphore) that admits one user write at a time before it takes a pooled connection; the settings store uses it too. The pool has 8 connections (`db::POOL_MAX`). While an import's save transaction holds SQLite's write lock, one gated write waits on a connection and the rest wait at the gate, so reads keep the other connections. Measured on a release build with a 20k live, 60k movie and 8k series Xtream refresh: a read while 13 toggles wait went from 2.2-2.9 s to 2-4 ms. A single toggle that lands in the save still waits for that save to commit. The other writes here (`favorites.reorder`, `favorites.remove`, `recent.remove`, `recent.clear`, `positions.remove`, `userstate.setWatched`) still use `db_call`.
+
 ## Timestamps
 
 Rows are written in RFC 3339 UTC with milliseconds, so ordering by text matches ordering by time. `now_ts` is strictly increasing within the process (a second write in the same millisecond gets the next millisecond), so live writes never tie. Every newest-first query (`recent.list`, the recent trim, `positions.forSeries`, `positions.continueWatching`) orders by the timestamp DESC, then `rowid DESC`, for rows that still tie (imported timestamps). `normalize_ts` accepts what backups contain: RFC 3339, SQLite `YYYY-MM-DD HH:MM:SS`, and unix seconds or milliseconds (values above 1e11 are taken as milliseconds).

@@ -240,7 +240,7 @@
   "backupNoSecrets": "Questo backup non contiene password. Dovrai reinserirle per le sorgenti Xtream e Stalker.",
   "backupMode": "Modalità di importazione",
   "backupMerge": "Unisci",
-  "backupMergeHint": "Aggiunge le sorgenti del file e mantiene quelle esistenti.",
+  "backupMergeHint": "Aggiunge le sorgenti del file. Quelle esistenti mantengono nomi e impostazioni.",
   "backupReplace": "Sostituisci",
   "backupReplaceHint": "Importa prima il backup, poi rimuove le tue fonti attuali quando una delle sue fonti si carica.",
   "backupImportButton": "Importa backup",
@@ -250,6 +250,9 @@
   "backupReplaceConfirm": "Sostituisci",
   "backupImportFailed": "Impossibile importare il backup",
   "backupResult": "Aggiunte o aggiornate: {{imported}}. Saltate: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} playlist è ancora in caricamento; preferiti e cronologia compariranno al termine.",
+  "backupRefreshing_many": "{{count, number}} playlist sono ancora in caricamento; preferiti e cronologia di ciascuna compariranno al termine.",
+  "backupRefreshing_other": "{{count, number}} playlist sono ancora in caricamento; preferiti e cronologia di ciascuna compariranno al termine.",
   "backupWarnings_one": "{{count}} avviso",
   "backupWarnings_many": "{{count}} avvisi",
   "backupWarnings_other": "{{count}} avvisi",
@@ -356,10 +359,10 @@
   "railsOffHint": "Attiva la dashboard per usare queste righe.",
 
   "resetGroup": "Ripristina",
-  "resetHint": "Riporta ogni impostazione al valore predefinito. Sorgenti, preferiti, cronologia e download restano.",
+  "resetHint": "Riporta ogni impostazione al valore predefinito. Sorgenti, preferiti, cronologia e download restano. Restano anche gli indirizzi della guida e la chiave TMDB.",
   "resetButton": "Ripristina impostazioni",
   "resetConfirmTitle": "Ripristinare tutte le impostazioni?",
-  "resetConfirmBody": "Ogni impostazione torna al valore predefinito, compresi lingua, tema e percorsi dei player. Sorgenti, preferiti, cronologia e download restano.",
+  "resetConfirmBody": "Ogni impostazione torna al valore predefinito, compresi lingua, tema e percorsi dei player. Sorgenti, preferiti, cronologia e download restano. Restano anche gli indirizzi della guida e la chiave TMDB.",
   "resetConfirm": "Ripristina",
   "resetDone": "Impostazioni ripristinate",
   "resetFailed": "Impossibile ripristinare le impostazioni",
@@ -448,5 +451,10 @@
   "backupOldVersion": "Questo backup usa un formato precedente che non può essere letto. Esporta un nuovo backup e importa quello.",
   "backupImportDone": "Backup importato",
   "backupReplacePinTitle": "Inserisci il PIN per sostituire le sorgenti",
-  "backupReplacePinText": "La sostituzione rimuove le sorgenti attuali e i relativi blocchi parentali, quindi serve il PIN del controllo parentale."
+  "backupReplacePinText": "La sostituzione rimuove le sorgenti attuali e i relativi blocchi parentali, quindi serve il PIN del controllo parentale.",
+  "backupParentalTitle": "Questo backup modifica il controllo parentale",
+  "backupParentalBody": "Il controllo parentale è bloccato, quindi le sue opzioni nel backup richiedono il PIN. Inseriscilo per importare tutto, oppure importa il resto e mantieni le opzioni attuali.",
+  "backupParentalSkip": "Importa senza",
+  "backupParentalUnlock": "Inserisci PIN e importa",
+  "backupParentalPinTitle": "Inserisci il PIN per importare le opzioni del controllo parentale"
 }

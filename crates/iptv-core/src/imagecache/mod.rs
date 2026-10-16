@@ -22,7 +22,11 @@
 //!    authority under the guard, and the source's request headers) runs as a
 //!    detached task (single flight); concurrent callers share its outcome.
 //!    The body is checked (image type, at most [`MAX_IMAGE_BYTES`]), written
-//!    to a temp name and renamed into place, then indexed. Failures are
+//!    to a temp name and renamed into place, and the callers are answered.
+//!    The index row is written in the background: a catalog import holds
+//!    the write lock for its whole save, and a poster must not wait for it.
+//!    Until the row commits, lookups serve the file from its pending entry
+//!    and the writer keeps it from eviction and clear. Failures are
 //!    remembered per URL and scope for [`FAILURE_TTL`], so a broken poster
 //!    wall does not refetch on every scroll.
 //!
@@ -74,10 +78,6 @@ pub const EVICT_TARGET_PERCENT: u64 = 90;
 pub const MAX_URL_LEN: usize = 8 * 1024;
 /// Deadline for one upstream fetch, response head and body together.
 pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
-/// How long a finished fetch waits for its index row to commit before
-/// answering anyway (the row still commits; only a busy database, such as
-/// one in the middle of a catalog import, makes it wait this long).
-const INSERT_WAIT: Duration = Duration::from_millis(500);
 /// Remembered failures kept at most (expired ones are pruned first).
 const MAX_FAILURES: usize = 4096;
 /// Extension key of the runtime singleton.
@@ -368,16 +368,29 @@ struct Done {
 
 type FlightResult = Result<Done, ImageError>;
 
-/// One in-progress (or just finished, not yet indexed) fetch.
+/// One in-progress fetch.
 struct Flight {
     id: u64,
     fut: Shared<BoxFuture<'static, FlightResult>>,
 }
 
 /// Flights by `"<key>|<scope>"` ([`flight_scope`]); shared with the writer,
-/// which must not delete the files of flights whose rows are not committed
-/// yet.
+/// which must not delete the files of running fetches.
 type Flights = Arc<Mutex<HashMap<String, Flight>>>;
+
+/// A stored file whose index row is queued but not committed yet.
+#[derive(Clone)]
+struct PendingRow {
+    /// The flight that wrote the file (a later flight's entry replaces it).
+    flight: u64,
+    content_type: String,
+    bytes: u64,
+}
+
+/// Pending rows by cache key; shared with the writer, which keeps their
+/// files from eviction and clear and drops each entry once the batch
+/// holding its row is done.
+type PendingRows = Arc<Mutex<HashMap<String, PendingRow>>>;
 
 /// What one fetch needs.
 struct Job {
@@ -400,6 +413,7 @@ struct ImageCache {
     rx: Mutex<Option<mpsc::UnboundedReceiver<Op>>>,
     ready: OnceCell<()>,
     flights: Flights,
+    pending: PendingRows,
     failures: Mutex<HashMap<String, (Instant, ImageError)>>,
     /// Keys whose `last_access` write was queued, with the time it was.
     touched: Mutex<HashMap<String, i64>>,
@@ -420,6 +434,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
             rx: Mutex::new(Some(rx)),
             ready: OnceCell::new(),
             flights: Arc::default(),
+            pending: Arc::default(),
             failures: Mutex::default(),
             touched: Mutex::default(),
             next_flight: AtomicU64::new(1),
@@ -463,6 +478,7 @@ impl ImageCache {
                         dir: self.dir.clone(),
                         settings: self.settings.clone(),
                         flights: self.flights.clone(),
+                        pending: self.pending.clone(),
                         total,
                         synced_at: Instant::now(),
                     };
@@ -480,9 +496,14 @@ impl ImageCache {
         let _ = self.tx.send(op);
     }
 
-    /// The stored image of `key`, if its file is intact. A row whose file is
-    /// missing or has the wrong size is dropped (re-verified by the writer).
+    /// The stored image of `key`, if its file is intact: from its pending
+    /// entry while its row waits to commit, else from its row. A row whose
+    /// file is missing or has the wrong size is dropped (re-verified by the
+    /// writer).
     async fn lookup(&self, key: &str) -> Result<Option<CachedImage>, ImageError> {
+        if let Some(image) = self.pending_file(key).await {
+            return Ok(Some(image));
+        }
         let dir = self.dir.clone();
         let k = key.to_owned();
         let found = blocking(&self.pool, &self.db_path, move |c| {
@@ -512,6 +533,24 @@ impl ImageCache {
                 }))
             }
         }
+    }
+
+    /// The file of `key` whose row is still queued, if it is on disk with
+    /// the size that was written.
+    async fn pending_file(&self, key: &str) -> Option<CachedImage> {
+        let PendingRow {
+            content_type,
+            bytes,
+            ..
+        } = self.pending.lock().get(key).cloned()?;
+        let path = file_path(&self.dir, key);
+        let meta = tokio::fs::metadata(&path).await.ok()?;
+        (meta.is_file() && meta.len() == bytes).then_some(CachedImage {
+            path,
+            content_type,
+            bytes,
+            hit: true,
+        })
     }
 
     /// Queues a `last_access` write when the stored one is a minute old and
@@ -627,20 +666,12 @@ impl ImageCache {
         job: Job,
         tx: oneshot::Sender<FlightResult>,
     ) {
-        match self.download(&job).await {
-            Ok((done, ack)) => {
-                let mut pending = ack;
-                if let Some(rx) = pending.as_mut() {
-                    if tokio::time::timeout(INSERT_WAIT, rx).await.is_ok() {
-                        pending = None;
-                    }
-                }
+        match self.download(&job, id).await {
+            Ok(done) => {
+                // The file is in place; its row may still wait for the write
+                // lock. A request arriving before it commits finds the
+                // pending entry instead of fetching again.
                 let _ = tx.send(Ok(done));
-                // Keep the flight until the row commits: a request arriving
-                // in between joins it instead of fetching again.
-                if let Some(rx) = pending {
-                    let _ = rx.await;
-                }
                 self.end_flight(&flight_key, id, None);
             }
             Err(err) => {
@@ -668,21 +699,15 @@ impl ImageCache {
         }
     }
 
-    /// Fetches, validates and stores one image. The returned receiver
-    /// resolves once its index row is committed.
-    async fn download(
-        &self,
-        job: &Job,
-    ) -> Result<(Done, Option<oneshot::Receiver<()>>), ImageError> {
+    /// Fetches, validates and stores one image for flight `id`, and queues
+    /// its index row (pending until the writer's batch is done).
+    async fn download(&self, job: &Job, id: u64) -> Result<Done, ImageError> {
         // An earlier flight may have stored it after the caller looked.
         if let Some(image) = self.lookup(&job.key).await? {
-            return Ok((
-                Done {
-                    image,
-                    fetched: false,
-                },
-                None,
-            ));
+            return Ok(Done {
+                image,
+                fetched: false,
+            });
         }
         let host = job.url.host_str().unwrap_or("the image server").to_owned();
         let (content_type, body) = tokio::time::timeout(
@@ -700,7 +725,16 @@ impl ImageCache {
         let path = store::write_file(&self.dir, &job.key, body)
             .await
             .map_err(ImageError::local)?;
-        let (ack, ack_rx) = oneshot::channel();
+        // Before the row is queued: an entry added after its batch was done
+        // would never be dropped.
+        self.pending.lock().insert(
+            job.key.clone(),
+            PendingRow {
+                flight: id,
+                content_type: content_type.clone(),
+                bytes,
+            },
+        );
         self.send(Op::Insert {
             row: store::Row {
                 key: job.key.clone(),
@@ -709,20 +743,17 @@ impl ImageCache {
                 bytes,
                 at: unix_now(),
             },
-            ack,
+            flight: id,
         });
-        Ok((
-            Done {
-                image: CachedImage {
-                    path,
-                    content_type,
-                    bytes,
-                    hit: false,
-                },
-                fetched: true,
+        Ok(Done {
+            image: CachedImage {
+                path,
+                content_type,
+                bytes,
+                hit: false,
             },
-            Some(ack_rx),
-        ))
+            fetched: true,
+        })
     }
 
     async fn read_stats(&self) -> CoreResult<ImageCacheStats> {

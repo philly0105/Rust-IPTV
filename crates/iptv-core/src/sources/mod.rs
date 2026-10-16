@@ -610,6 +610,22 @@ pub struct ActiveRun {
     pub token: tokio_util::sync::CancellationToken,
     /// Set by `sources.cancelImport` (versus a remove or settings change).
     pub user_cancelled: AtomicBool,
+    /// First partial failure of the run ([`note_import_warning`]).
+    pub warning: parking_lot::Mutex<Option<(String, RpcErrorCode)>>,
+}
+
+/// Notes a partial failure of the import running in this task: a content
+/// type that could not be loaded kept its previous rows (or its
+/// categories). The run still succeeds; [`run_import`] records the first
+/// warning as the source's `lastError`, so the source says what is missing
+/// instead of looking fully refreshed. No-op outside a run.
+pub fn note_import_warning(message: &str, code: RpcErrorCode) {
+    let _ = IMPORT_RUN.try_with(|r| {
+        let mut w = r.warning.lock();
+        if w.is_none() {
+            *w = Some((message.to_string(), code));
+        }
+    });
 }
 
 type ActiveMap = DashMap<String, Arc<ActiveRun>>;
@@ -667,6 +683,7 @@ impl RunGuard {
         let run = Arc::new(ActiveRun {
             token: token.clone(),
             user_cancelled: AtomicBool::new(false),
+            warning: parking_lot::Mutex::new(None),
         });
         let active = active(state);
         active.insert(id.to_string(), run.clone());
@@ -838,10 +855,12 @@ pub async fn get(state: &AppState, id: &str) -> CoreResult<Source> {
 }
 
 /// Error of [`add`]: the id of the created source (when the failure happened
-/// during the import) and the cause.
+/// during the import), the id of the source that already uses the address
+/// (a refused duplicate), and the cause.
 #[derive(Debug)]
 pub struct AddError {
     pub source_id: Option<String>,
+    pub existing_source_id: Option<String>,
     pub error: CoreError,
 }
 
@@ -849,6 +868,7 @@ impl From<CoreError> for AddError {
     fn from(error: CoreError) -> Self {
         Self {
             source_id: None,
+            existing_source_id: None,
             error,
         }
     }
@@ -858,6 +878,11 @@ impl From<AddError> for RpcError {
     fn from(e: AddError) -> Self {
         let cancelled = is_cancelled_error(&e.error);
         let mut err = RpcError::from(e.error);
+        // A refused duplicate: `details.existingSourceId`, never `sourceId`,
+        // which names a source this add created (the UI discards that one).
+        if let Some(id) = e.existing_source_id {
+            return err.with_details(serde_json::json!({ "existingSourceId": id }));
+        }
         match (e.source_id, cancelled) {
             (Some(id), true) => {
                 err = err.with_details(serde_json::json!({ "sourceId": id, "cancelled": true }))
@@ -882,8 +907,45 @@ pub fn cancel_aware_rpc_error(err: CoreError) -> RpcError {
     }
 }
 
+/// Held across the duplicate check and the write in [`add`] and [`update`],
+/// so two concurrent calls cannot both claim one address.
+fn identity_lock(state: &AppState) -> Arc<tokio::sync::Mutex<()>> {
+    state.ext_or_insert_with("sources_identity_lock", || {
+        Arc::new(tokio::sync::Mutex::new(()))
+    })
+}
+
+/// `Conflict` for a config whose address `existing` (a source name) already
+/// uses. The wording avoids "cancelled" / "import stopped", which mark a
+/// cancelled run's conflict.
+fn duplicate_error(config: &SourceConfig, existing: &str) -> CoreError {
+    let what = match config {
+        SourceConfig::M3u(c) if c.origin == M3uOrigin::File => "playlist file",
+        SourceConfig::M3u(_) => "playlist URL",
+        SourceConfig::Xtream(_) => "server and username",
+        SourceConfig::Stalker(_) => "portal and MAC address",
+    };
+    CoreError::Conflict(format!(
+        "this source already exists: \"{existing}\" uses the same {what}"
+    ))
+}
+
+/// The stored config of `s` (`None` when it could not be read).
+fn config_of(s: &Source) -> Option<SourceConfig> {
+    match s.kind {
+        SourceKind::M3u => s.m3u.clone().map(SourceConfig::M3u),
+        SourceKind::Xtream => s.xtream.clone().map(SourceConfig::Xtream),
+        SourceKind::Stalker => s.stalker.clone().map(SourceConfig::Stalker),
+    }
+}
+
 /// `sources.add`: validates, inserts, runs the importer. On importer failure
 /// the source stays (with `lastError`) and the error carries its id.
+///
+/// An address another source already uses (see [`store::identity`]; pasted
+/// text is never a duplicate) is refused with `Conflict` before anything is
+/// created; that error's `existing_source_id` (`details.existingSourceId` in
+/// the RPC error) is the existing source's id, and its `source_id` is `None`.
 pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, AddError> {
     let (config, raw_text) = match args.kind {
         SourceKind::M3u => {
@@ -943,14 +1005,27 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
     let id = uuid::Uuid::new_v4().to_string();
     let auto_refresh = args.auto_refresh.unwrap_or(false);
     {
+        let _same = identity_lock(&state).lock_owned().await;
         let id = id.clone();
         let data_dir = state.data_dir.clone();
-        state
+        let duplicate = state
             .db_call(move |c| {
+                if let Some((other_id, other_name)) = store::find_same(c, &config, None)? {
+                    return Ok(Some((other_id, duplicate_error(&config, &other_name))));
+                }
                 let raw = raw_text.as_deref().map(|t| (data_dir.as_path(), t));
-                store::insert(c, &id, &name, auto_refresh, &config, raw)
+                store::insert(c, &id, &name, auto_refresh, &config, raw)?;
+                Ok(None)
             })
             .await?;
+        // Nothing was created: the error names the source that already exists.
+        if let Some((other_id, error)) = duplicate {
+            return Err(AddError {
+                source_id: None,
+                existing_source_id: Some(other_id),
+                error,
+            });
+        }
     }
     tracing::info!(source_id = %id, kind = args.kind.as_str(), "source added");
     emit_changed(&state);
@@ -958,6 +1033,7 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
         Ok((source, _)) => Ok(source),
         Err(error) => Err(AddError {
             source_id: Some(id),
+            existing_source_id: None,
             error,
         }),
     }
@@ -1039,9 +1115,14 @@ async fn run_import_locked(
             let sid = id.to_string();
             let kind = source.kind;
             let (movies, series) = (summary.movies, summary.series);
+            let warning = run.run.warning.lock().take();
             state
                 .db_call(move |c| {
                     store::record_import(c, &sid, None)?;
+                    if let Some((msg, code)) = &warning {
+                        // A content type kept its previous rows: say so.
+                        store::record_import_error(c, &sid, msg, *code)?;
+                    }
                     if kind == SourceKind::Stalker {
                         // Portal VOD is not stored locally; keep its totals.
                         crate::catalog::set_remote_counts(c, &sid, movies, series)?;
@@ -1246,7 +1327,8 @@ async fn record(state: &AppState, id: &str, error: Option<(&str, RpcErrorCode)>)
     }
 }
 
-/// `sources.update`.
+/// `sources.update`. Moving a source to an address another source already
+/// uses is refused with `Conflict`; nothing is changed then.
 pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResult<Source> {
     let current = get(state, id).await?;
     let mut config: Option<SourceConfig> = None;
@@ -1297,6 +1379,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         }
         _ => false,
     };
+    // A new address (not the one this source already has) must not be
+    // another source's; checked under the lock, inside the write.
+    let claim = config.clone().filter(|cfg| {
+        let new = store::identity(cfg);
+        new.is_some() && new != config_of(&current).as_ref().and_then(store::identity)
+    });
     let name = match patch.name.as_deref().map(str::trim) {
         Some("") => return Err(CoreError::Invalid("the name cannot be empty".into())),
         Some(n) => Some(n.to_string()),
@@ -1329,10 +1417,19 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
+    let _same = match claim {
+        Some(_) => Some(identity_lock(state).lock_owned().await),
+        None => None,
+    };
     let (updated, config_changed) = state
         .db_call(move |c| {
             let mut config_changed = false;
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some(cfg) = &claim {
+                if let Some((_, other)) = store::find_same(&tx, cfg, Some(&sid))? {
+                    return Err(duplicate_error(cfg, &other));
+                }
+            }
             if let Some(n) = &name {
                 tx.execute(
                     "UPDATE sources SET name = ?2 WHERE id = ?1",

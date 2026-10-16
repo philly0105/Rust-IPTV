@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type WatchlistEntry } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 import { PosterCard, itemPath, joinList } from '@/shell/dashboard/cards';
 
 import { DashboardRail, usePendingRemovals, useSettings } from '../deps';
@@ -68,16 +69,18 @@ export function MyListRail({ hideError = false }: MyListRailProps = {}) {
       skeletonAspect={2 / 3}
       renderCard={(e, rail) => {
         const subtitle = e.snapshot.subtitle ?? (e.ref.contentType === 'series' ? t('typeSeries') : t('typeMovie'));
+        // Older snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
+        const title = snapshotTitle(e.ref, e.snapshot.title).title;
         return (
           <PosterCard
             rail={rail}
-            title={e.snapshot.title}
+            title={title}
             subtitle={subtitle}
             posterUrl={e.snapshot.posterUrl}
             to={itemPath(e.ref)}
             myList={{ itemRef: e.ref, snapshot: e.snapshot }}
             badge={e.watched ? <WatchedTag label={t('watched')} /> : undefined}
-            ariaLabel={joinList([e.snapshot.title, subtitle, e.watched && t('watched')], i18n.language)}
+            ariaLabel={joinList([title, subtitle, e.watched && t('watched')], i18n.language)}
           />
         );
       }}

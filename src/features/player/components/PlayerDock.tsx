@@ -18,8 +18,8 @@ import { flushProgress, reportFullscreen, usePlayerStore } from '../store';
 import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
 import { PlayerSurface } from './PlayerSurface';
-import { SleepTimerHost } from './lazyParts';
-import { useZapHover } from './zapHooks';
+import { SleepTimerHost, ZapHeaderLine } from './lazyParts';
+import { useZapBannerShown, useZapHover } from './zapHooks';
 
 const POS_KEY = 'player.mini.pos';
 const MARGIN = 16;
@@ -125,6 +125,10 @@ export function PlayerDock() {
   // Hovering the mini player's channel title brings up the zap banner over its video; leaving the
   // mini player (no pointerleave comes then) lets go of that hold.
   const titleHover = useZapHover(inMini);
+  // A zap in the mini player: its header gains the number and what airs now (no banner over the
+  // small picture, which would repeat the name the header already shows).
+  const zapShown = useZapBannerShown();
+  const miniZap = inMini && zapShown && mode !== 'radio';
   const channelPanelAvailable = !!source?.isLive && (settings?.fullscreenChannelPanel ?? true) && !!(zapContext ?? source?.ref);
 
   usePlaybackShortcuts({ channelPanelAvailable });
@@ -309,12 +313,12 @@ export function PlayerDock() {
           </button>
           {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
           <span
-            className="min-w-0 flex-1 truncate text-sm font-medium text-fg"
+            className="flex min-w-0 flex-1 text-sm font-medium text-fg"
             title={source?.title}
             onPointerEnter={titleHover.onPointerEnter}
             onPointerLeave={titleHover.onPointerLeave}
           >
-            {source?.title}
+            {miniZap && source ? <ZapHeaderLine title={source.title} /> : <span className="min-w-0 truncate">{source?.title}</span>}
           </span>
           <ExpandButton label={t('expand')} />
           <button

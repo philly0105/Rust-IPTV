@@ -50,8 +50,8 @@ describe('queryDefaultsFor (C4)', () => {
     ['catalog.movies', 2 * MIN, 10 * MIN],
     ['catalog.series', 2 * MIN, 10 * MIN],
     ['catalog.yearFacets', 2 * MIN, 10 * MIN],
-    ['epg.grid', 5 * MIN, 2 * MIN],
-    ['epg.programs', 5 * MIN, 2 * MIN],
+    ['epg.grid', 5 * MIN, 5 * MIN],
+    ['epg.programs', 5 * MIN, 5 * MIN],
     ['tmdb.movie', Infinity, 30 * MIN],
     ['tmdb.similar', Infinity, 30 * MIN],
     ['tmdb.person', Infinity, 30 * MIN],
@@ -62,6 +62,12 @@ describe('queryDefaultsFor (C4)', () => {
 
   it.each(rows)('%s -> staleTime %d, gcTime %d', (cmd, staleTime, gcTime) => {
     expect(queryDefaultsFor(cmd)).toEqual({ staleTime, gcTime });
+  });
+
+  // L2-perf-ui-10: an entry dropped before it goes stale is refetched on every reopen.
+  it.each(rows.filter(([, staleTime]) => Number.isFinite(staleTime)))('%s keeps cached data at least as long as it is fresh', (cmd) => {
+    const { staleTime, gcTime } = queryDefaultsFor(cmd);
+    expect(gcTime).toBeGreaterThanOrEqual(staleTime);
   });
 
   it('falls back to 30 s / 10 min for commands outside the table', () => {
@@ -87,7 +93,7 @@ describe('app query client (C4)', () => {
     expect(o.gcTime).toBe(30 * MIN);
     const epg = queryClient.defaultQueryOptions({ queryKey: ['epg.grid', null] });
     expect(epg.staleTime).toBe(5 * MIN);
-    expect(epg.gcTime).toBe(2 * MIN);
+    expect(epg.gcTime).toBe(5 * MIN);
   });
 
   it('uses the client defaults for other keys', () => {
@@ -152,7 +158,8 @@ describe('event invalidation', () => {
   it('maps core events to query prefixes', () => {
     expect(invalidationPrefixes({ type: 'epg.changed' })).toEqual(['epg.']);
     expect(invalidationPrefixes({ type: 'sources.changed' })).toEqual(['catalog.', 'sources.', 'lists.']);
-    expect(invalidationPrefixes({ type: 'downloads.update' })).toEqual(['downloads.', 'myvideos.']);
+    // L2-guide-library-11: not downloads.dir, which a progress tick cannot change.
+    expect(invalidationPrefixes({ type: 'downloads.update' })).toEqual(['downloads.list', 'myvideos.']);
     expect(invalidationPrefixes({ type: 'settings.changed' })).toEqual(['settings.']);
     expect(invalidationPrefixes({ type: 'epg.progress' })).toEqual([]);
   });

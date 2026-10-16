@@ -240,5 +240,8 @@
   "categoryMissingTitle": "لم يتم العثور على الفئة",
   "categoryMissingBody": "لا يحتوي هذا المصدر على فئة بهذا الرابط. ربما أعاد المزوّد تسميتها أو حذفها.",
   "namedMarkedWatched": "تم وضع علامة مشاهَد على {{name}}",
-  "namedMarkedUnwatched": "تمت إزالة علامة المشاهدة عن {{name}}"
+  "namedMarkedUnwatched": "تمت إزالة علامة المشاهدة عن {{name}}",
+  "filters": "عوامل التصفية",
+  "filtersActive": "عوامل التصفية المفعّلة: {{n}}",
+  "locked": "مقفل"
 }

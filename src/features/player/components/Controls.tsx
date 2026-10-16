@@ -33,9 +33,10 @@ import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
 import { setHistoryOpen, useHistoryStore } from '../history';
 import { useMediaStore } from '../media';
 import { usePipStore } from '../pip';
-import { nextInQueue, prevInQueue, replay, selectEnded, usePlayerStore } from '../store';
+import { nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnded, usePlayerStore, type PlayerState } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { InlineSpinner } from './InlineSpinner';
+import { useNarrow } from './useNarrow';
 // failover: AlternatesMenu, AlternatesRow
 import {
   AlternatesMenu,
@@ -80,6 +81,7 @@ export function CtlButton({
   className,
   shortcut,
   id,
+  role,
 }: {
   label: string;
   onClick(): void;
@@ -91,10 +93,13 @@ export function CtlButton({
   shortcut?: CtlShortcut;
   /** Stable control id (`data-ctl`) so focus can be put back after the chrome re-renders. */
   id?: string;
+  /** `menuitem` in the options menu's row of moved controls. */
+  role?: 'menuitem';
 }) {
   return (
     <button
       type="button"
+      role={role}
       data-ctl={id}
       aria-label={label}
       title={ctlTitle(label, shortcut)}
@@ -121,7 +126,7 @@ function VolumeControl({ compact }: { compact?: boolean }) {
   const percent = Math.round(shown * 100);
   const Icon = shown === 0 ? VolumeX : shown < 0.5 ? Volume1 : Volume2;
   return (
-    <div className="group/vol flex items-center">
+    <div data-vol="" className="group/vol flex items-center">
       <CtlButton id="mute" shortcut="mute" label={muted ? t('unmute') : t('mute')} onClick={() => usePlayerStore.getState().toggleMute()}>
         <Icon />
       </CtlButton>
@@ -152,21 +157,12 @@ function VolumeControl({ compact }: { compact?: boolean }) {
   );
 }
 
-/** Embedded mpv live recording: a toggle plus a red REC timer while `mpv.record` writes to disk. */
-export function RecordControl({ compact }: { compact?: boolean }) {
+/** Start or stop `mpv.record` (embedded mpv live recording), with a toast for the outcome. */
+function useRecordToggle(): { recording: boolean; busy: boolean; toggle(): void } {
   const { t } = useTranslation('player');
   const { toast } = useToast();
   const recording = useMediaStore((s) => !!s.mpv?.recording);
-  const startedAt = useMediaStore((s) => s.recordStartedAt);
-  const recordPath = useMediaStore((s) => s.mpv?.recordPath ?? null);
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!recording) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [recording]);
 
   const toggle = (): void => {
     if (busy) return;
@@ -194,8 +190,27 @@ export function RecordControl({ compact }: { compact?: boolean }) {
       })
       .finally(() => setBusy(false));
   };
+  return { recording, busy, toggle };
+}
+
+/** Embedded mpv live recording: a toggle plus a red REC timer while `mpv.record` writes to disk. */
+export function RecordControl({ compact }: { compact?: boolean }) {
+  const { t } = useTranslation('player');
+  const { recording, busy, toggle } = useRecordToggle();
+  const startedAt = useMediaStore((s) => s.recordStartedAt);
+  const recordPath = useMediaStore((s) => s.mpv?.recordPath ?? null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!recording) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [recording]);
 
   const elapsed = recording && startedAt ? Math.max(0, (now - startedAt) / 1000) : 0;
+  // A tally light that blinks in step with the timer's own one-second tick: no CSS animation,
+  // so nothing is redrawn over the video between ticks.
+  const dim = Math.floor(elapsed) % 2 === 1;
   return (
     <>
       {recording && (
@@ -204,7 +219,11 @@ export function RecordControl({ compact }: { compact?: boolean }) {
           title={recordPath ? t('recordingTo', { path: recordPath }) : undefined}
           className="ms-1 inline-flex items-center gap-1.5 rounded-full bg-[color:var(--color-danger,#ff7a7a)]/15 px-2 py-0.5 font-display text-xs font-semibold text-[color:var(--color-danger,#ff7a7a)] tabular-nums ring-1 ring-[color:var(--color-danger,#ff7a7a)]/45"
         >
-          <span className="size-2 rounded-full bg-[color:var(--color-danger,#ff7a7a)] motion-safe:animate-live-pulse" aria-hidden />
+          <span
+            data-testid="rec-dot"
+            className={cn('size-2 rounded-full bg-[color:var(--color-danger,#ff7a7a)]', dim && 'motion-safe:opacity-35')}
+            aria-hidden
+          />
           {t('rec')} {formatTime(elapsed)}
         </span>
       )}
@@ -340,28 +359,60 @@ export function MenuChoice({ label, selected, onClick }: { label: string; select
 const MENU_EDGE = 8;
 
 /**
- * The height a menu that grows up from its bottom edge may take: up to the app header, or the top
- * of the screen in fullscreen. Null when it cannot be measured.
+ * The height a menu that grows up from its bottom edge may take: up to the app header (or the top
+ * of the screen in fullscreen) and the top of the player it floats in, which clips it (a docked
+ * stage, the mini frame). Null when it cannot be measured.
  */
 export function roomAbove(menu: HTMLElement): number | null {
   const bottom = menu.getBoundingClientRect().bottom;
   const header = document.fullscreenElement ? null : document.querySelector<HTMLElement>('[data-testid="shell-header"]');
-  const top = Math.max(0, header?.getBoundingClientRect().bottom ?? 0) + MENU_EDGE;
+  const host = menu.closest<HTMLElement>('[data-player-host]');
+  const top = Math.max(0, header?.getBoundingClientRect().bottom ?? 0, host?.getBoundingClientRect().top ?? 0) + MENU_EDGE;
   const room = Math.floor(bottom - top);
   return Number.isFinite(room) && bottom > 0 ? Math.max(room, 0) : null;
+}
+
+/** The share of the player's height a docked menu may take; the native video keeps the rest. */
+export const DOCK_MENU_SHARE = 0.55;
+
+/**
+ * Docked under embedded mpv the menu grows the dock upward and the video shrinks to make room,
+ * so it may take only part of the player's height. Null when it cannot be measured.
+ */
+export function roomInDock(menu: HTMLElement): number | null {
+  const host = menu.closest<HTMLElement>('[data-player-host]');
+  const height = host?.getBoundingClientRect().height ?? 0;
+  return height > 0 ? Math.floor(height * DOCK_MENU_SHARE) : null;
+}
+
+/** When an Escape last closed a player menu (see `playerMenuJustClosed`). */
+let menuEscapeAt = Number.NEGATIVE_INFINITY;
+
+/**
+ * True right after Escape closed a player menu. A page-level Escape (close the player) lets such
+ * a key go: a held or doubled Escape must not run on from closing the menu into stopping playback.
+ */
+export function playerMenuJustClosed(withinMs = 600): boolean {
+  return Date.now() - menuEscapeAt < withinMs;
 }
 
 function OptionsMenu({
   view,
   setView,
   isVod,
-  fitAbove = false,
+  fit,
+  moved,
 }: {
   view: MenuView;
   setView(v: MenuView | null): void;
   isVod: boolean;
-  /** Floating over the picture, growing upward: never taller than the room above its bottom edge. */
-  fitAbove?: boolean;
+  /**
+   * `above`: floating over the picture, growing upward, never taller than the room above its
+   * bottom edge. `dock`: in the embedded mpv dock, never more than part of the player's height.
+   */
+  fit: 'above' | 'dock';
+  /** Controls the bar has no room for (a narrow player), as a row at the top of the root view. */
+  moved?: ReactNode;
 }) {
   const { t } = useTranslation('player');
   const { t: tc } = useTranslation('common');
@@ -378,16 +429,16 @@ function OptionsMenu({
 
   useLayoutEffect(() => {
     const menu = ref.current;
-    if (!fitAbove || !menu) return;
-    const fit = (): void => setRoom(roomAbove(menu));
-    fit();
-    window.addEventListener('resize', fit);
-    document.addEventListener('fullscreenchange', fit);
+    if (!menu) return;
+    const measure = (): void => setRoom(fit === 'dock' ? roomInDock(menu) : roomAbove(menu));
+    measure();
+    window.addEventListener('resize', measure);
+    document.addEventListener('fullscreenchange', measure);
     return () => {
-      window.removeEventListener('resize', fit);
-      document.removeEventListener('fullscreenchange', fit);
+      window.removeEventListener('resize', measure);
+      document.removeEventListener('fullscreenchange', measure);
     };
-  }, [fitAbove, view]);
+  }, [fit, view]);
 
   useEffect(() => {
     // The first item that can take focus (Sync rows may all be disabled, Sources may still be
@@ -459,6 +510,7 @@ function OptionsMenu({
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
+          if (view === 'root') menuEscapeAt = Date.now();
           setView(view === 'root' ? null : view === 'subStyle' ? 'text' : 'root');
         }
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -476,6 +528,11 @@ function OptionsMenu({
       {view === 'root' && (
         <>
           {header}
+          {moved && (
+            <div data-testid="moved-controls" className="mb-1 flex flex-wrap items-center gap-0.5 border-b border-white/10 pb-1">
+              {moved}
+            </div>
+          )}
           {tracks.qualities.length > 0 && <MenuRow label={t('quality')} value={qualityValue} onClick={() => setView('quality')} />}
           {tracks.audio.length > 0 && <MenuRow label={t('audioTrack')} value={audioValue} onClick={() => setView('audio')} />}
           {/* Always there (C6): a file can be loaded into a stream without subtitles. */}
@@ -572,6 +629,154 @@ export interface ControlsProps {
 
 export { InlineSpinner };
 
+/**
+ * Try a failed stream again: look its URL up again when that lookup is what failed, else reload
+ * the media through the active engine.
+ */
+export function retryPlayback(): void {
+  if (retryResolve()) return;
+  reportStatus('loading');
+  useMediaStore.getState().commands?.retry();
+}
+
+/** How long the live dot pulses after the stream starts playing; it then holds still. */
+export const LIVE_PULSES = 3;
+
+/**
+ * The live status at the stream's edge. On air (playing): the red dot pulses a few times, then
+ * holds still, because a never-ending animation keeps the compositor redrawing over the video.
+ * Starting or paused: a dim dot. Failed: "No signal" with a hollow dot, never the red badge.
+ */
+function LiveBadge({ status, pulseKey, className }: { status: PlayerState['status']; pulseKey: string; className?: string }) {
+  const { t } = useTranslation('player');
+  const failed = status === 'error';
+  const onAir = status === 'playing';
+  return (
+    <span
+      data-testid="live-badge"
+      data-state={failed ? 'no-signal' : onAir ? 'on-air' : 'standby'}
+      className={cn(
+        'ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-display text-xs font-semibold tracking-wide whitespace-nowrap',
+        onAir ? 'text-white' : 'text-white/70',
+        className,
+      )}
+    >
+      <span
+        // A new channel (or the stream coming back) pulses again.
+        key={`${pulseKey}|${status}`}
+        data-testid="live-dot"
+        className={cn(
+          'size-2 rounded-full',
+          onAir ? 'bg-live motion-safe:animate-live-pulse' : failed ? 'ring-1 ring-white/60 ring-inset' : 'bg-white/45',
+        )}
+        style={onAir ? { animationIterationCount: LIVE_PULSES } : undefined}
+        aria-hidden
+      />
+      {failed ? t('liveNoSignal') : t('live')}
+    </span>
+  );
+}
+
+/** The record toggle as one of the options menu's moved controls. */
+function RecordMenuAction({ onDone }: { onDone(): void }) {
+  const { t } = useTranslation('player');
+  const { recording, busy, toggle } = useRecordToggle();
+  return (
+    <CtlButton
+      role="menuitem"
+      label={recording ? t('recordStop') : t('recordStart')}
+      pressed={recording}
+      disabled={busy}
+      onClick={() => {
+        toggle();
+        onDone();
+      }}
+      className={recording ? 'text-[#ff7a7a]!' : undefined}
+    >
+      <CircleDot />
+    </CtlButton>
+  );
+}
+
+/**
+ * While the volume slider is out in a narrow bar, the live badge or the time steps aside for it
+ * (the row has no room for both).
+ */
+const NARROW_YIELD_TO_VOLUME = '[[data-ctl-row]:has([data-vol]:hover)_&]:hidden [[data-ctl-row]:has([data-vol]:focus-within)_&]:hidden';
+
+/** The buttons a narrow row can do without (the options menu takes them), by group. */
+type Spare = 'captions' | 'pip' | 'skip' | 'stop' | 'screenshot' | 'history';
+/** A spare button's room in the row: 40 px and the row's 2 px gap. */
+const SPARE_SLOT_PX = 42;
+/** What the dock's readout keeps for itself (typed channel digits, the volume level). */
+const READOUT_KEEP_PX = 72;
+
+/**
+ * The spare groups a narrow row keeps, given room for `slots` buttons. `groups` come most useful
+ * first with their button counts; one that does not fit is skipped and a smaller one may follow.
+ */
+export function keepSpares(groups: readonly (readonly [Spare, number])[], slots: number): Set<Spare> {
+  const kept = new Set<Spare>();
+  let left = slots;
+  for (const [spare, n] of groups) {
+    if (n > 0 && n <= left) {
+      kept.add(spare);
+      left -= n;
+    }
+  }
+  return kept;
+}
+
+/**
+ * How many spare buttons fit in a narrow row: the spacer's width, the readout's beyond what it
+ * keeps, and the spares shown now, less any overflow. That sum does not depend on how many spares
+ * show, so it settles in one pass. Read after layout (the row's ResizeObserver, or the next frame
+ * after a render), never during one. Not measured while the volume slider is out: the row lends it
+ * room then (the spares step aside), and it is measured again when the pointer or focus leaves.
+ */
+function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: number; showing: { current: number } } {
+  const [slots, setSlots] = useState(0);
+  // How many spares the render being measured shows (set by the caller once it has picked them).
+  const showing = useRef(0);
+  const measure = useRef<() => void>(() => undefined);
+  measure.current = () => {
+    if (!row || !active) return;
+    if (row.querySelector('[data-vol]')?.matches(':hover, :focus-within')) return;
+    const width = row.clientWidth;
+    if (!width) return;
+    let free = showing.current * SPARE_SLOT_PX - Math.max(0, row.scrollWidth - width);
+    for (const el of row.querySelectorAll<HTMLElement>(':scope > [data-row-free]')) free += el.offsetWidth;
+    const readout = row.querySelector<HTMLElement>(':scope > [data-testid="bar-readout"]');
+    if (readout) free += readout.offsetWidth - READOUT_KEEP_PX;
+    const next = Math.max(0, Math.floor(free / SPARE_SLOT_PX));
+    setSlots((s) => (s === next ? s : next));
+  };
+  const frame = useRef(0);
+  const later = useRef((): void => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => measure.current());
+  });
+  // What the row holds changes with the render (a badge, Retry, a caption track).
+  useEffect(() => {
+    if (active) later.current();
+  });
+  useEffect(() => {
+    if (!row) return;
+    const again = later.current;
+    row.addEventListener('pointerout', again);
+    row.addEventListener('focusout', again);
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => measure.current());
+    ro?.observe(row);
+    return () => {
+      cancelAnimationFrame(frame.current);
+      row.removeEventListener('pointerout', again);
+      row.removeEventListener('focusout', again);
+      ro?.disconnect();
+    };
+  }, [row]);
+  return { slots: active ? slots : 0, showing };
+}
+
 export function Controls({ variant, visible, compact, onMenuOpenChange, readoutIdle }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
@@ -593,11 +798,36 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const commands = useMediaStore((s) => s.commands);
   const historyOpen = useHistoryStore((s) => s.open);
   const [menu, setMenuState] = useState<MenuView | null>(null);
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  // A phone-width player (not the mini one, which has its own compact set): the row keeps its
+  // core controls and the options menu takes the rest.
+  const narrow = useNarrow(root) && !compact;
+  const [row, setRow] = useState<HTMLDivElement | null>(null);
+  const spareRoom = useSpareSlots(row, narrow);
 
   const setMenu = (v: MenuView | null): void => {
     setMenuState(v);
     if (v !== null) setHistoryOpen(false);
     onMenuOpenChange?.(v !== null || useHistoryStore.getState().open);
+  };
+
+  /**
+   * The menu asks to change view or close. Closing with focus inside it hands focus back to the
+   * control that opened it: dropped on the page, the player's keys would stop working and the
+   * page's own Escape (close the player) would be next in line.
+   */
+  const setMenuView = (v: MenuView | null): void => {
+    if (v === null && root) {
+      const open = root.querySelector('[data-testid="player-options-menu"]');
+      if (open?.contains(document.activeElement)) {
+        const trigger =
+          root.querySelector<HTMLElement>('[data-ctl="options"]') ??
+          root.querySelector<HTMLElement>('[data-ctl="sleep"]') ??
+          root.querySelector<HTMLElement>('[data-ctl="play"]');
+        trigger?.focus({ preventScroll: true });
+      }
+    }
+    setMenu(v);
   };
 
   useEffect(() => {
@@ -632,6 +862,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const isLive = source.isLive;
   const isVod = !isLive && !source.isRadio;
   const playing = status === 'playing' || status === 'loading';
+  const failed = status === 'error';
   const prev = prevInQueue();
   const next = nextInQueue();
   const captionsOn = tracks.text.some((x) => x.selected);
@@ -649,15 +880,108 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
   const showTime = !!duration || position > 0 || status !== 'loading';
   const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
+  const showPip = canPip && (variant === 'overlay' || !compact);
 
   const store = usePlayerStore.getState();
   // Overlay: a glass pane floating over a light scrim (the mini player's is full width, it has no
   // room to spare). Dock: a strong glass strip under the native video.
   const floating = variant === 'overlay' && !compact;
 
+  // A narrow row keeps the spares it has room for, most useful first; the menu takes the rest.
+  const kept = narrow
+    ? keepSpares(
+        [
+          ['captions', tracks.text.length > 0 ? 1 : 0],
+          ['pip', showPip && !windowPip ? 1 : 0],
+          ['skip', (prev ? 1 : 0) + (next ? 1 : 0)],
+          ['stop', 1],
+          ['screenshot', 1],
+          ['history', isLive ? 1 : 0],
+        ],
+        spareRoom.slots,
+      )
+    : undefined;
+  const inRow = (spare: Spare): boolean => !kept || kept.has(spare);
+  spareRoom.showing.current = kept
+    ? (kept.has('captions') ? 1 : 0) +
+      (kept.has('pip') ? 1 : 0) +
+      (kept.has('skip') ? (prev ? 1 : 0) + (next ? 1 : 0) : 0) +
+      (kept.has('stop') ? 1 : 0) +
+      (kept.has('screenshot') ? 1 : 0) +
+      (kept.has('history') ? 1 : 0)
+    : 0;
+  // A kept spare steps aside while the volume slider is out, like the live badge.
+  const spareClass = narrow ? NARROW_YIELD_TO_VOLUME : undefined;
+
+  const prevButton = prev && (
+    <CtlButton id="prev" className={spareClass} shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
+      <SkipBack />
+    </CtlButton>
+  );
+  const nextButton = next && (
+    <CtlButton id="next" className={spareClass} shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
+      <SkipForward />
+    </CtlButton>
+  );
+  const stopButton = (
+    <CtlButton id="stop" className={spareClass} label={t('stop')} onClick={() => store.stop()}>
+      <Square className="size-4! fill-current" />
+    </CtlButton>
+  );
+
+  /** A moved control did its job: close the menu, focus back on its trigger. */
+  const done = (): void => setMenuView(null);
+  const closeThen =
+    (run: () => void) =>
+    (): void => {
+      done();
+      run();
+    };
+  const moved = narrow ? (
+    <>
+      {prev && !inRow('skip') && (
+        <CtlButton role="menuitem" label={episodic ? t('previousEpisode') : t('previous')} shortcut="previousItem" onClick={closeThen(() => store.prev())}>
+          <SkipBack />
+        </CtlButton>
+      )}
+      {next && !inRow('skip') && (
+        <CtlButton role="menuitem" label={episodic ? t('nextEpisode') : t('next')} shortcut="nextItem" onClick={closeThen(() => store.next())}>
+          <SkipForward />
+        </CtlButton>
+      )}
+      {showPip && !windowPip && !inRow('pip') && (
+        <CtlButton role="menuitem" label={inPip ? t('exitPip') : t('pip')} pressed={inPip} onClick={closeThen(() => commands?.togglePip())}>
+          <PictureInPicture2 />
+        </CtlButton>
+      )}
+      {!inRow('screenshot') && <ScreenshotButton menuItem onDone={done} />}
+      {canRecord && <RecordMenuAction onDone={done} />}
+      {isLive && !inRow('history') && (
+        <CtlButton
+          role="menuitem"
+          label={t('channelHistory')}
+          shortcut="history"
+          onClick={() => {
+            done();
+            setHistoryOpen(true);
+          }}
+        >
+          <History />
+        </CtlButton>
+      )}
+      {!inRow('stop') && (
+        <CtlButton role="menuitem" label={t('stop')} onClick={() => store.stop()}>
+          <Square className="size-4! fill-current" />
+        </CtlButton>
+      )}
+    </>
+  ) : undefined;
+
   return (
     <div
+      ref={setRoot}
       data-player-controls=""
+      data-narrow={narrow ? '' : undefined}
       className={cn(
         'pointer-events-auto relative text-white',
         variant === 'overlay'
@@ -675,7 +999,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       {menu && variant === 'overlay' && (
         // Floating: just above the glass pane, inside the scrim. Compact: over the picture.
         <div className={cn('absolute z-10', floating ? 'end-2 bottom-[calc(100%-2.5rem)] sm:end-3' : 'end-1.5 bottom-full mb-1')}>
-          <OptionsMenu view={menu} setView={setMenu} isVod={isVod} fitAbove />
+          <OptionsMenu view={menu} setView={setMenuView} isVod={isVod} fit="above" moved={moved} />
         </div>
       )}
 
@@ -694,9 +1018,10 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       {menu && variant === 'dock' && (
         // A native surface sits above the DOM, so dock menus grow the dock upward instead of popping over
         // the video. The bar stays below so the options button can always close it; the surface shrinks
-        // to fit because MpvSurface re-measures the reserved strip on resize.
-        <div className="flex max-h-48 items-start justify-end overflow-y-auto py-1">
-          <OptionsMenu view={menu} setView={setMenu} isVod={isVod} />
+        // to fit because MpvSurface re-measures the reserved strip on resize. The menu keeps its own
+        // height (and scrolls inside itself) up to part of the player's height.
+        <div className="flex items-start justify-end py-1">
+          <OptionsMenu view={menu} setView={setMenuView} isVod={isVod} fit="dock" moved={moved} />
         </div>
       )}
 
@@ -720,14 +1045,15 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
             className="mb-0.5"
           />
         )}
-        <div className="flex min-w-0 items-center gap-0.5">
-          {prev && !compact && (
-            <CtlButton id="prev" shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
-              <SkipBack />
-            </CtlButton>
-          )}
+        <div ref={setRow} data-ctl-row="" className="flex min-w-0 items-center gap-0.5">
+          {!compact && !narrow && prevButton}
           {ended ? (
             <CtlButton id="play" label={t('replay')} onClick={replay}>
+              <RotateCcw />
+            </CtlButton>
+          ) : failed ? (
+            // Nothing to play or pause after a failure: the same spot tries the stream again.
+            <CtlButton id="play" label={t('retry')} onClick={retryPlayback}>
               <RotateCcw />
             </CtlButton>
           ) : (
@@ -735,28 +1061,14 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
               {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
             </CtlButton>
           )}
-          {next && !compact && (
-            <CtlButton id="next" shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
-              <SkipForward />
-            </CtlButton>
-          )}
-          {!compact && (
-            <CtlButton id="stop" label={t('stop')} onClick={() => store.stop()}>
-              <Square className="size-4! fill-current" />
-            </CtlButton>
-          )}
-          <VolumeControl compact={compact} />
+          {!compact && !narrow && nextButton}
+          {!compact && !narrow && stopButton}
+          <VolumeControl compact={compact || narrow} />
 
           {isLive ? (
-            atLiveEdge ? (
+            atLiveEdge || failed ? (
               // At the edge there is nothing to jump to: a status badge, not a dead button.
-              <span
-                data-testid="live-badge"
-                className="ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-display text-xs font-semibold tracking-wide text-white"
-              >
-                <span className="size-2 rounded-full bg-live motion-safe:animate-live-pulse" aria-hidden />
-                {t('live')}
-              </span>
+              <LiveBadge status={status} pulseKey={source.url} className={cn(narrow && NARROW_YIELD_TO_VOLUME)} />
             ) : (
               <>
                 <button
@@ -775,13 +1087,16 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
                   className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
                 >
                   <span className="size-2 rounded-full bg-white/50" aria-hidden />
-                  {compact ? t('live') : t('goLive')}
+                  {compact || narrow ? t('live') : t('goLive')}
                 </button>
                 <span
-                  className="ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums"
+                  className={cn(
+                    'ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums',
+                    narrow && NARROW_YIELD_TO_VOLUME,
+                  )}
                   data-testid="behind-live"
                 >
-                  {compact ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
+                  {compact || narrow ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
                 </span>
               </>
             )
@@ -791,28 +1106,38 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
               {t('radio')}
             </span>
           ) : showTime ? (
-            <span className="ms-1 font-display text-sm whitespace-nowrap text-white/90 tabular-nums">
+            <span
+              className={cn(
+                'ms-1 font-display whitespace-nowrap text-white/90 tabular-nums',
+                narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : 'text-sm',
+              )}
+            >
               {formatTime(position)}
               <span className="text-white/70"> / {formatTime(duration)}</span>
             </span>
           ) : null}
           {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
-          <SleepChip compact={compact} onOpen={() => setMenu(menu === 'sleep' ? null : 'sleep')} />
-          {canRecord && <RecordControl compact={compact} />}
-          {isLive && !compact && (
-            <CtlButton id="history" shortcut="history" label={t('channelHistory')} pressed={showHistory} onClick={() => setHistoryOpen(!historyOpen)}>
+          <SleepChip compact={compact || narrow} onOpen={() => setMenu(menu === 'sleep' ? null : 'sleep')} />
+          {canRecord && <RecordControl compact={compact || narrow} />}
+          {isLive && !compact && inRow('history') && (
+            <CtlButton id="history" className={spareClass} shortcut="history" label={t('channelHistory')} pressed={showHistory} onClick={() => setHistoryOpen(!historyOpen)}>
               <History />
             </CtlButton>
           )}
 
-          <div className="flex-1" />
+          <div data-row-free="" className="flex-1" />
           {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
+          {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
+          {narrow && inRow('skip') && prevButton}
+          {narrow && inRow('skip') && nextButton}
+          {narrow && inRow('stop') && stopButton}
           {/* Screenshot (C6). Radio and external players have no bar: their stages show it, disabled with the reason. */}
-          {!compact && <ScreenshotButton />}
+          {!compact && inRow('screenshot') && <ScreenshotButton className={spareClass} />}
 
-          {tracks.text.length > 0 && !compact && (
+          {tracks.text.length > 0 && !compact && inRow('captions') && (
             <CtlButton
               id="captions"
+              className={spareClass}
               // In live fullscreen, C opens the channel list instead.
               shortcut={isLive && isFullscreen ? undefined : 'captions'}
               label={captionsOn ? t('captionsOff') : t('captionsOn')}
@@ -830,9 +1155,10 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
               <Settings2 />
             </CtlButton>
           )}
-          {canPip && (variant === 'overlay' || !compact) && (
+          {showPip && (windowPip || inRow('pip')) && (
             <CtlButton
               id="pip"
+              className={windowPip ? undefined : spareClass}
               shortcut={windowPip ? 'exitPip' : undefined}
               label={inPip ? t('exitPip') : t('pip')}
               pressed={inPip}

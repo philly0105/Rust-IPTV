@@ -119,6 +119,13 @@ const ENGINE_MISSING = /\bmpv(?:\.exe)?\s+(?:was\s+|is\s+)?(?:not found|could no
  */
 const PARENTAL_LOCKED = /locked by parental controls/i;
 
+/**
+ * The built-in player's message for media the element took but could not show (no video or
+ * audio track it can decode, and no engine error to say why). Classifies as `unsupported`.
+ */
+export const NO_VIDEO_MESSAGE = 'The stream has no video or audio the player can decode';
+const NO_VIDEO = /no video or audio the player can decode/i;
+
 const PHRASES: readonly [RegExp, StreamErrorClass][] = [
   [/mpv stopped unexpectedly|lost the connection to mpv|mpv could not be monitored|mpv exited during startup/i, 'crashed'],
   [/timed?[\s_-]?out|timeout/i, 'timeout'],
@@ -186,7 +193,10 @@ function classifyBase(input: StreamErrorInput, status: number | undefined): Stre
  */
 export function errorCopyKeys(
   cls: StreamErrorClass,
-  input?: Pick<StreamErrorInput, 'connections' | 'message'>,
+  input?: Pick<StreamErrorInput, 'connections' | 'message'> & {
+    /** A live channel: a missing stream is the channel being unavailable, not a removed file. */
+    live?: boolean | undefined;
+  },
 ): { title: string; hint: string; params?: Record<string, number> } {
   switch (cls) {
     case 'engineMissing':
@@ -198,12 +208,16 @@ export function errorCopyKeys(
       return { title: 'errorAuthTitle', hint: 'errorAuth' };
     case 'notFound':
       if (PARENTAL_LOCKED.test(input?.message ?? '')) return { title: 'parentalHiddenTitle', hint: 'parentalHidden' };
+      if (input?.live) return { title: 'errorChannelUnavailableTitle', hint: 'errorChannelUnavailable' };
       return { title: 'errorNotFoundTitle', hint: 'errorNotFound' };
     case 'timeout':
       return { title: 'errorTimeoutTitle', hint: 'errorTimeout' };
     case 'server':
+      // 503: the provider says it is overloaded or down for a moment.
+      if (httpStatusOf(input?.message) === 503) return { title: 'errorBusyTitle', hint: 'errorBusy' };
       return { title: 'errorServerTitle', hint: 'errorServer' };
     case 'unsupported':
+      if (NO_VIDEO.test(input?.message ?? '')) return { title: 'errorNoVideoTitle', hint: 'errorNoVideo' };
       return { title: 'errorUnsupportedTitle', hint: 'errorUnsupportedCodec' };
     case 'network':
       return { title: 'errorTitle', hint: 'errorNetwork' };

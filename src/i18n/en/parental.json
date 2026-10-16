@@ -102,6 +102,8 @@
   "adultOffHint": "Named like adult content. Automatic adult locks are off.",
   "autoAdultCount_one": "{{count}} adult group is also locked automatically.",
   "autoAdultCount_other": "{{count}} adult groups are also locked automatically.",
+  "autoAdultRule": "Adult groups locked automatically",
+  "autoAdultNone": "None of this source's groups look like adult content.",
   "removeLockNamed": "Remove the lock on {{name}}",
   "showAllLocks_one": "Show {{count}} lock",
   "showAllLocks_other": "Show all {{count}} locks",

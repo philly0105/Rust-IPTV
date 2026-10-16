@@ -8,6 +8,12 @@ const bus = vi.hoisted(() => {
   };
 });
 const store = vi.hoisted(() => ({ zap: vi.fn(async () => undefined), zapToNumber: vi.fn(async () => undefined), adjustVolume: vi.fn() }));
+/** The player store and settings the remote follows, driven by the tests. */
+const player = vi.hoisted(() => ({
+  settings: null as null | { remoteControl: { enabled: boolean } },
+  storeListeners: new Set<(s: unknown, prev: unknown) => void>(),
+  settingsListeners: new Set<() => void>(),
+}));
 
 vi.mock('@/api/events', () => ({
   onAppEvent: (_type: string, fn: (p: unknown) => void) => {
@@ -16,13 +22,22 @@ vi.mock('@/api/events', () => ({
   },
 }));
 vi.mock('@/api/transport', () => ({ rpc: vi.fn(async () => null) }));
+const { rpc } = await import('@/api/transport');
 vi.mock('./store', () => ({
   zap: store.zap,
   zapToNumber: store.zapToNumber,
   playChannel: vi.fn(async () => undefined),
+  peekSettings: () => player.settings,
+  subscribeSettings: (fn: () => void) => {
+    player.settingsListeners.add(fn);
+    return () => player.settingsListeners.delete(fn);
+  },
   usePlayerStore: {
     getState: () => ({ adjustVolume: store.adjustVolume, volume: 1, muted: false }),
-    subscribe: () => () => undefined,
+    subscribe: (fn: (s: unknown, prev: unknown) => void) => {
+      player.storeListeners.add(fn);
+      return () => player.storeListeners.delete(fn);
+    },
   },
 }));
 
@@ -59,6 +74,33 @@ describe('bindRemote', () => {
     release(); // idempotent
     bus.emit({ command: 'channelDown' });
     expect(store.zap).toHaveBeenCalledTimes(1);
+    unbind();
+  });
+});
+
+describe('remote status reports (L2-player-10)', () => {
+  const change = (n: number): void =>
+    player.storeListeners.forEach((fn) => fn({ source: { title: `Ch ${n}` }, volume: 1, muted: false, mode: 'inline' }, {}));
+  const reports = (): number => vi.mocked(rpc).mock.calls.filter((c) => c[0] === 'remote.reportStatus').length;
+
+  afterEach(() => {
+    player.settings = null;
+    vi.useRealTimers();
+  });
+
+  it('sends nothing per channel change while the remote server is off, and catches up when it turns on', async () => {
+    vi.useFakeTimers();
+    player.settings = { remoteControl: { enabled: false } };
+    const unbind = bindRemote();
+    change(1);
+    change(2);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reports()).toBe(0);
+
+    player.settings = { remoteControl: { enabled: true } };
+    player.settingsListeners.forEach((fn) => fn());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reports()).toBe(1);
     unbind();
   });
 });

@@ -1,5 +1,19 @@
-import { ArrowDownWideNarrow, ArrowLeft, ArrowUpNarrowWide, CalendarX2, CircleCheck, Clapperboard, FolderX, Info, RotateCw, SearchX, Star, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import {
+  ArrowDownWideNarrow,
+  ArrowLeft,
+  ArrowUpNarrowWide,
+  CalendarX2,
+  CircleCheck,
+  Clapperboard,
+  FolderX,
+  Info,
+  RotateCw,
+  SearchX,
+  SlidersHorizontal,
+  Star,
+  TriangleAlert,
+} from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
@@ -14,15 +28,16 @@ import { ContextMenu, type MenuItem } from '@/features/live/components/ContextMe
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
 import { useShortcut } from '@/shell';
 
-import { PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
+import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { VodFilterBar } from '../components/VodFilterBar';
-import { usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
+import { preloadDetailChunk, usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
 import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { formatRating } from '../lib/format';
 import { isNonEnglish, itemLanguage } from '../lib/language';
@@ -44,7 +59,7 @@ import {
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
-import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass } from '@/ui';
+import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass, cn } from '@/ui';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -84,10 +99,15 @@ interface GridCellProps {
   /** The listbox has focus, so `active` is a live keyboard cursor. */
   gridFocused: boolean;
   resume: Map<string, number>;
+  locks: VodLocks;
 }
 
-/** One grid cell: subscribes to the page that contains `index`, so only pages near the viewport stay loaded. */
-function GridCell({ input, index, pageSize, active, gridFocused, resume }: GridCellProps) {
+/**
+ * One grid cell: subscribes to the page that contains `index`, so only pages near the viewport
+ * stay loaded. Memoised on stable props (L2-vod-1): a scroll re-renders only the cells it mounts,
+ * not every cell on screen, and a page's arrival re-renders only that page's cells.
+ */
+const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks }: GridCellProps) {
   const page = pageOf(index, pageSize);
   const q = useVodPage(input, page);
   const item = q.data?.items[index - page * pageSize];
@@ -105,17 +125,19 @@ function GridCell({ input, index, pageSize, active, gridFocused, resume }: GridC
       gridFocused={gridFocused}
       resume={resume}
       watched={watched.has(itemKey(item.ref))}
+      locked={locks.itemLocked(item)}
     />
   );
-}
+});
 
-function GridPoster({
+const GridPoster = memo(function GridPoster({
   item,
   sourceKind,
   active,
   gridFocused,
   resume,
   watched,
+  locked,
 }: {
   item: VodItem | SeriesItem;
   sourceKind: SourceKind;
@@ -123,11 +145,13 @@ function GridPoster({
   gridFocused: boolean;
   resume: Map<string, number>;
   watched: boolean;
+  locked: boolean;
 }) {
   const prefetch = useMemo<PrefetchTarget>(
     () => ({ ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }),
     [item, sourceKind],
   );
+  const myList = useMemo(() => myListTarget(item), [item]);
   // C4: the keyboard cursor moves aria-activedescendant, not focus, so a cursor that rests on a
   // poster for 120 ms warms its detail page the way a resting pointer does.
   usePrefetchOnRest(active && gridFocused ? prefetch : null);
@@ -145,11 +169,12 @@ function GridPoster({
       watched={watched}
       language={itemLanguage(item.title, item.categoryName)}
       // C3: the saved marker and pointer toggle on the corner; S toggles it from the keyboard.
-      myList={myListTarget(item)}
+      myList={myList}
       prefetch={prefetch}
+      locked={locked}
     />
   );
-}
+});
 
 export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const { t, i18n } = useTranslation('vod');
@@ -168,6 +193,19 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const source = useSource(sourceId);
   const cats = useRpcQuery('catalog.categories', { sourceId, contentType: kind, includeHidden: true }, { enabled: !!sourceId });
   const section = kind === 'movie' ? 'movies' : 'series';
+
+  // Warm the detail page's chunk while the grid idles (L2-vod-10): touch screens get no hover
+  // prefetch, so the first title opened otherwise waits for its code too.
+  useEffect(() => {
+    if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
+    const warm = () => preloadDetailChunk(kind);
+    if (typeof requestIdleCallback === 'function') {
+      const h = requestIdleCallback(warm, { timeout: 2000 });
+      return () => cancelIdleCallback(h);
+    }
+    const h = setTimeout(warm, 500);
+    return () => clearTimeout(h);
+  }, [kind]);
 
   // URL is the source of truth for search; the input debounces into it.
   useEffect(() => setSearchDraft(search), [search]);
@@ -295,16 +333,23 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
   const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
-  // One string for the page h1 and the shell header title (C16), so they always agree.
+  // One string for the page h1 and the shell header title (C16), so they always agree. The shell
+  // header shows it; the page's h1 is for assistive technology only, so the title shows once.
   const pageTitle = categoryName || (kind === 'movie' ? t('movies') : t('series'));
+  const countText = firstReady ? t('titleCount', { count: total, formatted: fmt.format(total) }) : undefined;
 
   usePageHeader(
     {
       title: pageTitle,
-      subtitle: source.data ? `${source.data.name}${firstReady ? `  ${t('titleCount', { count: total, formatted: fmt.format(total) })}` : ''}` : undefined,
+      subtitle: source.data ? (countText ? `${source.data.name} · ${countText}` : source.data.name) : undefined,
     },
-    [pageTitle, source.data?.name, firstReady ? total : -1],
+    [pageTitle, source.data?.name, countText],
   );
+  const locks = useVodLocks(sourceId, kind);
+  // Phones: sort, years and Hide watched fold behind one Filters button, so the grid starts under the search row.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = useId();
+  const activeFilters = (yearFiltered ? 1 : 0) + (hideWatched ? 1 : 0);
 
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
   const coverWidth = useCoverWidth(settings.coverSize);
@@ -440,230 +485,262 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   useEscapeBack(true, () => void (fromLanding ? navigate(-1) : navigate(backHref, { replace: true })));
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3 md:px-8">
-        <Link to={backHref} className={buttonClass('ghost', 'sm')}>
-          <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
-          {kind === 'movie' ? t('movies') : t('series')}
-        </Link>
-        <div className="me-auto flex min-w-0 items-baseline gap-3">
-          <h1 className="min-w-0 truncate text-lg text-fg">{pageTitle}</h1>
-          {firstReady && (
-            <span className="tabular shrink-0 text-sm font-normal text-fg-subtle">
-              {fmt.format(total)}
-            </span>
-          )}
-        </div>
-        <SearchInput
-          value={searchDraft}
-          onChange={setSearchDraft}
-          size="sm"
-          className="w-full sm:w-64"
-          placeholder={t('searchInCategory')}
-          onSubmit={focusGrid}
-          onKeyDown={(e) => {
-            // ArrowDown leaves the search box for the posters.
-            if (e.key === 'ArrowDown' && getListbox()) {
-              e.preventDefault();
-              focusGrid();
-            }
-          }}
-        />
-        <Select
-          aria-label={t('sortBy')}
-          options={sortOptions}
-          value={sort}
-          onValueChange={(v) => setSort(v as VodSortKey)}
-          className="h-8 w-36"
-        />
-        <IconButton
-          size="sm"
-          variant="secondary"
-          label={dirLabel}
-          icon={dir === 'asc' ? <ArrowUpNarrowWide aria-hidden size={16} /> : <ArrowDownWideNarrow aria-hidden size={16} />}
-          onClick={flipDir}
-        />
-      </div>
-
-      {input && (
-        <VodFilterBar
-          sourceId={sourceId}
-          kind={kind}
-          categoryId={categoryId}
-          stalker={stalker}
-          yearsLikely={source.data?.kind !== 'm3u'}
-          range={years}
-          onRangeChange={setYears}
-          hideWatched={hideWatched}
-          onHideWatchedChange={setHideWatched}
-        />
-      )}
-
-      {ratingFilterSet && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-divider px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
-          <Star aria-hidden size={14} className="fill-current text-accent" />
-          {filtered ? (
-            <>
-              <span>{t('ratingFilterNote', { rating: formatRating(minRating, i18n.language) })}</span>
-              <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(true)}>
-                {t('ratingFilterClear')}
-              </button>
-            </>
-          ) : (
-            <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(false)}>
-              {t('ratingFilterApply', { rating: formatRating(settingMinRating, i18n.language) })}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
-      <div
-        ref={gridWrapRef}
-        className="min-h-0 flex-1 px-4 pt-4 md:px-8"
-        onContextMenu={onGridContextMenu}
-        onFocus={(e) => setGridFocused(e.target.getAttribute('role') === 'listbox')}
-        onBlur={(e) => {
-          if (e.target.getAttribute('role') === 'listbox') setGridFocused(false);
-        }}
-      >
-        {source.isError && isSourceMissing(source.error) ? (
-          <SourceMissing />
-        ) : !source.isError && categoryMissing ? (
-          <EmptyState
-            icon={<FolderX size={32} />}
-            title={t('categoryMissingTitle')}
-            description={t('categoryMissingBody')}
-            action={
-              <Link to={backHref} className={buttonClass('secondary', 'sm')}>
-                {t('backToCategories')}
-              </Link>
-            }
-          />
-        ) : source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
-          <ErrorState
-            error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
-            onRetry={() => {
-              void source.refetch();
-              void (clientFiltered ? inOrder.refetch() : first.refetch());
+    // The grid's posters share one My List subscription (L2-vod-1).
+    <GridMyListProvider>
+      <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
+        <div className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3 md:px-8">
+          <Link to={backHref} className={buttonClass('ghost', 'sm')}>
+            <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
+            {kind === 'movie' ? t('movies') : t('series')}
+          </Link>
+          <div className="me-auto flex min-w-0 items-baseline gap-3">
+            <h1 className="sr-only">{pageTitle}</h1>
+            {/* The shell header carries the count from md up; below it the header has room for the title only. */}
+            {countText && <span className="tabular min-w-0 truncate text-sm text-fg-subtle md:hidden">{countText}</span>}
+          </div>
+          <button
+            type="button"
+            aria-expanded={filtersOpen}
+            aria-controls={`${filtersId}-sort ${filtersId}-bar`}
+            onClick={() => setFiltersOpen((o) => !o)}
+            className={cn(buttonClass(filtersOpen ? 'primary' : 'secondary', 'sm'), 'sm:hidden')}
+            data-testid="vod-filters-toggle"
+          >
+            <SlidersHorizontal aria-hidden size={15} />
+            {t('filters')}
+            {activeFilters > 0 && <span className="sr-only">{t('filtersActive', { n: activeFilters })}</span>}
+            {activeFilters > 0 && (
+              <span
+                aria-hidden
+                className={cn(
+                  'tabular inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-xs leading-none font-semibold',
+                  filtersOpen ? 'bg-accent-fg text-accent' : 'bg-accent text-accent-fg',
+                )}
+              >
+                {activeFilters}
+              </span>
+            )}
+          </button>
+          <SearchInput
+            value={searchDraft}
+            onChange={setSearchDraft}
+            size="sm"
+            className="w-full sm:w-64"
+            placeholder={t('searchInCategory')}
+            onSubmit={focusGrid}
+            onKeyDown={(e) => {
+              // ArrowDown leaves the search box for the posters.
+              if (e.key === 'ArrowDown' && getListbox()) {
+                e.preventDefault();
+                focusGrid();
+              }
             }}
           />
-        ) : !input || (clientFiltered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
-          <SkeletonGrid count={18} minColumnWidth={coverWidth} />
-        ) : total === 0 ? (
-          // The search query is the narrowest thing the user typed, so it names the empty result
-          // first; clearing it falls through to the rating, year and watched states below.
-          search ? (
-            <EmptyState
-              icon={<SearchX size={32} />}
-              title={t('noSearchMatchTitle', { query: search })}
-              description={t('noSearchMatchHint')}
-              action={
-                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
-                  {t('clearSearch')}
-                </button>
-              }
+          <div id={`${filtersId}-sort`} className={cn('flex items-center gap-2', !filtersOpen && 'max-sm:hidden')}>
+            <Select
+              aria-label={t('sortBy')}
+              options={sortOptions}
+              value={sort}
+              onValueChange={(v) => setSort(v as VodSortKey)}
+              className="h-8 w-auto min-w-36"
             />
-          ) : filtered ? (
-            <EmptyState
-              icon={<Star size={32} />}
-              title={t('ratingFilterEmptyTitle', { rating: formatRating(minRating, i18n.language) })}
-              description={t('ratingFilterEmptyHint')}
-              action={
-                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setAllRatings(true)}>
+            <IconButton
+              size="sm"
+              variant="secondary"
+              label={dirLabel}
+              icon={dir === 'asc' ? <ArrowUpNarrowWide aria-hidden size={16} /> : <ArrowDownWideNarrow aria-hidden size={16} />}
+              onClick={flipDir}
+            />
+          </div>
+        </div>
+
+        {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
+        {sourceId && !source.isError && (
+          <div id={`${filtersId}-bar`} className={cn(!filtersOpen && 'max-sm:hidden')}>
+            <VodFilterBar
+              sourceId={sourceId}
+              kind={kind}
+              categoryId={categoryId}
+              ready={!!source.data}
+              stalker={stalker}
+              yearsLikely={source.data?.kind !== 'm3u'}
+              range={years}
+              onRangeChange={setYears}
+              hideWatched={hideWatched}
+              onHideWatchedChange={setHideWatched}
+            />
+          </div>
+        )}
+
+        {ratingFilterSet && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-divider px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
+            <Star aria-hidden size={14} className="fill-current text-accent" />
+            {filtered ? (
+              <>
+                <span>{t('ratingFilterNote', { rating: formatRating(minRating, i18n.language) })}</span>
+                <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(true)}>
                   {t('ratingFilterClear')}
                 </button>
-              }
-            />
-          ) : yearFiltered ? (
+              </>
+            ) : (
+              <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(false)}>
+                {t('ratingFilterApply', { rating: formatRating(settingMinRating, i18n.language) })}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
+        <div
+          ref={gridWrapRef}
+          className="min-h-0 flex-1 px-4 pt-4 md:px-8"
+          onContextMenu={onGridContextMenu}
+          onFocus={(e) => setGridFocused(e.target.getAttribute('role') === 'listbox')}
+          onBlur={(e) => {
+            if (e.target.getAttribute('role') === 'listbox') setGridFocused(false);
+          }}
+        >
+          {source.isError && isSourceMissing(source.error) ? (
+            <SourceMissing />
+          ) : !source.isError && categoryMissing ? (
             <EmptyState
-              icon={<CalendarX2 size={32} />}
-              title={t('yearEmptyTitle')}
-              action={
-                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setYears({})}>
-                  {t('yearAll')}
-                </button>
-              }
-            />
-          ) : hideWatched ? (
-            <EmptyState
-              icon={<CircleCheck size={32} />}
-              title={t('watchedEmptyTitle')}
-              action={
-                <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setHideWatched(false)}>
-                  {t('showWatched')}
-                </button>
-              }
-            />
-          ) : (
-            <EmptyState
-              icon={<Clapperboard size={32} />}
-              title={t('emptyCategoryTitle')}
-              description={t('emptyCategoryHint')}
+              icon={<FolderX size={32} />}
+              title={t('categoryMissingTitle')}
+              description={t('categoryMissingBody')}
               action={
                 <Link to={backHref} className={buttonClass('secondary', 'sm')}>
                   {t('backToCategories')}
                 </Link>
               }
             />
-          )
-        ) : clientFiltered ? (
-          <VirtualGrid<VodItem | SeriesItem>
-            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${englishOnly}|${yearKey}|${hideWatched}`}
-            items={filteredItems}
-            minColumnWidth={coverWidth}
-            aspect="poster"
-            label={categoryName}
-            testId="vod-grid"
-            initialActiveIndex={restoredIndex}
-            getKey={(item) => item.ref.itemId}
-            render={(item, _index, state) => (
-              <GridPoster
-                item={item}
-                sourceKind={input.sourceKind}
-                active={state.active}
-                gridFocused={gridFocused}
-                resume={resume}
-                watched={watchedPages.keys.has(itemKey(item.ref))}
+          ) : source.isError || (clientFiltered ? inOrder.isError : first.isError) ? (
+            <ErrorState
+              error={source.error ?? (clientFiltered ? inOrder.error : first.error)}
+              onRetry={() => {
+                void source.refetch();
+                void (clientFiltered ? inOrder.refetch() : first.refetch());
+              }}
+            />
+          ) : !input || (clientFiltered ? inOrder.isPending || (filteredItems.length === 0 && !filteredDone) : first.isPending) ? (
+            <SkeletonGrid count={18} minColumnWidth={coverWidth} />
+          ) : total === 0 ? (
+            // The search query is the narrowest thing the user typed, so it names the empty result
+            // first; clearing it falls through to the rating, year and watched states below.
+            search ? (
+              <EmptyState
+                icon={<SearchX size={32} />}
+                title={t('noSearchMatchTitle', { query: search })}
+                description={t('noSearchMatchHint')}
+                action={
+                  <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setSearchDraft('')}>
+                    {t('clearSearch')}
+                  </button>
+                }
               />
-            )}
-            onEndReached={() => {
-              if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-            }}
-            footer={
-              isFetchingNextPage ? (
-                <p role="status" className="py-4 text-center text-sm text-fg-subtle">
-                  {t('ratingFilterLoading')}
-                </p>
-              ) : undefined
-            }
-            onSelect={(item, index) => openTitle(item.ref, index)}
-            className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          />
-        ) : (
-          <VirtualGrid<number>
-            key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${yearKey}|${hideWatched}`}
-            items={indices}
-            minColumnWidth={coverWidth}
-            aspect="poster"
-            label={categoryName}
-            testId="vod-grid"
-            initialActiveIndex={restoredIndex}
-            render={(i, _index, state) => (
-              <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} />
-            )}
-            onSelect={(i) => {
-              const item = queryItem(i);
-              // A cell whose page failed: selecting it retries that page.
-              if (!item) return retryPageOf(i);
-              openTitle(item.ref, i);
-            }}
-            className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          />
-        )}
+            ) : filtered ? (
+              <EmptyState
+                icon={<Star size={32} />}
+                title={t('ratingFilterEmptyTitle', { rating: formatRating(minRating, i18n.language) })}
+                description={t('ratingFilterEmptyHint')}
+                action={
+                  <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setAllRatings(true)}>
+                    {t('ratingFilterClear')}
+                  </button>
+                }
+              />
+            ) : yearFiltered ? (
+              <EmptyState
+                icon={<CalendarX2 size={32} />}
+                title={t('yearEmptyTitle')}
+                action={
+                  <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setYears({})}>
+                    {t('yearAll')}
+                  </button>
+                }
+              />
+            ) : hideWatched ? (
+              <EmptyState
+                icon={<CircleCheck size={32} />}
+                title={t('watchedEmptyTitle')}
+                action={
+                  <button type="button" className={buttonClass('secondary', 'sm')} onClick={() => setHideWatched(false)}>
+                    {t('showWatched')}
+                  </button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<Clapperboard size={32} />}
+                title={t('emptyCategoryTitle')}
+                description={t('emptyCategoryHint')}
+                action={
+                  <Link to={backHref} className={buttonClass('secondary', 'sm')}>
+                    {t('backToCategories')}
+                  </Link>
+                }
+              />
+            )
+          ) : clientFiltered ? (
+            <VirtualGrid<VodItem | SeriesItem>
+              // Not keyed on Hide watched (L2-vod-8): flipping it refills the cells and keeps the cursor.
+              key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${englishOnly}|${yearKey}`}
+              items={filteredItems}
+              minColumnWidth={coverWidth}
+              aspect="poster"
+              label={categoryName}
+              testId="vod-grid"
+              initialActiveIndex={restoredIndex}
+              getKey={(item) => item.ref.itemId}
+              render={(item, _index, state) => (
+                <GridPoster
+                  item={item}
+                  sourceKind={input.sourceKind}
+                  active={state.active}
+                  gridFocused={gridFocused}
+                  resume={resume}
+                  watched={watchedPages.keys.has(itemKey(item.ref))}
+                  locked={locks.itemLocked(item)}
+                />
+              )}
+              onEndReached={() => {
+                if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+              }}
+              footer={
+                isFetchingNextPage ? (
+                  <p role="status" className="py-4 text-center text-sm text-fg-subtle">
+                    {t('ratingFilterLoading')}
+                  </p>
+                ) : undefined
+              }
+              onSelect={(item, index) => openTitle(item.ref, index)}
+              className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            />
+          ) : (
+            <VirtualGrid<number>
+              // Not keyed on Hide watched (L2-vod-8): the pages keep their titles until the new ones arrive.
+              key={`${categoryId}|${sort}|${dir}|${search}|${minRating}|${yearKey}`}
+              items={indices}
+              minColumnWidth={coverWidth}
+              aspect="poster"
+              label={categoryName}
+              testId="vod-grid"
+              initialActiveIndex={restoredIndex}
+              render={(i, _index, state) => (
+                <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} locks={locks} />
+              )}
+              onSelect={(i) => {
+                const item = queryItem(i);
+                // A cell whose page failed: selecting it retries that page.
+                if (!item) return retryPageOf(i);
+                openTitle(item.ref, i);
+              }}
+              className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            />
+          )}
+        </div>
+        <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />
       </div>
-      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />
-    </div>
+    </GridMyListProvider>
   );
 }
 

@@ -5,7 +5,7 @@
  */
 
 import { Disc3, FolderOpen, Play, Trash2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -29,11 +29,35 @@ export function useRecordingFiles() {
   return useRpcQuery('recordings.library', undefined, { staleTime: 10_000 });
 }
 
-export function RecordingsPanel({ search }: { search: string }) {
-  const { t } = useTranslation('library');
+/** Files in the recordings folder minus those waiting out their Undo, so a delete leaves every view at once. */
+export function useVisibleRecordingFiles(): { query: ReturnType<typeof useRecordingFiles>; files: RecordingFile[] } {
   const query = useRecordingFiles();
   const hidden = usePendingRemovals((s) => s.ids);
-  const visible = useMemo(() => filterRecordings(query.data ?? [], search).filter((f) => !hidden.has(`recording:${f.id}`)), [query.data, search, hidden]);
+  const files = useMemo(() => (query.data ?? []).filter((f) => !hidden.has(`recording:${f.id}`)), [query.data, hidden]);
+  return { query, files };
+}
+
+/** Plays a recording file; a failure says so and refreshes the list (the file may be gone). */
+export function usePlayRecording(): (f: RecordingFile) => Promise<void> {
+  const { t } = useTranslation('library');
+  const { toast } = useToast();
+  return useCallback(
+    async (f: RecordingFile) => {
+      try {
+        await playSource(await rpc('recordings.playSource', { id: f.id }));
+      } catch (e) {
+        toast({ variant: 'error', title: t('recPlayFailed'), description: RpcError.from(e).message });
+        void invalidate('recordings.');
+      }
+    },
+    [t, toast],
+  );
+}
+
+export function RecordingsPanel({ search }: { search: string }) {
+  const { t } = useTranslation('library');
+  const { query, files } = useVisibleRecordingFiles();
+  const visible = useMemo(() => filterRecordings(files, search), [files, search]);
 
   if (query.isLoading) return <SkeletonList rows={6} className="pt-2" />;
   if (query.isError) return <ErrorState error={query.error} retrying={query.isFetching} onRetry={() => void query.refetch()} />;
@@ -71,14 +95,8 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
   const date = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
   const duration = f.durationSeconds ? formatDuration(f.durationSeconds, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) : '';
 
-  const play = async () => {
-    try {
-      await playSource(await rpc('recordings.playSource', { id: f.id }));
-    } catch (e) {
-      toast({ variant: 'error', title: t('recPlayFailed'), description: RpcError.from(e).message });
-      void invalidate('recordings.');
-    }
-  };
+  const playRecording = usePlayRecording();
+  const play = () => playRecording(f);
 
   const reveal = async () => {
     try {

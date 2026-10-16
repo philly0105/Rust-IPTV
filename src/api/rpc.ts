@@ -281,6 +281,8 @@ export interface BackupImportResult {
   imported: number;
   skipped: number;
   warnings: string[];
+  /** Background merge: names of the sources whose catalogs load after the call returned (each reports `import.progress`; their favorites and history follow). Absent when empty. */
+  refreshing?: string[];
 }
 
 /** Value accepted in an mpv JSON IPC command array. */
@@ -349,7 +351,8 @@ export interface RpcMap {
   'sources.cancelImport': Cmd<{ id: string }, boolean>;
 
   // ---- catalog (B1) -------------------------------------------------------
-  'catalog.categories': Cmd<{ sourceId: string; contentType: ContentType; includeHidden?: boolean }, Category[]>;
+  /** includeLocked: also list categories parental controls hide while locked (names and counts only, for the parental settings page). */
+  'catalog.categories': Cmd<{ sourceId: string; contentType: ContentType; includeHidden?: boolean; includeLocked?: boolean }, Category[]>;
   'catalog.setCategoryHidden': Cmd<{ sourceId: string; contentType: ContentType; categoryId: string; hidden: boolean }, void>;
   /** Replaces the hidden set. */
   'catalog.setCategoriesHidden': Cmd<{ sourceId: string; contentType: ContentType; hiddenIds: string[] }, void>;
@@ -441,7 +444,8 @@ export interface RpcMap {
 
   // ---- backup (B2, format C15) --------------------------------------------
   'backup.export': Cmd<{ includeSecrets: boolean; path?: string }, { json: string; fileName: string; path?: string }>;
-  'backup.import': Cmd<{ json: string; mode: 'merge' | 'replace' }, BackupImportResult>;
+  /** background (merge only): return once the source rows are written; sources that still need a catalog load afterwards and are named in `refreshing`. */
+  'backup.import': Cmd<{ json: string; mode: 'merge' | 'replace'; background?: boolean }, BackupImportResult>;
 
   // ---- xtream (B3) --------------------------------------------------------
   'xtream.sync': Cmd<{ sourceId: string; contentTypes?: ContentType[] }, ImportSummary>;
@@ -618,8 +622,8 @@ export interface RpcMap {
 
   // parental: parental controls (contract C2). Every change emits `parental.changed`.
   'parental.status': Cmd<void, ParentalStatus>;
-  /** First PIN: currentPin omitted. Changing: currentPin required (wrong -> auth). newPin 4-8 digits else invalid. */
-  'parental.setPin': Cmd<{ currentPin?: string; newPin: string }, ParentalStatus>;
+  /** First PIN: currentPin omitted. Changing: currentPin required (wrong -> auth). newPin 4-8 digits else invalid. unlock: true starts a session unlock after the first PIN (changing a PIN never changes the session). */
+  'parental.setPin': Cmd<{ currentPin?: string; newPin: string; unlock?: boolean }, ParentalStatus>;
   /** Removes the PIN (controls off). Locks are kept for when a PIN is set again. Wrong pin -> auth. */
   'parental.disable': Cmd<{ pin: string }, ParentalStatus>;
   /** Needs pin, or an active unlock. unlockMinutes outside 0..=720 -> invalid. */
@@ -630,6 +634,8 @@ export interface RpcMap {
   'parental.locks': Cmd<{ sourceId?: string }, ParentalLock[]>;
   /** Adding a lock needs no PIN. Removing one needs pin or an active unlock (else auth). */
   'parental.setLocked': Cmd<{ target: ParentalLockTarget; locked: boolean; pin?: string }, void>;
+  /** One transaction and one `parental.changed`. Any remove needs pin or an active unlock (else auth). At most 5000 targets in total, else invalid. */
+  'parental.setLockedMany': Cmd<{ add?: ParentalLockTarget[]; remove?: ParentalLockTarget[]; pin?: string }, { changed: number }>;
   /** Refs locked right now (empty when disabled or unlocked). categoryId optional: core looks it up from items when absent. Covers item locks, category locks and autoAdult categories. Max 500 items else invalid. */
   'parental.check': Cmd<{ items: { ref: ItemRef; categoryId?: string }[] }, ItemRef[]>;
   /** Category ids of a source/type that autoAdult treats as adult (whether or not enabled), for badges in lock management. */
@@ -885,6 +891,7 @@ export const RPC_COMMANDS = [
   'parental.lockNow',
   'parental.locks',
   'parental.setLocked',
+  'parental.setLockedMany',
   'parental.check',
   'parental.adultCategories',
   'watchlist.list',

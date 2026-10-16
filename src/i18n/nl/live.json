@@ -184,5 +184,11 @@
   "locked": "Vergrendeld",
   "lockedGuide": "Vergrendeld. Voer de pincode in om te zien wat er op is.",
   "unlock": "Ontgrendelen",
-  "ribbonFailed": "De gids van dit kanaal kon niet worden geladen"
+  "ribbonFailed": "De gids van dit kanaal kon niet worden geladen",
+  "parentalHiddenChannels": "Ouderlijk toezicht verbergt de zenders van deze bron",
+  "parentalHiddenStations": "Ouderlijk toezicht verbergt de radiozenders van deze bron",
+  "parentalHiddenHint": "De groepen zijn vergrendeld. Voer je pincode in om ze deze sessie te tonen.",
+  "parentalUnlock": "Ontgrendelen",
+  "parentalUnlockTitle": "Vergrendelde zenders tonen",
+  "parentalUnlockBody": "Voer je pincode in om vergrendelde groepen en zenders te tonen tot ouderlijk toezicht weer vergrendelt."
 }

@@ -53,7 +53,8 @@ const CODE_KINDS: Record<string, SourceErrorKind> = {
 
 // "<host> ..." prefixes, in http.rs and m3u/importer.rs order.
 const HOST_PATTERNS: readonly RegExp[] = [
-  /^Could not reach (\S+?)\. /,
+  // Stalker: "Could not reach the portal at <host>. ..."
+  /^Could not reach (?:the portal at )?(\S+?)\. /,
   /^(\S+?) did not respond in time\./,
   /^(\S+?) accepted the connection but did not answer/,
   /^(\S+?) stopped sending data/,
@@ -69,7 +70,7 @@ const TIMEOUT = /sending the playlist too slowly|did not respond in time|did not
 const SERVER = /HTTP 429\b|HTTP 5\d\d\b/;
 /** An upstream 5xx other than 504 (a gateway timeout, which TIMEOUT covers), or a 429 rate limit (B9: code `server`). */
 const HTTP_5XX = /HTTP (?:429|5(?!04)\d\d)\b/;
-const REFUSED = /connection refused|actively refused|os error 10061|os error 111\b|ECONNREFUSED/i;
+const REFUSED = /connection refused|refused the connection|actively refused|os error 10061|os error 111\b|ECONNREFUSED/i;
 const DNS = /dns error|failed to lookup address|No such host|os error 11001|Name or service not known|nodename nor servname/i;
 const NETWORK = /^Could not reach |error sending request|connection (reset|closed|aborted)|os error 1005[34]/i;
 

@@ -29,7 +29,7 @@ import { join, relative, sep } from 'node:path';
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { createElement } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Poster } from '@/ui/Poster';
 import { QUARTER_BLUR } from '@/ui/image';
@@ -273,17 +273,35 @@ describe('C5 cheaper blur', () => {
     expect(poster).not.toMatch(/(?<![\w-])(?:blur|scale-|transition-(?!opacity)|transition(?=['"\s]))|transform/);
   });
 
+  // A slow network load fades over 150 ms (300 ms before L2-perf-desktop-9); a cached one shows at once.
   it('Poster reveals with opacity only (rendered)', () => {
-    const { container } = render(createElement(Poster, { src: 'http://cdn.example/p.jpg', alt: 'P' }));
-    const img = container.querySelector('img')!;
-    fireEvent.load(img);
-    const classes = img.className.split(/\s+/);
-    expect(classes).toContain('opacity-100');
-    expect(classes.filter((c) => /transition|blur|scale|transform|duration|ease/.test(c))).toEqual([
-      'motion-safe:transition-opacity',
-      'motion-safe:duration-300',
-      'motion-safe:ease-out',
-    ]);
+    let now = 1000;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const { container } = render(createElement(Poster, { src: 'http://cdn.example/p-slow.jpg', alt: 'P' }));
+      const img = container.querySelector('img')!;
+      now += 2000;
+      fireEvent.load(img);
+      const classes = img.className.split(/\s+/);
+      expect(classes).toContain('opacity-100');
+      expect(classes.filter((c) => /transition|blur|scale|transform|duration|ease/.test(c))).toEqual([
+        'motion-safe:transition-opacity',
+        'motion-safe:duration-150',
+        'motion-safe:ease-out',
+      ]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('skeleton shimmer animates transform only (compositor), never background-position', () => {
+    const css = file('src/styles/globals.css').code;
+    const shimmer = /@keyframes shimmer\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    expect(shimmer).toMatch(/transform:/);
+    expect(shimmer).not.toMatch(/background|width|left|right|margin/);
+    expect(css).not.toMatch(/background-position/);
+    // Out-of-view placeholders and live dots stop (src/ui/offscreen.ts).
+    expect(css).toMatch(/\[data-offscreen\]\[class\*='animate-shimmer'\]::after/);
   });
 
   it('QUARTER_BLUR is a quarter-size copy scaled up under at most 12px', () => {

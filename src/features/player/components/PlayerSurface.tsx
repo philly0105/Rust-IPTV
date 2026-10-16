@@ -1,4 +1,4 @@
-import { AlertTriangle, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, PictureInPicture2, Play, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -14,18 +14,18 @@ import {
   MIN_RESUME_SECONDS,
   playUpNextNow,
   replay,
-  retryResolve,
   selectEnded,
   setPaused,
   usePlayerStore,
 } from '../store';
 import { useStreamInfoStore } from '../streamInfo';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
-import { BarReadout, Controls, CtlButton, InlineSpinner } from './Controls';
+import { BarReadout, Controls, CtlButton, InlineSpinner, retryPlayback } from './Controls';
 import { InlinePlayer } from './InlinePlayer';
 import { FullscreenChannelPanel, RadioPlayer, SleepPrompt, StreamInfoPanel, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
 import { ReconnectNotice, useReconnectLabel } from './ReconnectNotice';
+import { useNarrow } from './useNarrow';
 import { useZapBannerShown, useZapHover } from './zapHooks';
 
 const HIDE_AFTER_MS = 2600;
@@ -151,7 +151,11 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
   if (!upNext) return null;
   const left = Math.max(0, Math.ceil((upNext.deadline - now) / 1000));
   const progress = Math.min(1, Math.max(0, 1 - left / UP_NEXT_SECONDS));
-  const name = `${upNext.source.subtitle ? `${upNext.source.subtitle} ` : ''}${upNext.source.title}`;
+  // An episode's own line ("S01E02 · Low Tide") leads, the series name follows as a quieter one.
+  const episode = upNext.source.subtitle;
+  const series = episode ? upNext.source.title : undefined;
+  const lead = episode ?? upNext.source.title;
+  const name = series ? `${lead} · ${series}` : lead;
   // The mini player is too narrow for the card: a bar across its bottom edge instead.
   const tight = compact && variant === 'overlay';
   return (
@@ -183,9 +187,28 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
       <div className={variant === 'overlay' && !tight ? 'p-3' : 'flex items-center gap-2 px-3 py-2'}>
         <div className="min-w-0 flex-1">
           <p className="player-on-glass-muted text-xs">{t('nextEpisodeIn', { count: left })}</p>
-          {!tight && (
-            <p className="mt-0.5 truncate font-display text-base" title={name}>
-              {name}
+          {!tight && variant === 'overlay' && (
+            <>
+              <p data-testid="up-next-title" className="mt-0.5 truncate font-display text-base" title={name}>
+                {lead}
+              </p>
+              {series && (
+                <p data-testid="up-next-series" className="player-on-glass-muted truncate text-sm">
+                  {series}
+                </p>
+              )}
+            </>
+          )}
+          {!tight && variant === 'strip' && (
+            <p className="mt-0.5 truncate" title={name}>
+              <span data-testid="up-next-title" className="font-display text-base">
+                {lead}
+              </span>
+              {series && (
+                <span data-testid="up-next-series" className="player-on-glass-muted ms-2 text-sm">
+                  {series}
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -282,12 +305,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const reconnecting = useReconnectLabel(); // failover:
   const isError = status === 'error';
   const view = useStreamError(null);
-  const retry = useCallback((): void => {
-    if (retryResolve()) return;
-    usePlayerStore.setState({ status: 'loading', error: undefined });
-    useMediaStore.getState().commands?.retry();
-  }, []);
-  useRetryWhenOnline(isError ? view.cls : 'generic', retry);
+  useRetryWhenOnline(isError ? view.cls : 'generic', retryPlayback);
   useEffect(() => {
     if (isError) focusIfPlayerOwnsFocus(retryRef.current);
   }, [isError]);
@@ -297,20 +315,31 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const strip = 'player-glass-strong flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-sm text-white';
   if (status === 'error') {
     return (
-      <div role="alert" data-mpv-reserved="" data-error-class={view.cls} className={strip}>
+      <div role="alert" data-mpv-reserved="" data-error-class={view.cls} className={cn(strip, 'flex-wrap')}>
         <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
-        {/* What happened first, then mpv's own reason (often a bare "HTTP 404" or "loading failed"); the hover says what to do. */}
+        {/* What happened and what to do first; the hover also has mpv's own reason. */}
         <span className="min-w-0 flex-1 truncate" title={`${view.title}. ${view.hint}${error ? `\n${error}` : ''}`}>
           <span className="font-medium">{view.title}</span>
-          <span data-testid="mpv-error-detail" className="ms-2 text-white/70">
-            {compact ? '' : (error ?? view.hint)}
-          </span>
+          {!compact && <span className="ms-2 text-white/70">{view.hint}</span>}
         </span>
+        {!compact && error && (
+          // mpv's own reason (often a bare "HTTP 404" or "loading failed"), as InlinePlayer's
+          // overlay keeps it: closed until asked for, then on a row of its own under the strip.
+          <details className="group shrink-0 text-xs text-white/60 open:order-last open:basis-full">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+              {t('errorDetails')}
+            </summary>
+            <p data-testid="mpv-error-detail" className="mt-1 ps-4.5 pb-0.5 font-mono break-all select-all">
+              {error}
+            </p>
+          </details>
+        )}
         <button
           ref={retryRef}
           type="button"
           data-ctl="retry"
-          onClick={retry}
+          onClick={retryPlayback}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
         >
           <RotateCcw className="size-3.5" aria-hidden />
@@ -402,7 +431,13 @@ function MpvPlayer({ compact }: { compact: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [onBar, setOnBar] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const setRoot = useCallback((el: HTMLDivElement | null) => {
+    rootRef.current = el;
+    setRootEl(el);
+  }, []);
+  const narrow = useNarrow(rootEl);
   const overlay = (isFullscreen || pip) && !compact;
   const small = compact || pip;
   const focusPin = useKeyboardFocusPin();
@@ -476,7 +511,7 @@ function MpvPlayer({ compact }: { compact: boolean }) {
 
   return (
     <div
-      ref={rootRef}
+      ref={setRoot}
       tabIndex={-1}
       data-testid="mpv-player"
       className={cn('relative h-full w-full bg-black outline-none', !overlay && 'flex flex-col')}
@@ -494,11 +529,17 @@ function MpvPlayer({ compact }: { compact: boolean }) {
       <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
       {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
       <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
-      {/* Zap banner (C5): over the picture's top corner, cut out of the native video while up. */}
-      <ZapBanner
-        compact={small}
-        className={small ? cn('inset-x-2', pip ? 'top-11' : 'top-2') : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
-      />
+      {/*
+        Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
+        mini player says it in its header instead; a phone-width player gets the one-line chip.
+      */}
+      {!compact && (
+        <ZapBanner
+          compact={pip}
+          chip={narrow && !pip}
+          className={pip ? 'inset-x-2 top-11' : narrow ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
+        />
+      )}
       {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
       {overlay && <SleepPrompt small={small} className={pip ? 'bottom-14' : 'bottom-28'} />}
       {overlay ? (
@@ -590,10 +631,21 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   const lastClick = useRef<{ at: number; wasPaused: boolean } | null>(null);
   /** A click on an ended item: the replay waits out the double-click time (C6). */
   const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const setRoot = useCallback((el: HTMLDivElement | null) => {
+    rootRef.current = el;
+    setRootEl(el);
+  }, []);
+  const narrow = useNarrow(rootEl);
 
   const playing = status === 'playing';
-  const chromeVisible = !idle || !playing || menuOpen || focusPin.pinned || onBar || panelOpen;
+  // A phone-width player has no room for both the zap chip and the bar: while the chip is up the
+  // bar waits (unless it is in use, or playback paused or ended), the new channel's tuning
+  // included, and comes back when the chip goes or the stream fails.
+  const zapChip = narrow && !compact && !pip && zapShown;
+  const inUse = menuOpen || focusPin.pinned || onBar || panelOpen;
+  const chromeVisible = inUse || (zapChip ? !playing && status !== 'loading' : !idle || !playing);
   // The title takes the pointer only while the chrome shows it.
   const titleHover = useZapHover(chromeVisible);
 
@@ -678,7 +730,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
   return (
     <div
-      ref={rootRef}
+      ref={setRoot}
       className="relative h-full w-full overflow-hidden bg-black select-none"
       onPointerMove={poke}
       onPointerDown={poke}
@@ -741,13 +793,20 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
       <Osd />
       <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
-      {/* Zap banner (C5): the title's corner, or the far one while the channel list or stream info holds it. */}
-      <ZapBanner
-        compact={compact || pip}
-        className={
-          compact || pip ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
-        }
-      />
+      {/*
+        Zap banner (C5): the title's corner, or the far one while the channel list or stream info
+        holds it. The mini player says it in its header instead; a phone-width player gets the
+        one-line chip.
+      */}
+      {!compact && (
+        <ZapBanner
+          compact={pip}
+          chip={narrow && !pip}
+          className={
+            pip || narrow ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+          }
+        />
+      )}
       {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
       {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : 'bottom-28'} />}
       <EndedOverlay compact={compact} />

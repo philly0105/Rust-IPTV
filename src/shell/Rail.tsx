@@ -24,13 +24,13 @@ import {
 } from 'lucide-react';
 import { type CSSProperties, type RefObject, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, useLocation } from 'react-router';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source, SourceKind } from '@/api/types';
-import { cn, hueOf, initialsOf, Skeleton } from '@/ui';
+import { cn, hueOf, initialsOf, Menu, Skeleton } from '@/ui';
 
-import { railLinks, sourceBasePath } from './railLinks';
+import { railLinks } from './railLinks';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
 
@@ -121,46 +121,104 @@ function SourceMark({ source, size = 'sm', errorDot }: { source: Source; size?: 
   );
 }
 
+/**
+ * How far the rail must scroll so `target` sits inside `box` with `pad` to spare: 0 when it
+ * already does. A target taller than the box keeps its top edge in view (the source row the user
+ * just opened), so the scroll never pushes the row itself out above. Exported for tests.
+ */
+export function railRevealDelta(box: { top: number; bottom: number }, target: { top: number; bottom: number }, pad = 24): number {
+  if (target.top < box.top) return target.top - box.top - pad;
+  if (target.bottom > box.bottom) return Math.min(target.bottom - box.bottom + pad, target.top - box.top - pad);
+  return 0;
+}
+
 function SourceEntry({ source, collapsed, active, tour }: { source: Source; collapsed: boolean; active: boolean; tour?: 'live' }) {
   const { t } = useTranslation('shell');
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [expanded, setExpanded] = useState(active);
-  useEffect(() => {
+  // Opening a source from a card or the palette expands its entry in the same render, not in an
+  // effect a commit later: the rail's scroll effect runs once per route, and it must find the
+  // active sub-link already on the page to bring it into view.
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
     if (active) setExpanded(true);
-  }, [active]);
+  }
+  // The collapsed rail's menu lists Radio only once the m3u radio probe has answered: hovering
+  // or focusing the monogram starts it, so a narrow window pays for no probe it never opens.
+  const [warm, setWarm] = useState(false);
+  const itemRef = useRef<HTMLLIElement>(null);
+  const revealOnExpand = useRef(false);
 
   const radio = useRpcQuery(
     'catalog.channels',
     { sourceId: source.id, query: { offset: 0, limit: 1 }, radio: true },
-    { enabled: source.kind === 'm3u' && (expanded || active), staleTime: 5 * 60_000 },
+    { enabled: source.kind === 'm3u' && (expanded || active || (collapsed && warm)), staleTime: 5 * 60_000 },
   );
   const links = railLinks(source, { hasRadio: (radio.data?.total ?? 0) > 0 });
   // Source ids may hold spaces or other characters an IDREF cannot carry.
   const listId = useId();
 
+  // A source the user opens by hand slides its links into view: below the fold, a rotating
+  // chevron alone says nothing happened.
+  useEffect(() => {
+    if (!expanded || !revealOnExpand.current) return;
+    revealOnExpand.current = false;
+    const item = itemRef.current;
+    const box = item?.closest<HTMLElement>('[data-testid="rail-scroll"]');
+    if (!item || !box) return;
+    const delta = railRevealDelta(box.getBoundingClientRect(), item.getBoundingClientRect());
+    if (delta === 0) return;
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (typeof box.scrollTo === 'function') box.scrollTo({ top: box.scrollTop + delta, behavior: smooth ? 'smooth' : 'auto' });
+    else box.scrollTop += delta;
+  }, [expanded]);
+
   if (collapsed) {
+    const label = source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name;
+    // Icons only, so the monogram opens the source's own links (Live, Movies, Series, Radio,
+    // Favorites, Recent) in a menu: below lg the rail never expands, and a lone link to Live
+    // left a phone with no way to its movies or series.
     return (
-      <li>
-        <Link
-          to={`${sourceBasePath(source.id)}/live`}
-          data-tour={tour}
-          title={source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name}
-          aria-label={source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name}
-          className={cn(itemClass(active, true))}
-        >
-          <SourceMark source={source} errorDot={!!source.lastError} />
-        </Link>
+      <li data-tour={tour} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
+        <Menu
+          label={label}
+          align="start"
+          // Beside the monogram, not over the next ones: the rail is one icon wide.
+          placement="inline-end"
+          triggerClassName={cn(itemClass(active, true), 'w-full')}
+          trigger={
+            <span title={label} className="inline-flex">
+              <SourceMark source={source} errorDot={!!source.lastError} />
+            </span>
+          }
+          items={links.map((l) => {
+            const current = pathname === l.to || pathname.startsWith(`${l.to}/`);
+            return {
+              id: l.id,
+              label: t(l.labelKey),
+              icon: <l.icon size={15} className={cn(current && 'text-accent')} />,
+              hint: current ? <span className="sr-only">{t('railCurrentPage')}</span> : undefined,
+              onSelect: () => navigate(l.to),
+            };
+          })}
+        />
       </li>
     );
   }
 
   return (
-    <li>
+    <li ref={itemRef}>
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls={listId}
         data-tour={tour}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          revealOnExpand.current = !expanded;
+          setExpanded((v) => !v);
+        }}
         className={cn(
           'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
           active ? 'text-fg hover:bg-surface-2/60 active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
@@ -236,16 +294,12 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
       const bottom = el.scrollHeight - el.clientHeight - el.scrollTop > 1;
       setFade((f) => (f.top === top && f.bottom === bottom ? f : { top, bottom }));
     };
-    // Once per route (and once more when the source links arrive), so a refetch never undoes
-    // the user's own scrolling of the rail.
+    // Once per route, so a refetch never undoes the user's own scrolling of the rail. The route
+    // only counts as handled once its link was found: the source links arrive with the sources.
     const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"]');
-    scrolledFor.current = scrollKey;
     if (active) {
-      const box = el.getBoundingClientRect();
-      const link = active.getBoundingClientRect();
-      const pad = 24;
-      if (link.top < box.top) el.scrollTop -= box.top - link.top + pad;
-      else if (link.bottom > box.bottom) el.scrollTop += link.bottom - box.bottom + pad;
+      scrolledFor.current = scrollKey;
+      el.scrollTop += railRevealDelta(el.getBoundingClientRect(), active.getBoundingClientRect());
     }
     update();
     el.addEventListener('scroll', update, { passive: true });

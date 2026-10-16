@@ -317,9 +317,10 @@ fn gen_mixed_m3u(n: usize, groups: usize) -> String {
 /// checked against the Rust rule, so a faster filter cannot drop or keep
 /// the wrong rows.
 ///
-/// Each call is timed after a warm-up call, which builds the connection's
-/// cached set of hidden rowids (`catalog::language::hidden_rowids`); the
-/// budget is not scaled for debug builds, as above.
+/// Each call is timed after a warm-up call. English-only reads the verdict
+/// the catalog writer stored (`items.non_english`, migration 0018), so the
+/// warm-up builds no cache (`l2_query_perf` times it with a settings write
+/// before every call); the budget is not scaled for debug builds, as above.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn english_only_queries_on_50k_channels_stay_fast() {
     use iptv_core::catalog::language::is_non_english;

@@ -4,8 +4,12 @@ import type { CoverSize } from '@/api/types';
 
 /** Minimum poster column width for each cover size, in px at 100 % scale. */
 export const COVER_WIDTH: Record<CoverSize, number> = { small: 128, medium: 164, large: 212 };
-/** On a phone-width screen every size shrinks to this: three posters a row at 390px, two beside the search tabs. */
-export const NARROW_COVER_WIDTH = 104;
+/**
+ * On a phone-width screen every size shrinks to this: three posters a row at 390px (L2-vod-7). The
+ * grid there is about 286px wide (390 minus the 72px rail and the page padding), and 275px beside
+ * a thin desktop scrollbar; 80px columns with the 16px gap fit three in either.
+ */
+export const NARROW_COVER_WIDTH = 80;
 const NARROW_QUERY = '(max-width: 479px)';
 
 const narrowNow = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_QUERY).matches;

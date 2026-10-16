@@ -120,6 +120,18 @@ export function failedSourceId(err: Pick<RpcError, 'details'>): string | null {
 }
 
 /**
+ * Id of the source a refused add would duplicate: `sources.add` answers `conflict` with
+ * `details.existingSourceId` when the address is already a source (L1-sources-home-4). Null for
+ * any other error, a cancelled run included.
+ */
+export function duplicateSourceId(err: Pick<RpcError, 'code' | 'details'>): string | null {
+  const d = err.details;
+  if (err.code !== 'conflict' || !d || typeof d !== 'object') return null;
+  const o = d as { existingSourceId?: unknown; cancelled?: unknown };
+  return o.cancelled !== true && typeof o.existingSourceId === 'string' && o.existingSourceId ? o.existingSourceId : null;
+}
+
+/**
  * Error class of an `import.progress` error or a connection-test verdict. The core's classified
  * `code` (C10) wins when it says more than `internal`; older cores send only text, so the message
  * is matched as a fallback. Unknown text maps to `internal` (generic).

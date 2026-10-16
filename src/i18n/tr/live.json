@@ -184,5 +184,11 @@
   "locked": "Kilitli",
   "lockedGuide": "Kilitli. Yayın akışını görmek için PIN kodunu girin.",
   "unlock": "Kilidi aç",
-  "ribbonFailed": "Bu kanalın rehberi yüklenemedi"
+  "ribbonFailed": "Bu kanalın rehberi yüklenemedi",
+  "parentalHiddenChannels": "Ebeveyn denetimi bu kaynağın kanallarını gizliyor",
+  "parentalHiddenStations": "Ebeveyn denetimi bu kaynağın istasyonlarını gizliyor",
+  "parentalHiddenHint": "Grupları kilitli. Bu oturumda göstermek için PIN kodunu gir.",
+  "parentalUnlock": "Kilidi aç",
+  "parentalUnlockTitle": "Kilitli kanalları göster",
+  "parentalUnlockBody": "Ebeveyn denetimi yeniden kilitleyene kadar kilitli grupları ve kanalları göstermek için PIN kodunu gir."
 }

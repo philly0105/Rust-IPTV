@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import type { APIRequestContext, Page } from '@playwright/test';
 
 import type { ItemRef, VodItem, WatchlistEntry, Page as RpcPage } from '../src/api/types';
+import { baseTitle } from '../src/lib/title';
 import { ensureSource, resetApp, rpc } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
@@ -23,6 +24,8 @@ function listed(request: APIRequestContext): Promise<WatchlistEntry[]> {
   return rpc<WatchlistEntry[]>(request, 'watchlist.list', {});
 }
 const titlesOf = (list: WatchlistEntry[]) => list.map((e) => e.snapshot.title);
+/** A row shows a saved movie or series title as the VOD cards do: no year, no provider tags. */
+const shown = (title: string) => baseTitle(title).title;
 
 async function clearList(request: APIRequestContext): Promise<void> {
   for (const e of await listed(request)) await rpc(request, 'watchlist.remove', { ref: e.ref });
@@ -113,7 +116,7 @@ test.describe('My List', () => {
 
     await page.goto('/my-list');
     await expect(page.getByTestId('mylist-row')).toHaveCount(4);
-    expect(await rowTitles(page)).toEqual([c.title, series, b.title, a.title]);
+    expect(await rowTitles(page)).toEqual([c.title, series, b.title, a.title].map(shown));
     await expect(page.getByTestId('mylist-rank').first()).toHaveText('1');
 
     // Filter: Movies only, in the URL; ranks still count the whole list.
@@ -125,10 +128,10 @@ test.describe('My List', () => {
     await expect(page.getByTestId('mylist-row')).toHaveCount(4);
 
     // Alt+ArrowDown moves the focused row; focus stays on it.
-    await listItem(page, c.title).focus();
+    await listItem(page, shown(c.title)).focus();
     await page.keyboard.press('Alt+ArrowDown');
-    await expect.poll(() => rowTitles(page)).toEqual([series, c.title, b.title, a.title]);
-    await expect(listItem(page, c.title)).toBeFocused();
+    await expect.poll(() => rowTitles(page)).toEqual([series, c.title, b.title, a.title].map(shown));
+    await expect(listItem(page, shown(c.title))).toBeFocused();
     await page.keyboard.press('Alt+ArrowDown');
     await expect.poll(async () => titlesOf(await listed(request))).toEqual([series, b.title, c.title, a.title]);
 
@@ -146,7 +149,7 @@ test.describe('My List', () => {
     await page.getByTestId('mylist-sort').selectOption('order');
 
     await page.reload();
-    await expect.poll(() => rowTitles(page)).toEqual([series, b.title, c.title, a.title]);
+    await expect.poll(() => rowTitles(page)).toEqual([series, b.title, c.title, a.title].map(shown));
   });
 
   test('designed empty state, then axe and layout from phone to wide desktop', async ({ page, request }) => {

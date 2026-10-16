@@ -96,6 +96,8 @@
   "adultAutoHint": "성인 콘텐츠로 자동 잠김",
   "adultOffHint": "성인 콘텐츠처럼 보이는 이름입니다. 성인 자동 잠금이 꺼져 있습니다.",
   "autoAdultCount_other": "성인 그룹 {{count}}개도 자동으로 잠겨 있습니다.",
+  "autoAdultRule": "자동으로 잠긴 성인 그룹",
+  "autoAdultNone": "이 소스에는 성인 콘텐츠로 보이는 그룹이 없습니다.",
   "removeLockNamed": "{{name}} 잠금 제거",
   "showAllLocks_other": "잠금 {{count}}개 모두 표시",
   "showFewer": "간단히 표시",

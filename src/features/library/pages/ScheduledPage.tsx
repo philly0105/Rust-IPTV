@@ -14,6 +14,7 @@ import { Link } from 'react-router';
 import { invalidate } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { Recording, RecordingStatus, Reminder } from '@/api/types';
+import { joinList } from '@/shell/dashboard/cards';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
@@ -27,6 +28,8 @@ import {
   SkeletonList,
   StopRecordingDialog,
   clockDuration,
+  clockTime,
+  dayLabel,
   elapsedSeconds,
   finishedRecordings,
   groupByDay,
@@ -70,15 +73,28 @@ function useClock(everyMs: number): number {
 }
 
 function timeOf(iso: string, lang: string): string {
-  return new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(Date.parse(iso));
+  return clockTime(Date.parse(iso), lang);
 }
 
-function dayLabel(day: number, now: number, lang: string): string {
-  const today = new Date(now);
-  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const diff = Math.round((day - start) / 86_400_000);
-  if (diff === 0 || diff === 1) return new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }).format(diff, 'day');
-  return new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long' }).format(day);
+/**
+ * Header line: what is recording now and what is coming up, counted apart
+ * ("1 recording now, 4 items coming up"); a running recording is not "coming up".
+ */
+export function scheduledSubtitle({
+  now,
+  upcoming: next,
+  lang,
+  t,
+}: {
+  now: number;
+  upcoming: number;
+  lang: string;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+}): string {
+  const parts: string[] = [];
+  if (now > 0) parts.push(t('scheduledSummaryNow', { count: now }));
+  if (next > 0 || now === 0) parts.push(t('scheduledSummary', { count: next }));
+  return joinList(parts, lang);
 }
 
 export function ScheduledPage() {
@@ -94,7 +110,7 @@ export function ScheduledPage() {
   const nowList = useMemo(() => recordingNow(recordings.data), [recordings.data]);
   const next = useMemo(() => upcoming(reminders.data, recordings.data), [reminders.data, recordings.data]);
   const done = useMemo(() => finishedRecordings(recordings.data).slice(0, 50), [recordings.data]);
-  const subtitle = reminders.data && recordings.data ? t('scheduledSummary', { count: next.length + nowList.length }) : undefined;
+  const subtitle = reminders.data && recordings.data ? scheduledSubtitle({ now: nowList.length, upcoming: next.length, lang, t }) : undefined;
   usePageHeader(title, subtitle);
 
   // Rules count toward loading, so the lists appear with the panel already in its place.

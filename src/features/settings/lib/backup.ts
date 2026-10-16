@@ -9,6 +9,40 @@ export interface BackupSummary {
   epgUrls: number;
   /** Entries the import will skip: not an object, or an unknown `portalType`. */
   skipped: number;
+  /** Parental options (`settings.tsrustParental`); the core applies them only while controls are unlocked. */
+  parental?: BackupParentalOptions;
+}
+
+export interface BackupParentalOptions {
+  mode?: string;
+  autoAdult?: boolean;
+  unlockMinutes?: number;
+}
+
+/**
+ * True when importing `opts` would change the parental options `current` has.
+ * Only then does a locked session matter: the same options need no PIN.
+ */
+export function parentalOptionsDiffer(
+  opts: BackupParentalOptions | undefined,
+  current: { mode: string; autoAdult: boolean; unlockMinutes: number },
+): boolean {
+  if (!opts) return false;
+  return (
+    (opts.mode !== undefined && opts.mode !== current.mode) ||
+    (opts.autoAdult !== undefined && opts.autoAdult !== current.autoAdult) ||
+    (opts.unlockMinutes !== undefined && opts.unlockMinutes !== current.unlockMinutes)
+  );
+}
+
+function parentalOf(v: unknown): BackupParentalOptions | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const o = v as Record<string, unknown>;
+  const out: BackupParentalOptions = {};
+  if (typeof o.mode === 'string') out.mode = o.mode;
+  if (typeof o.autoAdult === 'boolean') out.autoAdult = o.autoAdult;
+  if (typeof o.unlockMinutes === 'number' && Number.isInteger(o.unlockMinutes)) out.unlockMinutes = o.unlockMinutes;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export type BackupCheck = { ok: true; summary: BackupSummary } | { ok: false; error: string };
@@ -64,6 +98,7 @@ export function inspectBackup(text: string): BackupCheck {
       byKind,
       epgUrls: Array.isArray(settings?.epgUrls) ? settings.epgUrls.length : 0,
       skipped,
+      parental: parentalOf(settings?.tsrustParental),
     },
   };
 }

@@ -15,7 +15,7 @@ import { sourcesRoutes } from '@/features/sources/routes';
 import { statsRoutes } from '@/features/stats/routes';
 import { vodRoutes } from '@/features/vod/routes';
 import { ShellLayout, useShellHeader, useShellStore } from '@/shell';
-import { StartupRedirect } from '@/shell/StartupRedirect';
+import { loadDashboard, StartupRedirect } from '@/shell/StartupRedirect';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { buttonClass, cn, EmptyState, ERROR_TITLE_KEYS, ErrorState, Skeleton } from '@/ui';
 
@@ -158,22 +158,13 @@ export function RouteErrorPage() {
   );
 }
 
-/** Starts the dashboard chunk download; shared by the route and the startup prefetch. */
-const loadDashboard = () => import('@/shell/dashboard/DashboardPage');
-
 /**
  * Shell-owned child routes (C7), wired here instead of `@/shell/routes` so the
- * dashboard is a lazy chunk: the index route performs the startup redirect
- * and, on its way, prefetches the dashboard (the most common landing page).
+ * dashboard is a lazy chunk: the index route performs the startup redirect,
+ * and prefetches the dashboard only when that is where it goes.
  */
 const shellChildRoutes: RouteObject[] = [
-  {
-    index: true,
-    lazy: async () => {
-      void loadDashboard().catch(() => undefined);
-      return { element: <StartupRedirect /> };
-    },
-  },
+  { index: true, element: <StartupRedirect /> },
   { path: 'dashboard', lazy: async () => ({ Component: (await loadDashboard()).DashboardPage }) },
 ];
 

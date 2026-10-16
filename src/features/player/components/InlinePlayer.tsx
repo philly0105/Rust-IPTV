@@ -1,9 +1,9 @@
-import { AlertTriangle, Copy, ExternalLink, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Copy, ExternalLink, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
-import type { PlayerSource } from '@/api/types';
+import { itemKey, type PlayerSource } from '@/api/types';
 
 import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
@@ -11,7 +11,7 @@ import { cn } from '../cn';
 import {
   createEngine,
   EMPTY_TRACKS,
-  fetchFailureReason,
+  fetchFailureStatus,
   looksLikeMpegTs,
   mseSupported,
   withReason,
@@ -20,9 +20,12 @@ import {
   type EngineError,
   type EngineTracks,
 } from '../engines';
+import { afterPaint } from '../enginePreload';
+import { NO_VIDEO_MESSAGE } from '../errors';
+import { useAlternatesStore } from '../failover';
 import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
-import { noteEngineError } from '../reconnect';
+import { noteEngineError, tryAnotherSource, useReconnectStore } from '../reconnect';
 import { canShareSource } from '../shareable';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
 import {
@@ -42,6 +45,12 @@ import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 function mediaKey(s: PlayerSource | undefined): string {
   return s ? `${s.kind}|${s.url}` : '';
 }
+
+/**
+ * How long hls.js, shaka or mpegts.js get to report an element error themselves. When the element
+ * rejects the media outright (no track it can decode), mpegts.js says nothing at all.
+ */
+export const ENGINE_ERROR_GRACE_MS = 1_000;
 
 function rangesOf(tr: TimeRanges, offset = 0): TimeRange[] {
   const out: TimeRange[] = [];
@@ -93,7 +102,10 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
    */
   // failover: the recovery module owns retries and switching; it needs the engine's error kind.
   const failRef = useRef<(src: PlayerSource, err: EngineError) => void>(() => undefined);
+  /** Failures reported so far: an element error the engine already answered is not reported twice. */
+  const failCount = useRef(0);
   failRef.current = (_src, err) => {
+    failCount.current++;
     setErrorKind(err.kind);
     noteEngineError(err.kind);
     reportStatus('error', err.message);
@@ -116,18 +128,29 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       if (!disposed) failRef.current(src, err);
     };
 
-    void createEngine(
-      el,
-      src,
-      loadUrl,
-      {
-        onTracks: (tracks) => {
-          if (!disposed) publishTracks(tracks);
+    // The engine starts once the tuned state (title, banner, loading dial) has painted: a click
+    // whose stream resolves from cache must not carry engine setup inside its own frame.
+    const forceMpegts = sniffedRef.current === mediaKey(src);
+    const start = (): Promise<Engine> =>
+      createEngine(
+        el,
+        src,
+        loadUrl,
+        {
+          onTracks: (tracks) => {
+            if (!disposed) publishTracks(tracks);
+          },
+          onError: onFatal,
         },
-        onError: onFatal,
-      },
-      { captions: captionsDefault, signal: abort.signal, forceMpegts: sniffedRef.current === mediaKey(src) },
-    ).then((engine) => {
+        { captions: captionsDefault, signal: abort.signal, forceMpegts },
+      );
+    let cancelStart: () => void = () => undefined;
+    void new Promise<Engine>((resolve, reject) => {
+      cancelStart = afterPaint(() => {
+        if (disposed) return;
+        start().then(resolve, reject);
+      });
+    }).then((engine) => {
       if (disposed) {
         engine.destroy();
         return;
@@ -156,6 +179,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
 
     return () => {
       disposed = true;
+      cancelStart();
       abort.abort();
       el.removeEventListener('loadedmetadata', onMeta);
       engineRef.current?.destroy();
@@ -199,7 +223,8 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
       reportStatus('playing');
     };
     const onPause = (): void => {
-      if (!el.ended) reportStatus('paused');
+      // The element pauses itself when it rejects the media: that is a failure, not a pause.
+      if (!el.ended && !el.error) reportStatus('paused');
     };
     const onWaiting = (): void => useMediaStore.setState({ waiting: true });
     const onVolume = (): void => reportVolume(el.volume, el.muted);
@@ -207,13 +232,27 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     const onEnded = (): void => {
       if (!isLive()) handleEnded();
     };
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
     const onError = (): void => {
-      // Native element errors only: hls.js, shaka and mpegts.js report their own.
       const s = usePlayerStore.getState().source;
       if (!s || !el.error) return;
-      const engineKind = engineRef.current?.kind;
-      if (engineKind ? engineKind !== 'native' : s.kind === 'hls' || s.kind === 'dash' || looksLikeMpegTs(s)) return;
       const code = el.error.code;
+      const engineKind = engineRef.current?.kind;
+      if (engineKind ? engineKind !== 'native' : s.kind === 'hls' || s.kind === 'dash' || looksLikeMpegTs(s)) {
+        // hls.js, shaka and mpegts.js report their own failures, and may recover from this one.
+        // When they stay quiet and the element still holds the error, say so: never a black
+        // frame and a Play button.
+        if (graceTimer) clearTimeout(graceTimer);
+        const reported = failCount.current;
+        graceTimer = setTimeout(() => {
+          graceTimer = null;
+          const cur = usePlayerStore.getState();
+          if (cur.source !== s || !el.error || cur.status === 'error' || failCount.current !== reported) return;
+          const kind = code === 2 ? 'network' : code === 3 ? 'media' : 'unsupported';
+          failRef.current(s, { kind, fatal: true, message: code === 4 ? NO_VIDEO_MESSAGE : el.error.message || `Media error ${code}` });
+        }, ENGINE_ERROR_GRACE_MS);
+        return;
+      }
       // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through mpegts.js.
       const k = mediaKey(s);
       if (code === 4 && sniffedRef.current !== k && mseSupported() && worthSniffingAsMpegTs(s)) {
@@ -227,11 +266,16 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
         failRef.current(s, { kind, fatal: true, message });
         return;
       }
-      // The element hides HTTP status and body: when our own server (proxy guard, files) refused
-      // the request, its answer says why and is shown instead of the generic media error.
-      void fetchFailureReason(proxiedUrl(s)).then((r) => {
+      // The element hides HTTP status and body: when our own server (proxy guard, files, a status
+      // relayed from the provider) refused the request, its answer replaces the generic media error.
+      void fetchFailureStatus(proxiedUrl(s)).then((r) => {
         if (usePlayerStore.getState().source !== s) return;
-        failRef.current(s, r ? { kind: 'network', fatal: true, message: withReason(message, r.reason, r.status) } : { kind, fatal: true, message });
+        if (!r) {
+          failRef.current(s, { kind, fatal: true, message });
+          return;
+        }
+        const refused = r.reason ? withReason(message, r.reason, r.status) : `${message} (HTTP ${r.status})`;
+        failRef.current(s, { kind: 'network', fatal: true, message: refused });
       });
     };
     const onEnterPip = (): void => useMediaStore.setState({ inPip: true });
@@ -304,6 +348,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
     }
 
     return () => {
+      if (graceTimer) clearTimeout(graceTimer);
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('durationchange', onTime);
       el.removeEventListener('progress', onTime);
@@ -359,6 +404,7 @@ export function InlinePlayer({ as = 'video', className, compact = false }: Inlin
         data-player-video={as === 'video' ? '' : undefined}
       />
       {as === 'video' && <div ref={subsRef} data-subtitle-overlay aria-hidden className="player-subs" />}
+      {status === 'loading' && <ConnectingNotice source={source} compact={compact} />}
       {status === 'error' && (
         <ErrorOverlay
           message={error}
@@ -452,18 +498,29 @@ function ErrorOverlay({
   };
 
   return (
+    // Top room for the player's title bar, and m-auto centering: a short player (a phone's
+    // 16:9) scrolls the block from its top instead of pushing it up under the title.
     <div
       role="alert"
       data-error-class={view.cls}
-      className="pointer-events-auto absolute inset-0 z-20 flex items-center justify-center overflow-y-auto bg-black/80 p-6 text-white"
+      className="pointer-events-auto absolute inset-0 z-20 flex overflow-y-auto bg-black/80 px-6 pt-14 pb-6 text-white"
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      <div className="flex max-w-md flex-col items-start gap-3">
+      <div className="m-auto flex max-w-md flex-col items-start gap-3">
         <AlertTriangle className="size-7 text-warning" aria-hidden />
         <h2 className="font-display text-lg">{view.title}</h2>
         <p className="text-sm text-white/80">{hint}</p>
-        {message && <p className="font-mono text-xs break-all text-white/70">{message}</p>}
+        {message && (
+          // What the engine said, for a bug report or a provider ticket: out of the way until asked for.
+          <details className="group w-full text-xs text-white/60">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+              {t('errorDetails')}
+            </summary>
+            <p className="mt-1.5 pl-4.5 font-mono break-all select-all">{message}</p>
+          </details>
+        )}
         <div className="mt-1 flex flex-wrap gap-2">
           <button
             ref={retryRef}
@@ -506,6 +563,56 @@ function ErrorOverlay({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A start that takes longer than usual (`reconnect.ts` SLOW_START_MS): say it is still coming,
+ * under the loading dial, and offer another copy of a live channel right away instead of making
+ * the user wait out the start timeout.
+ */
+function ConnectingNotice({ source, compact }: { source?: PlayerSource | undefined; compact: boolean }) {
+  const { t } = useTranslation('player');
+  const settings = usePlayerSettings();
+  const connecting = useReconnectStore((s) => s.phase === 'connecting');
+  const key = source?.isLive && source.ref ? itemKey(source.ref) : undefined;
+  const alternates = useAlternatesStore((s) => s.status === 'ready' && !!key && s.forKey === key && !!s.data?.alternates.length);
+  const [busy, setBusy] = useState(false);
+  if (!connecting || !source?.url) return null;
+  const offerSwitch = !compact && alternates && settings?.liveFailover !== false;
+  const onSwitch = (): void => {
+    setBusy(true);
+    void tryAnotherSource().finally(() => setBusy(false));
+  };
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 flex justify-center pt-12">
+      <p
+        role="status"
+        aria-live="polite"
+        data-testid="connecting-notice"
+        className={cn(
+          'player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1',
+          offerSwitch ? 'pr-1 pl-3' : 'px-3',
+          compact ? 'text-xs' : 'text-sm',
+        )}
+      >
+        <span className="truncate">{t('stillConnecting')}</span>
+        {offerSwitch && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSwitch();
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className="pointer-events-auto shrink-0 rounded-full bg-white/12 px-2.5 py-0.5 font-medium hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/70 disabled:opacity-60"
+          >
+            {t('tryAnotherSource')}
+          </button>
+        )}
+      </p>
     </div>
   );
 }

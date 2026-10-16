@@ -2,13 +2,13 @@
 //!
 //! Written by W0; owned and extended by B1. Every pooled connection runs with
 //! `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`,
-//! a busy handler that waits up to 5 s for the write lock (longer while a
+//! `journal_size_limit` of 64 MiB, a busy handler that waits up to 5 s for the write lock (longer while a
 //! catalog import holds it, see [`long_write`]). Long imports should use one
 //! write transaction per source.
 
 use crate::error::{is_sqlite_corruption, CoreError, CoreResult};
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -19,7 +19,12 @@ pub type PooledConn = r2d2::PooledConnection<SqliteConnectionManager>;
 
 /// Database file name inside the data dir.
 pub const DB_FILE: &str = "iptv.db";
-/// Maximum pooled connections.
+/// Maximum pooled connections. Opened on demand (one is kept idle). A write
+/// that waits for an import's write lock holds its connection while it
+/// waits; a burst of user writes during a save once took every connection
+/// and reads queued behind them for 9 s (L2-perf-core-2). User writes now
+/// pass `AppState::db_write`'s gate one at a time before they take a
+/// connection, so at most one of them holds one while it waits.
 pub const POOL_MAX: u32 = 8;
 /// How long a connection waits for the write lock before failing with
 /// "database is locked", when no catalog import is running.
@@ -189,6 +194,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0017_image_cache",
         sql: include_str!("migrations/0017_image_cache.sql"),
     },
+    // catalog: stored English-only verdict and sort indexes (loop 2).
+    Migration {
+        version: 18,
+        name: "0018_catalog_query_speed",
+        sql: include_str!("migrations/0018_catalog_query_speed.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -205,12 +216,24 @@ pub fn latest_version() -> i64 {
     MIGRATIONS.last().map(|m| m.version).unwrap_or(0)
 }
 
+/// Largest database (`page_count * page_size`) whose `quick_check` runs at
+/// open, before the pool. It costs well under 100 ms at this size; a 237 MB
+/// database took about 670 ms, in front of the first window. A larger file
+/// is checked in the background instead (see [`spawn_background_check`]).
+const SYNC_CHECK_MAX_BYTES: u64 = 32 * 1024 * 1024;
+
+/// How long after open the background `quick_check` of a large database
+/// starts, so it reads the file after the first window's queries.
+const BACKGROUND_CHECK_DELAY: Duration = Duration::from_secs(3);
+
 /// Applies the per-connection pragmas and registers the app's SQL functions.
+/// `journal_size_limit` (64 MiB) truncates a WAL that an import grew back to
+/// that size when the WAL is next reset; see also [`checkpoint_truncate`].
 pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.busy_handler(Some(busy_wait))?;
     crate::catalog::language::register(conn)?;
     conn.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY;",
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=67108864;",
     )?;
     Ok(())
 }
@@ -316,7 +339,8 @@ fn corrupt_error(detail: &str) -> CoreError {
 /// Runs `PRAGMA quick_check` (or the slower `integrity_check`, which also
 /// verifies index contents) and turns any finding into a corruption error.
 /// A file with a valid header but garbage pages opens fine and only fails on
-/// the first query that touches a bad page, so this runs on every boot.
+/// the first query that touches a bad page, so this runs on every boot: at
+/// open for a small or flagged file, in the background for a large one.
 fn check_integrity(conn: &Connection, full: bool) -> CoreResult<()> {
     let pragma = if full {
         "PRAGMA integrity_check(1)"
@@ -331,20 +355,70 @@ fn check_integrity(conn: &Connection, full: bool) -> CoreResult<()> {
     }
 }
 
-fn try_open_and_migrate(path: &Path, full_check: bool) -> CoreResult<DbPool> {
+/// Opens, checks and migrates `path`. The full check always runs; the quick
+/// one only when the database is at most `sync_check_max_bytes`. Returns the
+/// pool and whether a check ran.
+fn try_open_and_migrate(
+    path: &Path,
+    full_check: bool,
+    sync_check_max_bytes: u64,
+) -> CoreResult<(DbPool, bool)> {
     // Validate and migrate on a dedicated connection first: a corrupt file fails
     // fast here instead of stalling inside the pool builder.
-    {
+    let checked = {
         let mut conn = Connection::open(path)?;
         configure(&mut conn)?;
         conn.query_row("PRAGMA schema_version", [], |r| r.get::<_, i64>(0))?;
-        check_integrity(&conn, full_check)?;
+        let checked = full_check || database_bytes(&conn)? <= sync_check_max_bytes;
+        if checked {
+            check_integrity(&conn, full_check)?;
+        }
         if schema_version(&conn)? > latest_version() {
             return Err(newer_schema_error());
         }
         migrate(&mut conn)?;
-    }
-    open(path)
+        checked
+    };
+    Ok((open(path)?, checked))
+}
+
+/// Size of the database the integrity check walks, WAL frames included.
+fn database_bytes(conn: &Connection) -> CoreResult<u64> {
+    let pages: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+    Ok((pages.max(0) as u64).saturating_mul(page_size.max(0) as u64))
+}
+
+/// Runs `quick_check` on its own read-only connection in a background thread,
+/// `delay` after open, for a database too large to check at open. A finding
+/// writes the recovery flag (see [`note_error`]), so the next boot runs the
+/// full check and quarantines the file.
+fn spawn_background_check(path: &Path, delay: Duration) -> Option<std::thread::JoinHandle<()>> {
+    let path = path.to_path_buf();
+    std::thread::Builder::new()
+        .name("db-quick-check".into())
+        .spawn(move || {
+            std::thread::sleep(delay);
+            let started = std::time::Instant::now();
+            let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI;
+            let result = Connection::open_with_flags(&path, flags)
+                .and_then(|conn| conn.busy_timeout(BUSY_TIMEOUT).map(|()| conn))
+                .map_err(CoreError::from)
+                .and_then(|conn| check_integrity(&conn, false));
+            match result {
+                Ok(()) => tracing::info!(
+                    ms = started.elapsed().as_millis() as u64,
+                    "background database check passed"
+                ),
+                // note_error logged the finding.
+                Err(err) if note_error(&path, &err) => {}
+                Err(err) => tracing::warn!(%err, "background database check did not run"),
+            }
+        })
+        .map_err(|err| tracing::warn!(%err, "could not start the background database check"))
+        .ok()
 }
 
 fn is_corruption(err: &CoreError) -> bool {
@@ -404,12 +478,25 @@ pub fn note_error(db_path: &Path, err: &CoreError) -> bool {
     }
 }
 
-/// Boot path: open, check integrity (`quick_check`; the full `integrity_check`
-/// when a previous run flagged corruption, see [`note_error`]), refuse a
-/// schema newer than this build, and migrate. When the file is corrupt or not
-/// a database, quarantine it (see [`quarantine`]), log a warning, and recreate
-/// an empty one.
+/// Boot path: open, check integrity, refuse a schema newer than this build,
+/// and migrate. The check is `quick_check` at open for a database up to
+/// 32 MiB, `quick_check` in a background thread a few seconds after open for
+/// a larger one (a finding flags the next boot), and the full
+/// `integrity_check` at open when a previous run flagged corruption (see
+/// [`note_error`]). When the file is corrupt or not a database, quarantine it
+/// (see [`quarantine`]), log a warning, and recreate an empty one.
 pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
+    open_and_migrate_with(path, SYNC_CHECK_MAX_BYTES, BACKGROUND_CHECK_DELAY).map(|(pool, _)| pool)
+}
+
+/// [`open_and_migrate`] with the size limit of the check at open and the
+/// delay of the background check as parameters. Returns the background
+/// check's thread when one started.
+fn open_and_migrate_with(
+    path: &Path,
+    sync_check_max_bytes: u64,
+    background_delay: Duration,
+) -> CoreResult<(DbPool, Option<std::thread::JoinHandle<()>>)> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -418,12 +505,12 @@ pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
     if flagged {
         tracing::warn!("previous run reported database corruption; running a full integrity check");
     }
-    let result = match try_open_and_migrate(path, flagged) {
-        Ok(pool) => Ok(pool),
+    let result = match try_open_and_migrate(path, flagged, sync_check_max_bytes) {
+        Ok(opened) => Ok(opened),
         Err(err) if is_corruption(&err) => {
             let moved = quarantine(path)?;
             tracing::warn!(error = %err, backup = %moved.display(), "database was corrupt; moved aside and recreating");
-            try_open_and_migrate(path, false)
+            try_open_and_migrate(path, false, sync_check_max_bytes)
         }
         Err(err) => Err(err),
     };
@@ -432,7 +519,32 @@ pub fn open_and_migrate(path: &Path) -> CoreResult<DbPool> {
             tracing::warn!(%err, "could not remove the database recovery flag");
         }
     }
-    result
+    let (pool, checked) = result?;
+    let background = if checked {
+        None
+    } else {
+        spawn_background_check(path, background_delay)
+    };
+    Ok((pool, background))
+}
+
+/// Checkpoints the WAL into the database and truncates it to zero bytes,
+/// after a large write (a catalog import) grew it. Never blocks: when a
+/// reader or writer is busy the checkpoint does what it can and the WAL is
+/// truncated by a later one. Errors are logged, never returned.
+pub fn checkpoint_truncate(conn: &Connection) {
+    // Without a busy handler a busy reader or writer makes the checkpoint
+    // fall back to a passive one (busy = 1) instead of waiting for it.
+    if conn.busy_handler(None).is_err() {
+        return;
+    }
+    match conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+    }) {
+        Ok((busy, pages)) => tracing::debug!(busy, pages, "wal checkpoint after import"),
+        Err(err) => tracing::debug!(%err, "wal checkpoint after import skipped"),
+    }
+    let _ = conn.busy_handler(Some(busy_wait));
 }
 
 /// Current UTC time as RFC 3339 with second precision (`2026-10-11T02:30:00Z`).
@@ -461,11 +573,11 @@ mod tests {
         let pool = super::open_and_migrate(&dir.path().join("plan.db")).unwrap();
         let conn = pool.get().unwrap();
         let statements = [
-            // epg/query.rs `rows` (the guide grid and now/next).
-            "SELECT p.start, p.stop, p.title, p.description, p.category, p.icon \
-             FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url \
-             WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND p.stop > ?4 \
-             AND s.enabled = 1 AND s.origin <> ?5 ORDER BY p.start, s.rowid LIMIT ?6",
+            // epg/query.rs `rows` (the guide grid, now/next and programs): the
+            // feed pick, then that feed's programme before and inside the range.
+            crate::epg::query::FEED_SQL,
+            crate::epg::query::BEFORE_SQL,
+            crate::epg::query::INSIDE_SQL,
             // epg/resolve.rs: does a channel have programmes.
             "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",
             // epg/store.rs: replace, clear and remove a feed.
@@ -695,6 +807,151 @@ mod tests {
                     .starts_with("iptv.db.corrupt-")
             });
         assert!(moved, "corrupt file kept as a backup");
+    }
+
+    fn corrupt_backups(dir: &Path) -> usize {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("iptv.db.corrupt-")
+            })
+            .count()
+    }
+
+    /// Writes about 4 MB of `app_state` rows to a fresh database at `path`
+    /// and checkpoints, so the middle of the main file is table pages.
+    fn populate(path: &Path) {
+        let pool = open_and_migrate(path).unwrap();
+        let mut conn = pool.get().unwrap();
+        let tx = conn.transaction().unwrap();
+        let value = "v".repeat(2000);
+        for i in 0..2000 {
+            tx.execute(
+                "INSERT INTO app_state(key, value) VALUES (?1, ?2)",
+                rusqlite::params![format!("k{i}"), value],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+    }
+
+    /// Overwrites 64 KiB in the middle of the file with garbage; the header
+    /// stays valid.
+    fn corrupt_middle(path: &Path) {
+        use std::io::{Seek, SeekFrom, Write};
+        let len = std::fs::metadata(path).unwrap().len();
+        let mut f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.seek(SeekFrom::Start(len / 2)).unwrap();
+        let garbage: Vec<u8> = (0..64 * 1024u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect();
+        f.write_all(&garbage).unwrap();
+        f.sync_all().unwrap();
+    }
+
+    /// Waits at most 30 s for the background check to finish.
+    fn join_bounded(handle: std::thread::JoinHandle<()>) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !handle.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "background check still running after 30 s"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        handle.join().unwrap();
+    }
+
+    /// A database over the size limit opens without the check (the corrupt
+    /// file stays in place); the background check then flags it, and the
+    /// next boot quarantines it.
+    #[test]
+    fn large_db_is_checked_in_background_and_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        populate(&path);
+        corrupt_middle(&path);
+        let flag = recovery_flag_path(&path);
+
+        // Limit 0: every database counts as large.
+        let (pool, check) = open_and_migrate_with(&path, 0, Duration::ZERO).unwrap();
+        assert_eq!(corrupt_backups(dir.path()), 0, "not checked at open");
+        let rows: i64 = pool
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM sources", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "the pool is usable before the check");
+        let check = check.expect("a background check started");
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !flag.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "background check did not flag the corrupt page within 30 s"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        join_bounded(check);
+        drop(pool);
+
+        // The flagged boot runs the full check at open (even with limit 0)
+        // and recovers. The recreated file is checked in the background.
+        let (pool, check) = open_and_migrate_with(&path, 0, Duration::ZERO).unwrap();
+        assert_eq!(corrupt_backups(dir.path()), 1, "corrupt file moved aside");
+        join_bounded(check.expect("the new file counts as large too"));
+        assert!(!flag.exists(), "flag cleared after recovery");
+        let rows: i64 = pool
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM app_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "a fresh database replaced the corrupt one");
+    }
+
+    /// A healthy large database passes the background check: no flag, data kept.
+    #[test]
+    fn healthy_large_db_background_check_writes_no_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        populate(&path);
+        let (pool, check) = open_and_migrate_with(&path, 0, Duration::ZERO).unwrap();
+        join_bounded(check.expect("a background check started"));
+        assert!(!recovery_flag_path(&path).exists());
+        let rows: i64 = pool
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM app_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2000);
+        assert_eq!(corrupt_backups(dir.path()), 0);
+    }
+
+    /// Under the size limit the check still runs at open: a corrupt page is
+    /// quarantined before the pool opens and no background check starts.
+    #[test]
+    fn small_corrupt_db_is_still_quarantined_at_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        populate(&path);
+        let len = std::fs::metadata(&path).unwrap().len();
+        assert!(len > 1_000_000 && len < SYNC_CHECK_MAX_BYTES, "{len} bytes");
+        corrupt_middle(&path);
+
+        let (pool, check) =
+            open_and_migrate_with(&path, SYNC_CHECK_MAX_BYTES, BACKGROUND_CHECK_DELAY).unwrap();
+        assert!(check.is_none(), "checked at open, not in the background");
+        assert_eq!(corrupt_backups(dir.path()), 1);
+        let rows: i64 = pool
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM app_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[test]

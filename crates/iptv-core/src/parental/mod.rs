@@ -52,6 +52,8 @@ pub const MAX_UNLOCK_MINUTES: u32 = 720;
 pub const PIN_LENGTH: std::ops::RangeInclusive<usize> = 4..=8;
 /// Most items one `parental.check` call may ask about.
 pub const MAX_CHECK_ITEMS: usize = 500;
+/// Most targets (added plus removed) one `parental.setLockedMany` call takes.
+pub const MAX_LOCK_TARGETS: usize = 5000;
 
 /// Name of the SQL function registered by [`register_sql`].
 pub const SQL_FUNCTION: &str = "adult_category";
@@ -358,13 +360,27 @@ pub async fn set_pin(
     current: Option<&str>,
     new_pin: &str,
 ) -> Result<ParentalStatus, RpcError> {
+    set_pin_with(state, current, new_pin, false).await
+}
+
+/// [`set_pin`], and with `unlock` the first PIN (none was set) also starts a
+/// session unlock of `unlockMinutes`, so the parent who just set it can go on
+/// choosing locks and options without typing it again. A PIN change leaves
+/// the session as it is whatever `unlock` says.
+pub async fn set_pin_with(
+    state: &AppState,
+    current: Option<&str>,
+    new_pin: &str,
+    unlock: bool,
+) -> Result<ParentalStatus, RpcError> {
     if !pin::is_valid(new_pin) {
         return Err(RpcError::invalid("newPin must be 4 to 8 digits."));
     }
     let rt = runtime(state);
     let _w = rt.write.lock().await;
     let cfg = config_held(state, &rt).await?;
-    if cfg.enabled {
+    let first = !cfg.enabled;
+    if !first {
         let Some(current) = current else {
             return Err(RpcError::auth("Enter the current PIN to change it."));
         };
@@ -379,6 +395,11 @@ pub async fn set_pin(
         })
         .await?;
     tracing::info!("parental PIN set");
+    if first && unlock {
+        let until = (cfg.unlock_minutes > 0)
+            .then(|| rt.now() + chrono::Duration::minutes(i64::from(cfg.unlock_minutes)));
+        rt.set_unlock(Some(Unlock { until }));
+    }
     Ok(publish(state, &rt, &cfg))
 }
 
@@ -503,6 +524,63 @@ pub async fn set_locked(
         emit(state, &status_of(&cfg, unlock, now));
     }
     Ok(())
+}
+
+/// `parental.setLockedMany`: adds every `add` target and removes every
+/// `remove` target in one transaction, and emits [`CHANGED_EVENT`] once when
+/// anything changed. Removals need the PIN or an active unlock while a PIN
+/// is set, checked before anything is written, so a refused PIN changes
+/// nothing. Every target is validated first; an unknown source rolls the
+/// whole call back (`not_found`). Returns how many locks changed.
+pub async fn set_locked_many(
+    state: &AppState,
+    add: &[ParentalLockTarget],
+    remove: &[ParentalLockTarget],
+    pin: Option<&str>,
+) -> Result<usize, RpcError> {
+    if add.len() + remove.len() > MAX_LOCK_TARGETS {
+        return Err(RpcError::invalid(format!(
+            "parental.setLockedMany takes at most {MAX_LOCK_TARGETS} targets."
+        )));
+    }
+    let add = add
+        .iter()
+        .map(store::validate_target)
+        .collect::<CoreResult<Vec<_>>>()?;
+    let remove = remove
+        .iter()
+        .map(store::validate_target)
+        .collect::<CoreResult<Vec<_>>>()?;
+    if add.is_empty() && remove.is_empty() {
+        return Ok(0);
+    }
+    let rt = runtime(state);
+    let _w = rt.write.lock().await;
+    let cfg = config_held(state, &rt).await?;
+    if !remove.is_empty() {
+        authorize(state, &rt, &cfg, pin, "remove a lock").await?;
+    }
+    let changed = state
+        .db_call(move |c| {
+            let tx = c.transaction()?;
+            let created_at = crate::db::now_rfc3339();
+            let mut changed = 0;
+            for t in &remove {
+                changed += usize::from(store::remove_lock(&tx, t)?);
+            }
+            for t in &add {
+                changed += usize::from(store::add_lock(&tx, t, &created_at)?);
+            }
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await?;
+    if changed > 0 {
+        let now = rt.now();
+        let (unlock, _) = rt.session(now);
+        emit(state, &status_of(&cfg, unlock, now));
+    }
+    Ok(changed)
 }
 
 /// `parental.check`: the refs locked right now (none while controls are off
@@ -748,6 +826,14 @@ pub async fn restore_options(
     let cfg = config_held(state, &rt).await?;
     let (unlock, _) = rt.session(rt.now());
     if cfg.enabled && unlock.is_none() {
+        // Options that already match change nothing: no warning (the UI
+        // imports such a backup without asking for the PIN).
+        let unchanged = mode.is_none_or(|m| m == cfg.mode)
+            && auto_adult.is_none_or(|a| a == cfg.auto_adult)
+            && unlock_minutes.is_none_or(|m| m == cfg.unlock_minutes);
+        if unchanged {
+            return Ok(false);
+        }
         warnings.push(
             "Parental settings in the backup were not applied: parental controls are on and locked. Unlock them and import again to apply them.".into(),
         );

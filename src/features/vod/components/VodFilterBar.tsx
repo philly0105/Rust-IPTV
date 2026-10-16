@@ -24,6 +24,11 @@ export interface VodFilterBarProps {
   sourceId: string;
   kind: VodKind;
   categoryId: string;
+  /**
+   * False while the source record is still loading (its kind unknown): the bar holds its place
+   * with placeholder chips and asks for nothing yet. Defaults to true.
+   */
+  ready?: boolean;
   /** Stalker portals: fixed decades, filtered on loaded pages. */
   stalker: boolean;
   /**
@@ -65,6 +70,7 @@ export function VodFilterBar({
   sourceId,
   kind,
   categoryId,
+  ready = true,
   stalker,
   yearsLikely,
   range,
@@ -85,7 +91,7 @@ export function VodFilterBar({
   const facets = useQuery<YearFacet[], RpcError>({
     queryKey: rpcKey('catalog.yearFacets', facetArgs),
     queryFn: () => rpc('catalog.yearFacets', facetArgs),
-    enabled: !stalker && !!sourceId,
+    enabled: ready && !stalker && !!sourceId,
     staleTime: 60_000,
     // Flipping Hide watched keeps the chips (and their old levels) until the new counts arrive, instead of skeletons.
     placeholderData: (prev, prevQuery) => {
@@ -190,7 +196,7 @@ export function VodFilterBar({
                 options={optionsFor('from')}
                 value={range.from !== undefined ? String(range.from) : ''}
                 onValueChange={(v) => setBound('from', v)}
-                className={cn('tabular h-8 w-24', range.from !== undefined && activeDecade === undefined && 'border-accent text-fg')}
+                className={cn('tabular h-8 w-auto min-w-24', range.from !== undefined && activeDecade === undefined && 'border-accent text-fg')}
                 wrapperClassName="shrink-0"
                 disabled={loading}
               />
@@ -199,7 +205,7 @@ export function VodFilterBar({
                 options={optionsFor('to')}
                 value={range.to !== undefined ? String(range.to) : ''}
                 onValueChange={(v) => setBound('to', v)}
-                className={cn('tabular h-8 w-24', range.to !== undefined && activeDecade === undefined && 'border-accent text-fg')}
+                className={cn('tabular h-8 w-auto min-w-24', range.to !== undefined && activeDecade === undefined && 'border-accent text-fg')}
                 wrapperClassName="shrink-0"
                 disabled={loading}
               />

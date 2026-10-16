@@ -183,8 +183,8 @@ describe('Backup import errors', () => {
     fireEvent.click(screen.getByTestId('backup-import-retry'));
     await screen.findByTestId('backup-result');
     expect(rpcMock.callsOf('backup.import')).toEqual([
-      { json: validBackup, mode: 'merge' },
-      { json: validBackup, mode: 'merge' },
+      { json: validBackup, mode: 'merge', background: true },
+      { json: validBackup, mode: 'merge', background: true },
     ]);
     expect(screen.queryByTestId('backup-import-error')).toBeNull();
   });

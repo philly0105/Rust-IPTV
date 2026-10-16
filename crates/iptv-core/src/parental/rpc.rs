@@ -31,6 +31,7 @@ pub const COMMANDS: &[&str] = &[
     "parental.lockNow",
     "parental.locks",
     "parental.setLocked",
+    "parental.setLockedMany",
     "parental.check",
     "parental.adultCategories",
 ];
@@ -74,13 +75,16 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Obj<T> {
     }
 }
 
-/// `parental.setPin`: first PIN without `currentPin`; changing it needs `currentPin`.
+/// `parental.setPin`: first PIN without `currentPin`; changing it needs
+/// `currentPin`. `unlock: true` starts a session unlock after the first PIN.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPinArgs {
     #[serde(default)]
     pub current_pin: Option<Pin>,
     pub new_pin: Pin,
+    #[serde(default)]
+    pub unlock: bool,
 }
 
 /// `parental.disable` and `parental.unlock`.
@@ -115,6 +119,26 @@ pub struct SetLockedArgs {
     pub locked: bool,
     #[serde(default)]
     pub pin: Option<Pin>,
+}
+
+/// `parental.setLockedMany`: one transaction and one `parental.changed`.
+/// Any `remove` needs `pin` or an active unlock while a PIN is set.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetLockedManyArgs {
+    #[serde(default)]
+    pub add: Vec<ParentalLockTarget>,
+    #[serde(default)]
+    pub remove: Vec<ParentalLockTarget>,
+    #[serde(default)]
+    pub pin: Option<Pin>,
+}
+
+/// `parental.setLockedMany` result: how many locks were added or removed.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetLockedManyResult {
+    pub changed: usize,
 }
 
 /// One `parental.check` entry; `categoryId` is looked up when absent.
@@ -152,10 +176,11 @@ pub fn register(r: &mut RpcRouter) {
     r.add(
         "parental.setPin",
         |s: S, Obj(a): Obj<SetPinArgs>| async move {
-            super::set_pin(
+            super::set_pin_with(
                 &s,
                 a.current_pin.as_ref().map(Pin::as_str),
                 a.new_pin.as_str(),
+                a.unlock,
             )
             .await
         },
@@ -190,6 +215,15 @@ pub fn register(r: &mut RpcRouter) {
         "parental.setLocked",
         |s: S, Obj(a): Obj<SetLockedArgs>| async move {
             super::set_locked(&s, &a.target, a.locked, a.pin.as_ref().map(Pin::as_str)).await
+        },
+    );
+    r.add(
+        "parental.setLockedMany",
+        |s: S, Obj(a): Obj<SetLockedManyArgs>| async move {
+            let changed =
+                super::set_locked_many(&s, &a.add, &a.remove, a.pin.as_ref().map(Pin::as_str))
+                    .await?;
+            Ok::<SetLockedManyResult, RpcError>(SetLockedManyResult { changed })
         },
     );
     r.add("parental.check", |s: S, a: CheckArgs| async move {

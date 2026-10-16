@@ -19,6 +19,14 @@
  * 3. When the retries give up, a live channel switches to another copy; a movie gets the VOD
  *    failover. Otherwise the error shows as before.
  *
+ * A stream that never played gets one quick retry (STARTUP_RETRIES), not the ladder: a provider
+ * that answers 503 or does not answer at all on the first try rarely does on the fourth, and
+ * the user is waiting on a spinner. A live start that timed out tries another copy first. The
+ * engines leave retries to this module (mpegts.js only restarts a stream that played), so the
+ * "Reconnecting n of m" count is the real number of reloads. While a stream that never played
+ * is still loading after SLOW_START_MS, the phase is `connecting` ("Still connecting", with
+ * "Try another source" for a live channel that has copies elsewhere).
+ *
  * The retry budget resets after HEALTHY_MS of good playback. Missing players and a lost
  * connection are left alone (the error UI retries by itself when the connection is back).
  */
@@ -54,17 +62,22 @@ export const ATTEMPT_TIMEOUT_MS = 8_000;
 export const STALL_MS = 12_000;
 /** Playback this long without a failure restores the full retry budget. */
 export const HEALTHY_MS = 30_000;
+/** Retries for a stream that never played (the full ladder is for streams that played and dropped). */
+export const STARTUP_RETRIES = 1;
+/** A stream that never played and is still loading after this long says so ("Still connecting"). */
+export const SLOW_START_MS = 4_000;
 const TICK_MS = 1_000;
 
 const STALL_MESSAGE = 'The stream stopped sending data';
 const TIMEOUT_MESSAGE = 'Timed out waiting for the stream';
 
-export type ReconnectPhase = 'idle' | 'retrying' | 'switching';
+export type ReconnectPhase = 'idle' | 'connecting' | 'retrying' | 'switching';
 
 export interface ReconnectState {
   phase: ReconnectPhase;
   /** 1-based retry number while `retrying`. */
   attempt: number;
+  /** Retries this run allows: the ladder's length, or STARTUP_RETRIES for a stream that never played. */
   max: number;
 }
 
@@ -144,6 +157,10 @@ let healthyTimer: ReturnType<typeof setTimeout> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let lastPos = -1;
 let lastMoveAt = 0;
+/** `keyOf` the item that reached playback: only it gets the full retry ladder. */
+let playedKey: string | null = null;
+let slowTimer: ReturnType<typeof setTimeout> | null = null;
+let slowFor: string | null = null;
 
 function keyOf(src: PlayerSource): string {
   return src.ref ? `${itemKey(src.ref)}|${src.episodeId ?? ''}` : `url|${src.url}`;
@@ -153,9 +170,20 @@ function newSession(key: string): Session {
   return { key, attempts: 0, windowStart: 0, gaveUp: false, busy: false, resumeAt: 0, stallPos: null, accountChecked: false };
 }
 
-function setPhase(phase: ReconnectPhase, attempt = 0): void {
+function setPhase(phase: ReconnectPhase, attempt = 0, max?: number): void {
   const cur = useReconnectStore.getState();
-  if (cur.phase !== phase || cur.attempt !== attempt) useReconnectStore.setState({ phase, attempt });
+  const nextMax = max ?? cur.max;
+  if (cur.phase !== phase || cur.attempt !== attempt || cur.max !== nextMax) useReconnectStore.setState({ phase, attempt, max: nextMax });
+}
+
+/** Retries this session allows: the ladder once the item played, else one quick try. */
+function budgetOf(ses: Session): number {
+  return playedKey === ses.key ? RECONNECT_DELAYS_MS.length : STARTUP_RETRIES;
+}
+
+/** The wait before the session's next retry, or undefined when its budget is spent. */
+function nextDelay(ses: Session): number | undefined {
+  return ses.attempts < budgetOf(ses) ? RECONNECT_DELAYS_MS[ses.attempts] : undefined;
 }
 
 function clear(t: ReturnType<typeof setTimeout> | null): null {
@@ -203,12 +231,14 @@ function fail(ses: Session, src: PlayerSource, cls: StreamErrorClass, info: Fail
   const r = recoveryFor(cls);
   const now = Date.now();
   if (!ses.windowStart) ses.windowStart = now;
-  const delay = RECONNECT_DELAYS_MS[ses.attempts];
+  const delay = nextDelay(ses);
   const canRetry = reconnectOn && r.retry && delay !== undefined && now - ses.windowStart + delay <= RECONNECT_WINDOW_MS;
   // A copy failover just switched to that fails before it ever played: the next copy, no retries.
   const freshSwitch = isUntriedSwitch(src);
+  // A live start that timed out: a hung provider stays hung, so another copy goes first.
+  const switchFirst = r.switchNow || (cls === 'timeout' && playedKey !== ses.key);
 
-  if (failoverOn && r.canSwitch && (r.switchNow || freshSwitch || !canRetry)) {
+  if (failoverOn && r.canSwitch && (switchFirst || freshSwitch || !canRetry)) {
     void switchOver(ses, src, canRetry && !freshSwitch, cls);
     return;
   }
@@ -227,7 +257,7 @@ async function switchOver(ses: Session, src: PlayerSource, thenRetry: boolean, c
   ses.busy = false;
   // Switched (the new copy has its own session), or the user moved on.
   if (switched || !sameItem(ses)) return;
-  const delay = RECONNECT_DELAYS_MS[ses.attempts];
+  const delay = nextDelay(ses);
   if (thenRetry && delay !== undefined) scheduleRetry(ses, delay);
   else giveUp(ses, src);
 }
@@ -235,7 +265,7 @@ async function switchOver(ses: Session, src: PlayerSource, thenRetry: boolean, c
 function scheduleRetry(ses: Session, delay: number): void {
   ses.attempts++;
   hold();
-  setPhase('retrying', ses.attempts);
+  setPhase('retrying', ses.attempts, budgetOf(ses));
   retryTimer = setTimeout(() => {
     retryTimer = null;
     attempt(ses);
@@ -383,12 +413,59 @@ function syncTick(s: PlayerState): void {
   }
 }
 
+/**
+ * A stream that never played, still loading after SLOW_START_MS: phase `connecting`, so the
+ * player can say so and offer another copy. Recovery steps (retrying, switching) keep theirs.
+ */
+function syncSlowStart(s: PlayerState, key: string | null): void {
+  const want = !!key && s.status === 'loading' && !!s.source?.url && s.mode !== 'external' && playedKey !== key;
+  if (!want) {
+    slowTimer = clear(slowTimer);
+    slowFor = null;
+    if (useReconnectStore.getState().phase === 'connecting') setPhase('idle');
+    return;
+  }
+  // Already counting (or already said so) for this item.
+  if (slowFor === key) return;
+  slowTimer = clear(slowTimer);
+  slowFor = key;
+  slowTimer = setTimeout(() => {
+    slowTimer = null;
+    const cur = usePlayerStore.getState();
+    if (!cur.source || keyOf(cur.source) !== key || cur.status !== 'loading' || playedKey === key) return;
+    if (useReconnectStore.getState().phase === 'idle') setPhase('connecting');
+  }, SLOW_START_MS);
+}
+
+/**
+ * "Try another source" while a live channel is still connecting: switch to another copy now
+ * instead of waiting for the start to time out. With none that plays, it keeps waiting.
+ */
+export async function tryAnotherSource(): Promise<boolean> {
+  const src = usePlayerStore.getState().source;
+  if (!src?.url || !src.isLive || !isChannelRef(src.ref)) return false;
+  const key = keyOf(src);
+  if (!session || session.key !== key) session = newSession(key);
+  const ses = session;
+  if (ses.busy) return false;
+  ses.busy = true;
+  setPhase('switching');
+  const switched = await failoverLive(src, 'timeout').catch(() => false);
+  ses.busy = false;
+  if (switched || !sameItem(ses)) return switched;
+  if (useReconnectStore.getState().phase === 'switching') setPhase(usePlayerStore.getState().status === 'loading' ? 'connecting' : 'idle');
+  return false;
+}
+
 function onPlayer(s: PlayerState, prev: PlayerState): void {
   const src = s.source;
   const key = src ? keyOf(src) : null;
   const prevKey = prev.source ? keyOf(prev.source) : null;
   if (session && session.key !== key) endSession();
+  if (playedKey !== null && playedKey !== key) playedKey = null;
+  if (s.status === 'playing' && key && src?.url) playedKey = key;
   syncTick(s);
+  syncSlowStart(s, key);
   if (!src || !key || s.mode === 'external') return;
 
   if (session?.gaveUp && s.status !== 'error') {
@@ -432,6 +509,9 @@ export function bindRecovery(): () => void {
 /** Testing only. */
 export function __resetReconnect(): void {
   endSession();
+  playedKey = null;
+  slowTimer = clear(slowTimer);
+  slowFor = null;
   if (tickTimer) clearInterval(tickTimer);
   tickTimer = null;
   lastPos = -1;

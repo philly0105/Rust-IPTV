@@ -3,7 +3,7 @@
  * hover, `settings.zapBanner`), and what it shows (logo, number, title, now and next with
  * progress), windowed and fullscreen.
  */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
@@ -30,7 +30,7 @@ const store = await import('../store');
 const media = await import('../media');
 const nowNext = await import('../nowNext');
 const zap = await import('../zapBanner');
-const { ZapBanner, airingPair } = await import('./ZapBanner');
+const { ZapBanner, ZapHeaderLine, airingPair } = await import('./ZapBanner');
 const { useZapHover } = await import('./zapHooks');
 const { PlayerSurface } = await import('./PlayerSurface');
 const { usePlayerStore } = store;
@@ -438,5 +438,116 @@ describe('hover holds', () => {
     expect(visible()).toBe(true);
     await advance(ZAP_BANNER_MS * 2);
     expect(visible()).toBe(true);
+  });
+});
+
+describe('in a phone-width player', () => {
+  /** jsdom has no layout: the player (and its bar) as wide as a 390 px phone's screen. */
+  function narrowPlayer(): () => void {
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.parentElement?.hasAttribute('data-player-host') || this.hasAttribute('data-player-controls') ? 390 : 0;
+    });
+    return () => spy.mockRestore();
+  }
+  const mount = (): void => {
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+  };
+  const bar = (): HTMLElement => document.querySelector<HTMLElement>('[data-player-controls]')!;
+  const hidden = (): boolean => bar().className.includes('opacity-0');
+
+  it('shows a one-line chip: number, name and what airs now', async () => {
+    const restore = narrowPlayer();
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      const banner = screen.getByTestId('zap-banner');
+      expect(banner.getAttribute('data-variant')).toBe('chip');
+      expect(screen.getByTestId('zap-number').textContent).toBe('1');
+      expect(screen.getByTestId('zap-title').textContent).toBe('News 24');
+      expect(screen.getByTestId('zap-now').textContent).toBe('Evening News');
+      // A small logo in the line, and no "Next" row: the picture stays visible.
+      const logo = within(banner).queryByTestId('zap-logo') ?? within(banner).getByTestId('zap-logo-fallback');
+      expect(logo.className).toContain('size-6');
+      expect(screen.queryByTestId('zap-next')).toBeNull();
+      expect((screen.getByTestId('zap-progress') as HTMLElement).style.width).toBe('25%');
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps the bar down while the chip is up, unless the bar is reached for or playback pauses', async () => {
+    const restore = narrowPlayer();
+    try {
+      tune(news, { status: 'loading' });
+      mount();
+      await advance(0);
+      // Tuning the new channel: the chip alone.
+      expect(screen.getByTestId('zap-banner')).toBeTruthy();
+      expect(hidden()).toBe(true);
+      act(() => usePlayerStore.setState({ status: 'playing' }));
+      expect(hidden()).toBe(true);
+      const chrome = screen.getByTestId('overlay-chrome');
+      // A move over the picture does not bring the bar over it ...
+      fireEvent.pointerMove(chrome.parentElement!);
+      expect(hidden()).toBe(true);
+      // ... reaching for the bar does, and so does a pause.
+      fireEvent.pointerEnter(chrome);
+      expect(hidden()).toBe(false);
+      fireEvent.pointerLeave(chrome);
+      expect(hidden()).toBe(true);
+      act(() => usePlayerStore.setState({ status: 'paused' }));
+      expect(hidden()).toBe(false);
+      act(() => usePlayerStore.setState({ status: 'playing' }));
+      // The chip goes: the bar answers the pointer again.
+      await advance(ZAP_BANNER_MS);
+      expect(screen.queryByTestId('zap-banner')).toBeNull();
+      fireEvent.pointerMove(chrome.parentElement!);
+      expect(hidden()).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a wide player keeps the full banner and its bar', async () => {
+    tune(news);
+    mount();
+    await advance(0);
+    expect(screen.getByTestId('zap-banner').getAttribute('data-variant')).toBeNull();
+    expect(screen.getByTestId('zap-next')).toBeTruthy();
+    expect(hidden()).toBe(false);
+  });
+});
+
+describe('in the mini player', () => {
+  it('draws no banner over the small picture', async () => {
+    tune(news);
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact channelPanelAvailable={false} />
+      </div>,
+    );
+    await advance(0);
+    expect(visible()).toBe(true);
+    expect(screen.queryByTestId('zap-banner')).toBeNull();
+  });
+
+  it('its header line gains the number and what airs now while the banner is up', async () => {
+    tune(news);
+    render(<ZapHeaderLine title="News 24" />);
+    await advance(0);
+    const line = screen.getByTestId('mini-zap-line');
+    expect(screen.getByTestId('zap-number').textContent).toBe('1');
+    expect(screen.getByTestId('zap-now').textContent).toBe('Evening News');
+    // The name once, as the header already shows it.
+    expect(line.textContent).toBe('1News 24Evening News');
+    await advance(ZAP_BANNER_MS);
+    expect(screen.queryByTestId('zap-number')).toBeNull();
+    expect(screen.queryByTestId('zap-now')).toBeNull();
+    expect(line.textContent).toBe('News 24');
   });
 });

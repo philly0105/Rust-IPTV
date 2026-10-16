@@ -6,7 +6,7 @@ import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 're
 import { create } from 'zustand';
 
 import { rpc } from '@/api/transport';
-import type { ItemRef, PlayerSource, SourceKind } from '@/api/types';
+import type { Channel, ItemRef, PlayerSource, SourceKind } from '@/api/types';
 
 // ---------------------------------------------------------------------------
 // @/ui
@@ -284,6 +284,8 @@ type PlayItemArgs = {
   isLive: boolean;
   isRadio?: boolean;
   sourceKind: SourceKind;
+  categoryId?: string;
+  channel?: Channel;
 };
 
 export async function playItem(args: PlayItemArgs): Promise<void> {

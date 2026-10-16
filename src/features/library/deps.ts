@@ -27,6 +27,8 @@ export { PlayerStage, playItem, playSource, usePlayerStore } from '@/features/pl
 // recording:
 export {
   clockDuration,
+  clockTime,
+  dayLabel,
   elapsedSeconds,
   finishedRecordings,
   groupByDay,

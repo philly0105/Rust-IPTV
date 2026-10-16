@@ -114,8 +114,10 @@ test.describe.serial('m3u flow', () => {
     await gotoLive(page, source.id);
     await blurFocus(page);
     await page.keyboard.press('1');
+    await expect(page.getByTestId('digit-osd')).toContainText('1');
+    // The list tops out at 24, so no digit can extend 12: it tunes at once instead of after the
+    // 1 s pause, and the digit OSD may never show "12" (useDigitEntry digitsComplete).
     await page.keyboard.press('2');
-    await expect(page.getByTestId('digit-osd')).toContainText('12');
     await expect(playerRegion(page).getByRole('heading', { level: 2, name: 'ESPN' })).toBeVisible({ timeout: 8_000 });
     await expectPlaying(page, { advance: 1 });
     expect((await resumeRecord(page))?.source.title).toBe('ESPN');

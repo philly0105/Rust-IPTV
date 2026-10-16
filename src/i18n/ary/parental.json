@@ -126,6 +126,8 @@
   "autoAdultCount_few": "{{count}} مجموعات ديال الكبار حتى هوما مسدودين أوتوماتيكياً.",
   "autoAdultCount_many": "{{count}} مجموعة ديال الكبار حتى هوما مسدودين أوتوماتيكياً.",
   "autoAdultCount_other": "{{count}} مجموعات ديال الكبار حتى هوما مسدودين أوتوماتيكياً.",
+  "autoAdultRule": "مجموعات الكبار المسدودة أوتوماتيكياً",
+  "autoAdultNone": "حتى مجموعة فهاد المصدر ما باينة ديال الكبار.",
   "removeLockNamed": "حيّد القفل من {{name}}",
   "showAllLocks_zero": "بيّن كاع الأقفال ({{count}})",
   "showAllLocks_one": "بيّن القفل",

@@ -10,7 +10,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { rpc } from '@/api/transport';
 import { itemKey, type Channel, type ItemRef } from '@/api/types';
 
-import { peekSettings, usePlayerStore } from './store';
+import { knownChannel, peekSettings, usePlayerStore } from './store';
 
 /** How long the banner stays after a channel change. */
 export const ZAP_BANNER_MS = 5000;
@@ -155,26 +155,47 @@ export interface ZapChannelInfo {
 const infoCache = new Map<string, ZapChannelInfo>();
 const infoPending = new Map<string, Promise<ZapChannelInfo>>();
 
+function infoOf(ch: Partial<Channel>): ZapChannelInfo {
+  const info: ZapChannelInfo = {};
+  if (typeof ch.number === 'number') info.number = ch.number;
+  if (ch.logoUrl) info.logoUrl = ch.logoUrl;
+  if (ch.name) info.name = ch.name;
+  return info;
+}
+
+/**
+ * The cached details, or the row a zap already holds (its neighbour lookup carries number and
+ * logo), so a zap's banner fills in on the press without asking the catalog.
+ */
 export function peekChannelInfo(ref: ItemRef): ZapChannelInfo | undefined {
-  return infoCache.get(itemKey(ref));
+  const key = itemKey(ref);
+  const hit = infoCache.get(key);
+  if (hit) return hit;
+  const row = knownChannel(ref);
+  if (!row) return undefined;
+  const info = infoOf(row);
+  infoCache.set(key, info);
+  return info;
+}
+
+/** A channel edit (rename, new number or logo): its details are asked again next time. */
+export function forgetChannelInfo(ref?: ItemRef): void {
+  if (!ref) {
+    infoCache.clear();
+    return;
+  }
+  infoCache.delete(itemKey(ref));
 }
 
 /** The channel's number and logo from the catalog; an empty record when it cannot say. */
 export function fetchChannelInfo(ref: ItemRef): Promise<ZapChannelInfo> {
   const key = itemKey(ref);
-  const hit = infoCache.get(key);
+  const hit = peekChannelInfo(ref);
   if (hit) return Promise.resolve(hit);
   const inflight = infoPending.get(key);
   if (inflight) return inflight;
   const job = rpc('catalog.item', { ref })
-    .then((item) => {
-      const ch = item as Partial<Channel>;
-      const info: ZapChannelInfo = {};
-      if (typeof ch.number === 'number') info.number = ch.number;
-      if (ch.logoUrl) info.logoUrl = ch.logoUrl;
-      if (ch.name) info.name = ch.name;
-      return info;
-    })
+    .then((item) => infoOf(item as Partial<Channel>))
     .catch((): ZapChannelInfo => ({}))
     .then((info) => {
       infoCache.set(key, info);

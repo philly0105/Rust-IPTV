@@ -55,10 +55,12 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <div className="flex flex-col gap-2">
+            {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
             <h1
               id="vod-detail-title"
               dir="auto"
-              className="text-match-parent font-display text-[clamp(28px,3.4vw,56px)] leading-[1.05] font-semibold tracking-[-0.01em] text-fg"
+              tabIndex={-1}
+              className="text-match-parent outline-none font-display text-[clamp(28px,3.4vw,56px)] leading-[1.05] font-semibold tracking-[-0.01em] text-fg"
             >
               {model.titleBase ?? model.title}
             </h1>

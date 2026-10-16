@@ -8,7 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Settings } from '@/api/types';
 
 import { eagerRoutes, installDomStubs, renderAt, rpcMock, settings } from '../../sources/test/harness';
-import { inspectBackup } from '../lib/backup';
+import { inspectBackup, parentalOptionsDiffer } from '../lib/backup';
 import { applyPatch, diffSettings, playerPathStatus, tmdbPatch } from '../lib/patch';
 
 vi.mock('@/api/transport', async (orig) => ({
@@ -22,6 +22,22 @@ vi.mock('@/api/events', () => ({
   onAnyAppEvent: () => () => undefined,
   onConnectionState: () => () => undefined,
 }));
+// Counts the shell import-toast holds BackupSection takes and releases (the real hold still runs).
+const holds = vi.hoisted(() => ({ taken: 0, released: 0 }));
+vi.mock('@/shell/effects', async (orig) => {
+  const actual = await orig<typeof import('@/shell/effects')>();
+  return {
+    ...actual,
+    holdImportToasts: () => {
+      holds.taken += 1;
+      const release = actual.holdImportToasts();
+      return () => {
+        holds.released += 1;
+        release();
+      };
+    },
+  };
+});
 
 const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRoutes);
 const { useToastStore } = await import('@/ui');
@@ -206,6 +222,114 @@ describe('Replace import while parental controls are locked', () => {
     await waitFor(() => expect(lastToast()?.title).toBe('Backup imported'));
     expect(lastToast()?.description).toBe('Added or updated: 3. Skipped: 1.');
     expect(screen.queryByTestId('backup-import-error')).toBeNull();
+  });
+});
+
+describe('Background merge import (L2-settings-3, L2-settings-6)', () => {
+  const body = JSON.stringify({ kind: 'iptvnator-playlist-backup', version: 1, playlists: [{ portalType: 'm3u' }, { portalType: 'm3u' }] });
+  async function pickAndImport(mode: 'Merge' | 'Replace') {
+    renderAt(settingsRoutes, '/settings/backup');
+    const input = (await screen.findByTestId('backup-file-input')) as HTMLInputElement;
+    const file = Object.assign(new File([body], 'b.json', { type: 'application/json' }), { text: async () => body });
+    fireEvent.change(input, { target: { files: [file] } });
+    await screen.findByTestId('backup-summary');
+    if (mode === 'Replace') fireEvent.click(screen.getByRole('radio', { name: 'Replace' }));
+    fireEvent.click(screen.getByTestId('backup-import'));
+    if (mode === 'Replace') fireEvent.click(await screen.findByTestId('backup-replace-confirm'));
+  }
+
+  beforeEach(() => {
+    holds.taken = 0;
+    holds.released = 0;
+    rpcMock.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+  });
+
+  it('asks the core for a background merge, says which playlists still load, and holds the import toasts meanwhile', async () => {
+    const during: number[] = [];
+    rpcMock.handlers['backup.import'] = () => {
+      during.push(holds.taken - holds.released);
+      return { imported: 2, skipped: 0, warnings: [], refreshing: ['News', 'Films'] };
+    };
+    await pickAndImport('Merge');
+    await waitFor(() => expect(lastToast()?.title).toBe('Backup imported'));
+    expect(rpcMock.callsOf('backup.import')).toEqual([{ json: body, mode: 'merge', background: true }]);
+    expect(lastToast()?.description).toBe(
+      'Added or updated: 2. Skipped: 0. 2 playlists are still loading; their favorites and history appear as each one finishes.',
+    );
+    // One hold, taken before the RPC and released after it.
+    expect(during).toEqual([1]);
+    expect(holds).toEqual({ taken: 1, released: 1 });
+  });
+
+  it('keeps Replace in the foreground and releases the hold when the import fails', async () => {
+    rpcMock.handlers['backup.import'] = () => {
+      throw { code: 'io', message: 'disk full' };
+    };
+    await pickAndImport('Replace');
+    await screen.findByTestId('backup-import-error');
+    expect(rpcMock.callsOf('backup.import')).toEqual([{ json: body, mode: 'replace', background: false }]);
+    expect(holds).toEqual({ taken: 1, released: 1 });
+  });
+});
+
+describe('Merge import while parental controls are locked (L2-settings-8)', () => {
+  const locked = { enabled: true, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 };
+  const withParental = (p: object) =>
+    JSON.stringify({ kind: 'iptvnator-playlist-backup', version: 1, playlists: [{ portalType: 'm3u' }], settings: { tsrustParental: p } });
+
+  it('reads the parental options and compares them with the current ones', () => {
+    const r = inspectBackup(withParental({ mode: 'ask', autoAdult: true, unlockMinutes: 15, pin: 'never' }));
+    expect(r.ok && r.summary.parental).toEqual({ mode: 'ask', autoAdult: true, unlockMinutes: 15 });
+    expect(r.ok && parentalOptionsDiffer(r.summary.parental, locked)).toBe(true);
+    expect(parentalOptionsDiffer({ mode: 'hide', autoAdult: true }, locked)).toBe(false);
+    expect(parentalOptionsDiffer(undefined, locked)).toBe(false);
+  });
+
+  async function pickAndMerge(body: string) {
+    const { ParentalGateHost } = await import('@/features/parental');
+    rpcMock.handlers['parental.status'] = () => locked;
+    rpcMock.handlers['backup.import'] = () => ({ imported: 1, skipped: 0, warnings: [] });
+    rpcMock.handlers['parental.unlock'] = () => ({ ...locked, unlocked: true });
+    renderAt(settingsRoutes, '/settings/backup');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ParentalGateHost />
+      </QueryClientProvider>,
+    );
+    const input = (await screen.findByTestId('backup-file-input')) as HTMLInputElement;
+    const file = Object.assign(new File([body], 'b.json', { type: 'application/json' }), { text: async () => body });
+    fireEvent.change(input, { target: { files: [file] } });
+    await screen.findByTestId('backup-summary');
+    fireEvent.click(screen.getByTestId('backup-import'));
+  }
+
+  it('asks for the PIN first, then imports once with the options applied', async () => {
+    await pickAndMerge(withParental({ mode: 'ask' }));
+    const ask = await screen.findByRole('dialog', { name: 'This backup changes parental controls' });
+    expect(rpcMock.callsOf('backup.import')).toEqual([]);
+    fireEvent.click(within(ask).getByTestId('backup-parental-unlock'));
+
+    const pin = await screen.findByRole('dialog', { name: 'Enter the PIN to import parental options' });
+    fireEvent.change(within(pin).getByLabelText('PIN'), { target: { value: '2580' } });
+    fireEvent.click(within(pin).getByRole('button', { name: 'Import backup' }));
+
+    await waitFor(() => expect(rpcMock.callsOf('backup.import')).toHaveLength(1));
+    expect(rpcMock.callsOf('parental.unlock')).toEqual([{ pin: '2580' }]);
+    await waitFor(() => expect(lastToast()?.title).toBe('Backup imported'));
+  });
+
+  it('can import the rest without the PIN', async () => {
+    await pickAndMerge(withParental({ mode: 'ask' }));
+    const ask = await screen.findByRole('dialog', { name: 'This backup changes parental controls' });
+    fireEvent.click(within(ask).getByTestId('backup-parental-skip'));
+    await waitFor(() => expect(rpcMock.callsOf('backup.import')).toHaveLength(1));
+    expect(rpcMock.callsOf('parental.unlock')).toEqual([]);
+  });
+
+  it('does not ask when the options match the current ones', async () => {
+    await pickAndMerge(withParental({ mode: 'hide', autoAdult: true, unlockMinutes: 15 }));
+    await waitFor(() => expect(rpcMock.callsOf('backup.import')).toHaveLength(1));
+    expect(screen.queryByTestId('backup-parental')).toBeNull();
   });
 });
 

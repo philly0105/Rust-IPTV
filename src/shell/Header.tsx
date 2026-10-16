@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router';
 
 import { IconButton, Kbd, SearchInput, cn } from '@/ui';
 
+import { openSearch } from './focusSearch';
 import { useShellStore } from './store';
 import { useTheme } from './theme';
 
@@ -53,7 +54,15 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
             <p dir="auto" title={header.title} className="truncate font-display text-xl font-semibold" data-testid="page-title">
               {header.title}
             </p>
-            {header.subtitle && <p dir="auto" className="hidden truncate text-sm text-fg-muted md:block">{header.subtitle}</p>}
+            {/*
+              The subtitle only takes the room the title leaves (flex-basis 0), so it truncates
+              first and the title keeps its whole name for as long as it fits.
+            */}
+            {header.subtitle && (
+              <p dir="auto" title={header.subtitle} className="hidden min-w-0 flex-1 basis-0 truncate text-sm text-fg-muted md:block" data-testid="page-subtitle">
+                {header.subtitle}
+              </p>
+            )}
           </>
         ) : (
           <span aria-hidden />
@@ -80,6 +89,7 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
           value={header.search.value}
           onChange={header.search.onChange}
           onSubmit={header.search.onSubmit}
+          onKeyDown={header.search.onKeyDown}
           placeholder={header.search.placeholder}
           data-shell-search=""
           data-tour={narrow ? undefined : 'search'}
@@ -87,7 +97,8 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
       ) : (
         <button
           type="button"
-          onClick={() => navigate('/search')}
+          // Lands in the search field, as Ctrl+F does, so the user can type at once.
+          onClick={() => openSearch(navigate)}
           data-tour={narrow ? undefined : 'search'}
           className={cn(
             'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
@@ -100,7 +111,16 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
         </button>
       )}
 
-      {header?.actions && <div className="flex shrink-0 items-center gap-2">{header.actions}</div>}
+      {/*
+        Page actions give way before the shell's own buttons: on a phone (worst in Arabic) a
+        labelled action used to push the palette and theme buttons off the screen. The wrapper
+        shrinks and clips sideways only; the clip margin keeps the actions' focus rings.
+      */}
+      {header?.actions && (
+        <div data-testid="header-actions" className="flex min-w-0 items-center gap-2 overflow-x-clip [overflow-clip-margin:0.25rem]">
+          {header.actions}
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center gap-1">
         {hasPanel && !panelInline && (

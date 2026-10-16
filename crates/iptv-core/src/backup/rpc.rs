@@ -19,6 +19,9 @@ struct ImportArgs {
     json: String,
     #[serde(default)]
     mode: ImportMode,
+    /// Merge only: return before the catalogs load (L2-settings-3).
+    #[serde(default)]
+    background: bool,
 }
 
 /// Registers `backup.export` and `backup.import`.
@@ -28,7 +31,7 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<ExportResult, RpcError>(v)
     });
     r.add("backup.import", |state, a: ImportArgs| async move {
-        let v = super::import(&state, &a.json, a.mode).await?;
+        let v = super::import_with(&state, &a.json, a.mode, a.background).await?;
         Ok::<ImportReport, RpcError>(v)
     });
 }

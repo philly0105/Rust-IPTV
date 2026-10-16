@@ -79,3 +79,8 @@ export const ScreenshotButton = lazyPart(
   () => import('./ScreenshotButton').then((m) => m.ScreenshotButton),
   (p) => <span aria-hidden className={p.stage ? 'size-9' : 'size-10 shrink-0'} />,
 );
+/** The mini player's header line while the zap banner is up; the plain name until it loads. */
+export const ZapHeaderLine = lazyPart(
+  () => import('./ZapBanner').then((m) => m.ZapHeaderLine),
+  (p) => <span className="min-w-0 truncate">{p.title}</span>,
+);

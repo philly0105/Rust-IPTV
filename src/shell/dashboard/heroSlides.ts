@@ -6,6 +6,7 @@
  */
 
 import { itemKey, type ItemRef, type PlaybackPosition, type SeriesItem, type VodItem } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 
 import { minutesLeft, watchedFraction } from './progress';
 
@@ -39,12 +40,16 @@ export const HERO_MAX_SLIDES = 6;
 export const HERO_DWELL_MS = 8000;
 
 function fromPosition(p: PlaybackPosition): HeroSlide {
+  const raw = p.snapshot?.title;
+  const base = raw ? snapshotTitle(p.ref, raw) : undefined;
   return {
     key: `${itemKey(p.ref)}|${p.episodeId ?? ''}`,
     kind: 'continue',
     ref: p.ref,
     episodeId: p.episodeId,
-    title: p.snapshot?.title,
+    // A snapshot saved before the base title existed still carries the provider's year and tags.
+    title: base?.title,
+    year: base?.year,
     subtitle: p.snapshot?.subtitle,
     posterUrl: p.snapshot?.posterUrl,
     fraction: watchedFraction(p),

@@ -23,6 +23,7 @@ import type { StreamErrorClass } from './errors';
 import { getLivePin } from './livePins';
 import {
   getSettings,
+  isPendingZap,
   knownSourceKind,
   MIN_RESUME_SECONDS,
   peekSettings,
@@ -429,7 +430,8 @@ export function bindLiveFailover(): () => void {
         if (key === undefined || !pinUndone.has(key)) pinUndone.clear();
       }
     }
-    trackAlternates(s.source?.isLive ? ref : undefined);
+    // A zap's placeholder (a channel passed on the way) asks for no copies; the one it tunes does.
+    trackAlternates(s.source?.isLive && !isPendingZap(s.source) ? ref : undefined);
   };
   const unsub = usePlayerStore.subscribe(onChange);
   const s = usePlayerStore.getState();

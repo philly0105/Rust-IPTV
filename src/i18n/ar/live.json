@@ -204,5 +204,11 @@
   "locked": "مقفلة",
   "lockedGuide": "مقفلة. أدخل رمز PIN لترى ما يُعرض.",
   "unlock": "فتح القفل",
-  "ribbonFailed": "تعذّر تحميل دليل هذه القناة"
+  "ribbonFailed": "تعذّر تحميل دليل هذه القناة",
+  "parentalHiddenChannels": "الرقابة الأبوية تخفي قنوات هذا المصدر",
+  "parentalHiddenStations": "الرقابة الأبوية تخفي محطات هذا المصدر",
+  "parentalHiddenHint": "مجموعاته مقفلة. أدخل رمز PIN لإظهارها في هذه الجلسة.",
+  "parentalUnlock": "فتح القفل",
+  "parentalUnlockTitle": "إظهار القنوات المقفلة",
+  "parentalUnlockBody": "أدخل رمز PIN لإظهار المجموعات والقنوات المقفلة حتى تعود الرقابة الأبوية للقفل."
 }

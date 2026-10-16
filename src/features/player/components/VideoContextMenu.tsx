@@ -1,5 +1,6 @@
 import { Camera, ChevronLeft, Copy, Maximize, Minimize, Pause, PictureInPicture2, Play } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { useToast } from '@/ui/Toast';
@@ -18,6 +19,15 @@ import { SyncRows, useSyncSummary } from './SyncMenu';
 const EDGE = 8;
 
 type View = 'root' | 'audio' | 'text' | 'style' | 'sync' | 'sleep';
+
+/**
+ * Where the menu mounts. Inside the player it would stay in the stage's stacking context, under
+ * the page strips that follow it (the guide strip below the video); in the body it paints above
+ * them. In fullscreen and PiP only the layer the player fills is visible, so it goes there.
+ */
+function menuLayer(): Element {
+  return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])') ?? document.body;
+}
 
 function MenuAction({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint?: string; onClick(): void }) {
   return (
@@ -38,8 +48,9 @@ function MenuAction({ icon, label, hint, onClick }: { icon: ReactNode; label: st
 /**
  * The right-click menu of the embedded mpv video, opened at `at` (CSS px in the viewport).
  * The native window paints above the DOM, so the surface cuts this menu out of the video while
- * it is open (it carries `data-mpv-overlay`). Closes on a pick, Escape, a click elsewhere or a
- * resize; `onClose` must be stable (it is an effect dependency).
+ * it is open (it carries `data-mpv-overlay`). Portalled (`menuLayer`) so no page strip paints
+ * over it. Closes on a pick, Escape, a click elsewhere or a resize; `onClose` must be stable
+ * (it is an effect dependency).
  */
 export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }; onClose(): void }) {
   const { t } = useTranslation('player');
@@ -147,7 +158,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   );
   const icon = 'size-4 shrink-0';
 
-  return (
+  // `isFullscreen` and `pipActive` re-render the menu when the layer it belongs in changes.
+  return createPortal(
     <div
       ref={ref}
       role={styleView ? 'dialog' : 'menu'}
@@ -171,7 +183,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur fixed z-50 max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -251,6 +263,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           <SubtitleStyleMenu />
         </>
       )}
-    </div>
+    </div>,
+    menuLayer(),
   );
 }

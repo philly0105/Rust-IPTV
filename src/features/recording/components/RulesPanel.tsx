@@ -14,6 +14,7 @@ import { buttonClass, cn, EmptyState, ErrorState, IconButton, SkeletonList, Togg
 
 import { useRecordingRules, useRuleActions } from '../hooks';
 import { sortRules } from '../lib/rules';
+import { airingLabel } from '../lib/schedule';
 import { RemoveRuleDialog } from './SeriesDialogs';
 
 export function RecordingRulesPanel() {
@@ -74,9 +75,8 @@ function RuleRow({ rule, onRemove }: { rule: RecordingRule; onRemove: () => void
   const [pending, setPending] = useState<boolean | null>(null);
   const enabled = pending ?? rule.enabled;
   const next = rule.nextStart ? Date.parse(rule.nextStart) : NaN;
-  const when = Number.isFinite(next)
-    ? new Intl.DateTimeFormat(i18n.language, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(next)
-    : undefined;
+  // Worded like the Upcoming list below it ("today 02:45 AM"), so the same airing reads the same.
+  const when = Number.isFinite(next) ? airingLabel(next, Date.now(), i18n.language) : undefined;
 
   const toggle = async (on: boolean) => {
     setPending(on);

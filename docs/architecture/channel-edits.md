@@ -27,6 +27,23 @@ All four are registered in `rpc.rs`. A write that changes a row emits `channels.
 
 After each write the touched source's category `item_count` values and `source_counts` are recomputed (`catalog::recount_categories`, `catalog::update_counts`).
 
+## Writes from the UI
+
+`src/features/channeledit/` sends these writes (`actions.ts`) and keeps the query caches in step (`edits.ts`). Rename and hide show at once, before the core answers:
+
+- Rename (`renameInCache`): every cached `catalog.channels` row of the channel and its cached `catalog.item` answer take the new name. A reset does this only when the caller passes the provider name (`providerName`, from `ChannelEdit.originalName`); without it, nothing is patched and the refresh brings the name.
+- Hide (`hideInCache`): the row leaves the cached `catalog.channels` pages, the list's `total` drops by one, and later cached pages of the same list move up one place, so the rows below close the gap. Lists whose cached pages do not hold the channel are left to the refresh. `catalog.item` is not patched, since it still answers for a hidden channel.
+- Unhide (`patchHidden`): the channel leaves the cached hidden list, so its dialog row goes away.
+
+When the core refuses, the saved entries are put back (`restoreCache`, `restoreHidden`) and an error toast says why.
+
+Each write refreshes once (`editRefresh`). The app's event binding in `src/api/query.ts` already invalidates the prefixes a channel edit changes when `channels.changed` arrives (`EDIT_INVALIDATES` is the same list), so:
+
+- While the event connection is open, the write leaves the refresh to its event. If the event has not come within `EDIT_EVENT_WAIT_MS` (400 ms), or the connection has closed by the time the write lands, the write refreshes on its own (`afterEditChange`).
+- With the connection down, the write refreshes at once when it lands.
+
+The listener starts before the RPC, so an event that arrives before the answer still counts. When the core refuses `hideChannel`, `unhideChannel` or `renameChannel`, nothing is refreshed.
+
 ## Hidden channels in readers
 
 | Reader | How |
@@ -65,7 +82,7 @@ Because `items.title` keeps the provider name:
 - EPG resolution (`epg.resolve`, now/next, the guide) matches by the provider name, so renaming a channel does not break its guide data.
 - Sorting by name uses the provider name. A renamed channel keeps its place in a name-sorted list.
 - The FTS index stays on provider names. Search by custom name is a second pass:
-  - `catalog.search` first finds channels whose custom name contains the text (`LIKE`, case-insensitive for ASCII) and lists them first, shortest name first, then the provider-name matches without repeating them. Searching by the old provider name still finds a renamed channel.
+  - `catalog.search` (`search_groups`, one list per group: live and radio, movies, series) ranks the provider-name matches first (FTS word prefix, a substring `LIKE` for a group the prefix match finds nothing for). When a channel in scope is renamed (`has_any_names`), it then finds the channels whose custom name contains the text (`LIKE`, case-insensitive for ASCII, under the same hidden-group, English-only, parental and hidden-channel filters) and puts them at the head of their group's list, shortest custom name first. The provider-name matches follow without repeating them, and the list is cut back to `limit`. Searching by the old provider name still finds a renamed channel.
   - The in-list search of `catalog.channels` adds the rowids whose custom name matches (`named_rowids`) to both the FTS and the `LIKE` strategy.
 
 ## Cost rule and clause shapes

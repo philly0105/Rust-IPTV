@@ -20,7 +20,7 @@ import {
   type SourceDraft,
 } from '../lib/draft';
 import { enabledEpgUrls, refreshGuides, useGuideProgressFeed } from '../lib/epgRefresh';
-import { claimImportErrors, failedSourceId, fieldForError, nextStepKey, summaryKey } from '../lib/errors';
+import { claimImportErrors, duplicateSourceId, failedSourceId, fieldForError, nextStepKey, summaryKey } from '../lib/errors';
 import {
   beginImport,
   cancelImport,
@@ -30,7 +30,7 @@ import {
   useSourceProgress,
   wasCancelled,
 } from '../lib/progress';
-import { scheduleRemoval } from '../lib/pendingRemoval';
+import { flushPendingRemovals, isRemovalPending, scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
 import { useNextFrame } from '../lib/useNextFrame';
 import { checkHttpUrl, displayHost, parseXtreamLink, suggestName } from '../lib/validate';
@@ -228,7 +228,8 @@ export function AddSourceDialog({
     });
   };
 
-  const submit = async () => {
+  /** `afterFlush`: the second try once a pending removal of the duplicated source went through. */
+  const submit = async (afterFlush = false) => {
     const run = runRef.current;
     const live = () => run === runRef.current;
     setSubmitError(null);
@@ -256,7 +257,8 @@ export function AddSourceDialog({
       const guides = enabledEpgUrls(source.epg);
       if (guides.length > 0) void refreshGuides(guides);
       await Promise.all([invalidate('sources.'), invalidate('catalog.'), invalidate('epg.')]);
-      const total = source.channelCount + source.movieCount + source.seriesCount;
+      // Every item the import counted, radio included, so the toast agrees with the progress bar.
+      const total = source.channelCount + (source.radioCount ?? 0) + source.movieCount + source.seriesCount;
       toast({
         variant: 'success',
         title: t('addedTitle', { name: source.name }),
@@ -273,6 +275,18 @@ export function AddSourceDialog({
       if (!live()) {
         // The card shows how the background import ended; the shell toasts a failure no open dialog claims.
         void invalidate('sources.');
+        return;
+      }
+      // The address is already a source: nothing was created, so there is no failed source to keep.
+      const duplicate = duplicateSourceId(err);
+      if (duplicate) {
+        // It is the one the user just removed and can still undo: let the removal finish, then add again.
+        if (!afterFlush && isRemovalPending(duplicate)) {
+          await flushPendingRemovals();
+          if (live()) await submit(true);
+          return;
+        }
+        setSubmitError(err);
         return;
       }
       const createdId = failedSourceId(err);
@@ -351,6 +365,24 @@ export function AddSourceDialog({
   const dismiss = () => {
     if (!submitting && failed) discardFailed(failed);
     onClose();
+  };
+
+  // The source a refused add duplicates: the error offers to open or refresh it instead.
+  const duplicateId = submitError ? duplicateSourceId(submitError) : null;
+  // Leaving the page closes the dialog. Not through onClose: the host clears its `?add` params with a
+  // navigation of its own, which would cancel this one. Replace, so Back does not reopen the dialog.
+  const openDuplicate = (id: string) => {
+    if (failed) discardFailed(failed);
+    navigate(`/s/${id}/live`, { replace: true });
+  };
+  const refreshDuplicate = (id: string) => {
+    // The source card shows the refresh, and the shell toasts how it ends.
+    beginImport(id);
+    void rpc('sources.refresh', { id }).then(
+      () => Promise.all([invalidate('sources.'), invalidate('catalog.')]),
+      () => invalidate('sources.'),
+    );
+    dismiss();
   };
 
   /**
@@ -563,8 +595,17 @@ export function AddSourceDialog({
                 <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
                 <p className="mt-1 break-words font-mono text-xs">{redactText(submitError.message)}</p>
               </details>
-              {/* With a failed source on file the footer button already reads "Try again". */}
-              {failed ? null : (
+              {duplicateId ? (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => openDuplicate(duplicateId)} data-testid="add-source-open-existing">
+                    {t('open')}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => refreshDuplicate(duplicateId)} data-testid="add-source-refresh-existing">
+                    {t('refresh')}
+                  </Button>
+                </div>
+              ) : failed ? null : (
+                /* With a failed source on file the footer button already reads "Try again". */
                 <div className="mt-1 flex flex-wrap gap-2">
                   <Button size="sm" variant="secondary" onClick={() => void submit()} data-testid="add-source-retry">
                     {t('tryAgain')}

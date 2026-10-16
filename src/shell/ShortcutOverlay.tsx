@@ -20,6 +20,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'escape', descKey: 'scEscape', area: 'Global' },
   { combo: 'mod+shift+l', descKey: 'scTheme', area: 'Global' },
   { combo: 'f8', descKey: 'scNotifications', area: 'Global' },
+  { combo: 'f11', descKey: 'scFullscreen', area: 'Global' },
   // Bound by useParentalEvents only while a session unlock is active.
   { combo: 'mod+alt+l', descKey: 'parental:shortcutLockNow', area: 'Parental controls' },
   { combo: 'mod+b', descKey: 'scSidebar', area: 'Live' },
@@ -69,6 +70,9 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'contextmenu', descKey: 'vod:shortcutPosterMenu', area: 'Vod' },
   { combo: 'w', descKey: 'vod:shortcutWatched', area: 'Vod' },
   { combo: 'shift+w', descKey: 'vod:shortcutHideWatched', area: 'Vod' },
+  // The search page (SearchPage.tsx): the header field's onKeyDown and the first result's ArrowUp.
+  { combo: 'arrowdown', descKey: 'scSearchToResults', area: 'Search' },
+  { combo: 'arrowup', descKey: 'scResultsToSearch', area: 'Search' },
   // My List page (MyListPage.tsx), acting on the focused row.
   { combo: 'alt+arrowup', descKey: 'mylist:shortcutMoveUp', area: 'My List' },
   { combo: 'alt+arrowdown', descKey: 'mylist:shortcutMoveDown', area: 'My List' },
@@ -152,6 +156,7 @@ const AREA_ORDER = [
   'Lists',
   'Multi-view',
   'Vod',
+  'Search',
   'My List',
   'Sources',
   'Favorites',
@@ -178,6 +183,7 @@ export const SHORTCUT_AREA_KEYS: Readonly<Record<string, string>> = {
   Lists: 'lists:title',
   'Multi-view': 'multiview:shortcutArea',
   Vod: 'shell:areaVod',
+  Search: 'shell:navSearch',
   'My List': 'mylist:title',
   Sources: 'sources:title',
   Favorites: 'library:favoritesTitle',
@@ -248,9 +254,19 @@ export function shortcutHaystack(s: ShortcutInfo): string {
   return `${s.description} ${s.combo} ${comboKeys(s.combo).join(' ')}`.toLowerCase();
 }
 
+/**
+ * The `?` overlay. While closed it reads only `helpOpen`: the registry subscription and the
+ * reference build live in the open dialog, so registrations (a page mounting, a shortcut whose
+ * `enabled` follows a held key) cost the closed overlay nothing (L2-perf-ui-8, L2-live-12).
+ */
 export function ShortcutOverlay() {
-  const { t } = useTranslation('shell');
   const open = useShellStore((s) => s.helpOpen);
+  return open ? <OpenShortcutOverlay /> : null;
+}
+
+/** Mounted only while open, so the filter starts empty each time. */
+function OpenShortcutOverlay() {
+  const { t } = useTranslation('shell');
   const setOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useShortcutList();
   const [filter, setFilter] = useState('');
@@ -265,11 +281,8 @@ export function ShortcutOverlay() {
 
   return (
     <Dialog
-      open={open}
-      onClose={() => {
-        setOpen(false);
-        setFilter('');
-      }}
+      open
+      onClose={() => setOpen(false)}
       title={t('keyboardShortcuts')}
       description={t('shortcutsIntro')}
       size="lg"

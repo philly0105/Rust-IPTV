@@ -13,9 +13,11 @@ import { useLocation, useNavigate } from 'react-router';
 import { onAppEvent, onConnectionState } from '@/api/events';
 import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
-import type { ImportProgressEvent, Settings, Source, WindowState } from '@/api/types';
+import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } from '@/api/types';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { applyLanguage, languageUnresolved } from '@/i18n';
+// Not sources/lib/files or format: those whole modules would land in the entry chunk.
+import { formatCount, formatFileSize } from '@/lib/numbers';
 import { dismissToast, toast } from '@/ui';
 
 import { bindRailEmptySync } from './dashboard/railEmpty';
@@ -36,7 +38,8 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
     'stats.',
   ],
   'epg.changed': ['epg.'],
-  'downloads.update': ['downloads.', 'myvideos.'],
+  // No downloads.update entry: the api default refetches only downloads.list and myvideos.;
+  // a 'downloads.' prefix here refetched downloads.dir on every progress burst too.
   // account: a new subscription check.
   'account.changed': ['account.'],
 };
@@ -146,10 +149,57 @@ export function importToastPolicy(phase: ImportProgressEvent['phase'], onSources
   return onSourcesRoute ? 'dismiss' : 'toast';
 }
 
-/** The cached name of a source; undefined when unknown or blank (a just-added source is not cached yet). */
-function sourceName(sourceId: string): string | undefined {
-  const name = queryClient.getQueryData<Source[]>(rpcKey('sources.list'))?.find((s) => s.id === sourceId)?.name;
-  return name?.trim() || undefined;
+/** A source from the cached list; undefined when not cached yet (a just-added source). */
+function cachedSource(sourceId: string): Source | undefined {
+  return queryClient.getQueryData<Source[]>(rpcKey('sources.list'))?.find((s) => s.id === sourceId);
+}
+
+/** How long the shell keeps import toasts back after a hold ends: the last events can trail the RPC's reply. */
+export const IMPORT_TOAST_HOLD_GRACE_MS = 1000;
+
+let importToastHolds = 0;
+
+/**
+ * Holds back the shell's per-source import toasts (progress, ready, failed,
+ * cancelled) while a surface reports the whole run itself. Settings > Backup
+ * holds them for a backup import: the core imports each restored source
+ * inside `backup.import`, and the section's result card and toast already
+ * cover them, so a toast per source would only stack over its controls
+ * (with names the cached list has not caught up with yet). Returns the
+ * release; it takes effect {@link IMPORT_TOAST_HOLD_GRACE_MS} later, since
+ * events travel apart from the RPC reply and the last ones can trail it.
+ */
+export function holdImportToasts(): () => void {
+  importToastHolds += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    setTimeout(() => {
+      importToastHolds -= 1;
+    }, IMPORT_TOAST_HOLD_GRACE_MS);
+  };
+}
+
+/**
+ * The progress line of a shell import toast, worded as the Sources page's
+ * ImportProgressView counts: an M3U download reports bytes while it fetches,
+ * shown as a size; every other count is grouped in the user's number format.
+ * A source not cached yet counts as M3U when it fetches without a message
+ * (Xtream and Stalker always name what they load).
+ */
+export function importProgressText(
+  p: ImportProgressEvent,
+  kind: SourceKind | undefined,
+  phaseLabel: string,
+  lang: string,
+  t: (key: string, opts: Record<string, string>) => string,
+): string {
+  const bytes = p.phase === 'fetching' && (kind === 'm3u' || (kind === undefined && !p.message));
+  const fmt = (n: number) => (bytes ? formatFileSize(n, lang) : formatCount(n, lang));
+  if (p.total && p.total > 0) return t('importProgressOf', { phase: phaseLabel, done: fmt(p.done), total: fmt(p.total) });
+  if (p.done > 0) return t('importProgressCount', { phase: phaseLabel, done: fmt(p.done) });
+  return phaseLabel;
 }
 
 /**
@@ -190,7 +240,9 @@ export function bindTmdbCacheSync(client: QueryClient): () => void {
 
 /** Wires app events to the query cache, toasts, and navigation. Mount once. */
 export function useShellEvents(): void {
-  const { t } = useTranslation('shell');
+  const { t, i18n } = useTranslation('shell');
+  const langRef = useRef(i18n.language);
+  langRef.current = i18n.language;
   const navigate = useNavigate();
   const navRef = useRef(navigate);
   navRef.current = navigate;
@@ -249,12 +301,14 @@ export function useShellEvents(): void {
         const onSources = isSourcesRoute(pathRef.current);
         // A finished import's catalog and source queries are invalidated by bindEventInvalidation
         // (DEFAULT_EVENT_INVALIDATION in api/query.ts); doing it here too refetched them twice.
-        if (importToastPolicy(p.phase, onSources) === 'dismiss') {
+        // A backup import reports its sources itself (holdImportToasts).
+        if (importToastHolds > 0 || importToastPolicy(p.phase, onSources) === 'dismiss') {
           dismissToast(id);
-          if (p.phase === 'cancelled') void invalidate('sources.');
+          if (p.phase === 'cancelled' || p.phase === 'error') void invalidate('sources.');
           return;
         }
-        const name = sourceName(p.sourceId) ?? tr('thisSource');
+        const source = cachedSource(p.sourceId);
+        const name = source?.name.trim() || tr('thisSource');
         if (p.phase === 'done') {
           toast({
             id,
@@ -294,12 +348,7 @@ export function useShellEvents(): void {
           id,
           variant: 'info',
           title: tr('importing', { name }),
-          description:
-            p.total && p.total > 0
-              ? tr('importProgressOf', { phase: phaseLabel, done: p.done, total: p.total })
-              : p.done > 0
-                ? tr('importProgressCount', { phase: phaseLabel, done: p.done })
-                : phaseLabel,
+          description: importProgressText(p, source?.kind, phaseLabel, langRef.current, tr),
           progress: p.total && p.total > 0 ? { value: p.done, max: p.total } : {},
         });
       }),
@@ -407,7 +456,19 @@ export function isRestorableRoute(path: string): boolean {
   return path.startsWith('/');
 }
 
-/** Persists the current route as settings.lastRoute (debounced). */
+/** The pathname of a stored route (its query dropped). */
+function routePathname(route: string | undefined): string | undefined {
+  return route?.replace(/[?#].*$/, '');
+}
+
+/**
+ * Persists the current route, query included, as settings.lastRoute.
+ *
+ * A new screen (pathname) is saved after a debounce. A query-only change on
+ * the same screen (typing a search's ?q=, a filter) is not timed at all: each
+ * write costs a settings.update and a core settings rebuild, so it waits for
+ * the window to hide or close (a move to another screen saves that one instead).
+ */
 export function useLastRoutePersistence(enabled: boolean, initial: string | undefined): void {
   const location = useLocation();
   const saved = useRef<string | undefined>(initial);
@@ -418,6 +479,7 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
     if (!enabled) return;
     const path = `${location.pathname}${location.search}`;
     if (!isRestorableRoute(path) || path === saved.current) return;
+    const sameScreen = routePathname(saved.current) === location.pathname;
     let pending = true;
     const save = () => {
       if (!pending) return;
@@ -429,9 +491,9 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
           saved.current = undefined; // retry on the next navigation
         });
     };
-    const timer = setTimeout(save, LAST_ROUTE_DEBOUNCE_MS);
-    // Closing or hiding the window inside the debounce would lose the last
-    // screen; save it right away instead.
+    const timer = sameScreen ? undefined : setTimeout(save, LAST_ROUTE_DEBOUNCE_MS);
+    // Closing or hiding the window inside the debounce (or after a query-only
+    // change) would lose the last screen; save it right away instead.
     const flush = () => {
       if (document.visibilityState === 'hidden') save();
     };

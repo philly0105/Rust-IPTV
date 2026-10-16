@@ -60,12 +60,16 @@ The stage height bounds the grid (`[container-type:size]`), so tiles never push 
 
 Each tile is a `Tile` component with its own playback hook, `useTilePlayback`. A tile resolves its source through `stream.ts`, which wraps the player's `resolveSource`. The tile then creates its own engine through `engine.ts`, a re-export of the player's hls.js / shaka / mpegts.js / native engines, attached to its own element. Nothing is shared between tiles, so one failure stays in its tile.
 
+A tile's first start waits `slot × TILE_START_STAGGER_MS` (32 ms), so tiles that start together (the wall opening, a parental check answering) start in slot order, 32 ms apart. Each engine's parse and media attach then gets its own frames instead of all of them landing in one long task. The first slot starts at once, and so do later rebuilds of a tile (Retry, replace).
+
 | Phase | Shown | Notes |
 | --- | --- | --- |
 | `resolving` / `loading` | "Tuning" with the channel mark | |
 | `playing` | The video, with a "Buffering" pill while it waits for data | |
 | `error` | A panel with the class headline, one line of next step, Retry and Replace | The tile fails on a lookup error, an engine or element error, no frame within 25 s (`START_TIMEOUT_MS`), or waiting for data for 30 s (`STALL_TIMEOUT_MS`). Retry rebuilds only this tile. Offline, network and timeout errors also retry by themselves when the browser comes back online. |
 | `locked` | A lock panel instead of playback; no stream is requested | See Parental controls. |
+
+A stream the server refuses fails at once with the reason. The media element hides the HTTP status and reports a refusal (a 503, a 404) as a network or unsupported error, so on those two errors the tile asks the app's own server why (`fetchFailureReason`, one GET). An answer with a reason fails the tile with it. Only a 2xx answer, or one with no reason to read, still gets the single retry through mpegts.js that an extensionless stream the element cannot play is given. A tile on mpegts.js fails at once on an HTTP status too, since the player's mpegts.js engine no longer restarts on one ([failover.md](failover.md#starting-a-stream)).
 
 The player's `classifyStreamError` classifies failures. The copy is the wall's own (`errors.ts`). When an account has more tiles than connections, failures of classes `auth`, `server`, `network`, `timeout`, `generic` and `notFound` on that account's tiles read as "Connection limit reached".
 
@@ -91,18 +95,18 @@ Chrome follows the broadcast multiviewer pattern:
 | Empty | Loading | A skeleton. |
 | Empty | Load failed | `ErrorState` with retry. |
 | Empty | None | `EmptyState` linking to `/sources`. |
-| Empty | Present | An intro with a layout choice, "Pick channels", and quick picks from recent and favorite live channels. |
+| Empty | Present | An intro with a layout choice, "Pick channels", and up to six quick picks (`QUICK_PICKS`) from recent and favorite live channels. While Recent and Favorites load, a one-row skeleton holds their place. |
 | Has tiles | | The toolbar (layouts, add, mute, volume, full screen, clear), banners and the wall. |
 
 Behaviour:
 
 - Banners:
-  - Connection limit, per source. The page reads `account.status` for every Xtream source on the wall. A source with `maxConnections > 0` and more tiles than that gets a dismissable warning naming the source, its limit and its tile count. The dismissal lasts until the count changes.
+  - Connection limit, per source. The page reads `account.status` for every Xtream source with a tile on the wall, without waiting for the tiles' parental checks. Putting a channel on the wall (`addToWall`, `replaceOnWall`) also asks its Xtream account ahead (`prefetchAccountStatus` in `accountStatus.ts`, sharing the page's query), so the wall opens with the banner in place instead of the banner pushing the tiles down when the answer comes. A source with `maxConnections > 0` and more tiles than that gets a dismissable warning naming the source, its limit and its tile count. The dismissal lasts until the count changes.
   - Main player. Opening `/multiview` stops the in-app main player, whether or not the wall has tiles yet, and so does putting the first tile on an empty wall. External mpv or VLC is left alone. During the first 5 s a restored session that starts playing is stopped too. After that, playback the user starts on purpose keeps playing: on a wall with tiles, the wall goes quiet and a banner offers to stop the main player.
 - Missing source: a tile whose source was removed shows "Source removed" with Replace and Close.
-- Full screen covers the whole stage through the Fullscreen API. On the desktop the shell mirrors the window. In full screen the toolbar and banners float over the wall and hide after 2.5 s without pointer or key activity. Dialogs portal to `body`, so they cannot show inside the full-screen element. The picker and the PIN prompt therefore leave full screen first.
+- Full screen covers the whole stage through the Fullscreen API. On the desktop the shell mirrors the window. In full screen the toolbar and banners float over the wall and hide after 2.5 s without pointer or key activity. Toasts, dialogs and menus portal into the full-screen element while one is set (`src/ui/portal.ts`), so the Undo toast shows over the wall in full screen. The picker and the PIN prompt still leave full screen first (`openPicker` and `unlock` in `MultiviewPage`).
 - Picker: `ChannelPicker` is a dialog. Choose a source and browse its live channels, or search across sources with `catalog.search`. Rows already on the wall show their slot. In add mode it stays open for several picks, and it warns when the wall is full or a source is already at its connection limit. Under "All sources" the warning names every source at its limit, and the rows of those sources carry a warning mark ("Connection limit reached", also in the row's accessible name). In replace mode it puts the pick on one tile; picking from the replaced tile's own source adds no connection, so that source is not warned about.
-- Empty intro: below a 42rem intro width the layout buttons show only their glyphs (named for screen readers and in a tooltip), as in the toolbar; wider, the names show on one line each and the group wraps instead of overflowing.
+- Empty intro: below a 42rem intro width the layout buttons show only their glyphs (named for screen readers and in a tooltip), as in the toolbar; wider, the names show on one line each and the group wraps instead of overflowing. Until both Recent and Favorites have answered, the quick picks show a skeleton (`QuickPicksSkeleton`, `aria-hidden`, one pulse): the title line and one row of chip-height placeholders. The picks are always one row at that height: narrow, the row scrolls sideways; wider, the chips shorten their names instead of wrapping. With nothing recent or favorite, the skeleton goes and no row is left.
 - Focus after "Add to multi-view": the menu item navigates with the new tile's key in the route state, and the page focuses that tile's main button, so a keyboard user lands on the tile they added.
 - Undo: closing a tile or clearing the wall shows a toast with Undo.
 - Screen readers: layout changes, sound moves, swaps and closes are announced in a polite live region.
@@ -158,8 +162,10 @@ All copy is in the `multiview` namespace, in all 19 locales. The shared Close, C
   - one tile with sound, clicks and number keys;
   - failure isolation, where one failing tile leaves the other engines untouched and Retry rebuilds only it;
   - keyboard focus, close, replace and swap;
-  - parental locks, the connection-limit banner, and the empty, loading and no-source states;
+  - parental locks, the connection-limit banner (with `account.status` read when a channel is added), and the empty, loading and no-source states;
+  - staggered tile starts and the quick-picks skeleton;
   - the picker add flow.
+- `tilePlayback.test.tsx` covers a server-refused stream failing at once with its reason, the mpegts.js retry after a 2xx answer, and the start delay (none for the first slot, none for a retry).
 - `addChannel.test.tsx` covers the gate, duplicates and a full wall after the gate, replace, and `useMultiviewMenuItem`: disabled states, navigation, toasts and a cancelled PIN.
 - `e2e/multiview.spec.ts` (check 4) seeds the wall in localStorage against the mock portal and checks:
   - four tiles all advance `currentTime` and exactly one video is unmuted, after a click and after a number key;

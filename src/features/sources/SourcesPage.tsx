@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CircleStop, ListFilter, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
@@ -64,12 +64,18 @@ function SourcesSkeleton() {
   );
 }
 
+/** An in-app path to return to (`/`, `/s/x/live`), never another origin (`//host`, `https://...`). */
+function safeReturnPath(from: string | null): string | null {
+  return from && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/\\') ? from : null;
+}
+
 export function SourcesPage() {
   const { t, i18n } = useTranslation('sources');
   const { setHeader } = useShell();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   useImportProgressFeed();
   useGuideProgressFeed();
 
@@ -148,10 +154,24 @@ export function SourcesPage() {
       setEditing(target);
     }
   }, [accountParam, query.data, params, setParams]);
+  // `&from=<path>`: the page that sent the user here to add a source (Home's first-run welcome).
+  // After a successful add they go back there, to the content they came for.
+  const returnTo = safeReturnPath(params.get('from'));
+  const addedRef = useRef(false);
   const closeAdd = () => {
+    if (addedRef.current && returnTo) {
+      addedRef.current = false;
+      // The sender pushed this page: going back keeps history free of a second copy of it.
+      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+      if (idx > 0) navigate(-1);
+      else navigate(returnTo, { replace: true });
+      return;
+    }
+    addedRef.current = false;
     const next = new URLSearchParams(params);
     next.delete('add');
     next.delete('kind');
+    next.delete('from');
     setParams(next, { replace: true });
   };
 
@@ -460,9 +480,16 @@ export function SourcesPage() {
     body = (
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('viewControls')} data-testid="sources-view">
-            <ListFilter aria-hidden className="size-4 text-fg-subtle" />
+          {/* Phones: sort spans the row and the two filters share the next one at equal widths. */}
+          <div
+            className="grid w-full grid-cols-2 gap-2 @md:flex @md:w-auto @md:flex-wrap @md:items-center"
+            role="group"
+            aria-label={t('viewControls')}
+            data-testid="sources-view"
+          >
+            <ListFilter aria-hidden className="size-4 text-fg-subtle @max-md:hidden" />
             <Select
+              wrapperClassName="min-w-0 @max-md:col-span-2"
               aria-label={t('sortLabel')}
               value={view.sort}
               options={sortOptions}
@@ -470,6 +497,7 @@ export function SourcesPage() {
               data-testid="sources-sort"
             />
             <Select
+              wrapperClassName="min-w-0"
               aria-label={t('filterKindLabel')}
               value={view.kind}
               options={kindOptions}
@@ -477,6 +505,7 @@ export function SourcesPage() {
               data-testid="sources-filter-kind"
             />
             <Select
+              wrapperClassName="min-w-0"
               aria-label={t('filterStatusLabel')}
               value={view.status}
               options={statusOptions}
@@ -484,9 +513,11 @@ export function SourcesPage() {
               data-testid="sources-filter-status"
             />
           </div>
-          <div className="flex flex-wrap gap-2">
+          {/* Add and its More menu stay together; on phones the buttons fill their row. */}
+          <div className="flex w-full flex-wrap gap-2 @md:w-auto">
             <Button
               variant="secondary"
+              className="@max-md:flex-1"
               icon={<RefreshCw aria-hidden className="size-4" />}
               loading={refreshingAll}
               disabled={refreshable.length === 0}
@@ -498,6 +529,7 @@ export function SourcesPage() {
             {refreshingAll ? (
               <Button
                 variant="ghost"
+                className="@max-md:flex-1"
                 icon={<CircleStop aria-hidden className="size-4" />}
                 disabled={stoppingAll}
                 onClick={stopRefreshAll}
@@ -506,21 +538,23 @@ export function SourcesPage() {
                 {stoppingAll ? t('refreshAllStopping') : t('refreshAllStop')}
               </Button>
             ) : null}
-            <Button variant="primary" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
-              {t('addSource')}
-            </Button>
-            <Menu
-              label={t('moreActions')}
-              items={[
-                {
-                  id: 'remove-all',
-                  label: t('removeAllMenu'),
-                  icon: <Trash2 aria-hidden className="size-4" />,
-                  danger: true,
-                  onSelect: openRemoveAll,
-                },
-              ]}
-            />
+            <div className="flex gap-2 @max-md:flex-1">
+              <Button variant="primary" className="@max-md:flex-1" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
+                {t('addSource')}
+              </Button>
+              <Menu
+                label={t('moreActions')}
+                items={[
+                  {
+                    id: 'remove-all',
+                    label: t('removeAllMenu'),
+                    icon: <Trash2 aria-hidden className="size-4" />,
+                    danger: true,
+                    onSelect: openRemoveAll,
+                  },
+                ]}
+              />
+            </div>
           </div>
         </div>
         <p className="text-sm text-fg-muted" data-testid="sources-view-hint">
@@ -600,7 +634,14 @@ export function SourcesPage() {
       </p>
       {body}
 
-      <AddSourceDialog open={addInitial !== undefined} initial={addInitial} onClose={closeAdd} />
+      <AddSourceDialog
+        open={addInitial !== undefined}
+        initial={addInitial}
+        onClose={closeAdd}
+        onAdded={() => {
+          addedRef.current = true;
+        }}
+      />
 
       <EditSourceDialog source={editing} initialTab={editTab} onClose={() => setEditing(null)} onRefresh={(s) => void refreshOne(s)} />
 

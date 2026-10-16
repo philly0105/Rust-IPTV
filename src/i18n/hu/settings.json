@@ -238,7 +238,7 @@
   "backupNoSecrets": "Ez a biztonsági mentés nem tartalmaz jelszavakat. Az Xtream- és Stalker-forrásoknál újra meg kell adni őket.",
   "backupMode": "Importálási mód",
   "backupMerge": "Egyesítés",
-  "backupMergeHint": "Hozzáadja a fájlban lévő forrásokat, és megtartja a meglévőket.",
+  "backupMergeHint": "Hozzáadja a fájlban lévő forrásokat. A meglévő források megtartják a nevüket és a beállításaikat.",
   "backupReplace": "Csere",
   "backupReplaceHint": "Előbb importálja a biztonsági mentést, és csak akkor távolítja el a jelenlegi forrásokat, ha valamelyik forrása betöltődik.",
   "backupImportButton": "Biztonsági mentés importálása",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "Csere",
   "backupImportFailed": "Nem sikerült importálni a biztonsági mentést",
   "backupResult": "Hozzáadva vagy frissítve: {{imported}}. Kihagyva: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} lejátszási lista még töltődik; a kedvencei és az előzményei a betöltés végén jelennek meg.",
+  "backupRefreshing_other": "{{count, number}} lejátszási lista még töltődik; mindegyik kedvencei és előzményei a saját betöltésük végén jelennek meg.",
   "backupWarnings_one": "{{count}} figyelmeztetés",
   "backupWarnings_other": "{{count}} figyelmeztetés",
   "backupNotJson": "Ez a fájl nem érvényes JSON.",
@@ -352,10 +354,10 @@
   "railsOffHint": "Kapcsold be az irányítópultot a sorok használatához.",
 
   "resetGroup": "Visszaállítás",
-  "resetHint": "Minden beállítást alapértékre állít. A források, kedvencek, előzmények és letöltések maradnak.",
+  "resetHint": "Minden beállítást alapértékre állít. A források, kedvencek, előzmények és letöltések maradnak. A műsorújság-címek és a TMDB-kulcs is megmaradnak.",
   "resetButton": "Beállítások visszaállítása",
   "resetConfirmTitle": "Visszaállítod az összes beállítást?",
-  "resetConfirmBody": "Minden beállítás alapértékre áll, a nyelv, a téma és a lejátszók útvonala is. A források, kedvencek, előzmények és letöltések maradnak.",
+  "resetConfirmBody": "Minden beállítás alapértékre áll, a nyelv, a téma és a lejátszók útvonala is. A források, kedvencek, előzmények és letöltések maradnak. A műsorújság-címek és a TMDB-kulcs is megmaradnak.",
   "resetConfirm": "Visszaállítás",
   "resetDone": "Beállítások alapértékre állítva",
   "resetFailed": "Nem sikerült visszaállítani a beállításokat",
@@ -443,5 +445,10 @@
   "backupOldVersion": "Ez a biztonsági mentés régebbi formátumú, ezért nem olvasható. Exportálj új mentést, és azt importáld.",
   "backupImportDone": "Biztonsági mentés importálva",
   "backupReplacePinTitle": "Add meg a PIN-kódot a források cseréjéhez",
-  "backupReplacePinText": "A csere eltávolítja a jelenlegi forrásokat és a szülői zárolásaikat, ezért szükség van a szülői PIN-kódra."
+  "backupReplacePinText": "A csere eltávolítja a jelenlegi forrásokat és a szülői zárolásaikat, ezért szükség van a szülői PIN-kódra.",
+  "backupParentalTitle": "Ez a mentés módosítja a szülői felügyeletet",
+  "backupParentalBody": "A szülői felügyelet zárolva van, ezért a mentésben lévő beállításaihoz PIN-kód kell. Add meg az összes adat importálásához, vagy importáld a többit, és tartsd meg a jelenlegi beállításokat.",
+  "backupParentalSkip": "Importálás nélkülük",
+  "backupParentalUnlock": "PIN megadása és importálás",
+  "backupParentalPinTitle": "Add meg a PIN-kódot a szülői felügyelet beállításainak importálásához"
 }

@@ -123,6 +123,35 @@ export function groupByDay<T extends { at: number }>(entries: readonly T[]): { d
   return groups;
 }
 
+/** Local midnight of the day `at` falls on. */
+function startOfDay(at: number): number {
+  const d = new Date(at);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** Clock time as the Scheduled list shows it ("02:45 AM"). */
+export function clockTime(at: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(at);
+}
+
+/** Day heading of the Scheduled list: "today", "tomorrow" (the locale's words), else "Friday, October 16". */
+export function dayLabel(day: number, now: number, lang: string): string {
+  const diff = Math.round((startOfDay(day) - startOfDay(now)) / 86_400_000);
+  if (diff === 0 || diff === 1) return new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }).format(diff, 'day');
+  return new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long' }).format(day);
+}
+
+/**
+ * When an airing starts, in the Scheduled list's words, for places that show it
+ * on one line (a series rule's next airing): "today 02:45 AM", "tomorrow
+ * 09:00 PM", else "Saturday, October 17 at 02:45 AM".
+ */
+export function airingLabel(at: number, now: number, lang: string): string {
+  const diff = Math.round((startOfDay(at) - startOfDay(now)) / 86_400_000);
+  if (diff === 0 || diff === 1) return `${dayLabel(at, now, lang)} ${clockTime(at, lang)}`;
+  return new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(at);
+}
+
 /** Seconds a running recording has been writing. */
 export function elapsedSeconds(r: Pick<Recording, 'startedAt'>, now: number, reported?: number): number {
   if (reported !== undefined) return Math.max(0, reported);

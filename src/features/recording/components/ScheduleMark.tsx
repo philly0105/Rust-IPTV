@@ -4,18 +4,39 @@
  */
 
 import { Bell, Repeat } from 'lucide-react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { EpgProgram, ItemRef } from '@/api/types';
+import type { EpgProgram, ItemRef, Recording, Reminder } from '@/api/types';
 
 import { useScheduleIndex } from '../hooks';
-import { markFor } from '../lib/schedule';
+import { markFor, type ScheduleIndex } from '../lib/schedule';
 
 export function ScheduleMark({ channelRef, program }: { channelRef: ItemRef | undefined; program: Pick<EpgProgram, 'start'> }) {
+  return <ScheduleMarkView index={useScheduleIndex()} channelRef={channelRef} program={program} />;
+}
+
+/**
+ * The markers for an index the caller holds (L2-perf-ui-1): a guide cell subscribes to nothing,
+ * and only a programme that has a mark pays for the labels.
+ */
+export const ScheduleMarkView = memo(function ScheduleMarkView({
+  index,
+  channelRef,
+  program,
+}: {
+  index: ScheduleIndex;
+  channelRef: ItemRef | undefined;
+  program: Pick<EpgProgram, 'start'>;
+}) {
+  const { reminder, recording } = markFor(index, channelRef, program);
+  if (!reminder && !recording) return null;
+  return <Marks reminder={reminder} recording={recording} />;
+});
+
+function Marks({ reminder, recording }: { reminder: Reminder | undefined; recording: Recording | undefined }) {
   const { t } = useTranslation('live');
   const { t: tg } = useTranslation('guide');
-  const { reminder, recording } = markFor(useScheduleIndex(), channelRef, program);
-  if (!reminder && !recording) return null;
   return (
     <>
       {reminder ? (

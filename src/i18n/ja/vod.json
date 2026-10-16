@@ -204,5 +204,8 @@
   "categoryMissingTitle": "カテゴリが見つかりません",
   "categoryMissingBody": "このソースにはそのリンクのカテゴリがありません。プロバイダーが名前を変えたか削除した可能性があります。",
   "namedMarkedWatched": "{{name}}を視聴済みにしました",
-  "namedMarkedUnwatched": "{{name}}を未視聴にしました"
+  "namedMarkedUnwatched": "{{name}}を未視聴にしました",
+  "filters": "フィルター",
+  "filtersActive": "有効なフィルター: {{n}}",
+  "locked": "ロック中"
 }

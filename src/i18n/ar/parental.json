@@ -126,6 +126,8 @@
   "autoAdultCount_few": "{{count}} مجموعات للبالغين مقفلة تلقائيًا أيضًا.",
   "autoAdultCount_many": "{{count}} مجموعة للبالغين مقفلة تلقائيًا أيضًا.",
   "autoAdultCount_other": "{{count}} مجموعة للبالغين مقفلة تلقائيًا أيضًا.",
+  "autoAdultRule": "مجموعات البالغين المقفلة تلقائيًا",
+  "autoAdultNone": "لا تبدو أي مجموعة في هذا المصدر مخصصة للبالغين.",
   "removeLockNamed": "إزالة القفل عن {{name}}",
   "showAllLocks_zero": "عرض كل الأقفال ({{count}})",
   "showAllLocks_one": "عرض القفل",

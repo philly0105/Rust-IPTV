@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { UNSAFE_LocationContext } from 'react-router';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 import { useRowHeight } from '@/ui';
@@ -16,6 +17,8 @@ export interface ChannelListProps {
   /** Changes whenever the list identity changes (category, search); scrolls back to the top. */
   resetKey: string;
   playingRef?: ItemRef;
+  /** The playing channel's number: finds its row when it is outside the loaded pages. */
+  playingNumber?: number;
   openOnDoubleClick: boolean;
   now: number;
   compact?: boolean;
@@ -62,7 +65,9 @@ export function resetChannelListMemory(): void {
 
 export function ChannelList(props: ChannelListProps) {
   const { t } = useTranslation('live');
-  const { paged, resetKey, playingRef, now } = props;
+  const { paged, resetKey, playingRef, playingNumber, now } = props;
+  // Outside a router (tests) there is no navigation type: treat it as a push.
+  const navigationType = useContext(UNSAFE_LocationContext)?.navigationType;
   const scrollRef = useRef<HTMLDivElement>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -104,7 +109,7 @@ export function ChannelList(props: ChannelListProps) {
     count,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
-    overscan: 8,
+    overscan: 10,
     initialRect: { width: 360, height: props.initialHeight ?? 800 },
     // First paint already shows the remembered rows: no flash of the top of the list.
     initialOffset: () => listMemory.get(resetKey)?.scrollTop ?? 0,
@@ -135,13 +140,20 @@ export function ChannelList(props: ChannelListProps) {
       if (saved && scrollRef.current) scrollRef.current.scrollTop = saved.scrollTop;
       // Back to a list you left (Back, a round trip through another page): keyboard focus returns to
       // the row you were on, unless something else already holds it. The list holds it until the row renders.
+      // On Back, the shell's navigation (a sidebar link that opened the other page) does not count
+      // as holding it: that link survives the route change but is not where the user was.
       const focused = document.activeElement;
-      if (saved && scrollRef.current && (focused === null || focused === document.body)) {
+      const main = scrollRef.current?.closest('main');
+      const free = focused === null || focused === document.body || (!!main && focused === main);
+      const inShell = !!main && !!focused && !main.contains(focused);
+      if (saved && scrollRef.current && (free || (inShell && navigationType === 'POP'))) {
         scrollRef.current.focus({ preventScroll: true });
         focusPending.current = saved.active;
       }
       return;
     }
+    // The old list's pending scroll read lands under the old list, before the new offset is set.
+    flushScroll();
     setActive(saved?.active ?? 0);
     if (scrollRef.current) scrollRef.current.scrollTop = saved?.scrollTop ?? 0;
     virtualizer.scrollToOffset(saved?.scrollTop ?? 0);
@@ -151,8 +163,24 @@ export function ChannelList(props: ChannelListProps) {
   useEffect(() => {
     remember(resetKey, { active });
   }, [resetKey, active]);
+  // One scrollTop read per frame, not per scroll event (a fling fires several between frames).
+  // A read still pending when the list changes or unmounts is taken at once, under its own list.
+  const scrollFrame = useRef(0);
+  const scrollKey = useRef(resetKey);
+  const flushScroll = useCallback(() => {
+    if (!scrollFrame.current) return;
+    cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = 0;
+    if (scrollRef.current) remember(scrollKey.current, { scrollTop: scrollRef.current.scrollTop });
+  }, []);
+  useLayoutEffect(() => flushScroll, [flushScroll]);
   const onScroll = () => {
-    if (scrollRef.current) remember(resetKey, { scrollTop: scrollRef.current.scrollTop });
+    if (scrollFrame.current) return;
+    scrollKey.current = resetKey;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = 0;
+      if (scrollRef.current) remember(scrollKey.current, { scrollTop: scrollRef.current.scrollTop });
+    });
   };
 
   // The cursor follows the playing channel (zap, number entry, remote) once its row is loaded.
@@ -160,21 +188,42 @@ export function ChannelList(props: ChannelListProps) {
   // A remembered cursor wins on mount; with none, the playing channel's row is picked up.
   const followKey = useRef(listMemory.has(resetKey) ? '' : playingKey);
   const seenPlayingKey = useRef(playingKey);
+  /** `playingKey|number|list` of the lookup under way for a channel outside the loaded pages. */
+  const locating = useRef('');
   useEffect(() => {
     if (seenPlayingKey.current !== playingKey) {
       seenPlayingKey.current = playingKey;
       followKey.current = playingKey;
     }
     if (!followKey.current || !playingRef) return;
+    const follow = (index: number, align: 'auto' | 'center') => {
+      followKey.current = '';
+      if (index === activeRef.current) return;
+      setActive(index);
+      virtualizer.scrollToIndex(index, { align });
+      // Keep keyboard focus on the list when it was there.
+      if (scrollRef.current?.contains(document.activeElement)) focusPending.current = index;
+    };
     const hit = paged.loaded.find((l) => sameRef(l.channel.ref, playingRef));
-    if (!hit) return;
-    followKey.current = '';
-    if (hit.index === active) return;
-    setActive(hit.index);
-    virtualizer.scrollToIndex(hit.index, { align: 'auto' });
-    // Keep keyboard focus on the list when it was there.
-    if (scrollRef.current?.contains(document.activeElement)) focusPending.current = hit.index;
-  }, [playingKey, paged.loaded]);
+    if (hit) {
+      follow(hit.index, 'auto');
+      return;
+    }
+    // Tuned outside the loaded pages (a number typed, a zap from elsewhere): find its row, jump
+    // there and let the pages around it load. Once per channel and list.
+    const lookup = `${playingKey}|${playingNumber ?? ''}|${resetKey}`;
+    if (!paged.locate || playingNumber === undefined || locating.current === lookup) return;
+    locating.current = lookup;
+    const want = playingKey;
+    const list = resetKey;
+    void paged.locate(playingRef, playingNumber).then(
+      (index) => {
+        if (index === undefined || followKey.current !== want || propsRef.current.resetKey !== list) return;
+        follow(index, 'center');
+      },
+      () => undefined,
+    );
+  }, [playingKey, playingNumber, paged.loaded, resetKey]);
 
   // The parent hears about the cursor once it settles. Telling it on every key (from an effect)
   // left a parent render queued behind each keystroke of a fast repeat, so no commit ever ended

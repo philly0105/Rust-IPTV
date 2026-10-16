@@ -9,13 +9,14 @@
 use super::raw::{RawAccount, RawUserInfo};
 use super::url::{api_endpoint, normalize_server_url};
 use crate::error::{CoreError, CoreResult};
-use crate::http::{backoff_delay, cancellable, read_capped, send_checked};
+use crate::http::{backoff_delay, cancellable, read_capped, send_checked, send_checked_within};
 use crate::model::XtreamSourceConfig;
 use crate::state::AppState;
 use serde::de::DeserializeOwned;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// User-Agent sent to Xtream panels (old app's `XTREAM_CLIENT_USER_AGENT`):
 /// some panels challenge generic HTTP clients but allow IPTV players.
@@ -111,9 +112,9 @@ impl XtreamClient {
 
     /// Retries transient failures up to `attempts` times, like
     /// [`crate::http::with_retry`], except that a request which used up its
-    /// whole budget (the metadata deadline, or a list body under the minimum
-    /// rate) is not retried: a dripping panel would otherwise take three
-    /// budgets to fail. Each retry emits `import.progress` with
+    /// whole budget (the metadata deadline, the account check's head deadline,
+    /// or a list body under the minimum rate) is not retried: a dripping or
+    /// silent panel would otherwise take three budgets to fail. Each retry emits `import.progress` with
     /// `attempt`/`attempts` when the client has a progress target, and a
     /// retried failure ends with "The download failed after N tries." (the
     /// same emitter and suffix as the M3U download).
@@ -189,17 +190,25 @@ impl XtreamClient {
         let context = format!("Xtream {label}");
         let tried = Instant::now();
         match kind {
-            BodyKind::Metadata => {
+            BodyKind::Metadata | BodyKind::Account => {
                 // `http::send_metadata`, with the deadline shortened in unit
-                // tests.
+                // tests. The account check also gets a short head deadline,
+                // and a timeout that used it up is final.
+                let (head, budget) = match kind {
+                    BodyKind::Account => {
+                        let head = account_header_timeout();
+                        (head, head.min(METADATA_DEADLINE))
+                    }
+                    _ => (crate::http::HEADER_TIMEOUT, METADATA_DEADLINE),
+                };
                 let result = async {
-                    let resp = send_checked(req.timeout(METADATA_DEADLINE), &context).await?;
+                    let resp =
+                        send_checked_within(req.timeout(METADATA_DEADLINE), head, &context).await?;
                     read_capped(resp, &context, MAX_BODY_BYTES).await
                 }
                 .await;
                 result.map_err(|err| Failed {
-                    budget_spent: matches!(err, CoreError::Timeout(_))
-                        && tried.elapsed() >= METADATA_DEADLINE,
+                    budget_spent: matches!(err, CoreError::Timeout(_)) && tried.elapsed() >= budget,
                     err,
                 })
             }
@@ -218,10 +227,41 @@ impl XtreamClient {
 
     /// Account info. Fails with `Auth` when `user_info.auth == 0` and with
     /// `Invalid` when the response is not an Xtream account payload.
+    ///
+    /// The first request of a sync and of a connection test, so the one the
+    /// add dialog waits on: the response head must arrive within
+    /// [`ACCOUNT_HEADER_TIMEOUT`], and a panel that stays silent that long
+    /// fails at once instead of being retried. Busy (5xx) and reset
+    /// connections are still retried.
     pub async fn account(&self) -> CoreResult<RawAccount> {
-        let acc: RawAccount = self.get(None, &[]).await?;
+        let bytes = self.fetch(None, &[], BodyKind::Account).await?;
+        let acc: RawAccount = decode(&bytes, "account")?;
         check_auth(acc.user_info.as_ref())?;
         Ok(acc)
+    }
+}
+
+/// Response-head deadline of [`XtreamClient::account`]: about what a person
+/// waits for a "Connecting…" step, and as long as the connect timeout.
+pub const ACCOUNT_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Test override of [`ACCOUNT_HEADER_TIMEOUT`] in milliseconds (0: none).
+static ACCOUNT_HEADER_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Shortens the account check's head deadline for the whole process. Test
+/// hook for integration tests with a silent panel; the app never calls it.
+#[doc(hidden)]
+pub fn set_account_header_timeout_for_tests(timeout: Duration) {
+    let ms = u64::try_from(timeout.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    ACCOUNT_HEADER_TIMEOUT_MS.store(ms, Ordering::Relaxed);
+}
+
+fn account_header_timeout() -> Duration {
+    match ACCOUNT_HEADER_TIMEOUT_MS.load(Ordering::Relaxed) {
+        0 => ACCOUNT_HEADER_TIMEOUT,
+        ms => Duration::from_millis(ms),
     }
 }
 
@@ -262,6 +302,9 @@ impl From<CoreError> for Failed {
 enum BodyKind {
     /// Small JSON: whole-request deadline.
     Metadata,
+    /// The account check: [`BodyKind::Metadata`] with the shorter head
+    /// deadline [`ACCOUNT_HEADER_TIMEOUT`].
+    Account,
     /// A stream/VOD/series list: minimum average rate.
     List,
 }

@@ -33,6 +33,66 @@ pub struct AppState {
     /// Runtime singletons stashed by modules under their module name
     /// (download queue, mpv session, remote server handle, importers, ...).
     pub extensions: DashMap<&'static str, Arc<dyn Any + Send + Sync>>,
+    /// Admits one user write at a time to the pool; see [`Self::db_write`].
+    write_gate: tokio::sync::Semaphore,
+}
+
+tokio::task_local! {
+    /// Set by [`cancel_on_drop`]: database calls made inside it stop their
+    /// SQL when the call is dropped.
+    static CANCEL_ON_DROP: ();
+}
+
+/// Runs `fut` so that a [`AppState::db_call`] inside it interrupts its SQLite
+/// statement when `fut` is dropped before it finishes, instead of running to
+/// the end for nobody. For read-only work whose caller may go away (server
+/// mode drops a request when the browser aborts it, L2-perf-desktop-6).
+/// Never wrap writes in it: an interrupted write rolls back.
+pub async fn cancel_on_drop<F: std::future::Future>(fut: F) -> F::Output {
+    CANCEL_ON_DROP.scope((), fut).await
+}
+
+/// Where a cancellable database call is, shared by its async and blocking
+/// halves.
+enum CallState {
+    /// Waiting for a pooled connection.
+    Queued,
+    /// Running on a connection.
+    Running(rusqlite::InterruptHandle),
+    /// The caller went away.
+    Cancelled,
+    /// The closure returned (or panicked); the connection may serve others.
+    Done,
+}
+
+type CallSlot = Arc<parking_lot::Mutex<CallState>>;
+
+/// Async half: dropped with the caller's future. Interrupts the statement
+/// while the closure runs; a queued call never starts.
+struct InterruptOnDrop(CallSlot);
+
+impl Drop for InterruptOnDrop {
+    fn drop(&mut self) {
+        let mut st = self.0.lock();
+        match &*st {
+            CallState::Running(handle) => {
+                handle.interrupt();
+                *st = CallState::Cancelled;
+            }
+            CallState::Queued => *st = CallState::Cancelled,
+            CallState::Cancelled | CallState::Done => {}
+        }
+    }
+}
+
+/// Blocking half: marks the call done (also on panic) before the connection
+/// goes back to the pool, so a late interrupt never reaches another call.
+struct Disarm(CallSlot);
+
+impl Drop for Disarm {
+    fn drop(&mut self) {
+        *self.0.lock() = CallState::Done;
+    }
 }
 
 impl AppState {
@@ -74,6 +134,7 @@ impl AppState {
             settings: Arc::new(parking_lot::RwLock::new(settings)),
             is_desktop,
             extensions: DashMap::new(),
+            write_gate: tokio::sync::Semaphore::new(1),
         }))
     }
 
@@ -92,6 +153,9 @@ impl AppState {
     /// Runs blocking database work on the blocking thread pool. A corruption
     /// error from the closure flags the next boot for a full integrity check
     /// (see [`db::note_error`]); the error is returned unchanged.
+    ///
+    /// Inside [`cancel_on_drop`], dropping the returned future interrupts the
+    /// closure's SQL (or skips it while it still waits for a connection).
     pub async fn db_call<T, F>(&self, f: F) -> CoreResult<T>
     where
         T: Send + 'static,
@@ -99,15 +163,54 @@ impl AppState {
     {
         let pool = self.db.clone();
         let db_path = self.db_path();
+        let slot: Option<CallSlot> = CANCEL_ON_DROP
+            .try_with(|_| Arc::new(parking_lot::Mutex::new(CallState::Queued)))
+            .ok();
+        let _interrupt = slot.clone().map(InterruptOnDrop);
         tokio::task::spawn_blocking(move || {
             pool.get()
                 .map_err(CoreError::from)
-                .and_then(|mut conn| f(&mut conn))
+                .and_then(|mut conn| {
+                    // Declared after `conn`, so dropped before it.
+                    let _disarm = match &slot {
+                        Some(slot) => {
+                            let mut st = slot.lock();
+                            if matches!(*st, CallState::Cancelled) {
+                                return Err(CoreError::Other(anyhow::anyhow!(
+                                    "the request was cancelled"
+                                )));
+                            }
+                            *st = CallState::Running(conn.get_interrupt_handle());
+                            Some(Disarm(slot.clone()))
+                        }
+                        None => None,
+                    };
+                    f(&mut conn)
+                })
                 .inspect_err(|e| {
                     db::note_error(&db_path, e);
                 })
         })
         .await?
+    }
+
+    /// [`Self::db_call`] for user writes (a favourite, a position, a setting,
+    /// a recent entry). They pass a process-wide gate one at a time before
+    /// they take a pooled connection: while an import holds SQLite's write
+    /// lock, one of them waits on a connection and the rest wait here, so
+    /// reads keep the other connections (L2-perf-core-2). The closure must
+    /// not call `db_write` itself (it is synchronous, so it cannot).
+    pub async fn db_write<T, F>(&self, f: F) -> CoreResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> CoreResult<T> + Send + 'static,
+    {
+        let _permit = self
+            .write_gate
+            .acquire()
+            .await
+            .map_err(|_| CoreError::Other(anyhow::anyhow!("the database is closing")))?;
+        self.db_call(f).await
     }
 
     /// Records a database error for boot-time recovery when it is a

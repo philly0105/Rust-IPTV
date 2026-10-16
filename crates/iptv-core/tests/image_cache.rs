@@ -428,6 +428,9 @@ async fn hits_move_last_access_forward_at_most_once_a_minute() {
     let state = new_state(dir.path()).await;
     let url = stub.url("/png/touch");
     imagecache::get(&state, &url, None).await.unwrap();
+    // Barrier: a miss answers once the file is on disk; its row is written
+    // in the background (L2-perf-core-8).
+    imagecache::stats(&state).await.unwrap();
     let fresh = last_access(&state, &url).await;
     assert!((unix_now() - fresh).abs() < 5);
 
@@ -694,6 +697,18 @@ async fn two_processes_on_one_data_dir_stay_under_the_cap_together() {
     }
     for n in ["s1", "s2"] {
         imagecache::get(&server, &url(n), None).await.unwrap();
+    }
+    // Each writer records its rows in the background (L2-perf-core-8):
+    // wait for all four.
+    for _ in 0..500 {
+        let n: i64 = desktop
+            .db_call(|c| Ok(c.query_row("SELECT COUNT(*) FROM image_cache", [], |r| r.get(0))?))
+            .await
+            .unwrap();
+        if n == 4 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
     // 1.2 MB in the table, 600 kB in either running total: no insert
     // evicted. images.stats reads the table's own total and evicts.

@@ -184,5 +184,11 @@
   "locked": "잠김",
   "lockedGuide": "잠겨 있습니다. PIN을 입력하면 방송 중인 프로그램을 볼 수 있습니다.",
   "unlock": "잠금 해제",
-  "ribbonFailed": "이 채널의 가이드를 불러오지 못했습니다"
+  "ribbonFailed": "이 채널의 가이드를 불러오지 못했습니다",
+  "parentalHiddenChannels": "자녀 보호 기능이 이 소스의 채널을 숨기고 있습니다",
+  "parentalHiddenStations": "자녀 보호 기능이 이 소스의 방송국을 숨기고 있습니다",
+  "parentalHiddenHint": "그룹이 잠겨 있습니다. PIN을 입력하면 이번 세션 동안 표시됩니다.",
+  "parentalUnlock": "잠금 해제",
+  "parentalUnlockTitle": "잠긴 채널 표시",
+  "parentalUnlockBody": "PIN을 입력하면 자녀 보호 기능이 다시 잠글 때까지 잠긴 그룹과 채널을 표시합니다."
 }

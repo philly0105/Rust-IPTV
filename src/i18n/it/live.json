@@ -189,5 +189,11 @@
   "locked": "Bloccato",
   "lockedGuide": "Bloccato. Inserisci il PIN per vedere cosa va in onda.",
   "unlock": "Sblocca",
-  "ribbonFailed": "Impossibile caricare la guida di questo canale"
+  "ribbonFailed": "Impossibile caricare la guida di questo canale",
+  "parentalHiddenChannels": "Il parental control nasconde i canali di questa sorgente",
+  "parentalHiddenStations": "Il parental control nasconde le stazioni di questa sorgente",
+  "parentalHiddenHint": "I suoi gruppi sono bloccati. Inserisci il PIN per mostrarli in questa sessione.",
+  "parentalUnlock": "Sblocca",
+  "parentalUnlockTitle": "Mostra i canali bloccati",
+  "parentalUnlockBody": "Inserisci il PIN per mostrare gruppi e canali bloccati finché il parental control non si riattiva."
 }

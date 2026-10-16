@@ -38,8 +38,9 @@ export function useStreamError(kind?: EngineError['kind'] | null): StreamErrorVi
   // account: a full account turns a bare 403/5xx into "Connection limit reached (2 of 2 in use)".
   const sourceId = usePlayerStore((s) => s.source?.ref?.sourceId);
   const connections = useConnectionCounts({ message, kind, code, online }, sourceId);
+  const live = usePlayerStore((s) => !!s.source?.isLive);
   const cls = classifyStreamError({ message, kind, code, online, connections });
-  const keys = errorCopyKeys(cls, { connections, message });
+  const keys = errorCopyKeys(cls, { connections, message, live });
   return { cls, title: t(keys.title, keys.params), hint: t(keys.hint, keys.params) };
 }
 

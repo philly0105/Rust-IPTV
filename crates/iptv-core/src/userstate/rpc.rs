@@ -135,7 +135,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("favorites.toggle", |state, a: RefSnapshot| async move {
         let is_favorite = state
-            .db_call(move |c| super::favorite_toggle(c, &a.item_ref, &a.snapshot))
+            .db_write(move |c| super::favorite_toggle(c, &a.item_ref, &a.snapshot))
             .await?;
         Ok::<_, RpcError>(ToggleResult { is_favorite })
     });
@@ -169,7 +169,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("recent.add", |state, a: RefSnapshot| async move {
         state
-            .db_call(move |c| {
+            .db_write(move |c| {
                 super::recent_add_at(c, &a.item_ref, &a.snapshot, a.viewed_at.as_deref())
             })
             .await?;
@@ -210,9 +210,39 @@ pub fn register(r: &mut RpcRouter) {
                 .transpose()?,
             watched: a.watched,
         };
-        state
-            .db_call(move |c| super::position_set(c, &input).map(|_| ()))
+        let live = input.updated_at.is_none();
+        let item_ref = input.item_ref.clone();
+        let episode_id = input.episode_id.clone().unwrap_or_default();
+        // A live save that finished an episode may finish its series. Dated
+        // writes (undo, restore) put rows back exactly and are left alone.
+        let finished_episode = state
+            .db_write(move |c| {
+                super::position_set(c, &input)?;
+                if !live
+                    || input
+                        .episode_id
+                        .as_deref()
+                        .is_none_or(|e| e.trim().is_empty())
+                {
+                    return Ok(false);
+                }
+                Ok(
+                    super::position_get(c, &input.item_ref, input.episode_id.as_deref())?
+                        .is_some_and(|p| {
+                            p.watched && super::is_complete(p.position_seconds, p.duration_seconds)
+                        }),
+                )
+            })
             .await?;
+        if finished_episode {
+            super::watched::sync_series_mark(
+                &state,
+                &item_ref,
+                &episode_id,
+                super::watched::EpisodeMark::Watched,
+            )
+            .await?;
+        }
         Ok::<(), RpcError>(())
     });
     r.add("positions.forSeries", |state, a: RefOnly| async move {
@@ -249,11 +279,23 @@ pub fn register(r: &mut RpcRouter) {
     r.add(
         "userstate.setWatched",
         |state, a: SetWatchedArgs| async move {
+            let item_ref = a.item_ref.clone();
+            let episode_id = a.episode_id.clone();
+            let watched = a.watched;
             state
                 .db_call(move |c| {
                     super::set_watched(c, &a.item_ref, a.episode_id.as_deref(), a.watched)
                 })
                 .await?;
+            // An episode mark keeps its series' own mark in step.
+            if let Some(ep) = episode_id {
+                let mark = if watched {
+                    super::watched::EpisodeMark::Watched
+                } else {
+                    super::watched::EpisodeMark::Unmarked
+                };
+                super::watched::sync_series_mark(&state, &item_ref, &ep, mark).await?;
+            }
             Ok::<(), RpcError>(())
         },
     );

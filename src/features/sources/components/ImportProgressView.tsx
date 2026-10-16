@@ -23,6 +23,25 @@ const PHASE_KEY: Record<ImportPhase, string> = {
   cancelled: 'phaseCancelled',
 };
 
+/**
+ * The core's fixed progress messages, shown translated: the Xtream content type being fetched or
+ * read, the Stalker stage, and `unchanged` (a refresh found nothing new). Null hides one the phase
+ * label already says. Any other text (a warning, an error) is shown as the core sent it.
+ */
+const STEP_KEY: Readonly<Record<string, string | null>> = {
+  account: 'progressStepAccount',
+  live: 'progressStepLive',
+  movies: 'progressStepMovies',
+  series: 'progressStepSeries',
+  'Connecting to the portal': 'progressStepPortal',
+  'Loading channel categories': 'progressStepChannelGroups',
+  'Loading channels': 'progressStepChannels',
+  'Loading radio': 'progressStepRadio',
+  'Loading movie and series categories': 'progressStepVodGroups',
+  'Saving the catalog': null,
+  unchanged: 'progressStepUnchanged',
+};
+
 export interface ImportProgressViewProps {
   /** Latest event; undefined = waiting for the first one. */
   entry: ProgressEntry | undefined;
@@ -121,8 +140,11 @@ export function ImportProgressView({ entry, compact, onCancel, cancelling, cance
     phase === 'fetching' && entry?.attempt !== undefined && entry.attempts !== undefined
       ? t('progressRetry', { attempt: formatCount(entry.attempt, i18n.language), attempts: formatCount(entry.attempts, i18n.language) })
       : null;
-  // The error's plain part only; a technical detail after the core's separator stays out of view.
-  const rawMessage = entry?.message ? redactText(splitErrorText(entry.message).plain) : '';
+  const message = entry?.message;
+  const step = message !== undefined && Object.hasOwn(STEP_KEY, message) ? STEP_KEY[message] : undefined;
+  // A known step in the user's language; otherwise the error's plain part only (a technical detail
+  // after the core's separator stays out of view).
+  const detail = step !== undefined ? (step ? t(step) : '') : message ? redactText(splitErrorText(message).plain) : '';
   const errorSummary = phase === 'error' && (entry?.code || entry?.message) ? t(importSummaryKey(entry.message, entry.code)) : null;
 
   return (
@@ -163,10 +185,10 @@ export function ImportProgressView({ entry, compact, onCancel, cancelling, cance
         <p className="text-xs text-fg-muted" data-testid="import-retry">
           {retry}
         </p>
-      ) : rawMessage && !compact ? (
+      ) : detail && !compact ? (
         // The retry line replaces the core's English "Retrying the download ..." message.
-        <p className="truncate text-xs text-fg-subtle" title={rawMessage}>
-          {rawMessage}
+        <p className="truncate text-xs text-fg-subtle" title={detail} data-testid="import-progress-detail">
+          {detail}
         </p>
       ) : null}
     </div>

@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { sameRef, type ItemRef } from '@/api/types';
 import { usePlayerStore } from '@/features/player';
+import { playerMenuJustClosed } from '@/features/player/components/Controls';
 
 export interface WatchState {
   /** This item is playing in an in-app surface (inline or embedded mpv): the page is in watch state. */
@@ -37,7 +38,10 @@ export function useWatchState(ref: ItemRef): WatchState {
   );
 }
 
-/** Escape closes the inline player while the page is in watch state (unless a dialog, an input, fullscreen or PiP owns the key). */
+/**
+ * Escape closes the inline player while the page is in watch state (unless a dialog, an input,
+ * fullscreen, PiP or the player's own options menu owns the key).
+ */
 export function useEscapeToClose(active: boolean, onClose: () => void): void {
   const cb = useRef(onClose);
   cb.current = onClose;
@@ -47,6 +51,8 @@ export function useEscapeToClose(active: boolean, onClose: () => void): void {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      // The player's options menu closes on this Escape (or just did): it must not stop playback too.
+      if (t?.closest?.('[data-testid="player-options-menu"]') || playerMenuJustClosed()) return;
       if (document.fullscreenElement) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       // In PiP, Escape belongs to the PiP window (leave PiP), not to "stop playback".

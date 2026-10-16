@@ -15,6 +15,10 @@ vi.mock('@/api/transport', () => ({
 }));
 
 const { resolveSource } = await import('./store');
+const { queryClient } = await import('@/api/query');
+
+/** The source record sits in the query cache (`sources.changed` drops it): a new answer needs a drop. */
+const sourceChanged = (): void => queryClient.removeQueries({ queryKey: ['sources.get'] });
 
 const ref: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '101' };
 const args = { ref, title: 'BBC One', isLive: true, sourceKind: 'm3u' } as const;
@@ -37,6 +41,7 @@ function source(headers: Record<string, string>) {
 
 beforeEach(() => {
   for (const k of Object.keys(handlers)) delete handlers[k];
+  sourceChanged();
 });
 
 describe('resolveSource per-channel headers (m3u)', () => {
@@ -64,6 +69,7 @@ describe('resolveSource per-channel headers (m3u)', () => {
     expect((await resolveSource(args)).headers).toEqual({ userAgent: 'Playlist/1' });
 
     handlers['sources.get'] = () => source({});
+    sourceChanged();
     expect((await resolveSource(args)).headers).toBeUndefined();
   });
 
@@ -73,5 +79,30 @@ describe('resolveSource per-channel headers (m3u)', () => {
       throw new Error('gone');
     };
     expect((await resolveSource(args)).headers).toEqual({ userAgent: 'VLC/3.0' });
+  });
+
+  it('asks for the playlist record once across plays of its channels', async () => {
+    let asked = 0;
+    handlers['catalog.item'] = () => item();
+    handlers['sources.get'] = () => {
+      asked++;
+      return source({ userAgent: 'Playlist/1' });
+    };
+    await resolveSource(args);
+    await resolveSource(args);
+    expect(asked).toBe(1);
+  });
+
+  it('skips the channel lookup when the caller already holds the channel', async () => {
+    let looked = 0;
+    handlers['catalog.item'] = () => {
+      looked++;
+      return item();
+    };
+    handlers['sources.get'] = () => source({});
+    const out = await resolveSource({ ...args, channel: item({ userAgent: 'VLC/3.0' }) });
+    expect(looked).toBe(0);
+    expect(out.url).toBe('http://m/one.m3u8');
+    expect(out.headers).toEqual({ userAgent: 'VLC/3.0' });
   });
 });

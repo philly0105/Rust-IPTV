@@ -10,7 +10,17 @@ import { queryClient } from '@/api/query';
 import type { ParentalStatus } from '@/api/types';
 
 import { lockNow, useParentalEvents, useParentalStatus } from '..';
-import { afterLockChange, catalogAffected, FILTERED_PREFIXES, hidesContent, STATUS_KEY, unlockRemainingMs } from '../status';
+import {
+  afterLockChange,
+  catalogAffected,
+  EVENT_COALESCE_MS,
+  FILTERED_PREFIXES,
+  hidesContent,
+  resetStatusEventsForTests,
+  STATUS_KEY,
+  trackLockChange,
+  unlockRemainingMs,
+} from '../status';
 import { core, emitEvent, listenerCount } from './harness';
 
 vi.mock('@/api/transport', async (orig) => {
@@ -63,7 +73,11 @@ function seedLists() {
 beforeEach(() => {
   core.reset({ pin: '2580' });
   queryClient.clear();
+  resetStatusEventsForTests();
 });
+
+/** Events refresh once per coalescing window: let it pass. */
+const settle = () => act(() => new Promise<void>((r) => setTimeout(r, EVENT_COALESCE_MS + 10)));
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -86,22 +100,24 @@ describe('useParentalEvents', () => {
     expect(queryClient.getQueryData(STATUS_KEY)).toMatchObject({ unlocked: true });
     // Observers hear about cache writes on the next tick.
     await vi.waitFor(() => expect(result.current.data?.unlocked).toBe(true));
+    await settle();
     for (const k of keys) expect(invalidated(k), String(k[0])).toBe(true);
     // Unrelated queries (the rest of the guide) are left alone.
     for (const k of unrelated) expect(invalidated(k), String(k[0])).toBe(false);
   });
 
-  it('does not reload the catalog for a wrong PIN while Hide mode keeps filtering', () => {
+  it('does not reload the catalog for a wrong PIN while Hide mode keeps filtering', async () => {
     renderHook(() => useParentalEvents(), { wrapper });
     queryClient.setQueryData(STATUS_KEY, s());
     const { invalidated } = seedLists();
     act(() => emitEvent('parental.changed', s({ failedAttempts: 1 })));
+    await settle();
     expect(invalidated(['catalog.channels', { sourceId: 'src1' }])).toBe(false);
     // The lock list and checks always follow.
     expect(invalidated(['parental.locks', {}])).toBe(true);
   });
 
-  it('reloads the catalog when a lock is added or removed in Hide mode', () => {
+  it('reloads the catalog when a lock is added or removed in Hide mode', async () => {
     renderHook(() => useParentalEvents(), { wrapper });
     queryClient.setQueryData(STATUS_KEY, s());
     const seeded = FILTERED_PREFIXES.map((p) => [p.endsWith('.') ? `${p}list` : p, { seed: p }] as const);
@@ -109,6 +125,7 @@ describe('useParentalEvents', () => {
     queryClient.setQueryData(['epg.nowNext', null], []);
     // The core sends the same status after a lock-list change.
     act(() => emitEvent('parental.changed', s()));
+    await settle();
     // Nothing shows them, so the next visit loads fresh instead of drawing the old data first.
     for (const k of seeded) expect(queryClient.getQueryState(k), String(k[0])).toBeUndefined();
     expect(queryClient.getQueryState(['epg.nowNext', null])?.isInvalidated).toBe(false);
@@ -130,6 +147,7 @@ describe('useParentalEvents', () => {
 
     locked = true;
     act(() => emitEvent('parental.changed', s()));
+    await settle();
     for (const k of keys.filter(([cmd]) => !cmd.startsWith('parental.'))) {
       expect(queryClient.getQueryState(k), String(k[0])).toBeUndefined();
     }
@@ -140,11 +158,12 @@ describe('useParentalEvents', () => {
     await vi.waitFor(() => expect(page.result.current.data).toEqual(['Safe']));
   });
 
-  it('keeps cached data when Hide mode stops filtering (an unlock only shows more)', () => {
+  it('keeps cached data when Hide mode stops filtering (an unlock only shows more)', async () => {
     queryClient.setQueryData(STATUS_KEY, s());
     renderHook(() => useParentalEvents(), { wrapper });
     const { keys, invalidated } = seedLists();
     act(() => emitEvent('parental.changed', s({ enabled: false })));
+    await settle();
     for (const k of keys) expect(invalidated(k), String(k[0])).toBe(true);
   });
 
@@ -158,6 +177,60 @@ describe('useParentalEvents', () => {
     queryClient.setQueryData(STATUS_KEY, s());
     afterLockChange();
     expect(queryClient.getQueryState(detail)).toBeUndefined();
+  });
+
+  it('refreshes once for a burst of lock events (L2-settings-2)', async () => {
+    queryClient.setQueryData(STATUS_KEY, s());
+    renderHook(() => useParentalEvents(), { wrapper });
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    // Saving many group locks: the core sends one identical status per lock.
+    act(() => {
+      for (let i = 0; i < 40; i += 1) emitEvent('parental.changed', s());
+    });
+    expect(spy).not.toHaveBeenCalled();
+    await settle();
+    // One pass: the two parental prefixes plus each filtered prefix, once.
+    expect(spy).toHaveBeenCalledTimes(2 + FILTERED_PREFIXES.length);
+    spy.mockRestore();
+  });
+
+  it('leaves the refresh to a local batch of lock changes, then refreshes once', async () => {
+    queryClient.setQueryData(STATUS_KEY, s());
+    renderHook(() => useParentalEvents(), { wrapper });
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    let finish!: () => void;
+    const batch = trackLockChange(() => new Promise<void>((r) => (finish = r)));
+    act(() => {
+      for (let i = 0; i < 10; i += 1) emitEvent('parental.changed', s());
+    });
+    await settle();
+    expect(spy).not.toHaveBeenCalled();
+    await act(async () => {
+      finish();
+      await batch;
+    });
+    expect(spy).toHaveBeenCalledTimes(2 + FILTERED_PREFIXES.length);
+    // The echo that lands just after the batch is the same change.
+    act(() => emitEvent('parental.changed', s()));
+    await settle();
+    expect(spy).toHaveBeenCalledTimes(2 + FILTERED_PREFIXES.length);
+    spy.mockRestore();
+  });
+
+  it('still refreshes a real status change during a local batch', async () => {
+    queryClient.setQueryData(STATUS_KEY, s());
+    renderHook(() => useParentalEvents(), { wrapper });
+    const { keys, invalidated } = seedLists();
+    let finish!: () => void;
+    const batch = trackLockChange(() => new Promise<void>((r) => (finish = r)));
+    // The unlock ran out in another window, or Hide mode switched off meanwhile.
+    act(() => emitEvent('parental.changed', s({ enabled: false })));
+    await settle();
+    for (const k of keys) expect(invalidated(k), String(k[0])).toBe(true);
+    await act(async () => {
+      finish();
+      await batch;
+    });
   });
 
   it('refreshes adult categories and lock checks after an import or a source change', () => {

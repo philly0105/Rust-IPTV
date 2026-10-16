@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ShieldAlert } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
@@ -10,12 +11,10 @@ import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, T
 
 import { useContentTypeText } from './labels';
 import { PinDialog } from './PinDialog';
-import { afterLockChange } from './status';
+import { trackLockChange } from './status';
 
 const ROW = 40;
 const TYPES: readonly ContentType[] = ['live', 'radio', 'movie', 'series'];
-/** Lock changes sent at once. */
-const PARALLEL = 4;
 
 type Picks = Record<ContentType, Map<string, string>>;
 
@@ -39,10 +38,6 @@ function typesOf(source: Source, locks: readonly ParentalLock[]): ContentType[] 
   const counts = contentCounts(source);
   const out = TYPES.filter((ct) => counts[ct] > 0 || locks.some((l) => l.kind === 'category' && l.contentType === ct));
   return out.length > 0 ? out : ['live'];
-}
-
-async function inBatches<T>(list: readonly T[], run: (item: T) => Promise<unknown>): Promise<void> {
-  for (let i = 0; i < list.length; i += PARALLEL) await Promise.all(list.slice(i, i + PARALLEL).map(run));
 }
 
 export interface LockGroupsDialogProps {
@@ -95,20 +90,30 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
   /** Escape, the close button, the backdrop and Cancel: ticked groups are not dropped without asking. */
   const requestClose = () => (changeCount > 0 && !saving ? setConfirmDiscard(true) : onClose());
 
-  /** Removals first, so a refused PIN changes nothing. Throws the core's error. */
-  const apply = async (pin?: string) => {
-    const off = (target: ParentalLockTarget) =>
-      rpc('parental.setLocked', pin === undefined ? { target, locked: false } : { target, locked: false, pin });
-    try {
-      const [first, ...rest] = changes.remove;
-      if (first) await off(first);
-      await inBatches(rest, off);
-      await inBatches(changes.add, (target) => rpc('parental.setLocked', { target, locked: true }));
-    } finally {
-      afterLockChange();
+  /**
+   * Closes the dialog with focus back on the button that opened it. A prompt stacked on top
+   * (Discard?, the PIN) closes first, in its own commit: closing both at once lets the prompt
+   * hand focus back to a button of this dialog just as it leaves the page, and focus drops to
+   * <body>.
+   */
+  const closeAll = () => {
+    if (confirmDiscard || askPin) {
+      flushSync(() => {
+        setConfirmDiscard(false);
+        setAskPin(false);
+      });
     }
-    toast({ variant: 'success', title: t('groupLocksSaved', { count: changeCount }) });
     onClose();
+  };
+
+  /** One call, one transaction: a refused PIN changes nothing. Throws the core's error. */
+  const apply = async (pin?: string) => {
+    // One refresh when the call ends, not one per lock event the core sends meanwhile.
+    await trackLockChange(() =>
+      rpc('parental.setLockedMany', pin === undefined ? { add: changes.add, remove: changes.remove } : { add: changes.add, remove: changes.remove, pin }),
+    );
+    toast({ variant: 'success', title: t('groupLocksSaved', { count: changeCount }) });
+    closeAll();
   };
 
   const save = async () => {
@@ -215,7 +220,7 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
               <Button variant="ghost" onClick={() => setConfirmDiscard(false)} data-autofocus="" data-testid="lock-groups-keep">
                 {t('keepEditing')}
               </Button>
-              <Button variant="danger" onClick={onClose} data-testid="lock-groups-discard-confirm">
+              <Button variant="danger" onClick={closeAll} data-testid="lock-groups-discard-confirm">
                 {t('discard')}
               </Button>
             </>
@@ -267,7 +272,8 @@ function GroupList({
   const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const cats = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true });
+  // includeLocked: Hide mode while locked still lists locked groups here, in provider order with counts.
+  const cats = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true, includeLocked: true });
   const adult = useRpcQuery('parental.adultCategories', { sourceId, contentType });
 
   const { rows, unnamedAdult } = useMemo(() => {
@@ -279,14 +285,14 @@ function GroupList({
       const isAdult = adultIds.has(c.id);
       out.push({ id: c.id, name: c.name, count: c.itemCount, adult: isAdult, auto: isAdult && autoAdult });
     }
-    // Hide mode leaves locked groups out of the catalog; their lock still names them.
+    // Locks on groups the catalog no longer lists: their lock still names them.
     for (const [id, name] of lockedNames) {
       if (seen.has(id)) continue;
       seen.add(id);
       const isAdult = adultIds.has(id);
       out.push({ id, name, adult: isAdult, auto: isAdult && autoAdult });
     }
-    // Adult groups Hide mode left out, with no lock to name them.
+    // Adult groups the catalog left out, with no lock to name them.
     const unnamed = autoAdult ? [...adultIds].filter((id) => !seen.has(id)).length : 0;
     return { rows: out, unnamedAdult: unnamed };
   }, [cats.data, adult.data, lockedNames, autoAdult]);

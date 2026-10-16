@@ -3,12 +3,13 @@
  * Every action reports through a toast; callers only decide where to show it.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
-import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
+import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import type { EpgProgram, ItemRef, Recording, RecordingProgressEvent, RecordingRule, Reminder } from '@/api/types';
 import { useToast } from '@/ui';
 
@@ -25,8 +26,28 @@ export function useRecordings() {
   return useRpcQuery('recordings.list', undefined, { staleTime: STALE });
 }
 
+const CAPS_STALE = 5 * 60_000;
+
 export function useRecordingCapabilities() {
-  return useRpcQuery('recordings.capabilities', undefined, { staleTime: 5 * 60_000 });
+  return useRpcQuery('recordings.capabilities', undefined, { staleTime: CAPS_STALE });
+}
+
+/**
+ * Starts the schedule queries a guide page needs when the page mounts, alongside its grid, not
+ * when the first cell or programme dialog asks (L2-guide-library-15, L2-perf-ui-6).
+ */
+export function usePrefetchSchedule(): void {
+  const client = useQueryClient();
+  useEffect(() => {
+    for (const [cmd, staleTime] of [
+      ['reminders.list', STALE],
+      ['recordings.list', STALE],
+      ['recordings.rules', STALE],
+      ['recordings.capabilities', CAPS_STALE],
+    ] as const) {
+      void client.prefetchQuery({ queryKey: rpcKey(cmd, undefined), queryFn: () => rpcRaw(cmd, undefined), staleTime });
+    }
+  }, [client]);
 }
 
 /** Recording settings the guide needs (reminders on or off). */

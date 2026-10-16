@@ -187,7 +187,7 @@ describe('decade chips', () => {
     await screen.findByText('Film 5');
     expect(screen.queryByText('Film 0')).toBeNull();
     expect(callsOf('catalog.movies').at(-1)!.args).toMatchObject({ yearFrom: 1990, yearTo: 1999 });
-    expect(within(screen.getByTestId('vod-grid-movie')).getByText('8')).toBeTruthy();
+    expect(within(screen.getByTestId('vod-grid-movie')).getByText('8 titles')).toBeTruthy();
     expect(within(group).getByRole('button', { name: '1990s, 8 titles' }).getAttribute('aria-pressed')).toBe('true');
     expect((within(screen.getByRole('group', { name: 'Year range' })).getByRole('combobox', { name: 'From' }) as HTMLSelectElement).value).toBe('1990');
 
@@ -236,7 +236,7 @@ describe('Stalker client filter', () => {
     await screen.findByText('Film 5');
     expect(screen.queryByText('Film 0')).toBeNull();
     expect(screen.queryByText('Film 9')).toBeNull(); // no year
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('8')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('8 titles')).toBeTruthy());
     const group = screen.getByRole('group', { name: 'Year' });
     expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['All years', ...STALKER_DECADES.map((d) => `${d}s`)]);
     expect(callsOf('catalog.yearFacets')).toHaveLength(0);
@@ -250,7 +250,7 @@ describe('Stalker client filter', () => {
     await screen.findByText('Film 0');
     expect(screen.queryByText('Film 1')).toBeNull();
     expect(screen.queryByText('Film 2')).toBeNull();
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText(String(TOTAL - 2))).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText(`${TOTAL - 2} titles`)).toBeTruthy());
     expect(callsOf('stalker.movies').every((c) => !('hideWatched' in (c.args as object)))).toBe(true);
   });
 });
@@ -428,6 +428,19 @@ describe('review fixes (Run 2 R1)', () => {
     expect(chipRow.contains(range)).toBe(false);
     expect(within(range).getAllByRole('combobox').map((c) => c.getAttribute('aria-label'))).toEqual(['From', 'To']);
     expect(chipRow.contains(screen.getByRole('switch', { name: 'Hide watched' }))).toBe(false);
+  });
+
+  it('the sort and From/To selects grow to their longest option instead of clipping it (L1-visual-20)', async () => {
+    renderAt('/s/src1/movies/c/all', gridRoute);
+    const range = await screen.findByRole('group', { name: 'Year range' });
+    const classes = (el: HTMLElement) => el.className.split(/\s+/);
+    for (const select of within(range).getAllByRole('combobox')) {
+      expect(classes(select)).toEqual(expect.arrayContaining(['w-auto', 'min-w-24']));
+      expect(classes(select)).not.toContain('w-24');
+    }
+    const sort = screen.getByRole('combobox', { name: 'Sort by' });
+    expect(classes(sort)).toEqual(expect.arrayContaining(['w-auto', 'min-w-36']));
+    expect(classes(sort)).not.toContain('w-36');
   });
 
   describe('chip row edge fades', () => {

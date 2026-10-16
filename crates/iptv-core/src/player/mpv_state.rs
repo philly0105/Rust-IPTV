@@ -130,6 +130,10 @@ pub fn parse_tracks(data: &Value) -> Vec<MpvTrack> {
         .collect()
 }
 
+/// The error for a live stream that reached its end: the provider stopped
+/// sending it. The player's recovery retries it, then fails over.
+pub const LIVE_ENDED: &str = "The live stream stopped: the provider closed the connection.";
+
 /// Applies any IPC event object (`{"event": ...}`) to `state`. Handles
 /// `property-change`, `start-file`, `file-loaded`, and `end-file`.
 /// Returns true when the state changed.
@@ -156,16 +160,25 @@ pub fn apply_event(state: &mut MpvState, event: &Value) -> bool {
             state.error = None;
         }
         "end-file" => {
+            let was_loaded = state.loaded;
             state.loaded = false;
             state.buffering = None;
-            if event.get("reason").and_then(Value::as_str) == Some("error") {
-                let detail = event
-                    .get("file_error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error");
-                state.error = Some(format!(
-                    "mpv could not play this stream ({detail}). Check the source or try another player."
-                ));
+            match event.get("reason").and_then(Value::as_str) {
+                Some("error") => {
+                    let detail = event
+                        .get("file_error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown error");
+                    state.error = Some(format!(
+                        "mpv could not play this stream ({detail}). Check the source or try another player."
+                    ));
+                }
+                // Only live items end at EOF (`keep-open=no`, `args::loadfile_options`);
+                // everything else pauses on its last frame. A live stream that ends was
+                // dropped by the provider. `was_loaded`: the end of the file a new load
+                // just replaced (`embedded::load` clears `loaded` first) is not news.
+                Some("eof") if was_loaded => state.error = Some(LIVE_ENDED.to_string()),
+                _ => {}
             }
         }
         _ => return false,
@@ -192,5 +205,41 @@ mod tests {
         assert_eq!(tracks[1].title.as_deref(), Some("Signs"), "a title wins");
         assert_eq!(tracks[2].title, None);
         assert_eq!(tracks[3].title, None, "only subtitles get the fallback");
+    }
+
+    /// L2-desktop-2: a live stream that plays out its cache and ends (the
+    /// provider dropped it) is an error the player recovers from, not a pause.
+    #[test]
+    fn a_live_stream_that_ends_is_reported_as_dropped() {
+        let mut st = MpvState {
+            attached: true,
+            ..MpvState::default()
+        };
+        apply_event(&mut st, &json!({"event": "start-file"}));
+        apply_event(&mut st, &json!({"event": "file-loaded"}));
+        assert!(apply_event(
+            &mut st,
+            &json!({"event": "end-file", "reason": "eof"})
+        ));
+        assert!(!st.loaded);
+        assert_eq!(st.error.as_deref(), Some(LIVE_ENDED));
+        // The next load starts clean.
+        apply_event(&mut st, &json!({"event": "start-file"}));
+        assert_eq!(st.error, None);
+    }
+
+    #[test]
+    fn replacing_a_file_or_a_late_eof_after_a_new_load_is_not_an_error() {
+        let mut st = MpvState::default();
+        apply_event(&mut st, &json!({"event": "file-loaded"}));
+        // `loadfile replace` ends the old file with reason `stop`.
+        apply_event(&mut st, &json!({"event": "end-file", "reason": "stop"}));
+        assert_eq!(st.error, None);
+        // `embedded::load` clears `loaded` before it sends `loadfile`: the old
+        // file's EOF that was already in flight is not the new item's drop.
+        apply_event(&mut st, &json!({"event": "file-loaded"}));
+        st.loaded = false;
+        apply_event(&mut st, &json!({"event": "end-file", "reason": "eof"}));
+        assert_eq!(st.error, None);
     }
 }

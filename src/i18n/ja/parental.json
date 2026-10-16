@@ -96,6 +96,8 @@
   "adultAutoHint": "アダルトコンテンツとして自動でロックされています",
   "adultOffHint": "アダルトコンテンツのような名前です。アダルトの自動ロックはオフです。",
   "autoAdultCount_other": "ほかに{{count}}件のアダルトグループも自動でロックされています。",
+  "autoAdultRule": "自動でロックされるアダルトグループ",
+  "autoAdultNone": "このソースにアダルト向けと思われるグループはありません。",
   "removeLockNamed": "{{name}}のロックを削除",
   "showAllLocks_other": "{{count}}件のロックをすべて表示",
   "showFewer": "表示を減らす",

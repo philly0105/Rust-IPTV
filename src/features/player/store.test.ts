@@ -501,6 +501,7 @@ describe('playItem resolution by kind', () => {
 
 describe('zap', () => {
   beforeEach(() => {
+    handlers['parental.status'] = () => ({ enabled: false });
     handlers['xtream.streamUrl'] = (a) => {
       const id = (a as { ref: ItemRef }).ref.itemId;
       return { url: `http://x/live/${id}.m3u8`, kind: 'hls', title: id, isLive: true, isRadio: false };
@@ -512,7 +513,11 @@ describe('zap', () => {
     usePlayerStore.setState({ zapContext: { sourceId: 's1', categoryId: 'news' } });
     handlers['catalog.neighbors'] = () => ({ prev: channel(0), next: channel(2) });
     const played = await zap('down');
-    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref, categoryId: 'news' }]);
+    // The press asks once; the target's own neighbours are fetched ahead for the next press.
+    expect(calls('catalog.neighbors')).toEqual([
+      { ref: channel(1).ref, categoryId: 'news' },
+      { ref: channel(2).ref, categoryId: 'news' },
+    ]);
     expect(played?.number).toBe(2);
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
     // No guide data: no subtitle (never the category), as on the list click path.
@@ -542,7 +547,8 @@ describe('zap', () => {
     handlers['epg.nowNext'] = (a) => {
       const { refs } = a as { refs: ItemRef[] };
       const ref = refs[0] as ItemRef;
-      return { [`${ref.sourceId}|${ref.contentType}|${ref.itemId}`]: { now: { title: 'Evening News' } } };
+      const end = new Date(Date.now() + 3_600_000).toISOString();
+      return { [`${ref.sourceId}|${ref.contentType}|${ref.itemId}`]: { now: { title: 'Evening News', end } } };
     };
     await playItem({ title: 'Alpha One', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
     handlers['catalog.neighbors'] = () => ({ next: channel(2, { name: 'UK | Beta Two', categoryName: 'UK' }) });
@@ -568,7 +574,10 @@ describe('zap', () => {
     const other = channel(9, { ref: { sourceId: 's2', contentType: 'live', itemId: '555' } });
     handlers['lists.neighbors'] = () => ({ prev: channel(0), next: other });
     const played = await zap('down');
-    expect(calls('lists.neighbors')).toEqual([{ id: 'list-7', ref: channel(1).ref }]);
+    expect(calls('lists.neighbors')).toEqual([
+      { id: 'list-7', ref: channel(1).ref },
+      { id: 'list-7', ref: other.ref },
+    ]);
     expect(calls('catalog.neighbors')).toHaveLength(0);
     expect(played?.ref.itemId).toBe('555');
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('555');
@@ -582,7 +591,9 @@ describe('zap', () => {
     await zap('up');
     expect(calls('lists.neighbors')).toEqual([
       { id: 'list-7', ref: channel(1).ref },
+      { id: 'list-7', ref: other.ref },
       { id: 'list-7', ref: channel(4).ref },
+      { id: 'list-7', ref: channel(0).ref },
     ]);
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('100');
     expect(calls('catalog.neighbors')).toHaveLength(0);
@@ -598,13 +609,14 @@ describe('zap', () => {
     handlers['catalog.neighbors'] = () => ({ next: channel(2) });
     const played = await zap('down');
     expect(calls('lists.neighbors')).toEqual([{ id: 'list-7', ref: channel(1).ref }]);
-    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref }]);
+    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(1).ref }, { ref: channel(2).ref }]);
     expect(played?.ref.itemId).toBe('102');
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
     // The stale list is dropped: the next press goes straight to the source.
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
     await zap('down');
     expect(calls('lists.neighbors')).toHaveLength(1);
+    // The press from channel 2 was answered by the fetch ahead: no new lookup.
     expect(calls('catalog.neighbors')).toHaveLength(2);
 
     // Other failures still reach the caller.
@@ -630,8 +642,8 @@ describe('zap', () => {
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's2' });
     handlers['catalog.neighbors'] = () => ({ next: channel(6) });
     await zap('down');
-    expect(calls('lists.neighbors')).toHaveLength(1);
-    expect(calls('catalog.neighbors')).toEqual([{ ref: { sourceId: 's2', contentType: 'live', itemId: '777' } }]);
+    expect(calls('lists.neighbors')).toHaveLength(2);
+    expect(calls('catalog.neighbors')).toEqual([{ ref: { sourceId: 's2', contentType: 'live', itemId: '777' } }, { ref: channel(6).ref }]);
   });
 
   it('zapToNumber resolves catalog.channelByNumber', async () => {
@@ -643,6 +655,92 @@ describe('zap', () => {
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('142');
     handlers['catalog.channelByNumber'] = () => null;
     await expect(zapToNumber(999)).resolves.toBeUndefined();
+  });
+});
+
+describe('zap bursts, catch-up zapping and channel renames', () => {
+  beforeEach(() => {
+    handlers['parental.status'] = () => ({ enabled: false });
+    handlers['xtream.streamUrl'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      return { url: `http://x/live/${id}.m3u8`, kind: 'hls', title: id, isLive: true, isRadio: false };
+    };
+    // Channels 0 to 20 in a row: each one's neighbours are the numbers either side.
+    handlers['catalog.neighbors'] = (a) => {
+      const n = Number((a as { ref: ItemRef }).ref.itemId) - 100;
+      return { prev: n > 0 ? channel(n - 1) : null, next: n < 20 ? channel(n + 1) : null };
+    };
+  });
+
+  it('three quick presses land three channels away, move the title at once and open one stream', async () => {
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    rpcMock.mockClear();
+    const presses = [zap('down'), zap('down'), zap('down')];
+    // Every press moves the title before any stream is asked for (L2-player-1, L2-player-3).
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.title).toBe('Channel 4'));
+    expect(usePlayerStore.getState().status).toBe('loading');
+    expect(calls('xtream.streamUrl')).toHaveLength(0);
+    const landed = await Promise.all(presses);
+    expect(landed.map((c) => c?.number)).toEqual([4, 4, 4]);
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('104');
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/104.m3u8');
+    // Channels 2 and 3 were passed on the way: no stream and no Recent row for them.
+    expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(4).ref }]);
+    expect(calls('recent.add')).toEqual([expect.objectContaining({ ref: channel(4).ref })]);
+    expect(media.useMediaStore.getState().osd).toMatchObject({ primary: '4', secondary: 'Channel 4' });
+  });
+
+  it('a zap during catch-up of a channel goes to the neighbour live (L2-player-5)', async () => {
+    await playSource({ url: 'http://x/timeshift/101.m3u8', kind: 'hls', title: 'Channel 1', isLive: false, isRadio: false, ref: channel(1).ref });
+    expect(store.canZap(usePlayerStore.getState())).toBe(true);
+    const played = await zap('down');
+    expect(played?.number).toBe(2);
+    expect(usePlayerStore.getState().source).toMatchObject({ isLive: true, ref: channel(2).ref });
+    // A movie still has no neighbours.
+    expect(store.canZap({ source: vod('1') })).toBe(false);
+  });
+
+  it('a rename of the playing channel retitles the player (L2-player-11)', async () => {
+    await playItem({ title: 'Channel 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    handlers['catalog.item'] = () => channel(1, { name: 'UK | Channel One HD' });
+    store.setSettingsCache({ player: 'html5', stripCountryPrefix: true } as never);
+    await store.refreshPlayingChannel('s2');
+    expect(calls('catalog.item')).toHaveLength(0);
+    await store.refreshPlayingChannel('s1');
+    expect(usePlayerStore.getState().source?.title).toBe('Channel One HD');
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/101.m3u8');
+  });
+});
+
+describe('settings and the first-frame watchdog', () => {
+  it('concurrent settings reads, the shell query included, share one settings.get (L2-player-12)', async () => {
+    const { queryClient, rpcKey } = await import('@/api/query');
+    const shell = queryClient.fetchQuery({ queryKey: rpcKey('settings.get'), queryFn: () => rpcMock('settings.get') });
+    const [a, b] = await Promise.all([store.getSettings(), store.getSettings(), shell]);
+    expect(a).toEqual(b);
+    await store.getSettings();
+    expect(calls('settings.get')).toHaveLength(1);
+  });
+
+  it('a live channel that shows no frame fails after LIVE_STARTUP_TIMEOUT_MS, even when the surface reports a pause', async () => {
+    vi.useFakeTimers();
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/live/101.ts', kind: 'mpegts', title: 'News', isLive: true, isRadio: false });
+    await playItem({ title: 'News', isLive: true, ref: liveRef, sourceKind: 'xtream' });
+    // The element rejected the media and paused itself (L2-player-2).
+    store.reportStatus('paused');
+    await vi.advanceTimersByTimeAsync(store.LIVE_STARTUP_TIMEOUT_MS - 1);
+    expect(usePlayerStore.getState().status).toBe('paused');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(usePlayerStore.getState().status).toBe('error');
+    expect(media.useMediaStore.getState().errorCode).toBe('timeout');
+  });
+
+  it('a pause the user asked for before the first frame is not a hang', async () => {
+    vi.useFakeTimers();
+    await usePlayerStore.getState().play(vod('1'));
+    store.setPaused(true);
+    await vi.advanceTimersByTimeAsync(store.STARTUP_TIMEOUT_MS * 2);
+    expect(usePlayerStore.getState().status).toBe('paused');
   });
 });
 
@@ -844,6 +942,31 @@ describe('query cache after saves (Run 3 C4)', () => {
     expect(calls('positions.set')).toHaveLength(1);
     expect(stale(['positions.continueWatching', null])).toBe(true);
     expect(stale(['favorites.list', null])).toBe(false);
+    queryClient.clear();
+  });
+});
+
+describe('saved titles (L2-fix-app-library)', () => {
+  it('position and recent snapshots keep the core titleBase the detail page or catalog row holds', async () => {
+    vi.useFakeTimers();
+    const { queryClient } = await import('@/api/query');
+    queryClient.clear();
+    const ref = { sourceId: 's1', contentType: 'movie' as const, itemId: '1' };
+    // The Xtream detail page's cache, keyed the way vod/hooks/queries.ts keys it.
+    queryClient.setQueryData(['xtream.vodDetail', { ref }], { item: { ref, title: 'EN - Movie 1 (2020)', titleBase: 'Movie 1' }, cast: [], backdrops: [] });
+    await usePlayerStore.getState().play(vod('1', { title: 'EN - Movie 1 (2020)' }));
+    store.reportStatus('playing');
+    store.reportProgress(42, 600);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    expect(calls('recent.add')).toEqual([expect.objectContaining({ snapshot: expect.objectContaining({ title: 'Movie 1' }) })]);
+    expect(calls('positions.set')).toEqual([expect.objectContaining({ snapshot: expect.objectContaining({ title: 'Movie 1' }) })]);
+    usePlayerStore.getState().stop();
+
+    // A bare catalog row (an m3u movie) works the same; an item it does not describe keeps its title.
+    queryClient.setQueryData(['catalog.item', { ref: { ...ref, itemId: '2' } }], { ref: { ...ref, itemId: '2' }, title: '|FR| Movie 2', titleBase: 'Movie 2' });
+    await usePlayerStore.getState().play(vod('2', { title: '|FR| Movie 2' }));
+    await usePlayerStore.getState().play(vod('3', { title: 'EN - Movie 3' }));
+    expect(calls('recent.add').slice(1).map((c) => (c as { snapshot: { title: string } }).snapshot.title)).toEqual(['Movie 2', 'EN - Movie 3']);
     queryClient.clear();
   });
 });

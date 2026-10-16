@@ -238,7 +238,7 @@
   "backupNoSecrets": "此備份不含密碼。Xtream 與 Stalker 播放來源需要重新輸入密碼。",
   "backupMode": "匯入模式",
   "backupMerge": "合併",
-  "backupMergeHint": "新增檔案中的播放來源，並保留現有的播放來源。",
+  "backupMergeHint": "新增檔案中的播放來源。既有的播放來源會保留名稱與設定。",
   "backupReplace": "取代",
   "backupReplaceHint": "先匯入備份，備份中有一個來源載入成功後才移除目前的來源。",
   "backupImportButton": "匯入備份",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "取代",
   "backupImportFailed": "無法匯入備份",
   "backupResult": "已新增或更新：{{imported}}。已略過：{{skipped}}。",
+  "backupRefreshing_one": "仍有 {{count, number}} 個播放清單正在載入，完成後會顯示其收藏與觀看記錄。",
+  "backupRefreshing_other": "仍有 {{count, number}} 個播放清單正在載入，每個完成後會顯示其收藏與觀看記錄。",
   "backupWarnings_one": "{{count}} 則警告",
   "backupWarnings_other": "{{count}} 則警告",
   "backupNotJson": "此檔案不是有效的 JSON。",
@@ -352,10 +354,10 @@
   "railsOffHint": "開啟儀表板後才能使用這些列。",
 
   "resetGroup": "重設",
-  "resetHint": "將所有設定還原為預設值。來源、我的最愛、觀看記錄和下載會保留。",
+  "resetHint": "將所有設定還原為預設值。來源、我的最愛、觀看記錄和下載會保留。節目表網址與 TMDB 金鑰也會保留。",
   "resetButton": "重設設定",
   "resetConfirmTitle": "要重設所有設定嗎？",
-  "resetConfirmBody": "所有設定都會還原為預設值，包括語言、主題和播放器路徑。來源、我的最愛、觀看記錄和下載會保留。",
+  "resetConfirmBody": "所有設定都會還原為預設值，包括語言、主題和播放器路徑。來源、我的最愛、觀看記錄和下載會保留。節目表網址與 TMDB 金鑰也會保留。",
   "resetConfirm": "重設",
   "resetDone": "設定已還原為預設值",
   "resetFailed": "無法重設設定",
@@ -443,5 +445,10 @@
   "backupOldVersion": "此備份使用無法讀取的舊格式。請匯出新的備份後再匯入。",
   "backupImportDone": "已匯入備份",
   "backupReplacePinTitle": "輸入 PIN 以取代來源",
-  "backupReplacePinText": "取代會移除目前的來源及其家長鎖定，因此需要家長監護 PIN。"
+  "backupReplacePinText": "取代會移除目前的來源及其家長鎖定，因此需要家長監護 PIN。",
+  "backupParentalTitle": "此備份會變更家長監護",
+  "backupParentalBody": "家長監護已鎖定，備份中的家長監護選項需要 PIN。輸入 PIN 以匯入全部內容，或只匯入其餘部分並保留目前選項。",
+  "backupParentalSkip": "不匯入這些選項",
+  "backupParentalUnlock": "輸入 PIN 並匯入",
+  "backupParentalPinTitle": "輸入 PIN 以匯入家長監護選項"
 }

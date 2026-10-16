@@ -1,10 +1,12 @@
-import { Clapperboard, ListFilter, Search, SearchX, Tv } from 'lucide-react';
-import { useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Clapperboard, ListFilter, SearchX, Tv } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type SeriesItem, type VodItem } from '@/api/types';
+// The module itself, not the player barrel: small, no imports, already in the player core chunk.
+import { preloadEngines } from '@/features/player/enginePreload';
 
 import { CategoryIndex, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
@@ -16,6 +18,8 @@ import { resumeKey, useRecentlyAdded, useResumeMap, useSource } from '../hooks/q
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
+import { useVodLocks } from '../hooks/useVodLocks';
+import { loadSearchPage } from '../routes';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '@/ui';
@@ -34,28 +38,52 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
   const watched = useWatchedKeys(recent.data);
+  const locks = useVodLocks(sourceId, kind);
 
   const title = kind === 'movie' ? t('movies') : t('series');
+  const sourceCount = source.data ? (kind === 'movie' ? source.data.movieCount : source.data.seriesCount) : undefined;
+  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const countText = sourceCount ? t('titleCount', { count: sourceCount, formatted: fmt.format(sourceCount) }) : undefined;
+  const sourceLine = source.data ? (countText ? `${source.data.name} · ${countText}` : source.data.name) : undefined;
+
+  // One search entry (L1-visual-13): the header field searches this source. Typing opens the
+  // source's search page with the text so far; the field stays in the header there, so focus and
+  // the caret carry over. Later keystrokes before it opens replace that entry instead of stacking.
+  const navigate = useNavigate();
+  const [searchDraft, setSearchDraft] = useState('');
+  const searchStarted = useRef(false);
+  const onSearch = (v: string) => {
+    setSearchDraft(v);
+    if (!v.trim()) return;
+    void navigate(`/s/${encodeURIComponent(sourceId)}/search?q=${encodeURIComponent(v)}`, { replace: searchStarted.current });
+    searchStarted.current = true;
+  };
+  // Warm the search page while the landing idles, so the first keystroke opens it at once.
+  useEffect(() => {
+    const warm = () => void loadSearchPage().catch(() => undefined);
+    if (typeof requestIdleCallback === 'function') {
+      const h = requestIdleCallback(warm);
+      return () => cancelIdleCallback(h);
+    }
+    const h = setTimeout(warm, 200);
+    return () => clearTimeout(h);
+  }, []);
+  // VOD starts here: warm hls.js and mpegts.js once the browser is idle (preloadEngines waits for
+  // it), so the first movie or episode play does not fetch them after the click.
+  useEffect(() => preloadEngines(), []);
+  const searchPlaceholder = source.data ? t('searchInSource', { source: source.data.name }) : t('searchSource');
   usePageHeader(
     {
       title,
-      subtitle: source.data?.name,
-      actions: (
-        <Link to={`/s/${encodeURIComponent(sourceId)}/search`} className={buttonClass('secondary', 'sm')} aria-label={t('searchSource')}>
-          <Search aria-hidden size={16} />
-          <span className="hidden md:inline">{t('searchSource')}</span>
-        </Link>
-      ),
+      subtitle: sourceLine,
+      search: { value: searchDraft, onChange: onSearch, placeholder: searchPlaceholder, onSubmit: onSearch },
     },
-    [title, source.data?.name, sourceId],
+    [title, sourceLine, searchDraft, searchPlaceholder, sourceId],
   );
-
-  const sourceCount = source.data ? (kind === 'movie' ? source.data.movieCount : source.data.seriesCount) : undefined;
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const hiddenCount = (allCats.data ?? []).filter((c) => c.hidden).length;
 
   const entries = useMemo<CategoryEntry[]>(() => {
-    const list = categoryEntries(cats.data ?? [], filter);
+    const list = categoryEntries(cats.data ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));
     if (filter.trim()) return list;
     const all: CategoryEntry = {
       id: ALL_CATEGORIES,
@@ -64,7 +92,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     };
     if (sourceCount) all.count = sourceCount;
     return [all, ...list];
-  }, [cats.data, filter, kind, sourceCount, t]);
+  }, [cats.data, filter, kind, sourceCount, t, locks]);
 
   const hrefFor = (id: string) => `/s/${encodeURIComponent(sourceId)}/${section}/c/${encodeURIComponent(id)}`;
 
@@ -102,17 +130,10 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto" data-testid={`vod-landing-${kind}`}>
       <div className="mx-auto flex w-full max-w-[2200px] flex-col gap-10 px-4 py-6 md:px-8">
-        <div className="-mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="font-display text-[clamp(24px,2.4vw,36px)] leading-tight font-semibold text-fg">{title}</h1>
-          {source.data && (
-            <p className="min-w-0 truncate text-sm text-fg-muted">
-              {source.data.name}
-              {sourceCount ? (
-                <span className="tabular ms-2 text-fg-subtle">{t('titleCount', { count: sourceCount, formatted: fmt.format(sourceCount) })}</span>
-              ) : null}
-            </p>
-          )}
-        </div>
+        {/* The shell header shows the title, the source and the count (one place, L1-visual-13). Its
+            subtitle folds away below md, so only there the source line shows here. */}
+        <h1 className="sr-only">{title}</h1>
+        {sourceLine && <p className="-mb-6 min-w-0 truncate text-sm text-fg-muted md:hidden">{sourceLine}</p>}
         {isEmptySource ? (
           <EmptyState
             icon={kind === 'movie' ? <Clapperboard size={32} /> : <Tv size={32} />}
@@ -129,7 +150,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
             <PosterRail<VodItem | SeriesItem>
               title={t('recentlyAdded')}
               items={recent.data ?? []}
-              loading={recent.isPending && !!source.data}
+              // Placeholder cards from the first frame (L2-vod-5): the rail never pops in and pushes the categories down.
+              loading={recent.isPending}
               empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => void recent.refetch()} /> : undefined}
               myList={myListTarget}
               render={(item, i, rail) => (
@@ -146,6 +168,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                   watched={watched.has(itemKey(item.ref))}
                   language={itemLanguage(item.title, item.categoryName)}
                   myList={myListTarget(item)}
+                  locked={locks.itemLocked(item)}
                   prefetch={
                     source.data
                       ? { ref: item.ref, sourceKind: source.data.kind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }
@@ -198,7 +221,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                 />
               ) : (
                 <div onClickCapture={rememberCategory}>
-                  <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} />
+                  <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} lockedLabel={t('locked')} />
                 </div>
               )}
             </section>

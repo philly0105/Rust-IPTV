@@ -238,7 +238,7 @@
   "backupNoSecrets": "Deze backup bevat geen wachtwoorden. Die moet je voor Xtream- en Stalker-bronnen opnieuw invoeren.",
   "backupMode": "Importmodus",
   "backupMerge": "Samenvoegen",
-  "backupMergeHint": "Voegt bronnen uit het bestand toe en behoudt je huidige bronnen.",
+  "backupMergeHint": "Voegt bronnen uit het bestand toe. Je huidige bronnen houden hun naam en instellingen.",
   "backupReplace": "Vervangen",
   "backupReplaceHint": "Importeert eerst de back-up en verwijdert je huidige bronnen zodra een van de bronnen ervan laadt.",
   "backupImportButton": "Backup importeren",
@@ -248,6 +248,8 @@
   "backupReplaceConfirm": "Vervangen",
   "backupImportFailed": "Kan de backup niet importeren",
   "backupResult": "Toegevoegd of bijgewerkt: {{imported}}. Overgeslagen: {{skipped}}.",
+  "backupRefreshing_one": "{{count, number}} playlist wordt nog geladen; de favorieten en geschiedenis verschijnen zodra die klaar is.",
+  "backupRefreshing_other": "{{count, number}} playlists worden nog geladen; favorieten en geschiedenis verschijnen zodra elke playlist klaar is.",
   "backupWarnings_one": "{{count}} waarschuwing",
   "backupWarnings_other": "{{count}} waarschuwingen",
   "backupNotJson": "Dit bestand is geen geldige JSON.",
@@ -352,10 +354,10 @@
   "railsOffHint": "Zet het dashboard aan om deze rijen te gebruiken.",
 
   "resetGroup": "Herstellen",
-  "resetHint": "Zet elke instelling terug naar de standaard. Bronnen, favorieten, geschiedenis en downloads blijven.",
+  "resetHint": "Zet elke instelling terug naar de standaard. Bronnen, favorieten, geschiedenis en downloads blijven. Gidsadressen en de TMDB-sleutel blijven ook.",
   "resetButton": "Instellingen herstellen",
   "resetConfirmTitle": "Alle instellingen herstellen?",
-  "resetConfirmBody": "Elke instelling gaat terug naar de standaard, ook taal, thema en spelerpaden. Bronnen, favorieten, geschiedenis en downloads blijven.",
+  "resetConfirmBody": "Elke instelling gaat terug naar de standaard, ook taal, thema en spelerpaden. Bronnen, favorieten, geschiedenis en downloads blijven. Gidsadressen en de TMDB-sleutel blijven ook.",
   "resetConfirm": "Herstellen",
   "resetDone": "Instellingen hersteld naar standaard",
   "resetFailed": "Kan instellingen niet herstellen",
@@ -443,5 +445,10 @@
   "backupOldVersion": "Deze back-up gebruikt een ouder formaat dat niet gelezen kan worden. Exporteer een nieuwe back-up en importeer die.",
   "backupImportDone": "Back-up geïmporteerd",
   "backupReplacePinTitle": "Voer de pincode in om bronnen te vervangen",
-  "backupReplacePinText": "Vervangen verwijdert je huidige bronnen en hun ouderlijk-toezichtvergrendelingen, dus de pincode voor ouderlijk toezicht is nodig."
+  "backupReplacePinText": "Vervangen verwijdert je huidige bronnen en hun ouderlijk-toezichtvergrendelingen, dus de pincode voor ouderlijk toezicht is nodig.",
+  "backupParentalTitle": "Deze back-up wijzigt het ouderlijk toezicht",
+  "backupParentalBody": "Ouderlijk toezicht is vergrendeld, dus de opties ervan in de back-up vragen de pincode. Voer die in om alles te importeren, of importeer de rest en houd je huidige opties.",
+  "backupParentalSkip": "Importeren zonder deze opties",
+  "backupParentalUnlock": "Pincode invoeren en importeren",
+  "backupParentalPinTitle": "Voer de pincode in om de opties voor ouderlijk toezicht te importeren"
 }

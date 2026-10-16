@@ -13,6 +13,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { cn } from './cn';
+import { portalContainer } from './portal';
 
 export type TooltipSide = 'top' | 'bottom' | 'left' | 'right';
 
@@ -181,7 +182,8 @@ export function Tooltip({ content, children, side = 'top', delay = 400, classNam
           >
             {content}
           </div>,
-          document.body,
+          // In element fullscreen (player, multi-view wall) only the fullscreen element paints.
+          portalContainer(),
         )}
     </span>
   );

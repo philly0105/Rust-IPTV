@@ -8,23 +8,8 @@ export const PLAYLIST_EXTENSIONS = ['m3u', 'm3u8', 'txt'];
  */
 export const MAX_WEB_FILE_BYTES = 200 * 1024 * 1024;
 
-/** `1.2 GB`, `350 MB`, `12 KB` in the user's number format. */
-export function formatFileSize(bytes: number, lang: string): string {
-  const units = ['B', 'KB', 'MB', 'GB'] as const;
-  let value = Math.max(0, bytes);
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  let text: string;
-  try {
-    text = new Intl.NumberFormat(lang, { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
-  } catch {
-    text = String(Math.round(value));
-  }
-  return `${text} ${units[unit]}`;
-}
+// Lives in @/lib/numbers so the shell's entry chunk can format sizes without this whole module.
+export { formatFileSize } from '@/lib/numbers';
 
 /** Desktop only: native open dialog. Returns the absolute path or null when canceled. */
 export async function pickPathDesktop(opts: { title?: string; extensions: string[]; filterName: string }): Promise<string | null> {

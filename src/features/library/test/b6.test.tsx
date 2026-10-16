@@ -440,11 +440,16 @@ describe('downloads', () => {
     await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(0));
   });
 
-  it('the progress needle is placed with a logical inset for RTL (D6)', () => {
+  // L2-guide-library-10 moved the fill and needle from inset/width to one translated layer;
+  // this still pins that the position follows the reading direction (D6).
+  it('the progress fill and needle slide from the start edge in either direction (D6)', () => {
     render(<DialProgress percent={40} tone="accent" label="p" />);
-    const needle = document.querySelector<HTMLElement>('.bg-fg');
-    expect(needle?.style.insetInlineStart).toBe('calc(40% - 1px)');
-    expect(needle?.style.left).toBe('');
+    const fill = screen.getByTestId('dial-fill');
+    expect(fill.style.getPropertyValue('--dial')).toBe('40');
+    expect(fill.className).toContain('translate-x-[calc(var(--dial)*1%_-_100%)]');
+    expect(fill.className).toContain('rtl:translate-x-[calc(100%_-_var(--dial)*1%)]');
+    expect(within(fill).getByTestId('dial-needle').className).toContain('-end-px');
+    expect(fill.style.left).toBe('');
   });
 });
 

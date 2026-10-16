@@ -2,7 +2,7 @@
 
 import { k } from '../lib/keys';
 import { FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Download, Source } from '@/api/types';
@@ -92,20 +92,24 @@ export function DialProgress({
           />
         ) : null
       ) : (
-        <>
-          <div
-            aria-hidden
-            className={cn('absolute inset-y-0 start-0 rounded-full motion-safe:transition-[width] motion-safe:duration-300', fill)}
-            style={{ width: `${percent}%` }}
-          />
-          {tone === 'accent' && percent > 0 && percent < 100 && (
-            <div
-              aria-hidden
-              className="absolute -inset-y-0.5 w-0.5 rounded-full bg-fg shadow-[0_0_6px_var(--color-glow)]"
-              style={{ insetInlineStart: `calc(${percent}% - 1px)` }}
-            />
+        // One full-width layer slid in from the start edge: the fill and its needle move
+        // together with `translate`, which the compositor animates. Width and inset
+        // transitions re-ran layout on every row 4 times a second (L2-guide-library-10).
+        <div
+          aria-hidden
+          data-testid="dial-fill"
+          className={cn(
+            'absolute inset-0 rounded-full',
+            'translate-x-[calc(var(--dial)*1%_-_100%)] rtl:translate-x-[calc(100%_-_var(--dial)*1%)]',
+            'motion-safe:transition-[translate] motion-safe:duration-300',
+            fill,
           )}
-        </>
+          style={{ '--dial': percent } as CSSProperties}
+        >
+          {tone === 'accent' && percent > 0 && percent < 100 && (
+            <div aria-hidden data-testid="dial-needle" className="absolute -end-px inset-y-0 w-0.5 rounded-full bg-fg shadow-[0_0_6px_var(--color-glow)]" />
+          )}
+        </div>
       )}
     </div>
   );

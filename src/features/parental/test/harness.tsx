@@ -211,13 +211,16 @@ function createFakeCore() {
   const parental: Handlers = {
     'parental.status': () => status(),
     'parental.setPin': (raw) => {
-      const a = raw as { currentPin?: string; newPin: string };
+      const a = raw as { currentPin?: string; newPin: string; unlock?: boolean };
       if (!validPin(a.newPin)) fail('invalid', 'newPin must be 4 to 8 digits.');
-      if (state.pin !== null) {
+      const first = state.pin === null;
+      if (!first) {
         if (a.currentPin === undefined) fail('auth', 'Enter the current PIN to change it.');
         verify(a.currentPin!);
       }
       state.pin = a.newPin;
+      // L1-settings-5: a first PIN starts a session unlock only when asked; changing a PIN never does.
+      if (first && a.unlock) state.unlockedUntil = state.unlockMinutes > 0 ? Date.now() + state.unlockMinutes * 60_000 : Infinity;
       state.failedAttempts = 0;
       state.lockoutUntil = null;
       return changed();
@@ -262,6 +265,28 @@ function createFakeCore() {
       if (a.locked && !had) state.locks.push({ ...a.target, createdAt: '2026-10-13T08:00:00.000Z' });
       if (!a.locked) state.locks = state.locks.filter((l) => !sameLock(l, a.target));
       if (had !== a.locked) changed();
+    },
+    'parental.setLockedMany': (raw) => {
+      const a = raw as { add?: ParentalLockTarget[]; remove?: ParentalLockTarget[]; pin?: string };
+      const add = a.add ?? [];
+      const remove = a.remove ?? [];
+      if (add.length + remove.length > 5000) fail('invalid', 'parental.setLockedMany takes at most 5000 targets.');
+      // Checked before anything is written: one transaction.
+      if (remove.length > 0) authorize(a.pin, 'remove a lock');
+      let count = 0;
+      for (const t of remove) {
+        const before = state.locks.length;
+        state.locks = state.locks.filter((l) => !sameLock(l, t));
+        count += before - state.locks.length;
+      }
+      for (const t of add) {
+        if (state.locks.some((l) => sameLock(l, t))) continue;
+        state.locks.push({ ...t, createdAt: '2026-10-13T08:00:00.000Z' });
+        count += 1;
+      }
+      // One parental.changed per call.
+      if (count > 0) changed();
+      return { changed: count };
     },
     'parental.check': (raw) => {
       const a = raw as { items: { ref: ItemRef; categoryId?: string }[] };

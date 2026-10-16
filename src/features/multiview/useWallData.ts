@@ -8,10 +8,10 @@ import { useEffect, useMemo } from 'react';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
-import type { AccountStatus } from '@/api/rpc';
 import { rpcRaw, type RpcResult } from '@/api/transport';
 import { itemKey, type EpgNowNext, type ItemKey, type ParentalMode, type Source } from '@/api/types';
 
+import { accountStatusQuery } from './accountStatus';
 import { gateItem } from './addChannel';
 import { usePlayerStore } from './deps';
 import type { MultiviewTile } from './types';
@@ -81,21 +81,16 @@ export function useOwnStreams(): ReadonlyMap<string, number> {
 /**
  * Connections in use per account against its limit (`account.status`, cached by the core):
  * the tiles that open a stream plus this app's own streams. Only Xtream panels report a
- * limit (the player's `connectionLimit.ts` asks the same way), so only Xtream sources with
- * streaming tiles are asked.
+ * limit (the player's `connectionLimit.ts` asks the same way), so only Xtream sources are
+ * asked: every one with a tile on the wall, without waiting for the tiles' parental checks,
+ * so the banner is ready as soon as the checks are (it does not push the wall down later).
  */
 export function useSourceLoads(tiles: readonly MultiviewTile[], sources: Map<string, Source>, parentalActive: boolean | undefined): SourceLoad[] {
   const streaming = useStreamingTiles(tiles, sources, parentalActive);
   const own = useOwnStreams();
   const counts = useMemo(() => tileCounts(streaming), [streaming]);
-  const asked = counts.filter(([id]) => sources.get(id)?.kind === 'xtream');
-  const statuses = useQueries({
-    queries: asked.map(([sourceId]) => ({
-      queryKey: rpcKey('account.status', { sourceId }),
-      queryFn: async ({ signal }) => (await rpcRaw('account.status', { sourceId }, { signal })) as AccountStatus | null,
-      staleTime: 60_000,
-    })),
-  });
+  const asked = tileCounts(tiles).filter(([id]) => sources.get(id)?.kind === 'xtream');
+  const statuses = useQueries({ queries: asked.map(([sourceId]) => accountStatusQuery(sourceId)) });
   const maxBySource = new Map<string, number>();
   asked.forEach(([sourceId], i) => {
     const max = statuses[i]?.data?.maxConnections ?? 0;

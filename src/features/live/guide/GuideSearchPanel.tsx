@@ -1,6 +1,6 @@
 /**
  * Guide search (Run 2 C5): a toolbar field (`/` focuses it) and a floating
- * results panel. Queries `epg.search` for the selected source 250 ms after
+ * results panel. Queries `epg.search` for the selected source 120 ms after
  * typing stops, from what airs now to 14 days ahead, and lists the hits by
  * day with channel, time and title. Choosing a hit moves the grid to it; each
  * hit also offers Watch (while it airs), Remind, Record and Record series.
@@ -8,13 +8,13 @@
 
 import type { TFunction } from 'i18next';
 import { CalendarOff, Radio, SearchX, X } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { GuideSearchHit } from '@/api/types';
-import { ProgramActions } from '@/features/recording';
+import { ProgramActionsView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
 import { buttonClass, cn, EmptyState, ErrorState, IconButton, SearchInput, Skeleton } from '@/ui';
 
 import { useDebounced } from '../hooks/useDebounced';
@@ -23,8 +23,13 @@ import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/ep
 import { ChannelLogo } from '../components/ChannelLogo';
 import { displayHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
 
-/** Debounce before a query is sent. */
-export const SEARCH_DEBOUNCE_MS = 250;
+/** Debounce before a query is sent (the search itself answers within the 150 ms budget's rest). */
+export const SEARCH_DEBOUNCE_MS = 120;
+/**
+ * Hits mounted with the first frame of an answer; the rest follow a batch per frame, so a
+ * keystroke never mounts a hundred rows in one task (L2-perf-ui-2).
+ */
+export const HITS_FIRST_BATCH = 20;
 
 /** The panel's widest, in rem (it follows the UI scale). */
 const PANEL_MAX_REM = 30;
@@ -73,10 +78,12 @@ export interface GuideSearchProps extends SharedProps {
   /** For the `/` shortcut. */
   inputRef: RefObject<HTMLInputElement | null>;
   className?: string;
+  /** No source yet (the sources list is loading): the field holds its place, disabled. */
+  disabled?: boolean;
 }
 
 /** The toolbar field with its results panel. */
-export function GuideSearch({ inputRef, className, onSelect, onWatch, ...rest }: GuideSearchProps) {
+export const GuideSearch = memo(function GuideSearch({ inputRef, className, onSelect, onWatch, disabled, ...rest }: GuideSearchProps) {
   const { t } = useTranslation('guide');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -157,9 +164,10 @@ export function GuideSearch({ inputRef, className, onSelect, onWatch, ...rest }:
         label={t('searchLabel')}
         aria-controls={open ? panelId : undefined}
         className="w-full"
+        disabled={disabled}
         data-testid="guide-search-input"
       />
-      {open ? (
+      {open && !disabled ? (
         <GuideSearchPanel
           {...rest}
           id={panelId}
@@ -181,7 +189,7 @@ export function GuideSearch({ inputRef, className, onSelect, onWatch, ...rest }:
       ) : null}
     </div>
   );
-}
+});
 
 export interface GuideSearchPanelProps extends SharedProps {
   id?: string;
@@ -225,8 +233,25 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
     { enabled: !!q && !!sourceId && !guides.isLoading && !noGuide, staleTime: 60_000, keepPrevious: true },
   );
   const hits = useMemo(() => (search.data ? displayHits(search.data, offsetMinutes) : undefined), [search.data, offsetMinutes]);
-  const days = useMemo(() => groupHitsByDay(hits ?? []), [hits]);
+  // A new answer mounts its first hits at once and the rest a batch per frame.
+  const [shown, setShown] = useState<{ hits: typeof hits; n: number }>({ hits, n: HITS_FIRST_BATCH });
+  const shownN = shown.hits === hits ? shown.n : HITS_FIRST_BATCH;
+  if (shown.hits !== hits) setShown({ hits, n: HITS_FIRST_BATCH });
+  const total = hits?.length ?? 0;
+  useEffect(() => {
+    if (shownN >= total) return;
+    const id = requestAnimationFrame(() => setShown((s) => (s.hits === hits ? { hits, n: s.n + HITS_FIRST_BATCH } : s)));
+    return () => cancelAnimationFrame(id);
+  }, [hits, shownN, total]);
+  const days = useMemo(() => groupHitsByDay((hits ?? []).slice(0, shownN)), [hits, shownN]);
   const pending = settling || search.isFetching;
+  // One read of the schedule, rules and recording support for every hit's actions.
+  const shared = useProgramActionsShared();
+  // Stable for the memoised rows: each reads the latest callback.
+  const handlers = useRef({ onSelect, onWatch });
+  handlers.current = { onSelect, onWatch };
+  const select = useMemo(() => (hit: GuideSearchHit) => handlers.current.onSelect(hit), []);
+  const watch = useMemo(() => (hit: GuideSearchHit) => handlers.current.onWatch(hit), []);
 
   const focusHit = (from: HTMLElement | null, step: number | 'first' | 'last') => {
     const all = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-hit]') ?? [])];
@@ -315,7 +340,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
             </h3>
             <ul className="flex flex-col divide-y divide-divider">
               {d.hits.map((h) => (
-                <HitRow key={hitKey(h)} hit={h} now={now} lang={lang} strip={stripCountryPrefix} onSelect={onSelect} onWatch={onWatch} />
+                <HitRow key={hitKey(h)} hit={h} now={now} lang={lang} strip={stripCountryPrefix} shared={shared} onSelect={select} onWatch={watch} />
               ))}
             </ul>
           </section>
@@ -355,11 +380,12 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
   );
 }
 
-function HitRow({
+const HitRow = memo(function HitRow({
   hit,
   now,
   lang,
   strip,
+  shared,
   onSelect,
   onWatch,
 }: {
@@ -367,6 +393,7 @@ function HitRow({
   now: number;
   lang: string;
   strip?: boolean;
+  shared: ProgramActionsShared;
   onSelect(hit: GuideSearchHit): void;
   onWatch(hit: GuideSearchHit): void;
 }) {
@@ -408,8 +435,8 @@ function HitRow({
         {airing ? (
           <IconButton size="sm" label={t('watchNow', { channel: name })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
         ) : null}
-        <ProgramActions channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" />
+        <ProgramActionsView channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" shared={shared} />
       </span>
     </li>
   );
-}
+});

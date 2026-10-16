@@ -359,10 +359,31 @@ impl NamedRow {
 // Writer
 // ---------------------------------------------------------------------------
 
-const INSERT_ITEM_SQL: &str = "INSERT OR IGNORE INTO items (source_id, content_type, item_id, category_id, title, title_base, number, logo_url, poster_url, backdrop_url, rating, added, year, epg_channel_id, url, container_extension, is_radio, archive_hours, extra_json, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)";
+const INSERT_ITEM_SQL: &str = "INSERT OR IGNORE INTO items (source_id, content_type, item_id, category_id, title, title_base, number, logo_url, poster_url, backdrop_url, rating, added, year, epg_channel_id, url, container_extension, is_radio, archive_hours, extra_json, position, non_english) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
 
 /// Rows inserted between progress callbacks / statement resets.
 pub const WRITE_BATCH: u64 = 1000;
+
+/// Rows a rewrite touches (deleted plus offered for insert) from which the
+/// secondary indexes of `items` are dropped and built once in
+/// [`CatalogWriter::finish`] instead of being updated row by row. The rewrite
+/// must also touch at least as many rows as it leaves in `items` (other
+/// sources and types), since the rebuild sorts those too.
+pub const BULK_MIN_ROWS: u64 = 20_000;
+
+/// Rowids whose stored verdict their category may overturn, per category:
+/// `(untagged titles, foreign-script titles)`.
+type Undecided = HashMap<String, (Vec<i64>, Vec<i64>)>;
+
+/// The name a category is stored under (see [`CatalogWriter::finish`]).
+fn stored_category_name(name: &str) -> &str {
+    let name = name.trim();
+    if name.is_empty() {
+        FALLBACK_CATEGORY_NAME
+    } else {
+        name
+    }
+}
 
 /// Streaming catalog writer over a caller-owned transaction.
 ///
@@ -372,6 +393,17 @@ pub const WRITE_BATCH: u64 = 1000;
 /// `hidden`, adding fallback categories for ids items referenced but nobody
 /// declared), recomputes `item_count`, and refreshes `source_counts`.
 /// Dropping the transaction without committing restores the previous catalog.
+///
+/// Each row also gets its English-only verdict (`non_english`, see
+/// [`language`]), so readers never test rows. A row whose category was
+/// declared first ([`CatalogWriter::declare_categories`]) gets its final
+/// verdict on insert. Otherwise `insert` stores the title's guess, and
+/// `finish` corrects the rows whose category decides (an untagged title in a
+/// "FRANCE" group, a foreign-script title in an "UK | NEWS" one).
+///
+/// A large rewrite ([`BULK_MIN_ROWS`]) drops the secondary indexes of
+/// `items` and `finish` builds them again, inside the same transaction:
+/// readers keep seeing the previous catalog with its indexes until the commit.
 pub struct CatalogWriter<'c> {
     conn: &'c Connection,
     source_id: String,
@@ -379,6 +411,15 @@ pub struct CatalogWriter<'c> {
     hidden: HashMap<ContentType, HashSet<String>>,
     seen_categories: HashMap<ContentType, HashSet<String>>,
     inserted: HashMap<ContentType, u64>,
+    /// Rowids whose stored verdict a category may overturn, per type.
+    undecided: HashMap<ContentType, Undecided>,
+    /// Category verdicts declared before the rows, per type.
+    declared: HashMap<ContentType, HashMap<String, i64>>,
+    /// Rows of the rewritten types deleted by `begin`.
+    replaced: u64,
+    /// `(name, CREATE statement)` of the indexes dropped for a bulk rewrite;
+    /// `None` while the indexes are maintained row by row.
+    dropped_indexes: Option<Vec<(String, String)>>,
     total: u64,
     duplicates: u64,
     /// Cancel token of the import run writing this catalog (C8), taken at
@@ -434,6 +475,33 @@ impl<'c> CatalogWriter<'c> {
             "INSERT OR IGNORE INTO fts_suspend (source_id) VALUES (?1)",
             [source_id],
         )?;
+        let mut replaced = 0u64;
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT count(*) FROM items WHERE source_id = ?1 AND content_type = ?2",
+            )?;
+            for ct in types {
+                replaced +=
+                    stmt.query_row(params![source_id, ct.as_str()], |r| r.get::<_, i64>(0))? as u64;
+            }
+        }
+        let mut w = Self {
+            conn,
+            source_id: source_id.to_string(),
+            types: types.to_vec(),
+            hidden,
+            seen_categories: HashMap::new(),
+            inserted: HashMap::new(),
+            undecided: HashMap::new(),
+            declared: HashMap::new(),
+            replaced,
+            dropped_indexes: None,
+            total: 0,
+            duplicates: 0,
+            cancel: cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id)),
+        };
+        // A large refresh drops the indexes before its deletes too.
+        w.maybe_go_bulk()?;
         for ct in types {
             conn.execute(
                 "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
@@ -448,17 +516,57 @@ impl<'c> CatalogWriter<'c> {
                 params![source_id, ct.as_str()],
             )?;
         }
-        Ok(Self {
-            conn,
-            source_id: source_id.to_string(),
-            types: types.to_vec(),
-            hidden,
-            seen_categories: HashMap::new(),
-            inserted: HashMap::new(),
-            total: 0,
-            duplicates: 0,
-            cancel: cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id)),
-        })
+        Ok(w)
+    }
+
+    /// Drops every secondary index of `items` once the rewrite touches enough
+    /// rows ([`BULK_MIN_ROWS`]); [`CatalogWriter::finish`] runs their stored
+    /// CREATE statements again. Sorting the rows once is several times
+    /// cheaper than updating a dozen b-trees per row. The primary key stays
+    /// (duplicate detection and the per-source deletes use it).
+    fn maybe_go_bulk(&mut self) -> CoreResult<()> {
+        let touched = self.replaced + self.total + self.duplicates;
+        if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
+            return Ok(());
+        }
+        let all: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
+        // Rows the rebuild sorts although this rewrite leaves them alone.
+        let kept = (all as u64).saturating_sub(self.replaced + self.total);
+        if touched < kept {
+            return Ok(());
+        }
+        let indexes = {
+            let mut stmt = self.conn.prepare(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY name",
+            )?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for (name, _) in &indexes {
+            self.conn
+                .execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
+        }
+        self.dropped_indexes = Some(indexes);
+        Ok(())
+    }
+
+    /// Declares the categories of `ct` before its rows are inserted, so each
+    /// row gets its final English-only verdict on insert rather than an
+    /// update in `finish`. Pass `finish` the same categories (as there, the
+    /// first category with an id wins).
+    pub fn declare_categories(&mut self, ct: ContentType, categories: &[CategoryRow]) {
+        let declared = self.declared.entry(ct).or_default();
+        for c in categories {
+            if !declared.contains_key(c.category_id.as_str()) {
+                declared.insert(
+                    c.category_id.clone(),
+                    language::category_verdict(stored_category_name(&c.name)),
+                );
+            }
+        }
     }
 
     /// Inserts one item. The row's `source_id` is ignored (the writer's wins).
@@ -486,6 +594,23 @@ impl<'c> CatalogWriter<'c> {
         } else {
             item.extra.to_string()
         };
+        let verdict = language::title_verdict(&item.title);
+        let undecided = matches!(
+            verdict,
+            language::TITLE_UNDECIDED | language::TITLE_UNDECIDED_FOREIGN
+        );
+        let category = if undecided {
+            self.declared
+                .get(&item.content_type)
+                .and_then(|d| d.get(item.category_id.as_str()))
+                .copied()
+        } else {
+            None
+        };
+        let non_english = match category {
+            Some(c) => language::combine(verdict, c),
+            None => language::title_guess(verdict),
+        };
         let mut stmt = self.conn.prepare_cached(INSERT_ITEM_SQL)?;
         let n = stmt.execute(params![
             self.source_id,
@@ -508,13 +633,28 @@ impl<'c> CatalogWriter<'c> {
             item.archive_hours,
             extra,
             item.position,
+            non_english,
         ])?;
         if (self.total + self.duplicates + 1) % WRITE_BATCH == 0 {
             check_cancel(self.cancel.as_ref())?;
+            self.maybe_go_bulk()?;
         }
         if n == 0 {
             self.duplicates += 1;
             return Ok(false);
+        }
+        if undecided && category.is_none() {
+            let rowid = self.conn.last_insert_rowid();
+            let by_cat = self.undecided.entry(item.content_type).or_default();
+            let lists = match by_cat.get_mut(item.category_id.as_str()) {
+                Some(l) => l,
+                None => by_cat.entry(item.category_id.clone()).or_default(),
+            };
+            if verdict == language::TITLE_UNDECIDED {
+                lists.0.push(rowid);
+            } else {
+                lists.1.push(rowid);
+            }
         }
         let seen = self.seen_categories.entry(item.content_type).or_default();
         if !seen.contains(item.category_id.as_str()) {
@@ -544,12 +684,23 @@ impl<'c> CatalogWriter<'c> {
     /// number of items written. Does not commit.
     pub fn finish(self, categories: &[(ContentType, Vec<CategoryRow>)]) -> CoreResult<u64> {
         check_cancel(self.cancel.as_ref())?;
+        // A bulk rewrite builds the indexes again first: the counts below
+        // read them.
+        for (_, sql) in self.dropped_indexes.iter().flatten() {
+            self.conn.execute_batch(sql)?;
+        }
         let mut insert_cat = self.conn.prepare_cached(
             "INSERT OR IGNORE INTO categories (source_id, content_type, category_id, name, hidden, position, item_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
         )?;
+        let mut set_verdict = self
+            .conn
+            .prepare_cached("UPDATE items SET non_english = ?2 WHERE rowid = ?1")?;
         for ct in &self.types {
             let hidden = self.hidden.get(ct);
             let mut declared: HashSet<&str> = HashSet::new();
+            // English-only verdict of each category as stored (first wins,
+            // as with INSERT OR IGNORE).
+            let mut verdicts: HashMap<&str, i64> = HashMap::new();
             let mut next_pos = 0i64;
             let rows = categories
                 .iter()
@@ -559,11 +710,10 @@ impl<'c> CatalogWriter<'c> {
                 declared.insert(c.category_id.as_str());
                 next_pos = next_pos.max(c.position + 1);
                 let is_hidden = hidden.is_some_and(|h| h.contains(&c.category_id));
-                let name = if c.name.trim().is_empty() {
-                    FALLBACK_CATEGORY_NAME
-                } else {
-                    c.name.trim()
-                };
+                let name = stored_category_name(&c.name);
+                verdicts
+                    .entry(c.category_id.as_str())
+                    .or_insert_with(|| language::category_verdict(name));
                 insert_cat.execute(params![
                     self.source_id,
                     ct.as_str(),
@@ -592,6 +742,32 @@ impl<'c> CatalogWriter<'c> {
                     next_pos += 1;
                 }
             }
+            // English-only: the rows whose category overturns the title's
+            // guess (undeclared categories are named FALLBACK_CATEGORY_NAME).
+            if let Some(by_cat) = self.undecided.get(ct) {
+                let fallback = language::category_verdict(FALLBACK_CATEGORY_NAME);
+                for (category_id, (untagged, foreign)) in by_cat {
+                    let verdict = verdicts
+                        .get(category_id.as_str())
+                        .copied()
+                        .unwrap_or(fallback);
+                    let (hide_untagged, show_foreign) = language::category_changes(verdict);
+                    if hide_untagged {
+                        for rowid in untagged {
+                            set_verdict.execute(params![rowid, true])?;
+                        }
+                    }
+                    if show_foreign {
+                        for rowid in foreign {
+                            set_verdict.execute(params![rowid, false])?;
+                        }
+                    }
+                }
+            }
+            self.conn.execute(
+                "DELETE FROM english_pending WHERE source_id = ?1 AND content_type = ?2",
+                params![self.source_id, ct.as_str()],
+            )?;
             // C2: hidden channels (kept across the rewrite) leave the counts.
             recount_categories(self.conn, &self.source_id, *ct)?;
         }
@@ -823,7 +999,7 @@ pub fn english_categories(
     {
         // An index-only walk of `idx_items_cat` with a rowid probe per row
         // (two when channels are hidden, C2).
-        let hidden = language::hidden_rowids(conn, source_id, content_type.as_str())?;
+        let hidden = english_scoped(conn, true, source_id, content_type)?;
         let edited = channeledit::scoped(conn, source_id, content_type, "?1", "?2")?;
         let mut stmt = conn.prepare_cached(&format!(
             "SELECT i.category_id, count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2{hidden}{edited} GROUP BY i.category_id"
@@ -967,35 +1143,39 @@ pub fn set_categories_hidden(
 
 pub(crate) const SELECT_NAMED: &str = "SELECT i.source_id, i.content_type, i.item_id, i.category_id, i.title, i.title_base, i.number, i.logo_url, i.poster_url, i.backdrop_url, i.rating, i.added, i.year, i.epg_channel_id, i.url, i.container_extension, i.is_radio, i.archive_hours, i.extra_json, i.position, c.name FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id";
 
-/// `AND` clause of the English-only filter, or nothing. Needs the `c` join of
-/// [`SELECT_NAMED`]; for readers across sources, which look at few rows.
-fn english_clause(english_only: bool) -> &'static str {
+/// `AND` clause of the English-only filter, or nothing, for readers across
+/// sources (needs the `c` join of [`SELECT_NAMED`]): the stored verdict, or
+/// the per-row rule while a catalog from before migration 0018 is pending.
+fn english_clause(conn: &Connection, english_only: bool) -> CoreResult<&'static str> {
     if english_only {
-        language::ENGLISH_ONLY_SQL
+        Ok(language::english_only_joined(conn)?)
     } else {
-        ""
+        Ok("")
     }
 }
 
 /// `AND` clause of the English-only filter for rows of one source and
-/// content type, or nothing: a probe into this connection's cached set of
-/// hidden rowids (see [`language::hidden_rowids`]), so a count over 50k rows
-/// stays an index-only scan within the query budget.
+/// content type, or nothing: the stored verdict (`items.non_english`, a
+/// column of every catalog index, so a count over 100k rows stays an
+/// index-only scan), or this connection's cached set of hidden rowids
+/// ([`language::hidden_rowids`]) while the catalog is pending.
 fn english_scoped(
     conn: &Connection,
     english_only: bool,
     source_id: &str,
     content_type: ContentType,
 ) -> CoreResult<&'static str> {
-    if english_only {
-        Ok(language::hidden_rowids(
+    if !english_only {
+        return Ok("");
+    }
+    if language::is_pending(conn, source_id, content_type.as_str())? {
+        return Ok(language::hidden_rowids(
             conn,
             source_id,
             content_type.as_str(),
-        )?)
-    } else {
-        Ok("")
+        )?);
     }
+    Ok(language::STORED_SQL)
 }
 
 pub(crate) fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
@@ -1125,13 +1305,7 @@ pub fn query_named(
     // Skip the hidden-category filter when nothing is hidden (the common case).
     let filter_hidden = q.category_id.is_none()
         && !q.include_hidden
-        && conn
-            .prepare_cached(
-                "SELECT EXISTS(SELECT 1 FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
-            )?
-            .query_row(params![q.source_id, q.content_type.as_str()], |r| {
-                r.get::<_, bool>(0)
-            })?;
+        && has_hidden_categories(conn, &q.source_id, q.content_type)?;
     let locked = match hide {
         Some(h) => parental::filter::scoped(conn, &q.source_id, q.content_type, h, "?1", "?2")?,
         None => String::new(),
@@ -1211,9 +1385,13 @@ pub fn query_named(
         if total == 0 && i + 1 < attempts.len() {
             continue;
         }
+        // The page's rowids first, from the sort's index alone (migration
+        // 0018 puts every filter column in it), then the full rows of just
+        // those: OFFSET no longer reads and joins every skipped row, which
+        // made pages near the end of a 100k list take 100-900 ms.
+        let order = order_clause(&q.page);
         let sql = format!(
-            "{SELECT_NAMED} WHERE {where_sql} ORDER BY {} LIMIT {limit} OFFSET {offset}",
-            order_clause(&q.page)
+            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {where_sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}) ORDER BY {order}"
         );
         let mut stmt = conn.prepare_cached(&sql)?;
         let items = stmt
@@ -1227,6 +1405,19 @@ pub fn query_named(
         });
     }
     Ok(Page::empty(offset, limit))
+}
+
+/// True when a category of `source_id` / `content_type` is hidden.
+pub(crate) fn has_hidden_categories(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+) -> CoreResult<bool> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
+        )?
+        .query_row(params![source_id, content_type.as_str()], |r| r.get(0))?)
 }
 
 /// One item by reference.
@@ -1290,22 +1481,48 @@ pub fn search_named(
     english_only: bool,
     hide: Option<Hide>,
 ) -> CoreResult<Vec<NamedRow>> {
-    let text = query.trim();
-    if text.is_empty() || limit == 0 {
-        return Ok(Vec::new());
-    }
     let types: Vec<ContentType> = if types.is_empty() {
         ContentType::ALL.to_vec()
     } else {
         types.to_vec()
     };
+    Ok(
+        search_groups(conn, query, source_id, &[&types], limit, english_only, hide)?
+            .pop()
+            .unwrap_or_default(),
+    )
+}
+
+/// [`search_named`] for several groups of content types at once (the
+/// `catalog.search` lists: live and radio, movies, series), up to `limit`
+/// rows per group, in one ranked pass: one FTS match and one sort for every
+/// group instead of one each, partitioned with `ROW_NUMBER()`. A group the
+/// word-prefix match finds nothing for falls back to a substring match,
+/// again one statement for all such groups, over the title index rather
+/// than the table (wide rows: URLs, JSON). Each group answers exactly as a
+/// [`search_named`] call of its own would.
+pub fn search_groups(
+    conn: &Connection,
+    query: &str,
+    source_id: Option<&str>,
+    groups: &[&[ContentType]],
+    limit: usize,
+    english_only: bool,
+    hide: Option<Hide>,
+) -> CoreResult<Vec<Vec<NamedRow>>> {
+    let mut out: Vec<Vec<NamedRow>> = vec![Vec::new(); groups.len()];
+    let text = query.trim();
+    let types: Vec<ContentType> = groups.iter().flat_map(|g| g.iter().copied()).collect();
+    if text.is_empty() || limit == 0 || types.is_empty() {
+        return Ok(out);
+    }
     // Search lists may hold one probe row past the 1000-row UI step.
     let limit = limit.min(rpc::MAX_SEARCH_LIMIT);
     let fts = fts_query(text);
 
     let channels = types.iter().any(|t| channeledit::is_channel_type(*t));
     let mut filter = String::from(" AND COALESCE(c.hidden, 0) = 0");
-    filter.push_str(english_clause(english_only));
+    filter.push_str(english_clause(conn, english_only)?);
     if let Some(h) = hide {
         filter.push_str(&parental::filter::item_set(conn, h)?);
     }
@@ -1328,59 +1545,124 @@ pub fn search_named(
         base_args.push(sid.to_string().into());
         filter.push_str(&format!(" AND i.source_id = ?{}", base_args.len() + 1));
     }
+    // The group of each row, by content type (content types are fixed
+    // identifiers, safe as literals).
+    let group_of = |pick: &dyn Fn(usize) -> bool| -> String {
+        let arms: String = groups
+            .iter()
+            .enumerate()
+            .filter(|(g, _)| pick(*g))
+            .flat_map(|(g, ts)| {
+                ts.iter()
+                    .map(move |t| format!(" WHEN '{}' THEN {g}", t.as_str()))
+            })
+            .collect();
+        format!("CASE i.content_type{arms} END")
+    };
+    // Ranks each group's matching rows on their rowids alone and then reads
+    // the full rows of the `limit` best, so the window sorts small records
+    // rather than every match's URLs and JSON (a third faster on a broad
+    // prefix). `body` is the match: joins and WHERE after `items i` + `c`.
+    let ranked = |group: &str, order: &str, body: &str| -> String {
+        let (cols, join) = SELECT_NAMED
+            .split_once(" FROM items i")
+            .unwrap_or((SELECT_NAMED, ""));
+        format!(
+            "{cols}, g.search_group FROM (SELECT i.rowid AS rid, {group} AS search_group, ROW_NUMBER() OVER (PARTITION BY {group} ORDER BY {order}) AS search_rank FROM items i{join} {body}) g CROSS JOIN items i ON i.rowid = g.rid{join} WHERE g.search_rank <= {limit} ORDER BY g.search_group, g.search_rank"
+        )
+    };
+    let run = |sql: String, first: SqlValue, out: &mut Vec<Vec<NamedRow>>| -> CoreResult<()> {
+        let mut args: Vec<SqlValue> = vec![first];
+        args.extend(base_args.iter().cloned());
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            Ok((r.get::<_, i64>(21)?, read_named(r)?))
+        })?;
+        for row in rows {
+            let (g, n) = row?;
+            if let Some(list) = usize::try_from(g).ok().and_then(|g| out.get_mut(g)) {
+                list.push(n);
+            }
+        }
+        Ok(())
+    };
+
+    if let Some(fq) = &fts {
+        let group = group_of(&|_| true);
+        let sql = ranked(
+            &group,
+            "items_fts.rank, length(i.title), i.position",
+            &format!(
+                "JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{filter}"
+            ),
+        );
+        run(sql, fq.clone().into(), &mut out)?;
+    }
+    let missing: Vec<usize> = (0..groups.len())
+        .filter(|g| out[*g].is_empty() && !groups[*g].is_empty())
+        .collect();
+    if !missing.is_empty() {
+        let group = group_of(&|g| missing.contains(&g));
+        let wanted: Vec<String> = missing
+            .iter()
+            .flat_map(|g| groups[*g].iter().map(|t| format!("'{}'", t.as_str())))
+            .collect();
+        // Substring matches are found by scanning idx_items_title (covering
+        // for this subquery) instead of every table row. Without a source
+        // the `+` keeps SQLite off idx_items_added, which it otherwise took
+        // for the type and then read every row of it (300-800 ms on 100k
+        // movies against about 12 ms for the index scan).
+        let (scope, ct_col) = match source_id {
+            Some(_) => (
+                format!(" AND source_id = ?{}", base_args.len() + 1),
+                "content_type",
+            ),
+            None => (String::new(), "+content_type"),
+        };
+        let sql = ranked(
+            &group,
+            "length(i.title), i.title COLLATE NOCASE",
+            &format!(
+                "WHERE i.rowid IN (SELECT rowid FROM items WHERE title LIKE ?1 ESCAPE '\\' AND {ct_col} IN ({}){scope}){filter}",
+                wanted.join(", ")
+            ),
+        );
+        run(sql, like_pattern(text).into(), &mut out)?;
+    }
 
     // C2: channels whose custom name contains the text come first (the
     // user's own names), shortest name first; the provider-name matches
     // follow without repeating them.
-    let custom = if channels && has_any_names(conn, source_id)? {
-        custom_name_matches(conn, text, &filter, &base_args, limit)?
-    } else {
-        Vec::new()
-    };
-    let merge = |rows: Vec<NamedRow>| -> Vec<NamedRow> {
-        if custom.is_empty() {
-            return rows;
-        }
-        let mut seen: HashSet<(String, ContentType, String)> = HashSet::new();
-        custom
-            .iter()
-            .cloned()
-            .chain(rows)
-            .filter(|n| {
-                seen.insert((
-                    n.row.source_id.clone(),
-                    n.row.content_type,
-                    n.row.item_id.clone(),
-                ))
-            })
-            .take(limit)
-            .collect()
-    };
-
-    if let Some(fq) = &fts {
-        let sql = format!(
-            "{SELECT_NAMED} JOIN items_fts ON items_fts.rowid = i.rowid WHERE items_fts MATCH ?1{filter} ORDER BY items_fts.rank, length(i.title), i.position LIMIT {limit}"
-        );
-        let mut args: Vec<SqlValue> = vec![fq.clone().into()];
-        args.extend(base_args.iter().cloned());
-        let mut stmt = conn.prepare_cached(&sql)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(args.iter()), read_named)?
-            .collect::<Result<Vec<_>, _>>()?;
-        if !rows.is_empty() {
-            return Ok(merge(rows));
+    if channels && has_any_names(conn, source_id)? {
+        let custom = custom_name_matches(conn, text, &filter, &base_args, limit)?;
+        if !custom.is_empty() {
+            for (g, ts) in groups.iter().enumerate() {
+                let mine: Vec<NamedRow> = custom
+                    .iter()
+                    .filter(|n| ts.contains(&n.row.content_type))
+                    .cloned()
+                    .collect();
+                if mine.is_empty() {
+                    continue;
+                }
+                let mut seen: HashSet<(String, ContentType, String)> = HashSet::new();
+                let rows = std::mem::take(&mut out[g]);
+                out[g] = mine
+                    .into_iter()
+                    .chain(rows)
+                    .filter(|n| {
+                        seen.insert((
+                            n.row.source_id.clone(),
+                            n.row.content_type,
+                            n.row.item_id.clone(),
+                        ))
+                    })
+                    .take(limit)
+                    .collect();
+            }
         }
     }
-    let sql = format!(
-        "{SELECT_NAMED} WHERE i.title LIKE ?1 ESCAPE '\\'{filter} ORDER BY length(i.title), i.title COLLATE NOCASE LIMIT {limit}"
-    );
-    let mut args: Vec<SqlValue> = vec![like_pattern(text).into()];
-    args.extend(base_args.iter().cloned());
-    let mut stmt = conn.prepare_cached(&sql)?;
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(args.iter()), read_named)?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(merge(rows))
+    Ok(out)
 }
 
 /// True when a channel of `source_id` (any source when `None`) is renamed.
@@ -1567,7 +1849,7 @@ pub fn recently_added(
     let mut args: Vec<SqlValue> = vec![content_type.as_str().to_string().into()];
     let mut sql = format!(
         "{SELECT_NAMED} WHERE i.content_type = ?1 AND i.added IS NOT NULL AND COALESCE(c.hidden, 0) = 0{}",
-        english_clause(english_only)
+        english_clause(conn, english_only)?
     );
     if let Some(h) = hide {
         sql.push_str(&parental::filter::item_row(conn, h)?);
@@ -1640,8 +1922,17 @@ pub fn all_live_channels(
     Ok(rows)
 }
 
-/// The catalog module has no background runtime.
-pub async fn init(_state: Arc<AppState>) -> CoreResult<()> {
+/// Boot: stores the English-only verdicts of catalogs written before
+/// migration 0018, in the background (readers use the per-row rule for them
+/// until then; see [`language::backfill_pending`]).
+pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
+    tokio::spawn(async move {
+        match state.db_call(|c| Ok(language::backfill_pending(c)?)).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(catalogs = n, "stored English-only verdicts"),
+            Err(err) => tracing::warn!(%err, "could not store English-only verdicts"),
+        }
+    });
     Ok(())
 }
 

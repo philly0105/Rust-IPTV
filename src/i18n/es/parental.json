@@ -108,6 +108,8 @@
   "autoAdultCount_one": "También se bloquea automáticamente {{count}} grupo para adultos.",
   "autoAdultCount_many": "También se bloquean automáticamente {{count}} grupos para adultos.",
   "autoAdultCount_other": "También se bloquean automáticamente {{count}} grupos para adultos.",
+  "autoAdultRule": "Grupos para adultos bloqueados automáticamente",
+  "autoAdultNone": "Ningún grupo de esta fuente parece contenido para adultos.",
   "removeLockNamed": "Quitar el bloqueo de {{name}}",
   "showAllLocks_one": "Mostrar {{count}} bloqueo",
   "showAllLocks_many": "Mostrar los {{count}} bloqueos",

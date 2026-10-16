@@ -21,7 +21,10 @@ import { MyListRail } from '@/features/mylist/components/MyListRail';
 import { useMyList } from '@/features/mylist/hooks/useMyList';
 import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { playItem } from '@/features/player';
+// The module itself, not the barrel: small, no imports, and the barrel mocks in tests leave it alone.
+import { preloadEngines } from '@/features/player/enginePreload';
 import { RpcError } from '@/api/transport';
+import { snapshotTitle } from '@/lib/title';
 import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast } from '@/ui';
 
 import { useShell } from '../store';
@@ -137,6 +140,11 @@ function DashboardBody() {
 
   const sources = useVisibleSources();
   const hasSources = (sources.data?.length ?? 0) > 0;
+  // Home plays streams: with something to play, warm hls.js and mpegts.js once the browser is idle
+  // (preloadEngines waits for it), so the first play from here does not fetch them after the click.
+  useEffect(() => {
+    if (hasSources) preloadEngines();
+  }, [hasSources]);
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
   // Hover prefetch targets (C4) need each card's source kind.
   const sourceKinds = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.kind])), [sources.data]);
@@ -246,7 +254,8 @@ function DashboardBody() {
           title={t('welcomeTitle')}
           description={t('welcomeBody')}
           action={
-            <Link to="/sources?add=1" className={buttonClass('primary', 'lg')}>
+            // `from`: the first add returns to Home (/dashboard; `/` would go through StartupRedirect).
+            <Link to="/sources?add=1&from=%2Fdashboard" className={buttonClass('primary', 'lg')}>
               <ListPlus size={18} aria-hidden />
               {t('addFirstSource')}
             </Link>
@@ -366,8 +375,14 @@ function DashboardBody() {
             cardWidth={168}
             skeletonAspect={2 / 3}
             renderCard={(p, rail) => {
-              const title = p.snapshot?.title ?? t('untitled');
+              // L2-visual-3: a snapshot saved before the player stored the base title still carries
+              // the provider's tags and year; show (and save to My List) what the detail page shows.
+              const base = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title) : undefined;
+              const title = base?.title ?? t('untitled');
               const left = minutesLeft(p);
+              const snapshot: ItemSnapshot = p.snapshot
+                ? { ...p.snapshot, title, ...(base?.year && !p.snapshot.subtitle ? { subtitle: String(base.year) } : {}) }
+                : { title, contentType: p.ref.contentType };
               return (
                 <PosterCard
                   rail={rail}
@@ -377,7 +392,7 @@ function DashboardBody() {
                   progress={watchedFraction(p)}
                   badge={seriesBadge(p)}
                   ariaLabel={t('resumeTitle', { title })}
-                  myList={{ itemRef: p.ref, snapshot: p.snapshot ?? { title, contentType: p.ref.contentType } }}
+                  myList={{ itemRef: p.ref, snapshot }}
                   onPlay={() =>
                     play({ ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot?.subtitle, posterUrl: p.snapshot?.posterUrl })
                   }
@@ -472,18 +487,21 @@ function DashboardBody() {
             cardWidth={168}
             skeletonAspect={2 / 3}
             renderCard={(f, rail) => {
-              // A year the title already ends with ("Summer Static (2025)") is not repeated under it.
-              const own = f.snapshot.subtitle && !titleEndsWithYear(f.snapshot.title, f.snapshot.subtitle) ? f.snapshot.subtitle : undefined;
+              // L2-visual-3: the base title, as on the detail page; a year stripped from it becomes the subtitle.
+              const base = snapshotTitle(f.ref, f.snapshot.title);
+              const year = f.snapshot.subtitle || (base.year ? String(base.year) : undefined);
+              // A year the title still ends with ("Summer Static (2025)") is not repeated under it.
+              const own = year && !titleEndsWithYear(base.title, year) ? year : undefined;
               const subtitle = own ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
               return (
                 <PosterCard
                   rail={rail}
-                  title={f.snapshot.title}
+                  title={base.title}
                   subtitle={subtitle}
                   posterUrl={f.snapshot.posterUrl}
                   to={itemPath(f.ref)}
-                  ariaLabel={joinList([f.snapshot.title, subtitle], i18n.language)}
-                  myList={{ itemRef: f.ref, snapshot: f.snapshot }}
+                  ariaLabel={joinList([base.title, subtitle], i18n.language)}
+                  myList={{ itemRef: f.ref, snapshot: { ...f.snapshot, title: base.title, ...(year ? { subtitle: year } : {}) } }}
                 />
               );
             }}

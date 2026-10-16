@@ -8,7 +8,7 @@ import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
 import { announceSleep } from './sleepReadout';
 import { cycleSleepTimer } from './sleepTimer';
-import { nextInQueue, prevInQueue, usePlayerStore, zap } from './store';
+import { canZap, nextInQueue, prevInQueue, usePlayerStore, zap } from './store';
 import { toggleStreamInfo } from './streamInfo';
 import { adjustDelay, formatDelay, type DelayKind } from './sync';
 
@@ -63,6 +63,8 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   const { t, i18n } = useTranslation('player');
   const active = usePlayerStore((s) => !!s.source && s.mode !== 'external');
   const live = usePlayerStore((s) => !!s.source?.isLive);
+  // Live TV, or catch-up of a channel: channel up/down leaves the archive for the neighbour live.
+  const zappable = usePlayerStore(canZap);
   // Radio shows neither the history popover nor the stream info panel.
   const video = usePlayerStore((s) => s.mode !== 'radio');
   const seekable = usePlayerStore((s) => !!s.source && !s.source.isLive && !s.source.isRadio);
@@ -263,12 +265,12 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   );
   useShortcut('pageup', guard('arrow', () => void zap('up').catch(() => undefined)), {
     ...base,
-    enabled: active && live,
+    enabled: active && zappable,
     description: t('shortcutChannelUp'),
   });
   useShortcut('pagedown', guard('arrow', () => void zap('down').catch(() => undefined)), {
     ...base,
-    enabled: active && live,
+    enabled: active && zappable,
     description: t('shortcutChannelDown'),
   });
 }

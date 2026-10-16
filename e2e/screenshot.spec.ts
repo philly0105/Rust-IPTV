@@ -20,12 +20,17 @@ const NAME = 'Screenshot Xtream';
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const FILE_NAME = /^BBC One.* \d{4}-\d\d-\d\d \d\d-\d\d-\d\d\.png$/;
 
-/** Wakes the overlay controls: the pointer moves over the video (the click layer covers it). */
+/**
+ * Wakes the overlay controls: the pointer moves over the video (the click layer covers it), then
+ * rests on the bar. The live page's player is under 480 px wide, where the bar waits while the
+ * zap chip shows unless the pointer is on it.
+ */
 async function wakeControls(page: Page, scope: Locator): Promise<void> {
   const box = await scope.locator('video').first().boundingBox();
   if (!box) throw new Error('no video to hover');
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.move(box.x + box.width / 2 + 8, box.y + box.height / 2 + 8);
+  await scope.getByTestId('overlay-chrome').hover();
 }
 
 /** The downloaded file is a real PNG of a decoded frame, not an empty canvas. */

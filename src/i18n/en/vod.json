@@ -204,5 +204,8 @@
   "categoryMissingTitle": "Category not found",
   "categoryMissingBody": "This source has no category with that link. The provider may have renamed or dropped it.",
   "namedMarkedWatched": "{{name}} marked watched",
-  "namedMarkedUnwatched": "{{name}} marked unwatched"
+  "namedMarkedUnwatched": "{{name}} marked unwatched",
+  "filters": "Filters",
+  "filtersActive": "Active filters: {{n}}",
+  "locked": "Locked"
 }

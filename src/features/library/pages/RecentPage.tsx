@@ -9,6 +9,7 @@ import { useNavigate, useParams } from 'react-router';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
+import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, SkeletonList, usePlayerStore, useToast } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
@@ -80,7 +81,7 @@ export function RecentPage() {
         try {
           await rpc('recent.remove', { ref: e.ref });
           toast({
-            title: t('recentRemoved', { title: e.snapshot.title }),
+            title: t('recentRemoved', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
             variant: 'info',
             action: {
               label: t('undo'),
@@ -106,7 +107,7 @@ export function RecentPage() {
     (e: { ref: RecentEntry['ref']; snapshot: RecentEntry['snapshot'] }) => {
       openEntry(e.ref, e.snapshot, sources.get(e.ref.sourceId), navigate).catch((err: unknown) => {
         toast({
-          title: t('openFailed', { title: e.snapshot.title }),
+          title: t('openFailed', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
           variant: 'error',
         });
@@ -123,7 +124,7 @@ export function RecentPage() {
       if (path) navigate(path);
       return;
     }
-    const title = p.snapshot.title;
+    const title = snapshotTitle(p.ref, p.snapshot.title).title;
     resumePosition(p, sources.get(p.ref.sourceId)).catch((err: unknown) => {
       toast({
         title: t('openFailed', { title }),
@@ -136,7 +137,7 @@ export function RecentPage() {
   const removeContinue = async (p: PlaybackPosition) => {
     try {
       const removed = await removeContinueCard(p, positionCalls);
-      const label = p.snapshot?.title ?? '';
+      const label = p.snapshot ? snapshotTitle(p.ref, p.snapshot.title).title : '';
       toast({
         title: t('continueRemoved', { title: label }),
         variant: 'info',
@@ -189,7 +190,8 @@ export function RecentPage() {
     () =>
       count > 0 ? (
         <Button size="sm" variant="ghost" icon={<Trash size={15} aria-hidden />} onClick={() => setConfirmClear(true)}>
-          {t('clearHistory')}
+          {/* Icon only on a phone, so the header keeps the palette and theme buttons on screen. */}
+          <span className="max-sm:sr-only">{t('clearHistory')}</span>
         </Button>
       ) : undefined,
     [count, t],
@@ -215,7 +217,7 @@ export function RecentPage() {
         source={sources.get(e.ref.sourceId)}
         showSource={!sourceId}
         time={relativeTime(e.viewedAt, i18n.language)}
-        removeLabel={t('removeRecent', { title: e.snapshot.title })}
+        removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}
         busy={pending.has(key)}
         onOpen={() => open(e)}
         onRemove={() => remove(e)}

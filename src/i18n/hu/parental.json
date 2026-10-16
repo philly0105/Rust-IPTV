@@ -102,6 +102,8 @@
   "adultOffHint": "A neve felnőtt tartalomra utal. Az automatikus felnőtt zárolás ki van kapcsolva.",
   "autoAdultCount_one": "További {{count}} felnőtt csoport automatikusan zárolva van.",
   "autoAdultCount_other": "További {{count}} felnőtt csoport automatikusan zárolva van.",
+  "autoAdultRule": "Automatikusan zárolt felnőtt csoportok",
+  "autoAdultNone": "A forrás egyik csoportja sem tűnik felnőtt tartalomnak.",
   "removeLockNamed": "Zárolás eltávolítása: {{name}}",
   "showAllLocks_one": "{{count}} zárolás megjelenítése",
   "showAllLocks_other": "Mind a(z) {{count}} zárolás megjelenítése",

@@ -222,5 +222,8 @@
   "categoryMissingTitle": "Nie znaleziono kategorii",
   "categoryMissingBody": "To źródło nie ma kategorii o tym linku. Dostawca mógł zmienić jej nazwę lub ją usunąć.",
   "namedMarkedWatched": "{{name}}: oznaczono jako obejrzane",
-  "namedMarkedUnwatched": "{{name}}: oznaczono jako nieobejrzane"
+  "namedMarkedUnwatched": "{{name}}: oznaczono jako nieobejrzane",
+  "filters": "Filtry",
+  "filtersActive": "Aktywne filtry: {{n}}",
+  "locked": "Zablokowane"
 }

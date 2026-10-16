@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { cn } from './cn';
 import { reportToastStackBottom, useCenteredDialogOpen } from './Dialog';
 import { ProgressBar } from './Misc';
+import { portalContainer } from './portal';
 
 export type ToastVariant = 'info' | 'success' | 'error';
 
@@ -78,8 +79,17 @@ let seq = 0;
 
 const VIEWPORT_SELECTOR = '[data-toast-viewport]';
 const TOAST_SELECTOR = '[data-toast-id]';
-/** Where focus was before the user jumped into the toast stack (F8). */
+/** Where focus was before it entered the toast stack (F8, a click on Undo, Tab). */
 let returnFocus: HTMLElement | null = null;
+
+/**
+ * Notes where focus came from as it lands in a toast. Moves between toasts keep the first
+ * origin; an entry from <body> or from outside the window (no related target) forgets a stale one.
+ */
+function noteFocusEntry(from: EventTarget | null): void {
+  if (from instanceof Element && from.closest(VIEWPORT_SELECTOR)) return;
+  returnFocus = from instanceof HTMLElement && from !== document.body ? from : null;
+}
 
 function toastControls(li: Element): HTMLElement[] {
   return Array.from(li.querySelectorAll<HTMLElement>('button:not([disabled])'));
@@ -101,11 +111,18 @@ export function focusToasts(): boolean {
   return true;
 }
 
-/** Puts focus back where it was before entering the stack, or on main content. */
+/**
+ * Puts focus back where it was before entering the stack, or on main content when that element
+ * is gone or can no longer take focus (disabled, hidden), so it never drops to <body>.
+ */
 function leaveToasts(): void {
-  const back = returnFocus && returnFocus.isConnected ? returnFocus : document.getElementById('main');
+  const back = returnFocus;
   returnFocus = null;
-  back?.focus({ preventScroll: true });
+  if (back?.isConnected) {
+    back.focus({ preventScroll: true });
+    if (document.activeElement === back) return;
+  }
+  document.getElementById('main')?.focus({ preventScroll: true });
 }
 
 /**
@@ -207,7 +224,10 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
       data-variant={t.variant}
       onKeyDown={onKeyDown}
       data-paused={paused || undefined}
-      onFocus={pause}
+      onFocus={(e) => {
+        noteFocusEntry(e.relatedTarget);
+        pause();
+      }}
       onBlur={(e) => {
         if (!paused && !e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
       }}
@@ -287,7 +307,9 @@ export function toastsToAnnounce(prev: ReadonlyMap<string, ReactNode>, next: rea
 }
 
 /**
- * Renders the toast stack (bottom-right). Mount once; the shell does.
+ * Renders the toast stack (bottom-right). Mount once; the shell does. In element
+ * fullscreen (player, multi-view wall) the stack moves into the fullscreen element
+ * (portalContainer), so an Undo offered there can be seen and reached.
  *
  * Screen readers hear toasts through two live regions that exist from the
  * first render (a region inserted together with its text is often skipped):
@@ -404,7 +426,7 @@ export function ToastViewport() {
         ))}
       </ol>
     </section>,
-    document.body,
+    portalContainer(),
   );
 }
 

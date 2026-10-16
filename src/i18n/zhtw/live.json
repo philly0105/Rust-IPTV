@@ -184,5 +184,11 @@
   "locked": "已鎖定",
   "lockedGuide": "已鎖定。輸入 PIN 碼即可查看正在播出的節目。",
   "unlock": "解鎖",
-  "ribbonFailed": "無法載入此頻道的節目表"
+  "ribbonFailed": "無法載入此頻道的節目表",
+  "parentalHiddenChannels": "家長監護正在隱藏此來源的頻道",
+  "parentalHiddenStations": "家長監護正在隱藏此來源的電台",
+  "parentalHiddenHint": "其群組已鎖定。輸入 PIN 即可在本次工作階段中顯示。",
+  "parentalUnlock": "解鎖",
+  "parentalUnlockTitle": "顯示已鎖定的頻道",
+  "parentalUnlockBody": "輸入 PIN，在家長監護重新鎖定前顯示已鎖定的群組和頻道。"
 }

@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { CalendarClock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, History, Play, Radio, Tv, X } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 
@@ -36,8 +37,6 @@ import {
   formatClock,
   formatDay,
   formatRange,
-  hasUsableArchive,
-  layoutBlocks,
   localDayKey,
   ms,
   parseWindowAt,
@@ -49,14 +48,15 @@ import { archivePath, canBrowseArchive } from '../lib/archive';
 import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 import { GuideUnavailableNotice } from './ChannelList';
-import { ChannelLogo } from './ChannelLogo';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 // recording:
-import { ProgramActions, ScheduleMark } from '@/features/recording';
+import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
 // guide (Run 2 C5): jump to a date and time, guide search.
 import { GuideSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
 import { findChannelIndex, groupForHit } from '../guide/search';
+import { GuideRow, padCellText, type GuideRowHandlers } from '../guide/GuideRow';
+import { useStable } from '../guide/useStable';
 
 export const GRID_ROW = 56;
 export const GRID_SLOT_MIN = 30;
@@ -128,46 +128,33 @@ export function stalkerGridLimit(windowMs: number): number {
   return Math.max(STALKER_GRID_LIMIT, Math.ceil((STALKER_GRID_LIMIT * windowMs) / GRID_WINDOW));
 }
 
-/** CSS variable on the grid scroller: how far the track is scrolled from its inline-start edge, in px. */
-export const GRID_SCROLL_VAR = '--grid-scroll';
-/** Room a clipped cell keeps for its text before the cell's end pushes the text out. */
-const CELL_TEXT_MIN_PX = 48;
+/** The guide page's width at its last measurement: a later visit lays out (and asks for its window) at that width from the first render. */
+let lastGuideWidth = 0;
 
 /**
- * Inline-start padding for the text of a programme cell at `left` px into the track (`width` px
- * wide). A show that began before the visible edge has its text pushed just past the sticky
- * channel column. Pure CSS on a scroll variable, so a scroll restyles the cells without a render.
- * (`position: sticky` cannot do this: the text fills its cell, so it has no room to stick in.)
+ * Width of the element the callback ref is attached to, kept current by a ResizeObserver, and
+ * whether it has been measured yet (seeded from the last guide visit's width).
  */
-export function cellTextPad(left: number, width: number): string {
-  // The button sits at left + 1 with a 1 px border and 8 px padding: its text starts at left + 10,
-  // and should start 8 px past the edge, at scroll + 8.
-  const max = Math.max(0, width - 20 - CELL_TEXT_MIN_PX);
-  return `clamp(0px, calc(var(${GRID_SCROLL_VAR}, 0px) - ${left + 2}px), ${max}px)`;
-}
-
-/** Copies the scroller's inline-start scroll distance into GRID_SCROLL_VAR. */
-function syncGridScroll(el: HTMLElement): void {
-  el.style.setProperty(GRID_SCROLL_VAR, `${scrollStart(el)}px`);
-}
-
-/** Width of the element the callback ref is attached to, kept current by a ResizeObserver. */
-function useElementWidth(): [(el: HTMLElement | null) => void, number] {
-  const [width, setWidth] = useState(0);
+function useElementWidth(): [(el: HTMLElement | null) => void, number, boolean] {
+  const [state, setState] = useState(() => ({ width: lastGuideWidth, measured: false }));
   const observer = useRef<ResizeObserver | null>(null);
   const ref = useCallback((el: HTMLElement | null) => {
     observer.current?.disconnect();
     observer.current = null;
     if (!el) return;
-    setWidth(el.getBoundingClientRect().width);
+    const set = (width: number) => {
+      if (width > 0) lastGuideWidth = width;
+      setState((s) => (s.measured && s.width === width ? s : { width, measured: true }));
+    };
+    set(el.getBoundingClientRect().width);
     if (typeof ResizeObserver === 'undefined') return;
     observer.current = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
-      if (w !== undefined) setWidth(w);
+      if (w !== undefined) set(w);
     });
     observer.current.observe(el);
   }, []);
-  return [ref, width];
+  return [ref, state.width, state.measured];
 }
 
 /** Below this page width the time controls take a row of their own and the window label stacks its day over its times. */
@@ -215,6 +202,21 @@ interface Reveal {
   categoryId: string | undefined;
 }
 
+/**
+ * How long key and scroll moves of the window must pause before the URL follows them
+ * (L2-perf-ui-4): the window moves at once in the page's state, the router hears of it once.
+ */
+export const GRID_URL_SETTLE_MS = 400;
+/**
+ * Guide chunks are fetched once the visible chunk holds still this long (L2-perf-desktop-6): a
+ * fling past twenty chunks asks for the one it stops on, not every chunk on the way. A chunk
+ * that is already cached, or the first change after a pause, shows at once.
+ */
+export const GRID_CHUNK_SETTLE_MS = 120;
+/** Rows of programme lists kept per channel before the cache starts over. */
+const PROGRAMS_CACHE_MAX = 2000;
+const NO_PROGRAMS: EpgProgram[] = [];
+
 /** Multi-channel guide: virtualized channel rows x 30-minute columns over a window of at least 6 h that fills the page width. */
 export function EpgGridPage() {
   const { t, i18n } = useTranslation('live');
@@ -229,6 +231,9 @@ export function EpgGridPage() {
   const channelCol = compact ? GRID_CHANNEL_COMPACT : wide ? 220 : 168;
   const rtl = useIsRtl();
   const queryClient = useQueryClient();
+  // Reminders, recordings, rules and recording support load with the page (L2-guide-library-15).
+  const schedule = useScheduleIndex();
+  usePrefetchSchedule();
 
   const sources = useRpcQuery('sources.list', undefined);
   const sourceId = params.get('source') ?? sources.data?.[0]?.id ?? '';
@@ -237,13 +242,26 @@ export function EpgGridPage() {
   const kind: SourceKind | undefined = source?.kind;
   const categories = useRpcQuery('catalog.categories', { sourceId, contentType: 'live' }, { enabled: !!sourceId });
 
-  // The window start lives in the URL (`at`, epoch ms on a 30-minute slot), so back and forward
-  // restore it. Without `at` the window follows "now" as it was when the page opened or Jump to
-  // now was last pressed.
+  // ---- the window ----------------------------------------------------------
+  // The window start comes from the URL (`at`, epoch ms on a 30-minute slot), so back and forward
+  // restore it, and lives in state, so every move shows at once. Clicks push a history entry; a
+  // key or scroll that runs into the window's edge moves the state alone, and the URL follows once
+  // those moves pause (L2-perf-ui-4, L2-guide-library-5: a router navigation per move re-rendered
+  // the shell and, while it was pending, dropped scroll distance). Without `at` the window
+  // follows "now" as it was when the page opened or Jump to now was last pressed.
   const atParam = parseWindowAt(params.get('at'));
+  const [winAt, setWinAt] = useState(atParam);
+  // `seen`: the URL's `at` this page last rendered; `wrote`: the one it last wrote (or adopted).
+  // A URL change that is not the echo of a write (back, forward, a link) moves the window.
+  const [url, setUrl] = useState({ seen: atParam, wrote: atParam });
+  if (atParam !== url.seen) {
+    const external = atParam !== url.wrote;
+    setUrl({ seen: atParam, wrote: external ? atParam : url.wrote });
+    if (external) setWinAt(atParam);
+  }
   const [nowStart, setNowStart] = useState(() => defaultStart(Date.now()));
-  const start = atParam ?? nowStart;
-  const [measurePage, pageWidth] = useElementWidth();
+  const start = winAt ?? nowStart;
+  const [measurePage, pageWidth, pageMeasured] = useElementWidth();
   // Measured pages get room to scroll past the page width, so horizontal scrolling can move the window on.
   const windowMs = gridWindowFor(pageWidth > 0 ? pageWidth + GRID_SCROLL_ROOM_PX : 0, channelCol);
   const end = start + windowMs;
@@ -278,8 +296,6 @@ export function EpgGridPage() {
   const fromIso = new Date(start - offsetMs).toISOString();
   const toIso = new Date(end - offsetMs).toISOString();
 
-  const chunkA = Math.floor(first / GRID_CHUNK);
-  const chunkB = Math.floor(last / GRID_CHUNK);
   const chunkRefs = (c: number) => {
     const refs = [];
     for (let i = c * GRID_CHUNK; i < Math.min(count, (c + 1) * GRID_CHUNK); i++) {
@@ -288,15 +304,61 @@ export function EpgGridPage() {
     }
     return refs;
   };
+  const chunkCached = (c: number) => {
+    const refs = chunkRefs(c);
+    return refs.length > 0 && queryClient.getQueryData(rpcKey('epg.grid', { refs, from: fromIso, to: toIso })) !== undefined;
+  };
+  // The chunks on screen, and the ones asked for: those follow once the visible chunk settles.
+  const viewA = Math.floor(first / GRID_CHUNK);
+  const viewB = Math.floor(last / GRID_CHUNK);
+  const listKey = `${sourceId}|${categoryId ?? ''}`;
+  const [settled, setSettled] = useState({ key: listKey, a: viewA, b: viewB });
+  const atRest = settled.key === listKey && settled.a === viewA && settled.b === viewB;
+  const showView = atRest || settled.key !== listKey || (chunkCached(viewA) && (viewB === viewA || chunkCached(viewB)));
+  const chunkA = showView ? viewA : settled.a;
+  const chunkB = showView ? viewB : settled.b;
+  const lastChunkMove = useRef(0);
+  useEffect(() => {
+    if (atRest) return;
+    const t0 = performance.now();
+    const quiet = t0 - lastChunkMove.current > GRID_CHUNK_SETTLE_MS;
+    lastChunkMove.current = t0;
+    const settle = () => setSettled({ key: listKey, a: viewA, b: viewB });
+    if (quiet) return settle();
+    const id = window.setTimeout(settle, GRID_CHUNK_SETTLE_MS);
+    return () => window.clearTimeout(id);
+  }, [listKey, viewA, viewB, atRest]);
+
   const refsA = chunkRefs(chunkA);
   const refsB = chunkB !== chunkA ? chunkRefs(chunkB) : [];
   // The previous answer stays while the next chunk or window loads (keepPrevious): rows it
   // covers keep their programmes and the no-guide notice does not blink. Rows it does not
-  // cover show as loading (see `programsFor`).
-  const gridA = useRpcQuery('epg.grid', { refs: refsA, from: fromIso, to: toIso }, { enabled: refsA.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
-  const gridB = useRpcQuery('epg.grid', { refs: refsB, from: fromIso, to: toIso }, { enabled: refsB.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
+  // cover show as loading (see `programsFor`). Nothing is asked before the page is measured: the
+  // first measurement sets the window's length (L2-perf-desktop-12).
+  const gridA = useRpcQuery('epg.grid', { refs: refsA, from: fromIso, to: toIso }, { enabled: pageMeasured && refsA.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
+  const gridB = useRpcQuery('epg.grid', { refs: refsB, from: fromIso, to: toIso }, { enabled: pageMeasured && refsB.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
   const keysA = new Set(refsA.map(itemKey));
   const keysB = new Set(refsB.map(itemKey));
+
+  // At rest, the chunks above and below are fetched ahead, so the next rows arrive drawn.
+  const prefetchChunk = useStable((c: number) => {
+    if (c < 0 || c * GRID_CHUNK >= count) return;
+    const refs = chunkRefs(c);
+    // A chunk whose channels are not all loaded yet would be asked again once they are.
+    if (refs.length < Math.min(GRID_CHUNK, count - c * GRID_CHUNK)) return;
+    const args = { refs, from: fromIso, to: toIso };
+    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS });
+  });
+  const gridsLoaded = !!gridA.data && !gridA.isPlaceholderData && (refsB.length === 0 || (!!gridB.data && !gridB.isPlaceholderData));
+  useEffect(() => {
+    if (!atRest || !gridsLoaded) return;
+    const id = window.setTimeout(() => {
+      prefetchChunk(chunkB + 1);
+      prefetchChunk(chunkA - 1);
+    }, GRID_CHUNK_SETTLE_MS);
+    return () => window.clearTimeout(id);
+  }, [atRest, gridsLoaded, chunkA, chunkB, fromIso, toIso, prefetchChunk]);
+
   // Stalker: the portal's own guide for the visible rows, laid over the XMLTV grid. Archive
   // channels also get the archived past of the window (`from`), so earlier rows and catch-up
   // work without XMLTV; the others keep the plain airing-onwards answer.
@@ -332,7 +394,7 @@ export function EpgGridPage() {
       if (q.isPlaceholderData) {
         if (list && list.length > 0) return list;
       } else if (q.data && (list || keys.has(k))) {
-        return list ?? [];
+        return list ?? NO_PROGRAMS;
       }
     }
     return undefined;
@@ -351,16 +413,27 @@ export function EpgGridPage() {
   }, [shortEpgOn, first, last, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData]); // eslint-disable-line react-hooks/exhaustive-deps
   const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
   const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
+  // Each row's display list is kept while its sources are the same objects, so a memoised row
+  // sees the same array from render to render (L2-perf-ui-1).
+  const programsCache = useRef(new Map<ItemKey, { list?: EpgProgram[]; portal?: EpgProgram[]; short?: readonly EpgProgram[]; offset: number; out: EpgProgram[] | undefined }>());
   const programsFor = (ch: Channel | undefined): EpgProgram[] | undefined => {
     if (!ch) return undefined;
-    const list = gridList(itemKey(ch.ref));
+    const k = itemKey(ch.ref);
+    const list = gridList(k);
     const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
-    if (portal && portal.length > 0) return shiftPrograms(mergePrograms(portal, list ?? []), prefs.epgOffsetMinutes);
     // guide: an empty XMLTV row takes the provider's short guide.
-    const short = shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
-    if (short && short.length > 0) return shiftPrograms([...short], prefs.epgOffsetMinutes);
-    if (list) return shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), prefs.epgOffsetMinutes);
-    return undefined;
+    const short = !(portal && portal.length > 0) && shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
+    const offset = prefs.epgOffsetMinutes;
+    const cache = programsCache.current;
+    const hit = cache.get(k);
+    if (hit && hit.list === list && hit.portal === portal && hit.short === short && hit.offset === offset) return hit.out;
+    let out: EpgProgram[] | undefined;
+    if (portal && portal.length > 0) out = shiftPrograms(mergePrograms(portal, list ?? []), offset);
+    else if (short && short.length > 0) out = shiftPrograms([...short], offset);
+    else if (list) out = list.length === 0 ? NO_PROGRAMS : shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), offset);
+    if (cache.size >= PROGRAMS_CACHE_MAX) cache.clear();
+    cache.set(k, { list, portal, short, offset, out });
+    return out;
   };
   const gridError = gridA.error ?? gridB.error;
   const noEpgAnywhere =
@@ -369,70 +442,82 @@ export function EpgGridPage() {
     !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
 
   // ---- navigation ---------------------------------------------------------
-  // A move writes the window start to the URL, which the router applies in a transition: a commit
-  // or more after the cursor moved. Until the window the move asked for is on screen (or the URL
-  // changes some other way), `pending` holds it: moves start from it, and the keyboard cursor
-  // waits for it before it takes focus (otherwise it lands on a cell of the old window).
-  const pending = useRef<{ start: number; params: URLSearchParams } | null>(null);
-  /** The router's params as last rendered (`paramsRef` runs ahead of them while a move is pending). */
-  const routerParams = useRef(params);
-  routerParams.current = params;
   // Clicks and key repeat can outrun renders: each move starts from here, not from a stale render.
   const startRef = useRef(start);
-  startRef.current = pending.current?.start ?? start;
-  const paramsRef = useRef(params);
-  if (!pending.current) paramsRef.current = params;
-  useLayoutEffect(() => {
-    const p = pending.current;
-    if (p && (p.start === start || p.params !== params)) {
-      pending.current = null;
-      startRef.current = start;
-      paramsRef.current = params;
-    }
-  });
-  /** Records a move to `slot`; the URL it was made from tells when the router has moved on. */
-  const markPending = (slot: number) => {
-    pending.current = { start: slot, params: pending.current?.params ?? routerParams.current };
-    startRef.current = slot;
+  startRef.current = start;
+  /** The URL the next write starts from: the router's, or the last one written ahead of it. */
+  const latestParams = useRef(params);
+  const seenParams = useRef(params);
+  if (seenParams.current !== params) {
+    seenParams.current = params;
+    latestParams.current = params;
+  }
+  const urlTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(urlTimer.current), []);
+  /** Writes the URL (a new history entry, or `replace`); `at` is the window start it now holds. */
+  const writeUrl = (edit: (p: URLSearchParams) => void, at: number | null, replace: boolean) => {
+    window.clearTimeout(urlTimer.current);
+    const next = new URLSearchParams(latestParams.current);
+    edit(next);
+    if (at === null) next.delete('at');
+    else next.set('at', String(at));
+    latestParams.current = next;
+    setUrl((u) => (u.wrote === at ? u : { ...u, wrote: at }));
+    setParams(next, { replace });
   };
-  /** Moves the window to `at` (floored to its slot): a new history entry, or `replace` for key-driven moves. */
-  const goTo = useCallback(
-    (at: number, opts: { replace?: boolean; category?: null } = {}) => {
-      const next = new URLSearchParams(paramsRef.current);
-      const slot = floorLocal(at, GRID_SLOT_MIN);
-      next.set('at', String(slot));
-      if (opts.category === null) next.delete('category');
-      markPending(slot);
-      paramsRef.current = next;
-      setParams(next, { replace: opts.replace });
-    },
-    [setParams], // eslint-disable-line react-hooks/exhaustive-deps -- markPending only touches refs
-  );
-  const shift = useCallback((delta: number, replace = false) => goTo(startRef.current + delta, { replace }), [goTo]);
+  /** Moves the window to `at` (floored to its slot), with a new history entry. */
+  const goTo = useStable((at: number, opts: { category?: null } = {}) => {
+    const slot = floorLocal(at, GRID_SLOT_MIN);
+    startRef.current = slot;
+    setWinAt(slot);
+    writeUrl((p) => {
+      if (opts.category === null) p.delete('category');
+    }, slot, false);
+  });
+  const keepView = useRef(false);
+  /**
+   * A key or scroll ran into the window's edge: the window moves by `delta` at once and the view
+   * stays put (keepView); the URL follows once such moves pause.
+   */
+  const drift = (delta: number) => {
+    const slot = floorLocal(startRef.current + delta, GRID_SLOT_MIN);
+    startRef.current = slot;
+    keepView.current = true;
+    setWinAt(slot);
+    window.clearTimeout(urlTimer.current);
+    // Back, forward or a link in the meantime wins: the URL is then no longer the one this move left.
+    const base = latestParams.current.toString();
+    urlTimer.current = window.setTimeout(() => {
+      if (latestParams.current.toString() === base) writeUrl(() => undefined, slot, true);
+    }, GRID_URL_SETTLE_MS);
+  };
+  const shift = useStable((delta: number) => goTo(startRef.current + delta));
   // A calendar day, not 24 h: across a DST change the window keeps its wall-clock time.
-  const shiftDay = useCallback((days: number) => goTo(addLocalDays(startRef.current, days)), [goTo]);
-  const toNow = useCallback(() => {
+  const shiftDay = useStable((days: number) => goTo(addLocalDays(startRef.current, days)));
+  const toNow = useStable(() => {
     const s = defaultStart(Date.now());
     setNowStart(s);
-    markPending(s);
-    if (!paramsRef.current.has('at')) return;
-    const next = new URLSearchParams(paramsRef.current);
-    next.delete('at');
-    paramsRef.current = next;
-    setParams(next);
-  }, [setParams]); // eslint-disable-line react-hooks/exhaustive-deps -- markPending only touches refs
+    startRef.current = s;
+    setWinAt(null);
+    window.clearTimeout(urlTimer.current);
+    if (latestParams.current.has('at')) writeUrl(() => undefined, null, false);
+  });
   // Back to an entry without `at` (or a link without it): the window follows now again.
-  const followsNow = atParam === null;
+  const followsNow = winAt === null;
   useEffect(() => {
     if (followsNow) setNowStart(defaultStart(Date.now()));
   }, [followsNow]);
-  const setQuery = (key: string, value: string | undefined) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    if (key === 'source') next.delete('category');
-    setParams(next, { replace: true });
-  };
+  const setQuery = useStable((key: string, value: string | undefined) => {
+    writeUrl(
+      (p) => {
+        if (value) p.set(key, value);
+        else p.delete(key);
+        if (key === 'source') p.delete('category');
+      },
+      winAt === null ? null : startRef.current,
+      true,
+    );
+  });
 
   // ---- keyboard cursor ------------------------------------------------------
   const [cursor, setCursor] = useState<{ row: number; time: number }>({ row: 0, time: now });
@@ -461,10 +546,11 @@ export function EpgGridPage() {
   // RTL scrollers count scrollLeft down from 0. Declared before the focus effect, which then only
   // has to bring the cursor cell into view.
   const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
-  const keepView = useRef(false);
   const laidStart = useRef(start);
-  /** The scroll's distance from the inline start at the last scroll event, for its direction. */
-  const lastScrollX = useRef(0);
+  /** The scroll's distance from the inline start, at the last scroll event or scroll write. */
+  const scrollX = useRef(0);
+  /** The scroller's clientWidth at the last scroll event or scroll write (read with the scroll, never after a write). */
+  const viewWidth = useRef(0);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -477,9 +563,17 @@ export function EpgGridPage() {
       const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
       el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - nowLead(el.clientWidth - channelCol)) : 0, rtl);
     }
-    lastScrollX.current = scrollStart(el);
-    syncGridScroll(el); // before first paint: cells already clipped by the edge show their text
+    scrollX.current = scrollStart(el);
+    viewWidth.current = el.clientWidth;
+    padCellText(el, scrollX.current); // before first paint: cells already clipped by the edge show their text
   }, [start, rtl, gridMounted]);
+
+  /** Scrolls the track so that `x` px from its inline start is at the visible start. */
+  const scrollTrackTo = (root: HTMLElement, x: number) => {
+    root.scrollLeft = scrollLeftFor(Math.max(0, x), rtl);
+    scrollX.current = Math.max(0, x);
+    padCellText(root, scrollX.current);
+  };
 
   // Focus never sits on a cell that is about to unmount: while the cursor's row is off screen or
   // still loading, the grid itself holds focus (and takes the keys); the cell gets it once rendered.
@@ -497,31 +591,28 @@ export function EpgGridPage() {
       focusPending.current = false; // focus went elsewhere meanwhile: leave it there
       return;
     }
-    // The window the move asked for is not on screen yet: its cell does not exist, and a cell
-    // of the old window would take focus by mistake. Stay pending until it renders.
-    if (pending.current) return;
+    // The window a move asked for is not on screen yet: its cell does not exist, and a cell of
+    // the old window would take focus by mistake. Stay pending until it renders.
+    if (startRef.current !== start) return;
     const el = cursorElement(cursor.row, cursor.time);
-    if (el) {
-      el.focus({ preventScroll: true });
-      focusPending.current = false;
-      // The sticky channel column covers the track at its inline start: left in LTR, right in RTL.
-      // scrollLeft deltas are physical in both directions, so only the visible span flips.
-      const r = el.getBoundingClientRect();
-      const box = root.getBoundingClientRect();
-      const trackLeft = rtl ? box.left : box.left + channelCol;
-      const trackRight = rtl ? box.right - channelCol : box.right;
-      if (r.left < trackLeft) root.scrollLeft -= trackLeft - r.left + 8;
-      else if (r.right > trackRight) root.scrollLeft += Math.min(r.right - trackRight + 8, r.left - trackLeft);
-    }
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    focusPending.current = false;
+    // Bring the cell into the visible track, worked out from its times rather than measured
+    // (L2-guide-library-3): the sticky channel column covers the track's inline start.
+    const p = cursorProgram(cursor.row, cursor.time);
+    if (!p) return;
+    const left = ((Math.max(ms(p.start), start) - start) / MINUTE) * PX_PER_MIN;
+    const right = ((Math.min(ms(p.end), end) - start) / MINUTE) * PX_PER_MIN;
+    const x = scrollX.current;
+    const view = (viewWidth.current || root.clientWidth) - channelCol;
+    if (left < x) scrollTrackTo(root, left - 8);
+    else if (right > x + view) scrollTrackTo(root, x + Math.min(right - x - view + 8, left - x));
   });
 
   const [selection, setSelection] = useState<Selection | null>(null);
   /** The cell that opened the popover; focus returns to it when the popover closes. */
   const invoker = useRef<HTMLElement | null>(null);
-  const open = (channel: Channel, program: EpgProgram, el: HTMLElement) => {
-    invoker.current = el;
-    setSelection({ channel, program, anchor: el });
-  };
   const closePopover = () => {
     setSelection(null);
     const el = invoker.current;
@@ -574,24 +665,18 @@ export function EpgGridPage() {
       case 'PageUp':
         row = Math.max(0, row - 8);
         break;
-      // Past the window's edge the window moves on and the view stays put (keepView); the focus
-      // effect then brings the cell into view.
+      // Past the window's edge the window moves on and the view stays put; the focus effect then
+      // brings the cell into view.
       case 'later': {
         const nextT = cur ? ms(cur.end) : time + GRID_SLOT_MIN * MINUTE;
-        if (nextT >= startRef.current + windowMs) {
-          keepView.current = true;
-          shift(GRID_EXTEND, true);
-        }
+        if (nextT >= startRef.current + windowMs) drift(GRID_EXTEND);
         time = nextT;
         break;
       }
       case 'earlier': {
         const prevT = cur ? ms(cur.start) - 1 : time - GRID_SLOT_MIN * MINUTE;
         const from = startRef.current;
-        if (prevT < from) {
-          keepView.current = true;
-          shift(-GRID_EXTEND, true);
-        }
+        if (prevT < from) drift(-GRID_EXTEND);
         time = Math.max(prevT, from - GRID_EXTEND);
         break;
       }
@@ -633,18 +718,22 @@ export function EpgGridPage() {
   };
   // Horizontal scrolling runs on past the window: near an edge, scrolling toward it moves the
   // window by GRID_EXTEND (the layout effect above keeps the view still), and within a screen of
-  // the edge the next window's guide is fetched ahead, so it arrives drawn.
+  // the edge the next window's guide is fetched ahead, so it arrives drawn. Layout is read once,
+  // before anything is written (L2-guide-library-2).
   const onGridScroll = (el: HTMLDivElement) => {
-    syncGridScroll(el);
     const x = scrollStart(el);
-    const dx = x - lastScrollX.current;
-    lastScrollX.current = x;
-    if (dx === 0 || pending.current) return;
     const max = el.scrollWidth - el.clientWidth;
+    viewWidth.current = el.clientWidth;
+    const dx = x - scrollX.current;
+    scrollX.current = x;
+    // A vertical scroll leaves the padding as it is: rows it brings in pad themselves.
+    if (dx === 0) return;
+    padCellText(el, x);
     const dir = extendDirection(x, dx, max);
     if (dir !== 0) {
-      keepView.current = true;
-      shift(dir * GRID_EXTEND, true);
+      // Rendered and scrolled back at once, so the next wheel step lands on the moved window
+      // instead of the clamped edge (L2-guide-library-5).
+      flushSync(() => drift(dir * GRID_EXTEND));
     } else if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX - el.clientWidth) {
       prefetchWindow(GRID_EXTEND);
     } else if (dx < 0 && x <= GRID_EXTEND_EDGE_PX + el.clientWidth) {
@@ -654,6 +743,8 @@ export function EpgGridPage() {
 
   // ---- guide search and jump (Run 2 C5) ----------------------------------------
   const [jumpOpen, setJumpOpen] = useState(false);
+  const openJump = useCallback(() => setJumpOpen(true), []);
+  const closeJump = useCallback(() => setJumpOpen(false), []);
   const searchRef = useRef<HTMLInputElement>(null);
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [highlight, setHighlight] = useState<ItemKey | null>(null);
@@ -677,13 +768,13 @@ export function EpgGridPage() {
   );
 
   /** A search hit (display time): move the window to its start, in a group that holds the channel. */
-  const selectHit = (hit: GuideSearchHit) => {
+  const selectHit = useStable((hit: GuideSearchHit) => {
     const time = ms(hit.program.start);
     const group = groupForHit(categoryId, hit);
     goTo(time, { category: group === categoryId ? undefined : null });
     setHighlight(null);
     setReveal({ key: itemKey(hit.ref), time, channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
-  };
+  });
 
   // Once the list the hit needs is on screen, find the channel's row, scroll to it, put the
   // keyboard cursor on the programme and highlight the row for a moment.
@@ -731,15 +822,15 @@ export function EpgGridPage() {
   // `kind` is the selected source's; rows kept on screen from the previous source while the new
   // one loads must not be played as this kind.
   const ownKind = (channel: Channel) => (channel.ref.sourceId === source?.id ? kind : undefined);
-  const playLive = (channel: Channel) => {
+  const playLive = useStable((channel: Channel) => {
     const kind = ownKind(channel);
     if (!kind) return;
     playChannel(channel, kind, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
       toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
     );
-  };
+  });
   /** Watch on an airing search hit: the hit carries what playback needs of the channel. */
-  const watchHit = (hit: GuideSearchHit) =>
+  const watchHit = useStable((hit: GuideSearchHit) =>
     playLive({
       ref: hit.ref,
       name: hit.channelName,
@@ -748,7 +839,8 @@ export function EpgGridPage() {
       categoryId: hit.categoryId ?? '',
       categoryName: '',
       isRadio: hit.ref.contentType === 'radio',
-    });
+    }),
+  );
   const catchup = (channel: Channel, program: EpgProgram) => {
     const kind = ownKind(channel);
     if (!kind) return;
@@ -756,6 +848,18 @@ export function EpgGridPage() {
       toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
     );
   };
+
+  // What the memoised rows do: one stable object, each entry reading the latest render.
+  const openCell = useStable((row: number, channel: Channel, program: EpgProgram, el: HTMLElement) => {
+    setCursor({ row, time: ms(program.start) });
+    invoker.current = el;
+    setSelection({ channel, program, anchor: el });
+  });
+  const focusCell = useStable((row: number, program: EpgProgram) =>
+    setCursor((c) => (c.row === row && c.time >= ms(program.start) && c.time < ms(program.end) ? c : { row, time: Math.max(ms(program.start), start) })),
+  );
+  const rowMenuAt = useStable((channel: Channel, x: number, y: number) => setRowMenu({ pos: { x, y }, channel }));
+  const rowHandlers = useMemo<GuideRowHandlers>(() => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt }), [playLive, openCell, focusCell, rowMenuAt]);
 
   // ---- render ---------------------------------------------------------------
   const slots = useMemo(() => {
@@ -796,88 +900,36 @@ export function EpgGridPage() {
     );
   }
 
-  // The kit's Select, sized down to the toolbar's 32 px buttons.
-  const selectClass = 'h-8 max-w-48';
-  const sourceOptions: SelectOption[] = (sources.data ?? []).map((s) => ({ value: s.id, label: s.name }));
-  const groupOptions: SelectOption[] = [
-    { value: '', label: t('allChannels') },
-    ...(categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
-  ];
-
   const bar = guideBarLayout(pageWidth);
-  const stacked = bar !== 'full';
-  const range = `${formatClock(start, i18n.language)}–${formatClock(end, i18n.language)}`;
+  const cursorStart = cursorProgram(cursor.row, cursor.time)?.start ?? '';
+  const lang = i18n.language;
 
   return (
     // data-guide-search-bounds (SEARCH_BOUNDS_ATTR): the search panel stays inside the page, clear of the rail.
     <div ref={measurePage} className="flex h-full min-h-0 w-full min-w-0 flex-col bg-bg" data-testid="epg-grid-page" data-guide-bar={bar} data-guide-search-bounds="">
       {heading}
-      <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
-        <Select
-          aria-label={t('guideSource')}
-          className={selectClass}
-          wrapperClassName="min-w-0"
-          value={sourceId}
-          options={sourceOptions}
-          onValueChange={(v) => setQuery('source', v)}
-        />
-        <Select
-          aria-label={t('guideGroup')}
-          className={selectClass}
-          wrapperClassName="min-w-0"
-          value={categoryId ?? ''}
-          options={groupOptions}
-          onValueChange={(v) => setQuery('category', v || undefined)}
-        />
-        {sourceId ? (
-          <GuideSearch
-            inputRef={searchRef}
-            sourceId={sourceId}
-            offsetMinutes={prefs.epgOffsetMinutes}
-            now={now}
-            stripCountryPrefix={prefs.stripCountryPrefix}
-            onSelect={selectHit}
-            onWatch={watchHit}
-            // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
-            className={stacked ? 'min-w-48 flex-1' : 'w-60'}
-          />
-        ) : null}
-        {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
-        <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
-          {bar !== 'phone' ? (
-            <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(-1)} aria-label={t('previousDay')} title={t('previousDay')} />
-          ) : null}
-          <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => shift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
-          {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
-              both layouts (day, space, times); stacked, the day sits small over the times. */}
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            title={tg('jumpTitle')}
-            onClick={() => setJumpOpen(true)}
-            data-testid="guide-window"
-            className={cn(
-              'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent motion-safe:transition-colors',
-              stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
-            )}
-          >
-            {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-            <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
-              <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, i18n.language)}</span>{' '}
-              <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
-            </span>
-            <span className="sr-only">, {tg('jumpTitle')}</span>
-          </button>
-          <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => shift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
-          {bar !== 'phone' ? (
-            <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => shiftDay(1)} aria-label={t('nextDay')} title={t('nextDay')} />
-          ) : null}
-          <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} className="shrink-0" onClick={toNow}>
-            {t('jumpToNow')}
-          </Button>
-        </div>
-      </div>
-      <JumpToDialog open={jumpOpen} onClose={() => setJumpOpen(false)} start={start} now={now} onJump={(at) => goTo(at)} onNow={toNow} />
+      <GuideToolbar
+        sources={sources.data}
+        sourceId={sourceId}
+        categories={categories.data}
+        categoryId={categoryId}
+        bar={bar}
+        start={start}
+        end={end}
+        nowInWindow={nowInWindow}
+        now={now}
+        offsetMinutes={prefs.epgOffsetMinutes}
+        stripCountryPrefix={prefs.stripCountryPrefix}
+        searchRef={searchRef}
+        onQuery={setQuery}
+        onShift={shift}
+        onShiftDay={shiftDay}
+        onNow={toNow}
+        onJump={openJump}
+        onSelectHit={selectHit}
+        onWatchHit={watchHit}
+      />
+      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={start} now={now} onJump={goTo} onNow={toNow} />
 
       {gridError ? (
         <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
@@ -928,148 +980,45 @@ export function EpgGridPage() {
             className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
           >
             <div style={{ width: channelCol + trackWidth, height: virtualizer.getTotalSize() + HEADER_H, position: 'relative' }}>
-              {/* time header */}
-              <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height: HEADER_H, width: channelCol + trackWidth }}>
-                <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
-                  <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
-                </div>
-                {slots.map((s, i) => (
-                  <div
-                    role="columnheader"
-                    key={s}
-                    className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted"
-                    style={{ width: GRID_SLOT_PX }}
-                  >
-                    {labels[i]}
-                  </div>
-                ))}
-              </div>
+              <GuideHeader slots={slots} labels={labels} channelCol={channelCol} trackWidth={trackWidth} compact={compact} />
 
               {vItems.map((v) => {
                 const ch = paged.getChannel(v.index);
-                const programs = programsFor(ch);
-                const chName = displayChannelName(ch?.name, prefs.stripCountryPrefix);
-                const highlighted = !!ch && highlight === itemKey(ch.ref);
                 return (
-                  <div
+                  <GuideRow
                     key={v.key}
-                    role="row"
-                    aria-rowindex={v.index + 2}
-                    className="absolute start-0 flex border-b border-divider"
-                    style={{ top: HEADER_H + v.start, height: GRID_ROW, width: channelCol + trackWidth }}
-                    // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
-                    onContextMenu={(e) => {
-                      if (!ch) return;
-                      e.preventDefault();
-                      setRowMenu({ pos: { x: e.clientX, y: e.clientY }, channel: ch });
-                    }}
-                  >
-                    <div
-                      role="rowheader"
-                      className={`sticky start-0 z-10 border-e border-divider motion-safe:transition-colors motion-safe:duration-500 ${highlighted ? 'bg-surface-3' : 'bg-surface'}`}
-                      style={{ width: channelCol }}
-                    >
-                      {/* guide search: the row a hit moved to, marked for a moment. */}
-                      {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent" /> : null}
-                      {ch ? (
-                        <button
-                          type="button"
-                          data-channel-row={v.index}
-                          data-highlighted={highlighted ? '' : undefined}
-                          tabIndex={v.index === cursor.row && (!programs || programs.length === 0) ? 0 : -1}
-                          onClick={() => playLive(ch)}
-                          title={t('playChannel', { name: chName })}
-                          data-compact={compact ? '' : undefined}
-                          className={cn(
-                            'relative flex h-full w-full outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
-                            compact ? 'flex-col items-center justify-center gap-0.5 px-1' : 'items-center gap-2 px-2 text-start',
-                          )}
-                        >
-                          {compact ? (
-                            // Phones: the logo over the number; the name is the button's label and tooltip.
-                            <>
-                              <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
-                              <span className="max-w-full truncate text-[calc(11rem/15)] leading-none tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
-                              <span className="sr-only">{chName}</span>
-                              {hasUsableArchive(ch, kind) ? <History className="absolute end-1 top-1 size-3 text-fg-subtle" aria-label={t('archive')} /> : null}
-                            </>
-                          ) : (
-                            <>
-                              <span className="w-7 shrink-0 text-end text-[calc(11rem/15)] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
-                              <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
-                              <span className="min-w-0 flex-1 truncate text-sm text-fg">{chName}</span>
-                              {hasUsableArchive(ch, kind) ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
-                            </>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="flex h-full items-center gap-2 px-2">
-                          <Skeleton className="size-7" />
-                          <Skeleton className="h-3 flex-1" />
-                        </div>
-                      )}
-                    </div>
-                    <div role="gridcell" className="relative" style={{ width: trackWidth }}>
-                      {programs === undefined ? (
-                        <div className="absolute inset-1.5 rounded bg-surface-2/60" aria-hidden />
-                      ) : programs.length === 0 ? (
-                        <div className="absolute inset-1.5 flex items-center rounded border border-dashed border-divider text-xs text-fg-subtle">
-                          {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}
-                          <span data-testid="no-guide-label" className="sticky px-3" style={{ insetInlineStart: channelCol }}>
-                            {t('noGuideShort')}
-                          </span>
-                        </div>
-                      ) : (
-                        layoutBlocks(programs, start, end, PX_PER_MIN, now).map((b) => {
-                          const isCursor = v.index === cursor.row && cursorProgram(cursor.row, cursor.time)?.start === b.program.start;
-                          const catchupOk = ch ? canCatchUp(b.program, ch, kind, now) : false;
-                          return (
-                            <button
-                              key={b.program.start}
-                              type="button"
-                              data-cell-row={v.index}
-                              data-start={b.program.start}
-                              tabIndex={isCursor ? 0 : -1}
-                              aria-label={`${b.program.title}, ${formatRange(b.program, i18n.language)}${b.when === 'now' ? `, ${t('onNow')}` : ''}`}
-                              onClick={(e) => {
-                                setCursor({ row: v.index, time: ms(b.program.start) });
-                                if (ch) open(ch, b.program, e.currentTarget);
-                              }}
-                              onFocus={() => setCursor((c) => (c.row === v.index && c.time >= ms(b.program.start) && c.time < ms(b.program.end) ? c : { row: v.index, time: Math.max(ms(b.program.start), start) }))}
-                              className={`absolute top-1 bottom-1 overflow-hidden rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                                b.when === 'now'
-                                  ? 'border-accent/60 bg-accent/12 text-fg'
-                                  : b.when === 'past'
-                                    ? 'border-border/60 bg-surface-2/60 text-fg-muted'
-                                    : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
-                              }`}
-                              style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
-                            >
-                              {/* A show that began before the visible edge keeps its title readable: the text is
-                                  padded past the sticky channel column until the cell's end pushes it out. */}
-                              <span data-testid="cell-text" className="block" style={{ paddingInlineStart: cellTextPad(b.left, b.width) }}>
-                                <span className="flex items-center gap-1 truncate text-xs font-medium">
-                                  {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
-                                  <span dir="auto" className="truncate text-match-parent">{b.program.title}</span>
-                                  {/* recording: */}
-                                  <ScheduleMark channelRef={ch?.ref} program={b.program} />
-                                </span>
-                                <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{formatRange(b.program, i18n.language)}</span>
-                              </span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
+                    index={v.index}
+                    top={HEADER_H + v.start}
+                    height={GRID_ROW}
+                    channel={ch}
+                    programs={programsFor(ch)}
+                    start={start}
+                    end={end}
+                    now={now}
+                    pxPerMin={PX_PER_MIN}
+                    channelCol={channelCol}
+                    trackWidth={trackWidth}
+                    compact={compact}
+                    rtl={rtl}
+                    kind={kind}
+                    highlighted={!!ch && highlight === itemKey(ch.ref)}
+                    cursorStart={v.index === cursor.row ? cursorStart : null}
+                    lang={lang}
+                    stripCountryPrefix={prefs.stripCountryPrefix}
+                    schedule={schedule}
+                    handlers={rowHandlers}
+                    scrollX={scrollX}
+                  />
                 );
               })}
 
               {nowInWindow ? (
+                // Under the sticky channel column (z-10) and time header (z-20), over the cells
+                // (L2-guide-library-6).
                 <div
                   aria-hidden
                   data-testid="epg-now-line"
-                  className="pointer-events-none absolute z-10 w-0.5 bg-live"
+                  className="pointer-events-none absolute z-[5] w-0.5 bg-live"
                   style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: HEADER_H - 6, height: virtualizer.getTotalSize() + 6 }}
                 >
                   <span className="sticky top-[30px] -ms-[3px] block size-2 rounded-full bg-live" />
@@ -1120,6 +1069,158 @@ export function EpgGridPage() {
     </div>
   );
 }
+
+const MemoJumpToDialog = memo(JumpToDialog);
+
+/** The time header: the channel column's corner and a label per 30-minute slot. */
+const GuideHeader = memo(function GuideHeader({
+  slots,
+  labels,
+  channelCol,
+  trackWidth,
+  compact,
+}: {
+  slots: readonly number[];
+  labels: readonly string[];
+  channelCol: number;
+  trackWidth: number;
+  compact: boolean;
+}) {
+  const { t } = useTranslation('live');
+  return (
+    <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height: HEADER_H, width: channelCol + trackWidth }}>
+      <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
+        <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
+      </div>
+      {slots.map((s, i) => (
+        <div role="columnheader" key={s} className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted" style={{ width: GRID_SLOT_PX }}>
+          {labels[i]}
+        </div>
+      ))}
+    </div>
+  );
+});
+
+/**
+ * The guide's toolbar: source and group, the search field and the time controls. Memoised with
+ * stable handlers, so a scroll frame or a cursor move of the grid does not re-render it
+ * (L2-perf-ui-1).
+ */
+const GuideToolbar = memo(function GuideToolbar({
+  sources,
+  sourceId,
+  categories,
+  categoryId,
+  bar,
+  start,
+  end,
+  nowInWindow,
+  now,
+  offsetMinutes,
+  stripCountryPrefix,
+  searchRef,
+  onQuery,
+  onShift,
+  onShiftDay,
+  onNow,
+  onJump,
+  onSelectHit,
+  onWatchHit,
+}: {
+  sources: readonly { id: string; name: string }[] | undefined;
+  sourceId: string;
+  categories: readonly { id: string; name: string }[] | undefined;
+  categoryId: string | undefined;
+  bar: 'full' | 'stacked' | 'phone';
+  start: number;
+  end: number;
+  nowInWindow: boolean;
+  now: number;
+  offsetMinutes: number;
+  stripCountryPrefix: boolean;
+  searchRef: RefObject<HTMLInputElement | null>;
+  onQuery(key: string, value: string | undefined): void;
+  onShift(delta: number): void;
+  onShiftDay(days: number): void;
+  onNow(): void;
+  onJump(): void;
+  onSelectHit(hit: GuideSearchHit): void;
+  onWatchHit(hit: GuideSearchHit): void;
+}) {
+  const { t, i18n } = useTranslation('live');
+  const { t: tg } = useTranslation('guide');
+  const lang = i18n.language;
+  // The kit's Select, sized down to the toolbar's 32 px buttons.
+  const selectClass = 'h-8 max-w-48';
+  const sourceOptions: SelectOption[] = useMemo(() => (sources ?? []).map((s) => ({ value: s.id, label: s.name })), [sources]);
+  const groupOptions: SelectOption[] = useMemo(
+    () => [{ value: '', label: t('allChannels') }, ...(categories ?? []).map((c) => ({ value: c.id, label: c.name }))],
+    [categories, t],
+  );
+  const stacked = bar !== 'full';
+  const range = `${formatClock(start, lang)}–${formatClock(end, lang)}`;
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
+      <Select aria-label={t('guideSource')} className={selectClass} wrapperClassName="min-w-0" value={sourceId} options={sourceOptions} onValueChange={(v) => onQuery('source', v)} />
+      <Select
+        aria-label={t('guideGroup')}
+        className={selectClass}
+        wrapperClassName="min-w-0"
+        value={categoryId ?? ''}
+        options={groupOptions}
+        onValueChange={(v) => onQuery('category', v || undefined)}
+      />
+      {/* While the sources load the field holds its place, disabled, so the toolbar does not shift (L2-visual-2). */}
+      <GuideSearch
+        inputRef={searchRef}
+        sourceId={sourceId}
+        disabled={!sourceId}
+        offsetMinutes={offsetMinutes}
+        now={now}
+        stripCountryPrefix={stripCountryPrefix}
+        onSelect={onSelectHit}
+        onWatch={onWatchHit}
+        // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
+        className={stacked ? 'min-w-48 flex-1' : 'w-60'}
+      />
+      {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
+      <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
+        {bar !== 'phone' ? (
+          <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(-1)} aria-label={t('previousDay')} title={t('previousDay')} />
+        ) : null}
+        <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => onShift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
+        {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
+            both layouts (day, space, times); stacked, the day sits small over the times. */}
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          title={tg('jumpTitle')}
+          onClick={onJump}
+          data-testid="guide-window"
+          className={cn(
+            'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent motion-safe:transition-colors',
+            stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+          )}
+        >
+          {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
+          <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
+            <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
+            <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
+          </span>
+          <span className="sr-only">, {tg('jumpTitle')}</span>
+        </button>
+        <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => onShift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
+        {bar !== 'phone' ? (
+          <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(1)} aria-label={t('nextDay')} title={t('nextDay')} />
+        ) : null}
+        <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} className="shrink-0" onClick={onNow}>
+          {t('jumpToNow')}
+        </Button>
+      </div>
+    </div>
+  );
+});
+
 
 /**
  * A channel row's menu (right click on the row, or the context-menu key / Shift+F10 in the grid):

@@ -256,6 +256,8 @@ describe('Settings > Remote: phones on this network', () => {
     const list = await screen.findByTestId('remote-devices');
     expect(list.textContent).toContain('Safari on iPhone');
     expect(list.textContent).toContain('Chrome on Android');
+    // A Latin name in an RTL UI truncates at its own end (L2-visual-7).
+    expect(within(list).getByText('Safari on iPhone').getAttribute('dir')).toBe('auto');
     fireEvent.click(within(list).getByRole('button', { name: 'Revoke Safari on iPhone' }));
     await waitFor(() => expect(rpcMock.callsOf('remote.revokeDevice')).toEqual([{ id: 'a1' }]));
     await waitFor(() => expect(screen.getByTestId('remote-devices').textContent).not.toContain('Safari'));

@@ -115,6 +115,8 @@ export function DashboardRail<T>({
   const count = items?.length ?? 0;
   // Whether the track sat at its inline start before the last render.
   const atStartRef = useRef(true);
+  // The track element and item order the last commit showed.
+  const shownRef = useRef<{ el: HTMLUListElement | null; order: string }>({ el: null, order: '' });
   const orderKey = items?.map(getKey).join('\u0000') ?? '';
 
   // Scroll snapping keeps the previously snapped card snapped across layout
@@ -123,8 +125,15 @@ export function DashboardRail<T>({
   // its start stays at its start.
   useLayoutEffect(() => {
     const el = trackRef.current;
-    if (el && atStartRef.current && el.scrollLeft !== 0) el.scrollLeft = 0;
-  }, [orderKey]);
+    const shown = shownRef.current;
+    shownRef.current = { el, order: orderKey };
+    // Only the same track with new order can have moved. A track that just mounted (the
+    // rail's first items, or back from its skeleton or error) sits at 0: reading scrollLeft
+    // right after its DOM went in forced a layout of the whole page inside the commit, once
+    // per rail on a cold Home (L2-sources-home-2).
+    if (!el || el !== shown.el || orderKey === shown.order || !atStartRef.current) return;
+    if (el.scrollLeft !== 0) el.scrollLeft = 0;
+  });
 
   useEffect(() => {
     if (focusIndex >= count && count > 0) setFocusIndex(count - 1);

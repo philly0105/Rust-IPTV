@@ -1,7 +1,8 @@
-import type { ComponentPropsWithRef, ReactNode } from 'react';
+import { Children, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
+import { pauseWhenOffscreen } from './offscreen';
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
@@ -84,6 +85,35 @@ const badgeVariants: Record<BadgeVariant, string> = {
   outline: 'border border-border text-fg-muted',
 };
 
+/**
+ * Puts each run of text in a block that can shrink and truncate. Badge is inline-flex, so bare
+ * text under a caller's max-w would clip with no ellipsis. Icons and other elements stay flex
+ * items beside it (the gap keeps them apart). leading-normal: under the badge's leading-none the
+ * clip (overflow: hidden) would cut descenders (g, y, p) and Arabic marks; the line still fits h-5.
+ */
+function truncatingText(children: ReactNode): ReactNode[] {
+  const out: ReactNode[] = [];
+  let run: (string | number)[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    out.push(
+      <span key={`text-${out.length}`} className="min-w-0 truncate leading-normal">
+        {run.join('')}
+      </span>,
+    );
+    run = [];
+  };
+  for (const child of Children.toArray(children)) {
+    if (typeof child === 'string' || typeof child === 'number') run.push(child);
+    else {
+      flush();
+      out.push(child);
+    }
+  }
+  flush();
+  return out;
+}
+
 export function Badge({ variant = 'neutral', className, children, ...rest }: BadgeProps) {
   return (
     <span
@@ -94,17 +124,17 @@ export function Badge({ variant = 'neutral', className, children, ...rest }: Bad
       )}
       {...rest}
     >
-      {children}
+      {truncatingText(children)}
     </span>
   );
 }
 
-/** Red LIVE pill with a slow pulse dot (pulse only under motion-safe). */
+/** Red LIVE pill with a slow pulse dot (pulse only under motion-safe, and only while on screen). */
 export function LiveBadge({ className }: { className?: string }) {
   const { t } = useTranslation('common');
   return (
     <Badge variant="live" className={className}>
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg motion-safe:animate-live-pulse" />
+      <span ref={pauseWhenOffscreen} aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg motion-safe:animate-live-pulse" />
       {t('live')}
     </Badge>
   );

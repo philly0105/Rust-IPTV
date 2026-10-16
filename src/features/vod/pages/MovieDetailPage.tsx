@@ -15,6 +15,7 @@ import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero'
 import { OtherSourcesDialog } from '../components/detail/OtherSourcesDialog';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
+import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { WatchStage } from '../components/detail/WatchStage';
 import { SimilarSection } from '../components/SimilarSection';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
@@ -115,6 +116,9 @@ export function MovieDetailPage() {
   // Back from an actor or a similar title: the page opens where you left it.
   const { pathname } = useLocation();
   useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
+  // L2-vod-9: opened from a grid or a rail, focus lands on Play (or Resume).
+  const playRef = useRef<HTMLButtonElement>(null);
+  useFocusOnOpen(gate.state === 'open' && !!model && !!item && !watching, () => playRef.current);
 
   // Until the title is known (or while it is locked), the page (sr-only h1) and the shell header both read the section name.
   const pageTitle = (gate.state === 'open' ? (model?.titleBase ?? model?.title) : undefined) ?? t('movies');
@@ -248,7 +252,14 @@ export function MovieDetailPage() {
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           actions={
             <>
-              <Button size="lg" variant="primary" icon={<Play aria-hidden size={18} className="fill-current" />} onClick={() => play(false)}>
+              <Button
+                ref={playRef}
+                size="lg"
+                variant="primary"
+                icon={<Play aria-hidden size={18} className="fill-current" />}
+                aria-describedby="vod-detail-title"
+                onClick={() => play(false)}
+              >
                 {resumable && position.data && !pinnedTarget
                   ? t('resumeAt', { time: formatClock(position.data.positionSeconds) })
                   : t('play')}

@@ -9,6 +9,10 @@
  * is inside it, while the window is hidden or the hero is scrolled away, and
  * never starts under prefers-reduced-motion. The active tick fills over the
  * dwell time and freezes with the timer, so it always shows how long is left.
+ * The fill is a transform (compositor only). The tick's grow from dot to bar
+ * animates width, which lays out and repaints on the main thread every frame,
+ * so it plays only when the user changes slides: an automatic turn swaps the
+ * ticks at once (idle Home 3.2% -> 0.8% main-thread time, L2 XB2-22).
  *
  * Text sits on frosted glass (C8 tokens) that clears toward the inline end, so
  * it stays readable on any artwork in every theme; a slide with no artwork gets
@@ -61,9 +65,11 @@ function useSlideDetails(slide: HeroSlide, enabled: boolean): HeroSlide {
   return useMemo(() => {
     const d = wanted ? item.data : undefined;
     if (!d || !('title' in d)) return slide;
-    const vod = d as { backdropUrl?: string; posterUrl?: string; plot?: string; year?: number; genres?: string[]; rating?: number };
+    const vod = d as { titleBase?: string; backdropUrl?: string; posterUrl?: string; plot?: string; year?: number; genres?: string[]; rating?: number };
     return {
       ...slide,
+      // The detail page's title: the catalog's base title wins over the playback snapshot's.
+      title: vod.titleBase || slide.title,
       backdropUrl: slide.backdropUrl ?? vod.backdropUrl,
       posterUrl: slide.posterUrl ?? vod.posterUrl,
       plot: slide.plot ?? vod.plot,
@@ -239,7 +245,7 @@ function SlideBody({
         : { 'aria-hidden': true, inert: true })}
       data-hero-slide={s.key}
       // Room above the copy for the slide controls in the top corner.
-      className={cn('col-start-1 row-start-1', HERO_BODY, count > 1 && 'pt-14 sm:pt-14', !active && 'invisible')}
+      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, count > 1 && 'pt-14 sm:pt-14', !active && 'invisible')}
     >
       <div className="hidden w-[10rem] shrink-0 lg:block">
         {active || s.posterUrl ? (
@@ -345,6 +351,9 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
   const count = slides.length;
 
   const [activeKey, setActiveKey] = useState<string | undefined>(slides[0]?.key);
+  // The last change came from the rotation timer, not the user: the ticks then switch without their
+  // width/colour transition, which would cost main-thread frames on an otherwise idle page.
+  const [autoTurn, setAutoTurn] = useState(false);
   const found = slides.findIndex((s) => s.key === activeKey);
   // A refresh that drops the active slide falls back to the first.
   const index = found >= 0 ? found : 0;
@@ -360,13 +369,14 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
   const running = canRotate && !userPaused && !hovered && !focused && visible && onScreen;
 
   const go = useCallback(
-    (step: number) => {
+    (step: number, auto = false) => {
       if (count === 0) return;
+      setAutoTurn(auto);
       setActiveKey(slides[wrapIndex(index, step, count)]!.key);
     },
     [slides, index, count],
   );
-  useRotation(active?.key, running, dwellMs, () => go(1));
+  useRotation(active?.key, running, dwellMs, () => go(1, true));
 
   // Backdrops mount once visited. The next one mounts when the main thread is idle, so it
   // is fetched (at low priority, through the image cache) and decoded before its turn
@@ -387,6 +397,7 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
 
   const choose = (i: number, focusTab: boolean) => {
     const key = slides[i]!.key;
+    setAutoTurn(false);
     setActiveKey(key);
     if (focusTab) tabsRef.current?.querySelectorAll<HTMLElement>('[role="tab"]')[i]?.focus();
   };
@@ -473,7 +484,8 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
                   <span
                     aria-hidden
                     className={cn(
-                      'relative block h-1.5 overflow-hidden rounded-full motion-safe:transition-[width,background-color] motion-safe:duration-300',
+                      'relative block h-1.5 overflow-hidden rounded-full',
+                      !autoTurn && 'motion-safe:transition-[width,background-color] motion-safe:duration-300',
                       on ? 'w-7 bg-on-glass/25' : 'w-1.5 bg-on-glass/45 group-hover/tick:bg-on-glass/80',
                     )}
                   >
@@ -499,7 +511,12 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
       )}
 
       {/* Live region: quiet while rotating (no announcement every few seconds), polite once the user drives it. */}
-      <div className="relative z-[3] grid" aria-live={running ? 'off' : 'polite'} aria-atomic="false">
+      {/*
+        One column that may shrink below its content (minmax(0,1fr)): an auto column let the
+        widest slide's button row set the width, so on phones it overflowed the frame and the
+        frame clipped the Details button.
+      */}
+      <div className="relative z-[3] grid grid-cols-[minmax(0,1fr)]" aria-live={running ? 'off' : 'polite'} aria-atomic="false">
         {slides.map((s, i) => (
           <SlideBody
             key={s.key}

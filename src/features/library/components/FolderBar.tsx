@@ -18,11 +18,22 @@ export async function pickFolder(defaultPath?: string): Promise<string | undefin
 }
 
 /**
+ * Splits a folder path before its last segment ("D:\Media\" + "Videos"), so a
+ * long path can lose its middle and keep the drive and the folder's own name.
+ */
+export function splitPath(path: string): { head: string; tail: string } {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const at = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  if (at <= 0) return { head: '', tail: path };
+  return { head: trimmed.slice(0, at + 1), tail: trimmed.slice(at + 1) };
+}
+
+/**
  * `pageError`: the page body is already showing an error state (an outage
  * usually fails both reads); the bar then stays quiet instead of stacking a
  * second alert with its own retry.
  */
-export function FolderBar({ summary, pageError = false }: { summary?: string; pageError?: boolean }) {
+export function FolderBar({ pageError = false }: { pageError?: boolean }) {
   const { t } = useTranslation('library');
   const { toast } = useToast();
   const dir = useRpcQuery('downloads.dir', undefined, { staleTime: 60_000 });
@@ -79,12 +90,9 @@ export function FolderBar({ summary, pageError = false }: { summary?: string; pa
             </Button>
           </span>
         ) : (
-          <span className="truncate font-mono text-[calc(13rem/15)] text-fg" title={path} data-testid="downloads-dir">
-            {path ?? t('folderUnknown')}
-          </span>
+          <FolderPath path={path} unknown={t('folderUnknown')} />
         )}
       </div>
-      {summary && <span className="hidden text-[calc(13rem/15)] text-fg-muted lg:inline">{summary}</span>}
       {isDesktop && (
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" icon={<FolderOpen size={16} aria-hidden />} onClick={() => void openFolder()} disabled={!path}>
@@ -96,5 +104,32 @@ export function FolderBar({ summary, pageError = false }: { summary?: string; pa
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The path on one line, cut in the middle when it does not fit: the start
+ * (drive, parents) gives way first and the folder's own name stays whole. The
+ * full path is in the tooltip and, once, for screen readers. Paths read left
+ * to right in every locale.
+ */
+function FolderPath({ path, unknown }: { path: string | undefined; unknown: string }) {
+  const cls = 'font-mono text-[calc(13rem/15)] text-fg';
+  if (!path) return <span className={cls}>{unknown}</span>;
+  const { head, tail } = splitPath(path);
+  return (
+    // An RTL page still lines the path up with its "Saving to" label, on the right.
+    <span dir="ltr" className={`flex min-w-0 rtl:justify-end ${cls}`} title={path} data-testid="downloads-dir">
+      <span className="sr-only">{path}</span>
+      {head && (
+        <span aria-hidden className="min-w-0 truncate">
+          {head}
+        </span>
+      )}
+      {/* Never shrinks for the head; truncates itself only when it alone is too long. */}
+      <span aria-hidden className="max-w-full shrink-0 truncate">
+        {tail}
+      </span>
+    </span>
   );
 }

@@ -102,6 +102,8 @@
   "adultOffHint": "Benannt wie Erwachseneninhalt. Automatische Sperren für Erwachsenengruppen sind aus.",
   "autoAdultCount_one": "Außerdem ist {{count}} Erwachsenengruppe automatisch gesperrt.",
   "autoAdultCount_other": "Außerdem sind {{count}} Erwachsenengruppen automatisch gesperrt.",
+  "autoAdultRule": "Automatisch gesperrte Erwachsenengruppen",
+  "autoAdultNone": "Keine Gruppe dieser Quelle sieht nach Inhalten für Erwachsene aus.",
   "removeLockNamed": "Sperre für {{name}} entfernen",
   "showAllLocks_one": "{{count}} Sperre anzeigen",
   "showAllLocks_other": "Alle {{count}} Sperren anzeigen",

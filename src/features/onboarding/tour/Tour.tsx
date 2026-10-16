@@ -37,6 +37,9 @@ export const ANCHOR_POLL_MS = 300;
 const inOtherModal = (node: Node) =>
   node instanceof Element && node.closest('[aria-modal="true"], [data-dialog-layer]') !== null;
 
+/** Position as a transform: the compositor moves it, and it never counts as a layout shift. */
+export const translateTo = (x: number, y: number) => `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+
 const sameBox = (a: Box | null, b: Box | null) =>
   a === b || (!!a && !!b && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height);
 
@@ -239,15 +242,19 @@ export function Tour({ onClose }: TourProps) {
     <div ref={layerRef} className="fixed inset-0 z-50" data-testid="tour" data-tour-step={current.anchor}>
       {spot ? (
         // The scrim is the spotlight's own enormous shadow, so the anchor shows through a ring-edged hole.
+        // It sits at 0,0 and moves by transform, which the compositor animates and which is no layout
+        // shift. dir="ltr" keeps its starting corner at the top left in right-to-left layouts too, so a
+        // change of size does not count as one either.
         <div
           aria-hidden
+          dir="ltr"
           data-testid="tour-spotlight"
           className={cn(
-            'pointer-events-none fixed rounded-md',
+            'pointer-events-none fixed top-0 left-0 rounded-md will-change-transform',
             'shadow-[0_0_0_2px_var(--color-accent),0_0_0_7px_var(--color-glow),0_0_0_200vmax_var(--color-scrim)]',
-            'motion-safe:transition-[top,left,width,height] motion-safe:duration-200 motion-safe:ease-out',
+            'motion-safe:transition-[transform,width,height] motion-safe:duration-200 motion-safe:ease-out',
           )}
-          style={{ top: spot.top, left: spot.left, width: spot.width, height: spot.height }}
+          style={{ width: spot.width, height: spot.height, transform: translateTo(spot.left, spot.top) }}
         />
       ) : (
         <div aria-hidden data-testid="tour-scrim" className="pointer-events-none fixed inset-0 bg-scrim" />
@@ -266,10 +273,10 @@ export function Tour({ onClose }: TourProps) {
         data-testid="tour-card"
         data-side={place.side}
         className={cn(
-          'fixed flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-border bg-surface text-fg shadow-2 focus-visible:outline-none',
-          'motion-safe:transition-[top,left] motion-safe:duration-200 motion-safe:ease-out',
+          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-border bg-surface text-fg shadow-2 focus-visible:outline-none',
+          'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out',
         )}
-        style={{ top: place.top, left: place.left }}
+        style={{ transform: translateTo(place.left, place.top) }}
       >
         <div className="flex items-center gap-3 px-5 pt-5">
           <span aria-hidden className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-2 text-accent">

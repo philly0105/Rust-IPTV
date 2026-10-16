@@ -3,7 +3,7 @@
  * store so `useShell()` works anywhere (pages, tests) without a provider.
  */
 
-import { useEffect, useId, useMemo, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, type KeyboardEvent, type ReactNode } from 'react';
 import { create } from 'zustand';
 
 export interface HeaderSearch {
@@ -12,6 +12,8 @@ export interface HeaderSearch {
   placeholder?: string;
   /** Enter in the header search box. */
   onSubmit?: (value: string) => void;
+  /** Every key in the header search box, before its own Enter and Escape handling (preventDefault skips those). */
+  onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
 }
 
 export interface HeaderState {

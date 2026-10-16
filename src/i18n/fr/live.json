@@ -189,5 +189,11 @@
   "locked": "Verrouillée",
   "lockedGuide": "Verrouillée. Saisissez le code PIN pour voir ce qui passe.",
   "unlock": "Déverrouiller",
-  "ribbonFailed": "Impossible de charger le guide de cette chaîne"
+  "ribbonFailed": "Impossible de charger le guide de cette chaîne",
+  "parentalHiddenChannels": "Le contrôle parental masque les chaînes de cette source",
+  "parentalHiddenStations": "Le contrôle parental masque les stations de cette source",
+  "parentalHiddenHint": "Ses groupes sont verrouillés. Saisissez votre code PIN pour les afficher pendant cette session.",
+  "parentalUnlock": "Déverrouiller",
+  "parentalUnlockTitle": "Afficher les chaînes verrouillées",
+  "parentalUnlockBody": "Saisissez votre code PIN pour afficher les groupes et chaînes verrouillés jusqu’au prochain verrouillage du contrôle parental."
 }

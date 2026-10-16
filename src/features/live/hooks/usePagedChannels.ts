@@ -1,7 +1,9 @@
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { invalidate, useRpcQuery } from '@/api/query';
-import { itemKey, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type Page } from '@/api/types';
+import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
+import { rpcRaw, type RpcArgs } from '@/api/transport';
+import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type Page } from '@/api/types';
 
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { MINUTE, ms } from '../lib/epgTime';
@@ -60,7 +62,36 @@ export interface PagedChannels {
   guideUnavailable: boolean;
   /** Stalker: ask the portal's guide again now. */
   retryGuide(): void;
+  /**
+   * The row index of a channel in this list when it is not loaded (a number typed, a zap from
+   * elsewhere): pages are read until it turns up, guided by its channel number. Undefined when
+   * it cannot be found in a few reads.
+   */
+  locate?(ref: ItemRef, number: number | undefined): Promise<number | undefined>;
 }
+
+type ChannelsArgs = RpcArgs<'catalog.channels'>;
+
+/**
+ * One page of `catalog.channels` under the same key `useRpcQuery` uses. Pages are replaced whole
+ * and never patched, so structural sharing (a deep compare of 120 channels on every refetch and
+ * remount, 10-15 ms per return to Live on a big list) buys nothing.
+ */
+function channelPageOptions(args: ChannelsArgs) {
+  return {
+    queryKey: rpcKey('catalog.channels', args),
+    queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('catalog.channels', args, { signal })) as Page<Channel>,
+    structuralSharing: false,
+  };
+}
+
+/** `epg.nowNext` args for a page's refs, as {@link usePageExtras} asks them. */
+function nowNextArgs(refs: ItemRef[], offsetMinutes: number): RpcArgs<'epg.nowNext'> {
+  return offsetMinutes ? { refs, offsetMinutes } : { refs };
+}
+
+/** How many pages to read at most while looking for an unloaded channel's row. */
+const LOCATE_MAX_READS = 12;
 
 function inPage(page: Page<Channel> | undefined, index: number): Channel | undefined {
   if (!page) return undefined;
@@ -71,11 +102,13 @@ function inPage(page: Page<Channel> | undefined, index: number): Channel | undef
 function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offsetMinutes: number) {
   const refs = useMemo(() => page?.items.map((c) => c.ref) ?? [], [page]);
   const has = enabled && refs.length > 0;
-  const nowNext = useRpcQuery('epg.nowNext', offsetMinutes ? { refs, offsetMinutes } : { refs }, { enabled: has, staleTime: 60_000 });
+  const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS });
   const favs = useRpcQuery('favorites.contains', { refs }, { enabled: has });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };
 }
+
+const NOW_NEXT_STALE_MS = 60_000;
 
 /** How long the visible range must hold still before the portal guide is asked for it. */
 export const STALKER_RANGE_SETTLE_MS = 150;
@@ -87,20 +120,24 @@ export const STALKER_RANGE_SETTLE_MS = 150;
  */
 export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   const size = args.pageSize ?? CHANNEL_PAGE_SIZE;
+  const queryClient = useQueryClient();
   const listKey = `${args.sourceId}|${args.categoryId ?? ''}|${args.search ?? ''}|${args.radio ? 'r' : 'l'}`;
   const [pages, setPages] = useState<{ key: string; a: number; b: number }>({ key: listKey, a: 0, b: 0 });
   const [range, setRange] = useState<{ key: string; start: number; end: number }>({ key: listKey, start: 0, end: 0 });
   const { a, b } = pages.key === listKey ? pages : { a: 0, b: 0 };
 
-  const query = (page: number) => ({
-    sourceId: args.sourceId,
-    categoryId: args.categoryId,
-    radio: args.radio || undefined,
-    query: { offset: page * size, limit: size, search: args.search || undefined },
-  });
+  const query = useCallback(
+    (page: number): ChannelsArgs => ({
+      sourceId: args.sourceId,
+      categoryId: args.categoryId,
+      radio: args.radio || undefined,
+      query: { offset: page * size, limit: size, search: args.search || undefined },
+    }),
+    [args.sourceId, args.categoryId, args.radio, args.search, size],
+  );
   // keepPrevious: a new search or group keeps the old rows up until its first page lands.
-  const qa = useRpcQuery('catalog.channels', query(a), { enabled: !!args.sourceId, keepPrevious: true });
-  const qb = useRpcQuery('catalog.channels', query(b), { enabled: !!args.sourceId && b !== a });
+  const qa = useQuery({ ...channelPageOptions(query(a)), enabled: !!args.sourceId, placeholderData: keepPreviousData });
+  const qb = useQuery({ ...channelPageOptions(query(b)), enabled: !!args.sourceId && b !== a });
   const pageA = qa.data;
   const pageB = b !== a ? qb.data : undefined;
 
@@ -113,6 +150,8 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   const freshTotal = pageA?.total ?? pageB?.total;
   if (freshTotal !== undefined && !placeholderFromOtherList) totals.current.set(listKey, freshTotal);
   const total = placeholderFromOtherList ? freshTotal : (freshTotal ?? totals.current.get(listKey));
+  const totalRef = useRef(total);
+  totalRef.current = placeholderFromOtherList ? undefined : total;
 
   const extrasOn = args.withExtras ?? true;
   const offsetMs = (args.epgOffsetMinutes ?? 0) * MINUTE;
@@ -142,13 +181,57 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   const portalPrograms = useStalkerPreviews(args.sourceId, stalkerOn, visibleRefs, args.now ?? 0);
   const shortPrograms = useShortEpgPreviews(args.sourceId, shortOn, visibleRefs, args.now ?? 0);
 
+  // Pages ahead of a scroll are read before the rows reach the screen, with their now/next and
+  // favourite flags, so a brisk scroll lands on rows that are already there (L2-live-4).
+  const extrasOffset = args.epgOffsetMinutes ?? 0;
+  const prefetchPage = useCallback(
+    (page: number) => {
+      const known = totalRef.current;
+      if (page < 0 || known === undefined || page * size >= known || !args.sourceId) return;
+      const pageArgs = query(page);
+      void queryClient.prefetchQuery(channelPageOptions(pageArgs)).then(() => {
+        if (!extrasOn) return;
+        const data = queryClient.getQueryData<Page<Channel>>(rpcKey('catalog.channels', pageArgs));
+        if (!data?.items.length) return;
+        const refs = data.items.map((c) => c.ref);
+        const nn = nowNextArgs(refs, extrasOffset);
+        void queryClient.prefetchQuery({
+          queryKey: rpcKey('epg.nowNext', nn),
+          queryFn: ({ signal }) => rpcRaw('epg.nowNext', nn, { signal }),
+          staleTime: NOW_NEXT_STALE_MS,
+        });
+        void queryClient.prefetchQuery({
+          queryKey: rpcKey('favorites.contains', { refs }),
+          queryFn: ({ signal }) => rpcRaw('favorites.contains', { refs }, { signal }),
+        });
+      });
+    },
+    [queryClient, query, size, args.sourceId, extrasOn, extrasOffset],
+  );
+
   const rangeTimer = useRef<number | undefined>(undefined);
+  const lastRange = useRef<{ key: string; start: number }>({ key: '', start: 0 });
   useEffect(() => () => window.clearTimeout(rangeTimer.current), []);
   const setVisibleRange = useCallback(
     (start: number, end: number) => {
       const na = Math.max(0, Math.floor(start / size));
       const nb = Math.max(na, Math.floor(Math.max(start, end) / size));
       setPages((p) => (p.key === listKey && p.a === na && p.b === nb ? p : { key: listKey, a: na, b: nb }));
+      // Read ahead in the direction of travel once the range is within half a page of the next
+      // page, and two pages ahead while moving fast (more than a few rows per report).
+      const prev = lastRange.current;
+      lastRange.current = { key: listKey, start };
+      if (prev.key === listKey && prev.start !== start) {
+        const step = start - prev.start;
+        const fast = Math.abs(step) > 4;
+        if (step > 0 && (Math.max(start, end) % size >= size / 2 || fast)) {
+          prefetchPage(nb + 1);
+          if (fast) prefetchPage(nb + 2);
+        } else if (step < 0 && (start % size < size / 2 || fast)) {
+          prefetchPage(na - 1);
+          if (fast) prefetchPage(na - 2);
+        }
+      }
       if (!previewOn) return;
       // The portal guide follows the visible rows once scrolling pauses: a range update per row of
       // a held arrow key would queue a render of the page behind every keystroke (React #185).
@@ -158,10 +241,53 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
         STALKER_RANGE_SETTLE_MS,
       );
     },
-    [listKey, size, previewOn],
+    [listKey, size, previewOn, prefetchPage],
   );
 
-  const getChannel = useCallback((i: number) => inPage(pageA, i) ?? inPage(pageB, i), [pageA, pageB]);
+  // Rows outside pages a and b come from any page of this list already in the cache (read
+  // ahead, or seen before), so a page switch never blanks rows that are known.
+  const getChannel = useCallback(
+    (i: number) => {
+      const hit = inPage(pageA, i) ?? inPage(pageB, i);
+      if (hit || placeholderFromOtherList || i < 0) return hit;
+      return inPage(queryClient.getQueryData<Page<Channel>>(rpcKey('catalog.channels', query(Math.floor(i / size)))), i);
+    },
+    [queryClient, pageA, pageB, placeholderFromOtherList, query, size],
+  );
+
+  const locate = useCallback(
+    async (ref: ItemRef, number: number | undefined): Promise<number | undefined> => {
+      const known = totalRef.current;
+      if (!known || number === undefined || !args.sourceId) return undefined;
+      // Rows run in playlist order, which providers number upwards: start at number - 1 (exact
+      // for a densely numbered list), then narrow by the numbers each page holds.
+      let lo = 0;
+      let hi = Math.ceil(known / size) - 1;
+      let page = Math.min(hi, Math.max(0, Math.floor((number - 1) / size)));
+      for (let read = 0; read < LOCATE_MAX_READS && lo <= hi; read++) {
+        const data = await queryClient.fetchQuery(channelPageOptions(query(page)));
+        const at = data.items.findIndex((c) => sameRef(c.ref, ref));
+        if (at >= 0) return data.offset + at;
+        const nums = data.items.map((c) => c.number).filter((n): n is number => typeof n === 'number');
+        const first = nums[0];
+        const last = nums[nums.length - 1];
+        if (first === undefined || last === undefined) return undefined;
+        let guess: number;
+        if (number < first) {
+          hi = page - 1;
+          guess = page - Math.ceil((first - number) / size);
+        } else if (number > last) {
+          lo = page + 1;
+          guess = page + Math.ceil((number - last) / size);
+        } else {
+          return undefined; // its number falls inside this page, yet it is not here: numbers are not in order
+        }
+        page = read < 2 ? Math.min(hi, Math.max(lo, guess)) : Math.floor((lo + hi) / 2);
+      }
+      return undefined;
+    },
+    [queryClient, args.sourceId, query, size],
+  );
   const nowForPreviews = args.now;
   const getNowNext = useCallback(
     (i: number) => {
@@ -229,5 +355,6 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     pageSize: size,
     guideUnavailable: portalPrograms.unavailable,
     retryGuide: portalPrograms.retry,
+    locate,
   };
 }

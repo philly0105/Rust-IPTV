@@ -4,7 +4,7 @@
  * series card with a season/episode list.
  */
 
-import { itemKey, type Download } from '@/api/types';
+import { itemKey, type Download, type RecordingFile } from '@/api/types';
 
 export interface EpisodeEntry {
   download: Download;
@@ -39,6 +39,19 @@ export interface SeriesEntry {
 }
 
 export type LibraryEntry = MovieEntry | SeriesEntry;
+
+/** A file in the recordings folder, shown in the All grid beside downloads. */
+export interface RecordingEntry {
+  kind: 'recording';
+  key: string;
+  title: string;
+  file: RecordingFile;
+  missing: boolean;
+  completedAt: string;
+}
+
+/** What the My Videos grid shows: downloads, and in All and Missing, recordings too. */
+export type GridEntry = LibraryEntry | RecordingEntry;
 
 export type LibraryFilter = 'all' | 'movies' | 'series' | 'missing';
 
@@ -162,15 +175,38 @@ export function buildLibrary(downloads: readonly Download[]): LibraryEntry[] {
   return entries;
 }
 
-/** Applies the type chip and the search term. */
-export function filterLibrary(entries: readonly LibraryEntry[], filter: LibraryFilter, search: string): LibraryEntry[] {
+/** A recording file as a grid entry: the programme title leads, as in the Recordings list. */
+export function recordingEntry(f: RecordingFile): RecordingEntry {
+  return { kind: 'recording', key: `r-${f.id}`, title: f.title ?? f.channelName ?? f.fileName, file: f, missing: !f.fileAvailable, completedAt: f.date };
+}
+
+function timeOf(iso: string): number {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Downloads and recordings in one list, newest first. Both inputs are already newest first. */
+export function withRecordings(library: readonly LibraryEntry[], files: readonly RecordingFile[]): GridEntry[] {
+  if (files.length === 0) return [...library];
+  const all: GridEntry[] = [...library, ...files.map(recordingEntry)];
+  return all.sort((a, b) => timeOf(b.completedAt) - timeOf(a.completedAt) || a.key.localeCompare(b.key));
+}
+
+/** Whether an entry has a file that is gone from disk (a series counts when any episode is). */
+export function hasMissing(e: GridEntry): boolean {
+  return e.kind === 'series' ? e.missingCount > 0 : e.missing;
+}
+
+/** Applies the type chip and the search term. Recordings only pass All and Missing. */
+export function filterLibrary<E extends GridEntry>(entries: readonly E[], filter: LibraryFilter, search: string): E[] {
   const q = search.trim().toLocaleLowerCase();
   return entries.filter((e) => {
     if (filter === 'movies' && e.kind !== 'movie') return false;
     if (filter === 'series' && e.kind !== 'series') return false;
-    if (filter === 'missing' && !(e.kind === 'movie' ? e.missing : e.missingCount > 0)) return false;
+    if (filter === 'missing' && !hasMissing(e)) return false;
     if (!q) return true;
     if (e.title.toLocaleLowerCase().includes(q)) return true;
+    if (e.kind === 'recording') return [e.file.channelName, e.file.fileName].some((s) => s?.toLocaleLowerCase().includes(q));
     return e.kind === 'series' && e.episodes.some((ep) => ep.name.toLocaleLowerCase().includes(q));
   });
 }

@@ -1,5 +1,5 @@
 import { Tv } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type EpgNowNext, type EpgProgram, type ItemRef } from '@/api/types';
@@ -70,9 +70,9 @@ function useClock(active: boolean): number {
  * The channel's logo: the guide's logo, else the item's own picture, each through the image
  * cache (C3) and then its original URL once; the TV icon when none loads.
  */
-function Logo({ urls, sourceId, compact }: { urls: readonly (string | undefined)[]; sourceId: string; compact: boolean }) {
+function Logo({ urls, sourceId, compact, chip = false }: { urls: readonly (string | undefined)[]; sourceId: string; compact: boolean; chip?: boolean }) {
   const logo = useImageChain(urls.map(safeImageUrl), sourceId);
-  const box = compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
+  const box = chip ? 'size-6 rounded-[3px]' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
   if (!logo.url) {
     return (
       <span
@@ -80,7 +80,7 @@ function Logo({ urls, sourceId, compact }: { urls: readonly (string | undefined)
         className={cn('player-on-glass-muted flex shrink-0 items-center justify-center bg-white/8 ring-1 ring-white/10', box)}
         aria-hidden
       >
-        <Tv className={compact ? 'size-4' : 'size-6'} />
+        <Tv className={chip ? 'size-3.5' : compact ? 'size-4' : 'size-6'} />
       </span>
     );
   }
@@ -91,7 +91,7 @@ function Logo({ urls, sourceId, compact }: { urls: readonly (string | undefined)
       aria-hidden
       draggable={false}
       data-testid="zap-logo"
-      className={cn('shrink-0 bg-white/8 object-contain p-1 ring-1 ring-white/10', box)}
+      className={cn('shrink-0 bg-white/8 object-contain ring-1 ring-white/10', chip ? 'p-0.5' : 'p-1', box)}
       onError={logo.onError}
     />
   );
@@ -194,14 +194,62 @@ function GuideRows({ guide, now, compact }: { guide: EpgNowNext | null | undefin
   );
 }
 
+/** The zap readout (number and name, top corner) says what the banner says: drop it while it is up. */
+function useDropZapReadout(shown: boolean, title: string | undefined): void {
+  const showing = useZapBanner((s) => s.showing);
+  useEffect(() => {
+    if (!shown) return;
+    const osd = useMediaStore.getState().osd;
+    if (osd && title && (osd.primary === title || osd.secondary === title)) useMediaStore.setState({ osd: undefined });
+  }, [shown, showing, title]);
+}
+
+/**
+ * The phone-width banner: one line of number, name and what airs now, with how far in as a
+ * hairline along its bottom edge. Small enough to leave the picture visible.
+ */
+function ZapChip({ number, title, guide, now, logo }: { number: number | undefined; title: string; guide: EpgNowNext | null | undefined; now: number; logo: ReactNode }) {
+  const { current } = airingPair(guide, now);
+  return (
+    <>
+      <div className="flex min-w-0 items-center gap-2">
+        {logo}
+        {number !== undefined && (
+          <span data-testid="zap-number" className="shrink-0 font-display text-base leading-none text-white tabular-nums dark:text-accent-hover">
+            {number}
+          </span>
+        )}
+        <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate font-display text-sm leading-tight" title={title}>
+          {title}
+        </span>
+        {guide === undefined ? (
+          <span data-testid="zap-guide-loading" aria-hidden className="h-2.5 w-16 shrink self-center rounded-sm bg-white/10 motion-safe:animate-pulse" />
+        ) : (
+          current && (
+            <span data-testid="zap-now" className="player-on-glass-muted min-w-0 flex-1 truncate text-xs" title={current.title}>
+              {current.title}
+            </span>
+          )
+        )}
+      </div>
+      {current && (
+        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-white/10" aria-hidden>
+          <div data-testid="zap-progress" className="h-full bg-accent" style={{ width: `${Math.round(airedShare(current, now) * 1000) / 10}%` }} />
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * The tuner's info banner (C5): logo, number, name, and what airs now (with how far in) and
  * next. Up for 5 s on every live channel change and while the channel title is hovered; see
  * `zapBanner.ts`. Over embedded mpv it is cut out of the native video (`data-mpv-overlay`).
- * The caller places it (`className`: position and insets); `compact` is the one-line version
- * for the mini player and picture-in-picture.
+ * The caller places it (`className`: position and insets); `compact` is the two-line version
+ * for picture-in-picture, `chip` the one-line version for a phone-width player. The mini player
+ * shows `ZapHeaderLine` in its header instead.
  */
-export function ZapBanner({ compact = false, className }: { compact?: boolean; className?: string }) {
+export function ZapBanner({ compact = false, chip = false, className }: { compact?: boolean; chip?: boolean; className?: string }) {
   const { t } = useTranslation('player');
   const shown = useZapBannerShown();
   const showing = useZapBanner((s) => s.showing);
@@ -211,18 +259,39 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
   const { info, guide } = useZapData(ref, now);
   // Hidden while hovered (the stream failed, the setting went off): no leave comes, so `shown` releases it.
   const hover = useZapHover(shown);
-
-  // The zap readout (number and name, top corner) says what the banner says: drop it.
-  const title = source?.title;
-  useEffect(() => {
-    if (!shown) return;
-    const osd = useMediaStore.getState().osd;
-    if (osd && title && (osd.primary === title || osd.secondary === title)) useMediaStore.setState({ osd: undefined });
-  }, [shown, showing, title]);
+  useDropZapReadout(shown, source?.title);
 
   if (!shown || !source || !ref) return null;
   const number = info?.number;
   const logos = [info?.logoUrl, source.posterUrl];
+
+  if (chip) {
+    return (
+      <div
+        key={showing}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-label={t('zapBannerLabel')}
+        data-testid="zap-banner"
+        data-variant="chip"
+        data-zap-banner=""
+        data-mpv-overlay=""
+        data-mpv-reserved=""
+        className={cn(
+          'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-[12] overflow-hidden rounded-lg border px-2.5 py-1.5 motion-safe:animate-pop-in',
+          className,
+        )}
+        onPointerEnter={hover.onPointerEnter}
+        onPointerLeave={hover.onPointerLeave}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
+        <ZapChip number={number} title={source.title} guide={guide} now={now} logo={<Logo urls={logos} sourceId={ref.sourceId} compact chip />} />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -276,5 +345,37 @@ export function ZapBanner({ compact = false, className }: { compact?: boolean; c
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The mini player's header while the zap banner is up: the channel number and what airs now
+ * beside the name it already shows, instead of a banner over its small picture.
+ */
+export function ZapHeaderLine({ title }: { title: string }) {
+  const shown = useZapBannerShown();
+  const source = usePlayerStore((s) => s.source);
+  const now = useClock(shown);
+  const ref = shown ? source?.ref : undefined;
+  const { info, guide } = useZapData(ref, now);
+  useDropZapReadout(shown, source?.title);
+  const { current } = airingPair(guide, now);
+  const number = shown ? info?.number : undefined;
+  return (
+    <span data-testid="mini-zap-line" className="flex min-w-0 flex-1 items-baseline gap-1.5">
+      {number !== undefined && (
+        <span data-testid="zap-number" className="shrink-0 font-display text-sm leading-none text-accent tabular-nums motion-safe:animate-fade-in">
+          {number}
+        </span>
+      )}
+      <span className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0')} title={title}>
+        {title}
+      </span>
+      {shown && current && (
+        <span data-testid="zap-now" className="min-w-0 flex-1 truncate text-xs font-normal text-fg-muted motion-safe:animate-fade-in" title={current.title}>
+          {current.title}
+        </span>
+      )}
+    </span>
   );
 }

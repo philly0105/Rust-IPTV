@@ -204,5 +204,8 @@
   "categoryMissingTitle": "Categorie niet gevonden",
   "categoryMissingBody": "Deze bron heeft geen categorie met die link. De provider heeft hem misschien hernoemd of verwijderd.",
   "namedMarkedWatched": "{{name}} gemarkeerd als bekeken",
-  "namedMarkedUnwatched": "{{name}} gemarkeerd als niet bekeken"
+  "namedMarkedUnwatched": "{{name}} gemarkeerd als niet bekeken",
+  "filters": "Filters",
+  "filtersActive": "Actieve filters: {{n}}",
+  "locked": "Vergrendeld"
 }

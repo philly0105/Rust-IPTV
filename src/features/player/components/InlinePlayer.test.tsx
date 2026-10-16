@@ -14,7 +14,7 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
-const { InlinePlayer } = await import('./InlinePlayer');
+const { InlinePlayer, ENGINE_ERROR_GRACE_MS } = await import('./InlinePlayer');
 
 /** No media URL: the overlay is under test, not an engine. */
 const placeholder = { url: '', kind: 'direct' as const, title: 'Movie', isLive: false, isRadio: false };
@@ -48,6 +48,17 @@ describe('stream error overlay', () => {
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('The provider refused this stream');
     expect(alert.textContent).toContain('HTTP 403');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('leaves room for the title bar and scrolls from the top in a short player (390 px)', () => {
+    render(<InlinePlayer />);
+    fail('HTTP 403');
+    const alert = screen.getByRole('alert');
+    // pt-14 clears the title and subtitle lines; m-auto, unlike justify-center, never pushes an
+    // overflowing block above the scroll top, under the title.
+    expect(alert.className).toContain('pt-14');
+    expect(alert.className).not.toContain('justify-center');
+    expect((alert.firstElementChild as HTMLElement).className).toContain('m-auto');
   });
 
   it('uses the RPC error code when the message says nothing useful', () => {
@@ -121,5 +132,72 @@ describe('stream error overlay', () => {
       await new Promise((r) => setTimeout(r, 10));
     });
     expect(vi.mocked(rpc).mock.calls.filter((c) => c[0] === 'xtream.streamUrl').length).toBe(before + 1);
+  });
+});
+
+describe('quiet failures and slow starts', () => {
+  it('keeps the engine message behind Details, under the plain headline', () => {
+    render(<InlinePlayer />);
+    fail('HttpStatusCodeInvalid (HTTP 503)');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('The provider is busy, try again shortly');
+    const raw = screen.getByText('HttpStatusCodeInvalid (HTTP 503)');
+    const details = raw.closest('details');
+    expect(details).toBeTruthy();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toBe('Details');
+  });
+
+  it('an element error the engine never reports fails with plain copy, and is not a pause (L2-player-2)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<InlinePlayer />);
+      // No URL yet: no engine is built, the handlers are what is under test.
+      const stream = { url: '', kind: 'hls' as const, title: 'Stalled Stream', isLive: true, isRadio: false };
+      act(() => usePlayerStore.setState({ source: stream, mode: 'inline', status: 'loading', error: undefined }));
+      const el = container.querySelector('video')!;
+      Object.defineProperty(el, 'error', { value: { code: 4, message: '' }, configurable: true });
+      act(() => {
+        el.dispatchEvent(new Event('error'));
+        el.dispatchEvent(new Event('pause'));
+      });
+      expect(usePlayerStore.getState().status).toBe('loading');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ENGINE_ERROR_GRACE_MS);
+      });
+      expect(usePlayerStore.getState().status).toBe('error');
+      expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('This channel sends no video the player can show');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a slow live start says so and offers another copy when there is one', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const { useReconnectStore } = await import('../reconnect');
+    const { useAlternatesStore } = await import('../failover');
+    const ref = { sourceId: 's1', contentType: 'live' as const, itemId: '101' };
+    render(<InlinePlayer />);
+    act(() =>
+      usePlayerStore.setState({
+        source: { url: 'http://h/live/101.mp4', kind: 'direct', title: 'News', isLive: true, isRadio: false, ref },
+        mode: 'inline',
+        status: 'loading',
+      }),
+    );
+    expect(screen.queryByTestId('connecting-notice')).toBeNull();
+    act(() => useReconnectStore.setState({ phase: 'connecting' }));
+    expect(screen.getByTestId('connecting-notice').textContent).toBe('Still connecting');
+    act(() =>
+      useAlternatesStore.setState({
+        forKey: 's1|live|101',
+        status: 'ready',
+        data: { key: 'news', alternates: [{ ref: { ...ref, sourceId: 's2' }, sourceName: 'Backup', name: 'News' }] } as never,
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Try another source' })).toBeTruthy();
+    act(() => useReconnectStore.setState({ phase: 'idle' }));
+    expect(screen.queryByTestId('connecting-notice')).toBeNull();
+    act(() => useAlternatesStore.setState({ forKey: undefined, status: 'idle', data: undefined }));
   });
 });

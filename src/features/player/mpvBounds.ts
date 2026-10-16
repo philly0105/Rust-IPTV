@@ -86,8 +86,14 @@ export function boundsClear(b: Bounds, reserved: Rect[]): boolean {
   return reserved.every((x) => !intersect(r, x));
 }
 
-/** Elements the native window must never cover, inside the player host. */
+/**
+ * Chrome inside the player host that the native window must never cover. Docked, the window
+ * shrinks around it (the options menu grows the dock upward); in fullscreen it is cut out.
+ */
 export const RESERVED_SELECTOR = '[data-player-controls], [data-mpv-reserved], [role="menu"]';
+
+/** The player's own popovers over the video: always holes, even inside the host. */
+export const PLAYER_OVERLAY_SELECTOR = '[data-mpv-overlay]';
 
 /**
  * App-level chrome outside the player host that the native window must not cover either:
@@ -97,30 +103,47 @@ export const RESERVED_SELECTOR = '[data-player-controls], [data-mpv-reserved], [
 export const GLOBAL_RESERVED_SELECTOR = '[data-toast-viewport] [data-toast-id], [data-mpv-reserved-global]';
 
 /**
+ * Transient UI that floats over the video, anywhere in the document: the player's own popovers
+ * (`data-mpv-overlay`: the video's context menu, the zap banner, stream info), every menu and
+ * tooltip (most are portalled to the body), and dialogs (the command palette, the tour card).
+ * They are cut out of the native window as holes, so the video keeps its size and place.
+ * A menu inside the player host stays reserved chrome (`RESERVED_SELECTOR`).
+ */
+export const OVERLAY_SELECTOR = `${PLAYER_OVERLAY_SELECTOR}, [role="menu"], [role="tooltip"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]`;
+
+/** Modal dialogs: when they cover most of the video it is hidden instead of shown in slivers. */
+export const MODAL_SELECTOR = '[aria-modal="true"], dialog[open]';
+
+/** Share of the visible video a modal dialog may cover before the video is hidden. */
+export const MODAL_HIDE_SHARE = 0.5;
+
+/**
+ * Anything whose arrival or removal can change the layout: the mutation filter in MpvSurface
+ * re-measures only for these (simple selectors: they are matched against detached nodes too).
+ */
+export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer]`;
+
+/**
  * Measure the live DOM: the surface, every clipping ancestor up to the viewport, the
- * reserved chrome inside the player host, and app-level overlays (toasts) anywhere in the
- * document. Kept separate from the math so tests can stub rects.
+ * reserved chrome inside the player host, and app-level chrome (toasts) anywhere in the
+ * document. Floating overlays are left out (they become holes, see `measureMpvLayout`).
+ * Kept separate from the math so tests can stub rects.
  */
 export function measureMpvBounds(surface: Element): Bounds | null {
   const { surfaceRect, clip, reserved } = measureParts(surface);
   return computeMpvBounds(surfaceRect, { clip, reserved });
 }
 
-/** Transient chrome over the video (the context menu) that is cut out of it, never shrinks it. */
-export const OVERLAY_SELECTOR = '[data-mpv-overlay]';
-
 /**
- * Same measurements; in fullscreen, and while an overlay such as the context menu is open, the
- * chrome over the video becomes holes in the native window (`computeMpvOverlay`) instead of
- * shrinking it; everywhere else `holes` is empty.
+ * The window rectangle plus its holes. Docked, reserved chrome shrinks the video and floating
+ * overlays (menus, tooltips, dialogs) are holes in what is left. In fullscreen and PiP the
+ * video keeps the whole surface and all chrome over it is holes. A modal dialog that covers
+ * most of the video hides it (`bounds: null`).
  */
 export function measureMpvLayout(surface: Element): MpvLayout {
-  const { surfaceRect, clip, reserved } = measureParts(surface);
+  const { surfaceRect, clip, reserved, overlays, modals } = measureParts(surface);
   const layer = topLayer();
-  const host = surface.closest('[data-player-host]') ?? surface.parentElement;
-  const overlayOpen = !!host?.querySelector(OVERLAY_SELECTOR);
-  if ((layer && layer.contains(surface)) || overlayOpen) return computeMpvOverlay(surfaceRect, { clip, reserved });
-  return { bounds: computeMpvBounds(surfaceRect, { clip, reserved }), holes: [] };
+  return computeMpvLayout(surfaceRect, { clip, reserved, overlays, modals, float: !!layer && layer.contains(surface) });
 }
 
 /**
@@ -131,7 +154,17 @@ function topLayer(): Element | null {
   return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])');
 }
 
-function measureParts(surface: Element): { surfaceRect: Rect; clip: Rect[]; reserved: Rect[] } {
+interface Parts {
+  surfaceRect: Rect;
+  clip: Rect[];
+  reserved: Rect[];
+  /** Floating overlays over the video (holes). */
+  overlays: Rect[];
+  /** The modal dialogs among `overlays`. */
+  modals: Rect[];
+}
+
+function measureParts(surface: Element): Parts {
   const clip: Rect[] = [{ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }];
   const layer = topLayer();
   for (let el = surface.parentElement; el && el !== document.documentElement; el = el.parentElement) {
@@ -142,18 +175,43 @@ function measureParts(surface: Element): { surfaceRect: Rect; clip: Rect[]; rese
     // old docked rectangle.
     if (el === layer) break;
   }
-  const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
-  const reserved: Rect[] = [];
-  const nodes = [...Array.from(host.querySelectorAll(RESERVED_SELECTOR)), ...Array.from(document.querySelectorAll(GLOBAL_RESERVED_SELECTOR))];
-  // In fullscreen only the top layer is visible: chrome outside it (the toast stack) is
-  // hidden underneath, and cutting it out would leave a black band where nothing shows.
-  for (const node of nodes) {
-    if (node === surface || surface.contains(node)) continue;
-    if (layer && !layer.contains(node)) continue;
+  /** The on-screen rect of chrome that may overlap the surface, or null when it cannot. */
+  const visible = (node: Element): Rect | null => {
+    // The surface's own content, or a container the player itself sits in.
+    if (node === surface || surface.contains(node) || node.contains(surface)) return null;
+    // In fullscreen only the top layer is visible: chrome left outside it (the docked page's
+    // strips) is hidden underneath, and cutting it out would leave a black band where nothing
+    // shows. Toasts, dialogs and menus portal into the fullscreen element (`ui/portal.ts`), so
+    // they are inside it and cut out like any other overlay.
+    if (layer && !layer.contains(node)) return null;
     const b = node.getBoundingClientRect();
-    if (b.width > 0 && b.height > 0) reserved.push(rectOf(b));
+    return b.width > 0 && b.height > 0 ? rectOf(b) : null;
+  };
+  const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
+  /** The player's own popovers are holes; other host chrome (its menus too) is reserved. */
+  const reservedInHost = (node: Element): boolean =>
+    host.contains(node) && node.matches(RESERVED_SELECTOR) && !node.matches(PLAYER_OVERLAY_SELECTOR);
+  const overlays: Rect[] = [];
+  const modals: Rect[] = [];
+  for (const node of Array.from(document.querySelectorAll(OVERLAY_SELECTOR))) {
+    if (reservedInHost(node)) continue;
+    const r = visible(node);
+    // A menu is laid out hidden for one pass before it is placed.
+    if (!r || getComputedStyle(node).visibility === 'hidden') continue;
+    overlays.push(r);
+    if (node.matches(MODAL_SELECTOR)) modals.push(r);
   }
-  return { surfaceRect: rectOf(surface.getBoundingClientRect()), clip, reserved };
+  const reserved: Rect[] = [];
+  for (const node of Array.from(host.querySelectorAll(RESERVED_SELECTOR))) {
+    if (!reservedInHost(node)) continue;
+    const r = visible(node);
+    if (r) reserved.push(r);
+  }
+  for (const node of Array.from(document.querySelectorAll(GLOBAL_RESERVED_SELECTOR))) {
+    const r = visible(node);
+    if (r) reserved.push(r);
+  }
+  return { surfaceRect: rectOf(surface.getBoundingClientRect()), clip, reserved, overlays, modals };
 }
 
 /** Native window rectangle plus the rects cut out of it (relative to its top-left). */
@@ -162,22 +220,54 @@ export interface MpvLayout {
   holes: Bounds[];
 }
 
-/**
- * Fullscreen overlay mode: the video keeps the whole surface and the chrome over it is
- * cut out of the native window as holes, so the controls show over the picture without
- * shrinking or moving it. Rects are rounded outward so no pixel row of the bar is covered.
- */
-export function computeMpvOverlay(surface: Rect, opts: { clip?: Rect[]; reserved?: Rect[] } = {}): MpvLayout {
-  const bounds = computeMpvBounds(surface, { clip: opts.clip ?? [] });
-  if (!bounds) return { bounds, holes: [] };
+/** `cuts` that overlap `bounds`, relative to its top-left, rounded outward so no pixel row of the chrome is covered. */
+function holesIn(bounds: Bounds, cuts: Rect[]): Bounds[] {
   const frame = rectOf({ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height });
   const holes: Bounds[] = [];
-  for (const cut of opts.reserved ?? []) {
+  for (const cut of cuts) {
     const r = intersect(frame, cut);
     if (!r) continue;
     const left = Math.floor(r.left);
     const top = Math.floor(r.top);
     holes.push({ x: left - bounds.x, y: top - bounds.y, width: Math.ceil(r.right) - left, height: Math.ceil(r.bottom) - top });
   }
-  return { bounds, holes };
+  return holes;
+}
+
+/** True when the modal dialogs cover at least `MODAL_HIDE_SHARE` of the video. */
+export function modalCovers(bounds: Bounds, modals: Rect[]): boolean {
+  if (modals.length === 0) return false;
+  const frame = rectOf({ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height });
+  let covered = 0;
+  for (const m of modals) {
+    const r = intersect(frame, m);
+    if (r) covered += area(r);
+  }
+  return covered >= MODAL_HIDE_SHARE * area(frame);
+}
+
+/**
+ * The native window's layout from measured rects. Docked (`float` false), `reserved` chrome
+ * shrinks the video and `overlays` are holes in what is left. Floating (fullscreen, PiP), the
+ * video keeps the whole surface and every piece of chrome over it is a hole. Modal dialogs
+ * that cover most of the video hide it.
+ */
+export function computeMpvLayout(
+  surface: Rect,
+  opts: { clip?: Rect[]; reserved?: Rect[]; overlays?: Rect[]; modals?: Rect[]; float?: boolean } = {},
+): MpvLayout {
+  const reserved = opts.reserved ?? [];
+  const overlays = opts.overlays ?? [];
+  const bounds = computeMpvBounds(surface, { clip: opts.clip ?? [], reserved: opts.float ? [] : reserved });
+  if (!bounds || modalCovers(bounds, opts.modals ?? [])) return { bounds: null, holes: [] };
+  return { bounds, holes: holesIn(bounds, opts.float ? [...reserved, ...overlays] : overlays) };
+}
+
+/**
+ * Fullscreen overlay mode: the video keeps the whole surface and the chrome over it is
+ * cut out of the native window as holes, so the controls show over the picture without
+ * shrinking or moving it. Rects are rounded outward so no pixel row of the bar is covered.
+ */
+export function computeMpvOverlay(surface: Rect, opts: { clip?: Rect[]; reserved?: Rect[] } = {}): MpvLayout {
+  return computeMpvLayout(surface, { ...opts, float: true });
 }

@@ -204,5 +204,8 @@
   "categoryMissingTitle": "Η κατηγορία δεν βρέθηκε",
   "categoryMissingBody": "Αυτή η πηγή δεν έχει κατηγορία με αυτόν τον σύνδεσμο. Ο πάροχος ίσως τη μετονόμασε ή την αφαίρεσε.",
   "namedMarkedWatched": "Το {{name}} σημειώθηκε ως προβληθέν",
-  "namedMarkedUnwatched": "Το {{name}} σημειώθηκε ως μη προβληθέν"
+  "namedMarkedUnwatched": "Το {{name}} σημειώθηκε ως μη προβληθέν",
+  "filters": "Φίλτρα",
+  "filtersActive": "Ενεργά φίλτρα: {{n}}",
+  "locked": "Κλειδωμένο"
 }

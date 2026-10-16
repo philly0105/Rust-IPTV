@@ -111,6 +111,23 @@ describe('settings.changed: refresh interval', () => {
   });
 });
 
+describe('downloads.update (XB2-33)', () => {
+  it('refetches the download and My videos lists, not the download folder', async () => {
+    expect(EVENT_INVALIDATION['downloads.update']).toBeUndefined();
+    mount();
+    const stale = (cmd: 'downloads.list' | 'downloads.dir' | 'myvideos.list') => queryClient.getQueryState(rpcKey(cmd))?.isInvalidated ?? false;
+    queryClient.setQueryData(rpcKey('downloads.list'), []);
+    queryClient.setQueryData(rpcKey('downloads.dir'), { path: 'D:/Videos' });
+    queryClient.setQueryData(rpcKey('myvideos.list'), []);
+
+    emit('downloads.update', {});
+    // Events are batched into one refetch round per burst.
+    await vi.waitFor(() => expect(stale('downloads.list')).toBe(true));
+    expect(stale('myvideos.list')).toBe(true);
+    expect(stale('downloads.dir')).toBe(false);
+  });
+});
+
 describe('connection lost toast (web)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

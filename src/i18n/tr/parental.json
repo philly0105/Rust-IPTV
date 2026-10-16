@@ -102,6 +102,8 @@
   "adultOffHint": "Adı yetişkin içeriğine benziyor. Otomatik yetişkin kilitleri kapalı.",
   "autoAdultCount_one": "{{count}} yetişkin grubu daha otomatik olarak kilitli.",
   "autoAdultCount_other": "{{count}} yetişkin grubu daha otomatik olarak kilitli.",
+  "autoAdultRule": "Otomatik kilitlenen yetişkin grupları",
+  "autoAdultNone": "Bu kaynaktaki hiçbir grup yetişkin içeriğine benzemiyor.",
   "removeLockNamed": "{{name}} için kilidi kaldır",
   "showAllLocks_one": "{{count}} kilidi göster",
   "showAllLocks_other": "{{count}} kilidin tümünü göster",

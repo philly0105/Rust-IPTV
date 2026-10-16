@@ -13,8 +13,20 @@ import { usePlayerStore } from '../store';
  * Where there is no picture to take (radio, an external player) it stays in place but is
  * `aria-disabled`, so it remains focusable: the tooltip and the screen reader description say
  * why, and pressing it says so again instead of doing nothing.
+ *
+ * `menuItem`: one of the options menu's moved controls (a narrow player); `onDone` runs after a press.
  */
-export function ScreenshotButton({ stage = false }: { stage?: boolean }) {
+export function ScreenshotButton({
+  stage = false,
+  menuItem = false,
+  onDone,
+  className,
+}: {
+  stage?: boolean;
+  menuItem?: boolean;
+  onDone?(): void;
+  className?: string;
+}) {
   const { t } = useTranslation('player');
   const block = usePlayerStore((s) => screenshotBlock(s));
   const [busy, setBusy] = useState(false);
@@ -30,12 +42,14 @@ export function ScreenshotButton({ stage = false }: { stage?: boolean }) {
     if (busy) return;
     setBusy(true);
     void takeScreenshot().finally(() => setBusy(false));
+    onDone?.();
   };
 
   return (
     <>
       <button
         type="button"
+        role={menuItem ? 'menuitem' : undefined}
         data-ctl="screenshot"
         data-testid="screenshot-button"
         aria-label={label}
@@ -52,6 +66,7 @@ export function ScreenshotButton({ stage = false }: { stage?: boolean }) {
             : 'size-10 rounded-full text-white/90 hover:bg-white/12 hover:text-white [&_svg]:size-5',
           (reason || busy) && 'opacity-40',
           reason && 'cursor-not-allowed',
+          className,
         )}
       >
         <Camera aria-hidden className={cn(busy && 'motion-safe:animate-pulse')} />

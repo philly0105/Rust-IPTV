@@ -194,5 +194,11 @@
   "locked": "Zablokowany",
   "lockedGuide": "Zablokowany. Wpisz PIN, aby zobaczyć, co jest emitowane.",
   "unlock": "Odblokuj",
-  "ribbonFailed": "Nie udało się wczytać przewodnika tego kanału"
+  "ribbonFailed": "Nie udało się wczytać przewodnika tego kanału",
+  "parentalHiddenChannels": "Kontrola rodzicielska ukrywa kanały tego źródła",
+  "parentalHiddenStations": "Kontrola rodzicielska ukrywa stacje tego źródła",
+  "parentalHiddenHint": "Jego grupy są zablokowane. Wpisz PIN, aby pokazać je w tej sesji.",
+  "parentalUnlock": "Odblokuj",
+  "parentalUnlockTitle": "Pokaż zablokowane kanały",
+  "parentalUnlockBody": "Wpisz PIN, aby pokazywać zablokowane grupy i kanały, dopóki kontrola rodzicielska znów ich nie zablokuje."
 }

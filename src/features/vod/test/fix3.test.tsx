@@ -379,7 +379,7 @@ describe('U4-fix3: minimum rating filter', () => {
     const note = screen.getByTestId('vod-rating-filter');
     expect(note.textContent).toContain('Showing titles rated 7.0 or higher');
     // The core filters (50 of 150 pass): one request, exact count from the first page.
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50 titles')).toBeTruthy());
     const movieCalls = callsOf('catalog.movies');
     expect(movieCalls).toHaveLength(1);
     expect(movieCalls[0]!.args).toMatchObject({ sourceId: 'src1', minRating: 7, query: { offset: 0 } });
@@ -403,7 +403,7 @@ describe('U4-fix3: minimum rating filter', () => {
     renderAt('/s/src1/movies/c/all', gridRoute);
     await screen.findByText('Rated 1');
     expect(screen.queryByText('Rated 2')).toBeNull();
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50 titles')).toBeTruthy());
     expect(callsOf('stalker.movies').every((c) => !('minRating' in (c.args as object)))).toBe(true);
   });
 
@@ -437,7 +437,7 @@ describe('English only on Stalker grids', () => {
     renderAt('/s/src1/movies/c/all', gridRoute);
     await screen.findByText('Film 1');
     expect(screen.queryByText('FR - Film 0')).toBeNull();
-    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('30')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('30 titles')).toBeTruthy());
   });
 
   it('shows everything when the setting is off', async () => {

@@ -328,7 +328,7 @@ function DeviceList() {
           <li key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
             <Smartphone aria-hidden className="size-4 shrink-0 text-fg-subtle" />
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-medium text-fg">{name}</span>
+              <span dir="auto" className="truncate text-match-parent text-sm font-medium text-fg">{name}</span>
               <span className="text-xs text-fg-muted">
                 <time dateTime={d.lastSeen}>{t('remoteDeviceSeen', { when: relativeTime(d.lastSeen, i18n.language) ?? d.lastSeen })}</time>
               </span>

@@ -61,10 +61,12 @@ describe('poster columns at phone width (L1-vod-4, L1-visual-19)', () => {
     expect(result.current).toBe(NARROW_COVER_WIDTH);
   });
 
-  it('fits three posters a row in a 390px grid and two beside the search tabs', () => {
-    // 390 minus the page padding; the search results also lose the 72px tab rail.
+  it('fits three posters a row in a 390px grid', () => {
+    // L2-vod-7: 390 minus the 72px rail and the page padding is 286px (275px beside a thin
+    // desktop scrollbar). Loop 1 counted without the rail and the grid showed two a row.
+    expect(gridLayout(286, NARROW_COVER_WIDTH, 16).columns).toBe(3);
+    expect(gridLayout(275, NARROW_COVER_WIDTH, 16).columns).toBe(3);
     expect(gridLayout(358, NARROW_COVER_WIDTH, 16).columns).toBe(3);
-    expect(gridLayout(286, NARROW_COVER_WIDTH, 16).columns).toBe(2);
     // Before: one poster a row.
     expect(gridLayout(358, COVER_WIDTH.large, 16).columns).toBe(1);
     expect(gridLayout(286, COVER_WIDTH.medium, 16).columns).toBe(1);

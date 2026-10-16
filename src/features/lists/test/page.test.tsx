@@ -178,6 +178,15 @@ describe('list page', () => {
     expect(screen.getByTestId('list-ribbon').className).toContain('max-md:hidden');
   });
 
+  it('keeps the ribbon in place while the channels load (L2-vod-5: no shift when they arrive)', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+    stubLiveExtras();
+    rpc.handlers['lists.items'] = () => new Promise(() => undefined);
+    h.renderAt('/lists/L1', routes);
+    const ribbon = await screen.findByTestId('list-ribbon');
+    expect(ribbon.className).not.toContain('max-md:hidden');
+  });
+
   it('the header count adds up to the sidebar one, naming the dropped channels', async () => {
     h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC], { dropped: [GONE, GONE2] }), h.coreList('L2', 'Kids', [], { dropped: [GONE] })]);
     stubLiveExtras();

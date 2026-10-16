@@ -134,7 +134,10 @@ test.describe('accessibility and layout', () => {
           await expect(p.getByTestId('channel-list').locator('button[data-row-index]').first()).toBeVisible();
           // Below 1024 px the groups (and this button) are in a drawer.
           const open = p.getByRole('button', { name: /^Hidden channels/ });
-          if (!(await open.isVisible())) await p.getByRole('button', { name: 'Show groups', exact: true }).click();
+          const groups = p.getByRole('button', { name: 'Show groups', exact: true });
+          // The hidden count can land after the rows: wait for one of the two before choosing.
+          await expect.poll(async () => (await open.isVisible()) || (await groups.isVisible())).toBe(true);
+          if (!(await open.isVisible())) await groups.click();
           await open.click();
           await expect(p.getByTestId('hidden-channels-dialog').getByTestId('hidden-channel-row').first()).toBeVisible();
         },

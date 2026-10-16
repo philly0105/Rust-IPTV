@@ -7,6 +7,7 @@ import {
   Clapperboard,
   FolderX,
   Info,
+  Play,
   RotateCw,
   SearchX,
   SlidersHorizontal,
@@ -32,6 +33,7 @@ import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { VodFilterBar } from '../components/VodFilterBar';
 import { preloadDetailChunk, usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
+import { usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
@@ -461,10 +463,28 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; item: VodItem | SeriesItem; index: number } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const myListItem = useMyListMenuItem(menu ? { ref: menu.item.ref, snapshot: myListTarget(menu.item).snapshot } : null);
+  // L4-vod-4: the menu also plays the title (resuming like the detail page's Play) and marks it watched.
+  const menuTitle = useMemo(() => (menu ? [menu.item] : undefined), [menu]);
+  const menuWatched = useWatchedKeys(menuTitle).has(menu ? itemKey(menu.item.ref) : '');
+  const { play } = usePlayback(undefined);
+  const playFromMenu = (item: VodItem | SeriesItem, index: number) => {
+    // A series has no single thing to play from here: its details pick the episode.
+    if (item.ref.contentType !== 'movie' || !input) return openTitle(item.ref, index);
+    const target: PlayTarget = { ref: item.ref, sourceKind: input.sourceKind, title: item.title, categoryId: item.categoryId };
+    if (item.posterUrl) target.posterUrl = item.posterUrl;
+    void play({ target });
+  };
   const menuItems: MenuItem[] = menu
     ? [
+        { id: 'play', label: t('play'), icon: <Play aria-hidden className="size-4" />, onSelect: () => playFromMenu(menu.item, menu.index) },
         { id: 'open', label: t('openDetails'), icon: <Info aria-hidden className="size-4" />, onSelect: () => openTitle(menu.item.ref, menu.index) },
         ...(myListItem ? [myListItem] : []),
+        {
+          id: 'watched',
+          label: menuWatched ? t('markUnwatched') : t('markWatched'),
+          icon: <CircleCheck aria-hidden className="size-4" />,
+          onSelect: () => void toggleWatched(menu.item.ref),
+        },
       ]
     : [];
   const onGridContextMenu = (e: MouseEvent<HTMLDivElement>) => {

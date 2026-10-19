@@ -17,6 +17,7 @@ import { registerCommands } from '@/shell/commands';
 import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
 import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
+import { intlLocale } from '@/lib/intl';
 
 import {
   Button,
@@ -34,6 +35,7 @@ import {
   buttonClass,
   cn,
   displayChannelName,
+  errorDescription,
   useDisplayPrefs,
   useMediaQuery,
   useNow,
@@ -66,7 +68,7 @@ function rowIndexOf(el: EventTarget | null): number | null {
 export function ListPage() {
   const { t, i18n } = useTranslation('lists');
   const { t: tl } = useTranslation('live');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const { toast } = useToast();
   const listId = useParams().listId ?? '';
   const now = useNow(30_000);
@@ -80,6 +82,7 @@ export function ListPage() {
   const settings = useRpcQuery('settings.get', undefined);
   const sources = useVisibleSources();
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  const firstSource = sources.data?.[0];
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
 
   // ---- playback -----------------------------------------------------------
@@ -105,7 +108,7 @@ export function ListPage() {
     (channel: Channel, nn?: EpgNowNext) => {
       const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
       playFromList(channel, listId, nn?.now?.title, name).catch((err: unknown) =>
-        toast({ title: tl('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+        toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
       );
     },
     [listId, prefs.stripCountryPrefix, tl, toast],
@@ -168,7 +171,7 @@ export function ListPage() {
         await invalidate('favorites.');
         toast({ title: res.isFavorite ? tl('favoriteAdded', { name }) : tl('favoriteRemoved', { name }), variant: 'success' });
       } catch (err) {
-        toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+        toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
       } finally {
         favInFlight.current.delete(key);
         setOverride(key, undefined);
@@ -378,7 +381,12 @@ export function ListPage() {
         title={paged.unavailable.length > 0 ? t('allUnavailableTitle') : t('listEmptyTitle')}
         description={t('listEmptyHint')}
         action={
-          <Link to="/" className={buttonClass('secondary', 'sm')}>
+          // Live TV, where L adds a channel (the hint above). Not `/`: it restores the saved screen, this one.
+          <Link
+            to={firstSource ? `/s/${encodeURIComponent(firstSource.id)}/live` : '/dashboard'}
+            className={buttonClass('secondary', 'sm')}
+            data-testid="list-browse-channels"
+          >
             {t('browseChannels')}
           </Link>
         }
@@ -529,7 +537,7 @@ function UnavailableEntries({
   onRemove(entries: CustomListEntry[], label: string): void;
 }) {
   const { t, i18n } = useTranslation('lists');
-  const fmt = new Intl.NumberFormat(i18n.language);
+  const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
   return (
     <details className="group shrink-0 border-t border-divider bg-surface" data-testid="list-unavailable">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-fg-muted outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent [&::-webkit-details-marker]:hidden">

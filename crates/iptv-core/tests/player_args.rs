@@ -498,6 +498,11 @@ fn only_ui_properties_can_be_set() {
         "sub-shadow-offset",
         "sub-pos",
         "sub-ass-override",
+        "video-aspect-override",
+        "keepaspect",
+        "panscan",
+        "video-zoom",
+        "deinterlace",
     ] {
         assert!(validate_property(name).is_ok(), "{name}");
         assert!(SETTABLE_PROPERTIES.contains(&name));

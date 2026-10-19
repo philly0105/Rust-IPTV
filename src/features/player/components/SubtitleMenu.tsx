@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { rpc } from '@/api/transport';
 import type { Settings } from '@/api/types';
 import { toast } from '@/ui/Toast';
+import { errorDescription } from '@/ui/States';
 
 import { useMediaStore } from '../media';
 import { peekSettings, setSettingsCache } from '../store';
@@ -51,7 +52,7 @@ export function SubtitleTrackMenu({ onDone, onStyle }: { onDone(): void; onStyle
       })
       .catch((err: unknown) => {
         if (alive.current) setLoading(false);
-        toast({ title: t('subtitleLoadFailedGeneric'), description: err instanceof Error ? err.message : String(err), variant: 'error' });
+        toast({ title: t('subtitleLoadFailedGeneric'), description: errorDescription(err), variant: 'error' });
       });
   };
 
@@ -99,7 +100,7 @@ export function saveSubtitleSettings(patch: Partial<Settings>, failedTitle: stri
         ) as Partial<Settings>;
         setSettingsCache({ ...now, ...undo });
       }
-      toast({ title: failedTitle, description: err instanceof Error ? err.message : String(err), variant: 'error' });
+      toast({ title: failedTitle, description: errorDescription(err), variant: 'error' });
     });
 }
 

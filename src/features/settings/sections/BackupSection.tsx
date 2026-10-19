@@ -9,7 +9,7 @@ import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 import { requestPin } from '@/features/parental/gate';
 import { holdImportToasts } from '@/shell/effects';
 import { applyStatus, currentStatus } from '@/features/parental/status';
-import { Button, Dialog, useToast } from '@/ui';
+import { Button, Dialog, useToast, errorDescription } from '@/ui';
 import { downloadText, readFileText } from '../../sources/lib/files';
 import { absoluteTime, formatCount } from '../../sources/lib/format';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
@@ -66,7 +66,7 @@ export function BackupSection(_props: SectionProps) {
       const saved = isDesktop ? await exportDesktop() : await exportWeb();
       if (saved) toast({ variant: 'success', title: t('backupExported'), description: saved });
     } catch (e) {
-      toast({ variant: 'error', title: t('backupExportFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('backupExportFailed'), description: errorDescription(e) });
     } finally {
       setExporting(false);
     }

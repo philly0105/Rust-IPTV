@@ -1,6 +1,13 @@
 {
   "shortcutArea": "TV rehberi",
   "searchLabel": "Rehberde ara",
+  "zoomIn": "Yakınlaştır",
+  "zoomOut": "Uzaklaştır",
+  "viewFavorites": "Favoriler",
+  "viewList": "Liste: {{name}}",
+  "viewFavoritesEmpty": "Bu kaynaktan favori kanal yok",
+  "viewListEmpty": "Bu listede bu kaynaktan kanal yok",
+  "viewEmptyHint": "Başka bir kaynak seçin veya kanalları menülerinden ekleyin.",
   "searchPlaceholder": "Rehberde ara",
   "searchResults": "Rehber araması",
   "searchHint": "En az 2 karakter yazın.",

@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Guide",
   "searchLabel": "Search the guide",
+  "zoomIn": "Zoom in",
+  "zoomOut": "Zoom out",
+  "viewFavorites": "Favorites",
+  "viewList": "List: {{name}}",
+  "viewFavoritesEmpty": "No favorite channels from this source",
+  "viewListEmpty": "No channels from this source in this list",
+  "viewEmptyHint": "Pick another source, or add channels from their menu.",
   "searchPlaceholder": "Search guide",
   "searchResults": "Guide search",
   "searchHint": "Type at least 2 characters.",

@@ -32,6 +32,10 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<Settings, RpcError>(super::for_client(&state, next))
     });
     r.add("settings.detectPlayers", |state, _: ()| async move {
+        // Like `player.detect`: a browser must not learn the server's player paths.
+        if !state.is_desktop {
+            return Err(RpcError::unsupported("Players run only in the desktop app"));
+        }
         // Detection stats files and may walk PATH: keep it off the async workers.
         let found = tokio::task::spawn_blocking(move || super::detect_players(&state))
             .await

@@ -104,7 +104,7 @@
   "pickerEmptySearch": "'{{query}}'와(과) 일치하는 라이브 채널이 없습니다",
   "pickerEmptySource": "이 소스에는 라이브 채널이 없습니다",
   "pickerNoSources": "채널을 고르려면 소스를 추가하세요.",
-  "pickerResults_other": "채널 {{count}}개",
+  "pickerResults_other": "채널 {{count, number}}개",
   "pickerOnSlot": "{{slot}}번 자리",
   "pickerAdd": "추가",
   "pickerPick": "선택",

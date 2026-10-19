@@ -1,7 +1,7 @@
 {
   "title": "Mijn lijst",
-  "count_one": "{{count}} titel",
-  "count_other": "{{count}} titels",
+  "count_one": "{{count, number}} titel",
+  "count_other": "{{count, number}} titels",
   "seeAll": "Alles bekijken",
   "loading": "Mijn lijst laden",
   "errorHint": "Mijn lijst wordt door de app bewaard, niet door je provider. Probeer het opnieuw, of start de app opnieuw als het blijft mislukken.",
@@ -63,7 +63,7 @@
   "showAll": "Alles tonen",
   "allWatchedTitle": "Alles bekeken",
   "allWatchedBody_one": "De enige titel hier is bekeken. Toon bekeken titels om hem weer te zien.",
-  "allWatchedBody_other": "Alle {{count}} titels hier zijn bekeken. Toon bekeken titels om ze weer te zien.",
+  "allWatchedBody_other": "Alle {{count, number}} titels hier zijn bekeken. Toon bekeken titels om ze weer te zien.",
   "showWatched": "Bekeken tonen",
   "noMatchTitle": "Geen resultaten",
   "noMatchBody": "Niets in Mijn lijst komt overeen met ‘{{query}}’.",

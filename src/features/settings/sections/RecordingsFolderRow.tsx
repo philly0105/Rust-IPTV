@@ -5,9 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, useToast } from '@/ui';
-import { CommitInput, SettingsRow } from '../components';
-import { cleanPath, type SettingsPatch } from '../lib/patch';
+import { Button, useToast, errorDescription } from '@/ui';
+import { SettingsRow } from '../components';
+import type { SettingsPatch } from '../lib/patch';
 import { pickDirectoryDesktop } from './DownloadsFolderRow';
 
 /** `<downloads>/recordings`, joined with the separator the downloads path already uses. */
@@ -19,7 +19,8 @@ export function defaultRecordingsDir(downloads: string): string {
 
 /**
  * Where live recordings (`mpv.record`) go: `settings.recordingsDir`, or
- * `<downloads>/recordings` when unset (null).
+ * `<downloads>/recordings` when unset (null). Only the desktop app can change
+ * it; in the browser the core refuses the field, so the row only names it.
  */
 export function RecordingsFolderRow({ value, update }: { value: string | null; update: (patch: SettingsPatch) => Promise<boolean> }) {
   const { t } = useTranslation('settings');
@@ -51,7 +52,7 @@ export function RecordingsFolderRow({ value, update }: { value: string | null; u
     try {
       await rpc('app.openPath', { path: shown });
     } catch (e) {
-      toast({ variant: 'error', title: t('openFolderFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('openFolderFailed'), description: errorDescription(e) });
     }
   };
 
@@ -64,11 +65,11 @@ export function RecordingsFolderRow({ value, update }: { value: string | null; u
   return (
     <SettingsRow
       label={t('recordingsFolder')}
-      description={value ? t('recordingsFolderHintCustom') : t('recordingsFolderHint')}
+      description={!isDesktop ? t('recordingsFolderHintServer') : value ? t('recordingsFolderHintCustom') : t('recordingsFolderHint')}
       error={error}
       stack
     >
-      {({ id, describedBy, invalid }) =>
+      {({ id, describedBy }) =>
         isDesktop ? (
           <div className="flex w-full flex-wrap items-center gap-2">
             <output
@@ -89,22 +90,15 @@ export function RecordingsFolderRow({ value, update }: { value: string | null; u
             {resetButton}
           </div>
         ) : (
-          <div className="flex w-full items-center gap-2">
-            <CommitInput
-              id={id}
-              describedBy={describedBy}
-              invalid={invalid}
-              mono
-              value={value ?? ''}
-              placeholder={fallback || 'D:\\Videos\\recordings'}
-              disabled={busy}
-              onError={(key) => setError(key ? t(key) : null)}
-              validate={(v) => (/[\r\n]/.test(v) ? 'errorPathNewline' : null)}
-              onCommit={(v) => void save(cleanPath(v) || null)}
-              testId="input-recordingsDir"
-            />
-            {resetButton}
-          </div>
+          <output
+            id={id}
+            aria-describedby={describedBy}
+            className="flex h-10 w-full min-w-0 items-center truncate rounded-md border border-border bg-surface-2 px-3 font-mono text-sm text-fg"
+            title={shown}
+            data-testid="recordings-dir-path"
+          >
+            {shown || t('downloadsFolderUnknown')}
+          </output>
         )
       }
     </SettingsRow>

@@ -276,6 +276,10 @@ pub fn emit_changed(state: &AppState, source_id: Option<&str>, reason: ChangeRea
             reason: reason.as_str(),
         },
     );
+    // remote: the phone's channel list follows the published source's catalog.
+    if matches!(reason, ChangeReason::Catalog | ChangeReason::Removed) {
+        crate::remote::channels_may_have_changed(state, source_id);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +328,9 @@ pub struct EpgPatch {
     pub manual_urls: Option<Vec<String>>,
     #[serde(default)]
     pub disabled_urls: Option<Vec<String>>,
+    /// Guide time shift of the source in minutes; 0 removes it.
+    #[serde(default)]
+    pub shift_minutes: Option<i32>,
 }
 
 /// `sources.update` patch. Config changes do not re-import.
@@ -344,6 +351,11 @@ pub struct SourcePatch {
     pub stalker: Option<StalkerSourceConfig>,
     #[serde(default)]
     pub epg: Option<EpgPatch>,
+    /// New playlist text for a pasted or uploaded M3U source (origin `text`).
+    /// It replaces the stored text; the next `sources.refresh` imports it
+    /// under the same source id, so user state stays attached.
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 /// `sources.counts` result.
@@ -391,6 +403,26 @@ fn clean_headers(h: RequestHeaders) -> RequestHeaders {
         referrer: trimmed(h.referrer.as_deref()),
         origin: trimmed(h.origin.as_deref()),
     }
+}
+
+/// Rejects header values HTTP cannot carry (a line break or other control
+/// character), so a bad User-Agent fails here instead of on every request.
+fn check_headers(h: &RequestHeaders) -> CoreResult<()> {
+    for (name, value) in [
+        ("User-Agent", &h.user_agent),
+        ("Referer", &h.referrer),
+        ("Origin", &h.origin),
+    ] {
+        if value
+            .as_deref()
+            .is_some_and(|v| reqwest::header::HeaderValue::from_str(v).is_err())
+        {
+            return Err(CoreError::Invalid(format!(
+                "the {name} header has a line break or control character; remove it"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn check_http_url(raw: &str, what: &str) -> CoreResult<url::Url> {
@@ -487,10 +519,13 @@ pub fn validate_xtream(cfg: XtreamSourceConfig) -> CoreResult<XtreamSourceConfig
     if cfg.password.trim().is_empty() {
         return Err(CoreError::Invalid("enter the Xtream password".into()));
     }
+    let headers = clean_headers(cfg.headers);
+    check_headers(&headers)?;
     Ok(XtreamSourceConfig {
         server_url: server,
         username,
         password: cfg.password,
+        headers,
     })
 }
 
@@ -1625,6 +1660,26 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             s, stored_mac,
         )?));
     }
+    // New text for a pasted or uploaded playlist: stored here, imported by
+    // the next refresh.
+    let text = match patch.text {
+        Some(t) => {
+            let origin = match &config {
+                Some(SourceConfig::M3u(c)) => Some(c.origin),
+                _ => current.m3u.as_ref().map(|c| c.origin),
+            };
+            if origin != Some(M3uOrigin::Text) {
+                return Err(CoreError::Invalid(
+                    "only a pasted or uploaded playlist takes new playlist text".into(),
+                ));
+            }
+            if t.trim().is_empty() {
+                return Err(CoreError::Invalid("paste the playlist text".into()));
+            }
+            Some(t)
+        }
+        None => None,
+    };
     // Only the M3U catch-up override changed: it applies when channels are
     // read, so a running import of the same playlist carries on.
     let catchup_only = match (&current.m3u, &config) {
@@ -1666,6 +1721,9 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 crate::epg::fetch::check_server_url(state, u)?;
             }
         }
+        if let Some(m) = p.shift_minutes {
+            crate::epg::query::check_shift_minutes(m)?;
+        }
     }
     let epg = patch.epg.map(|p| {
         let mut e: EpgLinks = current.epg.clone();
@@ -1678,26 +1736,75 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         if let Some(v) = p.disabled_urls {
             e.disabled_urls = normalize_urls(v);
         }
+        if let Some(m) = p.shift_minutes {
+            e.shift_minutes = (m != 0).then_some(m);
+        }
         e
     });
+    // A new source shift moves every guide time of the source.
+    let shift_changed = epg
+        .as_ref()
+        .is_some_and(|e| e.shift_minutes != current.epg.shift_minutes);
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
     // Only the auto-refresh flag changed: no catalog, list or guide reader
     // cares, so clients refetch `sources.*` only (ST-5).
-    let reason = if name.is_none() && config.is_none() && epg.is_none() && position.is_none() {
+    let reason = if name.is_none()
+        && config.is_none()
+        && epg.is_none()
+        && position.is_none()
+        && text.is_none()
+    {
         ChangeReason::Status
     } else {
         ChangeReason::Config
+    };
+    // New text: stop an import of the old text, and keep imports out until
+    // the new text is stored.
+    let _import = match &text {
+        Some(_) => {
+            cancel_imports(state, id, false);
+            Some(lock_for(state, id).lock_owned().await)
+        }
+        None => None,
     };
     let _same = match claim {
         Some(_) => Some(identity_lock(state).lock_owned().await),
         None => None,
     };
-    let (updated, config_changed) = state
+    let data_dir = state.data_dir.clone();
+    // Large new text waits next to the cached copy until the transaction
+    // commits, so a refused update leaves the stored playlist as it was.
+    let staged = crate::m3u::staged_playlist_path(&data_dir, id);
+    let staged_in = staged.clone();
+    let result = state
         .db_call(move |c| {
             let mut config_changed = false;
+            // Checked and placed before the write lock, as `store::insert` does.
+            let raw = match &text {
+                Some(t) => {
+                    if crate::m3u::rpc::preview(t).channel_count == 0 {
+                        return Err(CoreError::Invalid(
+                            "this is not an M3U playlist (no channels found); paste the playlist text".into(),
+                        ));
+                    }
+                    Some(crate::m3u::place_raw_text_at(&staged_in, t)?)
+                }
+                None => None,
+            };
+            let text_inline = raw.is_some_and(|r| !r.is_empty());
+            let text_staged = raw.is_some_and(str::is_empty);
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some(raw) = raw {
+                // The sha stays the current catalog's, so the next import sees
+                // new text and re-imports it (the remapper keeps user state).
+                tx.execute(
+                    "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, '', ?3)
+                     ON CONFLICT(source_id) DO UPDATE SET raw = excluded.raw",
+                    rusqlite::params![sid, raw, crate::db::now_rfc3339()],
+                )?;
+            }
             if let Some(cfg) = &claim {
                 if let Some((_, other)) = store::find_same(&tx, cfg, Some(&sid))? {
                     return Err(duplicate_error(cfg, &other));
@@ -1738,12 +1845,25 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 rusqlite::params![sid, crate::db::now_rfc3339()],
             )?;
             tx.commit()?;
+            if text_staged {
+                let dest = crate::m3u::cached_playlist_path(&data_dir, &sid);
+                std::fs::rename(&staged_in, dest)?;
+            }
             if let Some(p) = position {
                 store::move_to(c, &sid, p)?;
             }
-            Ok((store::get(c, &sid)?, config_changed))
+            Ok((store::get(c, &sid)?, config_changed, text_inline))
         })
-        .await?;
+        .await;
+    if result.is_err() {
+        // Refused or failed: the staged text (if any) never counts.
+        let _ = std::fs::remove_file(&staged);
+    }
+    let (updated, config_changed, text_inline) = result?;
+    if text_inline {
+        // A disk copy of the previous (large) text is stale now.
+        crate::m3u::remove_cached_playlist(state, id);
+    }
     if config_changed && !catchup_only {
         // An import still running fetches the old address (and may be stuck
         // on it); stop it so the next refresh uses the new settings.
@@ -1755,6 +1875,9 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         crate::stalker::forget_source(state, id).await;
     }
     emit_changed(state, Some(id), reason);
+    if shift_changed {
+        state.emit("epg.changed", serde_json::json!({}));
+    }
     Ok(updated)
 }
 
@@ -1960,6 +2083,7 @@ mod tests {
             server_url: "http://h".into(),
             username: "u".into(),
             password: "p".into(),
+            headers: Default::default(),
         });
         state
             .db_call(move |c| store::insert(c, "x1", "X", false, &cfg, None))
@@ -2017,6 +2141,7 @@ mod tests {
                     server_url: server.into(),
                     username: "u".into(),
                     password: "p".into(),
+                    headers: Default::default(),
                 }),
             )
         };
@@ -2052,6 +2177,7 @@ mod tests {
             server_url: " http://h:8080/player_api.php ".into(),
             username: "u".into(),
             password: "p".into(),
+            headers: Default::default(),
         })
         .unwrap();
         assert_eq!(x.server_url, "http://h:8080");
@@ -2060,6 +2186,7 @@ mod tests {
             server_url: "http://h".into(),
             username: " u ".into(),
             password: " p ".into(),
+            headers: Default::default(),
         })
         .unwrap();
         assert_eq!(
@@ -2070,14 +2197,26 @@ mod tests {
             server_url: "http://h".into(),
             username: "u".into(),
             password: "   ".into(),
+            headers: Default::default(),
         })
         .is_err());
         assert!(validate_xtream(XtreamSourceConfig {
             server_url: "ftp://h".into(),
             username: "u".into(),
-            password: "p".into()
+            password: "p".into(),
+            headers: Default::default(),
         })
         .is_err());
+        let bad_ua = validate_xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: "u".into(),
+            password: "p".into(),
+            headers: RequestHeaders {
+                user_agent: Some("Agent\n1".into()),
+                ..Default::default()
+            },
+        });
+        assert!(matches!(bad_ua, Err(CoreError::Invalid(_))), "{bad_ua:?}");
         assert_eq!(
             normalize_urls(vec![" a ".into(), "".into(), "a".into(), "b".into()]),
             vec!["a", "b"]

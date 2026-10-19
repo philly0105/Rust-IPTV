@@ -252,16 +252,16 @@ describe('U4-fix3: detail hero', () => {
 });
 
 describe('U4-fix3: empty seasons hint by source kind', () => {
-  it('Xtream says the provider sent no seasons; M3U keeps the playlist wording', async () => {
+  it('says the provider sent no seasons, for Xtream and for M3U series (F-M3U-SERIES: M3U has episode lists now)', async () => {
     rpcMock.handlers['xtream.seriesDetail'] = () => seriesDetail([]);
     renderAt('/s/src1/series/s1', seriesRoute);
     await screen.findByText('The provider sent no seasons for this series. Refresh the source, or check back later.');
     cleanup();
 
     useKind('m3u');
-    rpcMock.handlers['catalog.item'] = () => seriesDetail([]).item;
+    rpcMock.handlers['m3u.seriesDetail'] = () => seriesDetail([]);
     renderAt('/s/src1/series/s1', seriesRoute);
-    await screen.findByText(/M3U playlists carry no episode lists/);
+    await screen.findByText('The provider sent no seasons for this series. Refresh the source, or check back later.');
   });
 });
 

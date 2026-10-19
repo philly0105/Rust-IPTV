@@ -10,13 +10,13 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
+import { isDesktop, rpc, rpcRaw } from '@/api/transport';
 import type { RecordingFile } from '@/api/types';
-import { dateTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { scheduleRemoval, usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { buttonClass } from '@/ui/Button';
 
-import { Badge, EmptyState, ErrorState, IconButton, SkeletonList, playSource, useToast } from '../deps';
+import { Badge, EmptyState, ErrorState, IconButton, SkeletonList, playSource, useToast, errorDescription } from '../deps';
 import { formatBytes, formatDuration } from '../lib/format';
 
 /** Entries whose name, channel or title contains `query` (case-insensitive). */
@@ -47,7 +47,7 @@ export function usePlayRecording(): (f: RecordingFile) => Promise<void> {
       try {
         await playSource(await rpc('recordings.playSource', { id: f.id }));
       } catch (e) {
-        toast({ variant: 'error', title: t('recPlayFailed'), description: RpcError.from(e).message });
+        toast({ variant: 'error', title: t('recPlayFailed'), description: errorDescription(e) });
         void invalidate('recordings.');
       }
     },
@@ -93,7 +93,7 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
   // The programme title leads and the channel sits in the line under it, as on the Scheduled page.
   const name = f.title ?? f.channelName ?? f.fileName;
   const writing = f.status === 'recording';
-  const date = dateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
+  const date = dateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
   const duration = f.durationSeconds ? formatDuration(f.durationSeconds, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) : '';
 
   const playRecording = usePlayRecording();
@@ -103,7 +103,7 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
     try {
       await rpc('recordings.reveal', { id: f.id });
     } catch (e) {
-      toast({ variant: 'error', title: t('recRevealFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('recRevealFailed'), description: errorDescription(e) });
     }
   };
 
@@ -116,7 +116,7 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
       // keepalive (in `call`) when the page unloads before the undo window passed.
       remove: async (call) => void (await rpcRaw('recordings.delete', { id: f.id }, call)),
       onRemoved: () => void invalidate('recordings.'),
-      onFailed: (e) => toast({ variant: 'error', title: t('recDeleteFailed'), description: RpcError.from(e).message }),
+      onFailed: (e) => toast({ variant: 'error', title: t('recDeleteFailed'), description: errorDescription(e) }),
     });
   };
 

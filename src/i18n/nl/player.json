@@ -48,6 +48,7 @@
   "channels": "Kanalen",
   "channelPanel": "Zenderlijst",
   "channelPanelHint": "Druk op C om de zenderlijst te openen",
+  "openChannelPanel": "Zenderlijst openen",
   "searchChannels": "Zenders zoeken",
   "noChannels": "Geen overeenkomende kanalen",
   "channelsFailed": "Kanalen konden niet worden geladen",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "Ingebouwde MPV kan het vastleggen: kies het via Instellingen > Spelers.",
   "screenshotNotReady": "Er is nog geen beeld. Probeer het opnieuw zodra de video speelt.",
   "screenshotNoVideo": "Radio heeft geen beeld om vast te leggen.",
-  "screenshotExternal": "Dit speelt in een externe speler. Gebruik de eigen screenshottoets daarvan."
+  "screenshotExternal": "Dit speelt in een externe speler. Gebruik de eigen screenshottoets daarvan.",
+  "picture": "Beeld",
+  "pictureAspect": "Beeldverhouding",
+  "aspectAuto": "Origineel",
+  "aspectFill": "Uitrekken",
+  "pictureZoom": "Zoom",
+  "zoomNone": "Geen",
+  "zoomCrop": "Bijsnijden tot vullend",
+  "deinterlace": "Deïnterlacing"
 }

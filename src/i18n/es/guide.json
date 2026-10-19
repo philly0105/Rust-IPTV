@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Guía de TV",
   "searchLabel": "Buscar en la guía",
+  "zoomIn": "Ampliar",
+  "zoomOut": "Reducir",
+  "viewFavorites": "Favoritos",
+  "viewList": "Lista: {{name}}",
+  "viewFavoritesEmpty": "No hay canales favoritos de esta fuente",
+  "viewListEmpty": "No hay canales de esta fuente en esta lista",
+  "viewEmptyHint": "Elige otra fuente o añade canales desde su menú.",
   "searchPlaceholder": "Buscar en la guía",
   "searchResults": "Búsqueda en la guía",
   "searchHint": "Escribe al menos 2 caracteres.",

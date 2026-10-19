@@ -514,3 +514,146 @@ async fn a_busy_port_at_startup_is_retried_until_it_frees_up() {
     assert_eq!(remote::hub(&state).running_port(), Some(port));
     remote::stop(state.clone()).await.unwrap();
 }
+
+#[tokio::test]
+async fn play_pause_and_stop_emit_remote_commands() {
+    let mut f = fixture().await;
+    for (path, command) in [("playback/toggle", "togglePlay"), ("playback/stop", "stop")] {
+        let res = f
+            .http
+            .post(format!("{}/{path}", f.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "{path}");
+        assert_eq!(
+            next_command(&mut f.events).await,
+            json!({ "command": command })
+        );
+    }
+}
+
+#[tokio::test]
+async fn seek_emits_seek_by_and_rejects_bad_steps() {
+    let mut f = fixture().await;
+    for seconds in [30.0, -10.0] {
+        let res = f
+            .http
+            .post(format!("{}/playback/seek", f.base))
+            .json(&json!({ "seconds": seconds }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "{seconds}");
+        assert_eq!(
+            next_command(&mut f.events).await,
+            json!({ "command": "seekBy", "seconds": seconds })
+        );
+    }
+    for body in [
+        json!({}),
+        json!({ "seconds": 0 }),
+        json!({ "seconds": 100000 }),
+        json!({ "seconds": "30" }),
+    ] {
+        let res = f
+            .http
+            .post(format!("{}/playback/seek", f.base))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "{body}");
+    }
+    assert_no_command(&mut f.events);
+    remote::stop(f.state.clone()).await.unwrap();
+}
+
+async fn channel_names(http: &reqwest::Client, base: &str) -> Vec<String> {
+    let all: Value = http
+        .get(format!("{base}/channels"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    all["channels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn published_source_fills_the_list_from_the_catalog_and_after_a_restart() {
+    use iptv_core::model::{M3uOrigin, SourceKind};
+    use iptv_core::sources::{AddSourceArgs, M3uAddInput};
+
+    let f = fixture().await;
+    iptv_core::m3u::init(f.state.clone()).await.unwrap();
+    let text = "#EXTM3U\n#EXTINF:-1,Alpha\nhttp://s.example/a.ts\n#EXTINF:-1,Beta\nhttp://s.example/b.ts\n";
+    let src = iptv_core::sources::add(
+        f.state.clone(),
+        AddSourceArgs {
+            kind: SourceKind::M3u,
+            name: "Pasted".into(),
+            auto_refresh: None,
+            m3u: Some(M3uAddInput {
+                origin: Some(M3uOrigin::Text),
+                text: Some(text.into()),
+                ..Default::default()
+            }),
+            xtream: None,
+            stalker: None,
+        },
+    )
+    .await
+    .map_err(|e| e.error)
+    .unwrap();
+    assert!(channel_names(&f.http, &f.base).await.is_empty());
+
+    let mut router = RpcRouter::new();
+    remote::rpc::register(&mut router);
+    let n = router
+        .dispatch(
+            f.state.clone(),
+            "remote.publishSource",
+            json!({ "sourceId": src.id }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(n, json!(2));
+    assert_eq!(channel_names(&f.http, &f.base).await, ["Alpha", "Beta"]);
+    let all: Value = f
+        .http
+        .get(format!("{}/channels", f.base))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = all["channels"][0]["id"].as_str().unwrap();
+    assert!(id.starts_with(&format!("{}|", src.id)), "{id}");
+
+    // A new app state on the same data (an app restart) lists the source
+    // without anyone publishing it again.
+    let (sink, _rx) = BroadcastSink::channel(8);
+    let again = AppState::new(f._tmp.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    let info = remote::start_on(again.clone(), 0).await.unwrap();
+    let base = format!("{}/api/remote-control", info.url);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while channel_names(&f.http, &base).await != ["Alpha", "Beta"] {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "list not filled after a restart"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    remote::stop(again).await.unwrap();
+    remote::stop(f.state.clone()).await.unwrap();
+}

@@ -1,7 +1,7 @@
 {
   "title": "Saját lista",
-  "count_one": "{{count}} cím",
-  "count_other": "{{count}} cím",
+  "count_one": "{{count, number}} cím",
+  "count_other": "{{count, number}} cím",
   "seeAll": "Összes",
   "loading": "Saját lista betöltése",
   "errorHint": "A Saját listát az alkalmazás tárolja, nem a szolgáltató. Próbálja újra, vagy indítsa újra az alkalmazást, ha a hiba továbbra is fennáll.",
@@ -63,7 +63,7 @@
   "showAll": "Összes megjelenítése",
   "allWatchedTitle": "Minden megtekintve",
   "allWatchedBody_one": "Az egyetlen cím itt már megtekintett. Jelenítse meg a megtekintett címeket, hogy újra lássa.",
-  "allWatchedBody_other": "Az itt lévő címek mind megtekintettek ({{count}}). Jelenítse meg a megtekintett címeket, hogy újra lássa őket.",
+  "allWatchedBody_other": "Az itt lévő címek mind megtekintettek ({{count, number}}). Jelenítse meg a megtekintett címeket, hogy újra lássa őket.",
   "showWatched": "Megtekintettek megjelenítése",
   "noMatchTitle": "Nincs találat",
   "noMatchBody": "A Saját listában semmi sem felel meg ennek: „{{query}}”.",

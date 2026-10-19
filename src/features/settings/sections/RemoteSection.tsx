@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { isDesktop, rpc } from '@/api/transport';
 
-import { Button, IconButton, Skeleton, useToast } from '@/ui';
+import { Button, IconButton, Skeleton, useToast, errorDescription } from '@/ui';
 import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { remotePatch, validatePort } from '../lib/patch';
 import { RemoteLanPanel } from './RemoteLanPanel';
@@ -25,7 +25,7 @@ export function RemoteSection({ settings, update }: SectionProps) {
     try {
       await fn();
     } catch (e) {
-      toast({ variant: 'error', title: t('remoteFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('remoteFailed'), description: errorDescription(e) });
     } finally {
       setBusy(false);
       void invalidate('remote.');

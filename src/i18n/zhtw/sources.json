@@ -15,6 +15,8 @@
   "cancel": "取消",
   "closeKeepImporting": "關閉，繼續匯入",
   "shortcutAddSource": "新增播放來源",
+  "shortcutMoveUp": "上移目前的播放來源",
+  "shortcutMoveDown": "下移目前的播放來源",
 
   "kindM3u": "M3U 播放清單",
   "kindXtream": "Xtream Codes",
@@ -143,7 +145,10 @@
   "saveFailed": "無法儲存變更",
   "refreshNow": "立即重新整理",
   "refresh": "重新整理",
-  "textOriginNotEditable": "此播放清單是以貼上方式匯入，沒有可變更的位址。若要取代頻道，請將其移除後重新新增。下方的要求標頭仍會套用到每個串流。",
+  "textOriginReplaceNote": "此播放清單是以貼上或上傳方式匯入，沒有可變更的位址。若要更新，請貼上新的播放清單或在下方選擇檔案。收藏、記錄和頻道編輯會保留在仍存在的頻道上。下方的要求標頭會套用到每個串流。",
+  "replacePlaylistText": "新的播放清單文字",
+  "replacePlaylistTextHint": "留空即可保留目前的頻道。",
+  "replacePlaylistFileHint": "或選擇播放清單檔案（.m3u、.m3u8 或 .txt），它會取代目前的頻道。",
 
   "epgLinks": "節目表來源",
   "epgLinksHint": "播放清單中找到的節目表 URL，以及您自行新增的 URL。關閉某個 URL 即停止擷取。",
@@ -373,5 +378,9 @@
   "discardedFailedHint": "首次匯入失敗。選擇「復原」即可保留它，並從其卡片上重試。",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "節目表時間偏移",
+  "epgShiftHint": "將此來源的所有節目移動指定的分鐘數，疊加在「設定」中的偏移之上。留空表示不偏移。",
+  "epgShiftUnit": "分鐘",
+  "epgShiftError": "請輸入 -720 到 720 之間的整數分鐘。"
 }

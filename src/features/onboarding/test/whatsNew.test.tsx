@@ -61,6 +61,16 @@ describe("What's new", () => {
     expect(within(dialog()).queryByRole('heading', { level: 3 })).toBeNull();
   });
 
+  it('after an upgrade from 0.1.0 lists only the 0.2.0 notes', async () => {
+    core.state.version = '0.2.0';
+    open({ since: '0.1.0', auto: true });
+    const items = await screen.findAllByTestId('whats-new-item');
+    expect(items).toHaveLength(RELEASE_NOTES.find((r) => r.version === '0.2.0')!.items.length);
+    expect(dialog().textContent).toContain('Version 0.2.0');
+    expect(items[0]!.textContent).toContain('Series in playlists');
+    expect(dialog().textContent).not.toContain('Multi-view');
+  });
+
   it('focuses Got it when it opens', async () => {
     open();
     const close = await screen.findByTestId('whats-new-close');
@@ -135,7 +145,8 @@ describe("What's new", () => {
   it('still lists every release when opened by hand and the version cannot be read', async () => {
     core.state.failInfo = true;
     open({ since: null });
-    expect(await screen.findAllByTestId('whats-new-item')).toHaveLength(CURRENT.items.length);
+    const all = RELEASE_NOTES.reduce((n, r) => n + r.items.length, 0);
+    expect(await screen.findAllByTestId('whats-new-item')).toHaveLength(all);
   });
 
   it('offers the tour when a source exists, and opens it after closing', async () => {

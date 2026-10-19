@@ -45,6 +45,10 @@ pub struct Resolution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epg_channel_id: Option<String>,
     pub via: Via,
+    /// The channel's own guide shift in minutes (`epg.setChannelShift`),
+    /// filled by `epg.resolve` only; absent when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift_minutes: Option<i32>,
 }
 
 impl Resolution {
@@ -52,6 +56,7 @@ impl Resolution {
         Self {
             epg_channel_id: None,
             via: Via::None,
+            shift_minutes: None,
         }
     }
 }
@@ -367,6 +372,7 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
         return Ok(Resolution {
             epg_channel_id: manual.filter(|s| !s.trim().is_empty()),
             via: Via::Manual,
+            shift_minutes: None,
         });
     }
     let item: Option<(String, Option<String>)> = conn
@@ -386,6 +392,7 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
             return Ok(Resolution {
                 epg_channel_id: Some(canonical.to_string()),
                 via: Via::Item,
+                shift_minutes: None,
             });
         }
         // Programmes for channels the feed never declared with <channel>.
@@ -393,6 +400,7 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
             return Ok(Resolution {
                 epg_channel_id: Some(id.to_string()),
                 via: Via::Item,
+                shift_minutes: None,
             });
         }
     }
@@ -400,6 +408,7 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
         return Ok(Resolution {
             epg_channel_id: Some(id.to_string()),
             via: Via::Name,
+            shift_minutes: None,
         });
     }
     Ok(Resolution::none())

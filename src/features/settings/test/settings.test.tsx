@@ -159,42 +159,17 @@ describe('Language picker', () => {
 });
 
 describe('Downloads folder (web build)', () => {
-  it('saves a typed path with downloads.setDir', async () => {
-    rpcMock.handlers['downloads.setDir'] = () => undefined;
+  it('names the fixed server folder, read-only: nothing to type, pick or reset', async () => {
+    current = settings({ downloadsDir: 'D:\\Videos' });
     renderAt(settingsRoutes, '/settings/general');
-    const input = (await screen.findByTestId('input-downloadsDir')) as HTMLInputElement;
-    await waitFor(() => expect(input.value).toBe('C:/Users/me/AppData/Roaming/tsrust-iptv/downloads'));
-    fireEvent.change(input, { target: { value: '  "D:\Videos"  ' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(rpcMock.callsOf('downloads.setDir')).toEqual([{ path: 'D:\Videos' }]));
-  });
-
-  it('shows the core error inline when the path is rejected', async () => {
-    rpcMock.handlers['downloads.setDir'] = () => {
-      throw new RpcError('invalid', 'Choose a full folder path (for example C:\Videos).');
-    };
-    renderAt(settingsRoutes, '/settings/general');
-    const input = (await screen.findByTestId('input-downloadsDir')) as HTMLInputElement;
-    await waitFor(() => expect(input.value).not.toBe(''));
-    fireEvent.change(input, { target: { value: 'relative/dir' } });
-    fireEvent.blur(input);
-    expect(await screen.findByText(/Couldn't use this folder: Choose a full folder path/)).toBeTruthy();
-    expect(input.value).toBe('relative/dir');
-    expect(input.getAttribute('aria-describedby') ?? '').toMatch(/-err/);
-  });
-
-  it('rejects an empty path without calling the core, and resets to default on request', async () => {
-    rpcMock.handlers['downloads.setDir'] = () => undefined;
-    current = settings({ downloadsDir: 'D:\Videos' });
-    renderAt(settingsRoutes, '/settings/general');
-    const input = (await screen.findByTestId('input-downloadsDir')) as HTMLInputElement;
-    await waitFor(() => expect(input.value).not.toBe(''));
-    fireEvent.change(input, { target: { value: '   ' } });
-    fireEvent.blur(input);
-    expect(await screen.findByText('Required.')).toBeTruthy();
+    const shown = await screen.findByTestId('downloads-dir-path');
+    await waitFor(() => expect(shown.textContent).toBe('C:/Users/me/AppData/Roaming/tsrust-iptv/downloads'));
+    expect(shown.tagName).toBe('OUTPUT');
+    expect(screen.getByText('Downloads are saved to this folder on the server. To move it, start the server with a different IPTV_DATA_DIR.')).toBeTruthy();
+    expect(screen.queryByTestId('input-downloadsDir')).toBeNull();
+    expect(screen.queryByTestId('downloads-dir-choose')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Use default' })).toBeNull();
     expect(rpcMock.callsOf('downloads.setDir')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Use default' }));
-    await waitFor(() => expect(rpcMock.callsOf('downloads.setDir')).toEqual([{ path: '' }]));
   });
 
   it('shows a retryable error when the folder cannot be read', async () => {
@@ -207,8 +182,7 @@ describe('Downloads folder (web build)', () => {
     const err = await screen.findByTestId('downloads-dir-error');
     fail = false;
     fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
-    const input = (await screen.findByTestId('input-downloadsDir')) as HTMLInputElement;
-    await waitFor(() => expect(input.value).toBe('E:/dl'));
+    await waitFor(() => expect(screen.getByTestId('downloads-dir-path').textContent).toBe('E:/dl'));
   });
 });
 

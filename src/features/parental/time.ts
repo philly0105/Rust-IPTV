@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { intlLocale } from '@/lib/intl';
 
 /** `Date.now()`, re-read every `intervalMs` while `intervalMs` is set. */
 export function useNow(intervalMs: number | null): number {
@@ -24,7 +25,7 @@ export function formatUntil(iso: string, language: string, now = Date.now()): st
     ? { hour: 'numeric', minute: '2-digit' }
     : { weekday: 'short', hour: 'numeric', minute: '2-digit' };
   try {
-    return new Intl.DateTimeFormat(language, opts).format(at);
+    return new Intl.DateTimeFormat(intlLocale(language), opts).format(at);
   } catch {
     return new Intl.DateTimeFormat(undefined, opts).format(at);
   }
@@ -35,7 +36,7 @@ export function formatDay(iso: string, language: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return '';
   try {
-    return new Intl.DateTimeFormat(language, { dateStyle: 'medium' }).format(at);
+    return new Intl.DateTimeFormat(intlLocale(language), { dateStyle: 'medium' }).format(at);
   } catch {
     return at.toLocaleDateString();
   }

@@ -26,6 +26,7 @@ import { useAlternatesStore } from '../failover';
 import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
 import { noteEngineError, tryAnotherSource, useReconnectStore } from '../reconnect';
+import { needsSizeContainer, pictureStyle, usePictureStore } from '../picture';
 import { canShareSource } from '../shareable';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
 import {
@@ -450,9 +451,15 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
 
   const ambient = !!settings?.playerAmbientMode;
   const Tag = as;
+  // Aspect, zoom and crop from the player menu (picture.ts); global, not per channel.
+  const picture = usePictureStore();
+  const pictureCss = as === 'video' ? pictureStyle(picture) : undefined;
 
   return (
-    <div className={cn('relative h-full w-full overflow-hidden bg-black', className)}>
+    <div
+      className={cn('relative h-full w-full overflow-hidden bg-black', className)}
+      style={pictureCss && needsSizeContainer(picture) ? { containerType: 'size' } : undefined}
+    >
       {art.url && (
         // Ambient: a quarter-size copy scaled up under a small blur (C5), never a full-size blur.
         // Without ambient mode it stays hidden and only tells `art` when the poster fails to load.
@@ -469,12 +476,20 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
         playsInline
         preload="auto"
         className={cn('relative h-full w-full object-contain', as === 'audio' && 'hidden')}
+        style={pictureCss}
         poster={art.url}
         // Found by the screenshot code (C6), which draws this frame on a canvas.
         data-player-video={as === 'video' ? '' : undefined}
       />
       {as === 'video' && (
-        <canvas ref={holdRef} data-zap-hold="" hidden aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
+        <canvas
+          ref={holdRef}
+          data-zap-hold=""
+          hidden
+          aria-hidden
+          className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+          style={pictureCss}
+        />
       )}
       {as === 'video' && <div ref={subsRef} data-subtitle-overlay aria-hidden className="player-subs" />}
       {status === 'loading' && <ConnectingNotice source={source} compact={compact} />}
@@ -610,10 +625,10 @@ function ErrorOverlay({
           // What the engine said, for a bug report or a provider ticket: out of the way until asked for.
           <details className="group w-full text-xs text-white/60">
             <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+              <ChevronRight className="size-3.5 transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90 motion-reduce:transition-none" aria-hidden />
               {t('errorDetails')}
             </summary>
-            <p className="mt-1.5 pl-4.5 font-mono break-all select-all">{message}</p>
+            <p className="mt-1.5 ps-4.5 font-mono break-all select-all">{message}</p>
           </details>
         )}
         <div className="mt-1 flex flex-wrap gap-2">
@@ -688,7 +703,7 @@ function ConnectingNotice({ source, compact }: { source?: PlayerSource | undefin
         data-testid="connecting-notice"
         className={cn(
           'player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1',
-          offerSwitch ? 'pr-1 pl-3' : 'px-3',
+          offerSwitch ? 'pe-1 ps-3' : 'px-3',
           compact ? 'text-xs' : 'text-sm',
         )}
       >

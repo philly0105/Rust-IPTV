@@ -11,6 +11,7 @@ import type { TFunction } from 'i18next';
 import { create } from 'zustand';
 
 import type { MpvStats } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { formatBitrate } from './engines';
 import { usePlayerStore } from './store';
@@ -122,7 +123,7 @@ export function secondsLabel(seconds: number | undefined, locale?: string): stri
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return undefined;
   const value = Math.round(seconds * 10) / 10;
   try {
-    return new Intl.NumberFormat(locale, { style: 'unit', unit: 'second', unitDisplay: 'short', maximumFractionDigits: 1 }).format(value);
+    return new Intl.NumberFormat(intlLocale(locale), { style: 'unit', unit: 'second', unitDisplay: 'short', maximumFractionDigits: 1 }).format(value);
   } catch {
     return `${value} s`;
   }
@@ -189,7 +190,7 @@ export function statsRows(stats: StreamStats, url: string, t: TFunction<'player'
     [t('infoChannels'), v(channelsLabel(stats.audioChannels, t))],
     [t('infoAudioBitrate'), v(bitrateLabel(stats.audioBitrate))],
     [t('infoHwdec'), hwdecLabel(stats, t)],
-    [t('infoDroppedFrames'), v(stats.droppedFrames === undefined ? undefined : new Intl.NumberFormat(locale).format(stats.droppedFrames))],
+    [t('infoDroppedFrames'), v(stats.droppedFrames === undefined ? undefined : new Intl.NumberFormat(intlLocale(locale)).format(stats.droppedFrames))],
     [t('infoBuffer'), v(secondsLabel(stats.cacheSeconds, locale))],
     [t('infoContainer'), v(containerLabel(stats, url))],
     [t('infoHost'), v(streamHost(url, t))],

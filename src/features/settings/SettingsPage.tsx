@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentType } from 're
 import { useTranslation } from 'react-i18next';
 import { Navigate, NavLink, useParams } from 'react-router';
 
+import { isDesktop } from '@/api/transport';
 import { ParentalSection } from '@/features/parental/ParentalSection';
 import { useShell } from '@/shell';
 import { SectionError, SectionSkeleton } from './components';
@@ -56,6 +57,14 @@ const SECTIONS: Record<SectionId, { icon: LucideIcon; label: string; component: 
 };
 
 /**
+ * The sections this host offers. External players run only in the desktop app, and the core
+ * refuses their paths and arguments in server mode, so the browser has no External players section.
+ */
+export function sectionAvailable(id: SectionId): boolean {
+  return isDesktop || id !== 'players';
+}
+
+/**
  * Section list. `panel` is the vertical list in the shell's context panel;
  * `inline` is the row the page shows itself where the shell has no room for the
  * panel (under 1440 px, the shell's inline-panel breakpoint): one
@@ -87,7 +96,7 @@ export function SettingsNav({ current, variant = 'panel' }: { current: SectionId
       }
       data-testid={inline ? 'settings-nav-inline' : 'settings-nav'}
     >
-      {SECTION_IDS.map((id) => {
+      {SECTION_IDS.filter(sectionAvailable).map((id) => {
         const { icon: Icon, label } = SECTIONS[id];
         const active = id === current;
         return (
@@ -184,7 +193,7 @@ export function SettingsPage() {
   const { setHeader, setContextPanel } = useShell();
   const query = useSettingsQuery();
   const save = useSaveStatus(useUpdateSettings());
-  const valid = isSectionId(section);
+  const valid = isSectionId(section) && sectionAvailable(section);
   const current: SectionId = valid ? section : 'general';
 
   useEffect(() => {

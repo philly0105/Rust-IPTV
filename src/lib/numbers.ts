@@ -5,7 +5,7 @@
  * format.ts into the entry. Both are re-exported from their old homes for existing callers.
  */
 
-import { numberFormat } from './intl';
+import { intlLocale, numberFormat } from './intl';
 
 /** `1.2 GB`, `350 MB`, `12 KB` in the user's number format. */
 export function formatFileSize(bytes: number, lang: string): string {
@@ -18,7 +18,7 @@ export function formatFileSize(bytes: number, lang: string): string {
   }
   let text: string;
   try {
-    text = numberFormat(lang, { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
+    text = numberFormat(intlLocale(lang), { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
   } catch {
     text = String(Math.round(value));
   }
@@ -27,7 +27,7 @@ export function formatFileSize(bytes: number, lang: string): string {
 
 export function formatCount(n: number, lang: string): string {
   try {
-    return numberFormat(lang).format(n);
+    return numberFormat(intlLocale(lang)).format(n);
   } catch {
     return String(n);
   }

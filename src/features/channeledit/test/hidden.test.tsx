@@ -1,7 +1,7 @@
 // Hidden-channels dialog (C2): designed loading, error and empty states, a
 // filter, Unhide per row and Unhide all (both with Undo), channels the
 // provider dropped, and the count for the sidebar entry.
-import { act, cleanup, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -191,7 +191,7 @@ describe('HiddenChannelsDialog', () => {
     fireEvent.click(screen.getByTestId('hidden-channel-unhide'));
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
     expect(lastToast()?.title).toBe('Could not unhide BBC One');
-    expect(lastToast()?.description).toBe('Database is locked.');
+    expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('Database is locked.');
     expect(rowNames()).toEqual(['BBC One']);
   });
 
@@ -254,7 +254,7 @@ describe('HiddenChannelsDialog', () => {
     act(() => useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!.action!.onClick());
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
     expect(lastToast()?.title).toBe('Could not undo');
-    expect(lastToast()?.description).toBe('Database is locked.');
+    expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('Database is locked.');
   });
 
   it('says channels the provider dropped were removed, without Undo, when none of them came back', async () => {
@@ -332,6 +332,33 @@ describe('HiddenChannelsDialog', () => {
     await waitFor(() => expect(toastTitles()).toContain('2 channels are back'));
     expect(core.callsOf('channels.setHidden')).toEqual([{ refs: [cnn.ref, bbc.ref], hidden: false }]);
     expect(core.isHidden(tve.ref)).toBe(true);
+  });
+
+  it('resets every edit of the source after asking, renames included (channels.reset)', async () => {
+    hide(bbc);
+    core.seed(cnn.ref, { name: 'CNN' });
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    fireEvent.click(await screen.findByTestId('hidden-channels-reset'));
+    expect(screen.getByTestId('hidden-channels-reset-confirm').textContent).toMatch(/provider's name back/);
+    expect(core.callsOf('channels.reset')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('hidden-channels-reset-yes'));
+    await waitFor(() => expect(toastTitles()).toContain('Channel edits reset'));
+    expect(core.callsOf('channels.reset')).toEqual([{ sourceId: 'src1' }]);
+    expect(core.isHidden(bbc.ref)).toBe(false);
+    expect(core.nameOf(cnn.ref)).toBeUndefined();
+    await waitFor(() => expect(screen.queryByText('No hidden channels')).toBeTruthy());
+  });
+
+  it('offers the reset for renames alone, and Cancel keeps them', async () => {
+    core.seed(cnn.ref, { name: 'CNN' });
+    open();
+    expect(await screen.findByText('No hidden channels')).toBeTruthy();
+    fireEvent.click(await screen.findByTestId('hidden-channels-reset'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('hidden-channels-reset-confirm')).toBeNull();
+    expect(core.callsOf('channels.reset')).toHaveLength(0);
+    expect(core.nameOf(cnn.ref)).toBe('CNN');
   });
 
   it('moves between rows with the arrow keys, one Tab stop for the list', async () => {

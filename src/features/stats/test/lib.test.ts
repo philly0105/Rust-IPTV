@@ -43,7 +43,7 @@ describe('intlLocale', () => {
     expect(intlLocale('by')).toBe('be');
     expect(intlLocale('zhtw')).toBe('zh-TW');
     expect(intlLocale('zh-CN')).toBe('zh-CN');
-    expect(['ary', 'ar']).toContain(intlLocale('ary'));
+    expect(intlLocale('ary')).toBe('ar');
     expect(intlLocale(undefined)).toBe('en');
     expect(intlLocale('')).toBe('en');
   });

@@ -100,10 +100,16 @@ fn fuzz_parse_str_and_row_builder() {
                 if let Some(d) = e.duration {
                     assert!(d.is_finite());
                 }
-                let row = b.row(e);
+                // Episodes are held back and come out as series rows below.
+                let Some(row) = b.push(e) else { continue };
                 if let Some(h) = row.archive_hours {
                     assert!(h > 0 && h <= 366 * 24, "archive_hours {h}");
                 }
+            }
+            let (series, _) = b.take_series();
+            for s in &series {
+                let eps = iptv_core::m3u::series::stored_episodes(&s.extra);
+                assert!(!eps.is_empty(), "a series row without episodes");
             }
             let _ = b.categories();
         },

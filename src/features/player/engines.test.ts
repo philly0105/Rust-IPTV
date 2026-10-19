@@ -702,6 +702,44 @@ describe('server refusal reasons', () => {
   });
 });
 
+describe('showCaptions in the native engine', () => {
+  const tracksOf = (callbacks: ReturnType<typeof cb>): boolean[] =>
+    (callbacks.onTracks.mock.calls.at(-1)?.[0] as { text: { selected: boolean }[] }).text.map((x) => x.selected);
+
+  it('turns the first subtitle track on once it appears; the menu wins after that', async () => {
+    const el = video();
+    const chapters = { kind: 'chapters', label: '', language: '', mode: 'disabled' as TextTrackMode };
+    const en = { kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' as TextTrackMode };
+    const fr = { kind: 'captions', label: 'French', language: 'fr', mode: 'disabled' as TextTrackMode };
+    Object.defineProperty(el, 'textTracks', { value: Object.assign([chapters, en, fr], { addEventListener() {}, removeEventListener() {} }) });
+    const callbacks = cb();
+    const engine = await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', callbacks, { captions: true });
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect([en.mode, fr.mode]).toEqual(['showing', 'disabled']);
+    expect(tracksOf(callbacks)).toEqual([true, false]);
+    engine.setText(null);
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect([en.mode, tracksOf(callbacks)]).toEqual(['disabled', [false, false]]);
+  });
+
+  it('leaves the tracks alone when off, or when one is already on', async () => {
+    const el = video();
+    const en = { kind: 'subtitles', label: 'English', language: 'en', mode: 'disabled' as TextTrackMode };
+    Object.defineProperty(el, 'textTracks', { value: Object.assign([en], { addEventListener() {}, removeEventListener() {} }) });
+    await createEngine(el, src('http://h/m.mp4', { isLive: false }), 'http://h/m.mp4', cb(), { captions: false });
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(en.mode).toBe('disabled');
+
+    const el2 = video();
+    const de = { kind: 'subtitles', label: 'German', language: 'de', mode: 'disabled' as TextTrackMode };
+    const it2 = { kind: 'subtitles', label: 'Italian', language: 'it', mode: 'showing' as TextTrackMode };
+    Object.defineProperty(el2, 'textTracks', { value: Object.assign([de, it2], { addEventListener() {}, removeEventListener() {} }) });
+    await createEngine(el2, src('http://h/n.mp4', { isLive: false }), 'http://h/n.mp4', cb(), { captions: true });
+    el2.dispatchEvent(new Event('loadedmetadata'));
+    expect([de.mode, it2.mode]).toEqual(['disabled', 'showing']);
+  });
+});
+
 describe('subtitles drawn by the player (subtitles/inline.ts)', () => {
   it('native: a track the overlay draws (hidden) still counts as on, an engine-hidden one does not', async () => {
     const { drawTrack, isShownTrack } = await import('./subtitles/tracks');

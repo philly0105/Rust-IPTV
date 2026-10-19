@@ -49,14 +49,22 @@ async function openPlayback() {
 }
 
 describe('Settings > Playback while the player capabilities load (L3-visual-10)', () => {
-  it('browser: the three players are listed at once, with no placeholder, and stay put', async () => {
+  it('browser: only the built-in player is listed, with no placeholder, and it stays put', async () => {
     await openPlayback();
     const group = screen.getByRole('radiogroup', { name: 'Player' });
     expect(group.querySelector('.animate-pulse')).toBeNull();
-    expect(values()).toEqual(['html5', 'mpv', 'vlc']);
+    expect(values()).toEqual(['html5']);
     await act(async () => answer({ embeddedMpv: false, vlcPath: 'C:/VLC/vlc.exe', reason: 'desktop app only' }));
-    await screen.findByText("mpv wasn't found. Set its path under External players.");
-    expect(values()).toEqual(['html5', 'mpv', 'vlc']);
+    expect(values()).toEqual(['html5']);
+    expect(screen.queryByText(/wasn't found/)).toBeNull();
+  });
+
+  it('browser: a saved mpv or VLC (a desktop backup) shows the built-in player as chosen', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ player: 'vlc' });
+    await openPlayback();
+    await act(async () => answer({ embeddedMpv: false, reason: 'desktop app only' }));
+    expect(values()).toEqual(['html5']);
+    expect(radios()[0]!.checked).toBe(true);
   });
 
   it('desktop: embedded mpv is listed and usable from the start', async () => {

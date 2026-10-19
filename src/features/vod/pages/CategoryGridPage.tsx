@@ -64,6 +64,7 @@ import {
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
 import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -349,7 +350,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const categoryMissing = categoryId !== ALL_CATEGORIES && cats.isSuccess && !category;
   const categoryName =
     categoryId === ALL_CATEGORIES ? (kind === 'movie' ? t('allMovies') : t('allSeries')) : (category?.name ?? '');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   // One string for the page h1 and the shell header title (C16), so they always agree. The shell
   // header shows it; the page's h1 is for assistive technology only, so the title shows once.
   const pageTitle = categoryName || (kind === 'movie' ? t('movies') : t('series'));

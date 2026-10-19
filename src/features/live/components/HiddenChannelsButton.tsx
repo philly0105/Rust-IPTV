@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { HiddenChannelsDialog, useHiddenChannelCount } from '@/features/channeledit';
+import { intlLocale } from '@/lib/intl';
 
 /**
  * "Hidden channels (n)" under the group list (C2): opens the source's hidden
@@ -10,7 +11,7 @@ import { HiddenChannelsDialog, useHiddenChannelCount } from '@/features/channele
  */
 export function HiddenChannelsButton({ sourceId }: { sourceId: string }) {
   const { t, i18n } = useTranslation('channels');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const count = useHiddenChannelCount(sourceId);
   const [open, setOpen] = useState(false);
   return (

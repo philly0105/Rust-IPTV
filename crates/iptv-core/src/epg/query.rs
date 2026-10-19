@@ -1,12 +1,14 @@
 //! Read side: programmes of a channel in a time range, now/next, grid rows,
 //! channel search. Only urls that are enabled contribute, and one channel's
-//! programmes come from one url. A channel's `tvg-shift` moves its programmes.
+//! programmes come from one url. A channel's guide shift ([`item_shift`]:
+//! its own shift or its `tvg-shift`, plus its source's) moves its programmes.
 
 use super::store::STAGING_ORIGIN;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{EpgNowNext, EpgProgram, ItemRef};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Programmes longer than this may be missed by range queries that start
 /// inside them (the lookback bound keeps queries on the index).
@@ -72,9 +74,87 @@ pub fn parse_shift(value: &str) -> i64 {
         .map_or(0, |h| (h * 3600.0).round() as i64)
 }
 
+/// Largest per-source or per-channel guide shift, in minutes either way (the
+/// range of the `epgOffsetMinutes` setting).
+pub const MAX_SHIFT_MINUTES: i32 = 720;
+
+/// Refuses a per-source or per-channel shift beyond [`MAX_SHIFT_MINUTES`].
+pub fn check_shift_minutes(minutes: i32) -> CoreResult<()> {
+    if (-MAX_SHIFT_MINUTES..=MAX_SHIFT_MINUTES).contains(&minutes) {
+        Ok(())
+    } else {
+        Err(CoreError::Invalid(format!(
+            "the guide shift must be between -{MAX_SHIFT_MINUTES} and {MAX_SHIFT_MINUTES} minutes, got {minutes}"
+        )))
+    }
+}
+
+/// A channel's guide shift in seconds: its own shift when one is set
+/// ([`channel_shift_minutes`]), else its `tvg-shift`, plus the shift of its
+/// source ([`source_shift`]). The global `epgOffsetMinutes` comes on top, in
+/// the UI. Now/next, programmes, the grid and guide search all use it.
+pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
+    let source_secs = source_shift(conn, &r.source_id)?;
+    item_shift_with(conn, r, source_secs)
+}
+
+/// [`item_shift`] with the source's shift (seconds) already read, for callers
+/// that resolve many channels ([`cached_source_shift`]).
+pub fn item_shift_with(conn: &Connection, r: &ItemRef, source_secs: i64) -> CoreResult<i64> {
+    let channel = match channel_shift_minutes(conn, r)? {
+        Some(m) => i64::from(m) * 60,
+        None => tvg_shift(conn, r)?,
+    };
+    Ok(channel + source_secs)
+}
+
+/// [`source_shift`] read once per source id and kept in `cache`.
+pub fn cached_source_shift(
+    conn: &Connection,
+    cache: &mut HashMap<String, i64>,
+    source_id: &str,
+) -> CoreResult<i64> {
+    if let Some(s) = cache.get(source_id) {
+        return Ok(*s);
+    }
+    let s = source_shift(conn, source_id)?;
+    cache.insert(source_id.to_string(), s);
+    Ok(s)
+}
+
+/// The channel's own guide shift in minutes (`epg.setChannelShift`, set in
+/// the mapping dialog); `None` when it has none.
+pub fn channel_shift_minutes(conn: &Connection, r: &ItemRef) -> CoreResult<Option<i32>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT shift_minutes FROM epg_channel_shift WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
+            params![r.source_id, r.content_type.as_str(), r.item_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// The guide shift of a source in seconds (`EpgLinks.shiftMinutes`, set in
+/// the source dialog); 0 without one.
+pub fn source_shift(conn: &Connection, source_id: &str) -> CoreResult<i64> {
+    let epg: Option<String> = conn
+        .prepare_cached("SELECT epg_json FROM sources WHERE id = ?1")?
+        .query_row([source_id], |row| row.get::<_, Option<String>>(0))
+        .optional()?
+        .flatten();
+    let minutes = epg
+        .and_then(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
+        .and_then(|v| v.get("shiftMinutes")?.as_i64())
+        .unwrap_or(0);
+    let max = i64::from(MAX_SHIFT_MINUTES);
+    Ok(minutes.clamp(-max, max) * 60)
+}
+
 /// The `tvg-shift` of a catalog item in seconds (`extraJson.tvgShift`, set
 /// by the M3U import); 0 for items without one.
-pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
+fn tvg_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
     let extra: Option<String> = conn
         .prepare_cached(
             "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",

@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Телегид",
   "searchLabel": "Поиск по телегиду",
+  "zoomIn": "Увеличить",
+  "zoomOut": "Уменьшить",
+  "viewFavorites": "Избранное",
+  "viewList": "Список: {{name}}",
+  "viewFavoritesEmpty": "Нет избранных каналов из этого источника",
+  "viewListEmpty": "В этом списке нет каналов из этого источника",
+  "viewEmptyHint": "Выберите другой источник или добавьте каналы через их меню.",
   "searchPlaceholder": "Поиск по телегиду",
   "searchResults": "Поиск по телегиду",
   "searchHint": "Введите не менее 2 символов.",

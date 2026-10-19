@@ -48,6 +48,7 @@
   "channels": "القنوات",
   "channelPanel": "لائحة القنوات",
   "channelPanelHint": "ورك على C باش تحل لائحة القنوات",
+  "openChannelPanel": "حل لائحة القنوات",
   "searchChannels": "قلّب على القنوات",
   "noChannels": "ما كاينة حتى قناة مطابقة",
   "channelsFailed": "القنوات ما تشارجاوش",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "MPV المدمج يقدر يصوّرها: ختارو فالإعدادات > المشغلات.",
   "screenshotNotReady": "باقي ما كايناش التصويرة. عاود جرّب ملي يبدا الفيديو.",
   "screenshotNoVideo": "الراديو ما فيهش تصويرة باش تصوّرها.",
-  "screenshotExternal": "هادشي خدام فمشغل خارجي. استعمل الزر ديال تصوير الشاشة ديالو."
+  "screenshotExternal": "هادشي خدام فمشغل خارجي. استعمل الزر ديال تصوير الشاشة ديالو.",
+  "picture": "التصويرة",
+  "pictureAspect": "نسبة العرض للطول",
+  "aspectAuto": "الأصلية",
+  "aspectFill": "تمديد",
+  "pictureZoom": "التكبير",
+  "zoomNone": "والو",
+  "zoomCrop": "قص باش تعمر الشاشة",
+  "deinterlace": "إزالة التشابك"
 }

@@ -106,24 +106,29 @@ export function PlaybackSection({ settings, update }: SectionProps) {
       note: embedded || embeddedPending ? undefined : (caps.data?.reason ?? t('playerEmbeddedUnavailable')),
     });
   }
-  players.push(
-    {
-      value: 'mpv',
-      label: t('playerMpv'),
-      hint: t('playerExternalHint', { player: 'mpv' }),
-      available: true,
-      note: caps.data && !caps.data.mpvPath ? t('playerNotFound', { player: 'mpv' }) : undefined,
-    },
-    {
-      value: 'vlc',
-      label: t('playerVlc'),
-      hint: t('playerExternalHint', { player: 'VLC' }),
-      available: true,
-      note: caps.data && !caps.data.vlcPath ? t('playerNotFound', { player: 'VLC' }) : undefined,
-    },
-  );
-  // Legacy value from the old app's Video.js player maps to the built-in one.
-  const current: VideoPlayer = settings.player === 'videojs' ? 'html5' : settings.player;
+  // External players run only in the desktop app; the core refuses `player.openExternal` elsewhere.
+  if (isDesktop) {
+    players.push(
+      {
+        value: 'mpv',
+        label: t('playerMpv'),
+        hint: t('playerExternalHint', { player: 'mpv' }),
+        available: true,
+        note: caps.data && !caps.data.mpvPath ? t('playerNotFound', { player: 'mpv' }) : undefined,
+      },
+      {
+        value: 'vlc',
+        label: t('playerVlc'),
+        hint: t('playerExternalHint', { player: 'VLC' }),
+        available: true,
+        note: caps.data && !caps.data.vlcPath ? t('playerNotFound', { player: 'VLC' }) : undefined,
+      },
+    );
+  }
+  // Legacy value from the old app's Video.js player maps to the built-in one, and so does a saved
+  // external player in the browser (the player store plays it there too).
+  const builtIn = settings.player === 'videojs' || (!isDesktop && (settings.player === 'mpv' || settings.player === 'vlc'));
+  const current: VideoPlayer = builtIn ? 'html5' : settings.player;
 
   return (
     <SettingsSection title={t('sectionPlayback')} description={t('sectionPlaybackLead')} testId="settings-playback">

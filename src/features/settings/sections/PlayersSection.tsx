@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { RpcError, rpc } from '@/api/transport';
 
 import { Button, IconButton } from '@/ui';
 import { pickExecutableDesktop } from '../../sources/lib/files';
@@ -13,6 +13,7 @@ import { parity, type SectionProps } from './types';
 
 type DetectState = { status: 'idle' } | { status: 'running' } | { status: 'done'; mpv?: string; vlc?: string } | { status: 'failed'; message: string };
 
+/** Desktop only: the settings page hides this section in the browser (`sectionAvailable`). */
 export function PlayersSection({ settings, update }: SectionProps) {
   const { t } = useTranslation('settings');
   const [errors, setErrors] = useState<Record<string, string | null>>({});
@@ -59,7 +60,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
   };
 
   const pathRow = (key: 'mpvPath' | 'vlcPath', label: string, placeholder: string) => (
-    <SettingsRow label={label} description={isDesktop ? t('playerPathHint') : t('playerPathHintServer')} error={err(key) ?? pathWarning(key)} stack>
+    <SettingsRow label={label} description={t('playerPathHint')} error={err(key) ?? pathWarning(key)} stack>
       {({ id, describedBy }) => (
         <div className="flex w-full items-center gap-2">
           <CommitInput
@@ -75,9 +76,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
             onCommit={(v) => void savePath(key, v)}
             testId={`input-${key}`}
           />
-          {isDesktop ? (
-            <IconButton label={t('browse')} icon={<FolderOpen aria-hidden className="size-4" />} onClick={() => void browse(key)} />
-          ) : null}
+          <IconButton label={t('browse')} icon={<FolderOpen aria-hidden className="size-4" />} onClick={() => void browse(key)} />
         </div>
       )}
     </SettingsRow>

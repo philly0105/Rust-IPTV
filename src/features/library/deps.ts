@@ -20,6 +20,7 @@ export {
   SkeletonList,
   Tabs,
   Toggle,
+  errorDescription,
   useToast,
 } from '@/ui';
 export { useShell, useShortcut } from '@/shell';

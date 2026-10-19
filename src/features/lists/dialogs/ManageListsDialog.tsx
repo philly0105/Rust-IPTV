@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { CustomList } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { Button, Dialog, EmptyState, ErrorState, IconButton, Skeleton, cn } from '../deps';
 import { NewListForm } from '../components/NewListForm';
@@ -35,7 +36,7 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
   const lists = useLists();
   const actions = useListActions();
   const [renaming, setRenaming] = useState<{ id: string; value: string; error: string | null; busy: boolean } | null>(null);
-  const fmt = new Intl.NumberFormat(i18n.language);
+  const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
   const bodyRef = useRef<HTMLDivElement>(null);
   const focusAfter = useRef<{ id?: string; part: string } | null>(null);
 

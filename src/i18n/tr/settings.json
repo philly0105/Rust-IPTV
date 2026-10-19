@@ -47,7 +47,7 @@
   "downloadsHint": "Çevrimdışı izlemek için indirdiğiniz filmler ve bölümler.",
   "downloadsFolder": "İndirme klasörü",
   "downloadsFolderHint": "Yeni indirmeler buraya kaydedilir. Devam eden indirmeler mevcut klasörlerinde kalır.",
-  "downloadsFolderHintServer": "Sunucunun çalıştığı bilgisayardaki tam klasör yolu. Kaydetmek için Enter tuşuna basın.",
+  "downloadsFolderHintServer": "İndirmeler sunucuda bu klasöre kaydedilir. Taşımak için sunucuyu farklı bir IPTV_DATA_DIR ile başlatın.",
   "downloadsFolderUnknown": "Ayarlanmadı",
   "downloadsFolderSaved": "İndirme klasörü değiştirildi",
   "downloadsFolderReset": "İndirme klasörü varsayılana sıfırlandı",
@@ -100,7 +100,7 @@
   "zapBanner": "Kanal değiştirirken kanal bilgisini göster",
   "zapBannerHint": "Her kanal değişiminden sonra birkaç saniye boyunca logoyu, numarayı, şimdiki ve sonraki programı gösterir.",
   "showCaptions": "Altyazıları göster",
-  "showCaptionsHint": "Yayında altyazı varsa altyazıları açar.",
+  "showCaptionsHint": "Yayında altyazı varsa yerleşik oynatıcıda ve gömülü mpv'de altyazıları açar. Yerleşik oynatıcı MPEG-TS yayınlarında altyazı gösteremez; harici oynatıcılar kendi ayarlarını kullanır.",
   "doubleClick": "Oynatmak için çift tıkla",
   "doubleClickHint": "Tek tıklama kanalı seçer, çift tıklama oynatır.",
 
@@ -109,7 +109,6 @@
   "mpvPath": "mpv yolu",
   "vlcPath": "VLC yolu",
   "playerPathHint": "Programın tam yolu; PATH içinde aramak için boş bırakın.",
-  "playerPathHintServer": "Sunucuyu çalıştıran makinedeki bir yol.",
   "playerPathMissing": "Bu yolda artık bir şey yok ve başka bir {{player}} bulunamadı.",
   "playerPathFallback": "Bu yolda artık bir şey yok. Bunun yerine {{path}} konumundaki {{player}} kullanılıyor.",
   "chooseMpv": "mpv seç",
@@ -327,6 +326,7 @@
   "recordingsFolder": "Kayıt klasörü",
   "recordingsFolderHint": "Canlı yayın kayıtları, indirme klasörünün içindeki bir kayıt klasörüne kaydedilir.",
   "recordingsFolderHintCustom": "Canlı yayın kayıtları bu klasöre kaydedilir.",
+  "recordingsFolderHintServer": "Canlı yayın kayıtları sunucuda bu klasöre kaydedilir. Yalnızca masaüstü uygulaması bunu değiştirebilir.",
   "recordingsFolderSaved": "Kayıt klasörü değiştirildi",
   "recordingsFolderReset": "Kayıtlar yeniden varsayılan klasöre kaydediliyor",
   "chooseRecordingsFolder": "Kayıt klasörünü seçin",
@@ -450,5 +450,10 @@
   "backupParentalBody": "Ebeveyn denetimi kilitli olduğundan yedekteki seçenekleri için PIN gerekiyor. Her şeyi içe aktarmak için PIN'i girin ya da geri kalanını içe aktarıp mevcut seçeneklerinizi koruyun.",
   "backupParentalSkip": "Onlar olmadan içe aktar",
   "backupParentalUnlock": "PIN'i gir ve içe aktar",
-  "backupParentalPinTitle": "Ebeveyn denetimi seçeneklerini içe aktarmak için PIN'i girin"
+  "backupParentalPinTitle": "Ebeveyn denetimi seçeneklerini içe aktarmak için PIN'i girin",
+  "windowStart": "Açılışta pencere",
+  "windowStartHint": "Uygulama penceresinin nasıl açılacağı. F11 tam ekrandan çıkar.",
+  "windowStartNormal": "Bıraktığım gibi",
+  "windowStartMaximized": "Ekranı kaplayan",
+  "windowStartFullscreen": "Tam ekran"
 }

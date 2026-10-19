@@ -137,7 +137,7 @@ beforeEach(() => {
   baseHandlers();
   playerMock.playItem.mockClear();
   events.clear();
-  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false });
+  useShellStore.setState({ paletteOpen: false, helpOpen: false, panelOpen: false, railCollapsed: false, railHidden: false });
   useThemeStore.setState({ theme: 'dark' });
   useToastStore.setState({ toasts: [] });
   localStorage.clear();
@@ -199,6 +199,34 @@ describe('ShellLayout', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
     const field = await screen.findByLabelText('late search');
     await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  it('Ctrl+R, Ctrl+F and Ctrl+K do nothing over a dialog or in a text field, and keep the browser from reloading', async () => {
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    const field = document.createElement('input');
+    dialog.appendChild(field);
+    document.body.appendChild(dialog);
+    field.focus();
+    expect(fireEvent.keyDown(field, { key: 'r', code: 'KeyR', ctrlKey: true })).toBe(false);
+    expect(fireEvent.keyDown(field, { key: 'f', code: 'KeyF', ctrlKey: true })).toBe(false);
+    fireEvent.keyDown(field, { key: 'k', code: 'KeyK', ctrlKey: true });
+    expect(useShellStore.getState().paletteOpen).toBe(false);
+    dialog.remove();
+
+    // A text field on the page, no dialog.
+    const pageField = document.createElement('input');
+    document.body.appendChild(pageField);
+    pageField.focus();
+    fireEvent.keyDown(pageField, { key: 'r', code: 'KeyR', ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(router.state.location.pathname).toBe('/favorites');
+    pageField.remove();
+
+    key('r', { code: 'KeyR', ctrlKey: true });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
   });
 
   it('mod+k toggles the palette closed from inside its input, and Escape still closes it', async () => {
@@ -391,6 +419,55 @@ describe('ContextPanel drawer (below 1440 px)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Details' })).toBeNull());
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(toggle);
+  });
+});
+
+describe('phone layout (below 1024 px)', () => {
+  let matchMedia: typeof window.matchMedia;
+  const narrowWindow = (narrow: boolean) => {
+    window.matchMedia = ((query: string) => ({
+      ...matchMedia(query),
+      matches: narrow && query === '(max-width: 1023px)',
+    })) as typeof window.matchMedia;
+  };
+  beforeEach(() => {
+    matchMedia = window.matchMedia;
+  });
+  afterEach(() => {
+    window.matchMedia = matchMedia;
+  });
+
+  it('the rail can be hidden and shown again, and focus moves to the button that brings it back', async () => {
+    narrowWindow(true);
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    // Below lg the rail never expands: its toggle hides it instead.
+    expect(within(nav).queryByRole('button', { name: 'Expand sidebar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+
+    fireEvent.click(within(nav).getByRole('button', { name: 'Hide sidebar' }));
+    expect(screen.queryByRole('navigation', { name: 'Main navigation' })).toBeNull();
+    const show = screen.getByRole('button', { name: 'Show sidebar' });
+    expect(document.activeElement).toBe(show);
+    expect(localStorage.getItem('tsrust.railHidden')).toBe('1');
+
+    fireEvent.click(show);
+    const back = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(document.activeElement).toBe(within(back).getByRole('button', { name: 'Hide sidebar' }));
+    expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+    expect(localStorage.getItem('tsrust.railHidden')).toBe('0');
+  });
+
+  it('from 1024 px up the rail shows even when it was hidden on a narrow window', async () => {
+    narrowWindow(false);
+    act(() => useShellStore.setState({ railHidden: true }));
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(within(nav).getByRole('button', { name: 'Collapse sidebar' })).toBeTruthy();
+    expect(within(nav).queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show sidebar' })).toBeNull();
   });
 });
 

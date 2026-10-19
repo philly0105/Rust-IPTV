@@ -47,7 +47,7 @@
   "downloadsHint": "Az offline megtekintéshez letöltött filmek és epizódok.",
   "downloadsFolder": "Letöltési mappa",
   "downloadsFolderHint": "Az új letöltések ide kerülnek. A már folyamatban lévő letöltések a saját mappájukban maradnak.",
-  "downloadsFolderHintServer": "Egy mappa teljes elérési útja a kiszolgálót futtató számítógépen. A mentéshez nyomja meg az Entert.",
+  "downloadsFolderHintServer": "A letöltések a kiszolgálón ebbe a mappába kerülnek. Áthelyezéséhez indítsa a kiszolgálót másik IPTV_DATA_DIR értékkel.",
   "downloadsFolderUnknown": "Nincs beállítva",
   "downloadsFolderSaved": "A letöltési mappa megváltozott",
   "downloadsFolderReset": "A letöltési mappa visszaállítva az alapértelmezettre",
@@ -100,7 +100,7 @@
   "zapBanner": "Csatornainfó megjelenítése csatornaváltáskor",
   "zapBannerHint": "Minden csatornaváltás után néhány másodpercig mutatja a logót, a számot, valamint az aktuális és a következő műsort.",
   "showCaptions": "Feliratok megjelenítése",
-  "showCaptionsHint": "Bekapcsolja a feliratokat, ha az adatfolyam tartalmaz ilyet.",
+  "showCaptionsHint": "Bekapcsolja a feliratokat, ha az adatfolyam tartalmaz ilyet, a beépített lejátszóban és a beágyazott mpv-ben. A beépített lejátszó MPEG-TS adatfolyamokban nem tud feliratot mutatni, a külső lejátszók pedig a saját beállításaikat követik.",
   "doubleClick": "Lejátszás dupla kattintással",
   "doubleClickHint": "Egy kattintással kijelöli a csatornát, dupla kattintással lejátssza.",
 
@@ -109,7 +109,6 @@
   "mpvPath": "MPV elérési útvonala",
   "vlcPath": "VLC elérési útvonala",
   "playerPathHint": "A program teljes elérési útja, vagy hagyja üresen a PATH-ban való kereséshez.",
-  "playerPathHintServer": "Elérési út a kiszolgálót futtató gépen.",
   "playerPathMissing": "Ezen az útvonalon már nincs semmi, és másik {{player}} sem található.",
   "playerPathFallback": "Ezen az útvonalon már nincs semmi. Helyette a(z) {{path}} helyen lévő {{player}} fut.",
   "chooseMpv": "mpv kiválasztása",
@@ -327,6 +326,7 @@
   "recordingsFolder": "Felvételek mappája",
   "recordingsFolderHint": "Az élő felvételek a letöltési mappán belüli felvételmappába kerülnek.",
   "recordingsFolderHintCustom": "Az élő felvételek ebbe a mappába kerülnek.",
+  "recordingsFolderHintServer": "Az élő felvételek a kiszolgálón ebbe a mappába kerülnek. Csak az asztali alkalmazás módosíthatja.",
   "recordingsFolderSaved": "A felvételek mappája megváltozott",
   "recordingsFolderReset": "A felvételek ismét az alapértelmezett mappába kerülnek",
   "chooseRecordingsFolder": "Felvételek mappájának kiválasztása",
@@ -450,5 +450,10 @@
   "backupParentalBody": "A szülői felügyelet zárolva van, ezért a mentésben lévő beállításaihoz PIN-kód kell. Add meg az összes adat importálásához, vagy importáld a többit, és tartsd meg a jelenlegi beállításokat.",
   "backupParentalSkip": "Importálás nélkülük",
   "backupParentalUnlock": "PIN megadása és importálás",
-  "backupParentalPinTitle": "Add meg a PIN-kódot a szülői felügyelet beállításainak importálásához"
+  "backupParentalPinTitle": "Add meg a PIN-kódot a szülői felügyelet beállításainak importálásához",
+  "windowStart": "Ablak indításkor",
+  "windowStartHint": "Hogyan nyílik meg az alkalmazás ablaka. Az F11 kilép a teljes képernyőből.",
+  "windowStartNormal": "Ahogy hagytam",
+  "windowStartMaximized": "Teljes méretű",
+  "windowStartFullscreen": "Teljes képernyő"
 }

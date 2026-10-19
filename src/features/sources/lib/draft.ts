@@ -90,6 +90,7 @@ export interface XtreamDraft {
   serverUrl: string;
   username: string;
   password: string;
+  headers: HeadersDraft;
 }
 
 export interface StalkerDraft {
@@ -124,9 +125,10 @@ export function emptyDraft(kind: SourceKind = 'm3u'): SourceDraft {
   return {
     kind,
     name: '',
-    autoRefresh: false,
+    // On for URL playlists and accounts; buildAddArgs turns it off for pasted or uploaded text.
+    autoRefresh: true,
     m3u: { origin: 'url', url: '', filePath: '', fileText: '', fileName: '', text: '', headers: emptyHeaders(), catchup: emptyCatchup() },
-    xtream: { serverUrl: '', username: '', password: '' },
+    xtream: { serverUrl: '', username: '', password: '', headers: emptyHeaders() },
     stalker: {
       portalUrl: '',
       macAddress: '',
@@ -162,7 +164,10 @@ export function draftFromSource(s: Source): SourceDraft {
       catchup: catchupDraftFrom(s.m3u.catchup),
     };
   }
-  if (s.xtream) d.xtream = { ...s.xtream };
+  if (s.xtream) {
+    const x = s.xtream;
+    d.xtream = { serverUrl: x.serverUrl, username: x.username, password: x.password, headers: headersDraftFrom(x.headers) };
+  }
   if (s.stalker) {
     const st = s.stalker;
     d.stalker = {
@@ -232,6 +237,8 @@ export interface BuildContext {
   isDesktop: boolean;
 }
 
+const looksLikeM3u = (text: string): boolean => /#EXT(M3U|INF)/i.test(text) || /^https?:\/\//im.test(text);
+
 function buildM3u(d: M3uDraft, ctx: BuildContext, errors: DraftErrors): M3uAddInput | undefined {
   const headers = buildHeaders(d.headers, 'm3u.headers', errors);
   const withHeaders = (o: M3uAddInput): M3uAddInput => (hasAny(headers) ? { ...o, headers } : o);
@@ -257,7 +264,7 @@ function buildM3u(d: M3uDraft, ctx: BuildContext, errors: DraftErrors): M3uAddIn
         errors['m3u.text'] = 'errorRequired';
         return undefined;
       }
-      if (!/#EXT(M3U|INF)/i.test(d.text) && !/^https?:\/\//im.test(d.text)) {
+      if (!looksLikeM3u(d.text)) {
         errors['m3u.text'] = 'errorNotM3u';
         return undefined;
       }
@@ -273,8 +280,11 @@ function buildXtream(d: XtreamDraft, errors: DraftErrors): XtreamSourceConfig | 
   if (!username) errors['xtream.username'] = 'errorRequired';
   const password = cleanSecret(d.password);
   if (!password) errors['xtream.password'] = 'errorRequired';
+  const headers = buildHeaders(d.headers, 'xtream.headers', errors);
   if (!server.ok || !username || !password) return undefined;
-  return { serverUrl: server.url, username, password };
+  const cfg: XtreamSourceConfig = { serverUrl: server.url, username, password };
+  if (hasAny(headers)) cfg.headers = headers;
+  return cfg;
 }
 
 function buildStalker(d: StalkerDraft, errors: DraftErrors, grandfatheredMac?: string): StalkerSourceConfig | undefined {
@@ -368,6 +378,14 @@ export function buildUpdatePatch(source: Source, draft: SourceDraft, ctx: BuildC
       else next.url = r.url;
     } else if (source.m3u.origin === 'file' && ctx.isDesktop && draft.m3u.filePath) {
       next.filePath = draft.m3u.filePath;
+    } else if (source.m3u.origin === 'text') {
+      // New text or a new file replaces a pasted or uploaded playlist; empty keeps it.
+      const fromFile = draft.m3u.fileText !== '';
+      const text = fromFile ? draft.m3u.fileText : draft.m3u.text;
+      if (text.trim()) {
+        if (!looksLikeM3u(text)) errors[fromFile ? 'm3u.file' : 'm3u.text'] = 'errorNotM3u';
+        else patch.text = text;
+      }
     }
     const catchup = buildCatchupOverride(draft.m3u.catchup, errors);
     if (catchup) next.catchup = catchup;
@@ -446,10 +464,10 @@ export function withFieldError(errors: DraftErrors, path: string, error: string 
 /**
  * True when the patch changes how the catalog is fetched (a refresh is advisable). Pass the
  * source as it was before the edit: M3U request headers apply at play time, so a header-only
- * edit needs no refresh, and a pasted playlist (`origin: 'text'`) cannot refresh at all.
+ * edit needs no refresh, and a pasted playlist (`origin: 'text'`) refreshes only for new text.
  */
 export function patchNeedsRefresh(patch: SourcePatch, before?: Pick<Source, 'm3u'>): boolean {
-  if (patch.xtream !== undefined || patch.stalker !== undefined) return true;
+  if (patch.xtream !== undefined || patch.stalker !== undefined || patch.text !== undefined) return true;
   const m3u = patch.m3u;
   if (m3u === undefined) return false;
   if ((m3u.origin ?? before?.m3u?.origin) === 'text') return false;

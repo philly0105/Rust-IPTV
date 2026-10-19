@@ -17,6 +17,8 @@
   "cancel": "Annuler",
   "closeKeepImporting": "Fermer et continuer l'importation",
   "shortcutAddSource": "Ajouter une source",
+  "shortcutMoveUp": "Monter la source sélectionnée",
+  "shortcutMoveDown": "Descendre la source sélectionnée",
 
   "kindM3u": "Liste de lecture M3U",
   "kindXtream": "Xtream Codes",
@@ -151,7 +153,10 @@
   "saveFailed": "Impossible d'enregistrer les modifications",
   "refreshNow": "Actualiser maintenant",
   "refresh": "Actualiser",
-  "textOriginNotEditable": "Cette liste de lecture a été collée, il n'y a donc aucune adresse à modifier. Supprimez-la et ajoutez-la de nouveau pour remplacer les chaînes. Les en-têtes de requête ci-dessous s'appliquent toujours à chaque flux.",
+  "textOriginReplaceNote": "Cette liste de lecture a été collée ou importée, il n'y a donc aucune adresse à modifier. Pour la mettre à jour, collez la nouvelle liste ou choisissez un fichier ci-dessous. Les favoris, l'historique et les modifications de chaînes restent attachés aux chaînes qui y figurent encore. Les en-têtes de requête ci-dessous s'appliquent à chaque flux.",
+  "replacePlaylistText": "Nouveau texte de la liste de lecture",
+  "replacePlaylistTextHint": "Laissez vide pour garder les chaînes actuelles.",
+  "replacePlaylistFileHint": "Ou choisissez un fichier de liste de lecture (.m3u, .m3u8 ou .txt). Il remplace les chaînes actuelles.",
 
   "epgLinks": "Sources du guide",
   "epgLinksHint": "URL de guide trouvées dans la liste de lecture, plus celles que vous ajoutez. Désactivez-en une pour cesser de la récupérer.",
@@ -392,5 +397,9 @@
   "discardedFailedHint": "Sa première importation a échoué. Choisissez Annuler pour la garder et réessayer depuis sa carte.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Décalage horaire du guide",
+  "epgShiftHint": "Décale chaque programme de cette source de ce nombre de minutes, en plus du décalage des Réglages. Laissez vide pour aucun.",
+  "epgShiftUnit": "minutes",
+  "epgShiftError": "Saisissez un nombre entier de minutes entre -720 et 720."
 }

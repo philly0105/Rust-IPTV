@@ -15,6 +15,7 @@ import { isDesktop, rpc } from '@/api/transport';
 import type { ReminderFiredEvent } from '@/api/types';
 import { playItem, playSource, usePlayerStore } from '@/features/player';
 import { toast } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { setRecordingProgress } from '../hooks';
 import { claimFiring, handleReminderFired, type FireDeps } from '../lib/fire';
@@ -50,7 +51,7 @@ export function RecordingWatcher() {
     const fire = (e: ReminderFiredEvent) => {
       // The event and the mount-time fetch can both bring the same firing.
       if (!claimFiring(e)) return;
-      const time = new Date(e.reminder.start).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' });
+      const time = new Date(e.reminder.start).toLocaleTimeString(intlLocale(i18n.language), { hour: '2-digit', minute: '2-digit' });
       void handleReminderFired(
         e,
         {

@@ -33,6 +33,7 @@ function routes(collapsed: boolean) {
       children: [
         { path: 'dashboard', element: <Page>home</Page> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
+        { path: 'live/archive/:sourceId/:channelId', element: <Page>archive page</Page> },
       ],
     },
   ];
@@ -100,6 +101,16 @@ describe('rail scroll (L2-shell-1)', () => {
     scrollTo.mockClear();
     fireEvent.click(btn);
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+});
+
+describe('catch-up archive', () => {
+  it("opens and marks the archive's source, though the route sits outside /s/:id", async () => {
+    renderRoutes(routes(false), '/live/archive/s2/ch1');
+    const btn = await screen.findByRole('button', { name: /Source s2/ });
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+    expect(btn.className).toContain('text-fg ');
+    expect(screen.getByRole('button', { name: /Source s1/ }).getAttribute('aria-expanded')).toBe('false');
   });
 });
 

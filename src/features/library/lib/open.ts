@@ -1,10 +1,10 @@
 /** Opening a favorite / recent entry: live and radio play, movies and series open their detail page. */
 
-import type { ItemRef, ItemSnapshot, PlaybackPosition, Source } from '@/api/types';
-import { relativeTimeFormat } from '@/lib/intl';
+import { sameRef, type ItemRef, type ItemSnapshot, type PlaybackPosition, type Source } from '@/api/types';
 import { queueSeriesFrom } from '@/features/vod/lib/episodeQueue';
+import { intlLocale, relativeTimeFormat } from '@/lib/intl';
 
-import { playItem } from '../deps';
+import { playItem, usePlayerStore } from '../deps';
 
 export function detailPath(ref: ItemRef): string | undefined {
   const sid = encodeURIComponent(ref.sourceId);
@@ -24,12 +24,15 @@ export class SourceGoneError extends Error {
 /**
  * Plays a live or radio entry, or navigates to the detail page of a movie or
  * series. Throws `SourceGoneError` when the owning source no longer exists.
+ * `favorites`: the entry was opened from a favorites page (one source's, or every
+ * source's without `sourceId`), so channel up/down walks the favorites in their order.
  */
 export async function openEntry(
   ref: ItemRef,
   snapshot: ItemSnapshot,
   source: Source | undefined,
   navigate: (path: string) => void,
+  favorites?: { sourceId?: string },
 ): Promise<void> {
   const path = detailPath(ref);
   if (path) {
@@ -47,6 +50,10 @@ export async function openEntry(
   if (snapshot.subtitle) args.subtitle = snapshot.subtitle;
   if (snapshot.posterUrl) args.posterUrl = snapshot.posterUrl;
   await playItem(args);
+  // Only once it plays: a refused PIN leaves what played, and its zapping, alone.
+  if (favorites && sameRef(usePlayerStore.getState().source?.ref, ref)) {
+    usePlayerStore.setState({ zapContext: { sourceId: ref.sourceId, favorites } });
+  }
 }
 
 /**
@@ -76,7 +83,7 @@ export function relativeTime(iso: string, locale: string, now = Date.now()): str
   if (!Number.isFinite(t)) return '';
   const diff = (t - now) / 1000;
   const abs = Math.abs(diff);
-  const rtf = relativeTimeFormat(locale, { numeric: 'auto' });
+  const rtf = relativeTimeFormat(intlLocale(locale), { numeric: 'auto' });
   if (abs < 60) return rtf.format(Math.round(diff), 'second');
   if (abs < 3600) return rtf.format(Math.round(diff / 60), 'minute');
   if (abs < 86_400) return rtf.format(Math.round(diff / 3600), 'hour');

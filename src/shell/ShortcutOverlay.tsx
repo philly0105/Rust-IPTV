@@ -37,6 +37,9 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'l', descKey: 'lists:shortcutAddToList', area: 'Live' },
   { combo: 'f2', descKey: 'channels:shortcutRename', area: 'Live' },
   { combo: 'shift+delete', descKey: 'channels:shortcutHide', area: 'Live' },
+  // The focused channel list (ChannelList.tsx onKeyDown): while a live channel plays, plain Page Up/Down zap.
+  { combo: 'shift+pageup', descKey: 'scChannelListPage', area: 'Live' },
+  { combo: 'shift+pagedown', descKey: 'scChannelListPage', area: 'Live' },
   // Guide (EpgGridPage.tsx): search and jump to a date and time.
   { combo: '/', descKey: 'guide:searchLabel', area: 'Guide' },
   { combo: 't', descKey: 'guide:jumpTitle', area: 'Guide' },
@@ -79,6 +82,9 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'delete', descKey: 'mylist:shortcutRemove', area: 'My List' },
   { combo: 'w', descKey: 'mylist:shortcutWatched', area: 'My List' },
   { combo: 'shift+n', descKey: 'sources:shortcutAddSource', area: 'Sources' },
+  // Bound by the focused source card (SourceCard.tsx onKeyDown); plain arrows on its grip too.
+  { combo: 'alt+arrowup', descKey: 'sources:shortcutMoveUp', area: 'Sources' },
+  { combo: 'alt+arrowdown', descKey: 'sources:shortcutMoveDown', area: 'Sources' },
   { combo: 'alt+arrowup', descKey: 'library:shortcutMoveUp', area: 'Favorites' },
   { combo: 'alt+arrowdown', descKey: 'library:shortcutMoveDown', area: 'Favorites' },
   { combo: 'p', descKey: 'library:shortcutPause', area: 'Downloads' },
@@ -141,7 +147,8 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'pagedown', descKey: 'scListPage', area: 'Dialogs and lists' },
   { combo: 'arrowleft', descKey: 'scGridMove', area: 'Dialogs and lists' },
   { combo: 'arrowright', descKey: 'scGridMove', area: 'Dialogs and lists' },
-  // Favorites, Recent and My videos rows (onRowKeyDown); Downloads registers its own.
+  // Favorites and Recent rows and a My Videos title's episode rows (onRowKeyDown); Downloads registers
+  // its own. The My Videos grid has no Delete: a title is removed from its page.
   { combo: 'delete', descKey: 'scListRemove', area: 'Dialogs and lists' },
   // Run 3 first-run tour (onboarding/tour/Tour.tsx): its own capture-phase key handler while it is
   // open. The arrows follow the reading direction (mirrored in RTL), so one text covers both.

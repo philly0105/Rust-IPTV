@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { imageCacheGeneration, imageUrl } from '@/api/images';
@@ -261,7 +261,10 @@ describe('ImageCacheRow', () => {
     const [failed] = toasts();
     expect(failed?.variant).toBe('error');
     expect(failed?.title).toBe("Couldn't clear the image cache");
-    expect(failed?.description).toBe('locked');
+    // The translated next step for an io error leads; the core's raw text follows in small print.
+    const description = render(<>{failed?.description}</>).container;
+    expect(description.textContent).toMatch(/^Check that the folder exists/);
+    expect(description.querySelector('[data-error-message]')?.textContent).toBe('locked');
     expect(screen.getByTestId('image-cache-size').textContent).toBe('120 MB of 500 MB');
     fail = false;
     await act(async () => failed?.action?.onClick());

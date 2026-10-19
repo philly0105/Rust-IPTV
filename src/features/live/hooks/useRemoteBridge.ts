@@ -26,16 +26,19 @@ interface Args {
 }
 
 /**
- * Remote control (C4 remote.*): publishes this source's live catalog while the loopback
- * server runs, applies channel commands, and reports status on channel changes.
+ * Remote control (C4 remote.*): tells the core which source this view shows while the loopback
+ * server runs (the core fills the phone's channel list from its catalog), applies channel
+ * commands, and reports status on channel changes.
  */
 export function useRemoteBridge(args: Args): void {
   const live = useRef(args);
   live.current = args;
   const running = useRef(false);
 
-  // Publish the channel catalog for this source when the remote server is running: on mount,
-  // and again when remote control may have just started (settings change, first remote command).
+  // Publish this source when the remote server is running: on mount, and again when remote
+  // control may have just started (settings change, first remote command). The core reads the
+  // channels itself and refills the list when the catalog, channel edits or parental controls
+  // change, so nothing here fetches the catalog.
   const published = useRef(false);
   const kick = useRef<() => void>(() => undefined);
   useEffect(() => {
@@ -43,26 +46,13 @@ export function useRemoteBridge(args: Args): void {
     const sourceId = args.sourceId;
     const timers: ReturnType<typeof setTimeout>[] = [];
     published.current = false;
-    // Bumped whenever the list to publish may have changed (parental locks): an attempt that
-    // started earlier fetched the old list, so it stands down instead of publishing it.
-    let generation = 0;
     const attempt = async () => {
-      const gen = generation;
-      const stale = () => cancelled || gen !== generation || published.current;
+      const stale = () => cancelled || published.current;
       try {
         const status = await rpc('remote.status');
         running.current = status.running;
         if (!status.running || stale()) return;
-        const channels = await rpc('catalog.allLiveChannels', { sourceId });
-        if (stale()) return;
-        await rpc('remote.publishChannels', {
-          channels: channels.map((c) => ({
-            id: `${c.ref.sourceId}|${c.ref.itemId}`,
-            name: c.name,
-            number: c.number,
-            logoUrl: c.logoUrl,
-          })),
-        });
+        await rpc('remote.publishSource', { sourceId });
         published.current = true;
       } catch {
         // Remote control is optional; the live view works without it.
@@ -82,18 +72,9 @@ export function useRemoteBridge(args: Args): void {
       if (s.remoteControl?.enabled) retry();
       else running.current = false;
     });
-    // Parental controls (C2): in Hide mode a lock, Lock now or an expired unlock takes channels out
-    // of `catalog.allLiveChannels`, and an unlock brings them back. Republish so the phone's list
-    // never keeps showing the names and logos of channels that are hidden now.
-    const offParental = onAppEvent('parental.changed', () => {
-      generation += 1;
-      published.current = false;
-      void attempt();
-    });
     return () => {
       cancelled = true;
       off();
-      offParental();
       for (const t of timers) clearTimeout(t);
       kick.current = () => undefined;
     };

@@ -15,6 +15,8 @@
   "cancel": "取消",
   "closeKeepImporting": "关闭，继续导入",
   "shortcutAddSource": "添加播放源",
+  "shortcutMoveUp": "上移当前播放源",
+  "shortcutMoveDown": "下移当前播放源",
 
   "kindM3u": "M3U 播放列表",
   "kindXtream": "Xtream Codes",
@@ -143,7 +145,10 @@
   "saveFailed": "无法保存更改",
   "refreshNow": "立即刷新",
   "refresh": "刷新",
-  "textOriginNotEditable": "此播放列表是粘贴导入的，没有可更改的地址。如需替换频道，请将其移除后重新添加。下方的请求头仍适用于每个流。",
+  "textOriginReplaceNote": "此播放列表是粘贴或上传导入的，没有可更改的地址。如需更新，请粘贴新的播放列表或在下方选择文件。收藏、历史记录和频道编辑会保留在仍然存在的频道上。下方的请求头适用于每个流。",
+  "replacePlaylistText": "新的播放列表文本",
+  "replacePlaylistTextHint": "留空则保留当前频道。",
+  "replacePlaylistFileHint": "或选择播放列表文件（.m3u、.m3u8 或 .txt），它将替换当前频道。",
 
   "epgLinks": "节目指南来源",
   "epgLinksHint": "播放列表中找到的节目指南 URL，以及你添加的 URL。关闭某个 URL 即停止获取。",
@@ -373,5 +378,9 @@
   "discardedFailedHint": "首次导入失败。选择\"撤销\"可保留它，并从其卡片上重试。",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "节目指南时间偏移",
+  "epgShiftHint": "将此来源的所有节目移动指定的分钟数，叠加在“设置”中的偏移之上。留空表示不偏移。",
+  "epgShiftUnit": "分钟",
+  "epgShiftError": "请输入 -720 到 720 之间的整数分钟。"
 }

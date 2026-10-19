@@ -147,13 +147,17 @@ export function EditSourceDialog({
       const guides = ep ? newlyEnabledEpgUrls(source.epg, updated.epg) : [];
       if (guides.length > 0) void refreshGuides(guides);
       await Promise.all([invalidate('sources.'), ep ? invalidate('epg.') : Promise.resolve()]);
+      // New playlist text is imported right away; other changes offer a refresh.
+      const reimport = patch.text !== undefined;
+      const needsRefresh = !reimport && patchNeedsRefresh(patch, source);
       toast({
         variant: 'success',
         title: t('savedTitle', { name: updated.name }),
-        description: patchNeedsRefresh(patch, source) ? t('savedNeedsRefresh') : undefined,
-        action: patchNeedsRefresh(patch, source) ? { label: t('refreshNow'), onClick: () => onRefresh(updated) } : undefined,
+        description: needsRefresh ? t('savedNeedsRefresh') : undefined,
+        action: needsRefresh ? { label: t('refreshNow'), onClick: () => onRefresh(updated) } : undefined,
       });
       onClose();
+      if (reimport) onRefresh(updated);
     } catch (e) {
       const err = RpcError.from(e);
       setSaveError(err);
@@ -216,7 +220,7 @@ export function EditSourceDialog({
               )}
             </Field>
             {source.kind === 'm3u' ? (
-              // Pasted playlists hide the content inputs inside the form but keep the headers editable.
+              // Pasted playlists take new text or a file instead of an address; the headers stay editable.
               <M3uForm
                 mode="edit"
                 value={draft.m3u}

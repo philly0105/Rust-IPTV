@@ -48,6 +48,9 @@ pub const PENDING_PREFIX: &str = "backup_pending:";
 /// Tsrust extension in an entry's `userState`: manual EPG mappings
 /// (`[{contentType, itemId, epgChannelId}]`, `null` = explicitly unmapped).
 pub const EXT_EPG_MAPPINGS: &str = "tsrustEpgMappings";
+/// Tsrust extension in an entry's `userState`: per-channel guide shifts
+/// (`[{contentType, itemId, shiftMinutes}]`, `epg.setChannelShift`).
+pub const EXT_EPG_SHIFTS: &str = "tsrustEpgShifts";
 /// Tsrust extension in an M3U or Stalker entry's `userState`: playback
 /// positions by catalog id (`[{contentType, itemId, episodeId?,
 /// positionSeconds, durationSeconds?, updatedAt, watched?, snapshot?}]`).
@@ -134,7 +137,7 @@ pub const APP_SETTING_KEYS: [&str; 39] = [
 /// Settings fields a backup never carries, each with the reason. `epgUrls`
 /// travels on its own (IPTVnator's field) and is listed here only so the
 /// completeness test accounts for it.
-pub const APP_SETTING_EXCLUDED: [(&str, &str); 17] = [
+pub const APP_SETTING_EXCLUDED: [(&str, &str); 18] = [
     ("epgUrls", "exported as the manifest's own settings.epgUrls"),
     (
         "player",
@@ -164,6 +167,7 @@ pub const APP_SETTING_EXCLUDED: [(&str, &str); 17] = [
     ("imageCacheMaxMb", "sizes this machine's disk cache"),
     ("tourCompleted", "records what this install has shown"),
     ("lastSeenVersion", "records what this install has shown"),
+    ("windowStart", "how this machine's screen opens the window"),
 ];
 
 /// `backup.import` mode.

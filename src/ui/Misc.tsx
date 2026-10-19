@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { Children, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -6,28 +7,13 @@ import { pauseWhenOffscreen } from './offscreen';
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
-const KEY_LABELS: Record<string, string> = {
-  mod: IS_MAC ? '⌘' : 'Ctrl',
-  ctrl: 'Ctrl',
-  meta: IS_MAC ? '⌘' : 'Win',
-  alt: IS_MAC ? '⌥' : 'Alt',
-  shift: 'Shift',
+/** Key caps drawn as a symbol, the same in every language. */
+const KEY_SYMBOLS: Record<string, string> = {
+  ...(IS_MAC ? { mod: '⌘', meta: '⌘', alt: '⌥' } : {}),
   arrowleft: '←',
   arrowright: '→',
   arrowup: '↑',
   arrowdown: '↓',
-  space: 'Space',
-  escape: 'Esc',
-  enter: 'Enter',
-  digit: '0-9',
-  pageup: 'PgUp',
-  pagedown: 'PgDn',
-  backspace: 'Backspace',
-  tab: 'Tab',
-  home: 'Home',
-  end: 'End',
-  delete: 'Del',
-  contextmenu: 'Menu',
   // Media keys show the symbol printed on the key. U+FE0E asks for the text glyph, so Windows
   // does not swap in a colour emoji; KEY_NAMES gives each one a spoken name.
   mediaplaypause: '⏯︎',
@@ -36,13 +22,50 @@ const KEY_LABELS: Record<string, string> = {
   mediatrackprevious: '⏮︎',
 };
 
-/** Spoken names for keys whose label is a symbol a screen reader would read out by its Unicode name. */
-const KEY_NAMES: Record<string, string> = {
-  mediaplaypause: 'Play/Pause',
-  mediastop: 'Stop',
-  mediatracknext: 'Next track',
-  mediatrackprevious: 'Previous track',
+/**
+ * i18n keys (common namespace) of key caps printed as a word (German keyboards say "Strg" and
+ * "Entf"), with the English text for when no strings are loaded (tests, a failed locale load).
+ */
+const KEY_LABELS: Record<string, readonly [key: string, english: string]> = {
+  mod: ['keyCtrl', 'Ctrl'],
+  ctrl: ['keyCtrl', 'Ctrl'],
+  meta: ['keyWin', 'Win'],
+  alt: ['keyAlt', 'Alt'],
+  shift: ['keyShift', 'Shift'],
+  space: ['keySpace', 'Space'],
+  escape: ['keyEsc', 'Esc'],
+  enter: ['keyEnter', 'Enter'],
+  digit: ['keyDigits', '0-9'],
+  pageup: ['keyPageUp', 'PgUp'],
+  pagedown: ['keyPageDown', 'PgDn'],
+  backspace: ['keyBackspace', 'Backspace'],
+  tab: ['keyTab', 'Tab'],
+  home: ['keyHome', 'Home'],
+  end: ['keyEnd', 'End'],
+  delete: ['keyDelete', 'Del'],
+  contextmenu: ['keyMenu', 'Menu'],
 };
+
+/**
+ * i18n keys (common namespace) of spoken names for keys whose label is a symbol a screen reader
+ * would read out by its Unicode name.
+ */
+const KEY_NAMES: Record<string, readonly [key: string, english: string]> = {
+  mediaplaypause: ['keyNamePlayPause', 'Play/Pause'],
+  mediastop: ['keyNameStop', 'Stop'],
+  mediatracknext: ['keyNameNextTrack', 'Next track'],
+  mediatrackprevious: ['keyNamePreviousTrack', 'Previous track'],
+};
+
+/** Looks up a common-namespace key. Kbd passes its hook's `t`, so it re-renders on a language switch. */
+type KeyTranslate = (key: string) => string;
+const globalT: KeyTranslate = (key) => i18next.t(key, { ns: 'common' });
+
+/** The translation, or the English text when the key has none (it comes back as the key or empty). */
+function translated([key, english]: readonly [string, string], t: KeyTranslate): string {
+  const text = t(key);
+  return text && text !== key ? text : english;
+}
 
 const comboParts = (combo: string) =>
   combo
@@ -50,16 +73,25 @@ const comboParts = (combo: string) =>
     .filter(Boolean)
     .map((k) => k.trim().toLowerCase());
 
-const keyLabel = (key: string) => KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key[0]!.toUpperCase() + key.slice(1));
+function keyLabel(key: string, t: KeyTranslate): string {
+  const symbol = KEY_SYMBOLS[key];
+  if (symbol) return symbol;
+  const label = KEY_LABELS[key];
+  if (label) return translated(label, t);
+  return key.length === 1 ? key.toUpperCase() : key[0]!.toUpperCase() + key.slice(1);
+}
 
-/** Human labels for a combo string like `mod+shift+k`. */
-export function comboKeys(combo: string): string[] {
-  return comboParts(combo).map(keyLabel);
+/** Human labels, in the UI language, for a combo string like `mod+shift+k`. */
+export function comboKeys(combo: string, t: KeyTranslate = globalT): string[] {
+  return comboParts(combo).map((key) => keyLabel(key, t));
 }
 
 /** The combo as a screen reader should say it: like {@link comboKeys}, with media keys by name. */
-function comboKeyNames(combo: string): string[] {
-  return comboParts(combo).map((key) => KEY_NAMES[key] ?? keyLabel(key));
+function comboKeyNames(combo: string, t: KeyTranslate): string[] {
+  return comboParts(combo).map((key) => {
+    const name = KEY_NAMES[key];
+    return name ? translated(name, t) : keyLabel(key, t);
+  });
 }
 
 export interface KbdProps {
@@ -70,11 +102,13 @@ export interface KbdProps {
 }
 
 export function Kbd({ combo, children, className }: KbdProps) {
+  const { t } = useTranslation('common');
   const keyClass =
     'inline-flex h-6 min-w-6 items-center justify-center rounded-sm border border-border border-b-2 bg-surface-2 px-1.5 font-mono text-xs text-fg-muted';
   if (combo) {
-    const keys = comboKeys(combo);
-    const names = comboKeyNames(combo);
+    const tr: KeyTranslate = (key) => t(key);
+    const keys = comboKeys(combo, tr);
+    const names = comboKeyNames(combo, tr);
     return (
       // A plain span cannot carry aria-label (prohibited on the generic role), so the
       // spoken form is visually hidden text and the key caps are hidden from AT.

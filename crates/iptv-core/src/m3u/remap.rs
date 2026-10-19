@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 /// Tables keyed by `(source_id, content_type, item_id)`.
-const REF_TABLES: [&str; 13] = [
+const REF_TABLES: [&str; 14] = [
     "favorites",
     "recent",
     "playback_positions",
@@ -30,6 +30,7 @@ const REF_TABLES: [&str; 13] = [
     "recording_rules",
     "watch_log",
     "epg_channel_map",
+    "epg_channel_shift",
     "parental_locks",
 ];
 

@@ -9,7 +9,8 @@ import { railLinks } from '../railLinks';
 import { groupShortcuts } from '../ShortcutOverlay';
 import { matches, normalizeCombo, parseCombo } from '../shortcuts';
 import { titleEndsWithYear } from '../dashboard/heroSlides';
-import { routeSourceId, startupTarget } from '../StartupRedirect';
+import { routeSourceId, sourceHomePath } from '../railLinks';
+import { routeListId, startupTarget } from '../StartupRedirect';
 import { resolveTheme } from '../theme';
 
 const ev = (key: string, init: Partial<KeyboardEventInit> = {}) => new KeyboardEvent('keydown', { key, ...init });
@@ -37,7 +38,12 @@ describe('shortcut matching', () => {
 describe('deep links', () => {
   it('routes iptv://add?url= to the add-source flow', () => {
     expect(deepLinkToPath('iptv://add?url=http%3A%2F%2Fx.test%2Fa.m3u')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u');
-    expect(deepLinkToPath('iptv://add')).toBe('/sources?add=1');
+    expect(deepLinkToPath('iptv://add')).toBe('/sources?add=');
+  });
+  it('keeps the kind and reads the path form of add links', () => {
+    expect(deepLinkToPath('iptv://add?url=http%3A%2F%2Fx.test%2Fa.m3u&kind=xtream')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u&kind=xtream');
+    expect(deepLinkToPath('iptv://add/http%3A%2F%2Fx.test%2Fa.m3u')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u');
+    expect(deepLinkToPath('iptv://add?url=file%3A%2F%2F%2Fetc%2Fpasswd')).toBeNull();
   });
   it('routes search and ignores unknown actions', () => {
     expect(deepLinkToPath('iptv://search?q=news')).toBe('/search?q=news');
@@ -56,12 +62,32 @@ describe('startup target', () => {
   });
   it('does not restore a screen of a source that no longer exists', () => {
     const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/s/gone/live', showDashboard: true };
-    expect(startupTarget(s, [{ id: 'other' }])).toBe('/dashboard');
-    expect(startupTarget(s, [{ id: 'gone' }])).toBe('/s/gone/live');
+    expect(startupTarget(s, { sources: [{ id: 'other' }] })).toBe('/dashboard');
+    expect(startupTarget(s, { sources: [{ id: 'gone' }] })).toBe('/s/gone/live');
     // Unknown list (failed or not needed): restore as before.
     expect(startupTarget(s)).toBe('/s/gone/live');
     expect(routeSourceId('/s/a%20b/movies')).toBe('a b');
     expect(routeSourceId('/epg')).toBeUndefined();
+  });
+  it('does not restore the archive of a removed source', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/live/archive/gone/ch1', showDashboard: true };
+    expect(routeSourceId('/live/archive/a%20b/ch1')).toBe('a b');
+    expect(startupTarget(s, { sources: [{ id: 'other' }] })).toBe('/dashboard');
+    expect(startupTarget(s, { sources: [{ id: 'gone' }] })).toBe('/live/archive/gone/ch1');
+  });
+  it('does not restore a deleted list', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/lists/l1', showDashboard: true };
+    expect(routeListId('/lists/l%201')).toBe('l 1');
+    expect(routeListId('/lists')).toBeUndefined();
+    expect(startupTarget(s, { lists: [{ id: 'l2' }] })).toBe('/dashboard');
+    expect(startupTarget(s, { lists: [{ id: 'l1' }] })).toBe('/lists/l1');
+    expect(startupTarget(s)).toBe('/lists/l1');
+  });
+  it('does not restore a path no route renders', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/no/such/page?x=1', showDashboard: false };
+    const isKnownPath = (p: string) => p !== '/no/such/page';
+    expect(startupTarget(s, { isKnownPath })).toBe('/sources');
+    expect(startupTarget({ ...s, lastRoute: '/epg?source=a' }, { isKnownPath })).toBe('/epg?source=a');
   });
   it('never restores transient routes', () => {
     expect(isRestorableRoute('/sources?add=1')).toBe(false);
@@ -100,12 +126,38 @@ describe('rail links', () => {
   it('adds movies for m3u only when it has movies', () => {
     expect(railLinks(src('m3u', 3)).map((l) => l.id)).toEqual(['live', 'movies', 'favorites', 'recent']);
   });
+  it('adds series for m3u once the importer grouped episodes into series (F-M3U-SERIES)', () => {
+    expect(railLinks({ ...src('m3u', 3), seriesCount: 2 } as Source).map((l) => l.id)).toEqual(['live', 'movies', 'series', 'favorites', 'recent']);
+    expect(railLinks({ ...src('m3u'), seriesCount: 0 } as Source).map((l) => l.id)).not.toContain('series');
+  });
   it('adds radio for m3u only when it has radio', () => {
     expect(railLinks(src('m3u'), { hasRadio: true }).map((l) => l.id)).toContain('radio');
     expect(railLinks(src('m3u'), { hasRadio: false }).map((l) => l.id)).not.toContain('radio');
   });
   it('encodes the source id in paths', () => {
     expect(railLinks(src('xtream'), { hasRadio: false })[0]!.to).toBe('/s/a%20b/live');
+  });
+  it('drops empty Xtream sections once an import has counted them (F-RAIL-COUNTS)', () => {
+    const counted = (patch: Partial<Source>) => ({ ...src('xtream'), lastRefreshAt: '2026-10-19T10:00:00Z', radioCount: 0, seriesCount: 0, ...patch }) as Source;
+    expect(railLinks(counted({})).map((l) => l.id)).toEqual(['live', 'favorites', 'recent']);
+    expect(railLinks(counted({ movieCount: 4, seriesCount: 2, radioCount: 1 })).map((l) => l.id)).toEqual(['live', 'radio', 'movies', 'series', 'favorites', 'recent']);
+    // Not imported yet: the zeros are no answer, so every link stays.
+    expect(railLinks({ ...counted({}), lastRefreshAt: undefined }).map((l) => l.id)).toHaveLength(6);
+  });
+  it('keeps Stalker movies and series, whose totals the portal may not report', () => {
+    const portal = { ...src('stalker'), lastRefreshAt: '2026-10-19T10:00:00Z', radioCount: 0, seriesCount: 0 } as Source;
+    expect(railLinks(portal).map((l) => l.id)).toEqual(['live', 'movies', 'series', 'favorites', 'recent']);
+  });
+});
+
+describe('source home path (F-VOD-ONLY-SOURCE)', () => {
+  const counts = (patch: Partial<Source>) => ({ id: 'a b', channelCount: 0, movieCount: 0, seriesCount: 0, radioCount: 0, ...patch }) as Source;
+  it('opens live channels first, else the first section with anything in it', () => {
+    expect(sourceHomePath(counts({ channelCount: 3, movieCount: 5 }))).toBe('/s/a%20b/live');
+    expect(sourceHomePath(counts({ movieCount: 5, seriesCount: 2 }))).toBe('/s/a%20b/movies');
+    expect(sourceHomePath(counts({ seriesCount: 2 }))).toBe('/s/a%20b/series');
+    expect(sourceHomePath(counts({ radioCount: 2 }))).toBe('/s/a%20b/radio');
+    expect(sourceHomePath(counts({}))).toBe('/s/a%20b/live');
   });
 });
 

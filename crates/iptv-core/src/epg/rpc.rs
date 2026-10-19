@@ -63,6 +63,16 @@ struct SetMappingArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SetShiftArgs {
+    #[serde(rename = "ref")]
+    item_ref: ItemRef,
+    /// Minutes; null removes the channel's own shift.
+    #[serde(default)]
+    minutes: Option<i32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RefArgs {
     #[serde(rename = "ref")]
     item_ref: ItemRef,
@@ -121,6 +131,12 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("epg.clearMapping", |s, a: RefArgs| async move {
         super::clear_mapping(&s, a.item_ref)
+            .await
+            .map_err(RpcError::from)
+    });
+    // guide: a channel's own time shift (mapping dialog).
+    r.add("epg.setChannelShift", |s, a: SetShiftArgs| async move {
+        super::set_channel_shift(&s, a.item_ref, a.minutes)
             .await
             .map_err(RpcError::from)
     });

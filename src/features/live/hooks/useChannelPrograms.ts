@@ -7,7 +7,7 @@ import { mergePrograms } from '../lib/epgMerge';
 import { ms } from '../lib/epgTime';
 import { usePortalEpg } from './usePortalEpg';
 import { useShortEpg } from './useShortEpg';
-import { hasAiring } from '../lib/shortEpg';
+import { hasAiring, markFromProvider } from '../lib/shortEpg';
 
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** `stalker.epg` caps its answer at 50 programmes. */
@@ -62,7 +62,8 @@ export function useChannelPrograms(
     const fallback = wantShort ? (short ?? []).filter(inWindow) : [];
     if (fallback.length > 0) return mergePrograms(base, fallback);
     if (!isStalker) return [...base].sort((a, b) => ms(a.start) - ms(b.start));
-    return mergePrograms((portal.data ?? []).filter(inWindow), base);
+    // The portal's programmes are the provider's guide: series rules and guide search never see them.
+    return mergePrograms(markFromProvider((portal.data ?? []).filter(inWindow)), base);
   }, [xmltv.data, portal.data, isStalker, from, to, wantShort, short]);
 
   if (!isStalker) {

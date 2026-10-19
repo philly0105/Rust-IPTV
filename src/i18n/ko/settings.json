@@ -47,7 +47,7 @@
   "downloadsHint": "오프라인으로 보기 위해 다운로드한 영화와 에피소드입니다.",
   "downloadsFolder": "다운로드 폴더",
   "downloadsFolderHint": "새 다운로드는 여기에 저장됩니다. 이미 진행 중인 다운로드는 기존 폴더를 유지합니다.",
-  "downloadsFolderHintServer": "서버가 실행 중인 컴퓨터의 전체 폴더 경로입니다. Enter 키를 눌러 저장하세요.",
+  "downloadsFolderHintServer": "다운로드는 서버의 이 폴더에 저장됩니다. 옮기려면 다른 IPTV_DATA_DIR로 서버를 시작하세요.",
   "downloadsFolderUnknown": "설정 안 됨",
   "downloadsFolderSaved": "다운로드 폴더를 변경했습니다",
   "downloadsFolderReset": "다운로드 폴더를 기본값으로 되돌렸습니다",
@@ -100,7 +100,7 @@
   "zapBanner": "채널을 바꿀 때 채널 정보 표시",
   "zapBannerHint": "채널을 바꿀 때마다 몇 초 동안 로고, 번호, 지금과 다음 프로그램을 보여 줍니다.",
   "showCaptions": "자막 표시",
-  "showCaptionsHint": "스트림에 자막이 있으면 자막을 켭니다.",
+  "showCaptionsHint": "스트림에 자막이 있으면 내장 플레이어와 내장 mpv에서 자막을 켭니다. 내장 플레이어는 MPEG-TS 스트림의 자막을 표시할 수 없으며, 외부 플레이어는 자체 설정을 따릅니다.",
   "doubleClick": "두 번 클릭하여 재생",
   "doubleClickHint": "한 번 클릭하면 채널을 선택하고, 두 번 클릭하면 재생합니다.",
 
@@ -109,7 +109,6 @@
   "mpvPath": "mpv 경로",
   "vlcPath": "VLC 경로",
   "playerPathHint": "프로그램의 전체 경로입니다. 비워 두면 PATH에서 찾습니다.",
-  "playerPathHintServer": "서버가 실행 중인 컴퓨터의 경로입니다.",
   "playerPathMissing": "이 경로에 더 이상 아무것도 없고 다른 {{player}}도 찾지 못했습니다.",
   "playerPathFallback": "이 경로에 더 이상 아무것도 없습니다. 대신 {{path}}의 {{player}}를 사용합니다.",
   "chooseMpv": "mpv 선택",
@@ -327,6 +326,7 @@
   "recordingsFolder": "녹화 폴더",
   "recordingsFolderHint": "라이브 녹화는 다운로드 폴더 안의 녹화 폴더에 저장됩니다.",
   "recordingsFolderHintCustom": "라이브 녹화는 이 폴더에 저장됩니다.",
+  "recordingsFolderHintServer": "라이브 녹화는 서버의 이 폴더에 저장됩니다. 데스크톱 앱에서만 변경할 수 있습니다.",
   "recordingsFolderSaved": "녹화 폴더를 변경했습니다",
   "recordingsFolderReset": "녹화 폴더를 기본값으로 되돌렸습니다",
   "chooseRecordingsFolder": "녹화 폴더 선택",
@@ -450,5 +450,10 @@
   "backupParentalBody": "자녀 보호가 잠겨 있어 백업의 자녀 보호 옵션에는 PIN이 필요합니다. PIN을 입력해 모두 가져오거나, 나머지만 가져오고 현재 옵션을 유지하세요.",
   "backupParentalSkip": "제외하고 가져오기",
   "backupParentalUnlock": "PIN 입력 후 가져오기",
-  "backupParentalPinTitle": "자녀 보호 옵션을 가져오려면 PIN을 입력하세요"
+  "backupParentalPinTitle": "자녀 보호 옵션을 가져오려면 PIN을 입력하세요",
+  "windowStart": "시작 시 창",
+  "windowStartHint": "앱 창이 열리는 방식입니다. F11을 누르면 전체 화면이 해제됩니다.",
+  "windowStartNormal": "마지막 상태대로",
+  "windowStartMaximized": "최대화",
+  "windowStartFullscreen": "전체 화면"
 }

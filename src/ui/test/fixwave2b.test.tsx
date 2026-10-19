@@ -152,9 +152,9 @@ describe('ErrorState for an unreachable app server (R6-r2 F4)', () => {
     const raw = screen.getByText('Cannot reach the server: Failed to fetch');
     expect(raw.closest('details')).not.toBeNull();
   });
-  it('keeps the provider hint and message for provider network errors', () => {
+  it('keeps the provider hint for provider network errors, with the raw message behind the disclosure', () => {
     render(<ErrorState error={new RpcError('network', 'error sending request for url (http://p.example/x)')} />);
-    expect(screen.getByText('error sending request for url (http://p.example/x)').closest('details')).toBeNull();
+    expect(screen.getByText('error sending request for url (http://p.example/x)').closest('details')).not.toBeNull();
     expect(screen.getByText(/provider URL/)).toBeTruthy();
   });
 });

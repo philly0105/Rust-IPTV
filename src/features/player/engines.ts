@@ -8,8 +8,10 @@
 // The ESM build of hls.js only starts its transmuxing worker from a script URL; without one it
 // demuxes every fragment on the UI thread.
 import hlsWorkerUrl from 'hls.js/dist/hls.worker.js?url';
+import i18next from 'i18next';
 
 import type { MpvStats, PlayerSource } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
 
@@ -95,16 +97,29 @@ export function formatBitrate(bps: number): string {
   return `${Math.round(bps / 1000)} kbps`;
 }
 
+const trackNames = new Map<string, Intl.DisplayNames>();
+
+/**
+ * A track's language code as a name in the app's language ("German", de "Deutsch"),
+ * not the OS's. The code itself when `Intl` doesn't know it.
+ */
+export function trackLanguageName(lang: string): string {
+  const locale = intlLocale(i18next.language);
+  try {
+    let dn = trackNames.get(locale);
+    if (!dn) {
+      dn = new Intl.DisplayNames(locale, { type: 'language' });
+      trackNames.set(locale, dn);
+    }
+    return dn.of(lang) ?? lang;
+  } catch {
+    return lang;
+  }
+}
+
 function langLabel(lang: string | undefined, name: string | undefined, fallback: string): string {
   if (name && name.trim()) return name;
-  if (lang) {
-    try {
-      const dn = new Intl.DisplayNames(undefined, { type: 'language' });
-      return dn.of(lang) ?? lang;
-    } catch {
-      return lang;
-    }
-  }
+  if (lang) return trackLanguageName(lang);
   return fallback;
 }
 
@@ -317,8 +332,13 @@ export function mediaCrossOrigin(url: string): 'anonymous' | null {
   return null;
 }
 
-function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): Engine {
+/**
+ * The element plays `url` itself. `wantCaptions` (settings.showCaptions) turns the first subtitle
+ * track the stream brings on once it appears, unless one is already on; a choice in the menu wins.
+ */
+function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks, wantCaptions = false): Engine {
   const owner = {};
+  let autoCaptions = wantCaptions;
   nativeOwner.set(el, owner);
   // Before `src`: the mode is fixed when the load starts.
   const cors = mediaCrossOrigin(url);
@@ -343,6 +363,15 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
         text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: isShownTrack(t) });
       }
     }
+    const first = text[0];
+    if (autoCaptions && first) {
+      autoCaptions = false;
+      const track = el.textTracks[Number(first.id)];
+      if (track && !text.some((o) => o.selected)) {
+        track.mode = 'showing';
+        first.selected = true;
+      }
+    }
     cb.onTracks({ qualities: [], qualityAuto: true, audio, text });
   };
   el.addEventListener('loadedmetadata', emitTracks);
@@ -360,6 +389,7 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
       emitTracks();
     },
     setText(id) {
+      autoCaptions = false;
       for (let i = 0; i < el.textTracks.length; i++) {
         const t = el.textTracks[i];
         if (!t) continue;
@@ -420,7 +450,7 @@ async function hlsEngine(
   nativeOwner.set(el, {});
   if (!Hls.isSupported()) {
     // Safari / platforms with native HLS.
-    if (el.canPlayType('application/vnd.apple.mpegurl')) return nativeEngine(el, url, cb);
+    if (el.canPlayType('application/vnd.apple.mpegurl')) return nativeEngine(el, url, cb, wantCaptions);
     cb.onError({ message: 'HLS is not supported in this browser', fatal: true, kind: 'unsupported' });
     return nativeEngine(el, url, cb);
   }
@@ -647,11 +677,16 @@ async function shakaEngine(
     },
     manifest: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
   });
+  // ClearKey from the channel's #KODIPROP licence (clearKey.ts): the keys, or a licence server.
+  if (source.drm?.clearKeys) player.configure({ drm: { clearKeys: source.drm.clearKeys } });
+  else if (source.drm?.licenseServer) player.configure({ drm: { servers: { 'org.w3.clearkey': source.drm.licenseServer } } });
   const route = proxyRoute(url);
   const rewrite = proxyRewrite(url);
   if (route && rewrite) {
     const net = player.getNetworkingEngine();
-    net?.registerRequestFilter((_type, request) => {
+    net?.registerRequestFilter((type, request) => {
+      // A ClearKey licence request is a POST, which the media proxy (GET only) cannot carry.
+      if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) return;
       request.uris = request.uris.map(rewrite);
     });
     // The DASH parser resolves BaseURL/SegmentTemplate against the manifest response URI; make
@@ -1131,6 +1166,8 @@ async function tsFirstEngine(
   cb: EngineCallbacks,
   profile: EngineProfile,
   signal?: AbortSignal,
+  /** The fallback's native element turns the first caption track on, as `nativeEngine` does. */
+  wantCaptions = false,
 ): Promise<Engine> {
   let destroyed = false;
   let fellBack = false;
@@ -1141,7 +1178,7 @@ async function tsFirstEngine(
     fellBack = true;
     current.destroy();
     el.addEventListener('loadeddata', onNativeData, { once: true });
-    current = nativeEngine(el, url, cb);
+    current = nativeEngine(el, url, cb, wantCaptions);
     // A new `src` pauses the element.
     void el.play().catch(() => undefined);
   };
@@ -1194,10 +1231,10 @@ export async function createEngine(
     case 'dash':
       return shakaEngine(el, source, loadUrl, cb, opts.captions, opts.signal);
     default:
-      if (!mseSupported()) return nativeEngine(el, loadUrl, cb);
+      if (!mseSupported()) return nativeEngine(el, loadUrl, cb, opts.captions);
       if (opts.forceMpegts || looksLikeMpegTs(source)) return mpegtsEngine(el, source, loadUrl, cb, profile, opts.signal);
       // The element would download until FFmpeg's probe gives up on raw MPEG-TS, then error.
-      if (isUnlabelledLive(source) && liveFormatFor(source) !== 'native') return tsFirstEngine(el, source, loadUrl, cb, profile, opts.signal);
-      return nativeEngine(el, loadUrl, cb);
+      if (isUnlabelledLive(source) && liveFormatFor(source) !== 'native') return tsFirstEngine(el, source, loadUrl, cb, profile, opts.signal, opts.captions);
+      return nativeEngine(el, loadUrl, cb, opts.captions);
   }
 }

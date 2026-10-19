@@ -3,17 +3,24 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { EpgLinks } from '@/api/types';
+import { parseGuideShift } from '@/lib/guideShift';
 
 import { Badge, Button, IconButton, Input, Toggle } from '@/ui';
 import { addManualEpgUrl, epgRows, removeManualEpgUrl, setEpgUrlEnabled } from '../lib/epgLinks';
 import { redactUrl } from '../lib/redact';
 import { Field } from './Field';
 
-/** Per-source EPG URLs: detected from the playlist/portal, added by hand, and disabled. */
+/**
+ * Per-source EPG URLs (detected from the playlist/portal, added by hand, and disabled), and the
+ * source's guide time shift.
+ */
 export function EpgLinksEditor({ value, onChange, disabled }: { value: EpgLinks; onChange: (next: EpgLinks) => void; disabled?: boolean }) {
   const { t } = useTranslation('sources');
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // The typed text; the links take it only while it is a valid shift.
+  const [shiftText, setShiftText] = useState(value.shiftMinutes ? String(value.shiftMinutes) : '');
+  const shiftValid = parseGuideShift(shiftText) !== null;
   const rows = epgRows(value);
 
   const add = () => {
@@ -99,6 +106,30 @@ export function EpgLinksEditor({ value, onChange, disabled }: { value: EpgLinks;
           {t('epgAddButton')}
         </Button>
       </div>
+      <Field label={t('epgShift')} hint={t('epgShiftHint')} error={shiftValid ? null : t('epgShiftError')}>
+        {(p) => (
+          <div className="flex items-center gap-2">
+            <Input
+              {...p}
+              type="text"
+              // Not "numeric": phone keypads for it have no minus sign, and the shift can be negative.
+              inputMode="text"
+              autoComplete="off"
+              disabled={disabled}
+              placeholder="0"
+              value={shiftText}
+              className="w-28 text-end tabular-nums"
+              data-testid="epg-shift-minutes"
+              onChange={(e) => {
+                setShiftText(e.target.value);
+                const minutes = parseGuideShift(e.target.value);
+                if (minutes !== null) onChange({ ...value, shiftMinutes: minutes });
+              }}
+            />
+            <span className="text-sm text-fg-muted">{t('epgShiftUnit')}</span>
+          </div>
+        )}
+      </Field>
     </div>
   );
 }

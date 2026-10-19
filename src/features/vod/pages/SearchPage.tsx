@@ -2,12 +2,16 @@ import { useQueries } from '@tanstack/react-query';
 import { Radio, RotateCw, Search, SearchX, TriangleAlert, Tv } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigationType, useParams, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { RpcError, rpcRaw } from '@/api/transport';
-import { itemKey, type Channel, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
+import { rpcRaw } from '@/api/transport';
+import { itemKey, type Channel, type GuideSearchHit, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
+import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
+import { displayChannelName } from '@/features/live/lib/channelName';
+import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
 import { playItem } from '@/features/player';
 
 import { GridMyListProvider, myListTarget, PosterCard } from '../components/PosterCard';
@@ -37,7 +41,7 @@ import {
   type SourceSearch,
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
-import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useToast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -102,6 +106,9 @@ function focusResult(scroller: HTMLElement, index: number, reveal: boolean, fram
 }
 
 const EMPTY_STALKER = splitStalkerResults([]);
+
+/** Guide programmes the Programmes tab lists for one query (`epg.search`, per source and in all). */
+const PROGRAMME_LIMIT = 50;
 
 /**
  * Stalker portals keep VOD out of SQLite, so their movies and series are searched on the portal,
@@ -190,6 +197,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     { enabled: !!query && !!facet, staleTime: 30_000, keepPrevious: true },
   );
   const stalker = useStalkerSearch(searchSources, query);
+  // Guide programmes: every searched source's, or the picked chip's.
+  const prefs = useDisplayPrefs();
+  const programmeSources = useMemo(() => (facet ? [facet] : searchSources.map((s) => s.id)), [facet, searchSources]);
+  const programmes = useProgrammeSearch(programmeSources, query, { enabled: !!query, limit: PROGRAMME_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
 
   // While a larger page loads, the previous page stays on screen: cap it by the limit it was fetched with.
   const [settledLimit, setSettledLimit] = useState(limit);
@@ -295,7 +306,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       const args: Parameters<typeof playItem>[0] = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
       if (c.logoUrl) args.posterUrl = c.logoUrl;
       if (c.categoryId) args.categoryId = c.categoryId;
-      playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' }));
+      playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' }));
     },
     [toast, t],
   );
@@ -305,6 +316,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const resume = useResumeLookup(!!query);
   // One result type at a time, chosen by tab; a type missing from these results falls back to the first one present.
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
+  // Programmes are a tab of their own, after the catalog's; the only one when nothing else matched.
+  const programmeHits = programmes.hits;
+  const showProgrammes = programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
+  const anyResults = groups.length > 0 || programmeHits.length > 0;
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
   // Back from a title: the results open where you left them (same query, type and source in the
@@ -350,13 +365,13 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         description={draft.trim().length === 1 ? t('searchMinLength', { count: 2 }) : t('searchHint')}
       />
     );
-  } else if (catalog.isError && groups.length === 0) {
+  } else if (catalog.isError && !anyResults) {
     body = <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />;
-  } else if (loading) {
+  } else if (loading && programmeHits.length === 0) {
     body = <SearchSkeleton />;
-  } else if (groups.length === 0 && stalker.error) {
+  } else if (!anyResults && stalker.error) {
     body = <ErrorState error={stalker.error} onRetry={stalker.retry} />;
-  } else if (groups.length === 0 && facet) {
+  } else if (!anyResults && facet) {
     // A facet kept from an earlier query: say so, and offer the way out (the chips only render with results).
     const facetName = allSources.find((s) => s.id === facet)?.name ?? facets.find((f) => f.sourceId === facet)?.sourceName;
     body = (
@@ -371,7 +386,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         }
       />
     );
-  } else if (groups.length === 0) {
+  } else if (!anyResults) {
     body = <EmptyState icon={<SearchX size={28} />} title={t('noResultsTitle', { query })} description={t('noResultsHint')} />;
   } else {
     body = (
@@ -393,15 +408,24 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         <Tabs
           label={t('search')}
           panelIdPrefix="search-results"
-          value={activeGroup?.kind ?? ''}
+          value={showProgrammes ? 'programmes' : (activeGroup?.kind ?? '')}
           onChange={setType}
-          items={groups.map((g) => ({
-            id: g.kind,
-            label: t(`group_${g.kind}`),
-            badge: capped.more[g.kind] ? t('searchCountMore', { count: g.hits.length }) : g.hits.length,
-          }))}
+          items={[
+            ...groups.map((g) => ({
+              id: g.kind,
+              label: t(`group_${g.kind}`),
+              badge: capped.more[g.kind] ? t('searchCountMore', { count: g.hits.length }) : g.hits.length,
+            })),
+            ...(programmeHits.length > 0
+              ? [{ id: 'programmes', label: t('group_programmes'), badge: programmeHits.length >= PROGRAMME_LIMIT ? t('searchCountMore', { count: programmeHits.length }) : programmeHits.length }]
+              : []),
+          ]}
         />
-        {activeGroup && (
+        {showProgrammes ? (
+          <div {...tabPanelProps('search-results', 'programmes')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
+          </div>
+        ) : activeGroup && (
           <div
             {...tabPanelProps('search-results', activeGroup.kind)}
             onClickCapture={rememberResult}
@@ -524,6 +548,69 @@ function PartialErrorNotice({ message, onRetry }: { message: string; onRetry: ()
     </div>
   );
 }
+
+/**
+ * Guide programmes that match: start, title, channel (and source). One opens the guide at the
+ * programme, where its row takes the cursor (as a hit of the guide's own search does).
+ */
+const ProgrammeList = memo(function ProgrammeList({
+  hits,
+  sources,
+  showSource,
+  stripCountryPrefix,
+}: {
+  hits: readonly GuideSearchHit[];
+  sources: readonly Source[];
+  showSource: boolean;
+  stripCountryPrefix: boolean;
+}) {
+  const { i18n } = useTranslation('vod');
+  const navigate = useNavigate();
+  const lang = i18n.language;
+  const names = useMemo(() => new Map(sources.map((s) => [s.id, s.name])), [sources]);
+  // Up and Down move between the rows; ArrowDown in the search field lands on the first.
+  const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const all = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-grid-index]')];
+    const i = all.indexOf(document.activeElement as HTMLElement);
+    const next = all[Math.max(0, Math.min(all.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+  };
+  return (
+    <ul className="flex flex-col gap-1" onKeyDown={onKeyDown} data-testid="search-programmes">
+      {hits.map((hit, i) => {
+        const at = ms(hit.program.start);
+        const link = guideHitLink(hit);
+        const channel = displayChannelName(hit.channelName, stripCountryPrefix);
+        const source = showSource ? names.get(hit.ref.sourceId) : undefined;
+        return (
+          <li key={`${itemKey(hit.ref)}@${at}`}>
+            <button
+              type="button"
+              data-grid-index={i}
+              onClick={() => void navigate(link.to, { state: link.state })}
+              className="flex w-full min-w-0 items-start gap-x-4 rounded-md px-3 py-2.5 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <span className="w-36 shrink-0 pt-0.5 text-sm whitespace-nowrap tabular-nums text-fg-muted">
+                {formatDay(at, lang)} {formatClock(at, lang)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span dir="auto" className="block truncate text-sm font-medium text-fg">
+                  {hit.program.title}
+                </span>
+                <span dir="auto" className="block truncate text-xs text-fg-muted">
+                  {source ? `${channel} · ${source}` : channel}
+                </span>
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+});
 
 const CHANNEL_MIN_WIDTH = 260;
 const CHANNEL_GAP = 8;

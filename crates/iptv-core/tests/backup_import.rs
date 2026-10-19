@@ -1683,6 +1683,45 @@ async fn url_entries_without_channel_text_import_from_the_url() {
     drop(mock);
 }
 
+/// Per-channel guide shifts travel as `tsrustEpgShifts`: imported under the
+/// entry's source (zero and out-of-range rows skipped) and exported again.
+#[tokio::test]
+async fn channel_guide_shifts_round_trip() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "m3u", "exportedId": "m3u-s", "title": "Shifted M3U",
+            "source": { "kind": "text", "rawM3u": INLINE_M3U },
+            "userState": { "favorites": [], "recentlyViewed": [], "tsrustEpgShifts": [
+                { "contentType": "live", "itemId": "a", "shiftMinutes": 90 },
+                { "contentType": "live", "itemId": "b", "shiftMinutes": 0 },
+                { "contentType": "live", "itemId": "c", "shiftMinutes": 5000 }
+            ] }
+        }]
+    })
+    .to_string();
+    import(&r, &st, &manifest, "merge").await;
+    let rows = st
+        .db_call(|c| {
+            let mut s = c.prepare(
+                "SELECT item_id, shift_minutes FROM epg_channel_shift WHERE source_id = 'm3u-s'",
+            )?;
+            let rows = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![("a".to_string(), 90)]);
+    let exported = export(&r, &st, false).await;
+    assert_eq!(
+        exported["playlists"][0]["userState"]["tsrustEpgShifts"],
+        json!([{ "contentType": "live", "itemId": "a", "shiftMinutes": 90 }])
+    );
+}
+
 /// Review round 3: the Tsrust position extension (M3U and Stalker) follows
 /// the same rules as the Xtream positions: an older dated row and an undated
 /// row never overwrite newer stored progress; an undated row fills a gap.

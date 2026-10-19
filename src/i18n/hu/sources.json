@@ -15,6 +15,8 @@
   "cancel": "Mégse",
   "closeKeepImporting": "Bezárás, az importálás folytatódik",
   "shortcutAddSource": "Forrás hozzáadása",
+  "shortcutMoveUp": "A kijelölt forrás mozgatása feljebb",
+  "shortcutMoveDown": "A kijelölt forrás mozgatása lejjebb",
 
   "kindM3u": "M3U lejátszási lista",
   "kindXtream": "Xtream Codes",
@@ -143,7 +145,10 @@
   "saveFailed": "Nem sikerült menteni a módosításokat",
   "refreshNow": "Frissítés most",
   "refresh": "Frissítés",
-  "textOriginNotEditable": "Ezt a lejátszási listát beillesztéssel adta hozzá, ezért nincs módosítható cím. A csatornák cseréjéhez távolítsa el, majd adja hozzá újra. Az alábbi kérésfejlécek továbbra is minden adatfolyamra érvényesek.",
+  "textOriginReplaceNote": "Ezt a lejátszási listát beillesztéssel vagy feltöltéssel adta hozzá, ezért nincs módosítható cím. A frissítéshez illessze be az új listát, vagy válasszon alább egy fájlt. A kedvencek, az előzmények és a csatornamódosítások a listában maradó csatornáknál megmaradnak. Az alábbi kérésfejlécek minden adatfolyamra érvényesek.",
+  "replacePlaylistText": "Új lejátszásilista-szöveg",
+  "replacePlaylistTextHint": "Hagyja üresen a jelenlegi csatornák megtartásához.",
+  "replacePlaylistFileHint": "Vagy válasszon egy lejátszásilista-fájlt (.m3u, .m3u8 vagy .txt). Ez lecseréli a jelenlegi csatornákat.",
 
   "epgLinks": "Műsorújság-források",
   "epgLinksHint": "A lejátszási listában talált és az Ön által hozzáadott műsorújság-URL-címek. Kapcsolja ki azt, amelyiket nem szeretné letölteni.",
@@ -373,5 +378,9 @@
   "discardedFailedHint": "Az első importálás nem sikerült. Válaszd a Visszavonás gombot, ha megtartanád, és a kártyájáról újra próbálnád.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Műsorújság időeltolása",
+  "epgShiftHint": "Ennyi perccel tolja el a forrás minden műsorát, a Beállításokban megadott eltoláson felül. Hagyja üresen, ha nem kell.",
+  "epgShiftUnit": "perc",
+  "epgShiftError": "Egész percet adjon meg -720 és 720 között."
 }

@@ -91,3 +91,43 @@ describe('a saved screen of a removed source (XB2 lastRoute)', () => {
     expect(queryClient.getQueryData<{ lastRoute?: string }>(rpcKey('settings.get'))?.lastRoute).toBe('/dashboard');
   });
 });
+
+describe('other dead saved screens', () => {
+  const withChecks: RouteObject[] = [
+    {
+      path: '/',
+      children: [
+        { index: true, element: <StartupRedirect isKnownPath={(p) => p !== '/old/page'} /> },
+        { path: 'dashboard', element: <div>dashboard page</div> },
+        { path: 'lists/:listId', element: <div>list page</div> },
+        { path: '*', element: <div>not found</div> },
+      ],
+    },
+  ];
+  const restoring = (lastRoute: string) => () => settings({ startupBehavior: 'restore-last-view', lastRoute, showDashboard: true });
+
+  it('a deleted list lands on the dashboard and is forgotten', async () => {
+    rpcMock.handlers['settings.get'] = restoring('/lists/gone');
+    rpcMock.handlers['lists.list'] = () => [{ id: 'other', name: 'Other' }];
+    renderRoutes(withChecks, '/');
+    expect(await screen.findByText('dashboard page')).toBeTruthy();
+    await flush();
+    expect(rpcMock.calls.filter((c) => c.cmd === 'settings.update').map((c) => c.args)).toEqual([{ patch: { lastRoute: '/dashboard' } }]);
+  });
+
+  it('a list that still exists is restored', async () => {
+    rpcMock.handlers['settings.get'] = restoring('/lists/l1');
+    rpcMock.handlers['lists.list'] = () => [{ id: 'l1', name: 'Sports' }];
+    renderRoutes(withChecks, '/');
+    expect(await screen.findByText('list page')).toBeTruthy();
+    expect(rpcMock.calls.some((c) => c.cmd === 'settings.update')).toBe(false);
+  });
+
+  it('a path no route renders lands on the dashboard, not the not-found page', async () => {
+    rpcMock.handlers['settings.get'] = restoring('/old/page');
+    renderRoutes(withChecks, '/');
+    expect(await screen.findByText('dashboard page')).toBeTruthy();
+    await flush();
+    expect(rpcMock.calls.filter((c) => c.cmd === 'settings.update').map((c) => c.args)).toEqual([{ patch: { lastRoute: '/dashboard' } }]);
+  });
+});

@@ -510,6 +510,82 @@ describe('SearchPage', () => {
   });
 });
 
+describe('Downloads of M3U movies and whole seasons', () => {
+  const mref = { sourceId: 'src1', contentType: 'movie' as const, itemId: 'm7' };
+  const m3uSource = () => ({ ...makeSource('src1', 'm3u', 'Home list'), m3u: { origin: 'url' as const, url: 'http://l/x.m3u', headers: { referrer: 'http://ref.example/' } } });
+
+  it('downloads an M3U movie from its playlist URL, with the playlist and row headers', async () => {
+    rpcMock.handlers['settings.get'] = () => settings();
+    rpcMock.handlers['sources.get'] = () => m3uSource();
+    rpcMock.handlers['catalog.item'] = () => ({ ref: mref, title: 'Heat', categoryId: 'c1', url: 'http://m/films/heat.mkv?t=1', headers: { userAgent: 'Row/1' } });
+    rpcMock.handlers['downloads.start'] = (a) => ({ id: 1, ...(a as object), status: 'queued' });
+    renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(callsOf('downloads.start')).toHaveLength(1));
+    expect(callsOf('downloads.start')[0]!.args).toMatchObject({
+      ref: mref,
+      title: 'Heat',
+      url: 'http://m/films/heat.mkv?t=1',
+      headers: { referrer: 'http://ref.example/', userAgent: 'Row/1' },
+      fileNameHint: 'Heat.mkv',
+    });
+  });
+
+  it('refuses an M3U movie that streams as an HLS playlist', async () => {
+    rpcMock.handlers['settings.get'] = () => settings();
+    rpcMock.handlers['sources.get'] = () => m3uSource();
+    rpcMock.handlers['catalog.item'] = () => ({ ref: mref, title: 'Heat', categoryId: 'c1', url: 'http://m/films/heat/index.m3u8' });
+    rpcMock.handlers['downloads.start'] = (a) => ({ id: 1, ...(a as object), status: 'queued' });
+    renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(callsOf('downloads.start')).toHaveLength(0);
+  });
+
+  it('queues every episode of the season that has no download yet', async () => {
+    const sref = { sourceId: 'src1', contentType: 'series' as const, itemId: 's9' };
+    const ep = (id: string, n: number) => ({ id, seriesRef: sref, season: 1, episode: n, title: `Part ${n}`, containerExtension: 'mkv' });
+    rpcMock.handlers['xtream.seriesDetail'] = (): SeriesDetail => ({
+      item: { ref: sref, title: 'Severance', categoryId: 'c1' },
+      seasons: [{ number: 1, episodes: [ep('e1', 1), ep('e2', 2), ep('e3', 3)] }],
+      cast: [],
+      providerDetailsUnavailable: false,
+      backdrops: [],
+    });
+    rpcMock.handlers['positions.forSeries'] = () => [];
+    rpcMock.handlers['tmdb.tv'] = () => null;
+    rpcMock.handlers['downloads.list'] = () => [
+      {
+        id: 9,
+        ref: sref,
+        episodeId: 'e1',
+        title: 'Severance',
+        url: 'http://x/e1.mkv',
+        status: 'completed',
+        bytesDownloaded: 1,
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+        fileAvailable: true,
+        positionSeconds: 0,
+      },
+    ];
+    rpcMock.handlers['xtream.streamUrl'] = (a) => ({ url: `http://x/${(a as { episodeId: string }).episodeId}.mkv`, kind: 'direct', title: 'x', isLive: false, isRadio: false });
+    rpcMock.handlers['downloads.start'] = (a) => ({ id: 1, ...(a as object), status: 'queued' });
+    renderAt('/s/src1/series/s9', [{ path: '/s/:sourceId/series/:itemId', element: <SeriesDetailPage /> }]);
+    // The finished episode is known before the season is queued.
+    await screen.findByRole('link', { name: /^Downloaded/ });
+    fireEvent.click(screen.getByTestId('vod-download-season'));
+    await waitFor(() => expect(callsOf('downloads.start')).toHaveLength(2));
+    expect(callsOf('downloads.start').map((c) => (c.args as { episodeId: string }).episodeId)).toEqual(['e2', 'e3']);
+    expect(callsOf('downloads.start')[0]!.args).toMatchObject({
+      title: 'Severance',
+      subtitle: 'S01E02 · Part 2',
+      url: 'http://x/e2.mkv',
+      fileNameHint: 'Severance - S01E02 - Part 2.mkv',
+    });
+  });
+});
+
 describe('U4-fix1: stalker VOD-as-series, episode downloads, TMDB attribution', () => {
   const sref = { sourceId: 'src1', contentType: 'series' as const, itemId: '7001' };
   const seriesDetail = (): SeriesDetail => ({

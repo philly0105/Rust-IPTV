@@ -1,6 +1,6 @@
 {
   "title": "我的片單",
-  "count_other": "{{count}} 部",
+  "count_other": "{{count, number}} 部",
   "seeAll": "查看全部",
   "loading": "正在載入我的片單",
   "errorHint": "我的片單由應用程式儲存，而非由供應商儲存。請再試一次；如果持續失敗，請重新啟動應用程式。",
@@ -61,7 +61,7 @@
   "emptySeriesBody": "您儲存的都是電影。",
   "showAll": "顯示全部",
   "allWatchedTitle": "全部已觀看",
-  "allWatchedBody_other": "這裡的 {{count}} 部影片都已觀看。顯示已觀看的內容即可再次看到它們。",
+  "allWatchedBody_other": "這裡的 {{count, number}} 部影片都已觀看。顯示已觀看的內容即可再次看到它們。",
   "showWatched": "顯示已觀看",
   "noMatchTitle": "沒有相符結果",
   "noMatchBody": "我的片單中沒有與「{{query}}」相符的內容。",

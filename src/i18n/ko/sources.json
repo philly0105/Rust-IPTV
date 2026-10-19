@@ -15,6 +15,8 @@
   "cancel": "취소",
   "closeKeepImporting": "닫고 계속 가져오기",
   "shortcutAddSource": "소스 추가",
+  "shortcutMoveUp": "선택한 소스를 위로 이동",
+  "shortcutMoveDown": "선택한 소스를 아래로 이동",
 
   "kindM3u": "M3U 재생목록",
   "kindXtream": "Xtream Codes",
@@ -143,7 +145,10 @@
   "saveFailed": "변경 사항을 저장할 수 없습니다",
   "refreshNow": "지금 새로 고침",
   "refresh": "새로 고침",
-  "textOriginNotEditable": "붙여넣은 재생목록이라 변경할 주소가 없습니다. 채널을 바꾸려면 삭제한 후 다시 추가하세요. 아래 요청 헤더는 계속 모든 스트림에 적용됩니다.",
+  "textOriginReplaceNote": "붙여넣거나 업로드한 재생목록이라 변경할 주소가 없습니다. 업데이트하려면 새 재생목록을 붙여넣거나 아래에서 파일을 선택하세요. 즐겨찾기, 기록, 채널 편집은 목록에 남아 있는 채널에 그대로 유지됩니다. 아래 요청 헤더는 모든 스트림에 적용됩니다.",
+  "replacePlaylistText": "새 재생목록 텍스트",
+  "replacePlaylistTextHint": "현재 채널을 유지하려면 비워 두세요.",
+  "replacePlaylistFileHint": "또는 재생목록 파일(.m3u, .m3u8, .txt)을 선택하세요. 현재 채널을 대체합니다.",
 
   "epgLinks": "가이드 소스",
   "epgLinksHint": "재생목록에서 찾은 가이드 URL과 직접 추가한 URL입니다. 가져오지 않으려면 해당 항목을 끄세요.",
@@ -373,5 +378,9 @@
   "discardedFailedHint": "첫 가져오기에 실패했습니다. 소스를 유지하고 카드에서 다시 시도하려면 실행 취소를 선택하세요.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "가이드 시간 조정",
+  "epgShiftHint": "이 소스의 모든 프로그램을 이만큼(분) 옮깁니다. 설정의 시간 조정에 더해집니다. 비워 두면 조정하지 않습니다.",
+  "epgShiftUnit": "분",
+  "epgShiftError": "-720~720 사이의 정수(분)를 입력하세요."
 }

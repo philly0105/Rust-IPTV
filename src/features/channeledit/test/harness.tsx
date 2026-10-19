@@ -196,6 +196,12 @@ function createFakeCore() {
       tidy(k);
       return edits.has(k) ? { ...edits.get(k)! } : null;
     },
+    // As crates/iptv-core/src/channeledit/mod.rs `reset`: every edit of the source goes.
+    'channels.reset': (raw) => {
+      const a = raw as { sourceId: string };
+      for (const [k, e] of edits) if (e.ref.sourceId === a.sourceId) edits.delete(k);
+      return null;
+    },
     // As crates/iptv-core/src/catalog/rpc.rs `item`: a parental-locked item is
     // not_found with details.parentalLocked, a dropped one plain not_found.
     'catalog.item': (raw) => {

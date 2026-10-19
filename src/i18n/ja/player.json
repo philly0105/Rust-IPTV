@@ -48,6 +48,7 @@
   "channels": "チャンネル",
   "channelPanel": "チャンネル一覧",
   "channelPanelHint": "Cキーでチャンネル一覧を開きます",
+  "openChannelPanel": "チャンネル一覧を開く",
   "searchChannels": "チャンネルを検索",
   "noChannels": "一致するチャンネルはありません",
   "channelsFailed": "チャンネルを読み込めませんでした",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "埋め込みMPVなら撮影できます。設定 > プレーヤーで選択してください。",
   "screenshotNotReady": "まだ映像がありません。動画の再生が始まってからもう一度お試しください。",
   "screenshotNoVideo": "ラジオには撮影できる映像がありません。",
-  "screenshotExternal": "外部プレーヤーで再生中です。そのプレーヤーのスクリーンショットキーを使ってください。"
+  "screenshotExternal": "外部プレーヤーで再生中です。そのプレーヤーのスクリーンショットキーを使ってください。",
+  "picture": "画面",
+  "pictureAspect": "アスペクト比",
+  "aspectAuto": "元のまま",
+  "aspectFill": "引き伸ばす",
+  "pictureZoom": "ズーム",
+  "zoomNone": "なし",
+  "zoomCrop": "切り取って全体に表示",
+  "deinterlace": "インターレース解除"
 }

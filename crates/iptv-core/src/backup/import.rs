@@ -375,6 +375,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
                     server_url: server,
                     username: user,
                     password: s_field(&c, "password").unwrap_or_default(),
+                    headers: headers_of(&c),
                 }),
                 fp,
             )
@@ -1856,11 +1857,12 @@ fn position_exists(
 }
 
 /// Applies the Tsrust `userState` extensions (see `backup::EXT_*`) under the
-/// new source id: EPG mappings (kept when the source already has one for
-/// the item), playback positions (same rules as the IPTVnator positions:
-/// dated rows only replace older ones, undated rows only fill gaps) and
-/// hidden categories. `check_items` requires the item in the local catalog
-/// (M3U); Stalker VOD is not stored locally, so its positions apply as is.
+/// new source id: EPG mappings and per-channel guide shifts (each kept when
+/// the source already has one for the item), playback positions (same rules
+/// as the IPTVnator positions: dated rows only replace older ones, undated
+/// rows only fill gaps) and hidden categories. `check_items` requires the
+/// item in the local catalog (M3U); Stalker VOD is not stored locally, so its
+/// positions apply as is.
 fn apply_tsrust_state(
     conn: &Connection,
     id: &str,
@@ -1877,6 +1879,22 @@ fn apply_tsrust_state(
             "INSERT OR IGNORE INTO epg_channel_map(source_id, content_type, item_id, epg_channel_id)
              VALUES (?1, ?2, ?3, ?4)",
             params![id, ct.as_str(), item, s_field(m, "epgChannelId")],
+        )?;
+    }
+    for m in arr(us, super::EXT_EPG_SHIFTS) {
+        let (Some(ct), Some(item)) = (ct_of(m), s_field(m, "itemId")) else {
+            continue;
+        };
+        let Some(minutes) = i_field(m, "shiftMinutes") else {
+            continue;
+        };
+        if minutes == 0 || minutes.abs() > i64::from(crate::epg::query::MAX_SHIFT_MINUTES) {
+            continue;
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO epg_channel_shift(source_id, content_type, item_id, shift_minutes)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, ct.as_str(), item, minutes],
         )?;
     }
     for p in arr(us, super::EXT_POSITIONS) {

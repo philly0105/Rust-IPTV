@@ -14,8 +14,9 @@ import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { QUARTER_BLUR, useImageChain } from '@/ui/image';
+import { intlLocale } from '@/lib/intl';
 
-import { Button, EmptyState, ErrorState, PlayerStage, Poster, Skeleton, Toggle, useShortcut, useToast, usePlayerStore } from '../deps';
+import { Button, EmptyState, ErrorState, PlayerStage, Poster, Skeleton, Toggle, useShortcut, useToast, usePlayerStore, errorDescription } from '../deps';
 import { ConfirmDialog, PageTitle, SectionHeading, SourceBadge } from '../components/bits';
 import { EPISODE_ROW_HEIGHT, EpisodeRow, episodeActions, episodeCode, type EpisodeAction } from '../components/EpisodeRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -129,7 +130,7 @@ export function MyVideoDetailPage() {
       } catch (err) {
         setPlaying(null);
         const e = RpcError.from(err);
-        toast({ title: t('playFailed', { title: d.title }), description: e.code === 'not_found' ? t('fileGoneHint') : e.message, variant: 'error' });
+        toast({ title: t('playFailed', { title: d.title }), description: e.code === 'not_found' ? t('fileGoneHint') : errorDescription(e), variant: 'error' });
         if (e.code === 'not_found') void query.refetch();
       } finally {
         setStarting(false);
@@ -234,7 +235,7 @@ export function MyVideoDetailPage() {
     0,
   );
   const completed = new Date(entry.completedAt);
-  const completedText = Number.isFinite(completed.getTime()) ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(completed) : '';
+  const completedText = Number.isFinite(completed.getTime()) ? new Intl.DateTimeFormat(intlLocale(i18n.language), { dateStyle: 'medium' }).format(completed) : '';
   const resume = primary && primary.positionSeconds > 5 ? primary.positionSeconds : 0;
   const primaryEpisode = entry.kind === 'series' && primary ? entry.episodes.find((e) => e.download.id === primary.id) : undefined;
 

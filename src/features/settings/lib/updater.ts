@@ -19,11 +19,9 @@ export interface AvailableUpdate {
   downloadAndInstall(onEvent?: (e: UpdateDownloadEvent) => void): Promise<void>;
 }
 
-/** `app.info` plus the updater flag B9-fix1 adds (typed here until it lands in `AppInfo`). */
-export type AppInfoWithUpdater = AppInfo & { updaterAvailable?: boolean };
-
+/** `app.info`'s updater flag; false while the info loads. */
 export function updaterAvailable(info: AppInfo | undefined): boolean {
-  return (info as AppInfoWithUpdater | undefined)?.updaterAvailable === true;
+  return info?.updaterAvailable === true;
 }
 
 /** Null when the running version is the newest one. */

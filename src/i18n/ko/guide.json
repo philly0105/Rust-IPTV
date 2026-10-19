@@ -1,6 +1,13 @@
 {
   "shortcutArea": "TV 가이드",
   "searchLabel": "가이드 검색",
+  "zoomIn": "확대",
+  "zoomOut": "축소",
+  "viewFavorites": "즐겨찾기",
+  "viewList": "목록: {{name}}",
+  "viewFavoritesEmpty": "이 소스의 즐겨찾기 채널이 없습니다",
+  "viewListEmpty": "이 목록에 이 소스의 채널이 없습니다",
+  "viewEmptyHint": "다른 소스를 선택하거나 채널 메뉴에서 채널을 추가하세요.",
   "searchPlaceholder": "가이드 검색",
   "searchResults": "가이드 검색",
   "searchHint": "2자 이상 입력하세요.",

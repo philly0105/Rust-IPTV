@@ -7,6 +7,7 @@ import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
 
 import { Badge, Button, ErrorState, Skeleton } from '@/ui';
+import { intlLocale, listSeparator } from '@/lib/intl';
 import { absoluteTime, formatCount, relativeTime } from '../lib/format';
 import { redactText } from '../lib/redact';
 
@@ -34,10 +35,10 @@ export function serverTimeText(serverTime: string | undefined, timezone: string 
   const tz = timezone?.trim() || undefined;
   if (!serverTime) return tz;
   const d = new Date(serverTime);
-  if (!RFC3339_INSTANT.test(serverTime.trim()) || Number.isNaN(d.getTime())) return [serverTime, tz].filter(Boolean).join(', ');
+  if (!RFC3339_INSTANT.test(serverTime.trim()) || Number.isNaN(d.getTime())) return [serverTime, tz].filter(Boolean).join(listSeparator(lang));
   if (tz) {
     try {
-      return `${new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(d)}, ${tz}`;
+      return `${new Intl.DateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(d)}, ${tz}`;
     } catch (e) {
       if (!(e instanceof RangeError)) throw e;
     }

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgProgram, type Recording } from '@/api/types';
 import { IconButton, Menu, type MenuItem } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { useRecordingCapabilities, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
 import { canHaveRule, ruleFor } from '../lib/rules';
@@ -44,8 +45,8 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
 
   const minutes = (m: number) =>
     m < 60
-      ? new Intl.NumberFormat(i18n.language, { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(m)
-      : new Intl.NumberFormat(i18n.language, { style: 'unit', unit: 'hour', unitDisplay: 'short' }).format(m / 60);
+      ? new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(m)
+      : new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'hour', unitDisplay: 'short' }).format(m / 60);
 
   const items: MenuItem[] = [];
   const stoppable = mark.recording ?? running;
@@ -67,7 +68,8 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
   }
   if (rule) {
     items.push({ id: 'series', label: tg('removeRuleFor', { title: rule.title }), icon: <Repeat className="size-4 text-live" />, onSelect: () => setRemoving(true) });
-  } else if (target && canRecord && canHaveRule(channel.ref, target.program.title)) {
+  } else if (target && canRecord && !target.program.fromProvider && canHaveRule(channel.ref, target.program.title)) {
+    // Rules match XMLTV programmes only: one made from the provider's guide would never schedule.
     const title = target.program.title;
     items.push({ id: 'series', label: tg('recordSeriesOf', { title }), icon: <Repeat className="size-4" />, onSelect: () => setSeriesTarget({ ref: channel.ref, channelName, title }) });
   }

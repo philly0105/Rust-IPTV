@@ -130,3 +130,18 @@ describe('Backup export (desktop)', () => {
     URL.createObjectURL = origCreate;
   });
 });
+
+describe('Window at startup (desktop)', () => {
+  it('offers normal, maximized and fullscreen and saves the choice', async () => {
+    rpcMock.handlers['settings.update'] = (a) => {
+      current = { ...current, ...(a as { patch: Partial<Settings> }).patch };
+      return current;
+    };
+    rpcMock.handlers['downloads.dir'] = () => ({ path: 'C:/data/downloads' });
+    renderAt(settingsRoutes, '/settings/general');
+    const fullscreen = await screen.findByRole('radio', { name: 'Fullscreen' });
+    expect(screen.getByRole('radio', { name: 'As I left it' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(fullscreen);
+    await waitFor(() => expect(rpcMock.callsOf('settings.update')).toContainEqual({ patch: { windowStart: 'fullscreen' } }));
+  });
+});

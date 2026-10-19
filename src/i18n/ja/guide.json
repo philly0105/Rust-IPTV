@@ -1,6 +1,13 @@
 {
   "shortcutArea": "番組表",
   "searchLabel": "番組表を検索",
+  "zoomIn": "拡大",
+  "zoomOut": "縮小",
+  "viewFavorites": "お気に入り",
+  "viewList": "リスト: {{name}}",
+  "viewFavoritesEmpty": "このソースのお気に入りチャンネルはありません",
+  "viewListEmpty": "このリストにはこのソースのチャンネルがありません",
+  "viewEmptyHint": "別のソースを選ぶか、チャンネルのメニューから追加してください。",
   "searchPlaceholder": "番組表を検索",
   "searchResults": "番組表の検索",
   "searchHint": "2文字以上入力してください。",

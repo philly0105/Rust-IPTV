@@ -52,6 +52,8 @@ struct SourceArgs {
 
 fn changed(state: &AppState, source_id: &str) {
     state.emit(super::CHANGED_EVENT, json!({ "sourceId": source_id }));
+    // remote: renamed and hidden channels change the phone's list.
+    crate::remote::channels_may_have_changed(state, Some(source_id));
 }
 
 /// Registers every `channels.*` command.

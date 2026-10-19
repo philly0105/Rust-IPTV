@@ -12,8 +12,8 @@ use super::url::{catchup_stamp, clean_extension, episode_url, live_url, movie_ur
 use crate::catalog::{self, NamedRow};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    ContentType, EpgProgram, Episode, ItemRef, Person, PlayerKind, PlayerSource, Season,
-    SeriesDetail, SeriesItem, StreamFormat, VodDetail, VodItem, XtreamSourceConfig,
+    ContentType, EpgProgram, Episode, ItemRef, Person, PlayerKind, PlayerSource, RequestHeaders,
+    Season, SeriesDetail, SeriesItem, StreamFormat, VodDetail, VodItem, XtreamSourceConfig,
 };
 use crate::state::AppState;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
@@ -487,12 +487,20 @@ pub fn live_extension(pref: StreamFormat, allowed: &[String]) -> String {
         .unwrap_or_else(|| want.to_string())
 }
 
+/// The source's own User-Agent, Referer and Origin (trimmed when saved,
+/// `sources::validate_xtream`) for the player, downloads and recordings;
+/// `None` when none is set, so the player keeps its defaults.
+fn stream_headers(cfg: &XtreamSourceConfig) -> Option<RequestHeaders> {
+    (!cfg.headers.is_empty()).then(|| cfg.headers.clone())
+}
+
 pub async fn stream_url(
     state: &Arc<AppState>,
     r: &ItemRef,
     episode_id: Option<&str>,
 ) -> CoreResult<PlayerSource> {
     let cx = ctx(state, r).await?;
+    let headers = stream_headers(&cx.source.config);
     let (server, user, pass) = (&cx.client.server, &cx.client.username, cx.client.password());
     let row = cx.item.as_ref().map(|n| &n.row);
     let title = row.map(|r| r.title.clone());
@@ -507,7 +515,7 @@ pub async fn stream_url(
             Ok(PlayerSource {
                 url: live_url(server, user, pass, &r.item_id, &ext),
                 kind: kind_for_ext(&ext),
-                headers: None,
+                headers,
                 title: title.unwrap_or_else(|| format!("Channel {}", r.item_id)),
                 subtitle: Some(cx.source.name.clone()),
                 poster_url: row.and_then(|r| r.logo_url.clone()),
@@ -554,7 +562,7 @@ pub async fn stream_url(
             Ok(PlayerSource {
                 url: movie_url(server, user, pass, &r.item_id, &ext),
                 kind: kind_for_ext(&ext),
-                headers: None,
+                headers,
                 title: title.unwrap_or_else(|| format!("Movie {}", r.item_id)),
                 subtitle: row.and_then(|r| r.year).map(|y| y.to_string()),
                 poster_url: row.and_then(|r| r.poster_url.clone()),
@@ -606,7 +614,7 @@ pub async fn stream_url(
             Ok(PlayerSource {
                 url: episode_url(server, user, pass, ep_id, &ext),
                 kind: kind_for_ext(&ext),
-                headers: None,
+                headers,
                 title: title.unwrap_or_else(|| format!("Series {}", r.item_id)),
                 subtitle,
                 poster_url: episode
@@ -700,7 +708,7 @@ pub async fn catchup_url(
             &r.item_id,
         ),
         kind: PlayerKind::Direct,
-        headers: None,
+        headers: stream_headers(&cx.source.config),
         title: row.map_or_else(|| format!("Channel {}", r.item_id), |r| r.title.clone()),
         subtitle: Some(start_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
         poster_url: row.and_then(|r| r.logo_url.clone()),

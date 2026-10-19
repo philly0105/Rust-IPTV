@@ -47,7 +47,7 @@
   "downloadsHint": "Películas y episodios que descargas para verlos sin conexión.",
   "downloadsFolder": "Carpeta de descargas",
   "downloadsFolderHint": "Las nuevas descargas se guardan aquí. Las descargas ya en curso mantienen su carpeta.",
-  "downloadsFolderHintServer": "Ruta completa de la carpeta en el equipo donde se ejecuta el servidor. Pulsa Enter para guardar.",
+  "downloadsFolderHintServer": "Las descargas se guardan en esta carpeta del servidor. Para moverla, inicia el servidor con otro IPTV_DATA_DIR.",
   "downloadsFolderUnknown": "Sin definir",
   "downloadsFolderSaved": "Carpeta de descargas cambiada",
   "downloadsFolderReset": "Carpeta de descargas restablecida a la predeterminada",
@@ -100,7 +100,7 @@
   "zapBanner": "Mostrar información del canal al cambiar de canal",
   "zapBannerHint": "Muestra el logotipo, el número y lo que se emite ahora y a continuación durante unos segundos tras cada cambio de canal.",
   "showCaptions": "Mostrar subtítulos",
-  "showCaptionsHint": "Activa los subtítulos cuando un stream los tiene.",
+  "showCaptionsHint": "Activa los subtítulos cuando un stream los tiene, en el reproductor integrado y en mpv integrado. El reproductor integrado no puede mostrar subtítulos en streams MPEG-TS, y los reproductores externos usan su propia configuración.",
   "doubleClick": "Doble clic para reproducir",
   "doubleClickHint": "Un clic selecciona un canal; un doble clic lo reproduce.",
 
@@ -109,7 +109,6 @@
   "mpvPath": "Ruta de mpv",
   "vlcPath": "Ruta de VLC",
   "playerPathHint": "Ruta completa del programa, o vacío para buscar en el PATH.",
-  "playerPathHintServer": "Una ruta en la máquina donde se ejecuta el servidor.",
   "playerPathMissing": "Ya no hay nada en esta ruta y no se encontró otro {{player}}.",
   "playerPathFallback": "Ya no hay nada en esta ruta. Se usa {{player}} en {{path}}.",
   "chooseMpv": "Elegir mpv",
@@ -332,6 +331,7 @@
   "recordingsFolder": "Carpeta de grabaciones",
   "recordingsFolderHint": "Las grabaciones en vivo se guardan en una carpeta de grabaciones dentro de la carpeta de descargas.",
   "recordingsFolderHintCustom": "Las grabaciones en vivo se guardan en esta carpeta.",
+  "recordingsFolderHintServer": "Las grabaciones en vivo se guardan en esta carpeta del servidor. Solo la aplicación de escritorio puede cambiarla.",
   "recordingsFolderSaved": "Carpeta de grabaciones cambiada",
   "recordingsFolderReset": "Las grabaciones vuelven a guardarse en la carpeta predeterminada",
   "chooseRecordingsFolder": "Elige la carpeta de grabaciones",
@@ -456,5 +456,10 @@
   "backupParentalBody": "El control parental está bloqueado, así que sus opciones de la copia necesitan el PIN. Introdúcelo para importarlo todo, o importa el resto y conserva tus opciones actuales.",
   "backupParentalSkip": "Importar sin ellas",
   "backupParentalUnlock": "Introducir PIN e importar",
-  "backupParentalPinTitle": "Introduce el PIN para importar las opciones del control parental"
+  "backupParentalPinTitle": "Introduce el PIN para importar las opciones del control parental",
+  "windowStart": "Ventana al iniciar",
+  "windowStartHint": "Cómo se abre la ventana de la aplicación. F11 sale de la pantalla completa.",
+  "windowStartNormal": "Como la dejé",
+  "windowStartMaximized": "Maximizada",
+  "windowStartFullscreen": "Pantalla completa"
 }

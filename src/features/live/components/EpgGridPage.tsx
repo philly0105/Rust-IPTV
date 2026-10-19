@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, History, Play, Radio, Tv, X } from 'lucide-react';
+import { CalendarClock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, History, Link2, Play, Radio, Star, Tv, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -15,13 +15,13 @@ import {
 } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
-import { rpcKey, useRpcQuery } from '@/api/query';
+import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
-import { itemKey, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
+import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useListVirtualizer, useToast, type MenuAction, type SelectOption } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useListVirtualizer, useToast, type MenuAction, type SelectOption, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
@@ -38,6 +38,7 @@ import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
 import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
+import { markFromProvider } from '../lib/shortEpg';
 import {
   HOUR,
   MAX_LOOKBACK_HOURS,
@@ -60,6 +61,7 @@ import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 import { GuideUnavailableNotice } from './ChannelList';
 import { ContextMenu, type MenuItem } from './ContextMenu';
+import { EpgMappingDialog } from './EpgMappingDialog';
 // recording:
 import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
 // guide (Run 2 C5): jump to a date and time, guide search.
@@ -67,8 +69,11 @@ import { GuideSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
+import { isGuideHitState } from '../guide/programmeSearch';
 import { fitCellText, GRID_SHIFT_VAR, GuideRow, type GuideRowHandlers } from '../guide/GuideRow';
 import { useStable } from '../guide/useStable';
+import { clampGuideZoom, GUIDE_ZOOM_SLOT_PX, storedGuideZoom, storeGuideZoom } from '../guide/zoom';
+import { guideViewParam, parseGuideView, useGuideViewChannels, type GuideView } from '../guide/viewChannels';
 import { prefetchProgramDescription, useProgramDescription } from '../guide/programDescription';
 
 export const GRID_ROW = 56;
@@ -94,11 +99,12 @@ export function stalkerArchiveQuery(start: number, end: number, now: number, lim
 }
 
 /**
- * Grid window length for a page `width` px wide: whole 30-minute slots that fill the track
- * beside the channel column, never less than 6 h (wide screens get a longer window, not a gap).
+ * Grid window length for a page `width` px wide: whole 30-minute slots (`slotPx` wide, the zoom
+ * step's) that fill the track beside the channel column, never less than 6 h (wide screens and
+ * zoomed-out scales get a longer window, not a gap).
  */
-export function gridWindowFor(width: number, channelCol: number): number {
-  const slots = Math.ceil(Math.max(0, width - channelCol) / GRID_SLOT_PX);
+export function gridWindowFor(width: number, channelCol: number, slotPx: number = GRID_SLOT_PX): number {
+  const slots = Math.ceil(Math.max(0, width - channelCol) / slotPx);
   return Math.max(GRID_WINDOW, slots * GRID_SLOT_MIN * MINUTE);
 }
 
@@ -111,7 +117,11 @@ export const GRID_EXTEND_EDGE_PX = GRID_SLOT_PX;
  * {@link GRID_EXTEND} can hold the view still (the scroll position moves by the same px)
  * without landing in the other edge's zone, at any page width.
  */
-export const GRID_SCROLL_ROOM_PX = (GRID_EXTEND / MINUTE) * PX_PER_MIN + 2 * GRID_EXTEND_EDGE_PX;
+export function gridScrollRoomPx(pxPerMin: number): number {
+  return (GRID_EXTEND / MINUTE) * pxPerMin + 2 * GRID_EXTEND_EDGE_PX;
+}
+/** {@link gridScrollRoomPx} at the default scale. */
+export const GRID_SCROLL_ROOM_PX = gridScrollRoomPx(PX_PER_MIN);
 
 /**
  * Which way a horizontal scroll to `x` px from the inline start (moving `dx` px since the last
@@ -130,10 +140,10 @@ export const GRID_CHANNEL_COMPACT = 72;
 
 /**
  * How far into the visible track (`view` px wide) the now line sits when the guide opens: one
- * slot of the past, but never more than a quarter of a narrow track (0: not measured yet).
+ * slot (`slotPx`) of the past, but never more than a quarter of a narrow track (0: not measured yet).
  */
-export function nowLead(view: number): number {
-  return view > 0 ? Math.min(GRID_SLOT_PX, Math.round(view / 4)) : GRID_SLOT_PX;
+export function nowLead(view: number, slotPx: number = GRID_SLOT_PX): number {
+  return view > 0 ? Math.min(slotPx, Math.round(view / 4)) : slotPx;
 }
 
 /** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
@@ -201,6 +211,9 @@ interface Selection {
   /** The programme cell that opened the popover; the popover follows it while the grid scrolls. */
   anchor: HTMLElement;
 }
+
+/** Ctrl+scroll zooms at most one step this often (a trackpad pinch sends a burst of wheel events). */
+export const WHEEL_ZOOM_MS = 150;
 
 /** How long a channel row stays highlighted after a guide search hit moved the grid to it. */
 export const HIGHLIGHT_MS = 3000;
@@ -314,6 +327,10 @@ export function EpgGridPage() {
   const compact = !useMediaQuery(`(min-width: ${GUIDE_BAR_STACK_PX}px)`);
   const channelCol = compact ? GRID_CHANNEL_COMPACT : wide ? 220 : 168;
   const rtl = useIsRtl();
+  // The time scale: the zoom step's px per 30-minute slot (toolbar buttons, Ctrl+scroll).
+  const [zoom, setZoom] = useState(storedGuideZoom);
+  const slotPx = GUIDE_ZOOM_SLOT_PX[zoom] ?? GRID_SLOT_PX;
+  const pxPerMin = slotPx / GRID_SLOT_MIN;
   const queryClient = useQueryClient();
   // Reminders, recordings, rules and recording support load with the page (L2-guide-library-15).
   const schedule = useScheduleIndex();
@@ -323,6 +340,10 @@ export function EpgGridPage() {
   const sourceId = params.get('source') ?? defaultGuideSource(sources.data) ?? '';
   useEffect(() => rememberGuideSource(sourceId), [sourceId]);
   const categoryId = params.get('category') ?? undefined;
+  // Favorites or a custom list instead of a group (`view`); its channels of this source only.
+  const viewParam = params.get('view');
+  const view = useMemo(() => parseGuideView(viewParam), [viewParam]);
+  const lists = useRpcQuery('lists.list', undefined, { staleTime: 60_000 });
   const source = sources.data?.find((s) => s.id === sourceId);
   const kind: SourceKind | undefined = source?.kind;
   const categories = useRpcQuery('catalog.categories', { sourceId, contentType: 'live' }, { enabled: !!sourceId });
@@ -348,12 +369,12 @@ export function EpgGridPage() {
   const start = winAt ?? nowStart;
   const [measurePage, pageWidth, pageMeasured] = useElementWidth();
   // Measured pages get room to scroll past the page width, so horizontal scrolling can move the window on.
-  const windowMs = gridWindowFor(pageWidth > 0 ? pageWidth + GRID_SCROLL_ROOM_PX : 0, channelCol);
+  const windowMs = gridWindowFor(pageWidth > 0 ? pageWidth + gridScrollRoomPx(pxPerMin) : 0, channelCol, slotPx);
   const end = start + windowMs;
   // Rows lay their cells out from this fixed time; the window's offset from it is one CSS
   // variable on the grid, so a window move leaves every row's props alone (L3-perf-ui-4).
   const [origin] = useState(start);
-  const gridShift = ((origin - start) / MINUTE) * PX_PER_MIN;
+  const gridShift = ((origin - start) / MINUTE) * pxPerMin;
   const shiftPx = useRef(gridShift);
   shiftPx.current = gridShift;
   // The window the guide is asked for follows the one on screen at a lower priority: a move at
@@ -362,7 +383,10 @@ export function EpgGridPage() {
   const dataStart = useDeferredValue(start);
   const dataEnd = useDeferredValue(end);
 
-  const paged = usePagedChannels({ sourceId, categoryId, withExtras: false });
+  // A view pages nothing from the source: the source's own list stays idle meanwhile.
+  const sourcePaged = usePagedChannels({ sourceId: view ? '' : sourceId, categoryId, withExtras: false });
+  const viewPaged = useGuideViewChannels(view, sourceId);
+  const paged = viewPaged ?? sourcePaged;
   const count = paged.total ?? 0;
 
   const shell = useShell();
@@ -407,7 +431,7 @@ export function EpgGridPage() {
   // The chunks on screen, and the ones asked for: those follow once the visible chunk settles.
   const viewA = Math.floor(first / GRID_CHUNK);
   const viewB = Math.floor(last / GRID_CHUNK);
-  const listKey = `${sourceId}|${categoryId ?? ''}`;
+  const listKey = `${sourceId}|${categoryId ?? ''}|${viewParam ?? ''}`;
   const [settled, setSettled] = useState({ key: listKey, a: viewA, b: viewB });
   const atRest = settled.key === listKey && settled.a === viewA && settled.b === viewB;
   const { a: chunkA, b: chunkB } = shownChunks({ a: viewA, b: viewB }, settled, atRest || settled.key !== listKey, chunkCached);
@@ -557,7 +581,8 @@ export function EpgGridPage() {
     const hit = cache.get(k);
     if (hit && hit.list === list && hit.portal === portal && hit.short === short && hit.offset === offset) return hit.out;
     let out: EpgProgram[] | undefined;
-    if (portal && portal.length > 0) out = shiftPrograms(mergePrograms(portal, list ?? []), offset);
+    // The portal's programmes are the provider's guide (no series rules, no guide search).
+    if (portal && portal.length > 0) out = shiftPrograms(mergePrograms(markFromProvider(portal), list ?? []), offset);
     else if (short && short.length > 0) out = shiftPrograms([...short], offset);
     else if (list) out = list.length === 0 ? NO_PROGRAMS : shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), offset);
     if (cache.size >= PROGRAMS_CACHE_MAX) cache.clear();
@@ -565,6 +590,10 @@ export function EpgGridPage() {
     return out;
   };
   const gridError = gridA.error ?? gridB.error;
+  // Guides hold programmes, yet none of these channels matched one: the way out is matching a
+  // channel to its guide channel, not adding another XMLTV address.
+  const guides = useRpcQuery('epg.sources', undefined, { staleTime: 60_000 });
+  const guidesLoaded = !!guides.data?.some((g) => g.enabled && g.programCount > 0);
   const noEpgAnywhere =
     !isStalker &&
     !hasShortData && // guide
@@ -594,13 +623,16 @@ export function EpgGridPage() {
     setUrl((u) => (u.wrote === at ? u : { ...u, wrote: at }));
     setParams(next, { replace });
   };
-  /** Moves the window to `at` (floored to its slot), with a new history entry. */
+  /** Moves the window to `at` (floored to its slot), with a new history entry. `category: null` also shows all channels. */
   const goTo = useStable((at: number, opts: { category?: null } = {}) => {
     const slot = floorLocal(at, GRID_SLOT_MIN);
     startRef.current = slot;
     setWinAt(slot);
     writeUrl((p) => {
-      if (opts.category === null) p.delete('category');
+      if (opts.category === null) {
+        p.delete('category');
+        p.delete('view');
+      }
     }, slot, false);
   });
   const keepView = useRef(false);
@@ -642,6 +674,9 @@ export function EpgGridPage() {
         if (value) p.set(key, value);
         else p.delete(key);
         if (key === 'source') p.delete('category');
+        // A group and a view replace each other; a view stays on another source.
+        if (key === 'category') p.delete('view');
+        if (key === 'view') p.delete('category');
       },
       winAt === null ? null : startRef.current,
       true,
@@ -692,22 +727,57 @@ export function EpgGridPage() {
   const scrollX = useRef(0);
   /** The scroller's clientWidth at the last scroll event or scroll write (read with the scroll, never after a write). */
   const viewWidth = useRef(0);
+  // A new zoom step keeps the time at the track's visible start where it was (worked out from the
+  // last scroll position: reading the scroll now would give one the narrower track has clamped).
+  const laidPx = useRef(pxPerMin);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const moved = start - laidStart.current;
     laidStart.current = start;
+    const zoomedFrom = laidPx.current;
+    laidPx.current = pxPerMin;
     if (keepView.current) {
       keepView.current = false;
-      el.scrollLeft = scrollLeftFor(Math.max(0, scrollStart(el) - (moved / MINUTE) * PX_PER_MIN), rtl);
+      el.scrollLeft = scrollLeftFor(Math.max(0, scrollStart(el) - (moved / MINUTE) * pxPerMin), rtl);
+    } else if (moved === 0 && zoomedFrom !== pxPerMin) {
+      el.scrollLeft = scrollLeftFor((scrollX.current * pxPerMin) / zoomedFrom, rtl);
     } else {
-      const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
-      el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - nowLead(el.clientWidth - channelCol)) : 0, rtl);
+      const nowX = ((now - start) / MINUTE) * pxPerMin;
+      el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - nowLead(el.clientWidth - channelCol, slotPx)) : 0, rtl);
     }
     scrollX.current = scrollStart(el);
     viewWidth.current = el.clientWidth;
     fitCellText(el, scrollX.current, shiftPx.current); // before first paint: cells already clipped by the edge fit their text
-  }, [start, rtl, gridMounted]);
+  }, [start, rtl, gridMounted, pxPerMin]);
+
+  // ---- zoom -----------------------------------------------------------------
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const zoomBy = useStable((delta: number) => {
+    const next = clampGuideZoom(zoomRef.current + delta);
+    if (next === zoomRef.current) return;
+    zoomRef.current = next;
+    storeGuideZoom(next);
+    setZoom(next);
+  });
+  // Ctrl+scroll over the grid zooms the time scale instead of the page (a native listener: React's
+  // wheel handlers are passive and cannot stop the page zoom).
+  const lastWheelZoom = useRef(Number.NEGATIVE_INFINITY);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.deltaY === 0) return;
+      e.preventDefault();
+      const t = performance.now();
+      if (t - lastWheelZoom.current < WHEEL_ZOOM_MS) return;
+      lastWheelZoom.current = t;
+      zoomBy(e.deltaY < 0 ? 1 : -1);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [gridMounted, zoomBy]);
 
   /** Scrolls the track so that `x` px from its inline start is at the visible start. */
   const scrollTrackTo = (root: HTMLElement, x: number) => {
@@ -747,8 +817,8 @@ export function EpgGridPage() {
     // (L2-guide-library-3): the sticky channel column covers the track's inline start.
     const p = cursorProgram(cursor.row, cursor.time);
     if (!p) return;
-    const left = ((Math.max(ms(p.start), start) - start) / MINUTE) * PX_PER_MIN;
-    const right = ((Math.min(ms(p.end), end) - start) / MINUTE) * PX_PER_MIN;
+    const left = ((Math.max(ms(p.start), start) - start) / MINUTE) * pxPerMin;
+    const right = ((Math.min(ms(p.end), end) - start) / MINUTE) * pxPerMin;
     const x = scrollX.current;
     const view = (viewWidth.current || root.clientWidth) - channelCol;
     if (left < x) scrollTrackTo(root, left - 8);
@@ -775,6 +845,22 @@ export function EpgGridPage() {
   // ---- channel row menu (C2: rename and hide from the guide, plus the Live page's other entries) ----
   const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel } | null>(null);
   const closeRowMenu = useCallback(() => setRowMenu(null), []);
+  // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
+  const [mapping, setMapping] = useState<Channel | null>(null);
+  const closeMapping = useCallback(() => setMapping(null), []);
+  const toggleFavorite = useStable(async (channel: Channel, wasFavorite: boolean) => {
+    const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+    try {
+      const res = await rpc('favorites.toggle', {
+        ref: channel.ref,
+        snapshot: { title: channel.name, subtitle: channel.categoryName, posterUrl: channel.logoUrl, contentType: channel.ref.contentType },
+      });
+      await invalidate('favorites.');
+      toast({ title: res.isFavorite ? t('favoriteAdded', { name }) : t('favoriteRemoved', { name }), variant: 'success' });
+    } catch (err) {
+      toast({ title: wasFavorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
+    }
+  });
   /** The keyboard's way in: the menu of the cursor row's channel, anchored at its channel cell. */
   const openRowMenuAt = (row: number) => {
     const ch = paged.getChannel(row);
@@ -939,17 +1025,32 @@ export function EpgGridPage() {
   /** A search hit (display time): move the window to its start, in a group that holds the channel. */
   const selectHit = useStable((hit: GuideSearchHit) => {
     const time = ms(hit.program.start);
-    const group = groupForHit(categoryId, hit);
-    goTo(time, { category: group === categoryId ? undefined : null });
+    // A view (favorites, a list) may leave the channel out: the hit opens in all channels.
+    const group = view ? undefined : groupForHit(categoryId, hit);
+    goTo(time, { category: group === categoryId && !view ? undefined : null });
     setHighlight(null);
     setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time, channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
   });
+
+  // A programme opened from the global search or the palette (`guideHitLink`): the URL already
+  // holds its source and window, and its row is found like a hit of the search panel. Once per
+  // history entry, so a re-render does not move the cursor back to it.
+  const location = useLocation();
+  const handledHit = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isGuideHitState(location.state) || handledHit.current === location.key) return;
+    handledHit.current = location.key;
+    const hit = location.state.guideHit;
+    if (hit.ref.sourceId !== sourceId) return;
+    setHighlight(null);
+    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time: ms(hit.program.start), channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId });
+  }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once the list the hit needs is on screen, find the channel's row, scroll to it, put the
   // keyboard cursor on the programme and highlight the row for a moment.
   const listReady = !!sourceId && !paged.isLoading && !paged.refreshing && !paged.error;
   useEffect(() => {
-    if (!reveal || !listReady || categoryId !== reveal.categoryId) return;
+    if (!reveal || !listReady || view || categoryId !== reveal.categoryId) return;
     let cancelled = false;
     const known = paged.loaded.find((l) => itemKey(l.channel.ref) === reveal.key)?.index;
     // LV-2: the channel number narrows the search to a few page reads; the sequential scan (to the
@@ -978,13 +1079,13 @@ export function EpgGridPage() {
       .catch((err: unknown) => {
         if (cancelled) return;
         setReveal(null);
-        toast({ title: tg('hitNotFound', { channel: reveal.channelName }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+        toast({ title: tg('hitNotFound', { channel: reveal.channelName }), description: errorDescription(err), variant: 'error' });
       });
     return () => {
       cancelled = true;
     };
     // `paged.loaded` is read once the list is ready; later page loads must not start another lookup.
-  }, [reveal, listReady, sourceId, categoryId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reveal, listReady, sourceId, categoryId, view]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!highlight) return;
     const id = setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
@@ -999,7 +1100,7 @@ export function EpgGridPage() {
     const kind = ownKind(channel);
     if (!kind) return;
     playChannel(channel, kind, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
-      toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
     );
   });
   /** Watch on an airing search hit: the hit carries what playback needs of the channel. */
@@ -1018,7 +1119,7 @@ export function EpgGridPage() {
     const kind = ownKind(channel);
     if (!kind) return;
     playCatchup(channel, kind, program, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
-      toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
     );
   };
 
@@ -1046,9 +1147,9 @@ export function EpgGridPage() {
     return out;
   }, [start, end]);
   const labels = useMemo(() => slotLabels(slots, i18n.language), [slots, i18n.language]);
-  const trackWidth = (windowMs / MINUTE) * PX_PER_MIN;
+  const trackWidth = (windowMs / MINUTE) * pxPerMin;
   const nowInWindow = now >= start && now < end;
-  const nowX = ((now - start) / MINUTE) * PX_PER_MIN;
+  const nowX = ((now - start) / MINUTE) * pxPerMin;
 
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
   const heading = <h1 className="sr-only">{t('guide')}</h1>;
@@ -1091,6 +1192,8 @@ export function EpgGridPage() {
         sourceId={sourceId}
         categories={categories.data}
         categoryId={categoryId}
+        view={view}
+        lists={lists.data}
         bar={bar}
         start={start}
         end={end}
@@ -1106,6 +1209,8 @@ export function EpgGridPage() {
         onJump={openJump}
         onSelectHit={selectHit}
         onWatchHit={watchHit}
+        zoom={zoom}
+        onZoom={zoomBy}
       />
       <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={start} now={now} onJump={goTo} onNow={toNow} />
 
@@ -1136,6 +1241,17 @@ export function EpgGridPage() {
             </div>
           ))}
         </div>
+      ) : count === 0 && view ? (
+        <EmptyState
+          icon={<Tv className="size-8" />}
+          title={tg(view.kind === 'favorites' ? 'viewFavoritesEmpty' : 'viewListEmpty')}
+          description={tg('viewEmptyHint')}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => setQuery('view', undefined)}>
+              {t('allChannels')}
+            </Button>
+          }
+        />
       ) : count === 0 ? (
         <EmptyState icon={<Tv className="size-8" />} title={t('noChannels')} description={t('noChannelsHint')} />
       ) : (
@@ -1171,7 +1287,7 @@ export function EpgGridPage() {
                 } as CSSProperties
               }
             >
-              <GuideHeader slots={slots} labels={labels} channelCol={channelCol} trackWidth={trackWidth} compact={compact} />
+              <GuideHeader slots={slots} labels={labels} channelCol={channelCol} trackWidth={trackWidth} slotPx={slotPx} compact={compact} />
 
               {nowInWindow ? (
                 // Under the sticky channel column (z-10) and time header (z-20), and under the cells'
@@ -1199,7 +1315,7 @@ export function EpgGridPage() {
                     programs={programsFor(ch)}
                     origin={origin}
                     now={now}
-                    pxPerMin={PX_PER_MIN}
+                    pxPerMin={pxPerMin}
                     channelCol={channelCol}
                     trackWidth={trackWidth}
                     compact={compact}
@@ -1223,10 +1339,20 @@ export function EpgGridPage() {
                 className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-fg-muted shadow-2 motion-safe:animate-fade-in"
               >
                 {/* Away from now, an empty window is past the guide's end, not a missing guide (L4-live-1). */}
-                <span className="min-w-0 truncate" title={nowInWindow ? t('guideNoData') : t('guideNoDataHere')}>
-                  {nowInWindow ? t('guideNoData') : t('guideNoDataHere')}
+                <span className="min-w-0 truncate" title={nowInWindow ? t(guidesLoaded ? 'guideNoMatch' : 'guideNoData') : t('guideNoDataHere')}>
+                  {nowInWindow ? t(guidesLoaded ? 'guideNoMatch' : 'guideNoData') : t('guideNoDataHere')}
                 </span>
-                {nowInWindow ? (
+                {nowInWindow && guidesLoaded ? (
+                  // The cursor row's channel (the first one until the keys moved it).
+                  <button
+                    type="button"
+                    className="shrink-0 text-accent hover:underline"
+                    data-testid="guide-no-match-map"
+                    onClick={() => setMapping(paged.getChannel(cursor.row) ?? paged.getChannel(first) ?? null)}
+                  >
+                    {t('mapEpg')}
+                  </button>
+                ) : nowInWindow ? (
                   <Link to="/settings/epg" className="shrink-0 text-accent hover:underline">
                     {t('epgSettings')}
                   </Link>
@@ -1241,7 +1367,10 @@ export function EpgGridPage() {
         </div>
       )}
 
-      {rowMenu ? <GuideRowMenu menu={rowMenu} kind={ownKind(rowMenu.channel)} onPlay={playLive} onClose={closeRowMenu} /> : null}
+      {rowMenu ? (
+        <GuideRowMenu menu={rowMenu} kind={ownKind(rowMenu.channel)} onPlay={playLive} onMapGuide={setMapping} onToggleFavorite={toggleFavorite} onClose={closeRowMenu} />
+      ) : null}
+      <MemoMappingDialog channel={mapping} onClose={closeMapping} />
 
       {selection ? (
         <ProgramPopover
@@ -1268,6 +1397,7 @@ export function EpgGridPage() {
 }
 
 const MemoJumpToDialog = memo(JumpToDialog);
+const MemoMappingDialog = memo(EpgMappingDialog);
 
 /** The time header: the channel column's corner and a label per 30-minute slot. */
 const GuideHeader = memo(function GuideHeader({
@@ -1275,12 +1405,15 @@ const GuideHeader = memo(function GuideHeader({
   labels,
   channelCol,
   trackWidth,
+  slotPx,
   compact,
 }: {
   slots: readonly number[];
   labels: readonly string[];
   channelCol: number;
   trackWidth: number;
+  /** Px per 30-minute slot at the zoom step. */
+  slotPx: number;
   compact: boolean;
 }) {
   const { t } = useTranslation('live');
@@ -1293,13 +1426,16 @@ const GuideHeader = memo(function GuideHeader({
           slots where they stand instead of moving them while the scroll makes up for it, which
           counted as a layout shift on every move (L4-live-4). */}
       {slots.map((_, i) => (
-        <div role="columnheader" key={i} className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted" style={{ width: GRID_SLOT_PX }}>
+        <div role="columnheader" key={i} className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted" style={{ width: slotPx }}>
           {labels[i]}
         </div>
       ))}
     </div>
   );
 });
+
+/** Marks the group select's view entries (favorites, a list) apart from the source's group ids. */
+const VIEW_OPTION = '@view:';
 
 /**
  * The guide's toolbar: source and group, the search field and the time controls. Memoised with
@@ -1311,6 +1447,8 @@ const GuideToolbar = memo(function GuideToolbar({
   sourceId,
   categories,
   categoryId,
+  view,
+  lists,
   bar,
   start,
   end,
@@ -1326,11 +1464,15 @@ const GuideToolbar = memo(function GuideToolbar({
   onJump,
   onSelectHit,
   onWatchHit,
+  zoom,
+  onZoom,
 }: {
   sources: readonly { id: string; name: string }[] | undefined;
   sourceId: string;
   categories: readonly { id: string; name: string }[] | undefined;
   categoryId: string | undefined;
+  view: GuideView | undefined;
+  lists: readonly { id: string; name: string }[] | undefined;
   bar: 'full' | 'stacked' | 'phone';
   start: number;
   end: number;
@@ -1346,6 +1488,9 @@ const GuideToolbar = memo(function GuideToolbar({
   onJump(): void;
   onSelectHit(hit: GuideSearchHit): void;
   onWatchHit(hit: GuideSearchHit): void;
+  /** The time scale's step (GUIDE_ZOOM_SLOT_PX). */
+  zoom: number;
+  onZoom(delta: 1 | -1): void;
 }) {
   const { t, i18n } = useTranslation('live');
   const { t: tg } = useTranslation('guide');
@@ -1353,9 +1498,15 @@ const GuideToolbar = memo(function GuideToolbar({
   // The kit's Select, sized down to the toolbar's 32 px buttons.
   const selectClass = 'h-8 max-w-48';
   const sourceOptions: SelectOption[] = useMemo(() => (sources ?? []).map((s) => ({ value: s.id, label: s.name })), [sources]);
+  // All channels, then the views (favorites, each custom list), then the source's groups.
   const groupOptions: SelectOption[] = useMemo(
-    () => [{ value: '', label: t('allChannels') }, ...(categories ?? []).map((c) => ({ value: c.id, label: c.name }))],
-    [categories, t],
+    () => [
+      { value: '', label: t('allChannels') },
+      { value: `${VIEW_OPTION}${guideViewParam({ kind: 'favorites' })}`, label: tg('viewFavorites') },
+      ...(lists ?? []).map((l) => ({ value: `${VIEW_OPTION}${guideViewParam({ kind: 'list', id: l.id })}`, label: tg('viewList', { name: l.name }) })),
+      ...(categories ?? []).map((c) => ({ value: c.id, label: c.name })),
+    ],
+    [categories, lists, t, tg],
   );
   const stacked = bar !== 'full';
   const range = `${formatClock(start, lang)}–${formatClock(end, lang)}`;
@@ -1366,9 +1517,9 @@ const GuideToolbar = memo(function GuideToolbar({
         aria-label={t('guideGroup')}
         className={selectClass}
         wrapperClassName="min-w-0"
-        value={categoryId ?? ''}
+        value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}
         options={groupOptions}
-        onValueChange={(v) => onQuery('category', v || undefined)}
+        onValueChange={(v) => (v.startsWith(VIEW_OPTION) ? onQuery('view', v.slice(VIEW_OPTION.length)) : onQuery('category', v || undefined))}
       />
       {/* While the sources load the field holds its place, disabled, so the toolbar does not shift (L2-visual-2). */}
       <GuideSearch
@@ -1416,6 +1567,13 @@ const GuideToolbar = memo(function GuideToolbar({
         <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} className="shrink-0" onClick={onNow}>
           {t('jumpToNow')}
         </Button>
+        {/* The time scale (Ctrl+scroll over the grid too); a phone keeps its row for the times. */}
+        {bar !== 'phone' ? (
+          <>
+            <Button size="sm" variant="ghost" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} aria-label={tg('zoomOut')} title={tg('zoomOut')} data-testid="guide-zoom-out" />
+            <Button size="sm" variant="ghost" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} aria-label={tg('zoomIn')} title={tg('zoomIn')} data-testid="guide-zoom-in" />
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -1424,18 +1582,23 @@ const GuideToolbar = memo(function GuideToolbar({
 
 /**
  * A channel row's menu (right click on the row, or the context-menu key / Shift+F10 in the grid):
- * play, the archive, multi-view, lists, rename / hide (C2) and the parental lock, as on the Live
- * page. Mounted only while open, so the guide asks for list, edit and lock state on demand.
+ * play, the archive, favorite, multi-view, lists, rename / hide (C2), guide matching and the
+ * parental lock, as on the Live page. Mounted only while open, so the guide asks for favorite,
+ * list, edit and lock state on demand.
  */
 function GuideRowMenu({
   menu,
   kind,
   onPlay,
+  onMapGuide,
+  onToggleFavorite,
   onClose,
 }: {
   menu: { pos: { x: number; y: number }; channel: Channel };
   kind?: SourceKind;
   onPlay(channel: Channel): void;
+  onMapGuide(channel: Channel): void;
+  onToggleFavorite(channel: Channel, wasFavorite: boolean): void;
   onClose(): void;
 }) {
   const { t } = useTranslation('live');
@@ -1452,14 +1615,25 @@ function GuideRowMenu({
     { sourceId: ch.ref.sourceId, contentType: ch.ref.contentType, kind: 'item', targetId: ch.ref.itemId, name },
     { categoryId: ch.categoryId },
   );
+  const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
+  const favorite = !!favorites.data?.some((r) => sameRef(r, ch.ref));
   // F2 and Shift+Delete belong to the Live list; the guide does not bind them, so no key hints here.
   const plain = ({ id, label, icon, disabled, onSelect }: MenuAction): MenuItem => ({ id, label, icon, disabled, onSelect });
   const items: MenuItem[] = [
     { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
     ...(canBrowseArchive(ch, kind) ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref)) }] : []),
+    {
+      id: 'fav',
+      label: favorite ? t('removeFavorite') : t('addFavorite'),
+      icon: <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />,
+      // Until the answer is in, the entry would not know which way it goes.
+      disabled: !favorites.data,
+      onSelect: () => onToggleFavorite(ch, favorite),
+    },
     ...(live ? [plain(multiviewItem)] : []),
     ...(addToListItem ? [plain(addToListItem)] : []),
     ...editItems.map(plain),
+    { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => onMapGuide(ch) },
     ...lockItems.map(plain),
   ];
   return <ContextMenu pos={menu.pos} items={items} label={name} onClose={onClose} />;

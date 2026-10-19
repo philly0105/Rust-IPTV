@@ -12,9 +12,9 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { invalidate } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { rpc } from '@/api/transport';
 import type { Recording, RecordingStatus, Reminder } from '@/api/types';
-import { dateTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
@@ -48,6 +48,7 @@ import {
   useScheduleActions,
   useToast,
   type UpcomingEntry,
+  errorDescription,
 } from '../deps';
 import { PageTitle } from '../components/bits';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -323,7 +324,7 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
       // Stays pending until the refreshed list drops the row.
       await invalidate('reminders.');
     } catch (e) {
-      toast({ variant: 'error', title: t('scheduledCancelFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('scheduledCancelFailed'), description: errorDescription(e) });
       setRemoving(false);
       void invalidate('reminders.');
     }
@@ -381,7 +382,7 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
   const [removing, setRemoving] = useState(false);
   const name = r.title ?? r.channelName;
   // When the recording itself began: a programme joined part-way starts after the programme does.
-  const when = dateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(recordingStartedAt(r));
+  const when = dateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }).format(recordingStartedAt(r));
   const early = stoppedEarly(r);
   const note = recordingNote(r, t);
 
@@ -393,7 +394,7 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
       // Stays pending until the refreshed list drops the row.
       await invalidate('recordings.');
     } catch (e) {
-      toast({ variant: 'error', title: t('scheduledRemoveFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('scheduledRemoveFailed'), description: errorDescription(e) });
       setRemoving(false);
       void invalidate('recordings.');
     }

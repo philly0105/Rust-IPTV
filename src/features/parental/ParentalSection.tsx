@@ -22,7 +22,7 @@ import { rpc, RpcError } from '@/api/transport';
 import type { ContentType, ParentalLock, ParentalLockTarget, ParentalMode, ParentalStatus, Source } from '@/api/types';
 import { SectionError, SectionSkeleton, Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '@/features/settings/components';
 import type { SectionProps } from '@/features/settings/sections/types';
-import { Badge, Button, EmptyState, ErrorState, IconButton, ProgressBar, Select, Skeleton, cn, toast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, IconButton, ProgressBar, Select, Skeleton, cn, toast, errorDescription } from '@/ui';
 
 import { LockGroupsDialog, contentCounts } from './LockGroupsDialog';
 import { PinDialog } from './PinDialog';
@@ -87,7 +87,7 @@ function ParentalSettings({ status }: { status: ParentalStatus }) {
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const close = () => setDialog(null);
 
-  const fail = (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: RpcError.from(err).message });
+  const fail = (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: errorDescription(err) });
 
   const configure = async (patch: ConfigurePatch) => {
     if (busy === 'config') return;

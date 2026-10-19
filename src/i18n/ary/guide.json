@@ -1,6 +1,13 @@
 {
   "shortcutArea": "دليل البرامج",
   "searchLabel": "قلّب فدليل البرامج",
+  "zoomIn": "كبّر",
+  "zoomOut": "صغّر",
+  "viewFavorites": "المفضلة",
+  "viewList": "الليستة: {{name}}",
+  "viewFavoritesEmpty": "ما كاينة حتى قناة مفضلة من هاد المصدر",
+  "viewListEmpty": "ما كاينة حتى قناة من هاد المصدر فهاد الليستة",
+  "viewEmptyHint": "ختار مصدر آخر، ولا زيد قنوات من القائمة ديالها.",
   "searchPlaceholder": "قلّب فالدليل",
   "searchResults": "البحث فالدليل",
   "searchHint": "كتب جوج حروف على الأقل.",

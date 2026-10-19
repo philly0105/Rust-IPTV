@@ -1,10 +1,11 @@
 /**
- * Audio/subtitle delay, the subtitle look and stream info for embedded mpv. Bound by MpvSurface
+ * Audio/subtitle delay, the subtitle look, the picture controls and stream info for embedded mpv. Bound by MpvSurface
  * once `mpv.attach` succeeded (property writes fail before that), and again after a restart.
  */
 
 import { rpc } from '@/api/transport';
 
+import { mpvPictureProperties, usePictureStore, type PictureState } from './picture';
 import { peekSettings, subscribeSettings } from './store';
 import { setStatsProvider } from './streamInfo';
 import { useSyncStore } from './sync';
@@ -57,6 +58,11 @@ export function sendSubtitleStyle(): Promise<void> {
   });
 }
 
+/** Aspect, zoom, crop and deinterlace (picture.ts); one property at a time, like the subtitle look. */
+function sendPicture(p: PictureState): void {
+  for (const prop of mpvPictureProperties(p)) void rpc('mpv.setProperty', prop).catch(() => undefined);
+}
+
 export function bindMpvExtras(): () => void {
   // A fresh session starts at mpv's zero; a restarted one gets the current values back.
   const now = useSyncStore.getState();
@@ -67,6 +73,9 @@ export function bindMpvExtras(): () => void {
     if (s.subMs !== prev.subMs) sendDelay('sub-delay', s.subMs);
   });
   void sendSubtitleStyle();
+  // mpv keeps these across files; a fresh or restarted session gets the current choice.
+  sendPicture(usePictureStore.getState());
+  const unPicture = usePictureStore.subscribe((p) => sendPicture(p));
   let styleKey = subtitleStyleKey();
   const unStyle = subscribeSettings(() => {
     const next = subtitleStyleKey();
@@ -78,6 +87,7 @@ export function bindMpvExtras(): () => void {
   return () => {
     unSync();
     unStyle();
+    unPicture();
     unStats();
   };
 }

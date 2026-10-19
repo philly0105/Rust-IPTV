@@ -13,7 +13,7 @@ import { invalidate, queryClient, rpcKey } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { Download, DownloadStatus } from '@/api/types';
 
-import { useToast } from '../deps';
+import { useToast, errorDescription } from '../deps';
 import type { QueueAction } from '../lib/queue';
 import { usePending } from './useLibraryData';
 
@@ -78,7 +78,7 @@ export function useDownloadActions() {
           const e = RpcError.from(err);
           toast({
             title: t(k('actionFailed', action), { title: d.title }),
-            description: e.code === 'not_found' ? t('notFoundHint') : e.message,
+            description: e.code === 'not_found' ? t('notFoundHint') : errorDescription(e),
             variant: 'error',
             // A timeout or dropped connection may succeed on a second attempt.
             action: e.retryable ? { label: t('tryAgain'), onClick: () => void perform(action, d, opts) } : undefined,

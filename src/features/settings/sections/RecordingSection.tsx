@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { ReminderAction } from '@/api/types';
 import { Select, type SelectOption } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
@@ -19,7 +20,7 @@ export function minuteChoices(choices: readonly number[], current: number): numb
 
 export function RecordingSection({ settings, update }: SectionProps) {
   const { t, i18n } = useTranslation('settings');
-  const minutes = (n: number) => new Intl.NumberFormat(i18n.language, { style: 'unit', unit: 'minute', unitDisplay: 'long' }).format(n);
+  const minutes = (n: number) => new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'minute', unitDisplay: 'long' }).format(n);
   const options = (choices: readonly number[], current: number): SelectOption[] =>
     minuteChoices(choices, current).map((n) => ({ value: String(n), label: minutes(n) }));
   const before = settings.recordingPaddingBeforeMinutes;

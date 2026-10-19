@@ -4,7 +4,7 @@
  */
 
 import { itemKey, sameRef, type ItemRef, type ItemSnapshot, type WatchlistEntry } from '@/api/types';
-import { relativeTimeFormat } from '@/lib/intl';
+import { intlLocale, relativeTimeFormat } from '@/lib/intl';
 
 /** The page's type filter (`?type=`). */
 export type MyListFilter = 'all' | 'movie' | 'series';
@@ -80,7 +80,7 @@ function collator(language: string): Intl.Collator {
   let c = collators.get(language);
   if (!c) {
     try {
-      c = new Intl.Collator(language, { sensitivity: 'base', numeric: true });
+      c = new Intl.Collator(intlLocale(language), { sensitivity: 'base', numeric: true });
     } catch {
       c = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
     }
@@ -201,7 +201,7 @@ export function relativeTime(iso: string, language: string, now = Date.now()): s
   const abs = Math.abs(diff);
   let rtf: Intl.RelativeTimeFormat;
   try {
-    rtf = relativeTimeFormat(language, { numeric: 'auto' });
+    rtf = relativeTimeFormat(intlLocale(language), { numeric: 'auto' });
   } catch {
     rtf = relativeTimeFormat(undefined, { numeric: 'auto' });
   }

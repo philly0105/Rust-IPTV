@@ -24,8 +24,12 @@ import { useZapBannerShown, useZapHover } from './zapHooks';
 const POS_KEY = 'player.mini.pos';
 const MARGIN = 16;
 
+/**
+ * The mini frame's offset from the inline-end edge (right in LTR, left in RTL) and the bottom.
+ * Logical, so in Arabic it docks bottom-left, away from the rail on the right.
+ */
 interface MiniPos {
-  right: number;
+  end: number;
   bottom: number;
 }
 
@@ -33,19 +37,29 @@ function readPos(): MiniPos {
   try {
     const raw = localStorage.getItem(POS_KEY);
     if (raw) {
-      const p = JSON.parse(raw) as Partial<MiniPos>;
-      if (typeof p.right === 'number' && typeof p.bottom === 'number') return { right: p.right, bottom: p.bottom };
+      // `right` is the name builds before the logical dock saved the same offset under.
+      const p = JSON.parse(raw) as Partial<MiniPos> & { right?: unknown };
+      const end = typeof p.end === 'number' ? p.end : p.right;
+      if (typeof end === 'number' && typeof p.bottom === 'number') return { end, bottom: p.bottom };
     }
   } catch {
     // default
   }
-  return { right: MARGIN, bottom: MARGIN };
+  return { end: MARGIN, bottom: MARGIN };
 }
 
 function clampPos(p: MiniPos, w: number, h: number): MiniPos {
-  const maxRight = Math.max(MARGIN, window.innerWidth - w - MARGIN);
+  const maxEnd = Math.max(MARGIN, window.innerWidth - w - MARGIN);
   const maxBottom = Math.max(MARGIN, window.innerHeight - h - MARGIN);
-  return { right: Math.min(maxRight, Math.max(MARGIN, p.right)), bottom: Math.min(maxBottom, Math.max(MARGIN, p.bottom)) };
+  return { end: Math.min(maxEnd, Math.max(MARGIN, p.end)), bottom: Math.min(maxBottom, Math.max(MARGIN, p.bottom)) };
+}
+
+/**
+ * +1 when the inline-end edge is on the right (LTR), -1 when it is on the left (RTL). The frame
+ * takes its direction from <html dir>, which the language setting sets (i18n `syncDocument`).
+ */
+function endSide(): number {
+  return document.documentElement.dir === 'rtl' ? -1 : 1;
 }
 
 /**
@@ -239,7 +253,11 @@ export const PlayerDock = memo(function PlayerDock() {
     const el = miniRef.current;
     if (!d || !el) return;
     setPos(
-      clampPos({ right: d.start.right - (e.clientX - d.x), bottom: d.start.bottom - (e.clientY - d.y) }, el.offsetWidth, el.offsetHeight),
+      clampPos(
+        { end: d.start.end - endSide() * (e.clientX - d.x), bottom: d.start.bottom - (e.clientY - d.y) },
+        el.offsetWidth,
+        el.offsetHeight,
+      ),
     );
   };
   const onDragEnd = (): void => {
@@ -254,7 +272,7 @@ export const PlayerDock = memo(function PlayerDock() {
   const nudge = (dx: number, dy: number): void => {
     const el = miniRef.current;
     if (!el) return;
-    const next = clampPos({ right: pos.right - dx, bottom: pos.bottom - dy }, el.offsetWidth, el.offsetHeight);
+    const next = clampPos({ end: pos.end - endSide() * dx, bottom: pos.bottom - dy }, el.offsetWidth, el.offsetHeight);
     setPos(next);
     try {
       localStorage.setItem(POS_KEY, JSON.stringify(next));
@@ -277,13 +295,17 @@ export const PlayerDock = memo(function PlayerDock() {
         aria-label={t('nowPlaying')}
         // Toasts lift above the docked mini player instead of covering its controls (ui/Toast.tsx).
         data-toast-avoid=""
+        // Focus in here gives Space, the arrows and Page Up/Down to the player (playerOwnsPageKeys).
+        data-player-mini=""
         hidden={!inMini}
         className={cn(
           'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-2',
-          isRadio ? 'w-[min(420px,calc(100vw-32px))]' : 'w-[clamp(280px,26vw,440px)]',
+          // Below sm (a phone) the video frame takes under half the screen's width (190 px at
+          // least), not the 280 px that covered nearly all of a 390 px phone's content column.
+          isRadio ? 'w-[min(420px,calc(100vw-32px))]' : 'w-[max(190px,45vw)] sm:w-[clamp(280px,26vw,440px)]',
           inMini && 'motion-safe:animate-pop-in',
         )}
-        style={{ right: pos.right, bottom: pos.bottom }}
+        style={{ insetInlineEnd: pos.end, bottom: pos.bottom }}
       >
         <div
           className="flex h-9 shrink-0 cursor-grab items-center gap-1.5 border-b border-divider pe-1 ps-2 active:cursor-grabbing"

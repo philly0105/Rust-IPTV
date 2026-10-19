@@ -15,6 +15,8 @@
   "cancel": "Annuleren",
   "closeKeepImporting": "Sluiten, import gaat door",
   "shortcutAddSource": "Een bron toevoegen",
+  "shortcutMoveUp": "Geselecteerde bron omhoog verplaatsen",
+  "shortcutMoveDown": "Geselecteerde bron omlaag verplaatsen",
 
   "kindM3u": "M3U-afspeellijst",
   "kindXtream": "Xtream Codes",
@@ -143,7 +145,10 @@
   "saveFailed": "Kan wijzigingen niet opslaan",
   "refreshNow": "Nu vernieuwen",
   "refresh": "Vernieuwen",
-  "textOriginNotEditable": "Deze afspeellijst is geplakt, dus er is geen adres om te wijzigen. Verwijder hem en voeg hem opnieuw toe om de kanalen te vervangen. De request-headers hieronder gelden nog steeds voor elke stream.",
+  "textOriginReplaceNote": "Deze afspeellijst is geplakt of geüpload, dus er is geen adres om te wijzigen. Plak de nieuwe afspeellijst of kies hieronder een bestand om hem bij te werken. Favorieten, geschiedenis en zenderwijzigingen blijven bij de zenders die er nog in staan. De request-headers hieronder gelden voor elke stream.",
+  "replacePlaylistText": "Nieuwe tekst van afspeellijst",
+  "replacePlaylistTextHint": "Laat leeg om de huidige zenders te houden.",
+  "replacePlaylistFileHint": "Of kies een afspeellijstbestand (.m3u, .m3u8 of .txt). Het vervangt de huidige zenders.",
 
   "epgLinks": "Gidsbronnen",
   "epgLinksHint": "Gids-URL's uit de afspeellijst plus de URL's die je zelf toevoegt. Zet er een uit om hem niet meer op te halen.",
@@ -373,5 +378,9 @@
   "discardedFailedHint": "De eerste import is mislukt. Kies Ongedaan maken om de bron te houden en het opnieuw te proberen vanaf de kaart.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Tijdverschuiving van de gids",
+  "epgShiftHint": "Verschuift elk programma van deze bron zoveel minuten, bovenop de verschuiving in Instellingen. Laat leeg voor geen.",
+  "epgShiftUnit": "minuten",
+  "epgShiftError": "Voer hele minuten in tussen -720 en 720."
 }

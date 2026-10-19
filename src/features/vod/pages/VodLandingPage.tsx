@@ -24,6 +24,7 @@ import { loadSearchPage } from '../routes';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 export function VodLandingPage({ kind }: { kind: VodKind }) {
   const { t, i18n } = useTranslation('vod');
@@ -54,7 +55,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     const sum = shownCats.reduce((n, c) => n + Math.max(0, c.itemCount), 0);
     return sum === 0 && shownCats.length > 0 && source.data.kind === 'stalker' ? sourceCount : sum;
   }, [shownCats, source.data, sourceCount]);
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const countText = visibleCount ? t('titleCount', { count: visibleCount, formatted: fmt.format(visibleCount) }) : undefined;
   const sourceLine = source.data ? (countText ? `${source.data.name} · ${countText}` : source.data.name) : undefined;
 

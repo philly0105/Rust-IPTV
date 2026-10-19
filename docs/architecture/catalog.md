@@ -82,7 +82,7 @@ All of it happens inside the import transaction: readers keep the previous catal
 | `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`, case-insensitive: default, append, shift, xc and flussonic, plus the aliases in `CATCHUP_TYPES` in `catchup/m3u.rs`: timeshift is handled as shift; flussonic-hls, flussonic-ts and fs as flussonic), as does `archive_hours > 0` |
 | `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped); the player merges them over the source-level headers |
 
-The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`. Readers pass unknown keys through untouched.
+The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`, and on the series rows it groups from playlist episodes `episodes`, the stored episode list that `m3u.seriesDetail` and `m3u.streamUrl` read (m3u.md, Series). Readers pass unknown keys through untouched.
 
 ## Reading
 
@@ -114,6 +114,7 @@ Stalker sources are the exception: their VOD and series are not stored, so `upda
   The first four replace the indexes of the same name from 0001, 0006 and 0013. Rating, year and added sort descending by default with NULLs last, the natural order of a DESC index. Since 2026-10-19 the file itself creates only `idx_items_cat` and drops the old `idx_items_title`, `idx_items_pos` and `idx_items_year`; the five sort indexes are built once, by 0019 (an upgrade from schema 17 used to build each twice, DB-6 in the performance audit). Migrations are tracked by version, never re-run or hashed, so a database that ran the old file is unaffected.
 - 0019 (`0019_guide_search_speed.sql`): recreates the five sort indexes with the rating and the year after the verdict (`idx_items_added_src`, `idx_items_title` and `idx_items_pos` gain both, `idx_items_rating` gains the year, `idx_items_year` the rating), so a page with a minimum rating or a year range reads index entries, not table rows (about 12 ms or less in every measured case, against up to 140 ms on a deep page of 100k movies). It also adds `idx_items_guide` and `epg_search_rows` for the guide search (guide-search.md).
 - 0020 (`0020_search_rank.sql`): `items_rank`, one narrow row per item (`id` is the item's rowid) with `source_id`, `content_type`, `category_id`, `non_english`, `title_len` (`length(title)`) and `position`, filled from `items` in the migration and kept in step by suspend-aware insert and delete triggers and an update trigger on the copied columns (see FTS during bulk writes). The search ranks on it (see Reading). It adds about 15 MB per 220k items; the upgrade copies 220k rows in about 0.14 s (`migration_perf.rs`).
+- 0021 (`0021_epg_channel_shift.sql`): `epg_channel_shift`, a channel's own guide shift in minutes, keyed like `epg_channel_map` (epg.md).
 
 ## rpc
 

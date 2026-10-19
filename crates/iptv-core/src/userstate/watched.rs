@@ -121,7 +121,8 @@ fn all_watched(conn: &Connection, r: &ItemRef, ids: &[String]) -> CoreResult<boo
 
 /// Every episode id the provider lists for series `r` (a source of `kind`),
 /// from the in-memory series cache when it has it, else from the provider
-/// within [`EPISODE_LIST_TIMEOUT`]. `None` when unknown.
+/// within [`EPISODE_LIST_TIMEOUT`]; for an m3u source, from the series row.
+/// `None` when unknown.
 async fn episode_ids(
     state: &Arc<AppState>,
     r: &ItemRef,
@@ -157,6 +158,8 @@ async fn episode_ids(
             .ok()?
             .seasons
         }
+        // The importer stored the episodes in the series row.
+        "m3u" => crate::m3u::series::series_detail(state, r).await.ok()?.seasons,
         _ => return None,
     };
     let ids: Vec<String> = seasons

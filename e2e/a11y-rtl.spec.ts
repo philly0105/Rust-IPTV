@@ -1,22 +1,24 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page, Request } from '@playwright/test';
 
-import type { Settings } from '../src/api/types';
+import type { Channel, CustomList, Page as RpcPage, Settings } from '../src/api/types';
 import { ensureSource, rpc } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
 import { settle } from './helpers/layout';
 
 // SC5: zero serious or critical axe violations on every route, in English
-// (LTR) and in Arabic (dir=rtl). The layout checks at 800x600 and 2560x1440
+// (LTR) and in Arabic (dir=rtl), a custom list page and watch stats included. The layout checks at 800x600 and 2560x1440
 // stay in a11y.spec.ts; this spec walks every routed page once per direction
 // at the default 1280x800, then every settings section again at 1440x900.
 
 const NAME = 'Axe Xtream';
+const LIST = 'Axe list';
 
-const SETTINGS_SECTIONS = ['general', 'playback', 'players', 'epg', 'recording', 'metadata', 'appearance', 'parental', 'remote', 'backup', 'shortcuts', 'about'];
+// Every section the browser shows: External players ('players') is desktop only.
+const SETTINGS_SECTIONS = ['general', 'playback', 'epg', 'recording', 'metadata', 'appearance', 'parental', 'remote', 'backup', 'shortcuts', 'about'];
 
-function routes(id: string): string[] {
+function routes(id: string, listId: string): string[] {
   return [
     '/dashboard',
     '/sources',
@@ -29,6 +31,8 @@ function routes(id: string): string[] {
     '/epg',
     '/my-list',
     '/multiview',
+    `/lists/${listId}`,
+    '/stats',
     `/s/${id}/live`,
     `/s/${id}/radio`,
     `/s/${id}/favorites`,
@@ -95,9 +99,19 @@ async function setLanguage(page: Page, language: string): Promise<void> {
 
 test.describe.serial('axe on every route, LTR and RTL', () => {
   let sourceId: string;
+  let listId: string;
 
   test.beforeAll(async ({ request }) => {
     sourceId = (await ensureSource(request, 'xtream', NAME)).id;
+    // A custom list of three channels for /lists/:id, made afresh so a rerun finds one copy.
+    const first = await rpc<RpcPage<Channel>>(request, 'catalog.channels', { sourceId, query: { offset: 0, limit: 3, sort: 'number', dir: 'asc' } });
+    for (const l of await rpc<CustomList[]>(request, 'lists.list')) if (l.name === LIST) await rpc(request, 'lists.remove', { id: l.id });
+    listId = (
+      await rpc<CustomList>(request, 'lists.create', {
+        name: LIST,
+        items: first.items.map((c) => ({ ref: c.ref, snapshot: { title: c.name, contentType: c.ref.contentType } })),
+      })
+    ).id;
   });
 
   test.afterAll(async ({ request }) => {
@@ -113,7 +127,7 @@ test.describe.serial('axe on every route, LTR and RTL', () => {
       await setLanguage(page, lang.code);
       const images = trackImages(page);
       const failures: string[] = [];
-      for (const path of routes(sourceId)) {
+      for (const path of routes(sourceId, listId)) {
         await page.goto(path);
         await expect(page.locator('html')).toHaveAttribute('dir', lang.dir);
         await expect(page.locator('html')).toHaveAttribute('lang', lang.bcp47);

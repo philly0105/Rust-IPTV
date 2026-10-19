@@ -15,6 +15,7 @@ import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/qu
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } from '@/api/types';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
+import { addSourcePathFromDeepLink } from '@/features/sources/lib/links';
 import { applyLanguage, languageUnresolved } from '@/i18n';
 // Not sources/lib/files or format: those whole modules would land in the entry chunk.
 import { formatCount, formatFileSize } from '@/lib/numbers';
@@ -45,17 +46,17 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
   'account.changed': ['account.'],
 };
 
-/** Maps an `iptv://` URL to an in-app path, or null when unsupported. */
+/**
+ * Maps an `iptv://` URL to an in-app path, or null when unsupported. Add links
+ * (`iptv://add?url=...&kind=...`, `iptv://add/<url>`) go through the Sources
+ * feature's parser, which keeps the kind and allows http(s) targets only.
+ */
 export function deepLinkToPath(raw: string): string | null {
   const m = /^iptv:\/*([^/?#]+)\/?(\?[^#]*)?/i.exec(raw.trim());
   if (!m) return null;
   const action = m[1]!.toLowerCase();
   const params = new URLSearchParams(m[2] ?? '');
-  if (action === 'add') {
-    const url = params.get('url');
-    if (!url) return '/sources?add=1';
-    return `/sources?add=${encodeURIComponent(url)}`;
-  }
+  if (action === 'add') return addSourcePathFromDeepLink(raw.trim());
   if (action === 'search') {
     const q = params.get('q');
     return q ? `/search?q=${encodeURIComponent(q)}` : '/search';

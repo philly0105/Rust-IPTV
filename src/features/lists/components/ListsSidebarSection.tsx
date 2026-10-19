@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { Button, IconButton, Skeleton, cn, useRowHeight } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 import { useLists } from '../hooks/useLists';
 import { listPath } from '../paths';
 import { openCreateList, openManageLists } from '../store';
@@ -46,7 +47,7 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
   const { t: tc } = useTranslation('common');
   const lists = useLists();
   const rowHeight = useRowHeight(ROW, ROW_SPACING);
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const headingId = useId();
   const bodyId = useId();
   const isPage = variant === 'page';

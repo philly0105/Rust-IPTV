@@ -5,10 +5,10 @@ import { useTranslation } from 'react-i18next';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
-import { RpcError, rpc, rpcRaw } from '@/api/transport';
+import { rpc, rpcRaw } from '@/api/transport';
 import type { EpgProgressEvent, EpgSourceStatus, EpgViewMode, Settings } from '@/api/types';
 
-import { Badge, Button, Dialog, ErrorState, IconButton, Input, SkeletonList, useToast } from '@/ui';
+import { Badge, Button, Dialog, ErrorState, IconButton, Input, SkeletonList, useToast, errorDescription } from '@/ui';
 import { absoluteTime, formatCount, relativeTime } from '../../sources/lib/format';
 import { redactText, redactUrl } from '../../sources/lib/redact';
 import { CommitInput, Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
@@ -104,7 +104,7 @@ export function EpgSection({ settings, update }: SectionProps) {
       await rpc('epg.refresh', url ? { url } : {});
       void invalidate('epg.sources');
     } catch (e) {
-      toast({ variant: 'error', title: t('epgRefreshFailed'), description: redactText(RpcError.from(e).message) });
+      toast({ variant: 'error', title: t('epgRefreshFailed'), description: errorDescription(e, redactText) });
     }
   };
 
@@ -113,7 +113,7 @@ export function EpgSection({ settings, update }: SectionProps) {
       await rpc('epg.setEnabled', { url, enabled });
       await Promise.all([invalidate('epg.'), invalidate('sources.')]);
     } catch (e) {
-      toast({ variant: 'error', title: t('saveFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('saveFailed'), description: errorDescription(e) });
     }
   };
 
@@ -126,7 +126,7 @@ export function EpgSection({ settings, update }: SectionProps) {
       toast({ variant: 'success', title: t('epgClearDone') });
       await Promise.all([invalidate('epg.'), invalidate('sources.')]);
     } catch (e) {
-      toast({ variant: 'error', title: t('epgClearFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('epgClearFailed'), description: errorDescription(e) });
     } finally {
       setClearing(false);
     }

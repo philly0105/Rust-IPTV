@@ -8,12 +8,13 @@ use crate::rpc::RpcRouter;
 use serde::{Deserialize, Serialize};
 
 /// Every command this module registers.
-pub const COMMANDS: [&str; 9] = [
+pub const COMMANDS: [&str; 10] = [
     "remote.start",
     "remote.stop",
     "remote.status",
     "remote.reportStatus",
     "remote.publishChannels",
+    "remote.publishSource",
     // remote: LAN pairing (desktop only; `unsupported` in server mode)
     "remote.pairingCode",
     "remote.devices",
@@ -36,6 +37,12 @@ struct ReportStatusArgs {
 #[serde(rename_all = "camelCase")]
 struct PublishChannelsArgs {
     channels: Vec<RemoteChannel>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishSourceArgs {
+    source_id: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -74,6 +81,14 @@ pub fn register(r: &mut RpcRouter) {
         |state, args: PublishChannelsArgs| async move {
             super::hub(&state).set_channels(args.channels);
             Ok(())
+        },
+    );
+    r.add(
+        "remote.publishSource",
+        |state, args: PublishSourceArgs| async move {
+            super::publish_source(&state, &args.source_id)
+                .await
+                .map_err(RpcError::from)
         },
     );
     r.add(

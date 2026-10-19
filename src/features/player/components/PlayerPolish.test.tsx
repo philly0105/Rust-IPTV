@@ -60,7 +60,7 @@ afterEach(() => {
 
 describe('arrow-key seek readout', () => {
   it('shows the step and the new position for VOD', () => {
-    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 100, durationSeconds: 600 }));
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', dock: 'stage', positionSeconds: 100, durationSeconds: 600 }));
     render(<Shortcuts />);
     key('ArrowRight');
     expect(usePlayerStore.getState().positionSeconds).toBe(100 + SEEK_STEP);
@@ -71,7 +71,7 @@ describe('arrow-key seek readout', () => {
 
   it('reads live rewind as time behind live', () => {
     act(() => {
-      usePlayerStore.setState({ source: live, mode: 'inline', status: 'playing', positionSeconds: 1000, durationSeconds: undefined });
+      usePlayerStore.setState({ source: live, mode: 'inline', status: 'playing', dock: 'stage', positionSeconds: 1000, durationSeconds: undefined });
       useMediaStore.setState({ seekable: { start: 900, end: 1060 } });
     });
     render(<Shortcuts />);
@@ -84,6 +84,48 @@ describe('arrow-key seek readout', () => {
     render(<Shortcuts />);
     key('ArrowLeft');
     expect(useMediaStore.getState().osd).toBeUndefined();
+  });
+});
+
+describe('page keys while the player is only the mini dock', () => {
+  const press = (target: EventTarget, k: string): KeyboardEvent => {
+    const e = new KeyboardEvent('keydown', { key: k, code: k === ' ' ? 'Space' : '', bubbles: true, cancelable: true });
+    act(() => {
+      target.dispatchEvent(e);
+    });
+    return e;
+  };
+
+  it('leaves Space, the arrows and Page Up/Down to the page; letters still work', () => {
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', dock: 'mini', positionSeconds: 100, durationSeconds: 600, volume: 0.5 }));
+    render(<Shortcuts />);
+    for (const k of [' ', 'ArrowRight', 'ArrowUp', 'PageDown']) expect(press(document.body, k).defaultPrevented, k).toBe(false);
+    expect(usePlayerStore.getState().status).toBe('playing');
+    expect(usePlayerStore.getState().positionSeconds).toBe(100);
+    expect(usePlayerStore.getState().volume).toBe(0.5);
+    key('m');
+    expect(usePlayerStore.getState().muted).toBe(true);
+  });
+
+  it('keeps them with focus inside the mini player, and when the player is expanded or fullscreen', () => {
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', dock: 'mini', positionSeconds: 100, durationSeconds: 600 }));
+    render(<Shortcuts />);
+    const mini = document.createElement('div');
+    mini.dataset['playerMini'] = '';
+    const inside = document.createElement('div');
+    inside.tabIndex = 0;
+    mini.appendChild(inside);
+    document.body.appendChild(mini);
+    expect(press(inside, 'ArrowRight').defaultPrevented).toBe(true);
+    expect(usePlayerStore.getState().positionSeconds).toBe(100 + SEEK_STEP);
+    mini.remove();
+
+    act(() => usePlayerStore.setState({ isFullscreen: true }));
+    press(document.body, 'ArrowRight');
+    expect(usePlayerStore.getState().positionSeconds).toBe(100 + 2 * SEEK_STEP);
+    act(() => usePlayerStore.setState({ isFullscreen: false, dock: 'stage' }));
+    press(document.body, ' ');
+    expect(usePlayerStore.getState().status).toBe('paused');
   });
 });
 
@@ -114,7 +156,7 @@ describe('held keys', () => {
 
 describe('large seek and next-item keys', () => {
   it('Shift+arrows seek 30 s', () => {
-    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 100, durationSeconds: 600 }));
+    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', dock: 'stage', positionSeconds: 100, durationSeconds: 600 }));
     render(<Shortcuts />);
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
@@ -346,6 +388,36 @@ describe('clicks on the DOM video', () => {
     fireEvent.click(surface(), { detail: 1 });
     expect(ctl.pause).toHaveBeenCalledTimes(1);
     expect(usePlayerStore.getState().isFullscreen).toBe(false);
+  });
+
+  it('a tap toggles the controls and never pauses; a mouse click still does', () => {
+    const hidden = (): boolean => document.querySelector('[data-player-controls]')!.className.includes('opacity-0');
+    const tap = (): void => {
+      fireEvent.pointerDown(surface(), { pointerType: 'touch' });
+      fireEvent.click(surface(), { detail: 1 });
+    };
+    expect(hidden()).toBe(false);
+    tap();
+    expect(hidden()).toBe(true);
+    tap();
+    expect(hidden()).toBe(false);
+    expect(ctl.pause).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().isFullscreen).toBe(false);
+
+    fireEvent.pointerDown(surface(), { pointerType: 'mouse' });
+    fireEvent.click(surface(), { detail: 1 });
+    expect(ctl.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it('a double tap still goes fullscreen', () => {
+    fireEvent.pointerDown(surface(), { pointerType: 'touch' });
+    fireEvent.click(surface(), { detail: 1 });
+    fireEvent.pointerDown(surface(), { pointerType: 'touch' });
+    fireEvent.click(surface(), { detail: 2 });
+    fireEvent.doubleClick(surface(), { detail: 2 });
+    expect(ctl.pause).not.toHaveBeenCalled();
+    expect(ctl.play).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().isFullscreen).toBe(true);
   });
 
   it('a slow (350 ms) double click goes fullscreen and keeps playing', () => {
@@ -627,5 +699,39 @@ describe('toasts and the docked mini player (L3-player-ui-x1)', () => {
     const section = showToastBesideDock();
     expect(screen.queryByRole('region', { name: 'Now playing' })).toBeNull();
     expect(section?.hasAttribute('data-clearing')).toBe(false);
+  });
+});
+
+describe('the mini dock in right-to-left layouts', () => {
+  afterEach(() => {
+    document.documentElement.dir = 'ltr';
+    localStorage.removeItem('player.mini.pos');
+  });
+
+  const dragHandle = () => screen.getByRole('button', { name: 'Drag to move the player' });
+  const saved = () => JSON.parse(localStorage.getItem('player.mini.pos') ?? 'null') as unknown;
+
+  it('keeps an offset saved under the old `right` name and moves it from the inline-end edge', () => {
+    localStorage.setItem('player.mini.pos', JSON.stringify({ right: 40, bottom: 30 }));
+    act(() => usePlayerStore.setState({ source: vod as never, mode: 'inline', status: 'playing', dock: 'mini' }));
+    render(<PlayerDock />);
+    fireEvent.keyDown(dragHandle(), { key: 'ArrowLeft' });
+    // LTR: the inline-end edge is the right one, so Left moves away from it.
+    expect(saved()).toEqual({ end: 56, bottom: 30 });
+  });
+
+  it('in RTL the frame docks at the left (inline-end) edge, so the arrows move it the other way', () => {
+    document.documentElement.dir = 'rtl';
+    localStorage.setItem('player.mini.pos', JSON.stringify({ end: 40, bottom: 30 }));
+    act(() => usePlayerStore.setState({ source: vod as never, mode: 'inline', status: 'playing', dock: 'mini' }));
+    render(<PlayerDock />);
+    const mini = screen.getByRole('region', { name: 'Now playing' });
+    // Logical, not `right`: the browser puts it on the left in RTL, clear of the rail.
+    expect(mini.getAttribute('style')).toContain('inset-inline-end: 40px');
+    expect(mini.style.right).toBe('');
+    fireEvent.keyDown(dragHandle(), { key: 'ArrowLeft' });
+    expect(saved()).toEqual({ end: 24, bottom: 30 });
+    fireEvent.keyDown(dragHandle(), { key: 'ArrowRight', shiftKey: true });
+    expect(saved()).toEqual({ end: 88, bottom: 30 });
   });
 });

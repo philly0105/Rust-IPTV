@@ -290,6 +290,14 @@ Publish the port on loopback or put an authenticating reverse proxy in front.
 runs it as uid 10001 under `tini`, with `VOLUME /data`, `EXPOSE 7180` and a
 `HEALTHCHECK` that runs `iptv-server --health`. Set `IPTV_ALLOWED_HOSTS` when
 the app is reached under a host name other than localhost or an IP address.
+The runtime stage also installs Debian's `mpv` package (found on `PATH`), so
+scheduled and series recordings work in the container; recordings go to
+`/data/downloads/recordings`. Server mode uses mpv only for recording, never
+for playback. It makes the image larger; an image built without it hides
+Record (see recording.md). The remote control server listens on the
+container's own 127.0.0.1 only, and server mode has no LAN pairing, so the
+remote page cannot be reached from outside the container; publishing its
+port does not change that (remote-control.md).
 
 ```
 docker build -t tsrust-iptv .

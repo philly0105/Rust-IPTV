@@ -36,12 +36,18 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { RpcError } from '@/api/transport';
+import { isDesktop } from '@/api/transport';
 import { itemKey, type ContentType, type ItemRef, type ItemSnapshot } from '@/api/types';
+// Light modules only (no guide page): programme hits and the guide link they open.
+import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
+import { useDebounced } from '@/features/live/hooks/useDebounced';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
+import { displayChannelName } from '@/features/live/lib/channelName';
+import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
-import { cn, Dialog, Kbd, toast } from '@/ui';
+import { cn, Dialog, Kbd, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { railLinks } from './railLinks';
@@ -188,12 +194,50 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
                   playItem({ ref, title, posterUrl: snapshot.posterUrl, isLive: true, isRadio: ref.contentType === 'radio', sourceKind: source.kind }),
                 )
                 .catch((err: unknown) =>
-                  toast({ variant: 'error', title: t('playFailed', { title }), description: err instanceof Error ? err.message : undefined }),
+                  toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }),
                 )
           : () => void navigate(`/s/${sid}/${ref.contentType}/${iid}`),
       };
     });
   }, [q, sources.data, favorites.data, recent.data, t, navigate]);
+}
+
+/** Most guide programmes the palette lists for one query. */
+const PROGRAMME_LIMIT = 5;
+
+/**
+ * Guide programmes whose titles match the query (`epg.search` of each source, after a pause in
+ * typing, only while the palette is open). One opens the guide at the programme.
+ */
+function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
+  const { t, i18n } = useTranslation('shell');
+  const navigate = useNavigate();
+  const sources = useVisibleSources();
+  const prefs = useDisplayPrefs();
+  const debounced = useDebounced(query.trim(), 200);
+  const ids = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
+  const { hits } = useProgrammeSearch(ids, debounced, { enabled: open, limit: PROGRAMME_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
+
+  return useMemo(() => {
+    if (!query.trim()) return [];
+    const group = t('groupProgrammes');
+    const lang = i18n.language;
+    return hits.map((hit): PaletteItem => {
+      const at = ms(hit.program.start);
+      const link = guideHitLink(hit);
+      return {
+        id: `programme.${itemKey(hit.ref)}@${at}`,
+        title: hit.program.title,
+        group,
+        icon: CalendarRange,
+        detail: [`${formatDay(at, lang)} ${formatClock(at, lang)}`, displayChannelName(hit.channelName, prefs.stripCountryPrefix)],
+        // The core matched the title with diacritics folded ("cafe" finds "Café"), which the
+        // palette's own filter does not: the typed words count as its keywords.
+        keywords: [debounced],
+        run: () => void navigate(link.to, { state: link.state }),
+      };
+    });
+  }, [query, hits, debounced, prefs.stripCountryPrefix, t, i18n.language, navigate]);
 }
 
 /**
@@ -277,12 +321,14 @@ export function usePaletteItems(): PaletteItem[] {
         run: () =>
           void lockNow().then(
             () => toast({ variant: 'success', title: t('parental:lockedNowToast') }),
-            (err: unknown) => toast({ variant: 'error', title: t('parental:saveFailed'), description: RpcError.from(err).message }),
+            (err: unknown) => toast({ variant: 'error', title: t('parental:saveFailed'), description: errorDescription(err) }),
           ),
       });
     }
     const en = i18n.getFixedT('en', 'shell');
     for (const section of SETTINGS_SECTIONS) {
+      // External players run only in the desktop app; the browser's settings page has no such section.
+      if (section === 'players' && !isDesktop) continue;
       const key = `settings${section[0]!.toUpperCase()}${section.slice(1)}`;
       items.push({
         id: `settings.${section}`,
@@ -309,6 +355,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const content = useContentItems(query, open);
+  const programmes = useProgrammeItems(query, open);
   // Every way of closing (Esc, the scrim, Ctrl+K again, Back) leaves the next open empty: the
   // query resets as the palette opens, during render, so no frame shows the old filter.
   const [wasOpen, setWasOpen] = useState(open);
@@ -320,13 +367,13 @@ export function CommandPalette() {
   // Favourites and recent items lead: a tie with a command goes to the content.
   const groups = useMemo(() => {
     const map = new Map<string, PaletteItem[]>();
-    for (const it of [...content, ...items]) {
+    for (const it of [...content, ...programmes, ...items]) {
       const list = map.get(it.group) ?? [];
       list.push(it);
       map.set(it.group, list);
     }
     return [...map.entries()];
-  }, [content, items]);
+  }, [content, programmes, items]);
 
   // cmdk 1.1 sorts items inside a group but never moves the groups themselves (it looks a
   // group up by its value while tracking it by an internal id), so "Go to" always led. Order

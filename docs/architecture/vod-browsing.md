@@ -10,7 +10,7 @@ A movie or series is watched when it has an item-level row in `playback_position
 
 - A movie gets the row when playback finishes it (a save at 95 % of the duration or later) or when someone marks it watched.
 - A movie keeps it while it is played again. The player's saves during a replay store the new position but leave `watched = 1`, so the tick stays, Hide watched keeps the film out, and it does not come back into Continue Watching. A replay stopped between 5% and 95% of the duration is still a resume point: the player resumes there and the movie page offers Resume and Start over beside the watched mark (`isWatchedReplay` in the player store, used by `isResumable`). Under 5% the next play starts over; at 95% the film is finished again. An episode works the other way: a save past 5 s clears its flag, so a rewatched episode becomes the series' place to resume. Only unmarking clears a movie's flag.
-- A series gets the row from "Mark series watched" (`userstate.setWatched` without an episode id), and also when an episode write leaves every episode the provider lists watched (`watched::sync_series_mark`, the same rule as the detail page's `seriesWatchedWrite`). The core checks after a live `positions.set` that finishes an episode and after a `userstate.setWatched` episode mark, so finishing the last episode in the player or marking it from Recently watched counts too. The episode list comes from the Xtream series cache, else from the provider within 4 s (Stalker always asks the portal). When the list is unknown (an m3u source, the provider down or too slow), or the write is a dated undo or restore, nothing changes. Unmarking any episode clears the series row.
+- A series gets the row from "Mark series watched" (`userstate.setWatched` without an episode id), and also when an episode write leaves every episode the provider lists watched (`watched::sync_series_mark`, the same rule as the detail page's `seriesWatchedWrite`). The core checks after a live `positions.set` that finishes an episode and after a `userstate.setWatched` episode mark, so finishing the last episode in the player or marking it from Recently watched counts too. The episode list comes from the Xtream series cache, else from the provider within 4 s (Stalker always asks the portal); an m3u series has it in its row (m3u.md, Series). When the list is unknown (the provider down or too slow), or the write is a dated undo or restore, nothing changes. Unmarking any episode clears the series row.
 - Unmarking deletes the row (`set_watched(.., false)` removes the position), so the resume point goes too. The grid's Undo toast restores the captured rows.
 
 ## Core
@@ -82,7 +82,11 @@ When the grid comes back empty, the reason is checked in this order: the rating 
 
 ### Series detail
 
-The hero actions include a series-level `WatchedButton` (labels `markSeriesWatched` / `markSeriesUnwatched`). It writes the item-level row, and the page reads it back from `positions.forSeries`. The season button is separate and still marks episodes.
+The hero actions include a series-level `WatchedButton` (labels `markSeriesWatched` / `markSeriesUnwatched`). It writes the item-level row, and the page reads it back from `positions.forSeries`. The season button is separate and still marks episodes. Next to it, Download season queues every episode of the selected season that has no download yet, or only a failed, cancelled or missing one (downloads.md).
+
+### Preferred source
+
+A movie that other sources carry too (`catalog.sameTitle`) has an Other sources dialog, where one copy can be pinned so Play uses it. Pins are kept by the core in `vod_source_pins`, one per title match key (`matchKey` in `src/features/vod/lib/pins.ts`: the normalized title base plus the year), through `sourcePins.get`, `sourcePins.set` and `sourcePins.clear` (`useSourcePin`). Backups export and import the table (backup.md). Builds before these commands kept pins in localStorage (`vod.sourcePins.v1`); the first pin read of a page load moves them into the core (`migrateLocalPins`): a key the core already has keeps its pin, a pin whose source is gone is dropped, and the local copy is deleted once nothing is left to retry.
 
 ## Bundle budget
 

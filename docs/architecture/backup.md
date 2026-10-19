@@ -28,18 +28,19 @@ One entry per source, in `sources.list` order. Common fields: `portalType`, `exp
   - `favorites`: channel URLs, in favorite order.
   - `recentlyViewed`: `{source:'m3u', id, url, title, category_id:'live', added_at, poster_url?, tvg_id?, group_title?}`.
   - `hiddenGroupTitles`: names of hidden categories.
-- xtream: `connection {serverUrl, username, password?}`. User state:
+- xtream: `connection {serverUrl, username, password?, userAgent?, referrer?, origin?}`. The three headers are a Tsrust extension, named as in the Stalker connection, written only when the source sets them and read back on import. User state:
   - `hiddenCategories {categoryType: live|movies|series, xtreamId}`.
   - `favorites {contentType: live|movie|series, xtreamId, addedAt, position}`.
   - `recentlyViewed {contentType, xtreamId, viewedAt}`.
   - `playbackPositions`: `vod` for movies, and `episode` with `seriesXtreamId` plus `seasonNumber`/`episodeNumber` when known. A watched row adds `watched: true` (Tsrust extension). Unwatched rows leave the key out, so they keep the old app's exact shape.
-  - `sourcePins {matchKey, contentId, updatedAt}`.
+  - `sourcePins {matchKey, contentId, updatedAt}`: the source's rows of `vod_source_pins`, which the app writes through `sourcePins.*` when a title is pinned in Other sources (vod-browsing.md). Pins to copies on M3U or Stalker sources are not exported (the format holds numeric Xtream ids only).
   - Ids that are not numeric are left out, since the old format requires numbers.
 - stalker: `connection {portalUrl, macAddress, isFullStalkerPortal, username?, userAgent?, referrer?, origin?, stalkerSerialNumber?, stalkerDeviceId1?, stalkerDeviceId2?, password?, stalkerSignature1?, stalkerSignature2?}`. `favorites` and `recentlyViewed` are `StalkerPortalItem`s: the original portal object when the row came from a backup (kept as `portalItem` in the snapshot), otherwise a minimal `{id, name, title, type, category_id, logo/cover, added_at}`.
 
 Tsrust extensions in an entry's `userState` (`backup::EXT_*`). Export writes each key only when it has data, IPTVnator ignores unknown keys, and backups without them import as before:
 
 - `tsrustEpgMappings` (every kind): manual EPG mappings `[{contentType, itemId, epgChannelId}]`; `epgChannelId: null` means explicitly unmapped. On import a mapping the source already has for the item is kept.
+- `tsrustEpgShifts` (every kind): per-channel guide shifts `[{contentType, itemId, shiftMinutes}]` (`epg.setChannelShift`). On import a shift the source already has for the item is kept, and a zero or out-of-range shift (beyond 720 minutes either way) is skipped. The source-level guide shift (`EpgLinks.shiftMinutes`) is not in backups, like the rest of the source's EPG links.
 - `tsrustPlaybackPositions` (M3U and Stalker; Xtream uses `playbackPositions`): `[{contentType, itemId, episodeId?, positionSeconds, durationSeconds?, updatedAt, watched?, snapshot?}]` by catalog id. Import follows the same rules as the IPTVnator positions: dated rows only replace older ones, undated rows only fill gaps. M3U rows need the item in the local catalog; Stalker VOD is not stored locally, so its rows apply as they are.
 - `tsrustHiddenCategories` (Stalker): `[{contentType, categoryId}]`.
 - `tsrustParentalLocks` (every kind): the source's parental locks `[{contentType, kind, targetId, name, createdAt}]`. Import adds them to the source the entry went into (existing locks stay, no PIN needed, as with `parental.setLocked`), even when its catalog did not load; unreadable rows are skipped with a warning. Never PIN material. Details in [parental.md](parental.md#backup).
@@ -114,6 +115,7 @@ Every other settings field is in `backup::APP_SETTING_EXCLUDED` with its reason,
 | `liveFailover`, `streamReconnect` | Describe this machine's playback setup. |
 | `imageCacheMaxMb` | Sizes this machine's disk cache. |
 | `tourCompleted`, `lastSeenVersion` | Record what this install has shown. |
+| `windowStart` | How this machine's screen opens the window. |
 
 The remote pairing token is a secret and never appears in a backup.
 

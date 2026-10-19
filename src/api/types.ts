@@ -49,6 +49,8 @@ export interface XtreamSourceConfig {
   serverUrl: string;
   username: string;
   password: string;
+  /** Sent with every panel request; without a User-Agent the core sends VLC's. */
+  headers?: RequestHeaders;
 }
 
 export interface StalkerSourceConfig {
@@ -69,6 +71,8 @@ export interface EpgLinks {
   detectedUrls: string[];
   manualUrls: string[];
   disabledUrls: string[];
+  /** Guide time shift of every channel of the source, in minutes (-720..720); absent = none. A patch with 0 removes it. */
+  shiftMinutes?: number;
 }
 
 export interface Source {
@@ -160,6 +164,11 @@ export interface Channel {
   headers?: RequestHeaders;
   /** m3u catch-up attributes. */
   catchup?: CatchupInfo;
+  /**
+   * m3u ClearKey licence from `#KODIPROP` (`inputstream.adaptive.license_key` with
+   * `license_type=clearkey`) as written: kid:key pairs, a JSON key map or JWK set, or a URL.
+   */
+  clearKey?: string;
 }
 
 /**
@@ -322,6 +331,13 @@ export interface ItemSnapshot {
   contentType: ContentType;
 }
 
+/** `sourcePins.*`: the copy of a title Play uses when several sources carry it. */
+export interface SourcePin {
+  sourceId: string;
+  itemId: string;
+  updatedAt: string;
+}
+
 export interface PlaybackPosition {
   ref: ItemRef;
   episodeId?: string;
@@ -392,12 +408,24 @@ export interface PlayerSource {
   resumeSeconds?: number;
   isLive: boolean;
   isRadio: boolean;
+  /** ClearKey DRM (UI only; the core never sets it). Such a source plays in the built-in player. */
+  drm?: PlayerDrm;
+}
+
+/** ClearKey for shaka (`drm.clearKeys` / `drm.servers['org.w3.clearkey']`). */
+export interface PlayerDrm {
+  /** Hex key id to hex key. */
+  clearKeys?: Record<string, string>;
+  /** ClearKey licence server URL. */
+  licenseServer?: string;
 }
 
 export type VideoPlayer = 'html5' | 'videojs' | 'embedded-mpv' | 'mpv' | 'vlc';
 export type StreamFormat = 'm3u8' | 'ts';
 export type Theme = 'light' | 'dark' | 'system';
 export type StartupBehavior = 'first-view' | 'restore-last-view';
+/** How the desktop window opens (`settings.windowStart`): as it closed, maximized or fullscreen. */
+export type WindowStart = 'normal' | 'maximized' | 'fullscreen';
 export type EpgViewMode = 'timeline' | 'list';
 export type CoverSize = 'small' | 'medium' | 'large';
 // appearance:
@@ -595,6 +623,9 @@ export interface Settings {
    * `[0-9A-Za-z.+-]` (`LAST_SEEN_VERSION_MAX_LENGTH`). `settings.reset` keeps it.
    */
   lastSeenVersion: string;
+  // desktop (machine-local: never in backups).
+  /** How the desktop window opens, applied when it is first shown. The browser ignores it. */
+  windowStart: WindowStart;
 }
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
@@ -671,6 +702,8 @@ export const DEFAULT_SETTINGS: Settings = {
   imageCacheMaxMb: 500,
   tourCompleted: false,
   lastSeenVersion: '',
+  // desktop:
+  windowStart: 'normal',
 };
 
 export interface WindowState {
@@ -794,7 +827,10 @@ export type RemoteCommand =
   | 'volumeUp'
   | 'volumeDown'
   | 'mute'
-  | 'setVolume';
+  | 'setVolume'
+  | 'togglePlay'
+  | 'stop'
+  | 'seekBy';
 
 // ---------------------------------------------------------------------------
 // TMDB (C4 tmdb). Images: w500 posters, w1280 backdrops.
@@ -958,6 +994,8 @@ export interface RemoteCommandEvent {
   number?: number;
   id?: string;
   level?: number;
+  /** `seekBy`: seconds from the current position (negative: back). */
+  seconds?: number;
 }
 
 export interface PlayerExternalEvent {
@@ -1040,6 +1078,8 @@ export interface AppEventMap {
   'lists.changed': EmptyEvent;
   /** After every channel edit (rename, hide, restore). */
   'channels.changed': ChannelsChangedEvent;
+  /** A source's cached subscription status changed (`account.status`, `account.statusAll`). */
+  'account.changed': { sourceId: string };
 }
 
 export type AppEventType = keyof AppEventMap;

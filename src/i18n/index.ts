@@ -19,7 +19,10 @@
 import i18next, { type Resource } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
+import { intlLocale } from '@/lib/intl';
+
 import { languageLoaders } from './lazyLocales';
+import { LANGUAGES, type LanguageInfo } from './languages';
 
 export const NAMESPACES = [
   'common',
@@ -43,37 +46,7 @@ export const NAMESPACES = [
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
-export interface LanguageInfo {
-  /** Folder name and settings.language value. */
-  code: string;
-  /** Native name for pickers. */
-  name: string;
-  /** BCP 47 tag for <html lang> and Intl. */
-  bcp47: string;
-  rtl?: boolean;
-}
-
-export const LANGUAGES: readonly LanguageInfo[] = [
-  { code: 'en', name: 'English', bcp47: 'en' },
-  { code: 'ar', name: 'العربية', bcp47: 'ar', rtl: true },
-  { code: 'ary', name: 'الدارجة المغربية', bcp47: 'ary', rtl: true },
-  { code: 'by', name: 'Беларуская', bcp47: 'be' },
-  { code: 'de', name: 'Deutsch', bcp47: 'de' },
-  { code: 'el', name: 'Ελληνικά', bcp47: 'el' },
-  { code: 'es', name: 'Español', bcp47: 'es' },
-  { code: 'fr', name: 'Français', bcp47: 'fr' },
-  { code: 'hu', name: 'Magyar', bcp47: 'hu' },
-  { code: 'it', name: 'Italiano', bcp47: 'it' },
-  { code: 'ja', name: '日本語', bcp47: 'ja' },
-  { code: 'ko', name: '한국어', bcp47: 'ko' },
-  { code: 'nl', name: 'Nederlands', bcp47: 'nl' },
-  { code: 'pl', name: 'Polski', bcp47: 'pl' },
-  { code: 'pt', name: 'Português', bcp47: 'pt' },
-  { code: 'ru', name: 'Русский', bcp47: 'ru' },
-  { code: 'tr', name: 'Türkçe', bcp47: 'tr' },
-  { code: 'zh', name: '简体中文', bcp47: 'zh-CN' },
-  { code: 'zhtw', name: '繁體中文', bcp47: 'zh-TW' },
-];
+export { LANGUAGES, type LanguageInfo } from './languages';
 
 export const DEFAULT_LANGUAGE = 'en';
 const STORAGE_KEY = 'tsrust.language';
@@ -115,6 +88,25 @@ function pinPluralRules(): void {
   const getRule = resolver.getRule.bind(resolver);
   resolver.getRule = (code, options) => getRule(pluralLocale(code), options);
   pinnedResolvers.add(resolver);
+}
+
+type FormatFn = (value: unknown, lng: string | undefined, options: unknown) => string;
+const pinnedFormatters = new WeakSet<object>();
+
+/**
+ * Routes i18next's built-in `Intl` formats (`{{count, number}}`, `datetime`,
+ * `list` and friends) through `intlLocale`, so an `ary` string formats its
+ * numbers as Arabic on every machine instead of in the machine's locale.
+ * Idempotent per formatter instance.
+ */
+function pinIntlFormats(): void {
+  const formatter = i18next.services.formatter as { formats?: Record<string, FormatFn>; add?: (name: string, fc: FormatFn) => void } | undefined;
+  if (!formatter?.formats || typeof formatter.add !== 'function' || pinnedFormatters.has(formatter)) return;
+  for (const name of ['number', 'currency', 'datetime', 'relativetime', 'list']) {
+    const builtIn = formatter.formats[name];
+    if (builtIn) formatter.add(name, (value, lng, options) => builtIn(value, intlLocale(lng), options));
+  }
+  pinnedFormatters.add(formatter);
 }
 
 /** Builds `{ [bcp47]: { [ns]: json } }` from glob results keyed `./<folder>/<ns>.json`. */
@@ -242,6 +234,7 @@ if (!i18next.isInitialized) {
 }
 // Also when another import initialised i18next first (tests, HMR).
 pinPluralRules();
+pinIntlFormats();
 
 /**
  * Resolves when i18next is ready to render: the remembered language (or

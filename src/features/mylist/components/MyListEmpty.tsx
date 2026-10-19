@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Source } from '@/api/types';
-import { numberFormat } from '@/lib/intl';
+import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { buttonClass, cn } from '../deps';
 
@@ -29,7 +29,7 @@ export function browseTarget(sources: readonly Source[], kind: 'movie' | 'series
 
 export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
   const { t, i18n } = useTranslation('mylist');
-  const nf = numberFormat(i18n.language);
+  const nf = numberFormat(intlLocale(i18n.language));
   const movies = sources ? browseTarget(sources, 'movie') : undefined;
   const series = sources ? browseTarget(sources, 'series') : undefined;
   const noVod = sources !== undefined && !movies && !series;

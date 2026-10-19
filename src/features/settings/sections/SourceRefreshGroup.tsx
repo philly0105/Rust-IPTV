@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { Settings } from '@/api/types';
 
 import { Select } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 import { SettingsGroup, SettingsRow } from '../components';
 import type { SettingsPatch } from '../lib/patch';
 
@@ -13,7 +14,7 @@ export const EXPIRY_WARN_CHOICES: readonly number[] = [0, 3, 7, 14, 30];
 /** "12 hours", "7 days" in the UI language, without plural keys. */
 export function formatUnit(value: number, unit: 'hour' | 'day', lang: string): string {
   try {
-    return new Intl.NumberFormat(lang, { style: 'unit', unit, unitDisplay: 'long' }).format(value);
+    return new Intl.NumberFormat(intlLocale(lang), { style: 'unit', unit, unitDisplay: 'long' }).format(value);
   } catch {
     return new Intl.NumberFormat('en', { style: 'unit', unit, unitDisplay: 'long' }).format(value);
   }

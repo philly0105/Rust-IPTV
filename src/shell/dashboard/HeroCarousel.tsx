@@ -42,6 +42,7 @@ import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
 import { Poster, ProgressBar, QUARTER_BLUR, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
 import { itemPath, joinList, usePrefetchTarget } from './cards';
@@ -323,7 +324,7 @@ function SlideBody({
   const vod = isVod(s.ref);
   const continuing = s.kind === 'continue';
   const playable = continuing || s.ref.contentType === 'movie';
-  const rating = s.rating ? new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
+  const rating = s.rating ? new Intl.NumberFormat(intlLocale(i18n.language), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
   // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
   // continue-watching snapshot) does not get the year again below it.
   const facts = joinList([!titleEndsWithYear(title, s.year) && s.year, s.genres?.slice(0, 2).join(' / ')], i18n.language);

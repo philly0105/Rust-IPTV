@@ -47,7 +47,7 @@
   "downloadsHint": "Movies and episodes you download for offline viewing.",
   "downloadsFolder": "Downloads folder",
   "downloadsFolderHint": "New downloads are saved here. Downloads already in progress keep their folder.",
-  "downloadsFolderHintServer": "A full folder path on the computer running the server. Press Enter to save.",
+  "downloadsFolderHintServer": "Downloads are saved to this folder on the server. To move it, start the server with a different IPTV_DATA_DIR.",
   "downloadsFolderUnknown": "Not set",
   "downloadsFolderSaved": "Downloads folder changed",
   "downloadsFolderReset": "Downloads folder reset to the default",
@@ -100,7 +100,7 @@
   "zapBanner": "Show channel info when switching channels",
   "zapBannerHint": "Shows the logo, number and what's on now and next for a few seconds after each channel change.",
   "showCaptions": "Show captions",
-  "showCaptionsHint": "Turns on subtitles when a stream has them.",
+  "showCaptionsHint": "Turns on subtitles when a stream has them, in the built-in player and embedded mpv. The built-in player can't show subtitles in MPEG-TS streams, and external players use their own settings.",
   "doubleClick": "Double-click to play",
   "doubleClickHint": "A single click selects a channel; a double click plays it.",
 
@@ -109,7 +109,6 @@
   "mpvPath": "mpv path",
   "vlcPath": "VLC path",
   "playerPathHint": "Full path to the program, or empty to search PATH.",
-  "playerPathHintServer": "A path on the machine running the server.",
   "playerPathMissing": "Nothing at this path any more, and no other {{player}} was found.",
   "playerPathFallback": "Nothing at this path any more. Using {{player}} at {{path}} instead.",
   "chooseMpv": "Choose mpv",
@@ -327,6 +326,7 @@
   "recordingsFolder": "Recordings folder",
   "recordingsFolderHint": "Live recordings go to a recordings folder inside the downloads folder.",
   "recordingsFolderHintCustom": "Live recordings go to this folder.",
+  "recordingsFolderHintServer": "Live recordings are saved to this folder on the server. Only the desktop app can change it.",
   "recordingsFolderSaved": "Recordings folder changed",
   "recordingsFolderReset": "Recordings go to the default folder again",
   "chooseRecordingsFolder": "Choose the recordings folder",
@@ -450,5 +450,10 @@
   "backupParentalBody": "Parental controls are locked, so the backup's parental options need the PIN. Enter it to import everything, or import the rest and keep your current parental options.",
   "backupParentalSkip": "Import without them",
   "backupParentalUnlock": "Enter PIN and import",
-  "backupParentalPinTitle": "Enter the PIN to import parental options"
+  "backupParentalPinTitle": "Enter the PIN to import parental options",
+  "windowStart": "Window at startup",
+  "windowStartHint": "How the app window opens. F11 leaves fullscreen.",
+  "windowStartNormal": "As I left it",
+  "windowStartMaximized": "Maximized",
+  "windowStartFullscreen": "Fullscreen"
 }

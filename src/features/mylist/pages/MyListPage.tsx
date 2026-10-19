@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router';
 
 import { itemKey, sameRef, type ItemKey, type WatchlistEntry } from '@/api/types';
 import { itemPath } from '@/shell/dashboard/cards';
+import { intlLocale } from '@/lib/intl';
 
 import { MyListEmpty } from '../components/MyListEmpty';
 import { MyListRow, MyListSkeleton, ROW_HEIGHT, type RowReorder } from '../components/MyListRow';
@@ -121,7 +122,7 @@ export function MyListPage() {
 
   // Rank = place in the whole (visible) list, so a filtered view still says "7th in your list".
   const ranks = useMemo(() => {
-    const nf = new Intl.NumberFormat(language);
+    const nf = new Intl.NumberFormat(intlLocale(language));
     return new Map(view.base.map((e, i) => [itemKey(e.ref), nf.format(i + 1)]));
   }, [view.base, language]);
 
@@ -237,7 +238,7 @@ export function MyListPage() {
 
   const dateFormat = useMemo(() => {
     try {
-      return new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' });
+      return new Intl.DateTimeFormat(intlLocale(language), { dateStyle: 'medium', timeStyle: 'short' });
     } catch {
       return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
     }

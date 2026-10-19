@@ -17,6 +17,8 @@
   "cancel": "Annulla",
   "closeKeepImporting": "Chiudi e continua l'importazione",
   "shortcutAddSource": "Aggiungi una sorgente",
+  "shortcutMoveUp": "Sposta su la sorgente selezionata",
+  "shortcutMoveDown": "Sposta giù la sorgente selezionata",
 
   "kindM3u": "Playlist M3U",
   "kindXtream": "Xtream Codes",
@@ -151,7 +153,10 @@
   "saveFailed": "Impossibile salvare le modifiche",
   "refreshNow": "Aggiorna ora",
   "refresh": "Aggiorna",
-  "textOriginNotEditable": "Questa playlist è stata incollata, quindi non c'è un indirizzo da modificare. Rimuovila e aggiungila di nuovo per sostituire i canali. Gli header della richiesta qui sotto valgono comunque per tutti gli stream.",
+  "textOriginReplaceNote": "Questa playlist è stata incollata o caricata, quindi non c'è un indirizzo da modificare. Per aggiornarla, incolla la nuova playlist o scegli un file qui sotto. Preferiti, cronologia e modifiche ai canali restano legati ai canali ancora presenti. Gli header della richiesta qui sotto valgono per tutti gli stream.",
+  "replacePlaylistText": "Nuovo testo della playlist",
+  "replacePlaylistTextHint": "Lascia vuoto per mantenere i canali attuali.",
+  "replacePlaylistFileHint": "Oppure scegli un file di playlist (.m3u, .m3u8 o .txt). Sostituisce i canali attuali.",
 
   "epgLinks": "Sorgenti della guida",
   "epgLinksHint": "Gli URL della guida trovati nella playlist più quelli che aggiungi. Disattivane uno per non scaricarlo più.",
@@ -392,5 +397,9 @@
   "discardedFailedHint": "La prima importazione non è riuscita. Scegli Annulla per tenerla e riprovare dalla sua scheda.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Spostamento orario della guida",
+  "epgShiftHint": "Sposta ogni programma di questa sorgente di questi minuti, oltre allo spostamento nelle Impostazioni. Lascia vuoto per nessuno.",
+  "epgShiftUnit": "minuti",
+  "epgShiftError": "Inserisci minuti interi tra -720 e 720."
 }

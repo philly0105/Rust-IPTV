@@ -1,7 +1,7 @@
 /** Number formatting for the library pages. Locale-aware, never throws. */
 
 import { formatDurationParts, type DurationFormatOptions } from '@/lib/duration';
-import { numberFormat } from '@/lib/intl';
+import { intlLocale, numberFormat } from '@/lib/intl';
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
 
@@ -15,7 +15,7 @@ export function formatBytes(bytes: number | undefined | null, locale?: string): 
     unit += 1;
   }
   const digits = unit === 0 ? 0 : value >= 100 ? 0 : 1;
-  const n = numberFormat(locale, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value);
+  const n = numberFormat(intlLocale(locale), { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value);
   return `${n} ${UNITS[unit]}`;
 }
 

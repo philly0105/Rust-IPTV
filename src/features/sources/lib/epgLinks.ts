@@ -54,5 +54,7 @@ export function epgPatch(before: EpgLinks, after: EpgLinks): Partial<EpgLinks> |
   const out: Partial<EpgLinks> = {};
   if (!same(before.manualUrls, after.manualUrls)) out.manualUrls = after.manualUrls;
   if (!same(before.disabledUrls, after.disabledUrls)) out.disabledUrls = after.disabledUrls;
+  // The core stores no shift for 0, so 0 is how a patch removes it.
+  if ((before.shiftMinutes ?? 0) !== (after.shiftMinutes ?? 0)) out.shiftMinutes = after.shiftMinutes ?? 0;
   return Object.keys(out).length > 0 ? out : undefined;
 }

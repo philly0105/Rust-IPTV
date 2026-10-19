@@ -7,6 +7,7 @@ import { buildXtreamConfig, type DraftErrors, type XtreamDraft } from '../lib/dr
 import { hasEdgeSpace, inputHost, parseXtreamLink } from '../lib/validate';
 import { ConnectionTest } from './ConnectionTest';
 import { Field } from './Field';
+import { HeadersFields } from './HeadersFields';
 import { SecretInput } from './SecretInput';
 
 export function XtreamForm({
@@ -38,7 +39,7 @@ export function XtreamForm({
   /** Pasting a full `get.php?username=&password=` link fills all three fields. */
   const onServerChange = (raw: string) => {
     const link = parseXtreamLink(raw);
-    if (link) onChange({ ...link });
+    if (link) onChange({ ...value, ...link });
     else set({ serverUrl: raw });
   };
 
@@ -80,6 +81,13 @@ export function XtreamForm({
           {(p) => <SecretInput {...p} disabled={disabled} value={value.password} onChange={(e) => set({ password: e.target.value })} />}
         </Field>
       </div>
+      <HeadersFields
+        value={value.headers}
+        onChange={(headers) => set({ headers })}
+        errors={errors}
+        prefix="xtream.headers"
+        disabled={disabled}
+      />
       <ConnectionTest
         kind="xtream"
         disabled={disabled}

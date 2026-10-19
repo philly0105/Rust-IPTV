@@ -3,6 +3,7 @@ import { memo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
+import { listSeparator } from '@/lib/intl';
 
 import { displayChannelName } from '../lib/channelName';
 import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
@@ -91,7 +92,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           playing ? t('playingNow') : '',
         ]
           .filter(Boolean)
-          .join(', ')}
+          .join(listSeparator(i18n.language))}
         onClick={() => props.onActivate(index, 'click')}
         onDoubleClick={() => props.onActivate(index, 'double')}
         className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-3 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"

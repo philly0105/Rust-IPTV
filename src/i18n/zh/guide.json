@@ -1,6 +1,13 @@
 {
   "shortcutArea": "节目指南",
   "searchLabel": "搜索节目指南",
+  "zoomIn": "放大",
+  "zoomOut": "缩小",
+  "viewFavorites": "收藏",
+  "viewList": "列表：{{name}}",
+  "viewFavoritesEmpty": "此来源没有收藏的频道",
+  "viewListEmpty": "此列表中没有此来源的频道",
+  "viewEmptyHint": "请选择其他来源，或从频道菜单中添加频道。",
   "searchPlaceholder": "搜索节目指南",
   "searchResults": "节目指南搜索",
   "searchHint": "请至少输入 2 个字符。",

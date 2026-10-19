@@ -9,11 +9,15 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { eagerRoutes, installDomStubs, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
 import { SECTION_IDS } from '../sections/types';
 
+const flags = vi.hoisted(() => ({ desktop: false }));
+
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
   rpc: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
   rpcRaw: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
-  isDesktop: false,
+  get isDesktop() {
+    return flags.desktop;
+  },
 }));
 vi.mock('@/api/events', () => ({
   onAppEvent: () => () => undefined,
@@ -28,6 +32,7 @@ const { useShellStore } = await import('@/shell');
 beforeAll(installDomStubs);
 beforeEach(() => {
   rpcMock.reset();
+  flags.desktop = false;
   useShellStore.setState({ header: null });
   rpcMock.handlers['settings.get'] = () => settings();
   rpcMock.handlers['player.capabilities'] = () => ({ embeddedMpv: false, reason: 'not built' });
@@ -47,6 +52,8 @@ async function expectSingleH1() {
 
 describe.each(SECTION_IDS)('/settings/%s has one h1', (id) => {
   it('with content', async () => {
+    // External players is a desktop-only section.
+    flags.desktop = id === 'players';
     renderAt(settingsRoutes, `/settings/${id}`);
     await screen.findByTestId(`settings-${id}`);
     await expectSingleH1();

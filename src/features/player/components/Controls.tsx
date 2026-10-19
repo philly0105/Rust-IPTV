@@ -27,12 +27,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop, rpc } from '@/api/transport';
+import { intlLocale } from '@/lib/intl';
 
 import { useToast } from '@/ui/Toast';
+import { errorDescription } from '@/ui/States';
 import { cn } from '../cn';
 import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
 import { setHistoryOpen, useHistoryStore } from '../history';
 import { useMediaStore, type TimeRange } from '../media';
+import { ASPECTS, setPicture, usePictureStore, ZOOMS, type PictureAspect, type PictureZoom } from '../picture';
 import { usePipStore } from '../pip';
 import { nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnded, usePlayerStore, type PlayerState } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
@@ -185,7 +188,7 @@ function useRecordToggle(): { recording: boolean; busy: boolean; toggle(): void 
       .catch((err: unknown) => {
         toast({
           title: start ? t('recordStartFailed') : t('recordStopFailed'),
-          description: err instanceof Error ? err.message : String(err),
+          description: errorDescription(err),
           variant: 'error',
         });
       })
@@ -301,7 +304,7 @@ export function BarReadout({
   );
 }
 
-type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'subStyle' | 'speed' | 'sync' | 'sources' | 'sleep'; // failover: + 'sources'
+type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'subStyle' | 'speed' | 'sync' | 'sources' | 'sleep' | 'picture'; // failover: + 'sources'
 
 /** A row that opens a submenu (shared with the video's context menu). */
 export function MenuRow({ label, value, onClick }: { label: string; value?: ReactNode; onClick(): void }) {
@@ -403,13 +406,15 @@ function OptionsMenu({
   /** Controls the bar has no room for (a narrow player), as a row at the top of the root view. */
   moved?: ReactNode;
 }) {
-  const { t } = useTranslation('player');
+  const { t, i18n } = useTranslation('player');
   const { t: tc } = useTranslation('common');
   const tracks = useMediaStore((s) => s.tracks);
   const rate = useMediaStore((s) => s.rate);
   const commands = useMediaStore((s) => s.commands);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const syncSummary = useSyncSummary();
+  const picture = usePictureStore();
+  const mpvMode = usePlayerStore((s) => s.mode === 'embedded-mpv');
   const ref = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState<number | null>(null);
   // The style view holds form fields (radio groups, a slider), which a menu may not contain: it
@@ -440,6 +445,15 @@ function OptionsMenu({
   const qualityValue = tracks.qualityAuto ? t('qualityAuto') : (tracks.qualities.find((q) => q.selected)?.label ?? t('qualityAuto'));
   const audioValue = tracks.audio.find((a) => a.selected)?.label ?? t('trackDefault');
   const textValue = tracks.text.find((a) => a.selected)?.label ?? t('off');
+  const aspectLabel = (a: PictureAspect): string => (a === 'auto' ? t('aspectAuto') : a === 'fill' ? t('aspectFill') : a);
+  const zoomLabel = (z: PictureZoom): string =>
+    z === 'none'
+      ? t('zoomNone')
+      : z === 'crop'
+        ? t('zoomCrop')
+        : new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent' }).format(Number(z) / 100);
+  // The Picture row names what is changed; nothing while both are at their defaults.
+  const pictureValue = picture.aspect !== 'auto' ? aspectLabel(picture.aspect) : picture.zoom !== 'none' ? zoomLabel(picture.zoom) : undefined;
 
   const pick = (run: () => void): void => {
     run();
@@ -473,7 +487,9 @@ function OptionsMenu({
                     ? t('alternateSources')
                     : view === 'sleep'
                       ? t('sleepTimer')
-                      : t('speed')}
+                      : view === 'picture'
+                        ? t('picture')
+                        : t('speed')}
         </button>
       )}
       <button
@@ -535,6 +551,7 @@ function OptionsMenu({
             />
           )}
           <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          <MenuRow label={t('picture')} value={pictureValue} onClick={() => setView('picture')} />
           {/* Sleep timer (C5): the countdown as its value while on. */}
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
@@ -558,6 +575,30 @@ function OptionsMenu({
         <>
           {header}
           <SleepMenu onDone={() => setView(null)} />
+        </>
+      )}
+      {view === 'picture' && (
+        <>
+          {header}
+          {/* Choices keep the menu open, so the effect can be compared on the picture. */}
+          <div role="group" aria-label={t('pictureAspect')}>
+            <p className="px-3 pt-1 pb-0.5 text-xs text-white/50">{t('pictureAspect')}</p>
+            {ASPECTS.map((a) => (
+              <MenuChoice key={a} label={aspectLabel(a)} selected={picture.aspect === a} onClick={() => setPicture({ aspect: a })} />
+            ))}
+          </div>
+          <div role="group" aria-label={t('pictureZoom')} className="mt-1 border-t border-white/10 pt-1">
+            <p className="px-3 pt-1 pb-0.5 text-xs text-white/50">{t('pictureZoom')}</p>
+            {ZOOMS.map((z) => (
+              <MenuChoice key={z} label={zoomLabel(z)} selected={picture.zoom === z} onClick={() => setPicture({ zoom: z })} />
+            ))}
+          </div>
+          {/* Browsers deinterlace on their own; only mpv takes the switch. */}
+          {mpvMode && (
+            <div className="mt-1 border-t border-white/10 pt-1">
+              <MenuToggle label={t('deinterlace')} checked={picture.deinterlace} onClick={() => setPicture({ deinterlace: !picture.deinterlace })} />
+            </div>
+          )}
         </>
       )}
       {view === 'quality' && (
@@ -628,6 +669,12 @@ export function retryPlayback(): void {
   reportStatus('loading');
   useMediaStore.getState().commands?.retry();
 }
+
+/**
+ * Below this width (CSS px) the compact mini bar is a phone's: see `tiny` in Controls. Under the
+ * desktop mini player's 280 px minimum, so only the phone sizes (PlayerDock below sm) get it.
+ */
+export const TINY_MINI_PX = 260;
 
 /** How long the live dot pulses after the stream starts playing; it then holds still. */
 export const LIVE_PULSES = 3;
@@ -720,13 +767,13 @@ function PositionSeekBar({
   );
 }
 
-/** VOD: position and duration. */
-function TimeReadout({ shown, duration, narrow }: { shown: boolean; duration: number | undefined; narrow: boolean }) {
+/** VOD: position and duration. `tiny` (a phone's mini player) drops the duration (F-PHONE-DOCK). */
+function TimeReadout({ shown, duration, narrow, tiny }: { shown: boolean; duration: number | undefined; narrow: boolean; tiny: boolean }) {
   const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
   return (
-    <span className={cn('ms-1 font-display whitespace-nowrap text-white/90 tabular-nums', narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : 'text-sm')}>
+    <span className={cn('ms-1 font-display whitespace-nowrap text-white/90 tabular-nums', narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : tiny ? 'text-xs' : 'text-sm')}>
       {formatTime(position)}
-      <span className="text-white/70"> / {formatTime(duration)}</span>
+      {!tiny && <span className="text-white/70"> / {formatTime(duration)}</span>}
     </span>
   );
 }
@@ -915,6 +962,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   // A phone-width player (not the mini one, which has its own compact set): the row keeps its
   // core controls and the options menu takes the rest.
   const narrow = useNarrow(root) && !compact;
+  // A phone's mini player (PlayerDock below sm, 190 px at least): the compact row drops
+  // picture-in-picture and the duration, so play, mute, the time or live badge, and fullscreen fit.
+  const tiny = useNarrow(root, TINY_MINI_PX) && !!compact;
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const spareRoom = useSpareSlots(row, narrow);
   // A narrow row measures its spare room after each render: the time readout growing a digit is one.
@@ -991,7 +1041,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
   const showTime = !!duration || hasPosition || status !== 'loading';
   const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
-  const showPip = canPip && (variant === 'overlay' || !compact);
+  const showPip = canPip && (variant === 'overlay' || !compact) && !tiny;
 
   const store = usePlayerStore.getState();
   // Overlay: a glass pane floating over a light scrim (the mini player's is full width, it has no
@@ -1170,7 +1220,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
               {t('radio')}
             </span>
           ) : showTime ? (
-            <TimeReadout shown={visible} duration={duration} narrow={narrow} />
+            <TimeReadout shown={visible} duration={duration} narrow={narrow} tiny={tiny} />
           ) : null}
           {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
           <SleepChip compact={compact || narrow} onOpen={() => setMenu(menu === 'sleep' ? null : 'sleep')} />

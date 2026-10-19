@@ -315,15 +315,18 @@ export function MultiviewPage() {
     },
     { description: t('shortcutSound'), area, enabled: hasTiles },
   );
-  useShortcut('f', fsToggle, { description: t('shortcutFullscreen'), area, enabled: hasTiles && fsSupported });
-  useShortcut('m', toggleMute, { description: t('shortcutMute'), area, enabled: hasTiles });
+  // The wall's F, M and L beat the playback keys of the same letters, which register again
+  // (as newer) whenever main playback starts while this page is open.
+  const wallKey = 1;
+  useShortcut('f', fsToggle, { description: t('shortcutFullscreen'), area, enabled: hasTiles && fsSupported, priority: wallKey });
+  useShortcut('m', toggleMute, { description: t('shortcutMute'), area, enabled: hasTiles, priority: wallKey });
   useShortcut(
     'l',
     () => {
       const s = useMultiviewStore.getState();
       setLayout(nextLayout(s.layout, s.tiles.length));
     },
-    { description: t('shortcutLayout'), area },
+    { description: t('shortcutLayout'), area, priority: wallKey },
   );
   useShortcut('a', () => openPicker(ADD), { description: t('shortcutAdd'), area, enabled: count < MAX_TILES && picker === null });
   useShortcut('escape', swapCancel, { description: t('shortcutSwapCancel'), area, enabled: swapFrom !== null });

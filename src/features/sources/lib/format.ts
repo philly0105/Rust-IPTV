@@ -1,6 +1,6 @@
 /** Locale-aware number and relative-time helpers (no date-fns locale bundles needed). */
 
-import { dateTimeFormat, relativeTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', 365 * 24 * 3600],
@@ -19,7 +19,7 @@ export function relativeTime(iso: string | undefined, lang: string, now: number 
   const abs = Math.abs(diff);
   let rtf: Intl.RelativeTimeFormat;
   try {
-    rtf = relativeTimeFormat(lang, { numeric: 'auto' });
+    rtf = relativeTimeFormat(intlLocale(lang), { numeric: 'auto' });
   } catch {
     rtf = relativeTimeFormat('en', { numeric: 'auto' });
   }
@@ -34,7 +34,7 @@ export function absoluteTime(iso: string | undefined, lang: string): string | un
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return undefined;
   try {
-    return dateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+    return dateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }).format(d);
   } catch {
     return d.toLocaleString();
   }

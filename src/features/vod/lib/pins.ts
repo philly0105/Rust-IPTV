@@ -1,22 +1,21 @@
 /**
  * Preferred-source pins for multi-source VOD ("Other sources").
  *
- * The schema has a `vod_source_pins` table (C3) but C4 exposes no rpc for it,
- * so pins are kept in localStorage under the same match key the table uses
- * until a `catalog.pin*` command exists (reported to the integration agent).
- * The match key mirrors the server's same-title rule: normalized title base
- * plus year.
+ * The core keeps them in its `vod_source_pins` table (C3) through `sourcePins.*` (C4), so
+ * backups carry them and a restore brings them back. The match key mirrors the server's
+ * same-title rule: normalized title base plus year.
+ *
+ * Builds before those commands kept pins in localStorage; {@link migrateLocalPins} moves them
+ * into the core once.
  */
 
-import type { ItemRef, VodItem } from '@/api/types';
+import { RpcError, rpc } from '@/api/transport';
+import type { ItemRef, SourcePin, VodItem } from '@/api/types';
 
-const STORAGE_KEY = 'vod.sourcePins.v1';
+export type { SourcePin };
 
-export interface SourcePin {
-  sourceId: string;
-  itemId: string;
-  updatedAt: string;
-}
+/** Where older builds kept pins: `{ [matchKey]: { sourceId, itemId, updatedAt } }`. */
+export const LEGACY_STORAGE_KEY = 'vod.sourcePins.v1';
 
 export function normalizeTitle(title: string): string {
   return title
@@ -31,41 +30,57 @@ export function matchKey(item: Pick<VodItem, 'title' | 'titleBase' | 'year'>): s
   return `${normalizeTitle(item.titleBase || item.title)}|${item.year ?? ''}`;
 }
 
-function readAll(): Record<string, SourcePin> {
+function readLegacy(): [string, Partial<SourcePin>][] {
   try {
-    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return {};
+    const raw = globalThis.localStorage?.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, SourcePin>) : {};
+    return parsed && typeof parsed === 'object' ? Object.entries(parsed as Record<string, Partial<SourcePin>>) : [];
   } catch {
-    return {};
+    return [];
   }
 }
 
-function writeAll(pins: Record<string, SourcePin>): void {
+function dropLegacy(): void {
   try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(pins));
+    globalThis.localStorage?.removeItem(LEGACY_STORAGE_KEY);
   } catch {
-    // storage full or unavailable: pins are a convenience, not state we must keep
+    // storage unavailable: nothing to drop
   }
 }
 
-export function getPin(key: string): SourcePin | undefined {
-  return readAll()[key];
+let migration: Promise<void> | null = null;
+
+/**
+ * Moves the pins an older build kept in localStorage into the core, once per page load. A pin
+ * the core already has for a key wins, and one whose source is gone is dropped. The local copy is
+ * deleted once nothing is left to retry (any other failure keeps it for the next load).
+ */
+export function migrateLocalPins(): Promise<void> {
+  migration ??= (async () => {
+    const legacy = readLegacy();
+    if (legacy.length === 0) return;
+    let retry = false;
+    for (const [key, pin] of legacy) {
+      if (typeof pin?.sourceId !== 'string' || typeof pin.itemId !== 'string') continue;
+      try {
+        if (await rpc('sourcePins.get', { matchKey: key })) continue;
+        // Only movie pages offered pins.
+        await rpc('sourcePins.set', { matchKey: key, ref: { sourceId: pin.sourceId, contentType: 'movie', itemId: pin.itemId } });
+      } catch (err) {
+        // A source that is gone (not_found) or a key the core refuses (invalid) never lands.
+        const { code } = RpcError.from(err);
+        if (code !== 'not_found' && code !== 'invalid') retry = true;
+      }
+    }
+    if (!retry) dropLegacy();
+  })();
+  return migration;
 }
 
-export function setPin(key: string, ref: ItemRef): SourcePin {
-  const pins = readAll();
-  const pin: SourcePin = { sourceId: ref.sourceId, itemId: ref.itemId, updatedAt: new Date().toISOString() };
-  pins[key] = pin;
-  writeAll(pins);
-  return pin;
-}
-
-export function clearPin(key: string): void {
-  const pins = readAll();
-  delete pins[key];
-  writeAll(pins);
+/** Test hook: forget that this page load already migrated. */
+export function resetPinMigration(): void {
+  migration = null;
 }
 
 export function isPinned(pin: SourcePin | undefined, ref: ItemRef): boolean {

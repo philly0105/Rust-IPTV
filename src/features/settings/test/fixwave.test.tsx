@@ -5,11 +5,15 @@ import type { Settings } from '@/api/types';
 
 import { eagerRoutes, installDomStubs, renderAt, rpcMock, settings } from '../../sources/test/harness';
 
+const flags = vi.hoisted(() => ({ desktop: false }));
+
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
   rpc: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
   rpcRaw: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
-  isDesktop: false,
+  get isDesktop() {
+    return flags.desktop;
+  },
 }));
 vi.mock('@/api/events', () => ({
   onAppEvent: () => () => undefined,
@@ -26,6 +30,7 @@ const patches = () => rpcMock.callsOf('settings.update').map((a) => (a as { patc
 beforeAll(installDomStubs);
 beforeEach(() => {
   rpcMock.reset();
+  flags.desktop = false;
   useToastStore.setState({ toasts: [] });
   current = settings();
   rpcMock.handlers['settings.get'] = () => current;
@@ -49,11 +54,25 @@ describe('Section nav below the shell panel breakpoint', () => {
     expect(wrap.className).toContain('min-[1440px]:hidden');
     expect(wrap.className).not.toMatch(/(^|\s)lg:hidden/);
     const nav = within(wrap).getByTestId('settings-nav-inline');
-    expect(within(nav).getAllByRole('link')).toHaveLength(12);
+    // Browser: no External players section (the desktop app lists all 12).
+    expect(within(nav).getAllByRole('link')).toHaveLength(11);
+    expect(within(nav).queryByRole('link', { name: 'External players' })).toBeNull();
     expect(within(nav).getByRole('link', { name: 'General' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(within(nav).getByRole('link', { name: 'About' }));
     await screen.findByTestId('settings-about');
     expect(view.router.state.location.pathname).toBe('/settings/about');
+  });
+
+  it('desktop lists External players; the browser sends its address to General', async () => {
+    const view = renderAt(settingsRoutes, '/settings/players');
+    await screen.findByTestId('settings-general');
+    expect(view.router.state.location.pathname).toBe('/settings/general');
+    cleanup();
+    flags.desktop = true;
+    renderAt(settingsRoutes, '/settings/players');
+    await screen.findByTestId('settings-players');
+    const nav = within(screen.getByTestId('settings-nav-inline-wrap')).getByTestId('settings-nav-inline');
+    expect(within(nav).getAllByRole('link')).toHaveLength(12);
   });
 });
 
@@ -95,19 +114,32 @@ describe('Parity settings', () => {
     await waitFor(() => expect(patches()).toEqual([{ vodMinRating: 6.5 }]));
   });
 
-  it('Downloads: recordings folder defaults inside downloads, and a typed path saves (web)', async () => {
+  it('Downloads: the recordings folder defaults inside downloads and is read-only in the browser', async () => {
     renderAt(settingsRoutes, '/settings/general');
     await screen.findByTestId('settings-general');
-    const input = (await screen.findByTestId('input-recordingsDir')) as HTMLInputElement;
-    await waitFor(() => expect(input.placeholder).toBe('C:\\Users\\me\\Downloads\\tsrust\\recordings'));
-    fireEvent.change(input, { target: { value: '"D:\\Rec"' } });
-    fireEvent.blur(input);
-    await waitFor(() => expect(patches()).toEqual([{ recordingsDir: 'D:\\Rec' }]));
-    fireEvent.click(await screen.findByTestId('recordings-dir-reset'));
-    await waitFor(() => expect(patches()).toEqual([{ recordingsDir: 'D:\\Rec' }, { recordingsDir: null }]));
+    const shown = await screen.findByTestId('recordings-dir-path');
+    await waitFor(() => expect(shown.textContent).toBe('C:\\Users\\me\\Downloads\\tsrust\\recordings'));
+    expect(screen.getByText('Live recordings are saved to this folder on the server. Only the desktop app can change it.')).toBeTruthy();
+    expect(screen.queryByTestId('input-recordingsDir')).toBeNull();
+    cleanup();
+    // A folder set in the desktop app (a shared data folder) is named as it is, with no reset.
+    current = settings({ recordingsDir: 'D:\\Rec' });
+    renderAt(settingsRoutes, '/settings/general');
+    await waitFor(() => expect(screen.getByTestId('recordings-dir-path').textContent).toBe('D:\\Rec'));
+    expect(screen.queryByTestId('recordings-dir-reset')).toBeNull();
+    expect(patches()).toEqual([]);
   });
 
-  it('Players: reuse instance and external bar', async () => {
+  it('Downloads: the desktop app resets a custom recordings folder', async () => {
+    flags.desktop = true;
+    current = settings({ recordingsDir: 'D:\\Rec' });
+    renderAt(settingsRoutes, '/settings/general');
+    fireEvent.click(await screen.findByTestId('recordings-dir-reset'));
+    await waitFor(() => expect(patches()).toEqual([{ recordingsDir: null }]));
+  });
+
+  it('Players: reuse instance and external bar (desktop)', async () => {
+    flags.desktop = true;
     renderAt(settingsRoutes, '/settings/players');
     await screen.findByTestId('settings-players');
     expect(screen.getByTestId('toggle-playerReuseInstance').getAttribute('aria-checked')).toBe('true');

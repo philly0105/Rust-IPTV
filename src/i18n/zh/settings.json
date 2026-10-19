@@ -47,7 +47,7 @@
   "downloadsHint": "下载后可离线观看的电影和剧集。",
   "downloadsFolder": "下载文件夹",
   "downloadsFolderHint": "新的下载将保存在此处。正在进行的下载仍使用原文件夹。",
-  "downloadsFolderHintServer": "运行服务器的计算机上的完整文件夹路径。按 Enter 保存。",
+  "downloadsFolderHintServer": "下载保存在服务器上的此文件夹中。如需更改位置，请使用不同的 IPTV_DATA_DIR 启动服务器。",
   "downloadsFolderUnknown": "未设置",
   "downloadsFolderSaved": "下载文件夹已更改",
   "downloadsFolderReset": "下载文件夹已恢复为默认",
@@ -100,7 +100,7 @@
   "zapBanner": "切换频道时显示频道信息",
   "zapBannerHint": "每次切换频道后，显示几秒钟台标、频道号以及当前和下一个节目。",
   "showCaptions": "显示字幕",
-  "showCaptionsHint": "流中有字幕时自动开启。",
+  "showCaptionsHint": "流中有字幕时，在内置播放器和嵌入式 mpv 中自动开启。内置播放器无法显示 MPEG-TS 流中的字幕，外部播放器使用各自的设置。",
   "doubleClick": "双击播放",
   "doubleClickHint": "单击选择频道，双击播放。",
 
@@ -109,7 +109,6 @@
   "mpvPath": "mpv 路径",
   "vlcPath": "VLC路径",
   "playerPathHint": "程序的完整路径，留空则在 PATH 中查找。",
-  "playerPathHintServer": "运行服务器的计算机上的路径。",
   "playerPathMissing": "此路径下已没有文件，也没有找到其他 {{player}}。",
   "playerPathFallback": "此路径下已没有文件。改用 {{path}} 中的 {{player}}。",
   "chooseMpv": "选择 mpv",
@@ -327,6 +326,7 @@
   "recordingsFolder": "录制文件夹",
   "recordingsFolderHint": "直播录制保存在下载文件夹中的录制文件夹内。",
   "recordingsFolderHintCustom": "直播录制保存在此文件夹中。",
+  "recordingsFolderHintServer": "直播录制保存在服务器上的此文件夹中。只有桌面应用可以更改它。",
   "recordingsFolderSaved": "录制文件夹已更改",
   "recordingsFolderReset": "录制文件夹已恢复为默认",
   "chooseRecordingsFolder": "选择录制文件夹",
@@ -450,5 +450,10 @@
   "backupParentalBody": "家长控制已锁定，备份中的家长控制选项需要 PIN。输入 PIN 以导入全部内容，或只导入其余部分并保留当前选项。",
   "backupParentalSkip": "不导入这些选项",
   "backupParentalUnlock": "输入 PIN 并导入",
-  "backupParentalPinTitle": "输入 PIN 以导入家长控制选项"
+  "backupParentalPinTitle": "输入 PIN 以导入家长控制选项",
+  "windowStart": "启动时的窗口",
+  "windowStartHint": "应用窗口的打开方式。按 F11 退出全屏。",
+  "windowStartNormal": "保持上次状态",
+  "windowStartMaximized": "最大化",
+  "windowStartFullscreen": "全屏"
 }

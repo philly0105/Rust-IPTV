@@ -3,12 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import type { Settings } from '@/api/types';
+import { isDesktop } from '@/api/transport';
+import { leaveBareWindowFullscreen } from '@/api/window';
 import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
 import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
+import { isTypingTarget } from '@/ui/focus';
 
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
@@ -16,7 +19,7 @@ import { focusSearchWhenReady } from './focusSearch';
 import { Header } from './Header';
 import { Rail } from './Rail';
 import { useOutletScrollMemory } from './scrollMemory';
-import { useShortcut } from './shortcuts';
+import { modalOpen, useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
@@ -178,8 +181,25 @@ export function toggleFullscreenKey(): void {
     player.toggleFullscreen();
     return;
   }
-  if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => undefined);
-  else void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
+  if (document.fullscreenElement) {
+    void document.exitFullscreen?.()?.catch(() => undefined);
+    return;
+  }
+  const enter = () => void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
+  // A desktop window that opened fullscreen (settings.windowStart) has no page fullscreen to leave:
+  // F11 takes the window itself out.
+  if (isDesktop) void leaveBareWindowFullscreen().then((left) => left || enter());
+  else enter();
+}
+
+/**
+ * Ctrl+F and Ctrl+R leave the page, which would throw away a dialog's or a field's typed text
+ * (the Add source URL and credentials): there they claim the key, so the browser neither
+ * reloads nor opens its find bar, and do nothing. From the command palette they still run.
+ */
+function navigationKeyBlocked(e: KeyboardEvent): boolean {
+  if (useShellStore.getState().paletteOpen) return false;
+  return modalOpen() || isTypingTarget(e.target);
 }
 
 function GlobalShortcuts() {
@@ -192,13 +212,16 @@ function GlobalShortcuts() {
     'mod+k',
     () => {
       const s = useShellStore.getState();
+      // Inside the palette it closes it; over another dialog it does not open.
+      if (!s.paletteOpen && modalOpen()) return;
       s.setPaletteOpen(!s.paletteOpen);
     },
-    { description: t('scPalette'), area, allowInInput: true },
+    { description: t('scPalette'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut(
     'mod+f',
-    () => {
+    (e) => {
+      if (navigationKeyBlocked(e)) return;
       useShellStore.getState().setPaletteOpen(false);
       const field = document.querySelector<HTMLInputElement>('[data-shell-search], [data-page-search]');
       if (field && !window.location.pathname.startsWith('/search')) {
@@ -209,15 +232,16 @@ function GlobalShortcuts() {
       navigate('/search');
       focusSearchWhenReady();
     },
-    { description: t('scSearch'), area, allowInInput: true },
+    { description: t('scSearch'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut(
     'mod+r',
-    () => {
+    (e) => {
+      if (navigationKeyBlocked(e)) return;
       useShellStore.getState().setPaletteOpen(false);
       navigate('/recent');
     },
-    { description: t('scRecent'), area, allowInInput: true },
+    { description: t('scRecent'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut(
     '?',
@@ -230,7 +254,7 @@ function GlobalShortcuts() {
   useShortcut(
     'mod+shift+l',
     () => toggleTheme(),
-    { description: t('scTheme'), area, allowInInput: true },
+    { description: t('scTheme'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut('f8', () => focusToasts(), { description: t('scNotifications'), area, allowInInput: true });
   useShortcut('f11', toggleFullscreenKey, { description: t('scFullscreen'), area, allowInInput: true, allowInModal: true });
@@ -309,11 +333,12 @@ const selectLanguage = (s: Settings) => s.language;
  * server's language loads (no English first frame). Same geometry as the
  * real rail and header, so nothing jumps when it swaps out.
  */
-function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
+function ShellSkeleton({ collapsed, railHidden }: { collapsed: boolean; railHidden: boolean }) {
   return (
     <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell-skeleton" aria-busy="true">
       <div
         aria-hidden
+        hidden={railHidden}
         className={cn(
           'flex h-full shrink-0 flex-col gap-3 border-e border-divider bg-surface px-3 pt-5',
           collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
@@ -357,6 +382,8 @@ export function ShellLayout() {
   const narrow = useMediaQuery('(max-width: 1023px)');
   const wide = useMediaQuery('(min-width: 1440px)');
   const collapsed = railPref || narrow;
+  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows.
+  const railHidden = useShellStore((s) => s.railHidden) && narrow;
 
   useParentalEvents();
   const player = usePlayerModule();
@@ -391,7 +418,7 @@ export function ShellLayout() {
     return (
       <>
         {leaves}
-        <ShellSkeleton collapsed={collapsed} />
+        <ShellSkeleton collapsed={collapsed} railHidden={railHidden} />
       </>
     );
   }
@@ -407,9 +434,9 @@ export function ShellLayout() {
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        <Rail collapsed={collapsed} autoCollapsed={narrow} />
+        {!railHidden && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <Header panelInline={wide} narrow={narrow} />
+          <Header panelInline={wide} narrow={narrow} railHidden={railHidden} />
           <div className="flex min-h-0 flex-1">
             {/*
               The outlet is a bounded flex column at every width: the row above

@@ -48,6 +48,7 @@
   "channels": "القنوات",
   "channelPanel": "قائمة القنوات",
   "channelPanelHint": "اضغط C لفتح قائمة القنوات",
+  "openChannelPanel": "فتح قائمة القنوات",
   "searchChannels": "البحث في القنوات",
   "noChannels": "لا توجد قنوات مطابقة",
   "channelsFailed": "تعذّر تحميل القنوات",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "يمكن لـ MPV المدمج التقاطها: اختره من الإعدادات > المشغلات.",
   "screenshotNotReady": "لا توجد صورة بعد. أعد المحاولة بعد بدء تشغيل الفيديو.",
   "screenshotNoVideo": "لا توجد صورة في الراديو لالتقاطها.",
-  "screenshotExternal": "يعمل هذا في مشغل خارجي. استخدم مفتاح لقطة الشاشة الخاص به."
+  "screenshotExternal": "يعمل هذا في مشغل خارجي. استخدم مفتاح لقطة الشاشة الخاص به.",
+  "picture": "الصورة",
+  "pictureAspect": "نسبة العرض إلى الارتفاع",
+  "aspectAuto": "الأصلية",
+  "aspectFill": "تمديد",
+  "pictureZoom": "التكبير",
+  "zoomNone": "بلا",
+  "zoomCrop": "قص لملء الشاشة",
+  "deinterlace": "إزالة التشابك"
 }

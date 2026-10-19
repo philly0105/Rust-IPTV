@@ -1,4 +1,4 @@
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, RotateCcw } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -6,9 +6,10 @@ import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type ChannelEdit } from '@/api/types';
 import { ChannelLogo } from '@/features/live/components/ChannelLogo';
 import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonList, cn, useListVirtualizer, useRowHeight } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
-import { isGoneAnswer, reportUnhideMany, unhideChannel, unhideMany } from './actions';
-import { ITEM_STALE_MS, useDisplayName, useHiddenEdits } from './edits';
+import { isGoneAnswer, reportUnhideMany, resetEdits, unhideChannel, unhideMany } from './actions';
+import { ITEM_STALE_MS, useDisplayName, useHiddenEdits, useSourceEdits } from './edits';
 
 export interface HiddenChannelsPanelProps {
   sourceId: string;
@@ -35,11 +36,15 @@ const fold = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').to
  */
 export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelProps) {
   const { t, i18n } = useTranslation('channels');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const display = useDisplayName();
   const hidden = useHiddenEdits(sourceId);
+  // Renames too: Reset all edits shows whenever the source has any edit.
+  const allEdits = useSourceEdits(sourceId);
   const [filter, setFilter] = useState('');
   const [busyAll, setBusyAll] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [active, setActive] = useState(0);
   const listId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -138,7 +143,18 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
     }
   };
 
+  const resetAll = async () => {
+    if (resetting) return;
+    setResetting(true);
+    try {
+      if (await resetEdits(sourceId, t)) setConfirmReset(false);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const total = rows.length;
+  const hasEdits = (allEdits.data?.length ?? 0) > 0 || total > 0;
   const summary = !hidden.data
     ? null
     : query
@@ -233,24 +249,49 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
       bodyClassName="pt-1"
       testId="hidden-channels-dialog"
       footer={
-        <>
-          {total > 0 ? (
-            <Button
-              variant="secondary"
-              className="me-auto"
-              icon={<Eye aria-hidden size={16} />}
-              loading={busyAll}
-              disabled={shown.length === 0}
-              onClick={() => void unhideShown()}
-              data-testid="hidden-channels-unhide-all"
-            >
-              {query ? t('unhideShown') : t('unhideAll')}
+        confirmReset ? (
+          <>
+            <p className="me-auto text-sm text-fg" role="alert" data-testid="hidden-channels-reset-confirm">
+              {t('resetEditsConfirm')}
+            </p>
+            <Button variant="ghost" disabled={resetting} onClick={() => setConfirmReset(false)}>
+              {t('cancel')}
             </Button>
-          ) : null}
-          <Button ref={doneRef} variant="primary" onClick={onClose}>
-            {t('done')}
-          </Button>
-        </>
+            <Button variant="danger" loading={resetting} onClick={() => void resetAll()} data-testid="hidden-channels-reset-yes">
+              {t('resetEdits')}
+            </Button>
+          </>
+        ) : (
+          <>
+            {total > 0 ? (
+              <Button
+                variant="secondary"
+                className="me-auto"
+                icon={<Eye aria-hidden size={16} />}
+                loading={busyAll}
+                disabled={shown.length === 0}
+                onClick={() => void unhideShown()}
+                data-testid="hidden-channels-unhide-all"
+              >
+                {query ? t('unhideShown') : t('unhideAll')}
+              </Button>
+            ) : null}
+            {hasEdits ? (
+              <Button
+                variant="ghost"
+                className={total > 0 ? undefined : 'me-auto'}
+                icon={<RotateCcw aria-hidden size={16} />}
+                onClick={() => setConfirmReset(true)}
+                data-testid="hidden-channels-reset"
+              >
+                {t('resetEdits')}
+              </Button>
+            ) : null}
+            <Button ref={doneRef} variant="primary" onClick={onClose}>
+              {t('done')}
+            </Button>
+          </>
+        )
       }
     >
       {body}

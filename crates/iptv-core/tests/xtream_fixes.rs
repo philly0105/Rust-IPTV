@@ -262,3 +262,45 @@ async fn mock_account_reports_allowed_output_formats() {
     .await;
     assert_eq!(acc["allowedOutputFormats"], json!(["m3u8", "ts"]));
 }
+
+/// The source's own User-Agent (and Referer / Origin) reach the stream it
+/// plays, not only `player_api.php`: the player, downloads and recordings
+/// all take `PlayerSource.headers`.
+#[tokio::test]
+async fn source_headers_reach_stream_urls() {
+    use iptv_core::model::{RequestHeaders, XtreamSourceConfig};
+    use iptv_core::sources::SourcePatch;
+    let (srv, _dir, state, r, sid) = synced(stub::USER).await;
+    let live = call(
+        &r,
+        &state,
+        "xtream.streamUrl",
+        json!({"ref": item_ref(&sid, "live", "101")}),
+    )
+    .await;
+    assert!(live["headers"].is_null(), "{live}");
+
+    let patch = SourcePatch {
+        xtream: Some(XtreamSourceConfig {
+            server_url: srv.server_url.clone(),
+            username: stub::USER.into(),
+            password: stub::PASS.into(),
+            headers: RequestHeaders {
+                user_agent: Some(" TestAgent/1.0 ".into()),
+                ..Default::default()
+            },
+        }),
+        ..Default::default()
+    };
+    iptv_core::sources::update(&state, &sid, patch)
+        .await
+        .unwrap();
+    let live = call(
+        &r,
+        &state,
+        "xtream.streamUrl",
+        json!({"ref": item_ref(&sid, "live", "101")}),
+    )
+    .await;
+    assert_eq!(live["headers"], json!({"userAgent": "TestAgent/1.0"}));
+}

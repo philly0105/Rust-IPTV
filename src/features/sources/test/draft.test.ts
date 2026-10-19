@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAddArgs, buildUpdatePatch, emptyDraft, patchNeedsRefresh, type SourceDraft } from '../lib/draft';
+import { buildAddArgs, buildUpdatePatch, draftFromSource, emptyDraft, patchNeedsRefresh, type SourceDraft } from '../lib/draft';
 import { addSourceHref, addSourcePathFromDeepLink } from '../lib/links';
 import { checkHttpUrl, formatMacInput, hasInfomirOui, looksLikeFullPortal, normalizeMac, normalizeXtreamServer, parseXtreamLink } from '../lib/validate';
 import { makeSource } from './harness';
@@ -64,6 +64,21 @@ describe('buildAddArgs produces the exact sources.add args', () => {
     });
   });
 
+  it('auto refresh is on by default for URL playlists and accounts, off for pasted text', () => {
+    expect(emptyDraft('m3u').autoRefresh).toBe(true);
+    expect(emptyDraft('xtream').autoRefresh).toBe(true);
+    expect(emptyDraft('stalker').autoRefresh).toBe(true);
+    const url = buildAddArgs(draft('m3u', (d) => {
+      d.m3u.url = 'http://lists.example.com/tv.m3u';
+    }), desktop);
+    expect(url.ok && url.value.autoRefresh).toBe(true);
+    const pasted = buildAddArgs(draft('m3u', (d) => {
+      d.m3u.origin = 'text';
+      d.m3u.text = '#EXTM3U\n#EXTINF:-1,One\nhttp://a/1';
+    }), desktop);
+    expect(pasted.ok && pasted.value.autoRefresh).toBe(false);
+  });
+
   it('m3u pasted text', () => {
     const text = '#EXTM3U\n#EXTINF:-1,One\nhttp://a/1';
     const r = buildAddArgs(draft('m3u', (d) => {
@@ -75,12 +90,12 @@ describe('buildAddArgs produces the exact sources.add args', () => {
 
   it('xtream normalizes the server and keeps the password untrimmed of inner content', () => {
     const r = buildAddArgs(draft('xtream', (d) => {
-      d.xtream = { serverUrl: 'http://xt.example.com:8080/player_api.php?x=1', username: ' alice ', password: 'p@ss word' };
+      d.xtream = { ...d.xtream, serverUrl: 'http://xt.example.com:8080/player_api.php?x=1', username: ' alice ', password: 'p@ss word' };
     }), web);
     expect(r.ok && r.value).toEqual({
       kind: 'xtream',
       name: 'My list',
-      autoRefresh: false,
+      autoRefresh: true,
       xtream: { serverUrl: 'http://xt.example.com:8080', username: 'alice', password: 'p@ss word' },
     });
   });
@@ -93,7 +108,7 @@ describe('buildAddArgs produces the exact sources.add args', () => {
     expect(r.ok && r.value).toEqual({
       kind: 'stalker',
       name: 'My list',
-      autoRefresh: false,
+      autoRefresh: true,
       stalker: { portalUrl: 'http://portal.example.com/c/', macAddress: '00:1A:79:AA:BB:CC', isFullPortal: false, headers: {} },
     });
   });
@@ -169,6 +184,7 @@ describe('buildUpdatePatch', () => {
     const src = makeSource('a', { name: 'Old', autoRefresh: false });
     const d = emptyDraft('m3u');
     d.name = 'New';
+    d.autoRefresh = src.autoRefresh;
     d.m3u.url = 'http://lists.example.com/tv.m3u';
     const r = buildUpdatePatch(src, d, web);
     expect(r.ok && r.value).toEqual({ name: 'New' });
@@ -190,6 +206,54 @@ describe('buildUpdatePatch', () => {
   });
 });
 
+describe('buildUpdatePatch for Xtream request headers', () => {
+  const src = makeSource('x', { kind: 'xtream', m3u: undefined, xtream: { serverUrl: 'http://xt.example.com', username: 'al', password: 'pw' } });
+
+  it('adds a User-Agent and Referer, and leaves an untouched source alone', () => {
+    const d = draftFromSource(src);
+    expect(buildUpdatePatch(src, d, web)).toEqual({ ok: true, value: {}, errors: {} });
+    d.xtream.headers.userAgent = ' MyBox/1.0 ';
+    d.xtream.headers.referrer = 'http://ref.example.com/';
+    const r = buildUpdatePatch(src, d, web);
+    expect(r.ok && r.value).toEqual({
+      xtream: { serverUrl: 'http://xt.example.com', username: 'al', password: 'pw', headers: { userAgent: 'MyBox/1.0', referrer: 'http://ref.example.com/' } },
+    });
+  });
+
+  it('round-trips stored headers and flags a bad Referer', () => {
+    const withUa = makeSource('y', { kind: 'xtream', m3u: undefined, xtream: { serverUrl: 'http://xt.example.com', username: 'al', password: 'pw', headers: { userAgent: 'MyBox/1.0' } } });
+    const d = draftFromSource(withUa);
+    expect(d.xtream.headers.userAgent).toBe('MyBox/1.0');
+    expect(buildUpdatePatch(withUa, d, web)).toEqual({ ok: true, value: {}, errors: {} });
+    d.xtream.headers.referrer = 'not a url';
+    expect(buildUpdatePatch(withUa, d, web).errors).toEqual({ 'xtream.headers.referrer': 'errorReferrer' });
+  });
+});
+
+describe('buildUpdatePatch for a pasted playlist', () => {
+  const src = makeSource('t', { name: 'Pasted', m3u: { origin: 'text', headers: {} } });
+
+  it('sends new text, or the text of a chosen file, and nothing when both are empty', () => {
+    const d = draftFromSource(src);
+    expect(buildUpdatePatch(src, d, web)).toEqual({ ok: true, value: {}, errors: {} });
+    d.m3u.text = '#EXTM3U\n#EXTINF:-1,One\nhttp://a/1';
+    expect(buildUpdatePatch(src, d, desktop)).toEqual({ ok: true, value: { text: d.m3u.text }, errors: {} });
+    d.m3u.text = '';
+    d.m3u.fileText = '#EXTM3U\n#EXTINF:-1,Two\nhttp://a/2';
+    d.m3u.fileName = 'tv.m3u';
+    expect(buildUpdatePatch(src, d, web)).toEqual({ ok: true, value: { text: d.m3u.fileText }, errors: {} });
+  });
+
+  it('refuses text that is not a playlist', () => {
+    const d = draftFromSource(src);
+    d.m3u.text = 'hello world';
+    expect(buildUpdatePatch(src, d, web).errors).toEqual({ 'm3u.text': 'errorNotM3u' });
+    d.m3u.text = '';
+    d.m3u.fileText = 'hello world';
+    expect(buildUpdatePatch(src, d, web).errors).toEqual({ 'm3u.file': 'errorNotM3u' });
+  });
+});
+
 describe('patchNeedsRefresh', () => {
   const url = makeSource('u', { m3u: { origin: 'url', url: 'http://a.example/x.m3u', headers: { userAgent: 'A/1' } } });
   const text = makeSource('t', { m3u: { origin: 'text', headers: {} } });
@@ -200,9 +264,10 @@ describe('patchNeedsRefresh', () => {
   it('is true when the playlist address changes', () => {
     expect(patchNeedsRefresh({ m3u: { origin: 'url', url: 'http://b.example/x.m3u', headers: { userAgent: 'A/1' } } }, url)).toBe(true);
   });
-  it('is false for a pasted playlist, which cannot refresh', () => {
+  it('is false for a header edit of a pasted playlist, true for new text', () => {
     expect(patchNeedsRefresh({ m3u: { origin: 'text', headers: { userAgent: 'EditedUA/2' } } }, text)).toBe(false);
     expect(patchNeedsRefresh({ m3u: { origin: 'text', headers: { userAgent: 'EditedUA/2' } } })).toBe(false);
+    expect(patchNeedsRefresh({ text: '#EXTM3U\n#EXTINF:-1,One\nhttp://a/1' }, text)).toBe(true);
   });
   it('is true for portal and Xtream config changes, false for name-only edits', () => {
     expect(patchNeedsRefresh({ xtream: { serverUrl: 'http://x', username: 'a', password: 'b' } })).toBe(true);

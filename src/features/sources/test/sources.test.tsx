@@ -55,7 +55,7 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(await submitAndGetArgs()).toEqual({
       kind: 'm3u',
       name: 'Home',
-      autoRefresh: false,
+      autoRefresh: true,
       m3u: { origin: 'url', url: 'http://lists.example.com/tv.m3u' },
     });
   });
@@ -84,8 +84,24 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(await submitAndGetArgs()).toEqual({
       kind: 'xtream',
       name: 'XC',
-      autoRefresh: false,
+      autoRefresh: true,
       xtream: { serverUrl: 'http://xt.example.com:8080', username: 'alice', password: 'pw' },
+    });
+  });
+
+  it('xtream with its own User-Agent', async () => {
+    await openAdd();
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Xtream Codes' }));
+    type(/^Name/, 'XC');
+    type(/^Server URL/, 'http://xt.example.com:8080/');
+    type(/^Username/, 'alice');
+    type(/^Password/, 'pw');
+    type(/^User-Agent/, 'MyBox/1.0');
+    expect(await submitAndGetArgs()).toEqual({
+      kind: 'xtream',
+      name: 'XC',
+      autoRefresh: true,
+      xtream: { serverUrl: 'http://xt.example.com:8080', username: 'alice', password: 'pw', headers: { userAgent: 'MyBox/1.0' } },
     });
   });
 
@@ -99,7 +115,7 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(await submitAndGetArgs()).toEqual({
       kind: 'stalker',
       name: 'Box',
-      autoRefresh: false,
+      autoRefresh: true,
       stalker: {
         portalUrl: 'http://portal.example.com/stalker_portal/c/',
         macAddress: '00:1A:79:AA:BB:CC',
@@ -274,6 +290,22 @@ describe('Guide (EPG) loads after add and edit', () => {
     fireEvent.click(screen.getByTestId('edit-source-save'));
     await waitFor(() => expect(rpcMock.callsOf('sources.update')).toEqual([{ id: 'a', patch: { epg: { manualUrls: [added] } } }]));
     await waitFor(() => expect(rpcMock.callsOf('epg.refresh')).toEqual([{ url: added }]));
+  });
+
+  it('edit: the guide time shift is saved with the guide links; blank removes it', async () => {
+    const before = makeSource('a', { name: 'First', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [], shiftMinutes: 30 } });
+    rpcMock.handlers['sources.list'] = () => [before];
+    rpcMock.handlers['sources.update'] = () => before;
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Guide' }));
+    const shift = screen.getByTestId('epg-shift-minutes') as HTMLInputElement;
+    expect(shift.value).toBe('30');
+    fireEvent.change(shift, { target: { value: '9999' } });
+    expect(within(dialog()).getByText('Enter whole minutes between -720 and 720.')).toBeTruthy();
+    fireEvent.change(shift, { target: { value: '-90' } });
+    fireEvent.click(screen.getByTestId('edit-source-save'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.update')).toEqual([{ id: 'a', patch: { epg: { shiftMinutes: -90 } } }]));
   });
 
   it('edit: a name-only change does not touch the guide', async () => {

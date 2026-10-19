@@ -212,6 +212,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0020_search_rank",
         sql: include_str!("migrations/0020_search_rank.sql"),
     },
+    // guide: per-channel time shift (epg.setChannelShift).
+    Migration {
+        version: 21,
+        name: "0021_epg_channel_shift",
+        sql: include_str!("migrations/0021_epg_channel_shift.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

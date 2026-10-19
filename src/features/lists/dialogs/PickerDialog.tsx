@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, CustomList } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { Button, ChannelLogo, Dialog, ErrorState, Skeleton, cn, displayChannelName, useDisplayPrefs } from '../deps';
 import { NewListForm } from '../components/NewListForm';
@@ -25,7 +26,7 @@ export function PickerDialog({ channel, onClose }: { channel: Channel; onClose()
   const actions = useListActions();
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [announce, setAnnounce] = useState('');
-  const fmt = new Intl.NumberFormat(i18n.language);
+  const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
 
   const member = new Set(containing.data ?? []);
   const ready = lists.isSuccess && containing.isSuccess;

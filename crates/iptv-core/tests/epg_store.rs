@@ -168,6 +168,7 @@ async fn registers_exactly_the_c4_commands() {
         "epg.channelsSearch",
         "epg.setMapping",
         "epg.clearMapping",
+        "epg.setChannelShift",
         "epg.resolve",
         "epg.setEnabled",
         "epg.clearAll",

@@ -73,6 +73,25 @@ describe('lock-now shortcut', () => {
     expect(shortcutRegistry.list().some((s) => s.combo === 'mod+alt+l')).toBe(false);
   });
 
+  it('locks while a dialog is open', async () => {
+    core.reset({ pin: '2580', unlockedUntil: Date.now() + 60_000 });
+    const { result } = await mount();
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    document.body.append(dialog);
+    try {
+      let e: KeyboardEvent | undefined;
+      act(() => {
+        e = pressLockNow();
+      });
+      expect(e?.defaultPrevented).toBe(true);
+      await vi.waitFor(() => expect(result.current.data?.unlocked).toBe(false));
+      expect(core.callsOf('parental.lockNow')).toHaveLength(1);
+    } finally {
+      dialog.remove();
+    }
+  });
+
   it('does nothing while locked', async () => {
     core.reset({ pin: '2580' });
     const { result } = await mount();

@@ -11,6 +11,8 @@
  * filter in SQL; keep both tables in step.
  */
 
+import { intlLocale } from '@/lib/intl';
+
 export interface ItemLanguage {
   /** Short tag for a badge, as the provider wrote it ("EN", "LAT", "TG"). */
   code: string;
@@ -253,7 +255,7 @@ function namesFor(locale: string): Intl.DisplayNames | null {
   let names = displayNames.get(locale);
   if (names === undefined) {
     try {
-      names = new Intl.DisplayNames([locale, 'en'], { type: 'language', fallback: 'none' });
+      names = new Intl.DisplayNames([intlLocale(locale), 'en'], { type: 'language', fallback: 'none' });
     } catch {
       names = null;
     }

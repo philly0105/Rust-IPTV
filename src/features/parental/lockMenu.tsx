@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { rpc, RpcError } from '@/api/transport';
 import type { ParentalLock, ParentalLockTarget, ParentalStatus } from '@/api/types';
-import { toast, type MenuAction } from '@/ui';
+import { toast, type MenuAction, errorDescription } from '@/ui';
 
 import { requestPin } from './gate';
 import { afterLockChange, useParentalStatus } from './status';
@@ -128,7 +128,7 @@ function lockLabel(target: ParentalLockTarget, t: T): string {
 }
 
 function failed(t: T, err: unknown): void {
-  toast({ variant: 'error', title: t('lockChangeFailed'), description: RpcError.from(err).message });
+  toast({ variant: 'error', title: t('lockChangeFailed'), description: errorDescription(err) });
 }
 
 async function addLock(target: ParentalLockTarget, status: ParentalStatus, t: T): Promise<void> {

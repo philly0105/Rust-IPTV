@@ -1,7 +1,8 @@
 //! `player_api.php` client.
 //!
 //! Every request: `GET {server}/player_api.php?username&password[&action..]`
-//! with the VLC User-Agent some panels require, retried on transient errors
+//! with the VLC User-Agent some panels require (or the source's own User-Agent,
+//! Referer and Origin), retried on transient errors
 //! (see [`XtreamClient::fetch`]). The password lives only in
 //! the request query; logs carry the server, masked username and action, never the
 //! URL, and errors come from reqwest with the URL stripped.
@@ -10,7 +11,7 @@ use super::raw::{RawAccount, RawUserInfo};
 use super::url::{api_endpoint, normalize_server_url};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{backoff_delay, cancellable, read_capped, send_checked_within};
-use crate::model::XtreamSourceConfig;
+use crate::model::{RequestHeaders, XtreamSourceConfig};
 use crate::state::AppState;
 use serde::de::DeserializeOwned;
 use std::fmt;
@@ -18,8 +19,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// User-Agent sent to Xtream panels (old app's `XTREAM_CLIENT_USER_AGENT`):
-/// some panels challenge generic HTTP clients but allow IPTV players.
+/// User-Agent sent to Xtream panels (old app's `XTREAM_CLIENT_USER_AGENT`)
+/// when the source sets none: some panels challenge generic HTTP clients but
+/// allow IPTV players.
 pub const XTREAM_USER_AGENT: &str = "VLC/3.0.18 LibVLC/3.0.18";
 
 /// Attempts per request (1 + 2 retries).
@@ -33,6 +35,10 @@ pub struct XtreamClient {
     pub server: String,
     pub username: String,
     password: String,
+    /// The source's User-Agent, or [`XTREAM_USER_AGENT`].
+    user_agent: String,
+    /// The source's Referer and Origin (its User-Agent is in `user_agent`).
+    headers: RequestHeaders,
     attempts: u32,
     /// Where retry progress goes (an import run), if anywhere.
     progress: Option<(Arc<AppState>, String)>,
@@ -61,11 +67,20 @@ impl XtreamClient {
         if password.trim().is_empty() {
             return Err(CoreError::invalid("Enter the Xtream password."));
         }
+        let mut headers = cfg.headers.clone();
+        let user_agent = headers
+            .user_agent
+            .take()
+            .map(|ua| ua.trim().to_string())
+            .filter(|ua| !ua.is_empty())
+            .unwrap_or_else(|| XTREAM_USER_AGENT.to_string());
         Ok(Self {
             http,
             server,
             username,
             password,
+            user_agent,
+            headers,
             attempts: ATTEMPTS,
             progress: None,
         })
@@ -184,9 +199,10 @@ impl XtreamClient {
         let req = self
             .http
             .get(api_endpoint(&self.server))
-            .header(reqwest::header::USER_AGENT, XTREAM_USER_AGENT)
+            .header(reqwest::header::USER_AGENT, self.user_agent.as_str())
             .header(reqwest::header::ACCEPT, "application/json, */*")
             .query(&query);
+        let req = crate::http::apply_source_headers(req, &self.headers);
         let context = format!("Xtream {label}");
         let tried = Instant::now();
         match kind {
@@ -437,6 +453,7 @@ mod tests {
                 server_url: "http://h:1/".into(),
                 username: "u".into(),
                 password: "hunter2".into(),
+                headers: Default::default(),
             },
         )
         .unwrap();
@@ -451,11 +468,34 @@ mod tests {
             server_url: "http://h".into(),
             username: " ".into(),
             password: "p".into(),
+            headers: Default::default(),
         };
         assert!(matches!(
             XtreamClient::new(reqwest::Client::new(), &cfg),
             Err(CoreError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn user_agent_defaults_to_vlc_and_follows_the_source() {
+        let cfg = |ua: Option<&str>| XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: "u".into(),
+            password: "p".into(),
+            headers: RequestHeaders {
+                user_agent: ua.map(str::to_owned),
+                referrer: Some("http://ref.example/".into()),
+                origin: None,
+            },
+        };
+        let c = XtreamClient::new(reqwest::Client::new(), &cfg(None)).unwrap();
+        assert_eq!(c.user_agent, XTREAM_USER_AGENT);
+        let c = XtreamClient::new(reqwest::Client::new(), &cfg(Some(" "))).unwrap();
+        assert_eq!(c.user_agent, XTREAM_USER_AGENT);
+        let c = XtreamClient::new(reqwest::Client::new(), &cfg(Some(" MyBox/1.0 "))).unwrap();
+        assert_eq!(c.user_agent, "MyBox/1.0");
+        assert_eq!(c.headers.user_agent, None);
+        assert_eq!(c.headers.referrer.as_deref(), Some("http://ref.example/"));
     }
 
     #[test]
@@ -569,6 +609,7 @@ mod tests {
                 server_url: server.into(),
                 username: "u".into(),
                 password: "p".into(),
+                headers: Default::default(),
             },
         )
         .unwrap()
@@ -716,6 +757,7 @@ mod tests {
                 server_url: format!("http://127.0.0.1:{port}"),
                 username: "u".into(),
                 password: "p".into(),
+                headers: Default::default(),
             },
         )
         .unwrap()

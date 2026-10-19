@@ -48,6 +48,7 @@
   "channels": "Csatornák",
   "channelPanel": "Csatornalista",
   "channelPanelHint": "A csatornalista megnyitásához nyomja meg a C billentyűt",
+  "openChannelPanel": "Csatornalista megnyitása",
   "searchChannels": "Csatornák keresése",
   "noChannels": "Nincs egyező csatorna",
   "channelsFailed": "Nem sikerült betölteni a csatornákat",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "A beágyazott MPV el tudja készíteni: válassza ki a Beállítások > Külső lejátszók részben.",
   "screenshotNotReady": "Még nincs kép. Próbálja újra, amint elindul a videó lejátszása.",
   "screenshotNoVideo": "A rádiónak nincs rögzíthető képe.",
-  "screenshotExternal": "Ez külső lejátszóban fut. Használja annak saját képernyőkép-billentyűjét."
+  "screenshotExternal": "Ez külső lejátszóban fut. Használja annak saját képernyőkép-billentyűjét.",
+  "picture": "Kép",
+  "pictureAspect": "Képarány",
+  "aspectAuto": "Eredeti",
+  "aspectFill": "Nyújtás",
+  "pictureZoom": "Nagyítás",
+  "zoomNone": "Nincs",
+  "zoomCrop": "Kivágás kitöltéshez",
+  "deinterlace": "Váltottsoros mentesítés"
 }

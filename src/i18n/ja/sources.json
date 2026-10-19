@@ -15,6 +15,8 @@
   "cancel": "キャンセル",
   "closeKeepImporting": "閉じて読み込みを続ける",
   "shortcutAddSource": "ソースを追加",
+  "shortcutMoveUp": "選択中のソースを上へ移動",
+  "shortcutMoveDown": "選択中のソースを下へ移動",
 
   "kindM3u": "M3Uプレイリスト",
   "kindXtream": "Xtream Codes",
@@ -143,7 +145,10 @@
   "saveFailed": "変更を保存できませんでした",
   "refreshNow": "今すぐ更新",
   "refresh": "更新",
-  "textOriginNotEditable": "このプレイリストは貼り付けで追加されたため、変更できるアドレスがありません。チャンネルを差し替えるには、削除してから再度追加してください。下のリクエストヘッダーは引き続きすべてのストリームに適用されます。",
+  "textOriginReplaceNote": "このプレイリストは貼り付けまたはアップロードで追加されたため、変更できるアドレスがありません。更新するには、新しいプレイリストを貼り付けるか、下でファイルを選択してください。お気に入り、履歴、チャンネルの編集は、引き続き含まれるチャンネルに残ります。下のリクエストヘッダーはすべてのストリームに適用されます。",
+  "replacePlaylistText": "新しいプレイリストのテキスト",
+  "replacePlaylistTextHint": "空のままにすると現在のチャンネルを維持します。",
+  "replacePlaylistFileHint": "またはプレイリストファイル（.m3u、.m3u8、.txt）を選択してください。現在のチャンネルと置き換わります。",
 
   "epgLinks": "番組表ソース",
   "epgLinksHint": "プレイリスト内で見つかった番組表URLと、追加したURLです。オフにすると取得を停止します。",
@@ -373,5 +378,9 @@
   "discardedFailedHint": "最初のインポートに失敗しました。残してカードから再試行するには「元に戻す」を選んでください。",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "番組表の時刻調整",
+  "epgShiftHint": "このソースの全番組を指定した分だけずらします（設定の時刻調整に加算）。空欄なら調整しません。",
+  "epgShiftUnit": "分",
+  "epgShiftError": "-720～720の整数で分を入力してください。"
 }

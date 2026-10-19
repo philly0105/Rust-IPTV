@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Programmführer",
   "searchLabel": "Im Programmführer suchen",
+  "zoomIn": "Vergrößern",
+  "zoomOut": "Verkleinern",
+  "viewFavorites": "Favoriten",
+  "viewList": "Liste: {{name}}",
+  "viewFavoritesEmpty": "Keine Lieblingssender aus dieser Quelle",
+  "viewListEmpty": "Keine Sender aus dieser Quelle in dieser Liste",
+  "viewEmptyHint": "Wählen Sie eine andere Quelle oder fügen Sie Sender über ihr Menü hinzu.",
   "searchPlaceholder": "Programmführer durchsuchen",
   "searchResults": "Suche im Programmführer",
   "searchHint": "Gib mindestens 2 Zeichen ein.",

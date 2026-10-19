@@ -17,7 +17,7 @@ import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, RpcError } from '@/api/transport';
 import type { ParentalStatus } from '@/api/types';
 import { useShortcut } from '@/shell/shortcuts';
-import { toast } from '@/ui';
+import { toast, errorDescription } from '@/ui';
 
 /** Query key of `parental.status`. */
 export const STATUS_KEY = rpcKey('parental.status');
@@ -31,9 +31,9 @@ export const STATUS_STALE_MS = 30_000;
  * (`lists.list` counts, `lists.items`), guide search and watch stats.
  * `epg.search` is exact so the other `epg.` queries are left alone.
  * Portal reads too: Stalker VOD pages and search are not in SQLite, so the
- * core drops hidden titles from them itself, and the Xtream and Stalker
- * detail commands refuse a hidden title. Their stream and catch-up URLs are
- * never cached.
+ * core drops hidden titles from them itself, and the Xtream, Stalker and
+ * m3u series detail commands refuse a hidden title. Their stream and
+ * catch-up URLs are never cached.
  */
 export const FILTERED_PREFIXES = [
   'catalog.',
@@ -51,6 +51,7 @@ export const FILTERED_PREFIXES = [
   'stalker.seriesDetail',
   'xtream.vodDetail',
   'xtream.seriesDetail',
+  'm3u.seriesDetail',
 ] as const;
 
 /** Parental queries that follow every change (the lock list and lock checks). */
@@ -237,7 +238,8 @@ export async function lockNow(): Promise<ParentalStatus> {
 /**
  * Mod+Alt+L locks at once, bound only while a session unlock is active.
  * Not while typing: on Windows Ctrl+Alt is AltGr, and AltGr+L types a letter
- * on some layouts (Polish "ł").
+ * on some layouts (Polish "ł"). It does fire while a dialog is open: locking
+ * navigates nowhere, so nothing in the dialog is lost.
  */
 function useLockNowShortcut(s: ParentalStatus | undefined): void {
   const { t } = useTranslation('parental');
@@ -246,9 +248,9 @@ function useLockNowShortcut(s: ParentalStatus | undefined): void {
     () =>
       void lockNow().then(
         () => toast({ variant: 'success', title: t('lockedNowToast') }),
-        (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: RpcError.from(err).message }),
+        (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: errorDescription(err) }),
       ),
-    { description: t('shortcutLockNow'), area: t('shell:settingsParental'), enabled: !!s?.enabled && s.unlocked },
+    { description: t('shortcutLockNow'), area: t('shell:settingsParental'), enabled: !!s?.enabled && s.unlocked, allowInModal: true },
   );
 }
 

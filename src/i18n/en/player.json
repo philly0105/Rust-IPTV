@@ -48,6 +48,7 @@
   "channels": "Channels",
   "channelPanel": "Channel list",
   "channelPanelHint": "Press C to open the channel list",
+  "openChannelPanel": "Open channel list",
   "searchChannels": "Search channels",
   "noChannels": "No channels match",
   "channelsFailed": "Channels could not be loaded",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "Embedded MPV can capture it: choose it in Settings > Players.",
   "screenshotNotReady": "There is no picture yet. Try again once the video plays.",
   "screenshotNoVideo": "Radio has no picture to capture.",
-  "screenshotExternal": "This plays in an external player. Use its own screenshot key."
+  "screenshotExternal": "This plays in an external player. Use its own screenshot key.",
+  "picture": "Picture",
+  "pictureAspect": "Aspect ratio",
+  "aspectAuto": "Original",
+  "aspectFill": "Stretch",
+  "pictureZoom": "Zoom",
+  "zoomNone": "None",
+  "zoomCrop": "Crop to fill",
+  "deinterlace": "Deinterlace"
 }

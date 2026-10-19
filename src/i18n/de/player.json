@@ -48,6 +48,7 @@
   "channels": "TV-Sender",
   "channelPanel": "Senderliste",
   "channelPanelHint": "Drücken Sie C, um die Senderliste zu öffnen",
+  "openChannelPanel": "Senderliste öffnen",
   "searchChannels": "Sender suchen",
   "noChannels": "Keine passenden Sender",
   "channelsFailed": "Sender konnten nicht geladen werden",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "Eingebettetes MPV kann es aufnehmen: Wählen Sie es unter Einstellungen > Player.",
   "screenshotNotReady": "Noch kein Bild vorhanden. Versuchen Sie es erneut, sobald das Video läuft.",
   "screenshotNoVideo": "Radio hat kein Bild, das aufgenommen werden kann.",
-  "screenshotExternal": "Dies läuft in einem externen Player. Verwenden Sie dessen eigene Screenshot-Taste."
+  "screenshotExternal": "Dies läuft in einem externen Player. Verwenden Sie dessen eigene Screenshot-Taste.",
+  "picture": "Bild",
+  "pictureAspect": "Seitenverhältnis",
+  "aspectAuto": "Original",
+  "aspectFill": "Strecken",
+  "pictureZoom": "Zoom",
+  "zoomNone": "Keiner",
+  "zoomCrop": "Zuschneiden und füllen",
+  "deinterlace": "Deinterlacing"
 }

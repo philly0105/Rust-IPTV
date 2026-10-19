@@ -5,8 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
+import { parseGuideShift } from '@/lib/guideShift';
 
-import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
+import { Button, Dialog, ErrorState, Skeleton, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -31,12 +32,22 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
   const [query, setQuery] = useState('');
   const debounced = useDebounced(query.trim(), 250);
   const [busy, setBusy] = useState(false);
+  /** The channel's own guide shift as typed; blank = the playlist's tvg-shift. */
+  const [shiftText, setShiftText] = useState('');
 
   useEffect(() => {
     if (channel) setQuery(mappingQuery(channel.name));
   }, [channel]);
 
   const resolution = useRpcQuery('epg.resolve', { ref: channel?.ref ?? { sourceId: '', contentType: 'live', itemId: '' } }, { enabled: open });
+  const savedShift = resolution.data?.shiftMinutes;
+  useEffect(() => {
+    setShiftText(savedShift !== undefined ? String(savedShift) : '');
+  }, [savedShift, channel]);
+  const shiftMinutes = parseGuideShift(shiftText);
+  // Blank clears the channel's own shift (back to tvg-shift); a number, 0 included, overrides it.
+  const nextShift = shiftText.trim() === '' ? null : shiftMinutes;
+  const shiftChanged = shiftMinutes !== null && nextShift !== (savedShift ?? null);
   const results = useRpcQuery('epg.channelsSearch', { query: debounced, limit: 50 }, { enabled: open && debounced.length > 0 });
 
   const apply = async (fn: () => Promise<unknown>, title: string) => {
@@ -47,7 +58,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
       toast({ title, variant: 'success' });
       onClose();
     } catch (err) {
-      toast({ title: t('mappingFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+      toast({ title: t('mappingFailed'), description: errorDescription(err), variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -92,6 +103,40 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
       <p className="mb-3 text-sm text-fg-muted">
         {current ? (current.epgChannelId ? t('mappingCurrent', { id: current.epgChannelId, via: viaLabel }) : viaLabel) : ' '}
       </p>
+      <form
+        className="mb-4 flex flex-col gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (channel && shiftChanged) void apply(() => rpc('epg.setChannelShift', { ref: channel.ref, minutes: nextShift }), t('mappingShiftSaved'));
+        }}
+      >
+        <label htmlFor="epg-mapping-shift" className="text-sm font-medium text-fg">
+          {t('mappingShift')}
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            id="epg-mapping-shift"
+            type="text"
+            // Not "numeric": phone keypads for it have no minus sign, and the shift can be negative.
+            inputMode="text"
+            autoComplete="off"
+            value={shiftText}
+            onChange={(e) => setShiftText(e.target.value)}
+            placeholder="0"
+            aria-invalid={shiftMinutes === null || undefined}
+            aria-describedby="epg-mapping-shift-hint"
+            data-testid="epg-mapping-shift"
+            className="h-9 w-24 rounded-md border border-border bg-surface-2 px-3 text-end text-sm tabular-nums text-fg outline-none focus:ring-2 focus:ring-accent"
+          />
+          <span className="text-sm text-fg-muted">{t('mappingShiftUnit')}</span>
+          <Button type="submit" size="sm" variant="secondary" disabled={busy || !channel || !shiftChanged}>
+            {t('mappingShiftSave')}
+          </Button>
+        </div>
+        <p id="epg-mapping-shift-hint" className={shiftMinutes === null ? 'text-sm text-danger' : 'text-xs text-fg-muted'} role={shiftMinutes === null ? 'alert' : undefined}>
+          {shiftMinutes === null ? t('mappingShiftError') : t('mappingShiftHint')}
+        </p>
+      </form>
       <input
         autoFocus
         value={query}

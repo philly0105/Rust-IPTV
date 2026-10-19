@@ -92,7 +92,7 @@ A rule records every airing of one title on one channel: `RecordingRule {id, ref
 
 ## Re-matching after a guide refresh
 
-On a loop tick after each guide refresh, and at most every 5 minutes otherwise, pending reminders and scheduled programme recordings are matched again against the channel's guide: the programme with the same title (letters and digits, case-insensitive) whose start is nearest the stored one, within 3 hours. Its new start and end replace the stored ones. Channel recordings are not re-matched. Stalker portal-side EPG (`stalker.epg`) is not part of the local guide, so items scheduled from it are not re-matched.
+On a loop tick after each guide refresh, and at most every 5 minutes otherwise, pending reminders and scheduled programme recordings are matched again against the channel's guide: the programme with the same title (letters and digits, case-insensitive) whose start is nearest the stored one, within 3 hours. Its new start and end replace the stored ones. Channel recordings are not re-matched. Stalker portal-side EPG (`stalker.epg`) is not part of the local guide, so items scheduled from it are not re-matched. For the same reason the UI offers "Record series" only on XMLTV programmes: a programme from the provider's guide (`fromProvider`: the Xtream short EPG and archive table, Stalker's portal guide) has no "Record series" in the programme dialog, the search hits or the ribbon's record menu, because a rule made from it would never schedule anything. A rule that already exists for the title still shows, so it can be removed.
 
 Recordings are matched channel by channel (`scheduler::follow`), together with the series rules' cancelled airings (skips), so one airing never ends up with two recordings:
 
@@ -102,7 +102,7 @@ Recordings are matched channel by channel (`scheduler::follow`), together with t
 
 ## Server mode
 
-`recordings.capabilities` reports `supported: false` when the server machine has no mpv. The guide then hides Record and shows a one-line explanation; the Scheduled page notes it. Reminders work in server mode (toast only). Recordings made on the server are written under `<data dir>/downloads/recordings` and played back through `GET /api/recordings/{id}` (Range support). Before recording, the stream URL goes through the same fetch guard as other server fetches (http/https only, no private or loopback hosts unless allowed); mpv resolves names itself, so the host is also resolved first and refused unless every address is public. Redirects and HLS segment hosts that mpv follows are not checked.
+`recordings.capabilities` reports `supported: false` when the server machine has no mpv. The guide then hides Record and shows a one-line explanation; the Scheduled page notes it. The Docker image installs mpv in its runtime stage (server.md, Docker), so recording works there out of the box; a server run outside Docker needs mpv on its `PATH`. Reminders work in server mode (toast only). Recordings made on the server are written under `<data dir>/downloads/recordings` and played back through `GET /api/recordings/{id}` (Range support). Before recording, the stream URL goes through the same fetch guard as other server fetches (http/https only, no private or loopback hosts unless allowed); mpv resolves names itself, so the host is also resolved first and refused unless every address is public. Redirects and HLS segment hosts that mpv follows are not checked.
 
 ## Library
 

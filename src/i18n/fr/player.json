@@ -48,6 +48,7 @@
   "channels": "Chaînes",
   "channelPanel": "Liste des chaînes",
   "channelPanelHint": "Appuyez sur C pour ouvrir la liste des chaînes",
+  "openChannelPanel": "Ouvrir la liste des chaînes",
   "searchChannels": "Rechercher des chaînes",
   "noChannels": "Aucune chaîne ne correspond",
   "channelsFailed": "Les chaînes n'ont pas pu être chargées",
@@ -294,5 +295,13 @@
   "screenshotCorsMpv": "MPV embarqué peut la prendre : choisissez-le dans Paramètres > Lecteurs.",
   "screenshotNotReady": "Pas encore d'image. Réessayez dès que la vidéo est lue.",
   "screenshotNoVideo": "La radio n'a pas d'image à capturer.",
-  "screenshotExternal": "La lecture se fait dans un lecteur externe. Utilisez sa propre touche de capture d'écran."
+  "screenshotExternal": "La lecture se fait dans un lecteur externe. Utilisez sa propre touche de capture d'écran.",
+  "picture": "Image",
+  "pictureAspect": "Format d’image",
+  "aspectAuto": "Original",
+  "aspectFill": "Étirer",
+  "pictureZoom": "Zoom",
+  "zoomNone": "Aucun",
+  "zoomCrop": "Rogner pour remplir",
+  "deinterlace": "Désentrelacement"
 }

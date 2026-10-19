@@ -2,6 +2,7 @@
 
 use super::parser::M3uReader;
 use crate::error::RpcError;
+use crate::model::{ItemRef, PlayerSource, SeriesDetail};
 use crate::rpc::RpcRouter;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,21 @@ pub struct RawResult {
     pub text: String,
     pub sha256: String,
     pub fetched_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RefArgs {
+    #[serde(rename = "ref")]
+    pub item_ref: ItemRef,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamUrlArgs {
+    #[serde(rename = "ref")]
+    pub item_ref: ItemRef,
+    #[serde(default)]
+    pub episode_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +119,17 @@ pub async fn parse_preview(
 pub fn register(r: &mut RpcRouter) {
     r.add("m3u.raw", raw);
     r.add("m3u.parsePreview", parse_preview);
+    // parental (C2): hide mode refuses a hidden series, as the Xtream commands do.
+    r.add("m3u.seriesDetail", |s, a: RefArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
+        Ok::<SeriesDetail, RpcError>(super::series::series_detail(&s, &a.item_ref).await?)
+    });
+    r.add("m3u.streamUrl", |s, a: StreamUrlArgs| async move {
+        crate::parental::refuse_hidden(&s, &a.item_ref).await?;
+        Ok::<PlayerSource, RpcError>(
+            super::series::stream_url(&s, &a.item_ref, a.episode_id.as_deref()).await?,
+        )
+    });
 }
 
 #[cfg(test)]

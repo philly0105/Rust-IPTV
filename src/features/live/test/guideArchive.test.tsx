@@ -12,6 +12,7 @@ import { loadArchiveDay } from '../hooks/useArchiveDay';
 import {
   archiveDayCount,
   archiveDays,
+  archiveHourSlots,
   archivePath,
   archiveProgramState,
   canBrowseArchive,
@@ -53,6 +54,8 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('./fakes')) }));
 vi.mock('@/shell', async () => await import('./fakes'));
 vi.mock('@/features/player', async () => await import('./fakes'));
+// The archive download asks the parental gate first; nothing is locked here.
+vi.mock('@/features/parental/gate', async (orig) => ({ ...(await orig<object>()), ensureUnlocked: async () => true }));
 
 // ---------------------------------------------------------------------------
 // Shared catch-up URL table (core runs the same file in catchup::m3u::tests)
@@ -167,6 +170,27 @@ describe('archive days', () => {
     expect(canBrowseArchive(ch({ isRadio: true }), 'xtream')).toBe(false);
     expect(canBrowseArchive(ch({ archive: undefined }), 'xtream')).toBe(false);
     expect(canBrowseArchive(ch(), undefined)).toBe(false);
+  });
+});
+
+describe('archive hour slots', () => {
+  const now = new Date(2026, 9, 12, 15, 30).getTime();
+  const title = (t: number) => `slot ${new Date(t).getHours()}`;
+
+  it('covers the day up to the airing hour, inside the archive window', () => {
+    const { start, end } = dayRange(dayStart(now));
+    const slots = archiveHourSlots(start, end, now, ch({ archive: { enabled: true, durationHours: 5 } }), title);
+    // 10:30 is the window's start: 11:00 is the first whole hour in it; 15:00 airs now.
+    expect(slots.map((s) => s.title)).toEqual(['slot 11', 'slot 12', 'slot 13', 'slot 14', 'slot 15']);
+    expect(slots[0]).toMatchObject({ start: new Date(start + 11 * HOUR).toISOString(), end: new Date(start + 12 * HOUR).toISOString() });
+  });
+
+  it('uses whole archive days without a length, and offers nothing past the window', () => {
+    const yesterday = dayRange(archiveDays(now, 2)[1]!);
+    const older = dayRange(archiveDays(now, 2)[2]!);
+    const playlist = ch({ archive: { enabled: true }, catchup: { type: 'shift', days: 1 } });
+    expect(archiveHourSlots(yesterday.start, yesterday.end, now, playlist, title)).toHaveLength(8); // 16:00 to 23:00
+    expect(archiveHourSlots(older.start, older.end, now, playlist, title)).toEqual([]);
   });
 });
 
@@ -320,7 +344,11 @@ describe('ArchivePage', () => {
     vi.useRealTimers();
   });
 
-  const rows = async () => within(await screen.findByTestId('archive-programs')).getAllByRole('button');
+  // The programme rows (a finished programme also has its Download button).
+  const rows = async () =>
+    within(await screen.findByTestId('archive-programs'))
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('data-state'));
 
   it('lists the days and today’s programmes with their states', async () => {
     renderAt('/live/archive/src1/c0', ROUTE);
@@ -383,6 +411,27 @@ describe('ArchivePage', () => {
     expect(call?.args).toMatchObject({ ref: REF, start: new Date(NOW - 3 * HOUR).toISOString(), durationMinutes: 60 });
   });
 
+  it('downloads a finished programme from its archive URL, under the channel', async () => {
+    rpcMock.handlers['downloads.start'] = () => ({ id: 1 });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    await rows();
+    // Only the finished programme offers it: the airing one is still growing.
+    const buttons = within(screen.getByTestId('archive-programs')).getAllByTestId('archive-download');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.getAttribute('aria-label')).toBe('Download Morning show');
+    fireEvent.click(buttons[0]!);
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'downloads.start')).toBe(true));
+    const args = rpcMock.calls.find((c) => c.cmd === 'downloads.start')!.args as Record<string, unknown>;
+    expect(args).toMatchObject({
+      ref: REF,
+      episodeId: `catchup:${new Date(NOW - 3 * HOUR).toISOString()}`,
+      url: 'http://arc/x.ts',
+    });
+    expect(String(args.subtitle)).toMatch(/^Morning show · /);
+    expect(String(args.fileNameHint)).toMatch(/ - Morning show - .*\.ts$/);
+    expect(recorded.playSource).toHaveLength(0);
+  });
+
   it('moves through programmes with the arrows and days with the tab keys', async () => {
     renderAt('/live/archive/src1/c0', ROUTE);
     const list = await rows();
@@ -402,11 +451,31 @@ describe('ArchivePage', () => {
     expect(screen.getByText("These programmes come from the provider's own guide.")).toBeTruthy();
   });
 
-  it('says when a day has nothing', async () => {
+  it('offers hourly slots on a day without any guide, played from their start (F-ARCHIVE-SLOTS)', async () => {
     rpcMock.handlers['catchup.programs'] = () => [];
     renderAt('/live/archive/src1/c0', ROUTE);
     await rows();
     fireEvent.click(within(screen.getByTestId('archive-days')).getAllByRole('tab')[1]!);
+    expect(await screen.findByTestId('archive-slots-note')).toBeTruthy();
+    const list = await rows();
+    // 30 h of archive from 15:30: yesterday from 10:00 (09:00 starts before the window) to 23:00.
+    expect(list).toHaveLength(14);
+    expect(list.every((r) => r.getAttribute('data-state') === 'playable')).toBe(true);
+    fireEvent.click(list[0]!);
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'xtream.catchupUrl')).toBe(true));
+    expect(rpcMock.calls.find((c) => c.cmd === 'xtream.catchupUrl')!.args).toEqual({
+      ref: REF,
+      start: new Date(yesterday + 10 * HOUR).toISOString(),
+      durationMinutes: 60,
+    });
+  });
+
+  it('says when a day has nothing, not even archive hours', async () => {
+    rpcMock.handlers['catchup.programs'] = () => [];
+    renderAt('/live/archive/src1/c0', ROUTE);
+    await rows();
+    // Two days back is past the 30 h window: no slot can play there.
+    fireEvent.click(within(screen.getByTestId('archive-days')).getAllByRole('tab')[2]!);
     expect(await screen.findByText('Nothing listed for this day')).toBeTruthy();
   });
 

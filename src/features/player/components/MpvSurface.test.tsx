@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 
 import '@/i18n';
 
-import type { Bounds, MpvState } from '@/api/types';
+import type { Bounds, MpvState, Settings } from '@/api/types';
 
 /** When set, `mpv.attach` waits for the test to resolve it. */
 let attachGate: Promise<void> | null = null;
@@ -78,7 +78,7 @@ vi.mock('@/api/window', () => ({
   QUIT_FLUSH_EVENT: 'tsrust:flush',
 }));
 
-const { usePlayerStore, __resetPlayerForTests, DOUBLE_CLICK_MS } = await import('../store');
+const { usePlayerStore, __resetPlayerForTests, DOUBLE_CLICK_MS, setSettingsCache } = await import('../store');
 const { useMediaStore } = await import('../media');
 const { boundsClear, rectOf } = await import('../mpvBounds');
 const { HIDDEN_BOUNDS, MPV_FALLBACK_TOAST } = await import('./MpvSurface');
@@ -1105,6 +1105,35 @@ describe('wheel and context menu over the native video', () => {
     act(() => emitState({ ...st, tracks: st.tracks.map((x) => ({ ...x, selected: x.id === 2 })) }));
     expect(useMediaStore.getState().tracks).not.toBe(first);
     expect(useMediaStore.getState().tracks.audio.map((a) => a.selected)).toEqual([false, true]);
+  });
+
+  it('showCaptions turns the first subtitle track on once per item, unless mpv picked one', async () => {
+    setSettingsCache({ showCaptions: true } as Settings);
+    await attached();
+    const sids = (): unknown[] => calls('mpv.setProperty').map((c) => c[1]).filter((a) => (a as { name: string }).name === 'sid');
+    const tracks: MpvState['tracks'] = [
+      { id: 1, type: 'audio', lang: 'en', selected: true },
+      { id: 4, type: 'sub', title: 'English', selected: false },
+      { id: 5, type: 'sub', title: 'French', selected: false },
+    ];
+    act(() => emitState({ ...mpvState, loaded: true, tracks }));
+    expect(sids()).toEqual([{ name: 'sid', value: 4 }]);
+    // Turned off later from the menu: the next state update leaves it off.
+    act(() => emitState({ ...mpvState, loaded: true, tracks, timePos: 3 }));
+    expect(sids()).toHaveLength(1);
+
+    // A track mpv chose itself stays.
+    act(() => usePlayerStore.setState({ source: { url: 'http://h/movie/2.mkv', kind: 'direct', title: 'Other', isLive: false, isRadio: false } }));
+    await tick(20);
+    act(() => emitState({ ...mpvState, loaded: true, tracks: tracks.map((x) => (x.id === 5 ? { ...x, selected: true } : x)) }));
+    expect(sids()).toHaveLength(1);
+  });
+
+  it('without showCaptions no subtitle track is turned on', async () => {
+    setSettingsCache({ showCaptions: false } as Settings);
+    await attached();
+    act(() => emitState({ ...mpvState, loaded: true, tracks: [{ id: 4, type: 'sub', title: 'English', selected: false }] }));
+    expect(calls('mpv.setProperty').filter((c) => (c[1] as { name: string }).name === 'sid')).toEqual([]);
   });
 
   it('never offers to copy a link that carries a login', async () => {

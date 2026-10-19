@@ -11,13 +11,14 @@ import { TmdbRail } from '../components/TmdbRail';
 import { useSettings } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { EmptyState, Poster, Skeleton, buttonClass, cn } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 const BIO_CLAMP = 600;
 
 function formatDate(iso: string | undefined, locale?: string): string | undefined {
   if (!iso) return undefined;
   const d = new Date(`${iso}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(intlLocale(locale), { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 /** TMDB person: portrait, facts, biography, and a known-for rail whose titles search the current source. */

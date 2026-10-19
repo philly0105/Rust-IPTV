@@ -754,6 +754,7 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
     )?;
     let mut names: HashMap<String, Option<String>> = HashMap::new();
     let mut shifts: HashMap<String, i64> = HashMap::new();
+    let mut source_shifts: HashMap<String, i64> = HashMap::new();
     let mut out = Vec::with_capacity(found.len());
     for c in found {
         type Details = (String, Option<String>, Option<String>, Option<String>);
@@ -769,7 +770,9 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
         let shift = match shifts.get(&key) {
             Some(s) => *s,
             None => {
-                let s = query::item_shift(conn, &c.channel.item_ref)?;
+                let r = &c.channel.item_ref;
+                let source = query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
+                let s = query::item_shift_with(conn, r, source)?;
                 shifts.insert(key.clone(), s);
                 s
             }

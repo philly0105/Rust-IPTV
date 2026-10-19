@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Channel, ItemRef, PlayerSource } from '@/api/types';
+import type { Channel, ItemRef, PlayerSource, Settings } from '@/api/types';
 
 const handlers: Record<string, (args: unknown) => unknown> = {};
 const rpcMock = vi.fn(async (name: string, args?: unknown) => {
@@ -9,9 +9,12 @@ const rpcMock = vi.fn(async (name: string, args?: unknown) => {
   return h(args);
 });
 
+const env = vi.hoisted(() => ({ desktop: false }));
 vi.mock('@/api/transport', () => ({
   rpc: (name: string, args?: unknown) => rpcMock(name, args),
-  isDesktop: false,
+  get isDesktop() {
+    return env.desktop;
+  },
   proxiedUrl: (s: { url: string }) => s.url,
 }));
 // The parental gate has its own tests (parentalHook.test.ts); here everything may play.
@@ -127,18 +130,33 @@ describe('store transitions', () => {
     expect(usePlayerStore.getState().muted).toBe(true);
   });
 
-  it('external player setting opens vlc and hides the dock', async () => {
-    handlers['settings.get'] = () => ({ player: 'vlc' });
-    handlers['player.openExternal'] = () => undefined;
-    await usePlayerStore.getState().play(vod('1'));
-    const s = usePlayerStore.getState();
-    expect(s.mode).toBe('external');
-    expect(s.dock).toBe('hidden');
-    expect(s.status).toBe('playing');
-    expect(calls('player.openExternal')).toEqual([
-      { player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }) },
-    ]);
-    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+  it('external player setting opens vlc and hides the dock (desktop)', async () => {
+    env.desktop = true;
+    try {
+      handlers['settings.get'] = () => ({ player: 'vlc' });
+      handlers['player.openExternal'] = () => undefined;
+      await usePlayerStore.getState().play(vod('1'));
+      const s = usePlayerStore.getState();
+      expect(s.mode).toBe('external');
+      expect(s.dock).toBe('hidden');
+      expect(s.status).toBe('playing');
+      expect(calls('player.openExternal')).toEqual([
+        { player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }) },
+      ]);
+      expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+    } finally {
+      env.desktop = false;
+    }
+  });
+
+  it('a saved mpv or vlc plays in the built-in player in the browser', async () => {
+    for (const player of ['mpv', 'vlc'] as const) {
+      store.setSettingsCache({ player } as Settings);
+      await usePlayerStore.getState().play(vod('1'));
+      expect(usePlayerStore.getState().mode).toBe('inline');
+    }
+    expect(calls('player.openExternal')).toEqual([]);
+    expect(store.modeForSettings('mpv', { ...vod('2'), isRadio: true })).toBe('radio');
   });
 
   it('embedded-mpv falls back to inline outside the desktop shell; radio gets radio mode', async () => {
@@ -146,7 +164,22 @@ describe('store transitions', () => {
     await usePlayerStore.getState().play(vod('1'));
     expect(usePlayerStore.getState().mode).toBe('inline');
     expect(store.modeForSettings('html5', { ...vod('2'), isRadio: true })).toBe('radio');
+    env.desktop = true;
     expect(store.modeForSettings('mpv', { ...vod('2'), isRadio: true })).toBe('external');
+    env.desktop = false;
+  });
+
+  it('a ClearKey source plays in the built-in player whatever player is set', async () => {
+    const keyed = { ...vod('2'), drm: { clearKeys: { aa: 'bb' } } };
+    env.desktop = true;
+    try {
+      expect(store.modeForSettings('mpv', keyed)).toBe('inline');
+      expect(store.modeForSettings('vlc', keyed)).toBe('inline');
+      expect(store.modeForSettings('embedded-mpv', keyed)).toBe('inline');
+      expect(store.modeForSettings('embedded-mpv', vod('2'))).toBe('embedded-mpv');
+    } finally {
+      env.desktop = false;
+    }
   });
 
   it('queue next/prev and the autoplay-next card at the end', async () => {
@@ -461,6 +494,17 @@ describe('playItem resolution by kind', () => {
     });
   });
 
+  it('an m3u channel with a ClearKey licence carries the keys and skips embedded mpv', async () => {
+    const kid = '00112233445566778899aabbccddeeff';
+    const key = 'ffeeddccbbaa99887766554433221100';
+    handlers['settings.get'] = () => ({ player: 'embedded-mpv' });
+    handlers['catalog.item'] = () => ({ ...channel(1), url: 'http://m/stream.mpd', clearKey: `${kid}:${key}` });
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u' });
+    await playItem({ ...base, ref: liveRef, sourceKind: 'm3u' });
+    expect(usePlayerStore.getState().source).toMatchObject({ kind: 'dash', drm: { clearKeys: { [kid]: key } } });
+    expect(usePlayerStore.getState().mode).toBe('inline');
+  });
+
   it('an m3u item without a url ends in the error state', async () => {
     handlers['catalog.item'] = () => channel(1);
     await expect(playItem({ ...base, ref: liveRef, sourceKind: 'm3u' })).rejects.toThrow(/no stream URL/);
@@ -647,6 +691,52 @@ describe('zap', () => {
     await zap('down');
     expect(calls('lists.neighbors')).toHaveLength(2);
     expect(calls('catalog.neighbors')).toEqual([{ ref: { sourceId: 's2', contentType: 'live', itemId: '777' } }, { ref: channel(6).ref }]);
+  });
+
+  it('walks the favorites in their order when playback started from favorites (F-FAVORITES-ZAP)', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', favorites: {} } });
+    const fav = (ch: Channel, position: number) => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: ch.ref.contentType } });
+    const other = channel(9, { ref: { sourceId: 's2', contentType: 'live', itemId: '555' } });
+    const gone = channel(8);
+    // Stored order, not catalog order: 5, gone, 1, movie, radio, other source. Gone is stepped over;
+    // the movie and the radio station are not live channels.
+    handlers['favorites.list'] = () => [
+      fav(channel(1), 2),
+      fav(other, 5),
+      fav(channel(5), 0),
+      fav(gone, 1),
+      { ...fav(channel(3), 3), ref: { sourceId: 's1', contentType: 'movie', itemId: 'm1' } },
+      { ...fav(channel(4), 4), ref: { sourceId: 's1', contentType: 'radio', itemId: 'r1' } },
+    ];
+    handlers['catalog.item'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      if (id === '555') return other;
+      if (id === '105') return channel(5);
+      if (id === '101') return channel(1);
+      throw Object.assign(new Error(`item ${id} not found`), { code: 'not_found' });
+    };
+    const played = await zap('down');
+    expect(played?.ref.itemId).toBe('555');
+    expect(calls('catalog.neighbors')).toHaveLength(0);
+    expect(calls('favorites.list')[0]).toEqual({});
+    // Up from the first favorite wraps to the last one; from 555 the one before 1 skips "gone".
+    await zap('up');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('101');
+    await zap('up');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('105');
+    expect(usePlayerStore.getState().zapContext?.favorites).toEqual({});
+
+    // A channel that is not a favorite zaps through its source, and the favorites order ends.
+    await playChannel(channel(6), 'xtream');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', favorites: { sourceId: 's1' } } });
+    handlers['catalog.neighbors'] = () => ({ next: channel(7) });
+    await zap('down');
+    expect(calls('favorites.list').at(-1)).toEqual({ sourceId: 's1' });
+    expect(calls('catalog.neighbors')[0]).toEqual({ ref: channel(6).ref });
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('107');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
   });
 
   it('zapToNumber resolves catalog.channelByNumber', async () => {

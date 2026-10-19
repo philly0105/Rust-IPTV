@@ -497,6 +497,8 @@ fn all_catalog_commands_registered() {
         "sources.counts",
         "m3u.raw",
         "m3u.parsePreview",
+        "m3u.seriesDetail",
+        "m3u.streamUrl",
     ] {
         assert!(r.contains(name), "{name} missing");
     }

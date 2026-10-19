@@ -47,7 +47,7 @@
   "downloadsHint": "オフライン視聴用にダウンロードした映画やエピソード。",
   "downloadsFolder": "ダウンロードフォルダー",
   "downloadsFolderHint": "新しいダウンロードはここに保存されます。進行中のダウンロードは現在のフォルダーのままです。",
-  "downloadsFolderHintServer": "サーバーを実行しているコンピューター上のフォルダーのフルパス。Enterキーで保存します。",
+  "downloadsFolderHintServer": "ダウンロードはサーバー上のこのフォルダーに保存されます。移動するには、別のIPTV_DATA_DIRでサーバーを起動してください。",
   "downloadsFolderUnknown": "未設定",
   "downloadsFolderSaved": "ダウンロードフォルダーを変更しました",
   "downloadsFolderReset": "ダウンロードフォルダーを既定に戻しました",
@@ -100,7 +100,7 @@
   "zapBanner": "チャンネル切り替え時にチャンネル情報を表示",
   "zapBannerHint": "チャンネルを切り替えるたびに、ロゴ、番号、現在と次の番組を数秒間表示します。",
   "showCaptions": "字幕を表示",
-  "showCaptionsHint": "ストリームに字幕がある場合はオンにします。",
+  "showCaptionsHint": "ストリームに字幕がある場合、内蔵プレーヤーと埋め込みmpvで字幕をオンにします。内蔵プレーヤーはMPEG-TSストリームの字幕を表示できません。外部プレーヤーはそれぞれの設定に従います。",
   "doubleClick": "ダブルクリックで再生",
   "doubleClickHint": "シングルクリックでチャンネルを選択し、ダブルクリックで再生します。",
 
@@ -109,7 +109,6 @@
   "mpvPath": "mpvのパス",
   "vlcPath": "VLCのパス",
   "playerPathHint": "プログラムのフルパス。空欄にするとPATHから検索します。",
-  "playerPathHintServer": "サーバーを実行しているマシン上のパス。",
   "playerPathMissing": "このパスには何もなく、ほかの {{player}} も見つかりませんでした。",
   "playerPathFallback": "このパスには何もありません。代わりに {{path}} の {{player}} を使用します。",
   "chooseMpv": "mpvを選択",
@@ -327,6 +326,7 @@
   "recordingsFolder": "録画フォルダー",
   "recordingsFolderHint": "ライブ録画は、ダウンロードフォルダー内の録画フォルダーに保存されます。",
   "recordingsFolderHintCustom": "ライブ録画はこのフォルダーに保存されます。",
+  "recordingsFolderHintServer": "ライブ録画はサーバー上のこのフォルダーに保存されます。変更できるのはデスクトップアプリだけです。",
   "recordingsFolderSaved": "録画フォルダーを変更しました",
   "recordingsFolderReset": "録画フォルダーを既定に戻しました",
   "chooseRecordingsFolder": "録画フォルダーを選択",
@@ -450,5 +450,10 @@
   "backupParentalBody": "ペアレンタルコントロールがロック中のため、バックアップ内の設定には PIN が必要です。PIN を入力してすべてをインポートするか、それ以外をインポートして現在の設定を残してください。",
   "backupParentalSkip": "それ以外をインポート",
   "backupParentalUnlock": "PIN を入力してインポート",
-  "backupParentalPinTitle": "ペアレンタルコントロールの設定をインポートするには PIN を入力してください"
+  "backupParentalPinTitle": "ペアレンタルコントロールの設定をインポートするには PIN を入力してください",
+  "windowStart": "起動時のウィンドウ",
+  "windowStartHint": "アプリのウィンドウの開き方です。F11 で全画面を終了できます。",
+  "windowStartNormal": "前回のまま",
+  "windowStartMaximized": "最大化",
+  "windowStartFullscreen": "全画面"
 }

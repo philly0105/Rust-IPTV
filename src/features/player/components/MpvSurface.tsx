@@ -8,7 +8,7 @@ import { itemKey, type Bounds, type MpvState, type MpvTrack, type PlayerSource }
 
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
-import type { EngineTracks, TrackOption } from '../engines';
+import { trackLanguageName, type EngineTracks, type TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
 import { useAlternatesStore } from '../failover';
 import { setMediaCommands, useMediaStore } from '../media';
@@ -21,6 +21,7 @@ import {
   DOUBLE_CLICK_MS,
   ENDED_EPSILON,
   handleEnded,
+  peekSettings,
   reportFullscreen,
   reportProgress,
   reportStatus,
@@ -102,26 +103,8 @@ export function boundsEqual(a: Bounds | null, b: Bounds): boolean {
   return !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
 }
 
-/** Built once: mpv state events come several times a second, each with every track. */
-let languageNames: Intl.DisplayNames | null | undefined;
-
-function languageName(lang: string): string {
-  if (languageNames === undefined) {
-    try {
-      languageNames = new Intl.DisplayNames(undefined, { type: 'language' });
-    } catch {
-      languageNames = null;
-    }
-  }
-  try {
-    return languageNames?.of(lang) ?? lang;
-  } catch {
-    return lang;
-  }
-}
-
 function trackLabel(t: MpvTrack, fallback: string): string {
-  const lang = t.lang ? languageName(t.lang) : undefined;
+  const lang = t.lang ? trackLanguageName(t.lang) : undefined;
   if (t.title && lang) return `${t.title} (${lang})`;
   return t.title ?? lang ?? fallback;
 }
@@ -364,6 +347,8 @@ export function MpvSurface({ className }: { className?: string }) {
     };
     /** The item whose video shape PiP last followed (a zap in PiP reshapes the window once). */
     let aspectFollowed: string | null = null;
+    /** The item whose subtitle tracks `showCaptions` was last applied to (once per item). */
+    let captionsApplied: string | null = null;
 
     const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
@@ -394,6 +379,15 @@ export function MpvSurface({ className }: { className?: string }) {
       if (st.loaded && st.timePos > 0 && aspectFollowed !== loadedKey.current) {
         aspectFollowed = loadedKey.current;
         void refreshPipAspect();
+      }
+      // showCaptions: once the item is loaded, its first subtitle track turns on unless mpv already
+      // picked one (a default or forced track). Off leaves mpv's own choice alone.
+      if (st.loaded && captionsApplied !== loadedKey.current) {
+        captionsApplied = loadedKey.current;
+        const sub = st.tracks.find((x) => x.type === 'sub');
+        if (peekSettings()?.showCaptions && sub && !st.tracks.some((x) => x.type === 'sub' && x.selected)) {
+          void rpc('mpv.setProperty', { name: 'sid', value: sub.id }).catch(() => undefined);
+        }
       }
       // keep-open pauses at EOF instead of ending: treat "paused at the end" as ended, once.
       const atEnd = !!st.duration && st.timePos >= st.duration - ENDED_EPSILON && st.paused;
@@ -625,7 +619,7 @@ function MpvConnectingNotice({ source }: { source: PlayerSource | null | undefin
         aria-live="polite"
         data-mpv-overlay=""
         data-testid="connecting-notice"
-        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-sm', offerSwitch ? 'pr-1 pl-3' : 'px-3')}
+        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-sm', offerSwitch ? 'pe-1 ps-3' : 'px-3')}
       >
         <span className="truncate">{t('stillConnecting')}</span>
         {offerSwitch && (

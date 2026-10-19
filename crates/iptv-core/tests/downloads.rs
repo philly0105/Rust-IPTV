@@ -962,6 +962,31 @@ async fn xtream_start_with_stale_url_uses_current_credentials() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn xtream_catchup_download_keeps_its_archive_url() {
+    let c = ctx().await;
+    let sid = add_xtream_source(&c, iptv_fixtures::XTREAM_PASSWORD).await;
+    // A catch-up programme: a live ref, so re-resolving would give the live stream.
+    let url = c.srv.url("/files/video.bin?size=65536");
+    let d: Download = serde_json::from_value(
+        c.ok(
+            "downloads.start",
+            json!({
+                "ref": {"sourceId": sid, "contentType": "live", "itemId": "1"},
+                "episodeId": "catchup:2026-10-18T20:00:00Z",
+                "title": "Channel 1",
+                "subtitle": "Evening news",
+                "url": url,
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    assert_eq!(done.url, url, "the archive URL is kept");
+    assert_eq!(done.file_available, Some(true));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pause_timeout_leaves_row_consistent_and_second_pause_succeeds() {
     let mut c = ctx().await;
     iptv_core::downloads::set_rate_limit(&c.state, Some(2 * 1024 * 1024));

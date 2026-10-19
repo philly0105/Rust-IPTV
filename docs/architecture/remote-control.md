@@ -1,16 +1,16 @@
 # Remote control
 
-The remote control lets a phone or another browser tab on the same machine change channels and volume on the running app. It is a small HTTP server inside `iptv-core` (`crates/iptv-core/src/remote/`), bound to `127.0.0.1`. In the desktop app the user can also turn on LAN mode (`settings.remoteLanEnabled`), which adds listeners on the computer's private IPv4 addresses for phones that pair with a QR code. See [LAN mode](#lan-mode).
+The remote control lets a phone or another browser tab on the same machine change channels and volume, and play, pause or stop, on the running app. It is a small HTTP server inside `iptv-core` (`crates/iptv-core/src/remote/`), bound to `127.0.0.1`. In the desktop app the user can also turn on LAN mode (`settings.remoteLanEnabled`), which adds listeners on the computer's private IPv4 addresses for phones that pair with a QR code. See [LAN mode](#lan-mode).
 
 ## Pieces
 
 | File | Role |
 | --- | --- |
-| `remote/mod.rs` | `RemoteHub` (latest status, published channels, server handle), `start`, `start_on`, `stop`, `server_status`, `init`, settings watcher |
+| `remote/mod.rs` | `RemoteHub` (latest status, channel list, published source, server handle), `start`, `start_on`, `stop`, `server_status`, `publish_source`, `refresh_channels`, `channels_may_have_changed`, `init`, settings watcher |
 | `remote/server.rs` | axum router, access guard (`check_access`), pairing endpoint, JSON handlers, `is_loopback_host` |
 | `remote/lan.rs` | private IPv4 selection (`select_lan_addrs`), bind plan (`plan_binds`), interface listing |
 | `remote/pairing.rs` | pairing code, pair rate limiter, paired-device sessions, cookie helpers, QR rendering |
-| `remote/rpc.rs` | the nine `remote.*` RPC commands |
+| `remote/rpc.rs` | the ten `remote.*` RPC commands |
 | `remote/remote-ui/index.html` | the remote web page, embedded with `include_str!` |
 | `tests/remote_control.rs` | check 10 (SC8) |
 | `tests/remote_lan.rs` | LAN pairing, sessions and guard, with simulated LAN peers on a loopback listener |
@@ -20,10 +20,12 @@ The remote control lets a phone or another browser tab on the same machine chang
 
 1. The user turns on Settings > Remote (or the UI calls `remote.start`). The server binds `127.0.0.1:{settings.remoteControl.port}` (default 7310).
 2. The remote page at `http://127.0.0.1:{port}` polls `GET /api/remote-control/status` once a second and posts commands.
-3. Each command becomes a `remote.command` app event (C1). The player store (`src/features/player`) listens with `onAppEvent('remote.command', ...)` and applies it: channel up/down and number select through `useChannelZap`, `selectId` by splitting `${sourceId}|${itemId}`, volume through the store actions.
-4. The UI reports what is playing with `remote.reportStatus` and publishes the current live list with `remote.publishChannels`. Both are kept in memory only; the channel list is capped at 20 000 entries.
+3. Each command becomes a `remote.command` app event (C1). The player store (`src/features/player`) listens with `onAppEvent('remote.command', ...)` and applies it: channel up/down and number select through `useChannelZap`, `selectId` by splitting `${sourceId}|${itemId}`, volume, `togglePlay`, `seekBy` and `stop` through the store actions (`stop` of an external player goes through `stopExternalPlayback`, like the stage's Stop button).
+4. The UI reports what is playing with `remote.reportStatus`, kept in memory only.
+5. The Live page names the source it shows with `remote.publishSource {sourceId}` (`useRemoteBridge`, while the server runs). The core fills the channel list itself (`refresh_channels`): `catalog::all_live_channels` with the readers' filters (hidden groups and channels, parental hide mode, English only), custom names from channel edits, at most 20 000 entries, of which the hub keeps only `id`, `name`, `number` and `logoUrl`. No channel row crosses the WebView (performance audit LV-7). The source is kept in memory and in `app_state` under `remote_source`, and every server start fills the list from it, so after a restart the phone lists channels before anyone opens Live TV. `channels_may_have_changed` refills it in the background when `parental.changed` fires (lock, unlock, an unlock running out), when `channels.changed` fires for that source, and when `sources.changed` reports a new catalog or a removal. Fills are serialized, and one that finds the published source changed meanwhile is dropped.
+6. `remote.publishChannels {channels}` still replaces the list with the caller's own, for clients that build one.
 
-The core never changes playback itself, so the same server works for the desktop shell and the PWA server mode.
+The core never changes playback itself, so the same server works for the desktop shell and the PWA server mode. In server mode it still binds loopback only (there is no LAN mode there), so in the Docker image the remote is reachable only from inside the container.
 
 ## Lifecycle
 
@@ -51,6 +53,9 @@ All routes sit under `/api/remote-control`. Responses are JSON with `Cache-Contr
 | `POST /channel/select` | `{number}` (1..999999, integer or numeric string) | `selectNumber {number}` |
 | `POST /channel/select-id` | `{id}` (`channelId` also accepted) | `selectId {id}`; 404 when a list is published and the id is not in it |
 | `POST /volume` | `{delta?, level?, mute?}` | `level` -> `setVolume {level}`; else `delta` > 0 -> `volumeUp`, < 0 -> `volumeDown`; `mute` -> `mute` |
+| `POST /playback/toggle` | ignored | `togglePlay` (play or pause the built-in player) |
+| `POST /playback/stop` | ignored | `stop` |
+| `POST /playback/seek` | `{seconds}` (non-zero, at most 6 hours either way; negative goes back) | `seekBy {seconds}` (the built-in player; external players ignore it) |
 
 Volume levels use the HTML media scale 0..1. A `level` in (1, 100] is read as a percentage. `mute` toggles in the player, so the server skips it when the last reported `muted` already equals the requested value; `{mute: true}` is therefore idempotent. Command responses are `{ok: true, commands: [...]}` listing the events emitted.
 
@@ -106,10 +111,12 @@ Redaction: `pair` and `tsr_remote` are in the logging `SECRET_PARAMS`, so `?pair
 - Channel and volume rockers sit side by side, with mute and the channel list between them.
 - The keypad collects up to six digits on the LCD. It commits 1.5 s after the last digit (a bar shows the countdown) or on Go. Delete removes a digit.
 - A volume slider sends `level`. Volume controls are disabled when the status says `canVolume: false`.
+- Back 10 s, Forward 30 s, Play / Pause and Stop sit under the rockers. Seeking and Play / Pause need the built-in player (`canVolume`); Stop also works while an external player has a channel open, and is disabled when nothing plays.
+- The page is English only. Its strings live in the embedded HTML, outside the app's `src/i18n` catalogs, so the app's translations do not reach it.
 - The channel sheet searches `/channels?q=` (debounced 200 ms, 200 rows per page) and selects with `select-id`. It has loading skeletons and empty states for "no list yet" and "no matches".
 - Status polls every second. After errors it backs off (2 s, 4 s ... up to 15 s) and shows a banner. Polling stops while the tab is hidden.
 - Over LAN, a 401 `unpaired` shows a "Not paired" screen with three steps (open Settings > Remote on the computer, scan the QR code, keep the phone on the same Wi-Fi) and a Check again button. Polling stops on that screen and resumes on Check again or when the phone comes back online. After an app restart the session cookie still works, so the page reconnects through the normal error backoff.
-- Touch targets are at least 44 px. The page uses a dark theme, honors `prefers-reduced-motion`, and gives haptic feedback where supported. On a desktop keyboard: arrows or PageUp/PageDown change channel, +/- change volume, m mutes, digits and Enter select a number, / opens search, Escape closes it.
+- Touch targets are at least 44 px. The page uses a dark theme, honors `prefers-reduced-motion`, and gives haptic feedback where supported. On a desktop keyboard: arrows or PageUp/PageDown change channel, +/- change volume, m mutes, k plays or pauses, j and l seek back 10 s and forward 30 s, digits and Enter select a number, / opens search, Escape closes it.
 
 ## Testing
 
@@ -120,9 +127,11 @@ Redaction: `pair` and `tsr_remote` are in the logging `SECRET_PARAMS`, so `?pair
 - `Origin: http://evil.example`, `null`, wrong port, and `https` return 403
 - Hosts `192.168.1.5` and `evil.example` return 403; loopback hosts pass
 - the `reportStatus` -> `/status` and `publishChannels` -> `/channels` round trips
+- `remote.publishSource` fills `/channels` from an imported playlist, and a new app state on the same data fills it again at start-up
+- play/pause and stop emit `togglePlay` and `stop`; seek emits `seekBy {seconds}` and rejects a missing, zero or too large step
 - the RPC lifecycle: start, idempotent start, busy port keeps the old server, stop
 - all `remote.*` names in `rpc::COMMANDS` are registered
 
 `cargo test -p iptv-core --test remote_lan` never binds a non-loopback address. It serves `router_with_lan(state, port, [192.168.1.5])` on `127.0.0.1:0` and fakes the peer with axum's `MockConnectInfo`, then checks: LAN requests without a session get 401, the pair round trip sets the cookie, single use, revoke and reset, sessions surviving a hub restart, the pair rate limit, an unreadable device list (503, nothing overwritten), the cookie path, rebinding hosts and origins, public peers, loopback unchanged, and `unsupported` in server mode.
 
-Unit tests cover address selection and bind plans (`lan.rs`), code expiry, single use, the rate limiter, user-agent summaries, session add/touch/revoke/evict and QR output (`pairing.rs`), `check_access` including rebinding cases (`server.rs`), and `pair` / `tsr_remote` redaction (`logging.rs`). Older unit tests in `server.rs` and `mod.rs` cover host parsing, origin matching, number and level parsing, and channel sanitizing. Vitest covers the Settings panel (`src/features/settings/test/remoteLan*.test.tsx`).
+Unit tests cover address selection and bind plans (`lan.rs`), code expiry, single use, the rate limiter, user-agent summaries, session add/touch/revoke/evict and QR output (`pairing.rs`), `check_access` including rebinding cases (`server.rs`), and `pair` / `tsr_remote` redaction (`logging.rs`). Older unit tests in `server.rs` and `mod.rs` cover host parsing, origin matching, number and level parsing, and channel sanitizing. Vitest covers the Settings panel (`src/features/settings/test/remoteLan*.test.tsx`), the Live page bridge (`src/features/live/test/remoteBridge.test.tsx`) and the player's command handling (`src/features/player/remote.test.ts`).

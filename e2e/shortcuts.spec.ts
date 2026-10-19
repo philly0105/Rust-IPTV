@@ -50,7 +50,7 @@ test.describe.serial('keyboard shortcuts', () => {
     await expect(palette.getByRole('option').first()).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(palette).toBeHidden();
-    // It reopens after closing (mod+k pressed inside the open palette does not close it; see report).
+    // It reopens after closing. (mod+k inside the open palette closes it too; shell.test.tsx covers that.)
     await page.keyboard.press(`${MOD}+k`);
     await expect(palette).toBeVisible();
     await page.keyboard.press('Escape');

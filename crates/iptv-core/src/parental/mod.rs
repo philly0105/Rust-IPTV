@@ -236,6 +236,8 @@ async fn config(state: &AppState, rt: &Runtime) -> CoreResult<store::Config> {
 
 fn emit(state: &AppState, status: &ParentalStatus) {
     state.emit(CHANGED_EVENT, status);
+    // remote: hide mode filters the phone's channel list too.
+    crate::remote::channels_may_have_changed(state, None);
 }
 
 /// Current status and session; emits [`CHANGED_EVENT`] when the unlock has

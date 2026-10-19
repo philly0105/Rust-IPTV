@@ -6,7 +6,7 @@ import { rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { Settings } from '@/api/types';
 
-import { useToast } from '@/ui';
+import { useToast, errorDescription } from '@/ui';
 import { applyPatch, revertPatch, type SettingsPatch } from './patch';
 
 const KEY = rpcKey('settings.get');
@@ -50,7 +50,7 @@ export function useUpdateSettings(): (patch: SettingsPatch) => Promise<boolean> 
         toast({
           variant: 'error',
           title: t('saveFailed'),
-          description: err.message,
+          description: errorDescription(err),
           action: { label: t('retry'), onClick: () => void update(patch) },
         });
         return false;
@@ -77,7 +77,7 @@ export function useResetSettings(): () => Promise<Settings | null> {
       if (seq === latestWrite) qc.setQueryData<Settings>(KEY, next);
       return before;
     } catch (e) {
-      toast({ variant: 'error', title: t('resetFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('resetFailed'), description: errorDescription(e) });
       return null;
     }
   }, [qc, toast, t]);

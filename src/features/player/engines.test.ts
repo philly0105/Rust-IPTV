@@ -275,6 +275,14 @@ describe('hls.js setup', () => {
     expect(main).not.toHaveProperty('capLevelToPlayerSize');
     expect(tile).toMatchObject({ backBufferLength: 5, maxBufferLength: 10, capLevelToPlayerSize: true });
   });
+
+  it('a movie buffers a minute ahead; live keeps the default', async () => {
+    await createEngine(video(), hls({ isLive: false }), 'http://h/movie/1.m3u8', cb(), { captions: false });
+    await createEngine(video(), hls(), 'http://h/live/1.m3u8', cb(), { captions: false });
+    const [movie, live] = FakeHls.created.map((x) => x.config);
+    expect(movie).toMatchObject({ maxBufferLength: 60, backBufferLength: 90 });
+    expect(live).not.toHaveProperty('maxBufferLength');
+  });
 });
 
 describe('mpegts.js buffer profile (PB-5)', () => {

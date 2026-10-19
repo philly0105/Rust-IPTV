@@ -35,6 +35,7 @@ of a large database (SPEC C3).
 | `src/api.rs` | `/api/rpc/{cmd}`, `/api/events`, `/api/health`, API 404 |
 | `src/guard.rs` | Origin / Host checks on `/api`, hardening headers |
 | `src/proxy/mod.rs` | `/api/proxy` handler, upstream client, redirects, streaming |
+| `src/proxy/readahead.rs` | Read-ahead and resume for media bodies of known length |
 | `src/proxy/target.rs` | SSRF rules, guarded DNS resolver |
 | `src/proxy/hls.rs` | Streaming HLS playlist rewriter |
 | `src/files.rs` | `/api/files/{downloadId}` |
@@ -147,6 +148,20 @@ needs source headers or would be mixed content.
    included, carries `Content-Security-Policy: sandbox; default-src 'none'`
    and `nosniff`, so upstream content never runs as a page on the app's
    origin.
+   A 200 or 206 body with a `Content-Length` (a movie, an episode, an HLS
+   segment) goes through a reader task (`src/proxy/readahead.rs`) that keeps
+   up to 32 MiB ahead of the player, so the provider's connection keeps
+   flowing while `<video>` pauses its own reads (it buffers about ten seconds
+   of a progressive file). When that connection drops before the body is
+   complete and the server takes byte ranges (206, or `Accept-Ranges: bytes`),
+   the reader asks for the rest (`Range: bytes=<offset>-<end>`, with `If-Range`
+   from a strong ETag or Last-Modified, redirects followed again from the
+   requested URL), checks the 206 `Content-Range`, and carries on in the same
+   response; three failed tries in a row end it. The player never sees the
+   drop, and the log notes each resume with the host. The reader stops as soon
+   as the client lets go of the response, which frees the provider's
+   connection. Bodies without a length (live MPEG-TS) pass through as they
+   come.
 7. HLS playlists are detected by content type (`*mpegurl*`) or, for untyped
    responses (`text/plain`, `application/octet-stream`, none), by sniffing
    `#EXTM3U` in the first bytes. They are rewritten line by line as chunks

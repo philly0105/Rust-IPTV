@@ -4,7 +4,8 @@
  * Every playback failure of the built-in engines and embedded mpv lands here as a store
  * transition to `status: 'error'`; a stream whose position stops moving while it should be
  * playing counts as a failure too (a stall: STALL_MS, or LIVE_STALL_MS for a live stream the
- * engine reports as buffering). Then, in order:
+ * engine reports as buffering; a movie or episode only once its data stops arriving too).
+ * Then, in order:
  *
  * 1. Errors that will not fix themselves (`errors.ts` classes auth, notFound, unsupported,
  *    connectionLimit, and server) switch a live channel to another copy at once
@@ -166,6 +167,8 @@ let healthyTimer: ReturnType<typeof setTimeout> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let lastPos = -1;
 let lastMoveAt = 0;
+/** Where the data held at the position ended on the last tick (`heldUntil`). */
+let lastHeld = -1;
 /** `keyOf` the item that reached playback: only it gets the full retry ladder. */
 let playedKey: string | null = null;
 let slowTimer: ReturnType<typeof setTimeout> | null = null;
@@ -387,7 +390,24 @@ function onPlaying(ses: Session, position: number): void {
   }, HEALTHY_MS);
 }
 
-/** Stall detector: a `playing` stream whose position stands still. */
+/**
+ * Where the data held at `position` ends, in seconds: the element's buffered range around it, or
+ * the end of embedded mpv's cache. -1 when nothing is held.
+ */
+function heldUntil(position: number): number {
+  const m = useMediaStore.getState();
+  let end = m.mpv?.seekable?.end ?? -1;
+  for (const r of m.buffered) {
+    if (r.start <= position + 1 && r.end >= position - 1 && r.end > end) end = r.end;
+  }
+  return end;
+}
+
+/**
+ * Stall detector: a `playing` stream whose position stands still. A movie or episode whose data
+ * is still coming in is waiting on a slow server, not stalled: a reload would throw away what
+ * arrived and ask the server again, so it counts as stalled only once the data stops too.
+ */
 function tick(): void {
   const s = usePlayerStore.getState();
   const now = Date.now();
@@ -395,8 +415,15 @@ function tick(): void {
     lastMoveAt = now;
     return;
   }
+  const held = s.source.isLive ? -1 : heldUntil(s.positionSeconds);
+  const arriving = held > lastHeld;
+  lastHeld = held;
   if (s.positionSeconds !== lastPos) {
     lastPos = s.positionSeconds;
+    lastMoveAt = now;
+    return;
+  }
+  if (arriving) {
     lastMoveAt = now;
     return;
   }
@@ -416,6 +443,7 @@ function syncTick(s: PlayerState): void {
   if (want && !tickTimer) {
     lastPos = s.positionSeconds;
     lastMoveAt = Date.now();
+    lastHeld = s.source?.isLive ? -1 : heldUntil(s.positionSeconds);
     tickTimer = setInterval(tick, TICK_MS);
   } else if (!want && tickTimer) {
     clearInterval(tickTimer);
@@ -527,4 +555,5 @@ export function __resetReconnect(): void {
   tickTimer = null;
   lastPos = -1;
   lastMoveAt = 0;
+  lastHeld = -1;
 }

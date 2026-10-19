@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_SETTINGS, type PlayerSource, type Settings } from '@/api/types';
+import { DEFAULT_SETTINGS, type MpvState, type PlayerSource, type Settings } from '@/api/types';
 
 const handlers: Record<string, (args: unknown) => unknown> = {};
 const rpcMock = vi.fn(async (name: string, args?: unknown) => {
@@ -253,6 +253,54 @@ describe('smart reconnect', () => {
     media.useMediaStore.setState({ waiting: true });
     vi.advanceTimersByTime(LIVE_STALL_MS + 2000);
     expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(STALL_MS);
+    expect(phase()).toBe('retrying');
+  });
+
+  it('waits on a movie whose data is still arriving, and reloads it once the data stops', () => {
+    start(movie, 600);
+    media.useMediaStore.setState({ waiting: true, buffered: [{ start: 590, end: 600 }] });
+    for (let s = 1; s <= 20; s++) {
+      vi.advanceTimersByTime(1000);
+      media.useMediaStore.setState({ buffered: [{ start: 590, end: 600 + s / 2 }] });
+    }
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(STALL_MS + 1000);
+    expect(phase()).toBe('retrying');
+  });
+
+  it('counts embedded mpv filling its cache as data arriving', () => {
+    usePlayerStore.setState({ source: movie, mode: 'embedded-mpv', status: 'playing', positionSeconds: 600 });
+    const mpv = (end: number): MpvState => ({
+      attached: true,
+      loaded: true,
+      paused: false,
+      timePos: 600,
+      volume: 100,
+      muted: false,
+      tracks: [],
+      fullscreen: false,
+      recording: false,
+      recordPath: null,
+      buffering: true,
+      seekable: { start: 590, end },
+    });
+    media.useMediaStore.setState({ mpv: mpv(600) });
+    for (let s = 1; s <= 20; s++) {
+      vi.advanceTimersByTime(1000);
+      media.useMediaStore.setState({ mpv: mpv(600 + s / 2) });
+    }
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(STALL_MS + 1000);
+    expect(phase()).toBe('retrying');
+  });
+
+  it('still reloads a live stream that buffers forever', () => {
+    start(live, 10);
+    for (let s = 1; s <= 5; s++) {
+      vi.advanceTimersByTime(1000);
+      media.useMediaStore.setState({ buffered: [{ start: 0, end: 10 + s }] });
+    }
     vi.advanceTimersByTime(STALL_MS);
     expect(phase()).toBe('retrying');
   });

@@ -463,6 +463,9 @@ async function hlsEngine(
     backBufferLength: tile ? 5 : source.isLive ? 30 : 90,
     // A tile never seeks back, and fetching the top rendition for a 640x360 slot wastes bandwidth.
     ...(tile ? { maxBufferLength: 10, capLevelToPlayerSize: true } : {}),
+    // A movie or episode keeps a minute ahead instead of 30 s (hls.js's 60 MB cap still applies),
+    // so a slow patch on the provider's side drains the buffer instead of stopping the picture.
+    ...(!tile && !source.isLive ? { maxBufferLength: 60 } : {}),
     // Undefined would replace hls.js's default, so the key is only there with a value.
     ...(hlsBandwidth ? { abrEwmaDefaultEstimate: hlsBandwidth } : {}),
     startPosition: !source.isLive && source.resumeSeconds ? source.resumeSeconds : -1,

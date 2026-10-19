@@ -525,6 +525,97 @@ async fn proxy_passes_range_through() {
     assert_eq!(r.headers()[header::CONTENT_LENGTH], "1000");
 }
 
+type RangeLog = Arc<std::sync::Mutex<Vec<Option<String>>>>;
+
+/// A 1000-byte movie whose first answer drops after 300 bytes; later answers
+/// honour Range. `ranges: false` leaves `Accept-Ranges` out of the first
+/// answer. Returns the base URL and the Range header of every request.
+async fn spawn_dropping_movie(ranges: bool) -> (String, RangeLog) {
+    use futures::StreamExt;
+    let log = RangeLog::default();
+    let seen = Arc::clone(&log);
+    let app = Router::new().route(
+        "/movie/u/p/1.mp4",
+        get(move |req: Request| {
+            let seen = Arc::clone(&seen);
+            async move {
+                let range = req.headers().get(header::RANGE);
+                let range = range.and_then(|v| v.to_str().ok()).map(str::to_owned);
+                let first = {
+                    let mut seen = seen.lock().unwrap();
+                    seen.push(range);
+                    seen.len() == 1
+                };
+                if !first {
+                    return serve_bytes(req).await;
+                }
+                let head = bytes::Bytes::copy_from_slice(&bytes_1000()[..300]);
+                let head = futures::stream::once(async move { Ok::<_, std::io::Error>(head) });
+                // The pause lets the 300 bytes go out before the connection drops.
+                let cut = futures::stream::once(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    Err::<bytes::Bytes, _>(std::io::Error::other("connection dropped"))
+                });
+                let body = axum::body::Body::from_stream(head.chain(cut));
+                let mut res = Response::builder()
+                    .header(header::CONTENT_TYPE, "video/mp4")
+                    .header(header::CONTENT_LENGTH, "1000");
+                if ranges {
+                    res = res.header(header::ACCEPT_RANGES, "bytes");
+                }
+                res.body(body).unwrap()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), log)
+}
+
+#[tokio::test]
+async fn proxy_resumes_a_movie_whose_connection_drops() {
+    let (stub, ranges) = spawn_dropping_movie(true).await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let url = h.proxy_url(&format!("{stub}/movie/u/p/1.mp4"), Some("x-1"));
+
+    // The player gets one whole answer; the proxy asked for the rest itself.
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()[header::CONTENT_LENGTH], "1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), bytes_1000().as_slice());
+    let ranges = ranges.lock().unwrap().clone();
+    assert_eq!(ranges.len(), 2, "{ranges:?}");
+    assert_eq!(ranges[0], None);
+    assert_eq!(ranges[1].as_deref(), Some("bytes=300-999"));
+}
+
+#[tokio::test]
+async fn proxy_passes_a_drop_on_when_the_server_takes_no_ranges() {
+    let (stub, ranges) = spawn_dropping_movie(false).await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let url = h.proxy_url(&format!("{stub}/movie/u/p/1.mp4"), Some("x-1"));
+
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(r.bytes().await.is_err());
+    assert_eq!(ranges.lock().unwrap().len(), 1);
+}
+
 #[tokio::test]
 async fn proxy_rejects_private_and_malformed_targets() {
     let stub = spawn_stub().await;

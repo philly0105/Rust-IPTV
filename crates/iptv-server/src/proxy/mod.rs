@@ -4,7 +4,9 @@
 //! from `sources.config_json`, fetch with the client's `Range`/`If-Range`,
 //! follow redirects manually (each hop re-validated), then either stream the
 //! body through untouched (status, type, length, range headers preserved) or,
-//! for HLS playlists, stream it through [`hls::HlsRewriter`].
+//! for HLS playlists, stream it through [`hls::HlsRewriter`]. A media body of
+//! known length goes through a read-ahead reader that also resumes a dropped
+//! connection (`readahead.rs`).
 //!
 //! `ua`, `referer` and `origin` query parameters override the source's
 //! headers (per-channel `#EXTVLCOPT` headers) and are carried into rewritten
@@ -17,6 +19,7 @@
 //! with `Content-Disposition: attachment`.
 
 pub mod hls;
+mod readahead;
 pub mod target;
 
 use crate::api::error_response_with;
@@ -33,6 +36,7 @@ use iptv_core::http::{
 };
 use iptv_core::model::RequestHeaders;
 use iptv_core::{AppState, CoreResult, RpcError};
+use readahead::{Resume, Span};
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use std::io;
@@ -144,6 +148,63 @@ async fn load_source(app: &AppState, id: String) -> CoreResult<Option<SourceAcce
     .await
 }
 
+/// A request's way to the stream server: the client, the guard, the source it
+/// trusts and the headers to send. A media body's reader keeps a clone so it
+/// can resume a dropped connection.
+#[derive(Clone)]
+pub(crate) struct Upstream {
+    client: reqwest::Client,
+    guard: Arc<NetGuard>,
+    trusted: Option<Authority>,
+    headers: RequestHeaders,
+}
+
+impl Upstream {
+    /// Sends the request and follows up to [`MAX_REDIRECTS`] redirects by
+    /// hand, validating every hop. Returns the answer and the URL that gave it.
+    async fn fetch(
+        &self,
+        method: &Method,
+        url: Url,
+        client_headers: &HeaderMap,
+        forward_range: bool,
+    ) -> Result<(reqwest::Response, Url), Fail> {
+        let mut current = url;
+        let mut hops = 0;
+        loop {
+            self.guard.check(&current, self.trusted.as_ref()).await?;
+            let resp = send(
+                &self.client,
+                method,
+                &current,
+                &self.headers,
+                client_headers,
+                forward_range,
+            )
+            .await?;
+            let location = resp
+                .status()
+                .is_redirection()
+                .then(|| resp.headers().get(header::LOCATION))
+                .flatten()
+                .and_then(|l| l.to_str().ok())
+                .and_then(|l| current.join(l).ok());
+            match location {
+                Some(next) if hops < MAX_REDIRECTS => {
+                    hops += 1;
+                    current = next;
+                }
+                Some(_) => {
+                    return Err(Fail::coded(RpcError::network(
+                        "upstream redirected too many times",
+                    )))
+                }
+                None => return Ok((resp, current)),
+            }
+        }
+    }
+}
+
 /// Error with its HTTP status.
 struct Fail(StatusCode, RpcError);
 
@@ -222,47 +283,20 @@ async fn proxy(
             .ok_or_else(|| Fail::coded(RpcError::not_found(format!("source {id} not found"))))?,
         None => SourceAccess::default(),
     };
-    let trusted = access.authority.as_ref();
-    let client = s.proxy.clients.get(trusted);
-    let headers_out = merge_headers(&access.headers, &q);
+    let upstream = Upstream {
+        client: s.proxy.clients.get(access.authority.as_ref()),
+        guard: Arc::clone(&s.proxy.guard),
+        headers: merge_headers(&access.headers, &q),
+        trusted: access.authority,
+    };
 
     // Playlists are rewritten whole; never ask for a slice of one.
     let path = url.path().to_ascii_lowercase();
     let forward_range = !(path.ends_with(".m3u8") || path.ends_with(".m3u"));
 
-    let mut current = url;
-    let mut hops = 0;
-    let resp = loop {
-        s.proxy.guard.check(&current, trusted).await?;
-        let resp = send(
-            &client,
-            &method,
-            &current,
-            &headers_out,
-            headers,
-            forward_range,
-        )
+    let (resp, current) = upstream
+        .fetch(&method, url.clone(), headers, forward_range)
         .await?;
-        let location = resp
-            .status()
-            .is_redirection()
-            .then(|| resp.headers().get(header::LOCATION))
-            .flatten()
-            .and_then(|l| l.to_str().ok())
-            .and_then(|l| current.join(l).ok());
-        match location {
-            Some(next) if hops < MAX_REDIRECTS => {
-                hops += 1;
-                current = next;
-            }
-            Some(_) => {
-                return Err(Fail::coded(RpcError::network(
-                    "upstream redirected too many times",
-                )))
-            }
-            None => break resp,
-        }
-    };
 
     check_upstream_status(resp.status())?;
 
@@ -275,17 +309,26 @@ async fn proxy(
     let head = method == Method::HEAD;
     let rewriter = hls::HlsRewriter::with_params(current.clone(), &params)
         .at_path(&s.opts.proxy_path);
-    if let Some(out) = respond(resp, current.clone(), rewriter, head).await? {
+    let resume_from = Some((upstream.clone(), url));
+    if let Some(out) = respond(resp, current.clone(), rewriter, head, resume_from).await? {
         return Ok(out);
     }
     // The client asked for a byte range of what turned out to be a playlist.
     // A slice of a playlist cannot be rewritten, so fetch the whole of it
     // (ignoring Range is allowed) and answer 200.
-    let resp = send(&client, &method, &current, &headers_out, headers, false).await?;
+    let resp = send(
+        &upstream.client,
+        &method,
+        &current,
+        &upstream.headers,
+        headers,
+        false,
+    )
+    .await?;
     check_upstream_status(resp.status())?;
     let rewriter = hls::HlsRewriter::with_params(current.clone(), &params)
         .at_path(&s.opts.proxy_path);
-    respond(resp, current, rewriter, head).await?.ok_or_else(|| {
+    respond(resp, current, rewriter, head, None).await?.ok_or_else(|| {
         Fail::coded(RpcError::network(
             "the stream server answered with part of a playlist although the whole one was requested",
         ))
@@ -440,12 +483,15 @@ fn is_generic_type(ct: &str) -> bool {
 }
 
 /// Builds the proxy response. `None` when the upstream answered 206 with a
-/// slice of a playlist: the caller refetches it whole.
+/// slice of a playlist: the caller refetches it whole. `resume_from` (the
+/// upstream and the URL the client asked for) lets a media body of known
+/// length resume a dropped connection.
 async fn respond(
     resp: reqwest::Response,
     final_url: Url,
     rewriter: hls::HlsRewriter,
     head: bool,
+    resume_from: Option<(Upstream, Url)>,
 ) -> Result<Option<Response>, Fail> {
     let status = resp.status();
     let upstream = resp.headers().clone();
@@ -525,13 +571,29 @@ async fn respond(
         let body = if head || status_code == StatusCode::NOT_MODIFIED {
             Body::empty()
         } else {
-            let input = stream::iter(prefix.into_iter().map(Ok)).chain(body);
-            Body::from_stream(input.map(|r| r.map_err(|e| io::Error::other(e.without_url()))))
+            let input = stream::iter(prefix.into_iter().map(Ok)).chain(body).boxed();
+            media_body(input, status_code, &upstream, resume_from)
         };
         builder.body(body)
     };
     out.map(Some)
         .map_err(|e| Fail::coded(RpcError::internal(format!("failed to build response: {e}"))))
+}
+
+/// A media body: through the read-ahead reader when its length is known (a
+/// movie, an episode, a segment), else as it comes (a live stream).
+fn media_body(
+    input: BoxStream<'static, reqwest::Result<Bytes>>,
+    status: StatusCode,
+    headers: &HeaderMap,
+    resume_from: Option<(Upstream, Url)>,
+) -> Body {
+    let Some(span) = Span::of(status, headers) else {
+        let pass = input.map(|r| r.map_err(|e| io::Error::other(e.without_url())));
+        return Body::from_stream(pass);
+    };
+    let resume = resume_from.and_then(|(up, url)| Resume::new(up, url, status, headers));
+    Body::from_stream(readahead::spawn(input, span, resume))
 }
 
 fn rewrite_stream(

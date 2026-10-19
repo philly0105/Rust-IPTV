@@ -1,5 +1,4 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { CalendarClock, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, History, Play, Radio, Tv, X } from 'lucide-react';
 import {
   memo,
@@ -22,7 +21,7 @@ import { rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useToast, type MenuAction, type SelectOption } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useListVirtualizer, useToast, type MenuAction, type SelectOption } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
@@ -209,6 +208,9 @@ export const HIGHLIGHT_MS = 3000;
 /** A search hit the grid is moving to: its channel's row is looked up once the list is loaded. */
 interface Reveal {
   key: ItemKey;
+  ref: ItemRef;
+  /** The hit's channel number: `paged.locate` finds the row in a few reads with it (LV-2). */
+  number: number | undefined;
   /** Display time of the hit's start; the keyboard cursor lands on it. */
   time: number;
   channelName: string;
@@ -370,16 +372,13 @@ export function EpgGridPage() {
 
   // ---- virtual rows + chunked grid data --------------------------------------
   const scroller = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count,
     getScrollElement: () => scroller.current,
     estimateSize: () => GRID_ROW,
     overscan: 6,
     scrollPaddingStart: HEADER_H,
     initialRect: { width: 1200, height: 720 },
-    // A scroll tick re-renders through React's normal batching, not a synchronous render inside
-    // the scroll event (L3-perf-desktop-4; VirtualGrid does the same).
-    useFlushSync: false,
   });
   const vItems = virtualizer.getVirtualItems();
   const first = vItems[0]?.index ?? 0;
@@ -461,6 +460,18 @@ export function EpgGridPage() {
     return () => window.clearTimeout(id);
   }, [atRest, gridsLoaded, chunkA, chunkB, fromIso, toIso, prefetchChunk]);
 
+  // The rows the portal and the short guide are asked for follow the visible rows once they hold
+  // still: a fling would otherwise queue a portal call for rows it has already passed (LV-4).
+  const rowsShown = vItems.length > 0;
+  const [shortRows, setShortRows] = useState({ first, last, shown: rowsShown });
+  useEffect(() => {
+    if (shortRows.first === first && shortRows.last === last && shortRows.shown === rowsShown) return;
+    // The first rows on screen ask at once; later moves wait for the rows to hold still.
+    if (!shortRows.shown) return setShortRows({ first, last, shown: rowsShown });
+    const id = window.setTimeout(() => setShortRows({ first, last, shown: rowsShown }), SHORT_EPG_SETTLE_MS);
+    return () => window.clearTimeout(id);
+  }, [first, last, rowsShown, shortRows]);
+
   // Stalker: the portal's own guide for the visible rows, laid over the XMLTV grid. Archive
   // channels also get the archived past of the window (`from`), so earlier rows and catch-up
   // work without XMLTV; the others keep the plain airing-onwards answer.
@@ -470,12 +481,12 @@ export function EpgGridPage() {
     const plain: ItemRef[] = [];
     const archive: ItemRef[] = [];
     if (!isStalker) return [plain, archive];
-    for (let i = first; i <= last; i++) {
+    for (let i = shortRows.first; i <= shortRows.last; i++) {
       const ch = getChannel(i);
       if (ch) (ch.archive?.enabled ? archive : plain).push(ch.ref);
     }
     return [plain, archive];
-  }, [isStalker, first, last, getChannel]);
+  }, [isStalker, shortRows, getChannel]);
   const portalLimit = stalkerGridLimit(windowMs);
   const archiveQuery = stalkerArchiveQuery(dataStart - offsetMs, dataEnd - offsetMs, now, portalLimit);
   const plainPortal = useStalkerPreviews(sourceId, isStalker, plainRefs, now, portalLimit);
@@ -517,13 +528,6 @@ export function EpgGridPage() {
     return { list: undefined, fresh: false };
   };
   const gridList = (k: ItemKey): EpgProgram[] | undefined => gridEntry(k).list;
-  // The rows the short guide is asked for follow the visible rows once they hold still.
-  const [shortRows, setShortRows] = useState({ first, last });
-  useEffect(() => {
-    if (shortRows.first === first && shortRows.last === last) return;
-    const id = window.setTimeout(() => setShortRows({ first, last }), SHORT_EPG_SETTLE_MS);
-    return () => window.clearTimeout(id);
-  }, [first, last, shortRows]);
   const shortRefs = useMemo(() => {
     const out: ItemRef[] = [];
     if (!shortEpgOn) return out;
@@ -938,7 +942,7 @@ export function EpgGridPage() {
     const group = groupForHit(categoryId, hit);
     goTo(time, { category: group === categoryId ? undefined : null });
     setHighlight(null);
-    setReveal({ key: itemKey(hit.ref), time, channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
+    setReveal({ key: itemKey(hit.ref), ref: hit.ref, number: hit.channelNumber, time, channelName: displayChannelName(hit.channelName, prefs.stripCountryPrefix), categoryId: group });
   });
 
   // Once the list the hit needs is on screen, find the channel's row, scroll to it, put the
@@ -948,10 +952,14 @@ export function EpgGridPage() {
     if (!reveal || !listReady || categoryId !== reveal.categoryId) return;
     let cancelled = false;
     const known = paged.loaded.find((l) => itemKey(l.channel.ref) === reveal.key)?.index;
+    // LV-2: the channel number narrows the search to a few page reads; the sequential scan (to the
+    // end of the list) is left for a list whose numbers are missing or out of order.
+    const scan = () =>
+      findChannelIndex((offset, limit) => rpc('catalog.channels', { sourceId, categoryId, query: { offset, limit } }), reveal.key, () => cancelled);
     const lookup =
       known !== undefined
         ? Promise.resolve(known)
-        : findChannelIndex((offset, limit) => rpc('catalog.channels', { sourceId, categoryId, query: { offset, limit } }), reveal.key, () => cancelled);
+        : (paged.locate?.(reveal.ref, reveal.number) ?? Promise.resolve(undefined)).then((index) => (index !== undefined ? index : cancelled ? null : scan()));
     lookup
       .then((index) => {
         if (cancelled) return;

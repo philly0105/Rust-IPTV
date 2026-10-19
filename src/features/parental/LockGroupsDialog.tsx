@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { ShieldAlert } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -7,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { rpc, RpcError } from '@/api/transport';
 import type { ContentType, ParentalLock, ParentalLockTarget, ParentalStatus, Source } from '@/api/types';
-import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps } from '@/ui';
+import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps, useListVirtualizer } from '@/ui';
 
 import { useContentTypeText } from './labels';
 import { PinDialog } from './PinDialog';
@@ -304,7 +303,7 @@ function GroupList({
 
   const lockedCount = rows.filter((r) => r.auto || picks.has(r.id)).length;
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: shown.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW,

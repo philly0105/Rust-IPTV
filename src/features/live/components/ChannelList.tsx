@@ -1,10 +1,9 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UNSAFE_LocationContext } from 'react-router';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
-import { useRowHeight } from '@/ui';
+import { useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
@@ -110,7 +109,7 @@ export function ChannelList(props: ChannelListProps) {
 
   // Rows follow the UI scale, and compact density tightens their padding and gaps.
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
@@ -118,9 +117,6 @@ export function ChannelList(props: ChannelListProps) {
     initialRect: { width: 360, height: props.initialHeight ?? 800 },
     // First paint already shows the remembered rows: no flash of the top of the list.
     initialOffset: () => listMemory.get(resetKey)?.scrollTop ?? 0,
-    // A scroll re-renders in the next commit instead of a flushSync inside the scroll event, so a
-    // fling never blocks on a synchronous render of the rows per event (as VirtualGrid does).
-    useFlushSync: false,
   });
   // A new scale or density: drop the cached row sizes so every row takes the new height.
   const measuredHeight = useRef(rowHeight);

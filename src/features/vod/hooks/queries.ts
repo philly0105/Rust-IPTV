@@ -132,6 +132,8 @@ export function sameGridSlot(a: readonly unknown[], b: readonly unknown[]): bool
 export function useVodPage(
   input: GridQueryInput | undefined,
   pageIndex: number,
+  /** False holds the request (a grid page the user is dragging past, VD-2); cached data still shows. */
+  fetchNow = true,
 ): UseQueryResult<Page<VodItem | SeriesItem>, RpcError> {
   const req = input ? buildPageRequest(input, pageIndex) : undefined;
   const queryKey = req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'];
@@ -141,7 +143,7 @@ export function useVodPage(
       if (!req) throw new RpcError('invalid', 'No source');
       return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
-    enabled: !!req,
+    enabled: !!req && fetchNow,
     placeholderData: (prev, prevQuery) => (prev && prevQuery && sameGridSlot(prevQuery.queryKey, queryKey) ? prev : undefined),
     ...PAGE_TIMING,
   });

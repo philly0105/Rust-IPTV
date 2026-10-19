@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type ChannelEdit } from '@/api/types';
 import { ChannelLogo } from '@/features/live/components/ChannelLogo';
-import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonList, cn, useRowHeight } from '@/ui';
+import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonList, cn, useListVirtualizer, useRowHeight } from '@/ui';
 
 import { isGoneAnswer, reportUnhideMany, unhideChannel, unhideMany } from './actions';
 import { ITEM_STALE_MS, useDisplayName, useHiddenEdits } from './edits';
@@ -66,7 +65,7 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
   );
   const mixed = useMemo(() => new Set(rows.map((r) => r.edit.ref.contentType)).size > 1, [rows]);
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: shown.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,

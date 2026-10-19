@@ -1,4 +1,4 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { useListVirtualizer } from './virtualizer';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
@@ -80,16 +80,13 @@ export function VirtualList<T>({
   const baseId = useId();
   const [active, setActive] = useState(() => (selectedIndex !== undefined && selectedIndex >= 0 ? selectedIndex : -1));
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => itemHeight,
     overscan,
     initialRect,
     getItemKey: getKey ? (i) => getKey(items[i]!, i) : undefined,
-    // As in VirtualGrid: a scroll event renders with the next frame, not synchronously inside the
-    // event, so a fast fling through the channel list is not a string of long tasks (L3-live-1).
-    useFlushSync: false,
   });
 
   useEffect(() => {

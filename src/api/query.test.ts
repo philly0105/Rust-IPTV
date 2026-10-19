@@ -9,6 +9,7 @@ import {
   EVENT_BURST_MS,
   bindEventInvalidation,
   invalidate,
+  invalidateWithEvents,
   invalidationPrefixes,
   queryClient,
   queryDefaultsFor,
@@ -300,5 +301,19 @@ describe('event bursts', () => {
     void invalidate('stats.');
     expect(queryClient.getQueryState(rpcKey('stats.summary', null as never))?.isInvalidated).toBe(true);
     await waitFor(() => expect(callsOf('stats.summary')).toBe(1));
+  });
+
+  it("shares one refetch between a write's own refresh and the change event it emits (LV-8)", async () => {
+    unbind = bindEventInvalidation();
+    const q = renderHook(() => useRpcQuery('lists.list', undefined as never), { wrapper });
+    await waitFor(() => expect(q.result.current.isSuccess).toBe(true));
+    vi.mocked(rpcRaw).mockClear();
+    // The reply lands, then the event; the other way round joins the same burst too.
+    const done = invalidateWithEvents('lists.');
+    emit('lists.changed', {});
+    await done;
+    await waitFor(() => expect(callsOf('lists.list')).toBe(1));
+    await new Promise((r) => setTimeout(r, EVENT_BURST_MS * 2));
+    expect(callsOf('lists.list')).toBe(1);
   });
 });

@@ -8,7 +8,7 @@
  * change what `lists.items` returns) then refresh other windows.
  */
 
-import { invalidate, queryClient, rpcKey } from '@/api/query';
+import { invalidateWithEvents, queryClient, rpcKey } from '@/api/query';
 import { RpcError } from '@/api/transport';
 import type { Channel, CustomList, CustomListEntry, ItemRef, ItemSnapshot } from '@/api/types';
 import type { RefWithSnapshot } from '@/api/rpc';
@@ -61,9 +61,12 @@ export function rollbackItems(id: string, previous: CustomListEntry[] | undefine
   if (previous) queryClient.setQueryData<CustomListEntry[]>(itemsKey(id), previous);
 }
 
-/** Refetches every `lists.*` query. */
+/**
+ * Refetches every `lists.*` query, in one round with the `lists.changed` the write emits (LV-8:
+ * each write used to refetch them twice).
+ */
 export function refreshLists(): Promise<void> {
-  return invalidate('lists.');
+  return invalidateWithEvents('lists.');
 }
 
 /** What the core stores next to a channel: its title and logo stay readable after the provider drops it. */

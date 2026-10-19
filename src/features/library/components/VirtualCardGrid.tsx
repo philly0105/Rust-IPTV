@@ -6,10 +6,10 @@
  * history entry lands where the user was, with focus on the card they opened.
  */
 
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from '@/ui/cn';
+import { useListVirtualizer } from '@/ui/virtualizer';
 
 export interface VirtualCardGridProps<T> {
   items: readonly T[];
@@ -101,7 +101,7 @@ export function VirtualCardGrid<T>({
   const rowHeight = Math.round(cardWidth / aspect + captionHeight + gap);
   const rowCount = Math.ceil(items.length / columns);
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,

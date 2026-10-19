@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { Check, EyeOff } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcMutation, useRpcQuery } from '@/api/query';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useToast } from '@/ui';
+import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useListVirtualizer, useToast } from '@/ui';
 
 export interface HiddenCategoriesDialogProps {
   open: boolean;
@@ -37,7 +36,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
     return (cats.data ?? []).filter((c) => !q || c.name.toLowerCase().includes(q));
   }, [cats.data, filter]);
 
-  const v = useVirtualizer({
+  const v = useListVirtualizer({
     count: visible.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_H,

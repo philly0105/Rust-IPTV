@@ -38,6 +38,7 @@ import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPage
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
 import { useCoverWidth } from '../hooks/useCoverWidth';
+import { PageGate, PageGateProvider, usePageOpen } from '../hooks/pageGate';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
@@ -121,7 +122,7 @@ interface GridCellProps {
  */
 const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks }: GridCellProps) {
   const page = pageOf(index, pageSize);
-  const q = useVodPage(input, page);
+  const q = useVodPage(input, page, usePageOpen(page));
   const item = q.data?.items[index - page * pageSize];
   // C4: one watched lookup per loaded page, shared by its cells.
   const watched = useWatchedKeys(q.data?.items);
@@ -304,6 +305,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const firstReady = clientFiltered ? filteredDone : !!first.data;
   const indices = useMemo(() => Array.from({ length: total }, (_, i) => i), [total]);
   const pageSize = pageSizeFor(source.data?.kind ?? 'xtream');
+  // VD-2: cells fetch their page once the grid rests on it, not every page a drag passes.
+  const pageGate = useMemo(() => new PageGate(), [categoryId]);
+  useEffect(() => () => pageGate.dispose(), [pageGate]);
 
   const qc = useQueryClient();
   /** Item at a grid index, read from the page cache (Enter on the keyboard cursor). */
@@ -757,28 +761,30 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
             />
           ) : (
-            <VirtualGrid<number>
-              // Keyed on the category only (L2-vod-8, L3-vod-3): a new sort, search or filter refills the
-              // mounted cells, whose pages keep their titles until the new ones arrive (useVodPage).
-              key={categoryId}
-              items={indices}
-              minColumnWidth={coverWidth}
-              aspect="poster"
-              label={categoryName}
-              testId="vod-grid"
-              initialActiveIndex={restoredIndex}
-              resetKey={filterKey}
-              render={(i, _index, state) => (
-                <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} locks={locks} />
-              )}
-              onSelect={(i) => {
-                const item = queryItem(i);
-                // A cell whose page failed: selecting it retries that page.
-                if (!item) return retryPageOf(i);
-                openTitle(item.ref, i);
-              }}
-              className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            />
+            <PageGateProvider value={pageGate}>
+              <VirtualGrid<number>
+                // Keyed on the category only (L2-vod-8, L3-vod-3): a new sort, search or filter refills the
+                // mounted cells, whose pages keep their titles until the new ones arrive (useVodPage).
+                key={categoryId}
+                items={indices}
+                minColumnWidth={coverWidth}
+                aspect="poster"
+                label={categoryName}
+                testId="vod-grid"
+                initialActiveIndex={restoredIndex}
+                resetKey={filterKey}
+                render={(i, _index, state) => (
+                  <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} locks={locks} />
+                )}
+                onSelect={(i) => {
+                  const item = queryItem(i);
+                  // A cell whose page failed: selecting it retries that page.
+                  if (!item) return retryPageOf(i);
+                  openTitle(item.ref, i);
+                }}
+                className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              />
+            </PageGateProvider>
           )}
         </div>
         <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />

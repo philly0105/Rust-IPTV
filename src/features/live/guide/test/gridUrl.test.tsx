@@ -8,11 +8,12 @@
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Category, Channel, EpgProgram, GuideSearchHit, Page, PageQuery } from '@/api/types';
+import { itemKey, type Category, type Channel, type EpgProgram, type GuideSearchHit, type Page, type PageQuery } from '@/api/types';
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_SLOT_MIN, HIGHLIGHT_MS } from '../../components/EpgGridPage';
 import { addLocalDays, floorLocal, formatClock, formatDay, HOUR, MINUTE } from '../../lib/epgTime';
+import { findChannelIndex, LOCATE_PAGE } from '../search';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -238,9 +239,33 @@ describe('search hits on the grid', () => {
     await waitFor(() => expect(document.querySelector('[data-channel-row="2"]')?.hasAttribute('data-highlighted')).toBe(false), { timeout: HIGHLIGHT_MS + 2000 });
   });
 
-  it('a channel beyond the loaded pages is looked up page by page', async () => {
+  it('a channel beyond the loaded pages is found by its number, not by scanning the list (LV-2)', async () => {
     const start = defaultStart(Date.now()) + 3 * HOUR;
     await searchAndPick('/epg', [searchHit(150, start)], /^Evening News, Channel 150, /);
+    const reads = () => rpc.of('catalog.channels').map((a) => (a as { query: PageQuery }).query);
+    // Number 151 is on the second page of 120: one read finds it.
+    await waitFor(() => expect(reads().some((q) => q.offset === 120 && q.limit === 120)).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reads().some((q) => q.limit === 1000)).toBe(false);
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it('the page-by-page fallback reads to the end of the list, past 60k rows (LV-2)', async () => {
+    const total = 75_000;
+    const target = 70_123;
+    let reads = 0;
+    const index = await findChannelIndex(async (offset, limit) => {
+      reads++;
+      const items = Array.from({ length: Math.min(limit, total - offset) }, (_, i) => makeChannel(offset + i));
+      return { items, total, offset, limit };
+    }, itemKey(makeChannel(target).ref));
+    expect(index).toBe(target);
+    expect(reads).toBe(Math.floor(target / LOCATE_PAGE) + 1);
+  });
+
+  it('a hit without a channel number falls back to reading the list page by page', async () => {
+    const start = defaultStart(Date.now()) + 3 * HOUR;
+    await searchAndPick('/epg', [searchHit(150, start, { channelNumber: undefined })], /^Evening News, Channel 150, /);
     await waitFor(() => expect(rpc.of('catalog.channels').some((a) => (a as { query: PageQuery }).query.limit === 1000)).toBe(true));
     await new Promise((r) => setTimeout(r, 50));
     expect(useToastStore.getState().toasts).toEqual([]);

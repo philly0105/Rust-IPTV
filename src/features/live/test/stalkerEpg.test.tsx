@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, configure } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, configure } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, ItemRef, Page, PageQuery } from '@/api/types';
@@ -187,6 +187,19 @@ describe('LivePage on a Stalker source', () => {
     expect(rowCalls.length).toBeGreaterThan(0);
     // throttled to the visible window, never the whole 200-channel page
     expect(rowCalls.length).toBeLessThanOrEqual(30);
+  });
+
+  it("a tune asks the portal once for the playing channel's now/next and the ribbon (LV-8)", async () => {
+    renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    const c5 = makeChannel(5);
+    act(() => fakes.usePlayerStore.setState({ source: { url: '', kind: 'hls', title: c5.name, ref: c5.ref, isLive: true, isRadio: false } }));
+    const c5Calls = () => stalkerCalls().filter((c) => (c.args as { ref: ItemRef }).ref.itemId === 'c5').map((c) => c.args as { limit: number });
+    await waitFor(() => expect(c5Calls().some((a) => a.limit === 50)).toBe(true));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(c5Calls().filter((a) => a.limit === 50)).toHaveLength(1);
+    // Besides it, at most the row's own preview (the visible rows' queue).
+    expect(c5Calls().length).toBeLessThanOrEqual(2);
   });
 
   it('does not ask the portal for an Xtream source', async () => {

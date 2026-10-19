@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { itemKey, type ItemRef, type ItemSnapshot, type SeriesItem, type VodItem } from '@/api/types';
-import { MyListButton } from '@/features/mylist/components/MyListButton';
+import { MyListButton, MyListButtonView } from '@/features/mylist/components/MyListButton';
 import { useMyListState, type MyListStatus } from '@/features/mylist/hooks/useMyList';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 
@@ -146,11 +146,12 @@ interface PosterText {
  * My List for every card of one grid: read once by the grid, instead of three list observers per
  * card (L2-vod-1). The grid's strings come with it: three `useTranslation` calls per card made
  * every mount copy the i18n instance three times, which a fast scroll paid for in GC pauses
- * (L3-perf-ui-3).
+ * (L3-perf-ui-3). Linked cards (search results, VD-1) read it too, for their corner button.
  */
 interface GridMyList {
   keys: ReadonlySet<string>;
   status: MyListStatus;
+  retry: () => Promise<boolean>;
   toggle: ReturnType<typeof useMyListToggle>;
   text: PosterText;
 }
@@ -162,10 +163,10 @@ const GridMyListContext = createContext<GridMyList | null>(null);
  * it subscribes on its own (slower on a large grid, same behaviour).
  */
 export function GridMyListProvider({ children }: { children: ReactNode }) {
-  const { keys, status } = useMyListState();
+  const { keys, status, retry } = useMyListState();
   const toggle = useMyListToggle();
   const text = usePosterText();
-  const value = useMemo(() => ({ keys, status, toggle, text }), [keys, status, toggle, text]);
+  const value = useMemo(() => ({ keys, status, retry, toggle, text }), [keys, status, retry, toggle, text]);
   return <GridMyListContext.Provider value={value}>{children}</GridMyListContext.Provider>;
 }
 
@@ -182,10 +183,18 @@ interface PosterCardViewProps extends PosterCardProps {
   extraLabel?: string | undefined;
   /** Drawn over the artwork's corner (the grid's My List toggle). */
   artCorner?: ReactNode;
+  /** A grid's shared My List and strings, for a linked card's corner button. */
+  list?: GridMyList | undefined;
 }
 
-/** A card that reads its own strings (rails, search results): one `useTranslation` per card. */
+/** A linked card: inside a GridMyListProvider it shares the grid's list and strings. */
 function PosterCardView(props: PosterCardViewProps) {
+  const shared = useContext(GridMyListContext);
+  return shared ? <PosterCardBody {...props} list={shared} t={shared.text.t} locale={shared.text.language} /> : <PosterCardOwnText {...props} />;
+}
+
+/** A card that reads its own strings (rails): one `useTranslation` per card. */
+function PosterCardOwnText(props: PosterCardViewProps) {
   const { t, i18n } = useTranslation('vod');
   return <PosterCardBody {...props} t={t} locale={i18n.language} />;
 }
@@ -216,6 +225,7 @@ function PosterCardBody({
   locked,
   extraLabel,
   artCorner,
+  list,
   t,
   locale,
 }: PosterCardViewProps & { t: TFunction; locale: string }) {
@@ -348,6 +358,18 @@ function PosterCardBody({
     </Link>
   );
   if (!myList) return link;
+  const cornerProps = {
+    variant: 'icon',
+    itemRef: myList.itemRef,
+    snapshot: myList.snapshot,
+    // Roving host (rail): the link is the card's only Tab stop; S toggles, and the corner shows while the link has focus.
+    tabIndex: tabIndex !== undefined ? -1 : undefined,
+    className: cn(
+      'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
+      'motion-safe:transition-[opacity,background-color,color,transform]',
+      hasProgress ? 'bottom-5' : 'bottom-1.5',
+    ),
+  } as const;
   return (
     <div className="group/poster relative min-w-0">
       {link}
@@ -357,18 +379,7 @@ function PosterCardBody({
         touch screens, and always once the title is saved.
       */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
-        <MyListButton
-          variant="icon"
-          itemRef={myList.itemRef}
-          snapshot={myList.snapshot}
-          // Roving host (rail): the link is the card's only Tab stop; S toggles, and the corner shows while the link has focus.
-          tabIndex={tabIndex !== undefined ? -1 : undefined}
-          className={cn(
-            'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
-            'motion-safe:transition-[opacity,background-color,color,transform]',
-            hasProgress ? 'bottom-5' : 'bottom-1.5',
-          )}
-        />
+        {list ? <MyListButtonView {...cornerProps} state={list} t={list.text.tm} /> : <MyListButton {...cornerProps} />}
       </div>
     </div>
   );
@@ -385,10 +396,10 @@ function GridPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; s
 
 /** Outside a GridMyListProvider: the card reads My List and its strings itself. */
 function GridPosterCardOwn(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
-  const { keys, status } = useMyListState();
+  const { keys, status, retry } = useMyListState();
   const toggle = useMyListToggle();
   const text = usePosterText();
-  const list = useMemo(() => ({ keys, status, toggle, text }), [keys, status, toggle, text]);
+  const list = useMemo(() => ({ keys, status, retry, toggle, text }), [keys, status, retry, toggle, text]);
   return <GridPosterCardWith {...props} list={list} />;
 }
 

@@ -36,12 +36,20 @@ export function useStalkerPreviews(
   const [version, bump] = useReducer((x: number) => x + 1, 0);
   const bumpRef = useRef(bump);
   bumpRef.current = bump;
+  // Answers that land in one frame re-render the list once, not once each (LV-3, as useShortEpg).
+  const frame = useRef(0);
 
   const queue = useMemo(
     () =>
       new StalkerPreviewQueue(
         (ref) => rpc('stalker.epg', from === undefined ? { ref, limit } : { ref, limit, from: new Date(from).toISOString() }),
-        () => bumpRef.current(),
+        () => {
+          if (frame.current) return;
+          frame.current = requestAnimationFrame(() => {
+            frame.current = 0;
+            bumpRef.current();
+          });
+        },
         { sourceId, scope: `${limit}|${from ?? ''}` },
       ),
     // One queue per source, size and window start; backoff and answers live with the source.
@@ -49,7 +57,14 @@ export function useStalkerPreviews(
     [sourceId, limit, from],
   );
   // reset, not destroy: StrictMode re-runs effects on the same memoized queue.
-  useEffect(() => () => queue.reset(), [queue]);
+  useEffect(
+    () => () => {
+      queue.reset();
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
+    },
+    [queue],
+  );
 
   const refsRef = useRef(refs);
   refsRef.current = refs;

@@ -19,6 +19,7 @@ export type { EmptyStateProps, ErrorStateProps } from './States';
 export { VirtualList } from './VirtualList';
 export type { VirtualItemState, VirtualListProps } from './VirtualList';
 export { VirtualGrid, aspectRatio, gridLayout } from './VirtualGrid';
+export { useListVirtualizer } from './virtualizer';
 export type { GridAspect, VirtualGridProps } from './VirtualGrid';
 export { ToastProvider, ToastViewport, dismissToast, focusToasts, toast, useToast, useToastStore } from './Toast';
 export type { ToastOptions, ToastRecord, ToastVariant } from './Toast';

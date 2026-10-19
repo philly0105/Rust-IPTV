@@ -98,7 +98,7 @@ function BackStub() {
 /** The app frame: header field, a rail link that stays mounted, and the routes. */
 function renderApp(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>
         <MemoryRouter initialEntries={[path]}>
@@ -116,6 +116,7 @@ function renderApp(path: string) {
       </I18nextProvider>
     </QueryClientProvider>,
   );
+  return { ...utils, client };
 }
 
 const field = () => screen.getByLabelText('Header search');
@@ -251,6 +252,23 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     const badge = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
     expect(badge.className).toContain('max-w-[110px]');
     expect(badge.querySelector('span')?.className).toContain('truncate');
+  });
+});
+
+describe('VD-1: poster results scroll without re-rendering every card', () => {
+  it('the cards share one My List subscription, not two per card', async () => {
+    rpcMock.handlers['watchlist.list'] = () => [];
+    rpcMock.handlers['positions.watchedContains'] = () => [];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: Array.from({ length: 40 }, (_, i) => movie(i)), series: [] });
+    const { client } = renderApp('/search?q=movie');
+    const grid = await screen.findByTestId('vod-search-movies');
+    await waitFor(() => expect(within(grid).getAllByTestId('mylist-button').length).toBeGreaterThan(4));
+    await waitFor(() => expect(within(grid).getAllByTestId('mylist-button')[0]!.dataset['state']).toBe('ready'));
+    const observers = client
+      .getQueryCache()
+      .findAll({ predicate: (q) => q.queryKey[0] === 'watchlist.list' })
+      .reduce((n, q) => n + q.getObserversCount(), 0);
+    expect(observers).toBeLessThanOrEqual(2);
   });
 });
 

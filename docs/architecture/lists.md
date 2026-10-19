@@ -85,6 +85,8 @@ The player recovers when the list stops matching what plays:
 
 `lists.changed` (payload `{}`) is emitted after a write that changed something. `create`, `reorder` and `reorderItems` always emit. `update`, `remove`, `addItems` and `removeItems` emit only when they changed a row.
 
+The UI patches its cache before a write and refetches every `lists.` query once the core has answered (`refreshLists` in `src/features/lists/lib/cache.ts`). That refetch joins the event burst (`invalidateWithEvents` in `src/api/query.ts`), so the reply and the `lists.changed` it causes share one refetch round.
+
 Removing a source deletes its list items through the cascade. `sources::remove` then calls `lists::forget_source(state, id)`, after the source row is gone. It emits `lists.changed` when any list exists, so counts and rails refresh, and it never fails the removal.
 
 ## Backup

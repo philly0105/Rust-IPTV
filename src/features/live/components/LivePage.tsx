@@ -61,6 +61,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useParentalLocks } from '../hooks/useParentalLocks';
+import { STALKER_RIBBON_LIMIT } from '../hooks/useChannelPrograms';
 import { usePortalEpg } from '../hooks/usePortalEpg';
 import { useRemoteBridge } from '../hooks/useRemoteBridge';
 import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -70,7 +71,6 @@ import { MINUTE } from '../lib/epgTime';
 import { openChannelSource, playChannel } from '../lib/playback';
 import { needsFallback } from '../lib/shortEpg';
 import { archivePath, canBrowseArchive } from '../lib/archive';
-import { PREVIEW_FETCH_SIZE } from '../lib/stalkerPreviewQueue';
 import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
@@ -255,8 +255,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     offset ? { refs: detailRef ? [detailRef] : [], offsetMinutes: offset } : { refs: detailRef ? [detailRef] : [] },
     { enabled: !!detailRef, staleTime: 60_000 },
   );
+  // The ribbon's own request for the channel (its archive past aside), so a tune asks the portal
+  // once, not once for now/next and again for the ribbon (LV-8).
   const playingPortalEpg = usePortalEpg(
-    { ref: detailRef ?? EMPTY_REF, limit: PREVIEW_FETCH_SIZE },
+    { ref: detailRef ?? EMPTY_REF, limit: STALKER_RIBBON_LIMIT },
     { enabled: !!detailRef && kind === 'stalker', staleTime: 60_000 },
   );
   const playingXmltv = playingNowNext.data ? Object.values(playingNowNext.data)[0] : undefined;

@@ -1,7 +1,7 @@
 /**
  * Campaign loop 2 (live channels): search answers within the budget (L2-live-2), the list jumps
  * to a channel tuned outside its loaded pages (L2-live-3), pages are read ahead of a scroll
- * (L2-live-4), number entry commits as soon as no longer number exists (L2-live-7), a source
+ * (L2-live-4) but not while a drag passes them (LV-1), number entry commits as soon as no longer number exists (L2-live-7), a source
  * emptied by parental Hide mode says so (L2-settings-4), focus comes back to the row on Back even
  * from the shell's sidebar (L2-live-14), the ribbon header wraps on a phone (L2-live-15) and the
  * idle stage shrinks to a bar on a phone (L2-visual-13).
@@ -13,13 +13,15 @@ import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Channel, Page, PageQuery } from '@/api/types';
+import { channelPageArgs } from '@/api/bootPrefetch';
+import { rpcKey } from '@/api/query';
+import type { Channel, ItemRef, Page, PageQuery } from '@/api/types';
 
 import { resetChannelListMemory } from '../components/ChannelList';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage, SEARCH_DEBOUNCE_MS } from '../components/LivePage';
 import { DIGIT_COMMIT_MS, digitsComplete, useDigitEntry } from '../hooks/useDigitEntry';
-import { usePagedChannels } from '../hooks/usePagedChannels';
+import { CHANNEL_PAGE_SIZE, PAGE_SETTLE_MS, usePagedChannels } from '../hooks/usePagedChannels';
 import { i18n, installDomStubs, makeChannel, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -94,6 +96,9 @@ function baseHandlers(total = 40) {
 
 const channelCalls = () =>
   rpcMock.calls.filter((c) => c.cmd === 'catalog.channels').map((c) => (c.args as { query: PageQuery }).query);
+/** The first row of each `epg.nowNext` call (rows run c0, c1, ...). */
+const nowNextFirstRows = () =>
+  rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext').map((c) => Number((c.args as { refs: ItemRef[] }).refs[0]!.itemId.slice(1)));
 
 beforeAll(() => {
   configure({ asyncUtilTimeout: 3000 });
@@ -204,11 +209,15 @@ describe('pages are read ahead of a scroll (L2-live-4)', () => {
     expect(channelCalls().filter((q) => q.offset === 120)).toHaveLength(0);
     act(() => result.current.setVisibleRange(70, 90));
     await waitFor(() => expect(channelCalls().some((q) => q.offset === 120)).toBe(true));
-    // Its now/next and favourite flags come with it.
-    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext').length).toBeGreaterThan(0));
-    act(() => result.current.setVisibleRange(250, 270));
+    expect(channelCalls().some((q) => q.offset === 240)).toBe(true);
+    // Pages read ahead bring no now/next or favourite flags until their rows are on screen (LV-1).
+    await new Promise((r) => setTimeout(r, PAGE_SETTLE_MS + 50));
+    expect(nowNextFirstRows()).not.toContain(120);
+    // Onto the page read ahead: it shows at once, its extras follow, and the next ones are read.
+    act(() => result.current.setVisibleRange(130, 150));
+    expect(result.current.getChannel(140)?.name).toBe('Channel 140');
     await waitFor(() => expect(channelCalls().some((q) => q.offset === 360)).toBe(true));
-    expect(channelCalls().some((q) => q.offset === 480)).toBe(true);
+    await waitFor(() => expect(nowNextFirstRows()).toContain(120));
   });
 
   it('rows of a cached page show at once when the range moves onto it', async () => {
@@ -219,6 +228,71 @@ describe('pages are read ahead of a scroll (L2-live-4)', () => {
     act(() => result.current.setVisibleRange(80, 100));
     await waitFor(() => expect(channelCalls().some((q) => q.offset === 120)).toBe(true));
     await waitFor(() => expect(result.current.getChannel(130)?.name).toBe('Channel 130'));
+  });
+});
+
+describe('a scrollbar drag reads the pages it stops on, not every page it passes (LV-1)', () => {
+  it('a drag across 200k rows sends nothing while it moves, then one page with its extras', async () => {
+    baseHandlers(200_000);
+    const { result } = renderHook(() => usePagedChannels({ sourceId: 'src1' }), { wrapper: hookWrapper() });
+    await waitFor(() => expect(result.current.total).toBe(200_000));
+    act(() => result.current.setVisibleRange(0, 20));
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'favorites.contains')).toBe(true));
+    rpcMock.calls.length = 0;
+    // One range report per frame, thousands of rows apart.
+    for (let k = 1; k <= 30; k++) act(() => result.current.setVisibleRange(k * 5000, k * 5000 + 20));
+    expect(rpcMock.calls).toHaveLength(0);
+    await waitFor(() => expect(channelCalls().some((q) => q.offset === 150_000)).toBe(true));
+    await new Promise((r) => setTimeout(r, PAGE_SETTLE_MS + 50));
+    expect(channelCalls()).toHaveLength(1);
+    expect(nowNextFirstRows()).toEqual([150_000]);
+    expect(rpcMock.calls.filter((c) => c.cmd === 'favorites.contains')).toHaveLength(1);
+    expect(result.current.getChannel(150_010)?.name).toBe('Channel 150010');
+  });
+
+  it('steps under a page onto pages not read yet wait for one settle, which they do not restart', async () => {
+    baseHandlers(20_000);
+    const { result } = renderHook(() => usePagedChannels({ sourceId: 'src1', withExtras: false }), { wrapper: hookWrapper() });
+    await waitFor(() => expect(result.current.total).toBe(20_000));
+    act(() => result.current.setVisibleRange(0, 20));
+    rpcMock.calls.length = 0;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    act(() => result.current.setVisibleRange(4000, 4020));
+    // 100 rows a frame onto pages nothing has read, 16 ms apart, for most of a settle.
+    for (let k = 1; k <= 5; k++) {
+      act(() => vi.advanceTimersByTime(16));
+      act(() => result.current.setVisibleRange(4000 + k * 100, 4020 + k * 100));
+    }
+    expect(channelCalls()).toHaveLength(0);
+    // The timer the jump started switches to where the range is when it fires (row 4500).
+    act(() => vi.advanceTimersByTime(PAGE_SETTLE_MS - 5 * 16));
+    vi.useRealTimers();
+    await waitFor(() => expect(channelCalls().some((q) => q.offset === 4440)).toBe(true));
+    expect(channelCalls()).toHaveLength(1);
+  });
+
+  it('cancels read-ahead the range has left far behind, and keeps it near the range', async () => {
+    baseHandlers(20_000);
+    const serveAll = rpcMock.handlers['catalog.channels']!;
+    // Pages past the first answer never, as on a busy core.
+    rpcMock.handlers['catalog.channels'] = (a) => ((a as { query: PageQuery }).query.offset === 0 ? serveAll(a) : new Promise(() => undefined));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => usePagedChannels({ sourceId: 'src1', withExtras: false }), { wrapper });
+    await waitFor(() => expect(result.current.total).toBe(20_000));
+    const status = (page: number) => client.getQueryState(rpcKey('catalog.channels', channelPageArgs({ sourceId: 'src1' }, page, CHANNEL_PAGE_SIZE)))?.fetchStatus;
+    act(() => result.current.setVisibleRange(0, 20));
+    act(() => result.current.setVisibleRange(70, 90));
+    await waitFor(() => expect(status(2)).toBe('fetching'));
+    expect(status(1)).toBe('fetching');
+    act(() => result.current.setVisibleRange(140, 160));
+    // Page 1 is on screen now, page 2 is next to it: both kept.
+    expect(status(1)).toBe('fetching');
+    expect(status(2)).toBe('fetching');
+    act(() => result.current.setVisibleRange(12_000, 12_020));
+    await waitFor(() => expect(status(2)).toBe('idle'));
+    expect(status(3)).toBe('idle');
+    await waitFor(() => expect(channelCalls().some((q) => q.offset === 12_000)).toBe(true));
   });
 });
 

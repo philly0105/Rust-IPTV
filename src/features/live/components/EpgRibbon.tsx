@@ -1,6 +1,5 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { CalendarClock, ChartGantt, CircleAlert, History, LayoutList, Link2, Lock, Radio, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -10,7 +9,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { Button, IconButton, Skeleton, useToast } from '@/ui';
+import { Button, IconButton, Skeleton, useListVirtualizer, useToast } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -498,7 +497,8 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
   );
 }
 
-function TimelineBlock({
+/** Memoized: a scroll re-renders only the blocks whose text cap moves (the clipped ones), LV-8. */
+const TimelineBlock = memo(function TimelineBlock({
   block,
   textMax,
   now,
@@ -580,13 +580,13 @@ function TimelineBlock({
       </span>
     </button>
   );
-}
+});
 
 function ProgramList(props: ViewProps) {
   const { t, i18n } = useTranslation('live');
   const { programs, now, channel, kind } = props;
   const scroller = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: programs.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => LIST_ROW,

@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -6,7 +5,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
+import { Button, Dialog, ErrorState, Skeleton, useListVirtualizer, useToast } from '@/ui';
 import { foldForFilter } from './CategorySidebar';
 
 const ROW = 36;
@@ -63,7 +62,7 @@ export function ManageCategoriesDialog({
     return q ? list.filter((c) => foldForFilter(c.name).includes(q)) : list;
   }, [all.data, filter]);
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: shown.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW,

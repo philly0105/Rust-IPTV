@@ -56,6 +56,13 @@ import { openEditListItems, openListPicker, openManageLists } from '../store';
 
 const SIDEBAR_KEY = 'lists.sidebarCollapsed';
 
+/** The index of the channel row `el` is in, if any. */
+function rowIndexOf(el: EventTarget | null): number | null {
+  const row = el instanceof Element ? el.closest<HTMLElement>('[data-testid="channel-list"] [data-row-index]') : null;
+  const i = row ? Number(row.dataset.rowIndex) : NaN;
+  return Number.isInteger(i) ? i : null;
+}
+
 export function ListPage() {
   const { t, i18n } = useTranslation('lists');
   const { t: tl } = useTranslation('live');
@@ -124,14 +131,15 @@ export function ListPage() {
 
   // `l` on a focused row: the picker for that row's channel.
   useAddToListShortcut(activeChannel, paged.getChannel);
-  // C2 (wired by I): F2 / Shift+Delete on the row that has DOM focus, as on the Live page.
-  const [focusedRow, setFocusedRow] = useState<number | null>(null);
-  const rowIndexOf = (el: EventTarget | null): number | null => {
-    const row = el instanceof Element ? el.closest<HTMLElement>('[data-testid="channel-list"] [data-row-index]') : null;
-    const i = row ? Number(row.dataset.rowIndex) : NaN;
-    return Number.isInteger(i) ? i : null;
-  };
-  useChannelEditShortcuts(focusedRow !== null ? (paged.getChannel(focusedRow) ?? activeChannel) : undefined);
+  // C2 (wired by I): F2 / Shift+Delete on the row that has DOM focus, as on the Live page. The row
+  // is read when the key is pressed, not tracked from focus events: tracking it re-rendered the
+  // page, its ribbon and the unavailable entries on every arrow key (LV-5).
+  const { getChannel } = paged;
+  const focusedRowChannel = useCallback(() => {
+    const i = rowIndexOf(document.activeElement);
+    return i === null ? undefined : (getChannel(i) ?? activeChannel);
+  }, [getChannel, activeChannel]);
+  useChannelEditShortcuts(rowsAreThisList && !!paged.total ? focusedRowChannel : undefined);
 
   // ---- favorites ----------------------------------------------------------
   const [favOverrides, setFavOverrides] = useState<ReadonlyMap<ItemKey, boolean>>(() => new Map());
@@ -420,10 +428,6 @@ export function ListPage() {
       {/* channels: beside the stage from 768 px, under it on a phone */}
       <section
         aria-label={tl('channels')}
-        onFocus={(e) => setFocusedRow(rowIndexOf(e.target))}
-        onBlur={(e) => {
-          if (rowIndexOf(e.relatedTarget) === null) setFocusedRow(null);
-        }}
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
       >
         <div className="flex items-center gap-2 border-b border-divider px-2 py-2">

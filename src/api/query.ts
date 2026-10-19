@@ -252,6 +252,17 @@ export function invalidationPrefixes(
   return [...new Set([...defaults, ...(extra[event.type] ?? [])])];
 }
 
+/**
+ * Like {@link invalidate}, but the refetch joins the open event burst, or opens one: a write's own
+ * refresh and the change event the core sends for it, a moment before or after the reply, then
+ * share one refetch round instead of asking twice (LV-8).
+ */
+export function invalidateWithEvents(prefix: string): Promise<void> {
+  const b = openBurst();
+  b.prefixes.add(prefix);
+  return b.done;
+}
+
 /** `settings.changed` carries the settings `settings.get` returns (core `for_client`). */
 function isSettingsPayload(payload: unknown): payload is Settings {
   return typeof payload === 'object' && payload !== null && !Array.isArray(payload);

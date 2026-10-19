@@ -385,6 +385,19 @@ describe('list page', () => {
     expect(fireEvent.keyDown(rows()[0]!, { key: 'PageDown' })).toBe(false);
     usePlayerStore.setState({ mode: 'inline' });
   });
+
+  it('F2 renames the row that has focus, read when the key is pressed, not tracked per focus move (LV-5)', async () => {
+    const { registerRenameHost, useRenameStore } = await import('@/features/channeledit/store');
+    const unregister = registerRenameHost();
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    act(() => rows()[1]!.focus());
+    fireEvent.keyDown(rows()[1]!, { key: 'F2', code: 'F2' });
+    expect(useRenameStore.getState().request?.channel.ref).toEqual(CNN.ref);
+    unregister();
+  });
 });
 
 describe('/lists', () => {

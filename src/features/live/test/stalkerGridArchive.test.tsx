@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Channel, ItemRef, Page, PageQuery } from '@/api/types';
 
-import { EpgGridPage, stalkerArchiveQuery } from '../components/EpgGridPage';
+import { EpgGridPage, GRID_ROW, stalkerArchiveQuery } from '../components/EpgGridPage';
 import { DAY, HOUR, MINUTE } from '../lib/epgTime';
 import { StalkerPreviewQueue } from '../lib/stalkerPreviewQueue';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
@@ -41,7 +41,7 @@ vi.mock('@/features/player/remote', async () => await import('./fakes'));
 
 const fakes = await import('./fakes');
 
-const TOTAL = 8;
+let TOTAL = 8;
 const SOURCE = { id: 'src1', kind: 'stalker', name: 'Demo portal', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } };
 
 interface EpgArgs {
@@ -84,6 +84,7 @@ const epgCalls = (itemId: string) =>
 
 beforeAll(installDomStubs);
 beforeEach(() => {
+  TOTAL = 8;
   handlers();
   fakes.recorded.playSource.length = 0;
 });
@@ -126,6 +127,29 @@ describe('EpgGridPage on a Stalker portal without XMLTV', () => {
     await screen.findByRole('button', { name: /^Morning c0,/ });
     expect(epgCalls('c5').every((c) => c.from === undefined)).toBe(true);
   });
+
+  it('asks the portal about the rows a fling stops on, not the rows it passes (LV-4)', async () => {
+    TOTAL = 600;
+    renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
+    expect(await screen.findByRole('button', { name: /^Now c5,/ })).toBeTruthy();
+    const rows = () => rpcMock.calls.filter((c) => c.cmd === 'stalker.epg').map((c) => Number((c.args as EpgArgs).ref.itemId.slice(1)));
+    // Let the first screen's queue drain, so its workers are free when the fling starts.
+    for (let seen = -1; seen !== rows().length; ) {
+      seen = rows().length;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    const grid = screen.getByTestId('epg-grid');
+    rpcMock.calls.length = 0;
+    // Rows 100-119 are on the loaded first page; the fling passes them, a few frames apart, and
+    // stops near row 400.
+    for (const row of [100, 250, 400]) {
+      grid.scrollTop = row * GRID_ROW;
+      fireEvent.scroll(grid);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await waitFor(() => expect(rows().some((r) => r >= 380)).toBe(true), { timeout: 3000 });
+    expect(rows().filter((r) => r < 380)).toEqual([]);
+  }, 20_000);
 });
 
 describe('stalkerArchiveQuery', () => {

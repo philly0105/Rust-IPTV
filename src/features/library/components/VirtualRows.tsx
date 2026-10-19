@@ -4,7 +4,6 @@
  * rows (headers are skipped); only rendered rows exist in the DOM.
  */
 
-import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   useCallback,
   useEffect,
@@ -15,6 +14,7 @@ import {
 } from 'react';
 
 import { cn } from '@/ui/cn';
+import { useListVirtualizer } from '@/ui/virtualizer';
 
 export interface RowBase {
   key: string;
@@ -64,7 +64,7 @@ export function VirtualRows<R extends RowBase>({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activeKey, setActiveKey] = useState<string | undefined>(undefined);
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (i) => {

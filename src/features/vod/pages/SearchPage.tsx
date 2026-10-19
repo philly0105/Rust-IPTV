@@ -1,5 +1,4 @@
 import { useQueries } from '@tanstack/react-query';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { Radio, RotateCw, Search, SearchX, TriangleAlert, Tv } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +9,7 @@ import { RpcError, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
 
-import { myListTarget, PosterCard } from '../components/PosterCard';
+import { GridMyListProvider, myListTarget, PosterCard } from '../components/PosterCard';
 import { isSourceMissing, SourceMissing } from '../components/SourceMissing';
 import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
@@ -37,7 +36,7 @@ import {
   type SourceSearch,
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
-import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useToast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useToast } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -569,7 +568,7 @@ function HitGrid({
 
   const { columns, cellWidth } = gridLayout(width, minWidth, gap);
   const rowCount = Math.ceil(hits.length / columns);
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight(cellWidth) + gap,
@@ -667,50 +666,87 @@ const PosterGrid = memo(function PosterGrid({
   // L1-vod-6: the watched tick, as on the category grid (the first 500 hits; the rest show none).
   const items = useMemo(() => hits.map((h) => h.item as VodItem | SeriesItem), [hits]);
   const watched = useWatchedKeys(items);
+  // VD-1: one My List subscription for the grid, and cells whose props are the hit and a few
+  // primitives, so a scroll step re-renders only the rows it mounts, not every card.
   return (
-    <HitGrid
-      hits={hits}
-      minWidth={minWidth}
-      gap={POSTER_GAP}
-      rowHeight={(w) => w * 1.5 + POSTER_CAPTION_HEIGHT}
-      scrollRef={scrollRef}
-      testId={`vod-search-${kind}`}
-      renderCell={(h, i, cellWidth) => {
-        const item = h.item as VodItem | SeriesItem;
-        return (
-          <PosterCard
-            index={i}
-            title={item.titleBase || h.title}
-            fullTitle={h.title}
-            href={h.href ?? '#'}
-            posterUrl={h.imageUrl}
-            meta={h.meta}
-            // L4-vod-3: the rating chip, as on the category grid and the rails.
-            rating={item.rating}
-            progress={resume.get(resumeKey(item.ref))}
-            watched={watched.has(itemKey(item.ref))}
-            language={itemLanguage(item.title, item.categoryName)}
-            badge={
-              showBadges ? (
-                // Badge is inline-flex, so the ellipsis needs a block inside it (L2-visual-8).
-                <Badge
-                  variant="neutral"
-                  dir="auto"
-                  title={h.sourceName}
-                  className="bg-scrim text-white"
-                  style={{ maxWidth: Math.max(0, Math.min(POSTER_BADGE_MAX, cellWidth - POSTER_BADGE_INSETS - (item.rating ? POSTER_RATING_ROOM : 0))) }}
-                >
-                  {h.sourceName}
-                </Badge>
-              ) : undefined
-            }
-            badgeLabel={showBadges ? h.sourceName : undefined}
-            myList={myListTarget(item)}
-            // C4: warm the detail page on hover or focus (needs the source kind for its command).
-            prefetch={h.sourceKind ? { ref: item.ref, sourceKind: h.sourceKind, posterUrl: h.imageUrl, backdropUrl: item.backdropUrl } : undefined}
-          />
-        );
-      }}
+    <GridMyListProvider>
+      <HitGrid
+        hits={hits}
+        minWidth={minWidth}
+        gap={POSTER_GAP}
+        rowHeight={(w) => w * 1.5 + POSTER_CAPTION_HEIGHT}
+        scrollRef={scrollRef}
+        testId={`vod-search-${kind}`}
+        renderCell={(h, i, cellWidth) => {
+          const item = h.item as VodItem | SeriesItem;
+          return (
+            <PosterHitCell
+              hit={h}
+              index={i}
+              cellWidth={cellWidth}
+              showBadges={showBadges}
+              progress={resume.get(resumeKey(item.ref))}
+              watched={watched.has(itemKey(item.ref))}
+            />
+          );
+        }}
+      />
+    </GridMyListProvider>
+  );
+});
+
+/** One poster hit. Memoized on the hit and primitives; the props PosterCard needs are built once per change. */
+const PosterHitCell = memo(function PosterHitCell({
+  hit: h,
+  index,
+  cellWidth,
+  showBadges,
+  progress,
+  watched,
+}: {
+  hit: SearchHit;
+  index: number;
+  cellWidth: number;
+  showBadges: boolean;
+  progress: number | undefined;
+  watched: boolean;
+}) {
+  const item = h.item as VodItem | SeriesItem;
+  const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item.title, item.categoryName]);
+  const myList = useMemo(() => myListTarget(item), [item]);
+  // C4: warm the detail page on hover or focus (needs the source kind for its command).
+  const prefetch = useMemo(
+    () => (h.sourceKind ? { ref: item.ref, sourceKind: h.sourceKind, posterUrl: h.imageUrl, backdropUrl: item.backdropUrl } : undefined),
+    [h.sourceKind, h.imageUrl, item],
+  );
+  const badgeWidth = Math.max(0, Math.min(POSTER_BADGE_MAX, cellWidth - POSTER_BADGE_INSETS - (item.rating ? POSTER_RATING_ROOM : 0)));
+  const badge = useMemo(
+    () =>
+      showBadges ? (
+        // Badge is inline-flex, so the ellipsis needs a block inside it (L2-visual-8).
+        <Badge variant="neutral" dir="auto" title={h.sourceName} className="bg-scrim text-white" style={{ maxWidth: badgeWidth }}>
+          {h.sourceName}
+        </Badge>
+      ) : undefined,
+    [showBadges, h.sourceName, badgeWidth],
+  );
+  return (
+    <PosterCard
+      index={index}
+      title={item.titleBase || h.title}
+      fullTitle={h.title}
+      href={h.href ?? '#'}
+      posterUrl={h.imageUrl}
+      meta={h.meta}
+      // L4-vod-3: the rating chip, as on the category grid and the rails.
+      rating={item.rating}
+      progress={progress}
+      watched={watched}
+      language={language}
+      badge={badge}
+      badgeLabel={showBadges ? h.sourceName : undefined}
+      myList={myList}
+      prefetch={prefetch}
     />
   );
 });

@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { EyeOff, Lock, Search, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +5,7 @@ import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
 
-import { Button, ErrorState, IconButton, Skeleton, useRowHeight } from '@/ui';
+import { Button, ErrorState, IconButton, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { documentIsRtl } from '../lib/rtl';
 
 /** A group row's slot at 100 %. */
@@ -73,7 +72,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
   // the first paint already starts a few rows above it, and later changes scroll to it.
   const activeIndex = useMemo(() => (props.activeId ? visible.findIndex((c) => c.id === props.activeId) : -1), [visible, props.activeId]);
   const initialTop = activeIndex > 3 ? (activeIndex - 3) * rowHeight : 0;
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: visible.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,

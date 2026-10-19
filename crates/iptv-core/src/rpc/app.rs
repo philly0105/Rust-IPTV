@@ -329,10 +329,7 @@ mod tests {
             i.proxy_base.as_deref(),
             Some("http://127.0.0.1:1/api/proxy")
         );
-        assert_eq!(
-            i.image_base.as_deref(),
-            Some("http://127.0.0.1:2/api/img")
-        );
+        assert_eq!(i.image_base.as_deref(), Some("http://127.0.0.1:2/api/img"));
         assert!(i.updater_available);
     }
 

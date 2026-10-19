@@ -159,9 +159,9 @@ pub async fn sync_source(
     let mut written: Vec<(Kind, Option<String>)> = Vec::new();
     // Kinds that failed without failing the sync: their rows stay too.
     let mut failed: Vec<Kind> = Vec::new();
-    // The import save slot (ST-2), taken before the first answer is decoded
-    // and held until the write ends: the decoded rows of every kind stay in
-    // memory until then.
+    // The import save slot (ST-2), taken before the first changed answer is
+    // decoded and held until the write ends: the decoded rows of every kind
+    // stay in memory until then.
     let mut slot: Option<tokio::sync::OwnedSemaphorePermit> = None;
 
     let steps: [(bool, Kind); 3] = [
@@ -595,20 +595,24 @@ async fn fetch_kind(
     };
     let bytes = list?;
 
-    if slot.is_none() {
-        *slot = Some(crate::sources::save_slot(state).await?);
-    }
     progress(state, source_id, "parsing", 0, None, Some(kind.label()));
-    let sid = source_id.to_string();
-    let previous = previous.clone();
-    let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
+    // The fingerprint needs only the bytes, so an unchanged kind never waits
+    // for the save slot (ST-2).
+    let (hash, categories, bytes) = tokio::task::spawn_blocking(move || {
         let hash = categories
             .as_deref()
             .map(|cats| kind_hash(kind, cats, &bytes));
-        if hash.as_deref().is_some_and(|h| previous.unchanged(kind, h)) {
-            return Ok(Fetched::Unchanged);
-        }
-        drop(previous);
+        (hash, categories, bytes)
+    })
+    .await?;
+    if hash.as_deref().is_some_and(|h| previous.unchanged(kind, h)) {
+        return Ok(Fetched::Unchanged);
+    }
+    if slot.is_none() {
+        *slot = Some(crate::sources::save_slot(state).await?);
+    }
+    let sid = source_id.to_string();
+    let fetched = tokio::task::spawn_blocking(move || -> CoreResult<Fetched> {
         let categories = categories.unwrap_or_default();
         let part = |content_type, categories, rows| CatalogPart {
             content_type,

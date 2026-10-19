@@ -219,7 +219,10 @@ async fn refresh_start_and_304_are_status_only_changes() {
     let before = rt.generation();
     epg::refresh_now(state.clone(), &url).await.unwrap();
     let status = serde_json::json!({"reason": "status"});
-    assert_eq!(changes(&mut events), [status.clone(), serde_json::json!({})]);
+    assert_eq!(
+        changes(&mut events),
+        [status.clone(), serde_json::json!({})]
+    );
     assert_eq!(rt.generation(), before + 1);
 
     let stats = epg::refresh_now(state.clone(), &url).await.unwrap();

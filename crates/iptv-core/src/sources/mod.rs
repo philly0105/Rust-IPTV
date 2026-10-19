@@ -726,31 +726,6 @@ fn is_user_cancel(err: &CoreError) -> bool {
     matches!(err, CoreError::Conflict(m) if m == USER_CANCELLED_MESSAGE)
 }
 
-/// A copy of `err` for the refreshes that joined a running import
-/// (`CoreError` is not `Clone`): the same variant, code and message.
-fn copy_error(err: &CoreError) -> CoreError {
-    match err {
-        CoreError::NotFound(m) => CoreError::NotFound(m.clone()),
-        CoreError::Invalid(m) => CoreError::Invalid(m.clone()),
-        CoreError::Network(m) => CoreError::Network(m.clone()),
-        CoreError::Auth(m) => CoreError::Auth(m.clone()),
-        CoreError::Timeout(m) => CoreError::Timeout(m.clone()),
-        CoreError::Server(m) => CoreError::Server(m.clone()),
-        CoreError::EngineMissing(m) => CoreError::EngineMissing(m.clone()),
-        CoreError::Conflict(m) => CoreError::Conflict(m.clone()),
-        CoreError::Unsupported(m) => CoreError::Unsupported(m.clone()),
-        CoreError::Io(e) => CoreError::Io(std::io::Error::new(e.kind(), e.to_string())),
-        CoreError::Db(rusqlite::Error::QueryReturnedNoRows) => {
-            CoreError::Db(rusqlite::Error::QueryReturnedNoRows)
-        }
-        CoreError::Db(rusqlite::Error::SqliteFailure(e, m)) => CoreError::Db(
-            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(e.extended_code), m.clone()),
-        ),
-        CoreError::Db(e) => CoreError::Other(anyhow::anyhow!("{e}")),
-        CoreError::Other(e) => CoreError::Other(anyhow::anyhow!("{e:#}")),
-    }
-}
-
 /// How long a cancelled import may take to stop on its own (cooperative
 /// checks between fetch, parse and save) before [`run_import`] drops it.
 /// A catalog writer still running on the blocking pool then rolls back at
@@ -1049,7 +1024,7 @@ impl Inflight {
     fn finish(&self, result: &CoreResult<(Source, ImportSummary)>) {
         let copy = match result {
             Ok(done) => Ok(done.clone()),
-            Err(err) => Err(copy_error(err)),
+            Err(err) => Err(crate::tmdb::cache::clone_error(err)),
         };
         self.tx.send_modify(|joined| *joined = Some(Arc::new(copy)));
     }
@@ -1085,7 +1060,7 @@ async fn join_running_import(
     let shared = joined?;
     Some(match &*shared {
         Ok(v) => Ok(v.clone()),
-        Err(err) => Err(copy_error(err)),
+        Err(err) => Err(crate::tmdb::cache::clone_error(err)),
     })
 }
 
@@ -1794,7 +1769,15 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     // writes wait for it instead of failing after the 5 s busy timeout, as
     // during an import (DB-2). `remove_all` and a backup Replace come here.
     let long = crate::db::long_write();
-    let deleted = state.db_call(move |c| store::delete(c, &sid)).await;
+    let deleted = state
+        .db_call(move |c| {
+            store::delete(c, &sid)?;
+            // The delete grew the WAL by about the catalog's size: fold it
+            // back (never waits on a busy reader).
+            crate::db::checkpoint_truncate(c);
+            Ok(())
+        })
+        .await;
     drop(long);
     // Imports after this (a failed delete, or an id reused) start uncancelled.
     cancels(state).remove(id);

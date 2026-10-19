@@ -88,7 +88,7 @@ The desktop loopback proxy mounts the same handler, so `w` works there too.
 `iptv_server::img::handler` serves `GET <base>/img?url=<absolute http(s) url>&sourceId=<id?>&w=<px?>`. The first value of each parameter wins (`w` trimmed), a blank `sourceId` counts as absent, and any other parameter is ignored (see [Browser copies after Clear](#browser-copies-after-clear)).
 
 - Server mode mounts it at `/api/img`, before the `/{*rest}` catch-all, outside the response compression layer (server.md): images go out as stored.
-- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks, and the UI loads it from the proxy's second listener (`app.info.imageBase`), so artwork does not wait behind streams for the webview's six connections per host and port. CORS exposes `X-Image-Cache` to the webview.
+- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks, and the UI loads it from the proxy's second listener (`app.info.imageBase`), so artwork does not wait behind streams for the webview's six connections per host and port. CORS exposes `X-Image-Cache` to the webview. Both listeners take a random port and the token is new on every launch, so desktop image URLs change between launches and the webview's own HTTP cache never serves a poster from an earlier session; the disk cache here still answers it without an upstream fetch. A stable image origin (a fixed loopback port or a token-free image path) would change the proxy's hardening model and is left for a separate decision (audit EP-6).
 
 | Status | When | Body |
 | --- | --- | --- |

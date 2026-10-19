@@ -348,7 +348,7 @@ async fn one_import_saves_at_a_time() {
     .await;
     assert!(waiting.is_err(), "a second import waits for the slot");
     drop(first);
-    tokio::time::timeout(
+    let _permit = tokio::time::timeout(
         std::time::Duration::from_secs(1),
         sources::save_slot(&env.state),
     )

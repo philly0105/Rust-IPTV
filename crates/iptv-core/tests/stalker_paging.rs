@@ -51,6 +51,19 @@ fn page_of(total: usize, page: usize, row: impl Fn(usize) -> Value) -> Value {
     json!({"total_items": total, "max_page_items": PAGE, "data": data})
 }
 
+fn channel(i: usize) -> Value {
+    let cmd = format!("ffrt http://x/{i}");
+    json!({"id": i.to_string(), "name": format!("Channel {i}"), "cmd": cmd})
+}
+
+fn station(i: usize) -> Value {
+    json!({"id": i.to_string(), "name": format!("Station {i}"), "cmd": format!("http://x/r{i}")})
+}
+
+fn movie(i: usize) -> Value {
+    json!({"id": i.to_string(), "name": format!("Movie {i}"), "cmd": format!("/m/{i}.mp4")})
+}
+
 async fn portal_php(
     State(p): State<Arc<Portal>>,
     Query(q): Query<HashMap<String, String>>,
@@ -66,15 +79,9 @@ async fn portal_php(
         tokio::time::sleep(Duration::from_millis(40)).await;
     }
     let js = match key.as_str() {
-        "itv.get_ordered_list" => page_of(p.channels.load(Ordering::SeqCst), page, |i| {
-            json!({"id": i.to_string(), "name": format!("Channel {i}"), "cmd": format!("ffrt http://x/{i}")})
-        }),
-        "radio.get_ordered_list" => page_of(STATIONS, page, |i| {
-            json!({"id": i.to_string(), "name": format!("Station {i}"), "cmd": format!("http://x/r{i}")})
-        }),
-        "vod.get_ordered_list" => page_of(MOVIES, page, |i| {
-            json!({"id": i.to_string(), "name": format!("Movie {i}"), "cmd": format!("/m/{i}.mp4")})
-        }),
+        "itv.get_ordered_list" => page_of(p.channels.load(Ordering::SeqCst), page, channel),
+        "radio.get_ordered_list" => page_of(STATIONS, page, station),
+        "vod.get_ordered_list" => page_of(MOVIES, page, movie),
         "series.get_ordered_list" => json!({"total_items": 0, "max_page_items": PAGE, "data": []}),
         // Disabled on this portal: the import pages through the list.
         _ => json!([]),

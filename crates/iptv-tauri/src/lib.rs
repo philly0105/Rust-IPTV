@@ -1000,9 +1000,8 @@ fn shutdown(app: &AppHandle) {
     iptv_core::player::kill_embedded(&state);
     let stop = iptv_core::remote::stop(Arc::clone(&state));
     let budget = left().min(std::time::Duration::from_secs(2));
-    let stopped = tauri::async_runtime::block_on(async {
-        tokio::time::timeout(budget, stop).await
-    });
+    let stopped =
+        tauri::async_runtime::block_on(async { tokio::time::timeout(budget, stop).await });
     if !matches!(stopped, Ok(Ok(()))) {
         tracing::warn!("remote control did not stop cleanly on exit");
     }
@@ -1026,7 +1025,7 @@ fn checkpoint_wal(state: &AppState, wait: std::time::Duration) {
     {
         Ok(conn) => {
             iptv_core::db::checkpoint_truncate(&conn);
-            tracing::info!("WAL checkpointed");
+            tracing::info!("WAL checkpoint attempted on exit");
         }
         Err(err) => tracing::warn!(%err, "WAL checkpoint on exit skipped"),
     }

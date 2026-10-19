@@ -968,8 +968,16 @@ fn store_copy(src: &Path, dest: &Path, temp: bool) -> std::io::Result<()> {
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    if temp && std::fs::rename(src, dest).is_ok() {
-        return Ok(());
+    if temp {
+        // The download was not synced (IN-10), but the kept copy outlives
+        // it: backups export it and an unchanged refresh never rewrites it.
+        // Opened for writing: Windows refuses to flush a read-only handle.
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(src) {
+            file.sync_data().ok();
+        }
+        if std::fs::rename(src, dest).is_ok() {
+            return Ok(());
+        }
     }
     std::fs::copy(src, dest).map(|_| ())
 }
@@ -1026,8 +1034,7 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
 /// playlists are often generated on request and take 20-60 s to start. Xtream
 /// list actions get the same deadline (IN-2).
 #[cfg(not(test))]
-pub(crate) const PLAYLIST_HEADER_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(120);
+pub(crate) const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 #[cfg(test)]
 pub(crate) const PLAYLIST_HEADER_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(1500);
@@ -1241,8 +1248,8 @@ async fn fetch_conditional(
                 return Err((err, false));
             }
         }
-        // No fsync: the temp file is parsed at once, and the kept copy is a
-        // cache a refresh replaces (IN-10; syncing 100 MB took seconds).
+        // No fsync here: most bodies are parsed and dropped or stored inline.
+        // `store_copy` syncs one before keeping it on disk (IN-10).
         file.flush().await.map_err(|e| (e.into(), false))?;
         sources::progress(
             state,

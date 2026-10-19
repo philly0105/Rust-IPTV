@@ -370,55 +370,62 @@ async fn run(
     // One import maps and saves at a time (ST-2); held until the write ends.
     let slot = crate::sources::save_slot(state).await?;
 
-    // Map rows.
+    // Map rows on the blocking pool, not the runtime worker (IN-1): a
+    // 20k-channel answer takes seconds of CPU on a slow machine.
     let total = (channels.len() + radio.len()) as u64;
-    // At most one parse event per 250 ms; the final count always goes out.
-    let mut gate = ProgressGate::default();
-    let known: HashSet<&str> = genres.iter().map(|g| g.category_id.as_str()).collect();
-    let mut live_rows: Vec<ItemRow> = Vec::with_capacity(channels.len());
-    let mut seen: HashSet<String> = HashSet::new();
-    for (i, v) in channels.iter().enumerate() {
-        let genre = p::s(v, "tv_genre_id")
-            .filter(|g| known.contains(g.as_str()))
-            .unwrap_or_else(|| UNCATEGORIZED.to_string());
-        if let Some(row) =
-            mapping::channel_row(source_id, &endpoint, v, ContentType::Live, genre, i as i64)
-        {
-            if seen.insert(row.item_id.clone()) {
-                live_rows.push(row);
+    let (st, sid) = (Arc::clone(state), source_id.to_string());
+    let (live_rows, live_categories, radio_rows) = tokio::task::spawn_blocking(move || {
+        // At most one parse event per 250 ms; the final count always goes out.
+        let mut gate = ProgressGate::default();
+        let known: HashSet<&str> = genres.iter().map(|g| g.category_id.as_str()).collect();
+        let mut live_rows: Vec<ItemRow> = Vec::with_capacity(channels.len());
+        let mut seen: HashSet<String> = HashSet::new();
+        for (i, v) in channels.iter().enumerate() {
+            let genre = p::s(v, "tv_genre_id")
+                .filter(|g| known.contains(g.as_str()))
+                .unwrap_or_else(|| UNCATEGORIZED.to_string());
+            if let Some(row) =
+                mapping::channel_row(&sid, &endpoint, v, ContentType::Live, genre, i as i64)
+            {
+                if seen.insert(row.item_id.clone()) {
+                    live_rows.push(row);
+                }
+            }
+            if (i + 1) % 2000 == 0 && gate.due(std::time::Instant::now()) {
+                progress(&st, &sid, "parsing", (i + 1) as u64, Some(total), None);
             }
         }
-        if (i + 1) % 2000 == 0 && gate.due(std::time::Instant::now()) {
-            emit("parsing", (i + 1) as u64, Some(total), None);
+        drop(known);
+        let mut live_categories = genres;
+        if live_rows.iter().any(|r| r.category_id == UNCATEGORIZED) {
+            live_categories.push(CategoryRow {
+                category_id: UNCATEGORIZED.into(),
+                name: catalog::FALLBACK_CATEGORY_NAME.into(),
+                position: live_categories.len() as i64,
+            });
         }
-    }
-    let mut live_categories = genres.clone();
-    if live_rows.iter().any(|r| r.category_id == UNCATEGORIZED) {
-        live_categories.push(CategoryRow {
-            category_id: UNCATEGORIZED.into(),
-            name: catalog::FALLBACK_CATEGORY_NAME.into(),
-            position: live_categories.len() as i64,
-        });
-    }
-    seen.clear();
-    let radio_rows: Vec<ItemRow> = radio
-        .iter()
-        .enumerate()
-        .filter_map(|(i, v)| {
-            mapping::channel_row(
-                source_id,
-                &endpoint,
-                v,
-                ContentType::Radio,
-                RADIO_CATEGORY.into(),
-                i as i64,
-            )
-        })
-        .filter(|r| seen.insert(r.item_id.clone()))
-        .collect();
-    // The answer trees are mapped: free them before the totals and the write.
-    drop(channels);
-    drop(radio);
+        seen.clear();
+        let radio_rows: Vec<ItemRow> = radio
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                mapping::channel_row(
+                    &sid,
+                    &endpoint,
+                    v,
+                    ContentType::Radio,
+                    RADIO_CATEGORY.into(),
+                    i as i64,
+                )
+            })
+            .filter(|r| seen.insert(r.item_id.clone()))
+            .collect();
+        // The answer trees are mapped: free them before the totals and the write.
+        drop(channels);
+        drop(radio);
+        (live_rows, live_categories, radio_rows)
+    })
+    .await?;
     let radio_categories = if radio_rows.is_empty() {
         Vec::new()
     } else {

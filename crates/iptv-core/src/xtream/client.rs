@@ -757,7 +757,10 @@ mod tests {
         assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
         assert_eq!(hits.load(SeqCst), 1, "a spent head deadline was retried");
         let took = started.elapsed();
-        assert!(took >= crate::m3u::importer::PLAYLIST_HEADER_TIMEOUT, "{took:?}");
+        assert!(
+            took >= crate::m3u::importer::PLAYLIST_HEADER_TIMEOUT,
+            "{took:?}"
+        );
         assert!(took < std::time::Duration::from_secs(5), "{took:?}");
     }
 

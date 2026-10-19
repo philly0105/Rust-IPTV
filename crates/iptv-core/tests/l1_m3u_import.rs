@@ -151,7 +151,9 @@ async fn ambiguous_successors_leave_references_alone() {
 
     // "Sport 1" comes back twice under new URLs: two successors.
     let mut body = playlist("tok2");
-    body.push_str("#EXTINF:-1 group-title=\"Sport\",Sport 1\nhttp://s.example/live/user/tok2/s1b.ts\n");
+    body.push_str(
+        "#EXTINF:-1 group-title=\"Sport\",Sport 1\nhttp://s.example/live/user/tok2/s1b.ts\n",
+    );
     stub.set_body(&body);
     sources::refresh(env.state.clone(), &src.id).await.unwrap();
     let new_ch2 = item_id(&env, &src.id, "Channel 2").await;

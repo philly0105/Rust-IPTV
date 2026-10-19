@@ -143,7 +143,9 @@ fn mem_key(media: &str, key: &str) -> String {
     format!("{media}\u{1f}{key}")
 }
 
-/// Rebuilds an owned error from a shared one (CoreError is not Clone).
+/// Rebuilds an owned error from a shared one (CoreError is not Clone): the
+/// same variant, code and message. Also used for refreshes that joined a
+/// running import.
 pub fn clone_error(e: &CoreError) -> CoreError {
     match e {
         CoreError::NotFound(m) => CoreError::NotFound(m.clone()),
@@ -156,6 +158,13 @@ pub fn clone_error(e: &CoreError) -> CoreError {
         CoreError::Conflict(m) => CoreError::Conflict(m.clone()),
         CoreError::Unsupported(m) => CoreError::Unsupported(m.clone()),
         CoreError::Io(io) => CoreError::Io(std::io::Error::new(io.kind(), io.to_string())),
+        CoreError::Db(rusqlite::Error::QueryReturnedNoRows) => {
+            CoreError::Db(rusqlite::Error::QueryReturnedNoRows)
+        }
+        CoreError::Db(rusqlite::Error::SqliteFailure(e, m)) => CoreError::Db(
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(e.extended_code), m.clone()),
+        ),
+        CoreError::Other(e) => CoreError::Other(anyhow::anyhow!("{e:#}")),
         other => CoreError::Other(anyhow::anyhow!("{other}")),
     }
 }
@@ -429,6 +438,10 @@ mod tests {
             matches!(clone_error(&CoreError::Auth("x".into())), CoreError::Auth(m) if m == "x")
         );
         assert!(clone_error(&CoreError::Network("n".into())).is_retryable());
+        assert!(matches!(
+            clone_error(&CoreError::Db(rusqlite::Error::QueryReturnedNoRows)),
+            CoreError::Db(rusqlite::Error::QueryReturnedNoRows)
+        ));
     }
 
     #[test]

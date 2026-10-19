@@ -8,7 +8,7 @@ import { itemKey, type Bounds, type MpvState, type MpvTrack, type PlayerSource }
 
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
-import type { EngineTracks, TrackOption } from '../engines';
+import { trackLanguageName, type EngineTracks, type TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
 import { useAlternatesStore } from '../failover';
 import { setMediaCommands, useMediaStore } from '../media';
@@ -104,13 +104,7 @@ export function boundsEqual(a: Bounds | null, b: Bounds): boolean {
 }
 
 function trackLabel(t: MpvTrack, fallback: string): string {
-  const lang = t.lang ? (() => {
-    try {
-      return new Intl.DisplayNames(undefined, { type: 'language' }).of(t.lang) ?? t.lang;
-    } catch {
-      return t.lang;
-    }
-  })() : undefined;
+  const lang = t.lang ? trackLanguageName(t.lang) : undefined;
   if (t.title && lang) return `${t.title} (${lang})`;
   return t.title ?? lang ?? fallback;
 }
@@ -616,7 +610,7 @@ function MpvConnectingNotice({ source }: { source: PlayerSource | null | undefin
         aria-live="polite"
         data-mpv-overlay=""
         data-testid="connecting-notice"
-        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-sm', offerSwitch ? 'pr-1 pl-3' : 'px-3')}
+        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-sm', offerSwitch ? 'pe-1 ps-3' : 'px-3')}
       >
         <span className="truncate">{t('stillConnecting')}</span>
         {offerSwitch && (

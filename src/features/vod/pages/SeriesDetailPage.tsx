@@ -37,14 +37,14 @@ import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState, IconButton, useToast } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, useToast, errorDescription } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
 import { seriesWatchedTargets, seriesWatchedWrite, watchedToastId, watchedUndoAll } from '../lib/seriesWatched';
 
 export function SeriesDetailPage() {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const { sourceId = '', itemId = '' } = useParams();
   const ref = useMemo<ItemRef>(() => ({ sourceId, contentType: 'series', itemId }), [sourceId, itemId]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -67,8 +67,8 @@ export function SeriesDetailPage() {
   const tmdb = useTmdbTv(item, tmdbOn);
   // A disabled query still returns what it cached while TMDB was on: merge it only while TMDB is on.
   const model = useMemo(
-    () => (detail.data ? mergeSeriesDetail(detail.data, tmdbOn ? tmdb.data : undefined) : undefined),
-    [detail.data, tmdb.data, tmdbOn],
+    () => (detail.data ? mergeSeriesDetail(detail.data, tmdbOn ? tmdb.data : undefined, i18n.language) : undefined),
+    [detail.data, tmdb.data, tmdbOn, i18n.language],
   );
   const similarFallback = useTmdbSimilar('tv', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
@@ -114,7 +114,7 @@ export function SeriesDetailPage() {
                 }
               : {}),
           }),
-        onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
+        onError: (err) => toast({ title: t('watchedFailed'), description: errorDescription(err), variant: 'error' }),
       },
     );
   };

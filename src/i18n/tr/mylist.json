@@ -1,7 +1,7 @@
 {
   "title": "Listem",
-  "count_one": "{{count}} içerik",
-  "count_other": "{{count}} içerik",
+  "count_one": "{{count, number}} içerik",
+  "count_other": "{{count, number}} içerik",
   "seeAll": "Tümünü gör",
   "loading": "Listem yükleniyor",
   "errorHint": "Listem, sağlayıcınız tarafından değil uygulama tarafından saklanır. Yeniden deneyin veya sorun sürerse uygulamayı yeniden başlatın.",
@@ -63,7 +63,7 @@
   "showAll": "Tümünü göster",
   "allWatchedTitle": "Hepsi izlendi",
   "allWatchedBody_one": "Buradaki tek içerik izlendi. Yeniden görmek için izlenenleri gösterin.",
-  "allWatchedBody_other": "Buradaki {{count}} içeriğin hepsi izlendi. Yeniden görmek için izlenenleri gösterin.",
+  "allWatchedBody_other": "Buradaki {{count, number}} içeriğin hepsi izlendi. Yeniden görmek için izlenenleri gösterin.",
   "showWatched": "İzlenenleri göster",
   "noMatchTitle": "Sonuç yok",
   "noMatchBody": "Listemde “{{query}}” ile eşleşen bir şey yok.",

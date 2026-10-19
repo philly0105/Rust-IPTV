@@ -104,7 +104,7 @@
   "pickerEmptySearch": "沒有符合「{{query}}」的直播頻道",
   "pickerEmptySource": "此播放來源沒有直播頻道",
   "pickerNoSources": "新增播放來源後即可選擇頻道。",
-  "pickerResults_other": "{{count}} 個頻道",
+  "pickerResults_other": "{{count, number}} 個頻道",
   "pickerOnSlot": "在第 {{slot}} 格",
   "pickerAdd": "新增",
   "pickerPick": "選擇",

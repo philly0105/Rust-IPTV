@@ -17,7 +17,7 @@ import { invalidate, queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, RpcError } from '@/api/transport';
 import type { ParentalStatus } from '@/api/types';
 import { useShortcut } from '@/shell/shortcuts';
-import { toast } from '@/ui';
+import { toast, errorDescription } from '@/ui';
 
 /** Query key of `parental.status`. */
 export const STATUS_KEY = rpcKey('parental.status');
@@ -246,7 +246,7 @@ function useLockNowShortcut(s: ParentalStatus | undefined): void {
     () =>
       void lockNow().then(
         () => toast({ variant: 'success', title: t('lockedNowToast') }),
-        (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: RpcError.from(err).message }),
+        (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: errorDescription(err) }),
       ),
     { description: t('shortcutLockNow'), area: t('shell:settingsParental'), enabled: !!s?.enabled && s.unlocked },
   );

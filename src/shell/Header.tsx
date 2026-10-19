@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { IconButton, Kbd, SearchInput, cn } from '@/ui';
+import { IconButton, Kbd, SearchInput, cn, comboKeys } from '@/ui';
 
 import { openSearch } from './focusSearch';
 import { useShellStore } from './store';
@@ -136,15 +136,15 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
         )}
         <IconButton
           label={t('openPalette')}
-          title={`${t('openPalette')} (Ctrl+K)`}
-          // A command-prompt glyph, not the Mac ⌘ key: this is a Windows app and the shortcut is Ctrl+K.
+          title={`${t('openPalette')} (${comboKeys('mod+k').join('+')})`}
+          // A command-prompt glyph, not the Mac ⌘ key: the shortcut is Ctrl+K outside macOS.
           icon={<SquareChevronRight size={18} className="rtl:-scale-x-100" />}
           onClick={() => setPaletteOpen(true)}
           data-testid="open-palette"
         />
         <IconButton
           label={resolved === 'dark' ? t('switchToLight') : t('switchToDark')}
-          title={`${resolved === 'dark' ? t('switchToLight') : t('switchToDark')} (Ctrl+Shift+L)`}
+          title={`${resolved === 'dark' ? t('switchToLight') : t('switchToDark')} (${comboKeys('mod+shift+l').join('+')})`}
           icon={resolved === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           onClick={toggle}
           data-testid="theme-toggle"

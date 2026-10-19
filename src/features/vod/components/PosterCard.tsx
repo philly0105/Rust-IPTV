@@ -14,6 +14,7 @@ import { formatRating } from '../lib/format';
 import { languageName, type ItemLanguage } from '../lib/language';
 import { joinList } from '@/shell/dashboard/cards';
 import { CARD_ART, CARD_ART_CURSOR, CARD_ROOT, Poster, ProgressBar, Skeleton, cn } from '@/ui';
+import { listSeparator } from '@/lib/intl';
 
 export interface PosterCardProps {
   /** Caption; pass `titleBase` so a year already in `year`/`meta` is not shown twice. */
@@ -109,6 +110,8 @@ export function posterCardLabel(parts: {
   watchedLabel?: string | undefined;
   /** "Locked" when the title asks for the PIN. */
   lockedLabel?: string | undefined;
+  /** UI language, for the separator between the parts (", " in English). */
+  language?: string | undefined;
 }): string {
   const yearText = parts.year !== undefined ? String(parts.year) : undefined;
   const name = yearText && !parts.title.includes(yearText) ? `${parts.title} (${yearText})` : parts.title;
@@ -121,7 +124,7 @@ export function posterCardLabel(parts: {
   if (parts.watchedLabel) out.push(parts.watchedLabel);
   if (parts.progressLabel) out.push(parts.progressLabel);
   if (parts.lockedLabel) out.push(parts.lockedLabel);
-  return out.join(', ');
+  return out.join(listSeparator(parts.language));
 }
 
 /**
@@ -237,8 +240,9 @@ function PosterCardBody({
     progressLabel,
     watchedLabel: watched ? t('watched') : undefined,
     lockedLabel: locked ? t('locked') : undefined,
+    language: locale,
   });
-  const fullLabel = extraLabel ? `${label}, ${extraLabel}` : label;
+  const fullLabel = extraLabel ? `${label}${listSeparator(locale)}${extraLabel}` : label;
   const secondary = meta ?? year;
   const content = (
     <>
@@ -508,9 +512,4 @@ export function PosterCardSkeleton({ className }: { className?: string }) {
       <Skeleton className="h-3 w-2/5 opacity-70" />
     </div>
   );
-}
-
-/** The locale's list separator ("、" in Japanese, "، " in Arabic), for a rich node followed by text. */
-function listSeparator(language: string): string {
-  return joinList(['\u0001', '\u0002'], language).slice(1, -1);
 }

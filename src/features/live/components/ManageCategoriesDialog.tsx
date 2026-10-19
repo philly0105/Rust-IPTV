@@ -6,7 +6,8 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
+import { Button, Dialog, ErrorState, Skeleton, useToast, errorDescription } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 import { foldForFilter } from './CategorySidebar';
 
 const ROW = 36;
@@ -23,7 +24,7 @@ export function ManageCategoriesDialog({
   contentType: ContentType;
 }) {
   const { t, i18n } = useTranslation('live');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const { toast } = useToast();
   const all = useRpcQuery('catalog.categories', { sourceId, contentType, includeHidden: true }, { enabled: open });
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
@@ -88,7 +89,7 @@ export function ManageCategoriesDialog({
       toast({ title: t('groupsSaved'), variant: 'success' });
       onClose();
     } catch (err) {
-      toast({ title: t('groupsSaveFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+      toast({ title: t('groupsSaveFailed'), description: errorDescription(err), variant: 'error' });
     } finally {
       setSaving(false);
     }

@@ -5,6 +5,8 @@
  * re-exported from their old homes for existing callers.
  */
 
+import { intlLocale } from './intl';
+
 /** `1.2 GB`, `350 MB`, `12 KB` in the user's number format. */
 export function formatFileSize(bytes: number, lang: string): string {
   const units = ['B', 'KB', 'MB', 'GB'] as const;
@@ -16,7 +18,7 @@ export function formatFileSize(bytes: number, lang: string): string {
   }
   let text: string;
   try {
-    text = new Intl.NumberFormat(lang, { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
+    text = new Intl.NumberFormat(intlLocale(lang), { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
   } catch {
     text = String(Math.round(value));
   }
@@ -25,7 +27,7 @@ export function formatFileSize(bytes: number, lang: string): string {
 
 export function formatCount(n: number, lang: string): string {
   try {
-    return new Intl.NumberFormat(lang).format(n);
+    return new Intl.NumberFormat(intlLocale(lang)).format(n);
   } catch {
     return String(n);
   }

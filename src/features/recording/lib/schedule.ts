@@ -8,6 +8,7 @@
  */
 
 import { itemKey, type EpgProgram, type ItemRef, type Recording, type RecordingStatus, type Reminder } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 /** `${itemKey}@${start ms}`: one programme on one channel. */
 export type SlotKey = `${string}@${number}`;
@@ -131,14 +132,14 @@ function startOfDay(at: number): number {
 
 /** Clock time as the Scheduled list shows it ("02:45 AM"). */
 export function clockTime(at: number, lang: string): string {
-  return new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(at);
+  return new Intl.DateTimeFormat(intlLocale(lang), { hour: '2-digit', minute: '2-digit' }).format(at);
 }
 
 /** Day heading of the Scheduled list: "today", "tomorrow" (the locale's words), else "Friday, October 16". */
 export function dayLabel(day: number, now: number, lang: string): string {
   const diff = Math.round((startOfDay(day) - startOfDay(now)) / 86_400_000);
-  if (diff === 0 || diff === 1) return new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }).format(diff, 'day');
-  return new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long' }).format(day);
+  if (diff === 0 || diff === 1) return new Intl.RelativeTimeFormat(intlLocale(lang), { numeric: 'auto' }).format(diff, 'day');
+  return new Intl.DateTimeFormat(intlLocale(lang), { weekday: 'long', day: 'numeric', month: 'long' }).format(day);
 }
 
 /**
@@ -149,7 +150,7 @@ export function dayLabel(day: number, now: number, lang: string): string {
 export function airingLabel(at: number, now: number, lang: string): string {
   const diff = Math.round((startOfDay(at) - startOfDay(now)) / 86_400_000);
   if (diff === 0 || diff === 1) return `${dayLabel(at, now, lang)} ${clockTime(at, lang)}`;
-  return new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(at);
+  return new Intl.DateTimeFormat(intlLocale(lang), { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(at);
 }
 
 /** Seconds a running recording has been writing. */

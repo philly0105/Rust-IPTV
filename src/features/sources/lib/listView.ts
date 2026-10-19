@@ -1,6 +1,7 @@
 /** Sort and filter for the sources list, persisted in localStorage. */
 
 import type { Source, SourceKind } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 export const SORTS = ['manual', 'name', 'kind', 'added', 'refreshed'] as const;
 export type SourceSort = (typeof SORTS)[number];
@@ -60,7 +61,7 @@ const time = (iso: string | undefined) => {
 };
 
 export function applyView(sources: readonly Source[], view: ListView, lang = 'en'): Source[] {
-  const collator = new Intl.Collator(lang, { numeric: true, sensitivity: 'base' });
+  const collator = new Intl.Collator(intlLocale(lang), { numeric: true, sensitivity: 'base' });
   const byName = (a: Source, b: Source) => collator.compare(a.name, b.name);
   const list = sources.filter(
     (s) => (view.kind === 'all' || s.kind === view.kind) && (view.status === 'all' || (view.status === 'error') === Boolean(s.lastError)),

@@ -42,7 +42,7 @@ import {
   type PlayerSource,
 } from '@/api/types';
 
-import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast } from '@/ui';
+import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast, errorDescription } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 import { canZap, isPendingZap } from '@/features/player/store';
@@ -55,6 +55,7 @@ import { requestPin } from '@/features/parental/gate';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { applyStatus, hidesContent, useParentalStatus } from '@/features/parental/status';
 import { registerCommands, useShell, useShortcut } from '@/shell';
+import { intlLocale } from '@/lib/intl';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -125,7 +126,7 @@ const MemoContextMenu = memo(ContextMenu);
 
 export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const { t, i18n } = useTranslation('live');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const { toast } = useToast();
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -288,7 +289,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       const itemQuery = rpcKey('catalog.item', { ref: channel.ref });
       if (queryClient.getQueryData(itemQuery) === undefined) queryClient.setQueryData(itemQuery, channel);
       playChannel(channel, kind, nn?.now?.title, name).catch((err: unknown) =>
-        toast({ title: t('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+        toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
       );
     },
     [kind, source.data?.id, prefs.stripCountryPrefix, t, toast, queryClient],
@@ -322,7 +323,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         }
       } catch (err) {
         flashOsd({ kind: 'missing', number: n });
-        toast({ title: t('zapFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+        toast({ title: t('zapFailed'), description: errorDescription(err), variant: 'error' });
       }
     },
     [sourceId, isRadio, flashOsd, play, t, toast],
@@ -523,7 +524,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       } catch (err) {
         toast({
           title: wasFavorite ? t('favoriteRemoveFailed') : t('favoriteAddFailed'),
-          description: err instanceof Error ? err.message : undefined,
+          description: errorDescription(err),
           variant: 'error',
         });
       } finally {
@@ -591,7 +592,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         const playing = { ...s, ref: s.ref ?? ch.ref };
         await store.play(playing, { mode: 'external', externalPlayer: player, queue: [] });
       } catch (err) {
-        toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+        toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: errorDescription(err), variant: 'error' });
       }
     };
     return [
@@ -633,7 +634,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
                   await navigator.clipboard.writeText(s.url);
                   toast({ title: t('urlCopied'), variant: 'success' });
                 } catch (err) {
-                  toast({ title: t('copyFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+                  toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
                 }
               },
             },

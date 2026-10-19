@@ -7,7 +7,8 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { rpc, RpcError } from '@/api/transport';
 import type { ContentType, ParentalLock, ParentalLockTarget, ParentalStatus, Source } from '@/api/types';
-import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps } from '@/ui';
+import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps, errorDescription } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { useContentTypeText } from './labels';
 import { PinDialog } from './PinDialog';
@@ -132,7 +133,7 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
       const e = RpcError.from(err);
       // The unlock ran out while the dialog was open.
       if (e.code === 'auth') setAskPin(true);
-      else toast({ variant: 'error', title: t('lockChangeFailed'), description: e.message });
+      else toast({ variant: 'error', title: t('lockChangeFailed'), description: errorDescription(e) });
     } finally {
       setSaving(false);
     }
@@ -269,7 +270,7 @@ function GroupList({
   onMany: (rows: readonly GroupRow[], on: boolean) => void;
 }) {
   const { t, i18n } = useTranslation('parental');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   // includeLocked: Hide mode while locked still lists locked groups here, in provider order with counts.

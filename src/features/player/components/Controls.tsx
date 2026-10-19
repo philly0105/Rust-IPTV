@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 import { isDesktop, rpc } from '@/api/transport';
 
 import { useToast } from '@/ui/Toast';
+import { errorDescription } from '@/ui/States';
 import { cn } from '../cn';
 import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
 import { setHistoryOpen, useHistoryStore } from '../history';
@@ -185,7 +186,7 @@ function useRecordToggle(): { recording: boolean; busy: boolean; toggle(): void 
       .catch((err: unknown) => {
         toast({
           title: start ? t('recordStartFailed') : t('recordStopFailed'),
-          description: err instanceof Error ? err.message : String(err),
+          description: errorDescription(err),
           variant: 'error',
         });
       })

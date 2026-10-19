@@ -23,9 +23,10 @@ import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { playItem } from '@/features/player';
 // The module itself, not the barrel: small, no imports, and the barrel mocks in tests leave it alone.
 import { preloadEngines } from '@/features/player/enginePreload';
+import { formatRating } from '@/features/vod/lib/format';
 import { RpcError } from '@/api/transport';
 import { snapshotTitle } from '@/lib/title';
-import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast, errorDescription } from '@/ui';
 
 import { useShell } from '../store';
 import { useVisibleSources } from '../useVisibleSources';
@@ -246,7 +247,7 @@ function DashboardBody() {
       isRadio: args.ref.contentType === 'radio',
       sourceKind: source.kind,
     }).catch((err: unknown) => {
-      toast({ variant: 'error', title: t('playFailed', { title: args.title }), description: err instanceof Error ? err.message : undefined });
+      toast({ variant: 'error', title: t('playFailed', { title: args.title }), description: errorDescription(err) });
     });
   };
 
@@ -544,7 +545,8 @@ function DashboardBody() {
             cardWidth={168}
             skeletonAspect={2 / 3}
             renderCard={(v, rail) => {
-              const rating = v.rating ? v.rating.toFixed(1) : undefined;
+              // Intl, like the hero: de reads "7,5" on both.
+              const rating = formatRating(v.rating, i18n.language);
               // The title the detail page and the hero show: no trailing year or provider tag.
               const title = v.titleBase || v.title;
               return (
@@ -586,7 +588,7 @@ function DashboardBody() {
                 title={b.title}
                 subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
                 posterUrl={b.posterUrl}
-                badge={b.rating ? <Badge variant="neutral">{b.rating.toFixed(1)}</Badge> : undefined}
+                badge={b.rating ? <Badge variant="neutral">{formatRating(b.rating, i18n.language)}</Badge> : undefined}
                 to={`/search?q=${encodeURIComponent(b.title)}`}
                 ariaLabel={t('findTitle', { title: b.title })}
               />

@@ -11,7 +11,7 @@ import { create } from 'zustand';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw } from '@/api/transport';
 import type { EpgProgram, ItemRef, Recording, RecordingProgressEvent, RecordingRule, Reminder } from '@/api/types';
-import { useToast } from '@/ui';
+import { useToast, errorDescription } from '@/ui';
 
 import { buildRuleIndex, type RuleKey } from './lib/rules';
 import { buildScheduleIndex, type ScheduleIndex } from './lib/schedule';
@@ -158,7 +158,7 @@ export function useScheduleActions() {
       } catch (e) {
         // Without mpv an HLS/DASH channel is refused up front; say so in the UI language.
         const err = RpcError.from(e);
-        toast({ variant: 'error', title: t('recordFailed'), description: err.code === 'engine_missing' ? t('recordNeedsMpv') : err.message });
+        toast({ variant: 'error', title: t('recordFailed'), description: err.code === 'engine_missing' ? t('recordNeedsMpv') : errorDescription(err) });
         return false;
       } finally {
         void invalidate('recordings.');
@@ -234,7 +234,7 @@ export function useRuleActions() {
         toast({
           variant: 'error',
           title: err.code === 'conflict' ? t('seriesExists', { title: args.title }) : t('seriesFailed'),
-          description: err.code === 'conflict' ? undefined : err.message,
+          description: err.code === 'conflict' ? undefined : errorDescription(err),
         });
         return false;
       } finally {

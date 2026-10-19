@@ -5,7 +5,10 @@
  * hls.js, shaka and mpegts.js are code-split; a direct mp4 never loads any of them.
  */
 
+import i18next from 'i18next';
+
 import type { MpvStats, PlayerSource } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
 
@@ -80,16 +83,29 @@ export function formatBitrate(bps: number): string {
   return `${Math.round(bps / 1000)} kbps`;
 }
 
+const trackNames = new Map<string, Intl.DisplayNames>();
+
+/**
+ * A track's language code as a name in the app's language ("German", de "Deutsch"),
+ * not the OS's. The code itself when `Intl` doesn't know it.
+ */
+export function trackLanguageName(lang: string): string {
+  const locale = intlLocale(i18next.language);
+  try {
+    let dn = trackNames.get(locale);
+    if (!dn) {
+      dn = new Intl.DisplayNames(locale, { type: 'language' });
+      trackNames.set(locale, dn);
+    }
+    return dn.of(lang) ?? lang;
+  } catch {
+    return lang;
+  }
+}
+
 function langLabel(lang: string | undefined, name: string | undefined, fallback: string): string {
   if (name && name.trim()) return name;
-  if (lang) {
-    try {
-      const dn = new Intl.DisplayNames(undefined, { type: 'language' });
-      return dn.of(lang) ?? lang;
-    } catch {
-      return lang;
-    }
-  }
+  if (lang) return trackLanguageName(lang);
   return fallback;
 }
 

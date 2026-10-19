@@ -3,11 +3,11 @@ import { version as reactVersion } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { isDesktop, rpc } from '@/api/transport';
 // The openers only (no UI imports): the dialogs load on first open.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 
-import { Button, ErrorState, Skeleton, useToast } from '@/ui';
+import { Button, ErrorState, Skeleton, useToast, errorDescription } from '@/ui';
 import { SettingsGroup, SettingsSection } from '../components';
 import { updaterAvailable } from '../lib/updater';
 import type { SectionProps } from './types';
@@ -22,7 +22,7 @@ export function AboutSection(_props: SectionProps) {
     try {
       await fn();
     } catch (e) {
-      toast({ variant: 'error', title: t('aboutActionFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('aboutActionFailed'), description: errorDescription(e) });
     }
   };
 

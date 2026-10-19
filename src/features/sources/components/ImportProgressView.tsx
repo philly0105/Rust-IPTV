@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import type { ImportPhase, ImportSaveStep, SourceKind } from '@/api/types';
 
 import { Button, ProgressBar } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 import { importSummaryKey } from '../lib/errors';
 import { formatFileSize } from '../lib/files';
 import { formatCount } from '../lib/format';
@@ -100,7 +101,7 @@ function useElapsedSeconds(since: number, on: boolean): number {
 
 function formatSeconds(n: number, lang: string): string {
   try {
-    return new Intl.NumberFormat(lang, { style: 'unit', unit: 'second', unitDisplay: 'narrow' }).format(n);
+    return new Intl.NumberFormat(intlLocale(lang), { style: 'unit', unit: 'second', unitDisplay: 'narrow' }).format(n);
   } catch {
     return `${n}s`;
   }

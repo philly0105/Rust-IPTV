@@ -11,10 +11,10 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { rpc } from '@/api/transport';
 import { sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, SkeletonList, useShortcut, useToast } from '../deps';
+import { Button, EmptyState, ErrorState, SkeletonList, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -69,7 +69,7 @@ export function FavoritesPage() {
         await rpc('favorites.reorder', reorderArgs(next, sourceId));
       } catch (err) {
         queryClient.setQueryData(key, previous);
-        toast({ title: t('reorderFailed'), description: RpcError.from(err).message, variant: 'error' });
+        toast({ title: t('reorderFailed'), description: errorDescription(err), variant: 'error' });
       } finally {
         void queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'favorites.list' });
       }
@@ -108,7 +108,7 @@ export function FavoritesPage() {
               label: t('undo'),
               onClick: () => {
                 void restore()
-                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: errorDescription(err), variant: 'error' }))
                   .finally(() =>
                     queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('favorites.') }),
                   );
@@ -116,7 +116,7 @@ export function FavoritesPage() {
             },
           });
         } catch (err) {
-          toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
+          toast({ title: t('removeFailed'), description: errorDescription(err), variant: 'error' });
         } finally {
           await queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('favorites.') });
         }
@@ -130,7 +130,7 @@ export function FavoritesPage() {
       openEntry(entry.ref, entry.snapshot, sources.get(entry.ref.sourceId), navigate).catch((err: unknown) => {
         toast({
           title: t('openFailed', { title: entry.snapshot.title }),
-          description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
+          description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
           variant: 'error',
         });
       });

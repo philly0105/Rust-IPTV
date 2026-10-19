@@ -9,7 +9,7 @@ import { captureWatched } from '@/features/library/lib/watchedUndo';
 
 import { useSetWatched } from '../../hooks/queries';
 import { seriesWatchedTargets, watchedToastId, watchedUndoAll } from '../../lib/seriesWatched';
-import { Button, IconButton, buttonClass, cn, useToast } from '@/ui';
+import { Button, IconButton, buttonClass, cn, useToast, errorDescription } from '@/ui';
 
 export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
   const { t } = useTranslation('vod');
@@ -23,7 +23,7 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { ite
           void invalidate('favorites.');
           toast({ title: res.isFavorite ? t('addedToFavorites') : t('removedFromFavorites'), variant: 'success' });
         },
-        onError: (err) => toast({ title: t('favoriteFailed'), description: err.message, variant: 'error' }),
+        onError: (err) => toast({ title: t('favoriteFailed'), description: errorDescription(err), variant: 'error' }),
       },
     );
   const icon = <Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current text-live')} />;
@@ -88,7 +88,7 @@ export function WatchedButton({
                 }
               : {}),
           }),
-        onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
+        onError: (err) => toast({ title: t('watchedFailed'), description: errorDescription(err), variant: 'error' }),
       },
     );
   };

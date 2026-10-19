@@ -671,3 +671,37 @@ describe('toasts and the docked mini player (L3-player-ui-x1)', () => {
     expect(section?.hasAttribute('data-clearing')).toBe(false);
   });
 });
+
+describe('the mini dock in right-to-left layouts', () => {
+  afterEach(() => {
+    document.documentElement.dir = 'ltr';
+    localStorage.removeItem('player.mini.pos');
+  });
+
+  const dragHandle = () => screen.getByRole('button', { name: 'Drag to move the player' });
+  const saved = () => JSON.parse(localStorage.getItem('player.mini.pos') ?? 'null') as unknown;
+
+  it('keeps an offset saved under the old `right` name and moves it from the inline-end edge', () => {
+    localStorage.setItem('player.mini.pos', JSON.stringify({ right: 40, bottom: 30 }));
+    act(() => usePlayerStore.setState({ source: vod as never, mode: 'inline', status: 'playing', dock: 'mini' }));
+    render(<PlayerDock />);
+    fireEvent.keyDown(dragHandle(), { key: 'ArrowLeft' });
+    // LTR: the inline-end edge is the right one, so Left moves away from it.
+    expect(saved()).toEqual({ end: 56, bottom: 30 });
+  });
+
+  it('in RTL the frame docks at the left (inline-end) edge, so the arrows move it the other way', () => {
+    document.documentElement.dir = 'rtl';
+    localStorage.setItem('player.mini.pos', JSON.stringify({ end: 40, bottom: 30 }));
+    act(() => usePlayerStore.setState({ source: vod as never, mode: 'inline', status: 'playing', dock: 'mini' }));
+    render(<PlayerDock />);
+    const mini = screen.getByRole('region', { name: 'Now playing' });
+    // Logical, not `right`: the browser puts it on the left in RTL, clear of the rail.
+    expect(mini.getAttribute('style')).toContain('inset-inline-end: 40px');
+    expect(mini.style.right).toBe('');
+    fireEvent.keyDown(dragHandle(), { key: 'ArrowLeft' });
+    expect(saved()).toEqual({ end: 24, bottom: 30 });
+    fireEvent.keyDown(dragHandle(), { key: 'ArrowRight', shiftKey: true });
+    expect(saved()).toEqual({ end: 88, bottom: 30 });
+  });
+});

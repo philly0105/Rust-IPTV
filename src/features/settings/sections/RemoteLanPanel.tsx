@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, rpcKey } from '@/api/query';
 import type { RemoteDevice, RemoteLanAddress, RemotePairing, RemoteServerStatus } from '@/api/rpc';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
-import { Button, Dialog, Select, Skeleton, useToast } from '@/ui';
+import { Button, Dialog, Select, Skeleton, useToast, errorDescription } from '@/ui';
 
 import { relativeTime } from '../../sources/lib/format';
 import { SettingsGroup, SwitchRow } from '../components';
@@ -45,7 +45,7 @@ export function RemoteLanPanel({ settings, update, status }: Props) {
     try {
       await fn();
     } catch (e) {
-      toast({ variant: 'error', title: t('remoteFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('remoteFailed'), description: errorDescription(e) });
     } finally {
       setBusy(false);
       void invalidate('remote.');
@@ -289,7 +289,7 @@ function DeviceList() {
       await rpc('remote.revokeDevice', { id: d.id });
       toast({ variant: 'success', title: t('remoteDeviceRevoked') });
     } catch (e) {
-      toast({ variant: 'error', title: t('remoteFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('remoteFailed'), description: errorDescription(e) });
     } finally {
       setRevoking(undefined);
       void invalidate('remote.devices');

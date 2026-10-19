@@ -7,6 +7,7 @@ import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type ChannelEdit } from '@/api/types';
 import { ChannelLogo } from '@/features/live/components/ChannelLogo';
 import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, SkeletonList, cn, useRowHeight } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { isGoneAnswer, reportUnhideMany, resetEdits, unhideChannel, unhideMany } from './actions';
 import { ITEM_STALE_MS, useDisplayName, useHiddenEdits, useSourceEdits } from './edits';
@@ -36,7 +37,7 @@ const fold = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').to
  */
 export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelProps) {
   const { t, i18n } = useTranslation('channels');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const display = useDisplayName();
   const hidden = useHiddenEdits(sourceId);
   // Renames too: Reset all edits shows whenever the source has any edit.

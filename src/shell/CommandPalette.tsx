@@ -36,12 +36,12 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop } from '@/api/transport';
+import { isDesktop } from '@/api/transport';
 import { itemKey, type ContentType, type ItemRef, type ItemSnapshot } from '@/api/types';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
-import { cn, Dialog, Kbd, toast } from '@/ui';
+import { cn, Dialog, Kbd, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { railLinks } from './railLinks';
@@ -188,7 +188,7 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
                   playItem({ ref, title, posterUrl: snapshot.posterUrl, isLive: true, isRadio: ref.contentType === 'radio', sourceKind: source.kind }),
                 )
                 .catch((err: unknown) =>
-                  toast({ variant: 'error', title: t('playFailed', { title }), description: err instanceof Error ? err.message : undefined }),
+                  toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }),
                 )
           : () => void navigate(`/s/${sid}/${ref.contentType}/${iid}`),
       };
@@ -277,7 +277,7 @@ export function usePaletteItems(): PaletteItem[] {
         run: () =>
           void lockNow().then(
             () => toast({ variant: 'success', title: t('parental:lockedNowToast') }),
-            (err: unknown) => toast({ variant: 'error', title: t('parental:saveFailed'), description: RpcError.from(err).message }),
+            (err: unknown) => toast({ variant: 'error', title: t('parental:saveFailed'), description: errorDescription(err) }),
           ),
       });
     }

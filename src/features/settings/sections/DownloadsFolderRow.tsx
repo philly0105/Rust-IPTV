@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, Skeleton, useToast } from '@/ui';
+import { Button, Skeleton, useToast, errorDescription } from '@/ui';
 import { redactText } from '../../sources/lib/redact';
 import { SettingsRow } from '../components';
 
@@ -62,7 +62,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
     try {
       await rpc('app.openPath', { path });
     } catch (e) {
-      toast({ variant: 'error', title: t('openFolderFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('openFolderFailed'), description: errorDescription(e) });
     }
   };
 

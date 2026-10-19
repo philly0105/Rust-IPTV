@@ -6,7 +6,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
 
-import { Button, Dialog, ErrorState, Skeleton, useToast } from '@/ui';
+import { Button, Dialog, ErrorState, Skeleton, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -47,7 +47,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
       toast({ title, variant: 'success' });
       onClose();
     } catch (err) {
-      toast({ title: t('mappingFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+      toast({ title: t('mappingFailed'), description: errorDescription(err), variant: 'error' });
     } finally {
       setBusy(false);
     }

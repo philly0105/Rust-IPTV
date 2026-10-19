@@ -9,6 +9,7 @@ import { invalidate } from '@/api/query';
 import { isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
+import { formatList } from '@/lib/intl';
 
 import { Button, EmptyState, ErrorState, SkeletonList, Toggle, useShortcut } from '../deps';
 import { ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
@@ -34,7 +35,7 @@ function focusedDownloadId(): number | undefined {
 }
 
 export function DownloadsPage() {
-  const { t } = useTranslation('library');
+  const { t, i18n } = useTranslation('library');
   const query = useDownloads();
   const { byId: sources } = useSourcesById();
   const { pending, perform } = useDownloadActions();
@@ -56,8 +57,8 @@ export function DownloadsPage() {
     if (counts.queued) parts.push(t('summaryQueued', { count: counts.queued }));
     if (counts.paused) parts.push(t('summaryPaused', { count: counts.paused }));
     if (counts.attention) parts.push(t('summaryAttention', { count: counts.attention }));
-    return parts.join(', ');
-  }, [counts, t]);
+    return formatList(parts, i18n.language);
+  }, [counts, t, i18n.language]);
 
   const onAction = useCallback(
     (action: QueueAction, d: Download) => {

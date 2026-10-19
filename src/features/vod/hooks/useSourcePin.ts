@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { queryClient, rpcKey } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { ItemRef, SourcePin, VodItem } from '@/api/types';
-import { useToast } from '@/ui';
+import { useToast, errorDescription } from '@/ui';
 
 import { matchKey, migrateLocalPins } from '../lib/pins';
 
@@ -36,7 +36,7 @@ export function useSourcePin(item: Pick<VodItem, 'title' | 'titleBase' | 'year'>
           queryClient.setQueryData(queryKey, null);
         }
       } catch (err) {
-        toast({ title: t('pinFailed'), description: RpcError.from(err).message, variant: 'error' });
+        toast({ title: t('pinFailed'), description: errorDescription(err), variant: 'error' });
       }
     },
     [key, t, toast],

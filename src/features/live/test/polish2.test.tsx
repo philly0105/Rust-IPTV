@@ -50,7 +50,12 @@ vi.mock('@/api/transport', () => ({
   get isDesktop() {
     return desktop.value;
   },
-  RpcError: class RpcError extends Error {},
+  // `from` for the error toasts' errorDescription (@/ui), which normalizes what was thrown.
+  RpcError: class RpcError extends Error {
+    static from(e: unknown) {
+      return e instanceof Error ? e : new Error(String(e));
+    }
+  },
   proxiedUrl: (s: { url: string }) => s.url,
 }));
 vi.mock('@/api/events', () => ({

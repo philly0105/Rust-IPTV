@@ -9,7 +9,7 @@ import { sameRef, type Download, type ItemRef, type PlaybackPosition, type Reque
 import { playItem, usePlayerStore } from '@/features/player';
 
 import { downloadFileName } from '../lib/format';
-import { useToast } from '@/ui';
+import { useToast, errorDescription } from '@/ui';
 import { useDownloads } from './queries';
 
 export interface PlayTarget {
@@ -109,7 +109,7 @@ export function usePlayback(target: PlayTarget | undefined) {
         if (tgt.categoryId) args.categoryId = tgt.categoryId;
         await playItem(args);
       } catch (err) {
-        toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' });
+        toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' });
       }
     },
     [target, t, toast],
@@ -149,7 +149,7 @@ export function usePlayback(target: PlayTarget | undefined) {
         });
       } catch (err) {
         const e = RpcError.from(err);
-        toast({ title: e.code === 'conflict' ? t('downloadExists') : t('downloadFailed'), description: e.message, variant: 'error' });
+        toast({ title: e.code === 'conflict' ? t('downloadExists') : t('downloadFailed'), description: errorDescription(e), variant: 'error' });
       } finally {
         setPendingDownload(null);
       }
@@ -190,7 +190,7 @@ export function usePlayback(target: PlayTarget | undefined) {
         });
       }
       if (failure) {
-        toast({ title: t('seasonDownloadFailed', { n: episodes.length - queued }), description: failure.message, variant: 'error' });
+        toast({ title: t('seasonDownloadFailed', { n: episodes.length - queued }), description: errorDescription(failure), variant: 'error' });
       }
     },
     [target, canDownload, t, toast, navigate],

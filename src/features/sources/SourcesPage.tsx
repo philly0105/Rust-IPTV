@@ -10,7 +10,7 @@ import { RpcError, rpc, rpcRaw, type CallOptions } from '@/api/transport';
 import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
-import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
+import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast, errorDescription } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
@@ -292,7 +292,7 @@ export function SourcesPage() {
       toast({
         variant: 'error',
         title: t('reorderFailed'),
-        description: redactText(RpcError.from(e).message),
+        description: errorDescription(e, redactText),
         action: { label: t('tryAgain'), onClick: () => void commitOrder(ids, movedId) },
       });
     } finally {
@@ -461,7 +461,7 @@ export function SourcesPage() {
         variant: 'error',
         title: t('removeAllFailed'),
         // The confirm dialog stays open for another try.
-        description: redactText(RpcError.from(e).message),
+        description: errorDescription(e, redactText),
       });
       void invalidate('sources.');
     } finally {

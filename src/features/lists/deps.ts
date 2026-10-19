@@ -19,6 +19,7 @@ export {
   Toggle,
   buttonClass,
   cn,
+  errorDescription,
   toast,
   useRowHeight,
   useToast,

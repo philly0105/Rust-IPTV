@@ -1,6 +1,7 @@
 import type { PlaybackPosition } from '@/api/types';
 import { isWatchedReplay, MIN_RESUME_SECONDS } from '@/features/player/store';
 import { formatDurationParts, resetDurationFormatCache, type DurationFormatOptions } from '@/lib/duration';
+import { intlLocale } from '@/lib/intl';
 
 type ProgressInput = Pick<PlaybackPosition, 'positionSeconds' | 'durationSeconds'> &
   Partial<Pick<PlaybackPosition, 'watched' | 'episodeId' | 'ref'>>;
@@ -66,7 +67,7 @@ function ratingFormat(locale: string | undefined): Intl.NumberFormat {
   if (!f) {
     const opts = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
     try {
-      f = new Intl.NumberFormat(locale, opts);
+      f = new Intl.NumberFormat(intlLocale(locale), opts);
     } catch {
       f = new Intl.NumberFormat('en', opts);
     }

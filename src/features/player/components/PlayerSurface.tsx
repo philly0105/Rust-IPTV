@@ -343,7 +343,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
           // overlay keeps it: closed until asked for, then on a row of its own under the strip.
           <details className="group shrink-0 text-xs text-white/60 open:order-last open:basis-full">
             <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+              <ChevronRight className="size-3.5 transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90 motion-reduce:transition-none" aria-hidden />
               {t('errorDetails')}
             </summary>
             <p data-testid="mpv-error-detail" className="mt-1 ps-4.5 pb-0.5 font-mono break-all select-all">

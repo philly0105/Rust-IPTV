@@ -1,4 +1,5 @@
 import type { Channel, EpgNowNext, EpgProgram, SourceKind } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { type CatchupChannel, isM3uCatchupSupported } from './catchup';
 
@@ -170,7 +171,7 @@ export function formatClock(t: number, locale?: string): string {
   const key = locale ?? '';
   let f = timeFormatters.get(key);
   if (!f) {
-    f = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
+    f = new Intl.DateTimeFormat(intlLocale(locale), { hour: '2-digit', minute: '2-digit' });
     timeFormatters.set(key, f);
   }
   return f.format(t);
@@ -181,7 +182,7 @@ export function formatDay(t: number, locale?: string): string {
   const key = locale ?? '';
   let f = dayFormatters.get(key);
   if (!f) {
-    f = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+    f = new Intl.DateTimeFormat(intlLocale(locale), { weekday: 'short', day: 'numeric', month: 'short' });
     dayFormatters.set(key, f);
   }
   return f.format(t);
@@ -193,7 +194,7 @@ export function formatClockZone(t: number, locale?: string): string {
   const key = locale ?? '';
   let f = zoneFormatters.get(key);
   if (!f) {
-    f = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    f = new Intl.DateTimeFormat(intlLocale(locale), { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
     zoneFormatters.set(key, f);
   }
   return f.format(t);

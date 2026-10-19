@@ -5,9 +5,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, isDesktop, rpc } from '@/api/transport';
+import { isDesktop, rpc } from '@/api/transport';
 
-import { Button, Skeleton, useToast } from '../deps';
+import { Button, Skeleton, useToast, errorDescription } from '../deps';
 
 /** Opens the native folder picker. Returns undefined when the user cancels. */
 export async function pickFolder(defaultPath?: string): Promise<string | undefined> {
@@ -49,7 +49,7 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
       await invalidate('downloads.dir');
       toast({ title: t('folderChanged'), description: next, variant: 'success' });
     } catch (err) {
-      toast({ title: t('folderChangeFailed'), description: RpcError.from(err).message, variant: 'error' });
+      toast({ title: t('folderChangeFailed'), description: errorDescription(err), variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -60,7 +60,7 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
     try {
       await rpc('app.openPath', { path });
     } catch (err) {
-      toast({ title: t('folderOpenFailed'), description: RpcError.from(err).message, variant: 'error' });
+      toast({ title: t('folderOpenFailed'), description: errorDescription(err), variant: 'error' });
     }
   };
 

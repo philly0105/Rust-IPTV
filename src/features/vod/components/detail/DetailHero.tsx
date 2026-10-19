@@ -8,6 +8,7 @@ import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
 import { Poster, QUARTER_BLUR, Skeleton, cn, useImageChain } from '@/ui';
+import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
 
 export interface DetailHeroProps {
@@ -82,7 +83,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
                   {language}
                 </span>
               )}
-              {model.genres.length > 0 && <span>{model.genres.slice(0, 4).join(', ')}</span>}
+              {model.genres.length > 0 && <span>{formatList(model.genres.slice(0, 4), i18n.language)}</span>}
               {chips}
             </div>
           </div>

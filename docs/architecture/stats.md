@@ -59,7 +59,7 @@ The reporter is plain TypeScript with no i18n, so it can sit in the entry chunk.
 
 Empty: on 7 days the action switches to 30 days; on 30 days it links Home. Loading shows a skeleton in the page's shape; an error shows the shared error state with Try again.
 
-Durations use `Intl.NumberFormat` units ("3 hr 20 min", "45 min", "40 sec"), dates `Intl.DateTimeFormat`, both in the app language (`by` as `be`, `zhtw` as `zh-TW`).
+Durations use `Intl.NumberFormat` units ("3 hr 20 min", "45 min", "40 sec"), dates `Intl.DateTimeFormat`, both in the app language through the shared `intlLocale` (`src/lib/intl.ts`: `ary` as `ar`, `by` as `be`, `zhtw` as `zh-TW`).
 
 ## Backup
 

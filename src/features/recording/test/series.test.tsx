@@ -4,7 +4,7 @@
  * "already a series", an existing rule shows as on or paused and offers removal, and a
  * recording a rule made carries the series mark.
  */
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { queryClient } from '@/api/query';
@@ -131,7 +131,7 @@ describe('Record series', () => {
     fireEvent.click(await seriesButton());
     fireEvent.click(await screen.findByTestId('series-confirm-ok'));
     await waitFor(() => expect(toastTitles()).toContain('Could not add the series'));
-    expect(useToastStore.getState().toasts.at(-1)!.description).toBe('disk is full');
+    expect(render(<>{useToastStore.getState().toasts.at(-1)!.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('disk is full');
   });
 
   it('an existing rule shows as on, and pressing it asks to remove the series', async () => {

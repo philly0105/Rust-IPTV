@@ -1,7 +1,7 @@
 {
   "title": "My List",
-  "count_one": "{{count}} title",
-  "count_other": "{{count}} titles",
+  "count_one": "{{count, number}} title",
+  "count_other": "{{count, number}} titles",
   "seeAll": "See all",
   "loading": "Loading My List",
   "errorHint": "My List is stored by the app, not your provider. Try again, or restart the app if it keeps failing.",
@@ -63,7 +63,7 @@
   "showAll": "Show all",
   "allWatchedTitle": "All watched",
   "allWatchedBody_one": "The one title here is watched. Show watched titles to see it again.",
-  "allWatchedBody_other": "All {{count}} titles here are watched. Show watched titles to see them again.",
+  "allWatchedBody_other": "All {{count, number}} titles here are watched. Show watched titles to see them again.",
   "showWatched": "Show watched",
   "noMatchTitle": "No matches",
   "noMatchBody": "Nothing in My List matches “{{query}}”.",

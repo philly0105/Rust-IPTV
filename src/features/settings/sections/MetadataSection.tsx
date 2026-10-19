@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 
-import { Button, IconButton, Select, useToast } from '@/ui';
+import { Button, IconButton, Select, useToast, errorDescription } from '@/ui';
 import { SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { TMDB_LANGUAGES } from '../lib/languages';
 import { tmdbPatch } from '../lib/patch';
@@ -52,7 +52,7 @@ export function MetadataSection({ settings, update }: SectionProps) {
       await invalidate('tmdb.');
       toast({ variant: 'success', title: t('tmdbCacheCleared') });
     } catch (e) {
-      toast({ variant: 'error', title: t('tmdbCacheClearFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('tmdbCacheClearFailed'), description: errorDescription(e) });
     } finally {
       setClearing(false);
     }

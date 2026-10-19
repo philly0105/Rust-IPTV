@@ -7,6 +7,7 @@ import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
 import type { Accent, Density, Theme } from '@/api/types';
 import { clampUiScale, previewAppearance, useTheme } from '@/shell';
 import { Button, Poster, ProgressBar } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
@@ -240,7 +241,7 @@ function ScaleControl({
   // Leaving the page mid-drag drops the unsaved preview.
   useEffect(() => () => previewAppearance(null), []);
 
-  const pct = (v: number) => new Intl.NumberFormat(i18n.language, { style: 'percent', maximumFractionDigits: 0 }).format(v);
+  const pct = (v: number) => new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent', maximumFractionDigits: 0 }).format(v);
 
   const commit = (v: number) => {
     editing.current = false;

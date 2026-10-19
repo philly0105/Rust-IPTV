@@ -10,7 +10,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { Button, IconButton, Skeleton, useToast } from '@/ui';
+import { Button, IconButton, Skeleton, useToast, errorDescription } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -41,6 +41,7 @@ import { playCatchup } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 // recording:
 import { RibbonActions, ScheduleMark } from '@/features/recording';
+import { listSeparator } from '@/lib/intl';
 
 export const RIBBON_PX_PER_MIN = 4;
 const AHEAD = 12 * HOUR;
@@ -118,7 +119,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         try {
           await playCatchup(channel, sourceKind!, p, undefined, channelName);
         } catch (err) {
-          toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+          toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' });
         }
         return;
       }
@@ -542,7 +543,7 @@ function TimelineBlock({
     block.when === 'now' && catchup && watchingLive ? t('startOverAvailable') : '',
   ]
     .filter(Boolean)
-    .join(', ');
+    .join(listSeparator(i18n.language));
   return (
     <button
       type="button"

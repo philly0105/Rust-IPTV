@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 
 import { itemKey, type PlayerSource } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
 import { usePlayerStore } from './store';
 
@@ -39,7 +40,7 @@ export function stepDelay(value: number, steps: number): number {
 export function formatDelay(ms: number, locale?: string): string {
   const value = ms === 0 ? 0 : ms;
   try {
-    return new Intl.NumberFormat(locale, { style: 'unit', unit: 'millisecond', unitDisplay: 'short', signDisplay: 'exceptZero' }).format(value);
+    return new Intl.NumberFormat(intlLocale(locale), { style: 'unit', unit: 'millisecond', unitDisplay: 'short', signDisplay: 'exceptZero' }).format(value);
   } catch {
     return `${value > 0 ? '+' : ''}${value} ms`;
   }

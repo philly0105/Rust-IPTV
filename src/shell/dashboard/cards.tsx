@@ -7,26 +7,13 @@ import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapsho
 import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
+import { intlLocale, listSeparator } from '@/lib/intl';
 import { Badge, CARD_ART, CARD_ROOT, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 
 /** The focusable card; its focus ring, hover lift and press are drawn on the artwork (CARD_ART). */
 const cardRoot = cn(CARD_ROOT, 'block w-full rounded-md text-start');
-
-/**
- * The separator between short facts in a list. Intl.ListFormat's `unit` lists
- * are no use here: several locales join with a bare space (en narrow, ru, ko,
- * tr) or nothing (ja, zh), and ar adds "و" (and) that bidi pushes after a year. So
- * the separator is fixed per script: "、" (ideographic comma) for Japanese and Chinese, "، " (Arabic comma) for
- * Arabic scripts, ", " otherwise.
- */
-function factSeparator(language: string): string {
-  const base = language.toLowerCase();
-  if (base.startsWith('ja') || base.startsWith('zh')) return '、';
-  if (base.startsWith('ar') || base === 'ary' || base.startsWith('fa') || base.startsWith('ur')) return '، ';
-  return ', ';
-}
 
 /** First-strong isolate (U+2068 ... U+2069): a part's own script sets its direction. */
 const isolate = (part: string) => (/[\p{L}\p{N}]/u.test(part) ? `\u2068${part}\u2069` : part);
@@ -40,7 +27,7 @@ export function joinList(parts: readonly (string | number | false | null | undef
   return parts
     .filter((p): p is string | number => p !== false && p !== null && p !== undefined && p !== '')
     .map((p) => isolate(String(p)))
-    .join(factSeparator(language));
+    .join(listSeparator(language));
 }
 
 /** In-app path for an item's detail (movie/series) or browse (live/radio) page. */
@@ -467,7 +454,7 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
       ? t(`importPhase_${importing.phase}`)
       : t('sourceCardImporting');
   const caption = importing
-    ? joinList([phaseLabel, fraction !== undefined && new Intl.NumberFormat(i18n.language, { style: 'percent' }).format(fraction)], i18n.language)
+    ? joinList([phaseLabel, fraction !== undefined && new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent' }).format(fraction)], i18n.language)
     : joinList(counts, i18n.language) || t('emptySource');
   return (
     <Link to={`/s/${encodeURIComponent(source.id)}/live`} {...rail} className={cardRoot}>

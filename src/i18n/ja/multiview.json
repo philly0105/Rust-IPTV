@@ -104,7 +104,7 @@
   "pickerEmptySearch": "「{{query}}」に一致するライブチャンネルはありません",
   "pickerEmptySource": "このソースにはライブチャンネルがありません",
   "pickerNoSources": "チャンネルを選ぶにはソースを追加してください。",
-  "pickerResults_other": "{{count}} チャンネル",
+  "pickerResults_other": "{{count, number}} チャンネル",
   "pickerOnSlot": "位置 {{slot}}",
   "pickerAdd": "追加",
   "pickerPick": "選択",

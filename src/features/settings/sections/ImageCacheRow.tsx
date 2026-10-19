@@ -24,7 +24,8 @@ import { bumpImageCacheGeneration } from '@/api/images';
 import { rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 import { IMAGE_CACHE_MAX_MB_MAX, IMAGE_CACHE_MAX_MB_MIN, type ImageCacheStats, type Settings } from '@/api/types';
-import { Button, Dialog, Select, Skeleton, cn, useToast } from '@/ui';
+import { Button, Dialog, Select, Skeleton, cn, useToast, errorDescription } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import type { SettingsPatch } from '../lib/patch';
 import { useSettingsQuery, useUpdateSettings } from '../lib/useUpdateSettings';
@@ -37,7 +38,7 @@ const STATS_KEY = rpcKey('images.stats');
 
 function unitFormat(locale: string, unit: 'kilobyte' | 'megabyte' | 'gigabyte', digits: number): Intl.NumberFormat {
   try {
-    return new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'short', maximumFractionDigits: digits });
+    return new Intl.NumberFormat(intlLocale(locale), { style: 'unit', unit, unitDisplay: 'short', maximumFractionDigits: digits });
   } catch {
     return new Intl.NumberFormat('en', { style: 'unit', unit, unitDisplay: 'short', maximumFractionDigits: digits });
   }
@@ -132,7 +133,7 @@ export function ImageCacheRow({ update: tracked }: { update?: (patch: SettingsPa
       toast({
         variant: 'error',
         title: t('imageCacheClearFailed'),
-        description: RpcError.from(e).message,
+        description: errorDescription(e),
         action: { label: t('retry'), onClick: () => void clear() },
       });
     } finally {

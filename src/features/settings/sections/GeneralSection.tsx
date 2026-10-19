@@ -7,6 +7,7 @@ import type { CoverSize, DashboardRails, StartupBehavior } from '@/api/types';
 import { LANGUAGES, applyLanguage } from '@/i18n';
 
 import { Button, Dialog, Select, useToast } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { clampRating, diffSettings, railsPatch, type SettingsPatch } from '../lib/patch';
 import { useResetSettings } from '../lib/useUpdateSettings';
@@ -55,7 +56,7 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
     const next = clampRating(draft);
     if (next !== value) void update({ vodMinRating: next });
   };
-  const label = draft > 0 ? t('vodMinRatingValue', { value: draft.toLocaleString(i18n.language, { minimumFractionDigits: 1 }) }) : t('vodMinRatingOff');
+  const label = draft > 0 ? t('vodMinRatingValue', { value: draft.toLocaleString(intlLocale(i18n.language), { minimumFractionDigits: 1 }) }) : t('vodMinRatingOff');
   return (
     <SettingsRow label={t('vodMinRating')} description={t('vodMinRatingHint')}>
       {({ id, describedBy }) => (
@@ -77,7 +78,7 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
             data-testid="input-vodMinRating"
           />
           <output htmlFor={id} className="w-14 text-end text-sm tabular-nums text-fg" data-testid="vodMinRating-value">
-            {draft > 0 ? draft.toLocaleString(i18n.language, { minimumFractionDigits: 1 }) : t('vodMinRatingAny')}
+            {draft > 0 ? draft.toLocaleString(intlLocale(i18n.language), { minimumFractionDigits: 1 }) : t('vodMinRatingAny')}
           </output>
         </div>
       )}

@@ -1,6 +1,6 @@
 {
   "title": "我的片单",
-  "count_other": "{{count}} 部",
+  "count_other": "{{count, number}} 部",
   "seeAll": "查看全部",
   "loading": "正在加载我的片单",
   "errorHint": "我的片单由应用保存，而不是由提供商保存。请重试；如果一直失败，请重启应用。",
@@ -61,7 +61,7 @@
   "emptySeriesBody": "你保存的都是电影。",
   "showAll": "显示全部",
   "allWatchedTitle": "全部已观看",
-  "allWatchedBody_other": "这里的 {{count}} 部影片都已观看。显示已观看的内容即可再次看到它们。",
+  "allWatchedBody_other": "这里的 {{count, number}} 部影片都已观看。显示已观看的内容即可再次看到它们。",
   "showWatched": "显示已观看",
   "noMatchTitle": "无匹配结果",
   "noMatchBody": "我的片单中没有与“{{query}}”匹配的内容。",

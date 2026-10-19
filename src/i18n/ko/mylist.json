@@ -1,6 +1,6 @@
 {
   "title": "내 목록",
-  "count_other": "{{count}}개",
+  "count_other": "{{count, number}}개",
   "seeAll": "모두 보기",
   "loading": "내 목록 불러오는 중",
   "errorHint": "내 목록은 제공업체가 아니라 앱에 저장됩니다. 다시 시도하거나, 계속 실패하면 앱을 다시 시작하세요.",
@@ -61,7 +61,7 @@
   "emptySeriesBody": "저장한 작품이 모두 영화입니다.",
   "showAll": "모두 표시",
   "allWatchedTitle": "모두 시청함",
-  "allWatchedBody_other": "여기 있는 작품 {{count}}개를 모두 시청했습니다. 시청한 작품을 표시하면 다시 보입니다.",
+  "allWatchedBody_other": "여기 있는 작품 {{count, number}}개를 모두 시청했습니다. 시청한 작품을 표시하면 다시 보입니다.",
   "showWatched": "시청한 작품 표시",
   "noMatchTitle": "결과 없음",
   "noMatchBody": "내 목록에서 ‘{{query}}’에 맞는 작품이 없습니다.",

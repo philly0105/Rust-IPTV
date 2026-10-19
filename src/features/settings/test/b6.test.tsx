@@ -102,7 +102,7 @@ describe('Reset settings (D9)', () => {
     fireEvent.click(await screen.findByTestId('settings-reset'));
     fireEvent.click(within(await screen.findByRole('dialog')).getByTestId('settings-reset-confirm'));
     await waitFor(() => expect(lastToast()?.title).toBe("Couldn't reset settings"));
-    expect(lastToast()?.description).toContain('disk full');
+    expect(render(<>{lastToast()?.description}</>).container.textContent).toContain('disk full');
   });
 
   it('diffSettings clears an optional path the target never had', () => {

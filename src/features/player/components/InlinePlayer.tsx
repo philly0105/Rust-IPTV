@@ -609,10 +609,10 @@ function ErrorOverlay({
           // What the engine said, for a bug report or a provider ticket: out of the way until asked for.
           <details className="group w-full text-xs text-white/60">
             <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden />
+              <ChevronRight className="size-3.5 transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90 motion-reduce:transition-none" aria-hidden />
               {t('errorDetails')}
             </summary>
-            <p className="mt-1.5 pl-4.5 font-mono break-all select-all">{message}</p>
+            <p className="mt-1.5 ps-4.5 font-mono break-all select-all">{message}</p>
           </details>
         )}
         <div className="mt-1 flex flex-wrap gap-2">
@@ -687,7 +687,7 @@ function ConnectingNotice({ source, compact }: { source?: PlayerSource | undefin
         data-testid="connecting-notice"
         className={cn(
           'player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1',
-          offerSwitch ? 'pr-1 pl-3' : 'px-3',
+          offerSwitch ? 'pe-1 ps-3' : 'px-3',
           compact ? 'text-xs' : 'text-sm',
         )}
       >

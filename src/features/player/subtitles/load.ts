@@ -9,6 +9,8 @@ import type { TFunction } from 'i18next';
 import { isDesktop, rpc } from '@/api/transport';
 import { baseName, pickPathDesktop, readFileText } from '@/features/sources/lib/files';
 import { toast } from '@/ui/Toast';
+import { intlLocale } from '@/lib/intl';
+import { errorDescription } from '@/ui/States';
 
 import { useMediaStore } from '../media';
 import { peekSettings, usePlayerStore } from '../store';
@@ -103,7 +105,7 @@ export function oversizeText(bytes: number, lang: string): string {
   const mb = Math.ceil((Math.max(0, bytes) * 100) / (1024 * 1024) - 1e-6) / 100;
   let text: string;
   try {
-    text = new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }).format(mb);
+    text = new Intl.NumberFormat(intlLocale(lang), { maximumFractionDigits: 2 }).format(mb);
   } catch {
     text = String(mb);
   }
@@ -155,7 +157,7 @@ export async function loadSubtitleFile(t: TFunction<'player'>): Promise<boolean>
       toast({ title: t('subtitleLoaded', { name }), variant: 'success' });
       return true;
     } catch (err) {
-      toast({ title: t('subtitleLoadFailed', { name }), description: err instanceof Error ? err.message : String(err), variant: 'error' });
+      toast({ title: t('subtitleLoadFailed', { name }), description: errorDescription(err), variant: 'error' });
       return false;
     }
   }

@@ -22,7 +22,7 @@ import { rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useToast, type MenuAction, type SelectOption } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useToast, type MenuAction, type SelectOption, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
@@ -970,7 +970,7 @@ export function EpgGridPage() {
       .catch((err: unknown) => {
         if (cancelled) return;
         setReveal(null);
-        toast({ title: tg('hitNotFound', { channel: reveal.channelName }), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+        toast({ title: tg('hitNotFound', { channel: reveal.channelName }), description: errorDescription(err), variant: 'error' });
       });
     return () => {
       cancelled = true;
@@ -991,7 +991,7 @@ export function EpgGridPage() {
     const kind = ownKind(channel);
     if (!kind) return;
     playChannel(channel, kind, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
-      toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('playFailed', { name: displayChannelName(channel.name, prefs.stripCountryPrefix) }), description: errorDescription(err), variant: 'error' }),
     );
   });
   /** Watch on an airing search hit: the hit carries what playback needs of the channel. */
@@ -1010,7 +1010,7 @@ export function EpgGridPage() {
     const kind = ownKind(channel);
     if (!kind) return;
     playCatchup(channel, kind, program, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
-      toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
     );
   };
 

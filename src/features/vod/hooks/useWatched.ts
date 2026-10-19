@@ -9,10 +9,10 @@ import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpcKey, useRpcQuery } from '@/api/query';
-import { RpcError, rpc, rpcRaw } from '@/api/transport';
+import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, type ItemRef } from '@/api/types';
 import { captureWatched, undoWatched } from '@/features/library/lib/watchedUndo';
-import { useToast } from '@/ui';
+import { useToast, errorDescription } from '@/ui';
 
 import { invalidateWatched, useSetWatched } from './queries';
 
@@ -125,7 +125,7 @@ export function useToggleWatched(): (ref: ItemRef) => Promise<void> {
       try {
         watched = (await rpc('positions.watchedContains', { refs: [ref] })).length > 0;
       } catch (e) {
-        toast({ title: t('watchedFailed'), description: RpcError.from(e).message, variant: 'error' });
+        toast({ title: t('watchedFailed'), description: errorDescription(e), variant: 'error' });
         return;
       }
       const next = !watched;
@@ -155,7 +155,7 @@ export function useToggleWatched(): (ref: ItemRef) => Promise<void> {
                   }
                 : {}),
             }),
-          onError: (err) => toast({ title: t('watchedFailed'), description: err.message, variant: 'error' }),
+          onError: (err) => toast({ title: t('watchedFailed'), description: errorDescription(err), variant: 'error' }),
         },
       );
     },

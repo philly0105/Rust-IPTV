@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import i18n, { i18nextLng, LANGUAGES, loadLanguage, NAMESPACES, resources } from '@/i18n';
 
@@ -41,8 +41,8 @@ describe('i18n language keys', () => {
     expect(few).not.toBe(many);
 
     const t = i18n.getFixedT('be', 'library');
-    expect(t('recentCount', { count: 2 })).toBe(few!.replace('{{count}}', '2'));
-    expect(t('recentCount', { count: 5 })).toBe(many!.replace('{{count}}', '5'));
+    expect(t('recentCount', { count: 2 })).toBe(few!.replace('{{count, number}}', '2'));
+    expect(t('recentCount', { count: 5 })).toBe(many!.replace('{{count, number}}', '5'));
   });
 
   it('pins Moroccan Arabic to Arabic plural rules whatever the runtime resolves `ary` to', async () => {
@@ -63,6 +63,27 @@ describe('i18n language keys', () => {
     expect(t('channelCount', { count: 11, formatted: '11' })).toBe(lists['channelCount_many']!.replace('{{formatted}}', '11'));
   });
 
+  it('formats `{{count, number}}` through the Intl locale helper (`ary` as Arabic, not the machine locale)', async () => {
+    await loadLanguage('ary');
+    await loadLanguage('de');
+    const arabic = new Intl.NumberFormat('ar').format(1000);
+    const Original = Intl.NumberFormat;
+    const asked: unknown[] = [];
+    vi.spyOn(Intl, 'NumberFormat').mockImplementation(function (locales?: string | string[], options?: Intl.NumberFormatOptions) {
+      asked.push(locales);
+      return new Original(locales, options);
+    } as unknown as typeof Intl.NumberFormat);
+    const library = i18n.getResourceBundle('ary', 'library') as Record<string, string>;
+    // 1000: Arabic `_other` (1234 would be `_many`).
+    expect(i18n.getFixedT('ary', 'library')('recentCount', { count: 1000 })).toBe(
+      library['recentCount_other']!.replace('{{count, number}}', arabic),
+    );
+    // `Intl.NumberFormat('ary')` would silently take the machine's locale.
+    expect(asked).not.toContain('ary');
+    expect(asked).toContain('ar');
+    expect(i18n.getFixedT('de', 'vod')('categoryCount', { count: 1234 })).toBe('1.234 Kategorien');
+  });
+
   it.each([
     ['zhtw', 'zh-TW'],
     ['zh', 'zh-CN'],
@@ -74,7 +95,7 @@ describe('i18n language keys', () => {
     expect(other).toBeTruthy();
 
     const t = i18n.getFixedT(bcp47, 'library');
-    expect(t('recentCount', { count: 3 })).toBe(other!.replace('{{count}}', '3'));
+    expect(t('recentCount', { count: 3 })).toBe(other!.replace('{{count, number}}', '3'));
     // Not the English fallback.
     expect(t('recentCount', { count: 3 })).not.toBe(i18n.getFixedT('en', 'library')('recentCount', { count: 3 }));
   });

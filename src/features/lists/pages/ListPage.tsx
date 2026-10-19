@@ -17,6 +17,7 @@ import { registerCommands } from '@/shell/commands';
 import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
 import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
+import { intlLocale } from '@/lib/intl';
 
 import {
   Button,
@@ -34,6 +35,7 @@ import {
   buttonClass,
   cn,
   displayChannelName,
+  errorDescription,
   useDisplayPrefs,
   useMediaQuery,
   useNow,
@@ -59,7 +61,7 @@ const SIDEBAR_KEY = 'lists.sidebarCollapsed';
 export function ListPage() {
   const { t, i18n } = useTranslation('lists');
   const { t: tl } = useTranslation('live');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const { toast } = useToast();
   const listId = useParams().listId ?? '';
   const now = useNow(30_000);
@@ -99,7 +101,7 @@ export function ListPage() {
     (channel: Channel, nn?: EpgNowNext) => {
       const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
       playFromList(channel, listId, nn?.now?.title, name).catch((err: unknown) =>
-        toast({ title: tl('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+        toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
       );
     },
     [listId, prefs.stripCountryPrefix, tl, toast],
@@ -161,7 +163,7 @@ export function ListPage() {
         await invalidate('favorites.');
         toast({ title: res.isFavorite ? tl('favoriteAdded', { name }) : tl('favoriteRemoved', { name }), variant: 'success' });
       } catch (err) {
-        toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' });
+        toast({ title: wasFavorite ? tl('favoriteRemoveFailed') : tl('favoriteAddFailed'), description: errorDescription(err), variant: 'error' });
       } finally {
         favInFlight.current.delete(key);
         setOverride(key, undefined);
@@ -531,7 +533,7 @@ function UnavailableEntries({
   onRemove(entries: CustomListEntry[], label: string): void;
 }) {
   const { t, i18n } = useTranslation('lists');
-  const fmt = new Intl.NumberFormat(i18n.language);
+  const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
   return (
     <details className="group shrink-0 border-t border-divider bg-surface" data-testid="list-unavailable">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-fg-muted outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent [&::-webkit-details-marker]:hidden">

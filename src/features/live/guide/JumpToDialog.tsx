@@ -10,6 +10,7 @@ import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, cn, Dialog, Select, type SelectOption } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import {
   atWallTime,
@@ -46,7 +47,7 @@ export function slotOptions(slots: readonly number[], locale: string): SelectOpt
 /** "today", "tomorrow", "yesterday" in the UI language, or nothing for other days. */
 function relativeDay(diff: number, locale: string): string | undefined {
   if (diff < -1 || diff > 1) return undefined;
-  return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(diff, 'day');
+  return new Intl.RelativeTimeFormat(intlLocale(locale), { numeric: 'auto' }).format(diff, 'day');
 }
 
 export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpToDialogProps) {

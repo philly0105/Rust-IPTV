@@ -18,7 +18,7 @@ import type { WatchStatsTop } from '@/api/types';
 import { DayChart, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
 import { TopChannels, TopTitles } from '../components/TopList';
-import { Button, Dialog, EmptyState, ErrorState, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources } from '../deps';
+import { Button, Dialog, EmptyState, ErrorState, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources, errorDescription } from '../deps';
 import { useClearStats, useMonthHasData, useWatchStats } from '../hooks/useWatchStats';
 import { rangeTotals } from '../lib/chart';
 import { formatWatchTime } from '../lib/format';
@@ -71,7 +71,7 @@ export function StatsPage() {
       isRadio: item.ref.contentType === 'radio',
       sourceKind: source.kind,
     }).catch((err: unknown) => {
-      toast({ variant: 'error', title: t('playFailed', { title: item.title }), description: err instanceof Error ? err.message : undefined });
+      toast({ variant: 'error', title: t('playFailed', { title: item.title }), description: errorDescription(err) });
     });
   };
 
@@ -83,7 +83,7 @@ export function StatsPage() {
         setConfirming(false);
         toast({ variant: 'success', title: t('cleared') });
       },
-      onError: (err) => toast({ variant: 'error', title: t('clearFailed'), description: err.message }),
+      onError: (err) => toast({ variant: 'error', title: t('clearFailed'), description: errorDescription(err) }),
     });
 
   const time = (s: number) => formatWatchTime(s, lang);

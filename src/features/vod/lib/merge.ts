@@ -28,6 +28,7 @@ import type {
 } from '@/api/types';
 
 import { MIN_RESUME_SECONDS } from '@/features/player/store';
+import { formatList } from '@/lib/intl';
 
 import { isResumable, isWatched } from './format';
 import { itemLanguage, type ItemLanguage } from './language';
@@ -204,9 +205,9 @@ export function mergeMovieDetail(detail: VodDetail, tmdb?: TmdbMovie | null): De
   );
 }
 
-export function mergeSeriesDetail(detail: SeriesDetail, tmdb?: TmdbTv | null): DetailModel {
+export function mergeSeriesDetail(detail: SeriesDetail, tmdb?: TmdbTv | null, language?: string): DetailModel {
   const { item } = detail;
-  const creators = tmdb?.creators.filter((c) => !isBlank(c)).join(', ');
+  const creators = tmdb ? formatList(tmdb.creators.filter((c) => !isBlank(c)), language) : undefined;
   const model = mergeCommon(
     {
       title: item.title,

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcMutation, useRpcQuery } from '@/api/query';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useToast } from '@/ui';
+import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useToast, errorDescription } from '@/ui';
 
 export interface HiddenCategoriesDialogProps {
   open: boolean;
@@ -71,7 +71,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
           toast({ title: t('categoriesSaved'), variant: 'success' });
           onClose();
         },
-        onError: (err) => toast({ title: t('categoriesSaveFailed'), description: err.message, variant: 'error' }),
+        onError: (err) => toast({ title: t('categoriesSaveFailed'), description: errorDescription(err), variant: 'error' }),
       },
     );
   };

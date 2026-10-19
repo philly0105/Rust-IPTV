@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc } from '@/api/transport';
 
-import { Button, useToast } from '@/ui';
+import { Button, useToast, errorDescription } from '@/ui';
 import { SettingsRow } from '../components';
 import type { SettingsPatch } from '../lib/patch';
 import { pickDirectoryDesktop } from './DownloadsFolderRow';
@@ -52,7 +52,7 @@ export function RecordingsFolderRow({ value, update }: { value: string | null; u
     try {
       await rpc('app.openPath', { path: shown });
     } catch (e) {
-      toast({ variant: 'error', title: t('openFolderFailed'), description: RpcError.from(e).message });
+      toast({ variant: 'error', title: t('openFolderFailed'), description: errorDescription(e) });
     }
   };
 

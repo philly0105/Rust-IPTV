@@ -16,6 +16,7 @@ import { useRpcQuery } from '@/api/query';
 import type { GuideSearchHit } from '@/api/types';
 import { ProgramActionsView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
 import { buttonClass, cn, EmptyState, ErrorState, IconButton, SearchInput, Skeleton } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
 import { displayChannelName } from '../lib/channelName';
@@ -207,7 +208,7 @@ function dayHeading(day: number, now: number, locale: string, t: TFunction<'guid
   const diff = localDayDiff(day, now);
   const date = formatDay(day, locale);
   if (diff < 0 || diff > 1) return date;
-  const rel = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(diff, 'day');
+  const rel = new Intl.RelativeTimeFormat(intlLocale(locale), { numeric: 'auto' }).format(diff, 'day');
   return t('dayHeading', { rel: `${rel.charAt(0).toLocaleUpperCase(locale)}${rel.slice(1)}`, date });
 }
 

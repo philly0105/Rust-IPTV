@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgProgram, type Recording } from '@/api/types';
 import { IconButton, Menu, type MenuItem } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { useRecordingCapabilities, useRuleIndex, useScheduleActions, useScheduleIndex } from '../hooks';
 import { canHaveRule, ruleFor } from '../lib/rules';
@@ -44,8 +45,8 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
 
   const minutes = (m: number) =>
     m < 60
-      ? new Intl.NumberFormat(i18n.language, { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(m)
-      : new Intl.NumberFormat(i18n.language, { style: 'unit', unit: 'hour', unitDisplay: 'short' }).format(m / 60);
+      ? new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(m)
+      : new Intl.NumberFormat(intlLocale(i18n.language), { style: 'unit', unit: 'hour', unitDisplay: 'short' }).format(m / 60);
 
   const items: MenuItem[] = [];
   const stoppable = mark.recording ?? running;

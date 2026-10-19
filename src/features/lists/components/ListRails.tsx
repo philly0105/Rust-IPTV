@@ -9,8 +9,9 @@ import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type Channel, type CustomList } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 
-import { ChannelCard, DashboardRail, displayChannelName, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
+import { ChannelCard, DashboardRail, displayChannelName, errorDescription, toast, useDisplayPrefs, usePendingRemovals, useVisibleSources } from '../deps';
 import { useListItems } from '../hooks/useLists';
 import { playFromList } from '../lib/play';
 import { listPath } from '../paths';
@@ -51,7 +52,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
     offset ? { refs, offsetMinutes: offset, withDescription: false } : { refs, withDescription: false },
     { enabled: refs.length > 0, staleTime: 60_000 },
   );
-  const fmt = new Intl.NumberFormat(i18n.language);
+  const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
 
   return (
     <DashboardRail<Channel>
@@ -86,7 +87,7 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
             channel={c}
             onPlay={() =>
               void playFromList(c, list.id, nn?.now?.title, name).catch((err: unknown) =>
-                toast({ title: tl('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+                toast({ title: tl('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
               )
             }
           />

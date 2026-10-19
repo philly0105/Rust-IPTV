@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { CircleAlert, RotateCw } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -114,9 +115,30 @@ export function isServerUnreachable(err: RpcError): boolean {
 }
 
 /**
- * Renders an RpcError's message plus a next-step hint chosen by its code. When the app's own
- * server is unreachable the body and hint are translated and the raw browser text moves into a
- * details disclosure.
+ * Description for an error toast: the translated next step for the error's code leads, and the
+ * raw message (the core's English text, a browser error) follows in small print for support.
+ * `redact` strips credentials from the raw text where it may carry a provider URL.
+ */
+export function errorDescription(error: unknown, redact?: (text: string) => string): ReactNode {
+  const err = RpcError.from(error);
+  const hint = i18next.t(isServerUnreachable(err) ? 'errorHintServerUnreachable' : (ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal'), { ns: 'common' });
+  const raw = (redact ? redact(err.message) : err.message).trim();
+  return (
+    <>
+      {hint}
+      {raw && raw !== hint && (
+        <span className="mt-0.5 block text-xs break-words text-fg-subtle" dir="auto" data-error-message="">
+          {raw}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * Renders a translated title and next-step hint chosen by an RpcError's code. The raw message,
+ * usually the core's English text, sits in a folded details disclosure with the code, so the
+ * translated text leads in every language.
  */
 export function ErrorState({ error, onRetry, action, className, size = 'page', title, hint, retrying = false }: ErrorStateProps) {
   const { t } = useTranslation('common');
@@ -144,18 +166,18 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
       </div>
       <div className="flex max-w-lg flex-col gap-1.5">
         <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code] ?? 'errorTitleInternal')}</h2>
-        <p className="text-sm break-words text-fg-muted">{unreachable ? t('errorBodyServerUnreachable') : err.message}</p>
+        {unreachable && <p className="text-sm break-words text-fg-muted">{t('errorBodyServerUnreachable')}</p>}
         <p className="text-sm text-fg">
           {unreachable ? t('errorHintServerUnreachable') : (hint ?? t(ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal'))}
         </p>
-        {/* The code is what support asks for; it stays folded away so the message leads. */}
+        {/* The code and raw message are what support asks for; they stay folded away so the translated text leads. */}
         <details className="text-xs text-fg-subtle">
           <summary className="cursor-pointer rounded-sm hover:text-fg-muted active:text-fg">{t('errorTechnicalDetails')}</summary>
           <p className="mt-1" data-error-code={err.code}>
             {t('errorCode', { code: err.code })}
           </p>
-          {unreachable && (
-            <p className="mt-1 font-mono break-words" dir="ltr">
+          {err.message && (
+            <p className="mt-1 font-mono break-words" dir="auto" data-error-message="">
               {err.message}
             </p>
           )}

@@ -9,6 +9,7 @@ import type { Category } from '@/api/types';
 import { columnsFor, useElementWidth, useScrollMargin } from '../hooks/useContainerColumns';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { cn } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 export interface CategoryEntry {
   id: string;
@@ -49,7 +50,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
   const rows = Math.ceil(entries.length / columns);
   const margin = useScrollMargin(listRef, scrollRef, [entries.length > 0]);
   const { i18n } = useTranslation();
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
 
   const v = useVirtualizer({
     count: rows,

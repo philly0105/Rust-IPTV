@@ -1,6 +1,6 @@
 // Context-menu entries (C2): lock without a PIN, remove a lock with the PIN
 // unless the session is unlocked, adult groups show the automatic rule.
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { queryClient } from '@/api/query';
@@ -192,6 +192,7 @@ describe('useLockMenuItems', () => {
     fireEvent.click(lock);
     await waitFor(() => expect(lastToast()?.title).toBe('Could not change the lock'));
     expect(lastToast()?.variant).toBe('error');
-    expect(lastToast()?.description).toBe('database is locked');
+    // The core's raw text follows the translated next step in small print.
+    expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('database is locked');
   });
 });

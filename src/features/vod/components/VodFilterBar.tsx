@@ -6,6 +6,7 @@ import { rpcKey } from '@/api/query';
 import { rpc, type RpcError } from '@/api/transport';
 import type { YearFacet } from '@/api/types';
 import { Select, Skeleton, Toggle, cn } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 
 import { revealInRow, useEdgeFades } from '../hooks/useEdgeFades';
 import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
@@ -99,7 +100,7 @@ export function VodFilterBar({
       return p && p.sourceId === sourceId && p.contentType === kind && p.categoryId === facetArgs.categoryId ? prev : undefined;
     },
   });
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
 
   // A failed facet lookup still offers the decades, without levels.
   const chips: DecadeChip[] = facets.isError ? STALKER_DECADES.map((decade) => ({ decade })) : decadeChips(stalker, facets.data);

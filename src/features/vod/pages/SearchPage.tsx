@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigationType, useParams, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { RpcError, rpcRaw } from '@/api/transport';
+import { rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { playItem } from '@/features/player';
 
@@ -37,7 +37,7 @@ import {
   type SourceSearch,
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
-import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useToast } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -278,7 +278,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       const args: Parameters<typeof playItem>[0] = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
       if (c.logoUrl) args.posterUrl = c.logoUrl;
       if (c.categoryId) args.categoryId = c.categoryId;
-      playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: RpcError.from(err).message, variant: 'error' }));
+      playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' }));
     },
     [toast, t],
   );

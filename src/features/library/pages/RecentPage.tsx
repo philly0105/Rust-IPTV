@@ -7,11 +7,11 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, SkeletonList, useMediaQuery, usePlayerStore, useToast } from '../deps';
+import { Button, EmptyState, ErrorState, SkeletonList, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
@@ -88,13 +88,13 @@ export function RecentPage() {
               onClick: () => {
                 // The original date goes back too (C7), so the entry returns to its old place.
                 void rpc('recent.add', restoreArgs(e))
-                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: RpcError.from(err).message, variant: 'error' }))
+                  .catch((err: unknown) => toast({ title: t('undoFailed'), description: errorDescription(err), variant: 'error' }))
                   .finally(() => invalidate('recent.'));
               },
             },
           });
         } catch (err) {
-          toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
+          toast({ title: t('removeFailed'), description: errorDescription(err), variant: 'error' });
         } finally {
           await invalidate('recent.');
         }
@@ -108,7 +108,7 @@ export function RecentPage() {
       openEntry(e.ref, e.snapshot, sources.get(e.ref.sourceId), navigate).catch((err: unknown) => {
         toast({
           title: t('openFailed', { title: snapshotTitle(e.ref, e.snapshot.title).title }),
-          description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
+          description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
           variant: 'error',
         });
       });
@@ -128,7 +128,7 @@ export function RecentPage() {
     resumePosition(p, sources.get(p.ref.sourceId)).catch((err: unknown) => {
       toast({
         title: t('openFailed', { title }),
-        description: err instanceof SourceGoneError ? t('sourceRemovedHint') : RpcError.from(err).message,
+        description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
         variant: 'error',
       });
     });
@@ -153,7 +153,7 @@ export function RecentPage() {
         },
       });
     } catch (err) {
-      toast({ title: t('removeFailed'), description: RpcError.from(err).message, variant: 'error' });
+      toast({ title: t('removeFailed'), description: errorDescription(err), variant: 'error' });
     } finally {
       await invalidate('positions.');
     }
@@ -178,7 +178,7 @@ export function RecentPage() {
         ...(before.length > 0 ? { action: { label: t('undo'), onClick: () => void undoClear(before) } } : {}),
       });
     } catch (err) {
-      toast({ title: t('clearFailed'), description: RpcError.from(err).message, variant: 'error' });
+      toast({ title: t('clearFailed'), description: errorDescription(err), variant: 'error' });
     } finally {
       setClearing(false);
       setConfirmClear(false);

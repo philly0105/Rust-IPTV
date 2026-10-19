@@ -6,22 +6,10 @@
  * digits, and the parts are joined in reading order (RTL-safe).
  */
 
-/** Locales whose app code is not a tag `Intl` knows. */
-const INTL_FALLBACK: Record<string, string> = { ary: 'ar', by: 'be', zhtw: 'zh-TW', zh: 'zh-CN' };
+import { intlLocale } from '@/lib/intl';
 
-/** A BCP 47 tag `Intl` supports for the i18next language, falling back to English. */
-export function intlLocale(language: string | undefined): string {
-  const lang = language || 'en';
-  const candidates = [lang, INTL_FALLBACK[lang], lang.split('-')[0]].filter((x): x is string => !!x);
-  for (const c of candidates) {
-    try {
-      if (Intl.NumberFormat.supportedLocalesOf(c).length > 0) return c;
-    } catch {
-      // An invalid tag throws; try the next one.
-    }
-  }
-  return 'en';
-}
+/** A BCP 47 tag `Intl` supports for the i18next language (the shared helper, re-exported). */
+export { intlLocale };
 
 const unitFormats = new Map<string, Intl.NumberFormat>();
 

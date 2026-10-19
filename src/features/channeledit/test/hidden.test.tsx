@@ -1,7 +1,7 @@
 // Hidden-channels dialog (C2): designed loading, error and empty states, a
 // filter, Unhide per row and Unhide all (both with Undo), channels the
 // provider dropped, and the count for the sidebar entry.
-import { act, cleanup, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -191,7 +191,7 @@ describe('HiddenChannelsDialog', () => {
     fireEvent.click(screen.getByTestId('hidden-channel-unhide'));
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
     expect(lastToast()?.title).toBe('Could not unhide BBC One');
-    expect(lastToast()?.description).toBe('Database is locked.');
+    expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('Database is locked.');
     expect(rowNames()).toEqual(['BBC One']);
   });
 
@@ -254,7 +254,7 @@ describe('HiddenChannelsDialog', () => {
     act(() => useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!.action!.onClick());
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
     expect(lastToast()?.title).toBe('Could not undo');
-    expect(lastToast()?.description).toBe('Database is locked.');
+    expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('Database is locked.');
   });
 
   it('says channels the provider dropped were removed, without Undo, when none of them came back', async () => {

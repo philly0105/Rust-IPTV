@@ -16,6 +16,8 @@ import { expectNoHorizontalScroll, settle } from './helpers/layout';
 // Run 3 (check 11): the image cache row in Settings > General (loaded, not its skeleton), the
 // first-run tour (each of its three steps) and the What's new dialog, both opened from About.
 // Check 14: under reduced motion the dashboard hero does not rotate.
+// Also the screens no other sweep reached: Scheduled with a reminder, a channel's catch-up
+// archive, a My Videos detail address with nothing behind it, and /lists before any list exists.
 
 const NAME = 'A11y Xtream';
 const VIEWPORTS = [
@@ -66,6 +68,19 @@ test.describe('accessibility and layout', () => {
     await expect
       .poll(async () => (await rpc<GuideSearchHit[]>(request, 'epg.search', { sourceId: id, query: 'news' })).length, { timeout: 30_000 })
       .toBeGreaterThan(0);
+    // A reminder for tomorrow, so /scheduled shows an upcoming row rather than its empty state.
+    const start = Date.now() + 24 * 3600_000;
+    await rpc(request, 'reminders.add', {
+      ref: first.items[0]!.ref,
+      channelName: first.items[0]!.name,
+      title: 'A11y reminder',
+      start: new Date(start).toISOString(),
+      end: new Date(start + 30 * 60_000).toISOString(),
+    });
+    // A channel with catch-up (mock streams 101..105), for the archive page.
+    const all = await rpc<RpcPage<Channel>>(request, 'catalog.channels', { sourceId: id, query: { offset: 0, limit: 200, sort: 'number', dir: 'asc' } });
+    const archived = all.items.find((c) => !c.isRadio && c.archive);
+    if (!archived) throw new Error('mock portal has no live channel with an archive');
     pages = [
       { name: 'dashboard', path: '/dashboard', ready: (p) => expect(p.getByTestId('dashboard')).toBeVisible() },
       { name: 'live', path: `/s/${id}/live`, ready: (p) => expect(p.getByRole('list', { name: 'Channels' }).getByRole('listitem').first()).toBeVisible() },
@@ -118,6 +133,22 @@ test.describe('accessibility and layout', () => {
         ready: (p) => expect(p.getByTestId('list-page').getByTestId('channel-list').locator('button[data-row-index]').first()).toBeVisible(),
       },
       { name: 'stats', path: '/stats', ready: (p) => expect(p.getByTestId('stats-chart')).toBeVisible() },
+      { name: 'scheduled', path: '/scheduled', ready: (p) => expect(p.getByTestId('upcoming-row').first()).toBeVisible() },
+      {
+        name: 'archive',
+        path: `/live/archive/${encodeURIComponent(id)}/${encodeURIComponent(archived.ref.itemId)}`,
+        ready: async (p) => {
+          const archive = p.getByTestId('archive-page');
+          await expect(archive.getByRole('tablist', { name: 'Archive day' })).toBeVisible();
+          // The day settles into a programme list or the designed empty state.
+          await expect(archive.getByTestId('archive-programs').or(archive.getByText('Nothing listed for this day')).first()).toBeVisible();
+        },
+      },
+      {
+        name: 'my video not found',
+        path: '/my-videos/999999',
+        ready: (p) => expect(p.getByRole('heading', { name: 'This video is not in your library' })).toBeVisible(),
+      },
       {
         name: 'guide search',
         path: `/epg?source=${encodeURIComponent(id)}`,
@@ -193,6 +224,22 @@ test.describe('accessibility and layout', () => {
       expect(failures, 'axe serious/critical violations').toEqual([]);
     });
   }
+
+  // Last but one: it removes the custom list the sweeps above open (beforeAll makes it again if a
+  // retry restarts the worker).
+  test('axe and layout on /lists before any list exists', async ({ page, request }) => {
+    for (const l of await rpc<CustomList[]>(request, 'lists.list')) await rpc(request, 'lists.remove', { id: l.id });
+    const failures: string[] = [];
+    for (const vp of VIEWPORTS) {
+      await page.setViewportSize(vp);
+      await page.goto('/lists');
+      await expect(page.getByTestId('lists-index').getByRole('heading', { name: 'No lists yet' })).toBeVisible();
+      await settle(page, 600);
+      await expectNoHorizontalScroll(page, `lists empty @ ${vp.width}x${vp.height}`);
+      for (const v of await seriousViolations(page)) failures.push(`lists empty @ ${vp.width}x${vp.height}: ${v}`);
+    }
+    expect(failures, 'axe serious/critical violations').toEqual([]);
+  });
 
   test('check 14: under reduced motion the dashboard hero does not rotate', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });

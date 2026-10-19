@@ -7,6 +7,7 @@ import { Link } from 'react-router';
 import type { Category } from '@/api/types';
 
 import { Button, ErrorState, IconButton, Skeleton, useRowHeight } from '@/ui';
+import { intlLocale } from '@/lib/intl';
 import { documentIsRtl } from '../lib/rtl';
 
 /** A group row's slot at 100 %. */
@@ -55,7 +56,7 @@ export function foldForFilter(s: string): string {
 
 export function CategorySidebar(props: CategorySidebarProps) {
   const { t, i18n } = useTranslation('live');
-  const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const [filter, setFilter] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);

@@ -7,7 +7,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 import { useShell } from '@/shell';
-import { Badge, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LiveBadge, Skeleton, useToast } from '@/ui';
+import { Badge, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LiveBadge, Skeleton, useToast, errorDescription } from '@/ui';
 
 import { useArchiveDay } from '../hooks/useArchiveDay';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -180,13 +180,13 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   const play = (p: EpgProgram, state: ArchiveProgramState) => {
     if (state === 'live') {
       playChannel(channel, kind, p.title, name).catch((err: unknown) =>
-        toast({ title: t('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+        toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
       );
       return;
     }
     if (state !== 'playable' && state !== 'airing') return;
     playCatchup(channel, kind, p, now, name).catch((err: unknown) =>
-      toast({ title: t('catchupFailed'), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
     );
   };
 
@@ -207,13 +207,13 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
         });
       })
       .catch((err: unknown) =>
-        toast({ title: t('downloadFailed', { ns: 'vod' }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+        toast({ title: t('downloadFailed', { ns: 'vod' }), description: errorDescription(err), variant: 'error' }),
       );
   };
 
   const watchLive = () =>
     playChannel(channel, kind, undefined, name).catch((err: unknown) =>
-      toast({ title: t('playFailed', { name }), description: err instanceof Error ? err.message : undefined, variant: 'error' }),
+      toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
     );
 
   const panelId = `archive-day-panel`;

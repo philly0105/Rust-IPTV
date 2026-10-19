@@ -14,7 +14,7 @@ export { Tabs, tabPanelProps } from './Tabs';
 export type { TabItem, TabsProps } from './Tabs';
 export { Skeleton, SkeletonGrid, SkeletonList } from './Skeleton';
 export type { SkeletonGridProps, SkeletonListProps, SkeletonProps } from './Skeleton';
-export { EmptyState, ErrorState, ERROR_HINT_KEYS, ERROR_TITLE_KEYS } from './States';
+export { EmptyState, ErrorState, ERROR_HINT_KEYS, ERROR_TITLE_KEYS, errorDescription } from './States';
 export type { EmptyStateProps, ErrorStateProps } from './States';
 export { VirtualList } from './VirtualList';
 export type { VirtualItemState, VirtualListProps } from './VirtualList';

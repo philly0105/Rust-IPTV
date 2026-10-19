@@ -11,11 +11,12 @@
  */
 
 import type { TFunction } from 'i18next';
+import type { ReactNode } from 'react';
 
 import { queryClient, rpcKey } from '@/api/query';
 import { isParentalLocked, rpc, RpcError } from '@/api/transport';
 import { itemKey, sameRef, type ChannelEdit, type ItemRef } from '@/api/types';
-import { toast } from '@/ui';
+import { toast, errorDescription } from '@/ui';
 
 import { editRefresh, hideInCache, ITEM_STALE_MS, patchHidden, renameInCache, restoreCache, restoreHidden, unhideInCache } from './edits';
 
@@ -40,11 +41,16 @@ export const HIDE_BATCH = 500;
 /** Calls in flight at once when refs go one at a time (lookups, a batch retried ref by ref). */
 const PARALLEL = 6;
 
-/** Why a write failed, as a toast description. A channel the provider dropped gets its own words. */
+/** Why a write failed, as text. A channel the provider dropped gets its own words. */
 export function failureText(err: unknown, t: T): string {
   const e = RpcError.from(err);
   if (e.code === 'not_found') return t('goneText');
   return e.message;
+}
+
+/** Why a write failed, as a toast description: like `failureText`, with the translated next step leading. */
+export function failureDescription(err: unknown, t: T): ReactNode {
+  return RpcError.from(err).code === 'not_found' ? t('goneText') : errorDescription(err);
 }
 
 /** "The provider no longer lists this channel / these channels." */
@@ -179,7 +185,7 @@ export function hideChannel(target: EditTarget, t: T): Promise<boolean> {
     } catch (err) {
       refresh.cancel();
       restoreCache(before);
-      toast({ variant: 'error', title: t('hideFailed', { name: target.name }), description: failureText(err, t) });
+      toast({ variant: 'error', title: t('hideFailed', { name: target.name }), description: failureDescription(err, t) });
       return false;
     }
     void refresh.settle();
@@ -214,7 +220,7 @@ export function unhideChannel(target: EditTarget, t: T, opts: { undo?: boolean }
       refresh.cancel();
       restoreCache(shown);
       restoreHidden(target.ref.sourceId, before);
-      toast({ variant: 'error', title: t('unhideFailed', { name: target.name }), description: failureText(err, t) });
+      toast({ variant: 'error', title: t('unhideFailed', { name: target.name }), description: failureDescription(err, t) });
       return false;
     }
     // Before the refresh below, which would mark the cached answer stale.
@@ -259,7 +265,7 @@ async function hideAgain(refs: readonly ItemRef[], t: T, maybeGone: readonly Ite
     toast({
       variant: 'error',
       title: failed.length === refs.length ? t('undoFailed') : t('hideAgainFailed', { count: failed.length }),
-      description: other ? other.error.message : goneText(failed.length, t),
+      description: other ? errorDescription(other.error) : goneText(failed.length, t),
     });
   } finally {
     void refresh.settle();
@@ -312,7 +318,7 @@ export async function resetEdits(sourceId: string, t: T): Promise<boolean> {
     await rpc('channels.reset', { sourceId });
   } catch (err) {
     refresh.cancel();
-    toast({ variant: 'error', title: t('resetEditsFailed'), description: failureText(err, t) });
+    toast({ variant: 'error', title: t('resetEditsFailed'), description: failureDescription(err, t) });
     return false;
   }
   void refresh.settle();
@@ -342,7 +348,7 @@ export function reportUnhideMany(result: UnhideManyResult, t: T): void {
     toast({
       variant: 'error',
       title: t('unhideManyFailed', { count: failed.length }),
-      description: other ? other.error.message : goneText(failed.length, t),
+      description: other ? errorDescription(other.error) : goneText(failed.length, t),
     });
   }
 }
@@ -380,7 +386,7 @@ export function renamedToast(ref: ItemRef, shown: string, previous: string | nul
       label: t('undo'),
       onClick: () =>
         void renameChannel(ref, previous, providerName).catch((err: unknown) =>
-          toast({ variant: 'error', title: t('undoFailed'), description: failureText(err, t) }),
+          toast({ variant: 'error', title: t('undoFailed'), description: failureDescription(err, t) }),
         ),
     },
   });
@@ -391,7 +397,7 @@ export async function resetName(ref: ItemRef, edit: ChannelEdit, provider: strin
   try {
     await renameChannel(ref, null, edit.originalName);
   } catch (err) {
-    toast({ variant: 'error', title: t('renameFailed'), description: failureText(err, t) });
+    toast({ variant: 'error', title: t('renameFailed'), description: failureDescription(err, t) });
     return false;
   }
   renamedToast(ref, provider, edit.name ?? null, true, t);

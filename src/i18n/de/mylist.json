@@ -1,7 +1,7 @@
 {
   "title": "Meine Liste",
-  "count_one": "{{count}} Titel",
-  "count_other": "{{count}} Titel",
+  "count_one": "{{count, number}} Titel",
+  "count_other": "{{count, number}} Titel",
   "seeAll": "Alle anzeigen",
   "loading": "Meine Liste wird geladen",
   "errorHint": "Meine Liste wird von der App gespeichert, nicht von Ihrem Anbieter. Versuchen Sie es erneut oder starten Sie die App neu, wenn der Fehler bleibt.",
@@ -63,7 +63,7 @@
   "showAll": "Alle anzeigen",
   "allWatchedTitle": "Alles angesehen",
   "allWatchedBody_one": "Der einzige Titel hier ist angesehen. Blenden Sie angesehene Titel ein, um ihn wieder zu sehen.",
-  "allWatchedBody_other": "Alle {{count}} Titel hier sind angesehen. Blenden Sie angesehene Titel ein, um sie wieder zu sehen.",
+  "allWatchedBody_other": "Alle {{count, number}} Titel hier sind angesehen. Blenden Sie angesehene Titel ein, um sie wieder zu sehen.",
   "showWatched": "Angesehene anzeigen",
   "noMatchTitle": "Keine Treffer",
   "noMatchBody": "Nichts in meiner Liste passt zu „{{query}}“.",

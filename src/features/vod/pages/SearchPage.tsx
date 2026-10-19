@@ -7,6 +7,7 @@ import { useLocation, useNavigationType, useParams, useSearchParams } from 'reac
 import { useRpcQuery } from '@/api/query';
 import { RpcError, rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
+import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { playItem } from '@/features/player';
 
 import { GridMyListProvider, myListTarget, PosterCard } from '../components/PosterCard';
@@ -44,6 +45,14 @@ import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, grid
  * (its query loses its observer, and `useRpcQuery` hands the signal to the transport).
  */
 const DEBOUNCE_MS = 100;
+
+/**
+ * Portal searches wait longer and need a few characters (VD-6): each one asks every Stalker
+ * source for movies and series, up to 4 portal pages a call, so the library's 100 ms pause sent
+ * dozens of portal requests per typed word.
+ */
+const PORTAL_DEBOUNCE_MS = 450;
+const PORTAL_MIN_CHARS = 3;
 
 /** The URL keeps the text as typed (spaces too); blank text removes `q`. */
 const keepTyped = (draft: string) => (draft.trim() ? draft : '');
@@ -94,9 +103,17 @@ function focusResult(scroller: HTMLElement, index: number, reveal: boolean, fram
 
 const EMPTY_STALKER = splitStalkerResults([]);
 
-/** Stalker portals keep VOD out of SQLite, so their movies and series are searched on the portal. */
-function useStalkerSearch(sources: Source[], query: string) {
+/**
+ * Stalker portals keep VOD out of SQLite, so their movies and series are searched on the portal,
+ * once the query has rested for PORTAL_DEBOUNCE_MS and has PORTAL_MIN_CHARS characters. A query
+ * the page opens with (a link, Back) goes out at once.
+ */
+function useStalkerSearch(sources: Source[], typed: string) {
   const targets = sources.filter((s) => s.kind === 'stalker');
+  const wanted = [...typed].length >= PORTAL_MIN_CHARS ? typed : '';
+  const rested = useDebounced(wanted, PORTAL_DEBOUNCE_MS);
+  // Too short (or cleared): the portal results go at once rather than after the pause.
+  const query = wanted ? rested : '';
   const results = useQueries({
     queries: targets.flatMap((s) =>
       (['movie', 'series'] as const).map((contentType) => {
@@ -111,7 +128,8 @@ function useStalkerSearch(sources: Source[], query: string) {
       }),
     ),
   });
-  const pending = !!query && results.some((r) => r.isPending);
+  // Waiting out the pause counts as pending, so the last portal results stay on screen meanwhile.
+  const pending = (targets.length > 0 && !!wanted && wanted !== query) || (!!query && results.some((r) => r.isPending));
   // The same answers give the same arrays, so the result groups only rebuild when a portal answers.
   const stamp = `${query}\u0000${targets.map((s) => s.id).join(',')}\u0000${results.map((r) => r.dataUpdatedAt).join(',')}`;
   const fresh = useMemo(

@@ -19,7 +19,7 @@ The download manager keeps a FIFO queue of movie and episode downloads, runs at 
 
 `downloads.list`, `downloads.get`, `downloads.start`, `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.retry`, `downloads.remove {id, deleteFile}`, `downloads.reveal`, `downloads.setDir {path}`, `downloads.dir`, `downloads.setPosition {id, positionSeconds}`, `myvideos.list`, `myvideos.playSource`.
 
-Events: `downloads.update {}` on every state change (queued, started, paused, resumed, canceled, failed, completed, removed) and `downloads.progress {id, bytesDownloaded, totalBytes?, bytesPerSecond}`, at most 4 per second per download. The first chunk of every attempt emits at once, so the UI sees a resumed transfer start where it left off. In the UI a `downloads.update` refetches only `downloads.list` and the `myvideos.` queries (`DEFAULT_EVENT_INVALIDATION` in `src/api/query.ts`), never `downloads.dir`.
+Events: `downloads.update {}` on every state change (queued, started, paused, resumed, canceled, failed, completed, removed) and `downloads.progress {id, bytesDownloaded, totalBytes?, bytesPerSecond}`, at most 4 per second per download. The first chunk of every attempt emits at once, so the UI sees a resumed transfer start where it left off. In the UI a `downloads.update` refetches only `downloads.list` and the `myvideos.` queries (`DEFAULT_EVENT_INVALIDATION` in `src/api/query.ts`), never `downloads.dir`. A `downloads.progress` event re-renders only the /downloads row it is about (`useLiveProgress`), and a movie or series page refetches `downloads.list` only for progress of its own rows ([performance.md](performance.md#progress-clocks-and-formatters)).
 
 ## Lifecycle
 

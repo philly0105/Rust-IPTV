@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -155,12 +155,20 @@ function writeFinalPosition(final: PlaybackPosition): void {
   }
 }
 
-/** Download rows for this item, keyed by episode id ('' for the movie itself). */
+/**
+ * Download rows for this item, keyed by episode id ('' for the movie itself). Progress events
+ * refetch the list only for these rows; a new download of this item arrives with `downloads.update`.
+ */
 export function useItemDownloads(ref: ItemRef, enabled: boolean): Map<string, Download> {
-  const q = useDownloads(enabled);
-  return useMemo(() => {
-    const map = new Map<string, Download>();
-    for (const d of q.data ?? []) if (sameRef(d.ref, ref)) map.set(d.episodeId ?? '', d);
-    return map;
+  const ids = useRef<ReadonlySet<number>>(new Set());
+  const q = useDownloads(enabled, ids);
+  const map = useMemo(() => {
+    const out = new Map<string, Download>();
+    for (const d of q.data ?? []) if (sameRef(d.ref, ref)) out.set(d.episodeId ?? '', d);
+    return out;
   }, [q.data, ref]);
+  useEffect(() => {
+    ids.current = new Set([...map.values()].map((d) => d.id));
+  }, [map]);
+  return map;
 }

@@ -18,7 +18,6 @@ import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
 import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { effectiveProgress, progressStore, useProgressVersion } from '../lib/progress';
 import { actionsFor, buildQueueRows, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
 
 const HEADER_HEIGHT = 52;
@@ -38,7 +37,6 @@ export function DownloadsPage() {
   const query = useDownloads();
   const { byId: sources } = useSourcesById();
   const { pending, perform } = useDownloadActions();
-  useProgressVersion();
 
   const [confirm, setConfirm] = useState<Pending | null>(null);
   const [deletePartial, setDeletePartial] = useState(true);
@@ -75,7 +73,7 @@ export function DownloadsPage() {
     [perform],
   );
 
-  const runFocused = (pick: (d: Download, actions: QueueAction[]) => QueueAction | undefined) => {
+  const runFocused = (pick: (d: Download, actions: readonly QueueAction[]) => QueueAction | undefined) => {
     const id = focusedDownloadId();
     const d = id !== undefined ? all.find((x) => x.id === id) : undefined;
     if (!d) return;
@@ -146,7 +144,6 @@ export function DownloadsPage() {
       return (
         <DownloadRow
           download={d}
-          progress={effectiveProgress(d, progressStore.get(d.id))}
           source={sources.get(d.ref.sourceId)}
           actions={actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath })}
           busy={pending.has(d.id)}
@@ -155,7 +152,7 @@ export function DownloadsPage() {
         />
       );
     },
-    // progress version re-renders the page; rows read the store directly.
+    // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
     [onAction, pending, sources, t],
   );
 

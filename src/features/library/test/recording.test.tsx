@@ -165,6 +165,28 @@ describe('ScheduledPage', () => {
     expect(before(screen.getByTestId('scheduled-finished'), screen.getByTestId('recording-rules'))).toBe(true);
   });
 
+  it('runs the one-second clock only inside a row that is recording now (VD-7)', async () => {
+    const intervals = vi.spyOn(window, 'setInterval');
+    const seconds = () => intervals.mock.calls.filter(([, ms]) => ms === 1000).length;
+    try {
+      rpc.handlers['reminders.list'] = () => [];
+      rpc.handlers['recordings.list'] = () => [rec({ id: 'next' }), rec({ id: 'old', status: 'completed', end: at(-100) })];
+      const view = renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+      await screen.findByTestId('scheduled-upcoming');
+      // Nothing is recording: the page keeps only its slow day-heading clock.
+      expect(seconds()).toBe(0);
+      expect(intervals.mock.calls.some(([, ms]) => ms === 60_000)).toBe(true);
+      view.unmount();
+
+      rpc.handlers['recordings.list'] = () => [rec({ id: 'run', status: 'recording', start: at(-10), end: at(20), startedAt: at(-11), bytes: 1_000_000 }), rec({ id: 'next' })];
+      renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+      await screen.findByTestId('recording-now-row');
+      expect(seconds()).toBe(1);
+    } finally {
+      intervals.mockRestore();
+    }
+  });
+
   it('shows a finished recording note in the UI language', async () => {
     rpc.handlers['reminders.list'] = () => [];
     rpc.handlers['recordings.list'] = () => [

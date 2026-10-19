@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef, WatchlistEntry } from '@/api/types';
 
@@ -130,6 +130,37 @@ describe('buildView', () => {
 
   it('sorts the rows it lists', () => {
     expect(titles(buildView(list, { ...base, sort: 'title' }).rows)).toEqual(['Arrival', 'Blade Runner', 'Dark', 'Severance']);
+  });
+});
+
+describe('per-keystroke work (VD-9)', () => {
+  const many = Array.from({ length: 50 }, (_, i) =>
+    e(r('movie', `m${i}`), `Amélie ${i}`, { addedAt: new Date(Date.UTC(2026, 0, 1 + i)).toISOString() }),
+  );
+
+  it('parses each date once when sorting by date added', () => {
+    const parse = vi.spyOn(Date, 'parse');
+    try {
+      const sorted = sortEntries(many, 'added', 'en');
+      expect(sorted[0]!.snapshot.title).toBe('Amélie 49');
+      expect(parse).toHaveBeenCalledTimes(many.length);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('folds each entry once across searches', () => {
+    const normalize = vi.spyOn(String.prototype, 'normalize');
+    try {
+      const o = { filter: 'all' as const, sort: 'order' as const, hideWatched: false, language: 'en' };
+      buildView(many, { ...o, query: 'ame' });
+      const first = normalize.mock.calls.length;
+      expect(buildView(many, { ...o, query: 'amelie 4' }).rows).toHaveLength(14);
+      // Only the query itself is folded again.
+      expect(normalize.mock.calls.length - first).toBe(1);
+    } finally {
+      normalize.mockRestore();
+    }
   });
 });
 

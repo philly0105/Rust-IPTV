@@ -8,6 +8,7 @@ import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw, type CallOptions } from '@/api/transport';
 import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
+import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
 import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast } from '@/ui';
@@ -83,8 +84,6 @@ export function SourcesPage() {
   // Sources waiting out their Undo window (C9) stay hidden even when a refetch brings them back.
   const hidden = usePendingRemovals((s) => s.ids);
   const sources = useMemo(() => (query.data ?? []).filter((s) => !hidden.has(s.id)), [query.data, hidden]);
-  const progress = useImportProgressStore((s) => s.bySource);
-  const cancelling = useImportProgressStore((s) => s.cancelling);
   // account: subscription status, the refresh schedule and the expiry warning window, for the cards.
   const accounts = useRpcQuery('account.statusAll', undefined);
   const schedule = useRpcQuery('sources.schedule', undefined);
@@ -322,12 +321,12 @@ export function SourcesPage() {
     });
   };
 
-  const onDragStart = (id: string) => (e: DragEvent<HTMLElement>) => {
+  const onDragStart = (id: string, e: DragEvent<HTMLElement>) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', id);
     setDrag({ id });
   };
-  const onDragOver = (id: string) => (e: DragEvent<HTMLElement>) => {
+  const onDragOver = (id: string, e: DragEvent<HTMLElement>) => {
     if (!drag) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
@@ -335,7 +334,7 @@ export function SourcesPage() {
     const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
     if (drag.overId !== id || drag.pos !== pos) setDrag({ ...drag, overId: id, pos });
   };
-  const onDrop = (id: string) => (e: DragEvent<HTMLElement>) => {
+  const onDrop = (id: string, e: DragEvent<HTMLElement>) => {
     e.preventDefault();
     if (!drag || drag.id === id) {
       setDrag(null);
@@ -473,6 +472,19 @@ export function SourcesPage() {
     }
   };
 
+  // VD-5: one set of card handlers whose identity never changes, so the memoised cards re-render
+  // only when their own props or their own import progress change.
+  const cardRefresh = useStable((s: Source) => void refreshOne(s));
+  const cardEdit = useStable((s: Source) => openEdit(s));
+  const cardAccount = useStable((s: Source) => openEdit(s, 'account'));
+  const cardRemove = useStable((s: Source) => removeChecked(s));
+  const cardCancel = useStable((id: string) => void cancelOne(id));
+  const cardMove = useStable(moveTo);
+  const cardDragStart = useStable(onDragStart);
+  const cardDragOver = useStable(onDragOver);
+  const cardDrop = useStable(onDrop);
+  const cardDragEnd = useCallback(() => setDrag(null), []);
+
   const sortOptions = SORTS.map((v) => ({ value: v, label: t(`sort_${v}`) }));
   const kindOptions = KIND_FILTERS.map((v) => ({ value: v, label: v === 'all' ? t('filterKindAll') : t(`kindLabel_${v}`) }));
   const statusOptions = STATUS_FILTERS.map((v) => ({ value: v, label: t(`filterStatus_${v}`) }));
@@ -603,21 +615,19 @@ export function SourcesPage() {
               index={i}
               total={shown.length}
               reorderable={manual}
-              progress={progress[s.id]}
               refreshing={refreshing.has(s.id)}
               dragging={drag?.id === s.id}
               dropTarget={drag && drag.id !== s.id && drag.overId === s.id ? (drag.pos ?? null) : null}
-              onRefresh={() => void refreshOne(s)}
-              onEdit={() => openEdit(s)}
-              onAccount={() => openEdit(s, 'account')}
-              onRemove={() => removeChecked(s)}
-              onCancelImport={() => void cancelOne(s.id)}
-              cancelling={cancelling[s.id] === true}
-              onMove={(to) => moveTo(s.id, to)}
-              onDragStart={onDragStart(s.id)}
-              onDragOver={onDragOver(s.id)}
-              onDrop={onDrop(s.id)}
-              onDragEnd={() => setDrag(null)}
+              onRefresh={cardRefresh}
+              onEdit={cardEdit}
+              onAccount={cardAccount}
+              onRemove={cardRemove}
+              onCancelImport={cardCancel}
+              onMove={cardMove}
+              onDragStart={cardDragStart}
+              onDragOver={cardDragOver}
+              onDrop={cardDrop}
+              onDragEnd={cardDragEnd}
               account={accountById.get(s.id)}
               warnDays={warnDays}
               schedule={scheduleById.get(s.id)}

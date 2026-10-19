@@ -12,6 +12,7 @@ import { Link } from 'react-router';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { RpcError, isDesktop, rpc, rpcRaw } from '@/api/transport';
 import type { RecordingFile } from '@/api/types';
+import { dateTimeFormat } from '@/lib/intl';
 import { scheduleRemoval, usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { buttonClass } from '@/ui/Button';
 
@@ -92,7 +93,7 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
   // The programme title leads and the channel sits in the line under it, as on the Scheduled page.
   const name = f.title ?? f.channelName ?? f.fileName;
   const writing = f.status === 'recording';
-  const date = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
+  const date = dateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
   const duration = f.durationSeconds ? formatDuration(f.durationSeconds, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) : '';
 
   const playRecording = usePlayRecording();

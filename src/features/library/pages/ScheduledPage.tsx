@@ -14,6 +14,7 @@ import { Link } from 'react-router';
 import { invalidate } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import type { Recording, RecordingStatus, Reminder } from '@/api/types';
+import { dateTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
@@ -104,7 +105,9 @@ export function ScheduledPage() {
   const recordings = useRecordings();
   const caps = useRecordingCapabilities();
   const rules = useRecordingRules();
-  const now = useClock(1000);
+  // Only the day headings read the page's clock ("today", "tomorrow"); the rows recording now
+  // run their own second clock (VD-7), so the page does not rebuild every row each second.
+  const now = useClock(60_000);
 
   const title = t('scheduledTitle');
   const nowList = useMemo(() => recordingNow(recordings.data), [recordings.data]);
@@ -162,7 +165,7 @@ export function ScheduledPage() {
         {nowList.length > 0 ? (
           <Section title={t('scheduledNow')} count={nowList.length} testId="scheduled-now">
             {nowList.map((r) => (
-              <RecordingNowRow key={r.id} recording={r} now={now} />
+              <RecordingNowRow key={r.id} recording={r} />
             ))}
           </Section>
         ) : null}
@@ -248,8 +251,9 @@ function Busy() {
   return <LoaderCircle size={16} aria-hidden className="motion-safe:animate-spin" />;
 }
 
-function RecordingNowRow({ recording: r, now }: { recording: Recording; now: number }) {
+function RecordingNowRow({ recording: r }: { recording: Recording }) {
   const { t, i18n } = useTranslation('library');
+  const now = useClock(1000);
   const live = useRecordingProgress((s) => s.byId[r.id]);
   const stopping = useCancelPending(r.id);
   const [confirm, setConfirm] = useState(false);
@@ -377,7 +381,7 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
   const [removing, setRemoving] = useState(false);
   const name = r.title ?? r.channelName;
   // When the recording itself began: a programme joined part-way starts after the programme does.
-  const when = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(recordingStartedAt(r));
+  const when = dateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(recordingStartedAt(r));
   const early = stoppedEarly(r);
   const note = recordingNote(r, t);
 

@@ -10,7 +10,7 @@ import { cn } from '@/ui/cn';
 
 import { IconButton, Poster } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, percentOf } from '../lib/format';
-import type { EffectiveProgress } from '../lib/progress';
+import { useLiveProgress } from '../lib/progress';
 import type { QueueAction } from '../lib/queue';
 import { SourceBadge, StatusBadge } from './bits';
 
@@ -29,8 +29,8 @@ const ICONS: Record<QueueAction, typeof Pause> = {
 const SHORTCUT_KEYS: Partial<Record<QueueAction, string>> = { pause: 'P', resume: 'P', retry: 'R', cancel: 'X', reveal: 'O' };
 
 export interface DownloadRowProps {
+  /** The persisted row; the live transfer sample comes from the progress store. */
   download: Download;
-  progress: EffectiveProgress;
   source: Source | undefined;
   actions: readonly QueueAction[];
   busy: boolean;
@@ -115,8 +115,9 @@ export function DialProgress({
   );
 }
 
-function DownloadRowImpl({ download: d, progress, source, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
+  const progress = useLiveProgress(d);
   const lang = i18n.language;
   const pct = percentOf(progress.bytesDownloaded, progress.totalBytes);
   const isActive = d.status === 'downloading';

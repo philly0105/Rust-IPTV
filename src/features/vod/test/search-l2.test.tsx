@@ -203,6 +203,37 @@ describe('L2-perf-ui-5: a new query never blanks the results', () => {
   });
 });
 
+describe('VD-6: portal searches wait for a pause and three characters', () => {
+  const field = () => screen.getByLabelText('Header search') as HTMLInputElement;
+  const portalQueries = () => [...new Set(callsOf('stalker.search').map((c) => (c.args as { query: string }).query))];
+
+  it('sends one portal search for the word typed, not one per keystroke', async () => {
+    sources = [makeSource('src2', 'stalker', 'Beta Portal')];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderApp('/s/src2/search?q=d');
+    await screen.findByLabelText('Header search');
+    // Typed letter by letter, faster than the portal pause.
+    for (const q of ['du', 'dun', 'dune', 'dune ', 'dune p', 'dune pa']) {
+      fireEvent.change(field(), { target: { value: q } });
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    await waitFor(() => expect(portalQueries()).toEqual(['dune pa']), { timeout: 2000 });
+    // The library search still follows the field at its own pace.
+    expect(callsOf('catalog.search').length).toBeGreaterThan(1);
+  });
+
+  it('opens a link with a long enough query at once, and keeps short ones off the portal', async () => {
+    sources = [makeSource('src2', 'stalker', 'Beta Portal')];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderApp('/s/src2/search?q=ab');
+    await screen.findByText('No results for "ab"');
+    expect(callsOf('stalker.search')).toHaveLength(0);
+    cleanup();
+    renderApp('/s/src2/search?q=dune');
+    await waitFor(() => expect(portalQueries()).toEqual(['dune']));
+  });
+});
+
 describe('L2-perf-desktop-11: one catalog.search per query', () => {
   it('a capped query sends exactly one catalog.search, and its chips read "N+"', async () => {
     // 61 rows for a 60 cap, alternating sources: each holds 30 of the shown rows, a lower bound.

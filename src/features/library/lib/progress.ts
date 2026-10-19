@@ -1,10 +1,11 @@
 /**
  * Live transfer progress from `downloads.progress` events. One shared
  * subscription while any component listens; speeds are smoothed so the
- * readout does not flicker at 4 updates per second.
+ * readout does not flicker at 4 updates per second. Each row subscribes to
+ * its own sample (`useLiveProgress`), so an event re-renders one row.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { onAppEvent } from '@/api/events';
 import type { Download, DownloadProgressEvent } from '@/api/types';
@@ -83,11 +84,6 @@ export class ProgressStore {
 
 export const progressStore = new ProgressStore((handler) => onAppEvent('downloads.progress', handler));
 
-/** Re-renders the caller on every progress event; read values with `progressStore.get(id)`. */
-export function useProgressVersion(): number {
-  return useSyncExternalStore(progressStore.subscribe, progressStore.getVersion, progressStore.getVersion);
-}
-
 export interface EffectiveProgress {
   bytesDownloaded: number;
   totalBytes?: number;
@@ -106,4 +102,24 @@ export function effectiveProgress(d: Download, live: LiveProgress | undefined, n
   if (live.totalBytes != null) out.totalBytes = live.totalBytes;
   if (now - live.at < STALE_MS && live.bytesPerSecond > 0) out.bytesPerSecond = live.bytesPerSecond;
   return out;
+}
+
+/**
+ * `effectiveProgress` for one row, re-rendering it only when its own sample
+ * changes (VD-4), and once more when that sample goes stale, so a transfer
+ * that stops sending reads as stalled.
+ */
+export function useLiveProgress(d: Download): EffectiveProgress {
+  const read = () => progressStore.get(d.id);
+  const live = useSyncExternalStore(progressStore.subscribe, read, read);
+  const [, setAged] = useState(0);
+  const downloading = d.status === 'downloading';
+  useEffect(() => {
+    if (!downloading || !live) return;
+    const left = live.at + STALE_MS - Date.now();
+    if (left <= 0) return;
+    const timer = setTimeout(() => setAged((n) => n + 1), left);
+    return () => clearTimeout(timer);
+  }, [downloading, live]);
+  return effectiveProgress(d, live);
 }

@@ -8,6 +8,7 @@ import { Disc3, FileWarning } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { dateTimeFormat } from '@/lib/intl';
 import { cn } from '@/ui/cn';
 
 import { Badge, Poster } from '../deps';
@@ -19,7 +20,7 @@ function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
   const f = entry.file;
   const writing = f.status === 'recording';
   const at = Date.parse(f.date);
-  const date = Number.isFinite(at) ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(at) : '';
+  const date = Number.isFinite(at) ? dateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(at) : '';
 
   return (
     <div className="flex h-full flex-col gap-2" data-testid="library-card" data-kind="recording" data-missing={entry.missing || undefined}>

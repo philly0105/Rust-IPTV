@@ -88,7 +88,7 @@ The desktop loopback proxy mounts the same handler, so `w` works there too.
 `iptv_server::img::handler` serves `GET <base>/img?url=<absolute http(s) url>&sourceId=<id?>&w=<px?>`. The first value of each parameter wins (`w` trimmed), a blank `sourceId` counts as absent, and any other parameter is ignored (see [Browser copies after Clear](#browser-copies-after-clear)).
 
 - Server mode mounts it at `/api/img`, before the `/{*rest}` catch-all, outside the response compression layer (server.md): images go out as stored.
-- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks. CORS exposes `X-Image-Cache` to the webview.
+- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks, and the UI loads it from the proxy's second listener (`app.info.imageBase`), so artwork does not wait behind streams for the webview's six connections per host and port. CORS exposes `X-Image-Cache` to the webview.
 
 | Status | When | Body |
 | --- | --- | --- |
@@ -127,4 +127,4 @@ With the guard active (`allow_private` off), a private or loopback target is ref
 
 ## Desktop
 
-The desktop app has no guard. Images are fetched with the shared client, plus the source's headers when `sourceId` is given. `imageUrl` builds the route from the proxy base (`.../proxy` becomes `.../img`), so images go through the token-protected loopback server.
+The desktop app has no guard. Images are fetched with the shared client, plus the source's headers when `sourceId` is given. `imageUrl` builds the route from `app.info.imageBase` (or from the proxy base, `.../proxy` becoming `.../img`, when it is missing), so images go through the token-protected loopback server.

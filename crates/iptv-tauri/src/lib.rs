@@ -739,8 +739,8 @@ pub(crate) async fn open_state(
     sink: Arc<dyn EventSink>,
 ) -> iptv_core::CoreResult<Arc<AppState>> {
     let state = AppState::new(data_dir, sink, true).await?;
-    let proxy_base = match proxy::start(Arc::clone(&state)) {
-        Ok(base) => Some(base),
+    let bases = match proxy::start(Arc::clone(&state)) {
+        Ok(bases) => Some(bases),
         Err(err) => {
             tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
             None
@@ -749,7 +749,8 @@ pub(crate) async fn open_state(
     set_desktop_info(
         &state,
         DesktopInfo {
-            proxy_base,
+            proxy_base: bases.as_ref().map(|b| b.proxy.clone()),
+            image_base: bases.map(|b| b.images),
             updater_available: cfg!(feature = "updater"),
         },
     );
@@ -824,7 +825,7 @@ fn observe_window(window: &tauri::Window) {
     });
 }
 
-/// Tracks the normal geometry; background windows ask WebView2 for its low
+/// Tracks the normal geometry; minimized windows ask WebView2 for its low
 /// memory target and trim the app's working set; focus restores the normal
 /// target. A minimized main window tells WebView2 it is hidden (the page
 /// stops rendering); restore or focus shows it again.
@@ -846,20 +847,14 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
             return;
         };
         let main = window.label() == pip_state::MAIN_WINDOW;
-        match event {
-            WindowEvent::Focused(false) => {
-                memory::set_webview_memory_low(&webview, true);
+        let minimized = || window.is_minimized().unwrap_or(false);
+        if let Some(low) = memory::memory_low_after(event, minimized) {
+            memory::set_webview_memory_low(&webview, low);
+            if low {
                 memory::trim_working_set();
             }
-            WindowEvent::Focused(true) => memory::set_webview_memory_low(&webview, false),
-            WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
-                memory::set_webview_memory_low(&webview, true);
-                memory::trim_working_set();
-            }
-            _ => {}
         }
         if main {
-            let minimized = || window.is_minimized().unwrap_or(false);
             if let Some(visible) = memory::visibility_after(event, minimized) {
                 memory::set_webview_visible(&webview, visible);
             }

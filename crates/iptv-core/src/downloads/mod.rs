@@ -432,13 +432,16 @@ pub async fn completed_file(state: &Arc<AppState>, id: i64) -> CoreResult<PathBu
     }
 }
 
-/// Player source for a completed download: the absolute path on desktop
-/// (the UI converts it with `convertFileSrc`), `/api/files/{id}` on the server.
+/// Player source for a completed download: on desktop the loopback proxy's
+/// `.../files/{id}/media.<ext>` (the absolute path, which the UI converts with
+/// `convertFileSrc`, when the proxy is not running), `/api/files/{id}` on the
+/// server.
 pub async fn play_source(state: &Arc<AppState>, id: i64) -> CoreResult<PlayerSource> {
     let path = completed_file(state, id).await?;
     let d = get(state, id).await?;
     let url = if state.is_desktop {
-        path.to_string_lossy().into_owned()
+        crate::rpc::app::desktop_media_url(state, "files", &id.to_string(), &path)
+            .unwrap_or_else(|| path.to_string_lossy().into_owned())
     } else {
         format!("/api/files/{id}")
     };

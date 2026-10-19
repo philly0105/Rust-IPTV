@@ -160,6 +160,8 @@ describe('MPEG-TS detection', () => {
     expect(looksLikeMpegTs(src('http://h/live/u/p/101.TS?token=1'))).toBe(true);
     expect(looksLikeMpegTs(src('http://h/play?id=1&output=ts'))).toBe(true);
     expect(looksLikeMpegTs(src('/media/rec.m2ts', { kind: 'file' }))).toBe(true);
+    // Desktop recordings on the loopback proxy end in a name that carries the extension.
+    expect(looksLikeMpegTs(src('http://127.0.0.1:5555/t/api/recordings/f.61/media.ts', { kind: 'file' }))).toBe(true);
     expect(looksLikeMpegTs(src('http://h/101.m3u8', { kind: 'hls' }))).toBe(false);
     expect(looksLikeMpegTs(src('http://h/movie.mp4'))).toBe(false);
     expect(looksLikeMpegTs(src('http://h/seg.ts/index.m3u8'))).toBe(false);
@@ -436,6 +438,9 @@ describe('CORS mode of the element (screenshots of local files and proxied strea
     expect(mediaCrossOrigin('https://asset.localhost/%2Fhome%2Fa%2Ffilm.mkv')).toBe('anonymous');
     expect(mediaCrossOrigin('asset://localhost/%2FUsers%2Fa%2Ffilm.mp4')).toBe('anonymous');
     expect(mediaCrossOrigin(PROXY)).toBe('anonymous');
+    const token = 'http://127.0.0.1:51234/0123456789abcdef0123456789abcdef01234567/api';
+    expect(mediaCrossOrigin(`${token}/recordings/f.636c69702e6d7034/media.mp4`)).toBe('anonymous');
+    expect(mediaCrossOrigin(`${token}/files/7/media.mkv`)).toBe('anonymous');
   });
 
   it('leaves third-party and same-origin URLs alone', () => {
@@ -445,6 +450,7 @@ describe('CORS mode of the element (screenshots of local files and proxied strea
     expect(mediaCrossOrigin('http://evil.example/x/api/proxy?url=y')).toBeNull();
     expect(mediaCrossOrigin('/api/proxy?url=http%3A%2F%2Fh%2Fm.mp4')).toBeNull();
     expect(mediaCrossOrigin('/api/files/abc')).toBeNull();
+    expect(mediaCrossOrigin('http://evil.example/x/api/files/7/media.mp4')).toBeNull();
     expect(mediaCrossOrigin('blob:http://localhost/1')).toBeNull();
   });
 

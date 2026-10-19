@@ -243,8 +243,9 @@ async fn locate(state: &Arc<AppState>, id: &str) -> CoreResult<Target> {
     })
 }
 
-/// Player source for an entry: the path on desktop, `/api/recordings/{id}`
-/// on the server.
+/// Player source for an entry: on desktop the loopback proxy's
+/// `.../recordings/{id}/media.<ext>` (the path when the proxy is not
+/// running), `/api/recordings/{id}` on the server.
 pub async fn play_source(state: &Arc<AppState>, id: &str) -> CoreResult<PlayerSource> {
     let target = resolve(state, id).await?;
     let title = match &target {
@@ -258,7 +259,8 @@ pub async fn play_source(state: &Arc<AppState>, id: &str) -> CoreResult<PlayerSo
             .unwrap_or_default(),
     };
     let url = if state.is_desktop {
-        target.path().to_string_lossy().into_owned()
+        crate::rpc::app::desktop_media_url(state, "recordings", id, target.path())
+            .unwrap_or_else(|| target.path().to_string_lossy().into_owned())
     } else {
         format!("/api/recordings/{id}")
     };

@@ -544,6 +544,8 @@ async fn attach_locked(
 /// `mpv.load`: `loadfile <url> replace -1 {per-file options}`.
 pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()> {
     ensure_platform()?;
+    let local = super::with_local_file(state, source).await?;
+    let source = &local;
     validate_play_url(source)?;
     let mgr = manager(state);
     let _op = mgr.op.lock().await;

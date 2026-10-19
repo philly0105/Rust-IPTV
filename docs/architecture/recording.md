@@ -108,4 +108,5 @@ Recordings are matched channel by channel (`scheduler::follow`), together with t
 
 - Library > Scheduled (`/scheduled`, rail entry) lists recordings writing now (progress, size, stop), upcoming reminders and recordings grouped by day (cancel), and the 50 most recent finished recordings (status, reason, remove from list).
 - My Videos > Recordings lists each recording part (id `r.<recording>.<hex file name>`, so ids stay put when another part is deleted) and every media file in the recordings folder: play, show in folder (desktop), delete with an 8 s Undo before the file goes to the Recycle Bin, size, date, duration, and a "File missing" badge when the file is gone.
+- On desktop `recordings.playSource` returns the loopback proxy's `.../recordings/{id}/media.<ext>`, which streams the file with Range support ([desktop.md](desktop.md#what-it-serves)); mpv and VLC get the path. When the proxy is not running it returns the path, which plays through the asset protocol.
 - At startup the desktop app adds every folder that holds a known recording part to the player's asset scope, so recordings stay playable after the recordings folder setting changes.

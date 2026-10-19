@@ -288,13 +288,17 @@ export async function fetchFailureStatus(url: string): Promise<{ status: number;
 /** Which engine last attached to an element; a stale native engine must not reset it on destroy. */
 const nativeOwner = new WeakMap<HTMLMediaElement, object>();
 
+/** Paths of the desktop loopback proxy that answer the app's window with CORS. */
+const LOOPBACK_MEDIA_PATH = /^\/[^/]+\/api\/(proxy|(files|recordings)\/[^/]+\/[^/]+)$/;
+
 /**
  * The CORS mode the element loads `url` in. Without one, a frame from another origin taints a
  * canvas and a screenshot of it is refused (C6), so the app's own cross-origin routes, which
  * answer with CORS for the app's window, load as `anonymous`:
  * - Tauri's asset protocol (`http://asset.localhost/...`, `asset://localhost/...`): downloads
- *   and recordings on the desktop;
- * - the desktop loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`).
+ *   and recordings on the desktop when the loopback proxy is not running;
+ * - the desktop loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`) and its
+ *   local file routes (`.../api/recordings/{id}/{name}`, `.../api/files/{id}/{name}`).
  *
  * Anything else gets null. A third-party server without CORS refuses a CORS request outright,
  * so a direct stream keeps the plain load: it plays, and only a screenshot of it is refused.
@@ -309,7 +313,7 @@ export function mediaCrossOrigin(url: string): 'anonymous' | null {
   }
   if (u.origin === window.location.origin) return null;
   if (u.protocol === 'asset:' || u.hostname === 'asset.localhost') return 'anonymous';
-  if (u.hostname === '127.0.0.1' && /^\/[^/]+\/api\/proxy$/.test(u.pathname)) return 'anonymous';
+  if (u.hostname === '127.0.0.1' && LOOPBACK_MEDIA_PATH.test(u.pathname)) return 'anonymous';
   return null;
 }
 

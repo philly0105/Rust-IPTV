@@ -154,7 +154,9 @@ needs source headers or would be mixed content.
    URI line and every `URI="..."` attribute (EXT-X-KEY, EXT-X-MAP,
    EXT-X-MEDIA, EXT-X-I-FRAME-STREAM-INF, EXT-X-PART, ...) is resolved against
    the final URL and replaced with `/api/proxy?url=<absolute>&sourceId=<id>`
-   (plus any `ua`/`referer`/`origin` overrides).
+   (plus any `ua`/`referer`/`origin` overrides). The path comes from
+   `ServerOptions::proxy_path`: `/api/proxy` here, `/<token>/api/proxy` on
+   the desktop loopback proxy.
    `data:` and `skd:` URIs are left alone. The response is 200
    `application/vnd.apple.mpegurl` (always; the upstream type is never
    echoed) with `Cache-Control: no-cache`.

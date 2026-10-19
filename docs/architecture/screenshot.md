@@ -89,7 +89,7 @@ Built-in player failures, each a toast titled "Screenshot not saved" that names 
 - A frame from another origin without CORS taints the canvas, and encoding it throws a `SecurityError`. The toast says the stream's server does not allow its picture to be copied. On the desktop it adds that embedded MPV can capture it, because mpv reads the stream itself.
   - Streams played through hls.js, shaka or mpegts.js (MSE, so raw MPEG-TS too) are never tainted.
   - In server mode the app's own proxy (`/api/proxy`) is the page's origin, so a proxied stream is not tainted either.
-  - On the desktop, local files (downloads and MP4 recordings, played through the Tauri asset protocol) and the loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`) load with `crossorigin="anonymous"` (`mediaCrossOrigin` in `engines.ts`, set before `src`). Both answer the web view with CORS headers, so their frames can be copied.
+  - On the desktop, local files (downloads and MP4 recordings, played from the loopback proxy's `/recordings` and `/files` routes, or through the Tauri asset protocol when the proxy is not running) and the loopback media proxy (`http://127.0.0.1:<port>/<token>/api/proxy`) load with `crossorigin="anonymous"` (`mediaCrossOrigin` in `engines.ts`, set before `src`). Both answer the web view with CORS headers, so their frames can be copied.
   - A direct MP4 from any other origin is tainted. It loads without a `crossorigin` attribute so that it still plays from servers that send no CORS headers.
 - An RPC error shows the core's message.
 

@@ -101,6 +101,11 @@ pub struct ServerOptions {
     /// per-launch path token and webview-origin check instead. Server mode
     /// keeps the refusal (off by default).
     pub allow_cross_site: bool,
+    /// Path of the proxy route that rewritten HLS playlists point their URIs
+    /// at: `/api/proxy` ([`proxy::hls::PROXY_PATH`]) by default. The desktop
+    /// loopback proxy serves it under its per-launch token
+    /// (`/<token>/api/proxy`).
+    pub proxy_path: String,
 }
 
 impl ServerOptions {
@@ -111,6 +116,7 @@ impl ServerOptions {
             allow_private_targets: false,
             allowed_hosts: guard::AllowedHosts::default(),
             allow_cross_site: false,
+            proxy_path: proxy::hls::PROXY_PATH.to_owned(),
         }
     }
 }

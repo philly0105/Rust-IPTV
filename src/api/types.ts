@@ -689,6 +689,11 @@ export interface AppInfo {
   logFile: string;
   /** Desktop: loopback media proxy base (`http://127.0.0.1:<port>/<token>/api/proxy`, where `<token>` is a per-launch secret path segment); null in server mode. */
   proxyBase: string | null;
+  /**
+   * Desktop: the image cache route on the proxy's second loopback listener (`http://127.0.0.1:<port>/<token>/api/img`),
+   * so artwork does not wait behind streams for the webview's six connections per host and port; null in server mode.
+   */
+  imageBase?: string | null;
   /** True only in a desktop build compiled with the updater feature. */
   updaterAvailable: boolean;
 }

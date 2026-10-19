@@ -242,8 +242,10 @@ pub fn mpv_pipe_name(pid: u32) -> String {
 
 /// Arguments for the embedded mpv process. The user's `mpvArgs` go first so
 /// the embedding flags (SPEC C4) always win (mpv lets later options
-/// override earlier ones). `volume` and `muted` are the UI's saved values,
-/// applied at startup so mpv never plays a frame at the wrong level.
+/// override earlier ones). The one exception is `--hwdec`: a decoder the user
+/// picked (`--hwdec=d3d11va`, `--hwdec=nvdec`, `--hwdec=no`) is kept, and
+/// `auto-safe` is only the default. `volume` and `muted` are the UI's saved
+/// values, applied at startup so mpv never plays a frame at the wrong level.
 pub fn embedded_mpv_args(
     hwnd: isize,
     pipe: &str,
@@ -252,6 +254,9 @@ pub fn embedded_mpv_args(
     muted: bool,
 ) -> Vec<String> {
     let mut args = split_shell_args(user_args);
+    let user_hwdec = args
+        .iter()
+        .any(|a| a == "--hwdec" || a.starts_with("--hwdec=") || a == "--no-hwdec");
     args.extend([
         format!("--wid={hwnd}"),
         format!("--input-ipc-server={pipe}"),
@@ -260,21 +265,25 @@ pub fn embedded_mpv_args(
         "--no-osc".to_string(),
         "--no-input-default-bindings".to_string(),
         "--force-window=yes".to_string(),
-        "--hwdec=auto-safe".to_string(),
         // Keys belong to the web UI, never to the video window.
         "--input-vo-keyboard=no".to_string(),
         "--no-terminal".to_string(),
         format!("--volume={}", volume.clamp(0.0, 130.0).round()),
         format!("--mute={}", if muted { "yes" } else { "no" }),
     ]);
+    if !user_hwdec {
+        args.push("--hwdec=auto-safe".to_string());
+    }
     args
 }
 
 /// Per-file mpv options that turn the demuxer cache into a rewind buffer for
-/// live streams.
+/// live streams. The buffer lives in mpv's RAM, so it is capped at 256 MiB:
+/// about 6 minutes of a 6 Mbit/s channel, 1.5 minutes at 25 Mbit/s (1 GiB
+/// grew mpv by 45 MB a minute until it held a gigabyte per stream).
 pub const LIVE_TIMESHIFT_OPTIONS: &[(&str, &str)] = &[
     ("cache", "yes"),
-    ("demuxer-max-back-bytes", "1GiB"),
+    ("demuxer-max-back-bytes", "256MiB"),
     ("demuxer-seekable-cache", "yes"),
     ("force-seekable", "yes"),
 ];

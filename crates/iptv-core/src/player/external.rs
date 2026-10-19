@@ -139,6 +139,8 @@ pub async fn open_external(
     player: ExternalPlayer,
     source: &PlayerSource,
 ) -> CoreResult<u32> {
+    let local = super::with_local_file(state, source).await?;
+    let source = &local;
     validate_play_url(source)?;
     let settings = state.settings_snapshot();
     let configured = match player {

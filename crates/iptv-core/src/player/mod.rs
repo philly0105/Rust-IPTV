@@ -27,8 +27,8 @@ pub mod mpv_state;
 pub mod rpc;
 pub mod stats;
 
-use crate::error::CoreResult;
-use crate::model::Settings;
+use crate::error::{CoreError, CoreResult};
+use crate::model::{PlayerKind, PlayerSource, Settings};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -106,6 +106,43 @@ pub fn window_factory(state: &AppState) -> Option<Arc<dyn ChildWindowFactory>> {
     state
         .ext::<WindowFactoryHandle>(WINDOW_FACTORY_KEY)
         .map(|h| Arc::clone(&h.0))
+}
+
+/// Desktop: a `kind: file` source that `recordings.playSource` or
+/// `myvideos.playSource` pointed at the loopback proxy, turned back into the
+/// file's path for mpv and VLC: they read local files themselves, and an
+/// external player outlives the app and its proxy. Every other source comes
+/// back unchanged.
+pub async fn with_local_file(
+    state: &Arc<AppState>,
+    source: &PlayerSource,
+) -> CoreResult<PlayerSource> {
+    let mut out = source.clone();
+    if source.kind != PlayerKind::File {
+        return Ok(out);
+    }
+    let Some(api) = crate::rpc::app::desktop_api_base(state) else {
+        return Ok(out);
+    };
+    let Some(rest) = source.url.strip_prefix(&format!("{api}/")) else {
+        return Ok(out);
+    };
+    let mut parts = rest.split('/');
+    let path = match (parts.next(), parts.next()) {
+        (Some("recordings"), Some(id)) => {
+            let target = crate::recording::library::resolve(state, id).await?;
+            target.path().to_path_buf()
+        }
+        (Some("files"), Some(id)) => {
+            let id = id
+                .parse::<i64>()
+                .map_err(|_| CoreError::invalid("not a download id"))?;
+            crate::downloads::completed_file(state, id).await?
+        }
+        _ => return Ok(out),
+    };
+    out.url = path.to_string_lossy().into_owned();
+    Ok(out)
 }
 
 /// Result of player detection.

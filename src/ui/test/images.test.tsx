@@ -499,6 +499,19 @@ describe('imageUrl (desktop)', () => {
     expect(broken.images.imageCacheBase()).toBeNull();
   });
 
+  it("uses the proxy's own image listener when app.info names one, and never wraps the stream port", async () => {
+    const { images, answer } = await desktopModules();
+    answer({
+      proxyBase: 'http://127.0.0.1:41234/tok3n/api/proxy',
+      imageBase: 'http://127.0.0.1:41235/tok3n/api/img',
+    });
+    await vi.waitFor(() => expect(images.imageCacheBase()).toBe('http://127.0.0.1:41235/tok3n/api/img'));
+    const src = 'http://cdn.example/p.jpg';
+    expect(images.imageUrl(src, 's1')).toBe(`http://127.0.0.1:41235/tok3n/api/img?${new URLSearchParams({ url: src, sourceId: 's1' })}`);
+    const stream = 'http://127.0.0.1:41234/tok3n/api/proxy?url=x';
+    expect(images.imageUrl(stream)).toBe(stream);
+  });
+
   it('a picture on screen keeps its URL when the base arrives (no second fade); the next picture uses the cache', async () => {
     const { images, answer } = await desktopModules();
     const { Poster: DesktopPoster } = await import('@/ui/Poster');

@@ -1273,6 +1273,12 @@ pub struct AppInfo {
     /// (`http://127.0.0.1:<port>/api/proxy`); `null` in server mode.
     #[serde(default)]
     pub proxy_base: Option<String>,
+    /// Desktop only: the image cache route on a second loopback listener
+    /// (`http://127.0.0.1:<port>/<token>/api/img`), so artwork does not wait
+    /// behind streams for the webview's six connections per host and port;
+    /// `null` in server mode.
+    #[serde(default)]
+    pub image_base: Option<String>,
     /// True only in a desktop build compiled with the `updater` feature.
     #[serde(default)]
     pub updater_available: bool,

@@ -522,7 +522,10 @@ export interface RpcMap {
   'downloads.setPosition': Cmd<{ id: number; positionSeconds: number }, void>;
   /** Completed downloads with `fileAvailable`. */
   'myvideos.list': Cmd<void, Download[]>;
-  /** kind 'file'; desktop url is an absolute path (see `proxiedUrl`), server url is `/api/files/{id}`. */
+  /**
+   * kind 'file'; desktop url is the loopback proxy's `.../files/{id}/media.<ext>` (an absolute path
+   * when the proxy is not running, see `proxiedUrl`), server url is `/api/files/{id}`.
+   */
   'myvideos.playSource': Cmd<{ id: number }, PlayerSource>;
 
   // ---- tmdb (B7) ----------------------------------------------------------

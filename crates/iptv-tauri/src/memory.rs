@@ -4,10 +4,10 @@
 //! utility processes), not the app. Two levers the app controls:
 //!
 //! - `ICoreWebView2_19::MemoryUsageTargetLevel`: `Low` while the window is
-//!   in the background asks WebView2 to drop caches and trim its processes;
-//!   `Normal` again on focus.
+//!   minimized asks WebView2 to drop caches and trim its processes; `Normal`
+//!   again on focus. Not on blur: an unfocused window may still be playing.
 //! - `SetProcessWorkingSetSize(-1, -1)` on the app process after startup and
-//!   on blur, which releases pages touched only during boot.
+//!   on minimize, which releases pages touched only during boot.
 //! - `ICoreWebView2Controller::IsVisible`: false while the window is
 //!   minimized, so the page stops rendering.
 //!
@@ -69,6 +69,23 @@ pub fn visibility_after(
     }
 }
 
+/// What a window event means for WebView2's memory target: Low (and a
+/// working-set trim) once the window is minimized, Normal again on focus;
+/// `None` for other events. Losing focus alone changes nothing: an unfocused
+/// window is often still showing video (picture-in-picture, a second
+/// monitor), and Low there makes playback and the UI fault back in.
+/// `minimized` is only asked on a size change.
+pub fn memory_low_after(
+    event: &tauri::WindowEvent,
+    minimized: impl FnOnce() -> bool,
+) -> Option<bool> {
+    match event {
+        tauri::WindowEvent::Focused(true) => Some(false),
+        tauri::WindowEvent::Resized(_) => minimized().then_some(true),
+        _ => None,
+    }
+}
+
 /// Sets WebView2's memory usage target level (`low = true` for Low).
 pub fn set_webview_memory_low<R: Runtime>(window: &WebviewWindow<R>, low: bool) {
     let result = window.with_webview(move |wv| {
@@ -101,7 +118,7 @@ pub fn set_webview_memory_low<R: Runtime>(window: &WebviewWindow<R>, low: bool) 
 
 #[cfg(test)]
 mod tests {
-    use super::visibility_after;
+    use super::{memory_low_after, visibility_after};
     use tauri::{PhysicalSize, WindowEvent};
 
     #[test]
@@ -121,6 +138,22 @@ mod tests {
             visibility_after(&WindowEvent::Focused(false), || unreachable!()),
             None,
             "blur alone keeps it visible"
+        );
+    }
+
+    #[test]
+    fn only_minimizing_lowers_the_memory_target() {
+        let resized = WindowEvent::Resized(PhysicalSize::new(0, 0));
+        assert_eq!(memory_low_after(&resized, || true), Some(true), "minimized");
+        assert_eq!(memory_low_after(&resized, || false), None, "resized");
+        assert_eq!(
+            memory_low_after(&WindowEvent::Focused(true), || unreachable!()),
+            Some(false)
+        );
+        assert_eq!(
+            memory_low_after(&WindowEvent::Focused(false), || unreachable!()),
+            None,
+            "blur alone keeps the normal target (picture-in-picture, a second monitor)"
         );
     }
 }

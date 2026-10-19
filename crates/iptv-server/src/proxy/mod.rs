@@ -273,7 +273,8 @@ async fn proxy(
         ("origin", q.origin.as_deref().unwrap_or("").trim()),
     ];
     let head = method == Method::HEAD;
-    let rewriter = hls::HlsRewriter::with_params(current.clone(), &params);
+    let rewriter = hls::HlsRewriter::with_params(current.clone(), &params)
+        .at_path(&s.opts.proxy_path);
     if let Some(out) = respond(resp, current.clone(), rewriter, head).await? {
         return Ok(out);
     }
@@ -282,7 +283,8 @@ async fn proxy(
     // (ignoring Range is allowed) and answer 200.
     let resp = send(&client, &method, &current, &headers_out, headers, false).await?;
     check_upstream_status(resp.status())?;
-    let rewriter = hls::HlsRewriter::with_params(current.clone(), &params);
+    let rewriter = hls::HlsRewriter::with_params(current.clone(), &params)
+        .at_path(&s.opts.proxy_path);
     respond(resp, current, rewriter, head).await?.ok_or_else(|| {
         Fail::coded(RpcError::network(
             "the stream server answered with part of a playlist although the whole one was requested",

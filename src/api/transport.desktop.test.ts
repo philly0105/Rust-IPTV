@@ -51,7 +51,7 @@ describe('proxiedUrl (desktop)', () => {
     expect(u.pathname).toBe('/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/proxy');
     expect(u.searchParams.get('url')).toBe('http://cdn.example/a.m3u8?token=abc&x=1');
     // The rewritten playlist's root-relative proxy URIs carry the token (the
-    // proxy prefixes it), so they resolve against this URL with it intact.
+    // rewriter writes it), so they resolve against this URL with it intact.
     expect(new URL('/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/proxy?url=seg.ts', out).pathname).toBe(u.pathname);
   });
 
@@ -77,6 +77,9 @@ describe('proxiedUrl (desktop)', () => {
     );
     const asset = 'http://asset.localhost/C%3A%5Cv%5Ca.mkv';
     expect(proxiedUrl({ ...base, kind: 'file', url: asset })).toBe(asset);
+    // recordings.playSource / myvideos.playSource: the proxy's own Range-capable file routes.
+    const recording = 'http://127.0.0.1:5555/9f8e7d6c5b4a39281706f5e4d3c2b1a098765432/api/recordings/f.636c69702e7473/media.ts';
+    expect(proxiedUrl({ ...base, kind: 'file', url: recording })).toBe(recording);
     const already = `${proxy}?url=${encodeURIComponent(base.url)}`;
     expect(proxiedUrl({ ...base, url: already })).toBe(already);
     expect(proxiedUrl({ ...base, url: 'blob:http://tauri.localhost/1' })).toBe('blob:http://tauri.localhost/1');

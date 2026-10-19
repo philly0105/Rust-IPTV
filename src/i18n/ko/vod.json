@@ -111,7 +111,6 @@
   "episodes": "에피소드",
   "percentWatched": "{{percent}}% 시청함",
   "noEpisodesTitle": "에피소드 목록이 없습니다",
-  "noEpisodesHint": "제공업체에서 이 시리즈의 시즌을 보내지 않았습니다. M3U 재생목록에는 에피소드 목록이 없습니다.",
   "upNext": "다음 에피소드",
   "nextEpisode": "다음 에피소드",
   "nextEpisodeIn": "{{seconds}}초 후 다음 에피소드",

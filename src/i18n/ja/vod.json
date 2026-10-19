@@ -111,7 +111,6 @@
   "episodes": "エピソード",
   "percentWatched": "{{percent}}% 視聴済み",
   "noEpisodesTitle": "エピソードがありません",
-  "noEpisodesHint": "プロバイダーからこのシリーズのシーズン情報が届いていません。M3Uプレイリストにはエピソード一覧が含まれません。",
   "upNext": "次に再生",
   "nextEpisode": "次のエピソード",
   "nextEpisodeIn": "{{seconds}}秒後に次のエピソード",

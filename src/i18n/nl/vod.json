@@ -111,7 +111,6 @@
   "episodes": "Afleveringen",
   "percentWatched": "{{percent}}% bekeken",
   "noEpisodesTitle": "Geen afleveringen vermeld",
-  "noEpisodesHint": "De provider heeft geen seizoenen voor deze serie gestuurd. M3U-afspeellijsten bevatten geen afleveringslijsten.",
   "upNext": "Hierna",
   "nextEpisode": "Volgende aflevering",
   "nextEpisodeIn": "Volgende aflevering over {{seconds}} s",

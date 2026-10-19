@@ -204,7 +204,8 @@ export function useRecentlyAdded(
 function detailCommand(sourceKind: SourceKind, kind: 'movie' | 'series'): string {
   if (sourceKind === 'stalker') return kind === 'movie' ? 'stalker.vodDetail' : 'stalker.seriesDetail';
   if (sourceKind === 'xtream') return kind === 'movie' ? 'xtream.vodDetail' : 'xtream.seriesDetail';
-  return 'catalog.item';
+  // m3u series rows carry the episodes the importer grouped (m3u.md, Series).
+  return kind === 'movie' ? 'catalog.item' : 'm3u.seriesDetail';
 }
 
 /** Only the ItemRef fields, so a ref carrying extra properties still hits the same cache entry. */
@@ -213,8 +214,8 @@ function plainRef(ref: ItemRef): ItemRef {
 }
 
 /**
- * An m3u playlist has no provider detail: the detail query caches the bare `catalog.item` row
- * under `['catalog.item', { ref }]`, the key flat `useRpcQuery('catalog.item')` readers (the
+ * An m3u playlist has no provider detail: the movie detail query caches the bare `catalog.item`
+ * row under `['catalog.item', { ref }]`, the key flat `useRpcQuery('catalog.item')` readers (the
  * player, live pages) share, so the two never hold different shapes for one ref; `select`
  * wraps it as a detail (L2 XB2-34).
  */
@@ -222,14 +223,14 @@ function toMovieDetail(data: VodDetail | VodItem): VodDetail {
   return 'item' in data ? data : { item: data, cast: [], backdrops: [], providerDetailsUnavailable: false };
 }
 
-/** As {@link toMovieDetail}; m3u playlists have no series metadata, so the row has no episodes. */
+/** As {@link toMovieDetail}, for a bare series row (an m3u series answers `m3u.seriesDetail` with its seasons). */
 function toSeriesDetail(data: SeriesDetail | SeriesItem): SeriesDetail {
   return 'item' in data ? data : { item: data, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false };
 }
 
 /**
  * Movie detail query: provider detail for portals; for m3u the catalog row, wrapped as a detail
- * by `select`. Shared by useMovieDetail and the hover prefetch (C4), so both use one key and fn.
+ * by `select` (m3u series ask `m3u.seriesDetail`). Shared by useMovieDetail and the hover prefetch (C4), so both use one key and fn.
  */
 export function movieDetailQuery(sourceKind: SourceKind | undefined, ref: ItemRef) {
   const cmd = sourceKind ? detailCommand(sourceKind, 'movie') : 'catalog.item';

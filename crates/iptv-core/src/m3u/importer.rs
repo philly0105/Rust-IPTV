@@ -5,6 +5,7 @@
 
 use super::body::{sniff, too_large_error, MinRate, MAX_PLAYLIST_BYTES, SNIFF_BYTES};
 use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
+use super::series::{LegacyEpisode, SeriesGrouper};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
 use crate::error::{CoreError, CoreResult};
@@ -115,7 +116,7 @@ pub fn stored_text(
 /// every M3U source (URL, file and pasted text) re-import an unchanged
 /// playlist once and pick up parser and classifier fixes. Bump it whenever a
 /// change alters the rows an import writes.
-pub const IMPORT_VERSION: u32 = 2;
+pub const IMPORT_VERSION: u32 = 3;
 
 /// sha256 state for a playlist body, seeded with [`IMPORT_VERSION`]. Every
 /// `m3u_raw.sha256` is computed this way (64 hex chars).
@@ -157,7 +158,8 @@ pub fn group_id(group: &str) -> String {
 /// file-only container (`.mkv`, `.avi`, `.mov`, `.m4v`) -> movie, whatever the
 /// group; an `.mp4` URL in a group whose title mentions movie / vod / film ->
 /// movie (`.mp4` alone is ambiguous: looping live channels use it too); else
-/// live. Series episodes are movies until M3U series grouping exists.
+/// live. [`RowBuilder::push`] then asks [`super::series::detect`] whether a
+/// movie is a series episode.
 pub fn classify(e: &M3uEntry) -> ContentType {
     if e.radio {
         return ContentType::Radio;
@@ -182,7 +184,7 @@ pub fn classify(e: &M3uEntry) -> ContentType {
 }
 
 /// The lowercased path of a stream URL (no scheme, host, query or fragment).
-fn url_path_lower(url: &str) -> String {
+pub(super) fn url_path_lower(url: &str) -> String {
     let no_query = url.split(['?', '#']).next().unwrap_or(url);
     let after_scheme = no_query
         .split_once("://")
@@ -194,13 +196,17 @@ fn url_path_lower(url: &str) -> String {
 /// Turns parser entries into catalog rows: stable ids (with a suffix for exact
 /// duplicates), categories in first-seen order per content type, channel
 /// numbers (tvg-chno, else one running index shared by live and radio, so a
-/// radio number never repeats a live one).
+/// radio number never repeats a live one). [`RowBuilder::push`] holds series
+/// episodes back; [`RowBuilder::take_series`] gives one row per show.
 pub struct RowBuilder {
     source_id: String,
     seen_ids: HashSet<String>,
     categories: HashMap<ContentType, (Vec<CategoryRow>, HashSet<String>)>,
     channel_counter: i64,
     position: i64,
+    series: SeriesGrouper,
+    /// Movie ids user state refers to (see [`RowBuilder::keep_legacy`]).
+    legacy_watch: HashSet<String>,
 }
 
 impl RowBuilder {
@@ -211,16 +217,25 @@ impl RowBuilder {
             categories: HashMap::new(),
             channel_counter: 0,
             position: 0,
+            series: SeriesGrouper::default(),
+            legacy_watch: HashSet::new(),
         }
     }
 
-    pub fn row(&mut self, e: M3uEntry) -> ItemRow {
-        let ct = classify(&e);
-        let mut id = item_id(&e.url, &e.name);
+    /// Movie ids that user state refers to (read before the import writes).
+    /// An episode whose id as a movie is among them is reported by
+    /// [`RowBuilder::take_series`], so its state can follow it.
+    pub fn keep_legacy(&mut self, ids: HashSet<String>) {
+        self.legacy_watch = ids;
+    }
+
+    /// The id of an entry: its hash, with a suffix for an exact duplicate.
+    fn unique_id(&mut self, url: &str, name: &str) -> String {
+        let mut id = item_id(url, name);
         if self.seen_ids.contains(&id) {
             let mut n = 2u32;
             loop {
-                let candidate = hash16(&format!("{}\n{}\n#{n}", e.url, e.name));
+                let candidate = hash16(&format!("{url}\n{name}\n#{n}"));
                 if !self.seen_ids.contains(&candidate) {
                     id = candidate;
                     break;
@@ -229,16 +244,19 @@ impl RowBuilder {
             }
         }
         self.seen_ids.insert(id.clone());
+        id
+    }
 
-        let group = e.group.clone().unwrap_or_default();
-        let cat_id = group_id(&group);
+    /// The category id of `group` for type `ct`, declared on first sight.
+    fn category(&mut self, ct: ContentType, group: &str) -> String {
+        let cat_id = group_id(group);
         let (cats, cat_ids) = self.categories.entry(ct).or_default();
         if !cat_ids.contains(&cat_id) {
             cat_ids.insert(cat_id.clone());
             let name = if group.trim().is_empty() {
                 catalog::FALLBACK_CATEGORY_NAME.to_string()
             } else {
-                group.clone()
+                group.to_string()
             };
             cats.push(CategoryRow {
                 category_id: cat_id.clone(),
@@ -246,6 +264,48 @@ impl RowBuilder {
                 position: cats.len() as i64,
             });
         }
+        cat_id
+    }
+
+    /// The row of entry `e`, or `None` when it is a series episode: episodes
+    /// are held back until the playlist ends and come out of
+    /// [`RowBuilder::take_series`], one row per show.
+    pub fn push(&mut self, e: M3uEntry) -> Option<ItemRow> {
+        let ct = classify(&e);
+        if ct != ContentType::Movie {
+            return Some(self.row_as(e, ct));
+        }
+        let Some(found) = super::series::detect(&e) else {
+            return Some(self.row_as(e, ct));
+        };
+        // Every entry still takes the id it had as a movie, so the duplicate
+        // suffixes of the movies around it stay what they were.
+        let movie_id = self.unique_id(&e.url, &e.name);
+        let legacy = self.legacy_watch.contains(&movie_id).then_some(movie_id);
+        let group = e.group.clone().unwrap_or_default();
+        let cat_id = self.category(ContentType::Series, &group);
+        if self.series.add(cat_id, self.position, found, e, legacy) {
+            self.position += 1;
+        }
+        None
+    }
+
+    /// The series rows of every episode [`RowBuilder::push`] held back, and
+    /// the episodes earlier imports stored as movies that user state refers to.
+    pub fn take_series(&mut self) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
+        std::mem::take(&mut self.series).into_rows(&self.source_id)
+    }
+
+    /// The row of one entry, as a movie, channel or radio station (never
+    /// grouped into a series).
+    pub fn row(&mut self, e: M3uEntry) -> ItemRow {
+        let ct = classify(&e);
+        self.row_as(e, ct)
+    }
+
+    fn row_as(&mut self, e: M3uEntry, ct: ContentType) -> ItemRow {
+        let id = self.unique_id(&e.url, &e.name);
+        let cat_id = self.category(ct, e.group.as_deref().unwrap_or_default());
 
         let number = match ct {
             ContentType::Live | ContentType::Radio => {
@@ -655,6 +715,8 @@ fn write_catalog(
     if remapper.old_rows > 0 {
         // The writer deletes the previous rows first (L3-perf-core-4).
         sources::progress_step(state, source_id, sources::SaveStep::Replacing, 0);
+        // Episodes earlier imports stored as movies: their state follows them.
+        builder.keep_legacy(super::series::referenced_movie_ids(&tx, source_id)?);
     }
     let (header, stats, summary) = {
         let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES, cancel.clone())?;
@@ -671,15 +733,17 @@ fn write_catalog(
         // is known before the row is written, so its verdict is final.
         let mut declared: HashMap<ContentType, usize> = HashMap::new();
         for entry in parser.by_ref() {
-            let row = builder.row(entry);
-            let seen = declared.entry(row.content_type).or_default();
-            let new = builder.categories_from(row.content_type, *seen);
-            if !new.is_empty() {
-                writer.declare_categories(row.content_type, new);
-                *seen += new.len();
-            }
-            if writer.insert(&row)? {
-                remapper.saw(&row);
+            // A series episode is held back until the playlist ends.
+            if let Some(row) = builder.push(entry) {
+                let seen = declared.entry(row.content_type).or_default();
+                let new = builder.categories_from(row.content_type, *seen);
+                if !new.is_empty() {
+                    writer.declare_categories(row.content_type, new);
+                    *seen += new.len();
+                }
+                if writer.insert(&row)? {
+                    remapper.saw(&row);
+                }
             }
             n += 1;
             if n % PROGRESS_EVERY == 0 {
@@ -689,6 +753,19 @@ fn write_catalog(
         }
         if let Some(err) = parser.take_io_error() {
             return Err(CoreError::Io(err));
+        }
+        // One row per show, with its episodes (m3u/series.rs).
+        let (series_rows, legacy) = builder.take_series();
+        for row in &series_rows {
+            let seen = declared.entry(row.content_type).or_default();
+            let new = builder.categories_from(row.content_type, *seen);
+            if !new.is_empty() {
+                writer.declare_categories(row.content_type, new);
+                *seen += new.len();
+            }
+            if writer.insert(row)? {
+                remapper.saw(row);
+            }
         }
         let stats = parser.stats();
         let header = parser.header().clone();
@@ -708,6 +785,7 @@ fn write_catalog(
             }));
         }
         remapper.apply(&tx, source_id)?;
+        super::series::adopt_movie_state(&tx, source_id, &legacy)?;
         // Every row is in: indexes, the search index and the counts follow.
         // Clients without the step show "Saving n of n", as before.
         sources::progress_step(state, source_id, sources::SaveStep::Indexing, n);
@@ -1577,6 +1655,62 @@ mod tests {
                 ContentType::Live
             ]
         );
+    }
+
+    /// F-M3U-SERIES: `push` holds episodes back and `take_series` groups
+    /// them; the movies around them keep the ids (and duplicate suffixes)
+    /// they had before grouping, and an episode that user state knew as a
+    /// movie is reported with its old id.
+    #[test]
+    fn push_groups_episodes_and_keeps_movie_ids() {
+        let (entries, _, _) = parse_str(
+            "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"Drama\",Dark S01 E01\nhttp://h:8080/series/u/p/1.mkv\n\
+             #EXTINF:-1 group-title=\"Films\",Heat (1995)\nhttp://h:8080/movie/u/p/9.mkv\n\
+             #EXTINF:-1 group-title=\"Drama\",Dark S01 E02\nhttp://h:8080/series/u/p/2.mkv\n\
+             #EXTINF:-1 group-title=\"Films\",Heat (1995)\nhttp://h:8080/movie/u/p/9.mkv\n\
+             #EXTINF:-1 group-title=\"News\",BBC\nhttp://h:8080/u/p/7.ts\n",
+        );
+        // What an import before series grouping wrote.
+        let mut old = RowBuilder::new("s");
+        let before: Vec<ItemRow> = entries.iter().cloned().map(|e| old.row(e)).collect();
+        assert!(before[..4]
+            .iter()
+            .all(|r| r.content_type == ContentType::Movie));
+
+        let mut b = RowBuilder::new("s");
+        b.keep_legacy(HashSet::from([before[2].item_id.clone()]));
+        let rows: Vec<ItemRow> = entries.into_iter().filter_map(|e| b.push(e)).collect();
+        assert_eq!(
+            rows.iter().map(|r| r.content_type).collect::<Vec<_>>(),
+            [ContentType::Movie, ContentType::Movie, ContentType::Live]
+        );
+        assert_eq!(rows[0].item_id, before[1].item_id);
+        assert_eq!(rows[1].item_id, before[3].item_id, "duplicate suffix kept");
+        assert_eq!(rows[2].item_id, before[4].item_id);
+
+        let (series, legacy) = b.take_series();
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].content_type, ContentType::Series);
+        assert_eq!(series[0].title, "Dark");
+        assert_eq!(series[0].category_id, group_id("Drama"));
+        let eps = crate::m3u::series::stored_episodes(&series[0].extra);
+        assert_eq!(eps.len(), 2);
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].movie_id, before[2].item_id);
+        assert_eq!(legacy[0].episode_id, eps[1].id);
+        assert_eq!(legacy[0].series_id, series[0].item_id);
+
+        // Drama is a series category now, not a movie one.
+        let cats = b.categories();
+        let names = |ct: ContentType| -> Vec<String> {
+            cats.iter()
+                .find(|(t, _)| *t == ct)
+                .map(|(_, v)| v.iter().map(|c| c.name.clone()).collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(names(ContentType::Movie), ["Films"]);
+        assert_eq!(names(ContentType::Series), ["Drama"]);
     }
 
     /// L1-core-13: a playlist generator that takes longer than the generic

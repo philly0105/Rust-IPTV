@@ -432,7 +432,7 @@ export function SeriesDetailPage() {
               size="inline"
               icon={<ListVideo size={20} />}
               title={t('noEpisodesTitle')}
-              description={source.data?.kind === 'm3u' ? t('noEpisodesHint') : t('noEpisodesHintProvider')}
+              description={t('noEpisodesHintProvider')}
             />
           ) : (
             <>

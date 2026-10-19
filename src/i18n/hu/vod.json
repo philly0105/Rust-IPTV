@@ -111,7 +111,6 @@
   "episodes": "Epizódok",
   "percentWatched": "{{percent}}% megtekintve",
   "noEpisodesTitle": "Nincsenek epizódok",
-  "noEpisodesHint": "A szolgáltató nem küldött évadokat ehhez a sorozathoz. Az M3U lejátszási listák nem tartalmaznak epizódlistát.",
   "upNext": "Következik",
   "nextEpisode": "Következő epizód",
   "nextEpisodeIn": "Következő epizód {{seconds}} mp múlva",

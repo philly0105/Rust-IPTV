@@ -42,6 +42,8 @@ async function streamSource(target: PlayTarget, episodeId: string | undefined): 
   const linkArgs = episodeId ? { ref, episodeId } : { ref };
   if (target.sourceKind === 'xtream') return rpc('xtream.streamUrl', linkArgs);
   if (target.sourceKind === 'stalker') return rpc('stalker.streamUrl', linkArgs);
+  // An m3u episode's URL is stored in its series row; the core merges the headers.
+  if (episodeId) return rpc('m3u.streamUrl', { ref, episodeId });
   const [item, source] = await Promise.all([rpc('catalog.item', { ref }), rpc('sources.get', { id: ref.sourceId }).catch(() => null)]);
   const url = 'url' in item ? item.url : undefined;
   if (!url) throw new RpcError('not_found', 'This item has no stream URL');

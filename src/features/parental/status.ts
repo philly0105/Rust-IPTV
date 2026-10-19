@@ -31,9 +31,9 @@ export const STATUS_STALE_MS = 30_000;
  * (`lists.list` counts, `lists.items`), guide search and watch stats.
  * `epg.search` is exact so the other `epg.` queries are left alone.
  * Portal reads too: Stalker VOD pages and search are not in SQLite, so the
- * core drops hidden titles from them itself, and the Xtream and Stalker
- * detail commands refuse a hidden title. Their stream and catch-up URLs are
- * never cached.
+ * core drops hidden titles from them itself, and the Xtream, Stalker and
+ * m3u series detail commands refuse a hidden title. Their stream and
+ * catch-up URLs are never cached.
  */
 export const FILTERED_PREFIXES = [
   'catalog.',
@@ -51,6 +51,7 @@ export const FILTERED_PREFIXES = [
   'stalker.seriesDetail',
   'xtream.vodDetail',
   'xtream.seriesDetail',
+  'm3u.seriesDetail',
 ] as const;
 
 /** Parental queries that follow every change (the lock list and lock checks). */

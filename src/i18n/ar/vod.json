@@ -131,7 +131,6 @@
   "episodes": "الحلقات",
   "percentWatched": "تمت مشاهدة {{percent}}%",
   "noEpisodesTitle": "لا توجد حلقات",
-  "noEpisodesHint": "لم يرسل المزوّد أي مواسم لهذا المسلسل. قوائم تشغيل M3U لا تتضمن قوائم حلقات.",
   "upNext": "التالي",
   "nextEpisode": "الحلقة التالية",
   "nextEpisodeIn": "الحلقة التالية بعد {{seconds}} ث",

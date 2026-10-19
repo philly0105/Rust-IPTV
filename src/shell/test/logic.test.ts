@@ -126,6 +126,10 @@ describe('rail links', () => {
   it('adds movies for m3u only when it has movies', () => {
     expect(railLinks(src('m3u', 3)).map((l) => l.id)).toEqual(['live', 'movies', 'favorites', 'recent']);
   });
+  it('adds series for m3u once the importer grouped episodes into series (F-M3U-SERIES)', () => {
+    expect(railLinks({ ...src('m3u', 3), seriesCount: 2 } as Source).map((l) => l.id)).toEqual(['live', 'movies', 'series', 'favorites', 'recent']);
+    expect(railLinks({ ...src('m3u'), seriesCount: 0 } as Source).map((l) => l.id)).not.toContain('series');
+  });
   it('adds radio for m3u only when it has radio', () => {
     expect(railLinks(src('m3u'), { hasRadio: true }).map((l) => l.id)).toContain('radio');
     expect(railLinks(src('m3u'), { hasRadio: false }).map((l) => l.id)).not.toContain('radio');

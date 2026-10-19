@@ -116,7 +116,6 @@
   "episodes": "Épisodes",
   "percentWatched": "{{percent}}% regardé",
   "noEpisodesTitle": "Aucun épisode listé",
-  "noEpisodesHint": "Le fournisseur n'a envoyé aucune saison pour cette série. Les listes de lecture M3U ne contiennent pas de liste d'épisodes.",
   "upNext": "À suivre",
   "nextEpisode": "Épisode suivant",
   "nextEpisodeIn": "Épisode suivant dans {{seconds}} s",

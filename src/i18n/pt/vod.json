@@ -116,7 +116,6 @@
   "episodes": "Episódios",
   "percentWatched": "{{percent}}% assistido",
   "noEpisodesTitle": "Nenhum episódio listado",
-  "noEpisodesHint": "O provedor não enviou temporadas para esta série. Playlists M3U não trazem listas de episódios.",
   "upNext": "A seguir",
   "nextEpisode": "Próximo episódio",
   "nextEpisodeIn": "Próximo episódio em {{seconds}} s",

@@ -401,6 +401,10 @@ export interface RpcMap {
   'm3u.raw': Cmd<{ sourceId: string }, { text: string; sha256: string; fetchedAt: string }>;
   /** Parses the first 2 MB only. */
   'm3u.parsePreview': Cmd<{ text: string }, { channelCount: number; groups: string[]; epgUrls: string[] }>;
+  /** A series the importer grouped from playlist episodes, with the seasons it stored. */
+  'm3u.seriesDetail': Cmd<{ ref: ItemRef }, SeriesDetail>;
+  /** One stored episode's URL, with the playlist's headers and the entry's own over them. */
+  'm3u.streamUrl': Cmd<{ ref: ItemRef; episodeId: string }, PlayerSource>;
 
   // ---- userstate (B2) -----------------------------------------------------
   'favorites.list': Cmd<{ sourceId?: string }, FavoriteEntry[]>;
@@ -780,6 +784,8 @@ export const RPC_COMMANDS = [
   'catalog.yearFacets',
   'm3u.raw',
   'm3u.parsePreview',
+  'm3u.seriesDetail',
+  'm3u.streamUrl',
   'favorites.list',
   'favorites.toggle',
   'favorites.contains',

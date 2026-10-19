@@ -1,6 +1,6 @@
 /**
  * Per-source rail links (SPEC C7). m3u: live, radio when it has any, movies
- * when movieCount > 0, favorites, recent. xtream/stalker: everything until the
+ * when movieCount > 0, series when seriesCount > 0, favorites, recent. xtream/stalker: everything until the
  * first import finished; then radio, movies and series only when they hold
  * something (stalker keeps movies and series: their totals come from the portal,
  * which may not report them).
@@ -71,6 +71,8 @@ export function railLinkIds(source: RailLinkSource, opts: RailLinkOptions = {}):
   const ids: RailLinkId[] = ['live'];
   if (opts.hasRadio) ids.push('radio');
   if (source.movieCount > 0) ids.push('movies');
+  // Series grouped from playlist episodes (m3u.md, Series).
+  if ((source.seriesCount ?? 0) > 0) ids.push('series');
   ids.push('favorites', 'recent');
   return ids;
 }

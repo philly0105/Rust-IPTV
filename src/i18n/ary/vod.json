@@ -131,7 +131,6 @@
   "episodes": "الحلقات",
   "percentWatched": "تشاهد {{percent}}%",
   "noEpisodesTitle": "ما كاينة حتى حلقة",
-  "noEpisodesHint": "المزود ما صيفط حتى موسم لهاد السلسلة. قوائم M3U ما فيهاش لوائح الحلقات.",
   "upNext": "اللي جاي",
   "nextEpisode": "الحلقة الجاية",
   "nextEpisodeIn": "الحلقة الجاية من بعد {{seconds}} ث",

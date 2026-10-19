@@ -111,7 +111,6 @@
   "episodes": "分集",
   "percentWatched": "已观看 {{percent}}%",
   "noEpisodesTitle": "没有分集列表",
-  "noEpisodesHint": "提供商未发送此剧集的季信息。M3U 播放列表不包含分集列表。",
   "upNext": "接下来播放",
   "nextEpisode": "下一集",
   "nextEpisodeIn": "{{seconds}} 秒后播放下一集",

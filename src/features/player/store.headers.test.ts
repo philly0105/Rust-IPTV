@@ -106,3 +106,17 @@ describe('resolveSource per-channel headers (m3u)', () => {
     expect(out.headers).toEqual({ userAgent: 'VLC/3.0' });
   });
 });
+
+describe('resolveSource for an m3u series episode (F-M3U-SERIES)', () => {
+  it('asks m3u.streamUrl, whose answer already carries the merged headers', async () => {
+    const sref: ItemRef = { sourceId: 's1', contentType: 'series', itemId: 'dark' };
+    let asked: unknown;
+    handlers['m3u.streamUrl'] = (a) => {
+      asked = a;
+      return { url: 'http://h/series/u/p/2.mkv', kind: 'direct', headers: { userAgent: 'Row/1' }, title: 'Dark', subtitle: 'S01E02 · Lies', isLive: false, isRadio: false };
+    };
+    const out = await resolveSource({ ref: sref, episodeId: 'e2', title: 'Dark', isLive: false, sourceKind: 'm3u' });
+    expect(asked).toEqual({ ref: sref, episodeId: 'e2' });
+    expect(out).toMatchObject({ url: 'http://h/series/u/p/2.mkv', headers: { userAgent: 'Row/1' }, episodeId: 'e2', subtitle: 'S01E02 · Lies', ref: sref });
+  });
+});

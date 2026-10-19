@@ -216,7 +216,7 @@ export function tracksPosition(source: PlayerSource | undefined): source is Play
  * (`{ item }`, keyed as vod/hooks/queries.ts keys them) and the bare `catalog.item` row, which
  * an m3u detail page shares (it caches the flat row and wraps it with `select`).
  */
-const ITEM_ROW_QUERIES = ['xtream.vodDetail', 'xtream.seriesDetail', 'stalker.vodDetail', 'stalker.seriesDetail', 'catalog.item'] as const;
+const ITEM_ROW_QUERIES = ['xtream.vodDetail', 'xtream.seriesDetail', 'stalker.vodDetail', 'stalker.seriesDetail', 'm3u.seriesDetail', 'catalog.item'] as const;
 
 type TitledRow = { title?: string; titleBase?: string };
 
@@ -1114,6 +1114,9 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
     resolved = await rpc('xtream.streamUrl', episodeId ? { ref, episodeId } : { ref });
   } else if (args.sourceKind === 'stalker') {
     resolved = await rpc('stalker.streamUrl', episodeId ? { ref, episodeId } : { ref });
+  } else if (episodeId) {
+    // An m3u episode: its URL is stored in the series row (m3u.md, Series).
+    resolved = await rpc('m3u.streamUrl', { ref, episodeId });
   } else {
     const known = args.channel && itemKey(args.channel.ref) === itemKey(ref) && args.channel.url ? args.channel : undefined;
     const [item, src] = await Promise.all([

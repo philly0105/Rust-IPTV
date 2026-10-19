@@ -111,7 +111,6 @@
   "episodes": "集數",
   "percentWatched": "已觀看 {{percent}}%",
   "noEpisodesTitle": "沒有集數清單",
-  "noEpisodesHint": "供應商未提供此影集的季資訊。M3U 播放清單不包含集數清單。",
   "upNext": "即將播放",
   "nextEpisode": "下一集",
   "nextEpisodeIn": "{{seconds}} 秒後播放下一集",

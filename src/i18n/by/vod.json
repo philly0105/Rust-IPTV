@@ -121,7 +121,6 @@
   "episodes": "Эпізоды",
   "percentWatched": "Прагледжана {{percent}}%",
   "noEpisodesTitle": "Няма эпізодаў",
-  "noEpisodesHint": "Правайдар не даслаў сезонаў для гэтага серыяла. Плэйлісты M3U не змяшчаюць спісаў эпізодаў.",
   "upNext": "Далей",
   "nextEpisode": "Наступны эпізод",
   "nextEpisodeIn": "Наступны эпізод праз {{seconds}} с",

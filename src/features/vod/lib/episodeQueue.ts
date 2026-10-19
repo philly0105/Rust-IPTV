@@ -102,17 +102,15 @@ export function placeholderFor(ctx: EpisodeQueueContext, ep: Episode): PlayerSou
   return out;
 }
 
-function streamCommand(kind: SourceKind): 'xtream.streamUrl' | 'stalker.streamUrl' | undefined {
+function streamCommand(kind: SourceKind): 'xtream.streamUrl' | 'stalker.streamUrl' | 'm3u.streamUrl' {
   if (kind === 'xtream') return 'xtream.streamUrl';
   if (kind === 'stalker') return 'stalker.streamUrl';
-  return undefined;
+  return 'm3u.streamUrl';
 }
 
 /** One queue entry, titled the way the detail page titles a played episode. */
 export async function resolveEpisode(ctx: EpisodeQueueContext, ep: Episode): Promise<PlayerSource> {
-  const cmd = streamCommand(ctx.sourceKind);
-  if (!cmd) throw new Error('This source has no episodes to queue');
-  const r = await rpc(cmd, { ref: ctx.ref, episodeId: ep.id });
+  const r = await rpc(streamCommand(ctx.sourceKind), { ref: ctx.ref, episodeId: ep.id });
   const out: PlayerSource = {
     url: r.url,
     kind: r.kind,
@@ -282,8 +280,7 @@ export async function queueSeriesFrom(args: {
   posterUrl?: string;
   episodeId: string;
 }): Promise<void> {
-  const cmd = args.sourceKind === 'stalker' ? 'stalker.seriesDetail' : args.sourceKind === 'xtream' ? 'xtream.seriesDetail' : undefined;
-  if (!cmd) return;
+  const cmd = args.sourceKind === 'stalker' ? 'stalker.seriesDetail' : args.sourceKind === 'xtream' ? 'xtream.seriesDetail' : 'm3u.seriesDetail';
   try {
     const detail: SeriesDetail = await rpc(cmd, { ref: args.ref });
     const ctx: EpisodeQueueContext = { ref: args.ref, sourceKind: args.sourceKind, title: args.title, order: episodeOrder(detail.seasons) };

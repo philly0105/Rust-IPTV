@@ -121,7 +121,6 @@
   "episodes": "Odcinki",
   "percentWatched": "Obejrzano {{percent}}%",
   "noEpisodesTitle": "Brak odcinków",
-  "noEpisodesHint": "Dostawca nie przesłał sezonów tego serialu. Listy odtwarzania M3U nie zawierają list odcinków.",
   "upNext": "Następne",
   "nextEpisode": "Następny odcinek",
   "nextEpisodeIn": "Następny odcinek za {{seconds}} s",

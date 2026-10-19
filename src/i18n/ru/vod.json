@@ -121,7 +121,6 @@
   "episodes": "Серии",
   "percentWatched": "Просмотрено {{percent}}%",
   "noEpisodesTitle": "Нет серий",
-  "noEpisodesHint": "Провайдер не передал сезоны этого сериала. В плейлистах M3U нет списков серий.",
   "upNext": "Далее",
   "nextEpisode": "Следующий эпизод",
   "nextEpisodeIn": "Следующая серия через {{seconds}} с",

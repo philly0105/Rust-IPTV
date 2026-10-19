@@ -1,7 +1,7 @@
 /**
  * L3-ui-data-x7: the boot prefetch asks for a channel list's or a VOD landing page's first data
  * under the keys and arguments the pages use, so the pages' own queries find it in the cache and
- * send nothing of their own.
+ * send nothing of their own. Performance audit SH-3: Home's rail queries too.
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
@@ -9,19 +9,31 @@ import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { usePagedChannels } from '@/features/live/hooks/usePagedChannels';
+import { LIST_KEY } from '@/features/mylist/lib/cache';
 import { useRecentlyAdded, useSource } from '@/features/vod/hooks/queries';
 
-import { CHANNEL_PAGE_SIZE, categoriesArgs, channelPageArgs, prefetchScreenData, recentlyAddedArgs } from './bootPrefetch';
+import {
+  CHANNEL_PAGE_SIZE,
+  categoriesArgs,
+  channelPageArgs,
+  homeContinueArgs,
+  homeFavoritesArgs,
+  homeRecentArgs,
+  homeRecentlyAddedArgs,
+  prefetchScreenData,
+  recentlyAddedArgs,
+} from './bootPrefetch';
 import { queryClient, rpcKey } from './query';
 import { rpcRaw } from './transport';
 import type { Source } from './types';
 
-const sources = vi.hoisted(() => ({ list: [] as Array<{ id: string; kind: string }> }));
+const sources = vi.hoisted(() => ({ list: [] as Array<{ id: string; kind: string }>, settings: {} as Record<string, unknown> }));
 
 vi.mock('./transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./transport')>()),
   rpcRaw: vi.fn(async (cmd: string) => {
     if (cmd === 'sources.list') return sources.list;
+    if (cmd === 'settings.get') return sources.settings;
     if (cmd === 'catalog.channels') return { items: [], total: 0 };
     if (cmd === 'catalog.categories' || cmd === 'catalog.recentlyAdded') return [];
     return {};
@@ -36,6 +48,7 @@ afterEach(() => {
   queryClient.clear();
   raw.mockClear();
   sources.list = [];
+  sources.settings = {};
 });
 
 describe('prefetchScreenData', () => {
@@ -76,9 +89,44 @@ describe('prefetchScreenData', () => {
     expect(calls('catalog.recentlyAdded')).toEqual([]);
   });
 
-  it.each(['/', '/dashboard', '/sources', '/s/s1/guide', '/s/s1/movie/7', '/s/s1/movies/c/5', '/s/s1/series/42'])('asks for nothing on %s', (path) => {
+  it.each(['/', '/sources', '/s/s1/guide', '/s/s1/movie/7', '/s/s1/movies/c/5', '/s/s1/series/42'])('asks for nothing on %s', (path) => {
     prefetchScreenData(path);
     expect(raw).not.toHaveBeenCalled();
+  });
+});
+
+describe('Home (SH-3)', () => {
+  const homeCalls = () => raw.mock.calls.map(([c]) => c).filter((c) => c !== 'settings.get' && c !== 'sources.list');
+
+  it("asks for Home's rails once settings and sources are in, under the page's arguments", async () => {
+    sources.list = [{ id: 's1', kind: 'xtream' }];
+    sources.settings = { tmdb: { enabled: true } };
+    prefetchScreenData('/dashboard');
+    await waitFor(() => expect(calls('tmdb.trending')).toHaveLength(1));
+    expect(calls('positions.continueWatching')).toEqual([homeContinueArgs()]);
+    expect(calls('favorites.list')).toEqual([homeFavoritesArgs()]);
+    expect(calls('recent.list')).toEqual([homeRecentArgs()]);
+    expect(calls('catalog.recentlyAdded')).toEqual([homeRecentlyAddedArgs('movie'), homeRecentlyAddedArgs('series')]);
+    expect(calls('lists.list')).toEqual([undefined]);
+    // My List's shared query, under its own key.
+    expect(queryClient.getQueryState(LIST_KEY)).toBeDefined();
+    expect(homeCalls()).toHaveLength(8);
+  });
+
+  it('asks only for what the switched-on rails read', async () => {
+    sources.list = [{ id: 's1', kind: 'm3u' }];
+    sources.settings = { tmdb: { enabled: true }, dashboardRails: { hero: false, recentlyAdded: false, tmdbTrending: false } };
+    prefetchScreenData('/dashboard');
+    await waitFor(() => expect(calls('lists.list')).toHaveLength(1));
+    expect(calls('catalog.recentlyAdded')).toEqual([]);
+    expect(calls('tmdb.trending')).toEqual([]);
+  });
+
+  it('asks for no rail without a source (Home shows its welcome)', async () => {
+    prefetchScreenData('/dashboard');
+    await waitFor(() => expect(calls('sources.list')).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(homeCalls()).toEqual([]);
   });
 });
 

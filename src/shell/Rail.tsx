@@ -22,7 +22,7 @@ import {
   Settings as SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { type CSSProperties, type RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
@@ -424,7 +424,8 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
   return fade;
 }
 
-export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCollapsed: boolean }) {
+/** Memoized (performance audit SH-1): it follows the location itself, so the shell's own re-renders pass it by. */
+export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCollapsed: boolean }) {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
   const toggleRail = useShellStore((s) => s.toggleRail);
@@ -592,4 +593,4 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
       </div>
     </nav>
   );
-}
+});

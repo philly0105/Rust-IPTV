@@ -20,7 +20,7 @@ export function displayPrefsOf(settings: Settings | undefined): DisplayPrefs {
 }
 
 export function useDisplayPrefs(): DisplayPrefs {
-  const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const settings = useRpcQuery('settings.get', undefined);
   const { stripCountryPrefix, epgOffsetMinutes } = displayPrefsOf(settings.data);
   return useMemo(() => ({ stripCountryPrefix, epgOffsetMinutes }), [stripCountryPrefix, epgOffsetMinutes]);
 }

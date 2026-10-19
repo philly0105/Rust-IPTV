@@ -77,7 +77,7 @@ export function ListPage() {
   // C2: Ask mode marks locked channels and keeps their programme titles back, as on Live.
   const locks = useListLocks(paged.channels);
   const actions = useListActions();
-  const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const settings = useRpcQuery('settings.get', undefined);
   const sources = useVisibleSources();
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);

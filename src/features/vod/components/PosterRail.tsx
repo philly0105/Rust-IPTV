@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { MyListKey, useMyListKeyFocus, type MyListTarget } from '../hooks/useMyListKey';
 import { handleGridKeyDown } from '../lib/gridNav';
-import { IconButton, cn } from '@/ui';
+import { IconButton, PosterWidthContext, cn } from '@/ui';
 import { PosterCardSkeleton } from './PosterCard';
 
 /** True when the user asked the OS to reduce motion. */
@@ -155,17 +155,20 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
           // Skeletons have nothing to focus, so the loading row clips instead of scrolling (axe scrollable-region-focusable).
           className={cn('-mx-1 flex snap-x scroll-px-1 gap-4 px-1 pt-1 pb-3 motion-safe:scroll-smooth', loading ? 'overflow-x-hidden' : 'overflow-x-auto')}
         >
-          {loading
-            ? Array.from({ length: 8 }, (_, i) => (
-                <div key={i} className="shrink-0" style={{ width: cardWidth }}>
-                  <PosterCardSkeleton />
-                </div>
-              ))
-            : items.map((item, i) => (
-                <div key={i} role="listitem" className="shrink-0 snap-start" style={{ width: cardWidth }}>
-                  {render(item, i, { tabIndex: i === tabStop ? 0 : -1 })}
-                </div>
-              ))}
+          {/* The posters fill the card, so they load at its width without measuring (SH-6). */}
+          <PosterWidthContext.Provider value={cardWidth}>
+            {loading
+              ? Array.from({ length: 8 }, (_, i) => (
+                  <div key={i} className="shrink-0" style={{ width: cardWidth }}>
+                    <PosterCardSkeleton />
+                  </div>
+                ))
+              : items.map((item, i) => (
+                  <div key={i} role="listitem" className="shrink-0 snap-start" style={{ width: cardWidth }}>
+                    {render(item, i, { tabIndex: i === tabStop ? 0 : -1 })}
+                  </div>
+                ))}
+          </PosterWidthContext.Provider>
         </div>
       )}
     </section>

@@ -70,7 +70,7 @@ A variant is stored under `variant_key`, the SHA-256 of `<normalised url>#w=<buc
 
 In the UI, `imageUrl(src, sourceId, width)` and the helpers built on it (`imageAttempts`, `imageCandidates`, `preloadImage`, and `useImageChain` in `src/ui/image.ts`) take the CSS width and add `w`, rounded up on the client to the same buckets (`IMAGE_WIDTH_BUCKETS`, `imageWidthBucket`). A card then keeps one URL, and one browser-cache entry, across small layout changes; a picture wider than 1024 device px gets no `w`. Callers:
 
-- `Poster` measures its frame when the `<img>` mounts and adds `w` from its `clientWidth` (`sizedImageUrl`). `priority` posters (the movie, series and My Videos detail pages) load the original.
+- `Poster` takes `width`, or else the card width a rail provides through `PosterWidthContext` (`DashboardRail`, the VOD `PosterRail`), or else measures its frame when the `<img>` mounts and adds `w` from its `clientWidth` (`sizedImageUrl`). Reading `clientWidth` forced a layout per card when the artwork was cached (performance audit SH-6), so the rails pass the width they already set on each card. `priority` posters (the movie, series and My Videos detail pages) load the original.
 - `ChannelLogo` passes its `size` (36 by default: 64 at 1x, 96 at 2x), and the fullscreen channel panel passes 32.
 - No `w`: backdrops and heroes (`DetailHero`, `HeroCarousel`), cast photos, player artwork, the zap banner, channel history, multiview marks and the hover prefetch (`preloadImage` in `src/features/vod/hooks/prefetch.ts`, which warms the detail page's original).
 

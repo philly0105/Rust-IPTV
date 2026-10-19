@@ -24,6 +24,25 @@ afterEach(() => {
 });
 
 describe('shortcut dispatch', () => {
+  it('queries the DOM for an open modal only once a shortcut a modal would block matches (SH-7)', () => {
+    const query = vi.spyOn(document, 'querySelector');
+    const seen: string[] = [];
+    shortcutRegistry.register('k', () => seen.push('k'), opts);
+    shortcutRegistry.register('mod+s', () => seen.push('mod+s'), opts);
+    press(document.body, 'ArrowDown', { code: 'ArrowDown' });
+    press(document.body, 'ArrowDown', { code: 'ArrowDown', repeat: true });
+    // A mod combo fires in a modal anyway, so it needs no lookup either.
+    press(document.body, 's', { code: 'KeyS', ctrlKey: true });
+    expect(query.mock.calls.filter(([sel]) => sel === '[aria-modal="true"]')).toHaveLength(0);
+    press(document.body, 'k', { code: 'KeyK' });
+    expect(query.mock.calls.filter(([sel]) => sel === '[aria-modal="true"]')).toHaveLength(1);
+    expect(seen).toEqual(['mod+s', 'k']);
+    // An open modal still blocks it.
+    mount('div', { 'aria-modal': 'true' });
+    press(document.body, 'k', { code: 'KeyK' });
+    expect(seen).toEqual(['mod+s', 'k']);
+  });
+
   it('prevents the browser default before the handler runs', () => {
     const seen: boolean[] = [];
     shortcutRegistry.register('space', (e) => seen.push(e.defaultPrevented), opts);

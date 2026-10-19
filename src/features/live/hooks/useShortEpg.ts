@@ -9,7 +9,7 @@ import { StalkerPreviewQueue } from '../lib/stalkerPreviewQueue';
 
 /** True when the Xtream short-EPG fallback applies to a source of `kind`. */
 export function useShortEpgEnabled(kind: SourceKind | undefined): boolean {
-  const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000, enabled: kind === 'xtream' });
+  const settings = useRpcQuery('settings.get', undefined, { enabled: kind === 'xtream' });
   return shortEpgEnabled(kind, settings.data);
 }
 

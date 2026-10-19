@@ -25,7 +25,7 @@ export { ToastProvider, ToastViewport, dismissToast, focusToasts, toast, useToas
 export type { ToastOptions, ToastRecord, ToastVariant } from './Toast';
 export { Badge, Kbd, LiveBadge, ProgressBar, comboKeys } from './Misc';
 export type { BadgeProps, BadgeVariant, KbdProps, ProgressBarProps } from './Misc';
-export { Poster, hueOf, initialsOf } from './Poster';
+export { Poster, PosterWidthContext, hueOf, initialsOf } from './Poster';
 export type { PosterAspect, PosterProps } from './Poster';
 export { QUARTER_BLUR, useImageChain, whenIdle } from './image';
 export type { ImageChain } from './image';

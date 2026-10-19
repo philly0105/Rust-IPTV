@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { ErrorState, Skeleton, cn, useScaledPx } from '@/ui';
+import { ErrorState, PosterWidthContext, Skeleton, cn, useScaledPx } from '@/ui';
 
 import { readRailEmpty, writeRailEmpty } from './railEmpty';
 
@@ -292,11 +292,14 @@ export function DashboardRail<T>({
               TRACK_PAD,
             )}
           >
-            {items!.map((item, i) => (
-              <li key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
-                {renderCard(item, { tabIndex: i === focusIndex ? 0 : -1, 'data-rail-card': '' })}
-              </li>
-            ))}
+            {/* The cards' artwork fills the card, so it loads at this width without measuring (SH-6). */}
+            <PosterWidthContext.Provider value={width}>
+              {items!.map((item, i) => (
+                <li key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
+                  {renderCard(item, { tabIndex: i === focusIndex ? 0 : -1, 'data-rail-card': '' })}
+                </li>
+              ))}
+            </PosterWidthContext.Provider>
           </ul>
           {canPrev && (
             <button

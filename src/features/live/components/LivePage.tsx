@@ -138,7 +138,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- data ---------------------------------------------------------------
   const source = useRpcQuery('sources.get', { id: sourceId }, { enabled: !!sourceId });
-  const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const settings = useRpcQuery('settings.get', undefined);
   const allCategories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
   // The query behind "Hidden channels (n)" below the groups: no request of its own.
   const channelsHidden = (useHiddenChannelCount(sourceId) ?? 0) > 0;

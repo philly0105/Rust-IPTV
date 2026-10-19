@@ -1,8 +1,9 @@
 import { ListPlus, Play, Tv } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
 
+import { HOME_RAIL_LIMIT, homeContinueArgs, homeFavoritesArgs, homeRecentArgs, homeRecentlyAddedArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import {
   itemKey,
@@ -20,10 +21,7 @@ import { CustomListRails } from '@/features/lists/rails';
 import { MyListRail } from '@/features/mylist/components/MyListRail';
 import { useMyList } from '@/features/mylist/hooks/useMyList';
 import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
-import { playItem } from '@/features/player';
-// The module itself, not the barrel: small, no imports, and the barrel mocks in tests leave it alone.
-import { preloadEngines } from '@/features/player/enginePreload';
-import { RpcError } from '@/api/transport';
+import { RpcError, type RpcResult } from '@/api/transport';
 import { snapshotTitle } from '@/lib/title';
 import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast } from '@/ui';
 
@@ -40,7 +38,12 @@ import { HeroSkeleton } from './HeroSkeleton';
 import { buildHeroSlides, titleEndsWithYear, type HeroSlide } from './heroSlides';
 import { minutesLeft, watchedFraction } from './progress';
 
-const RAIL_LIMIT = 24;
+const RAIL_LIMIT = HOME_RAIL_LIMIT;
+
+// The rails that read their own queries, memoized here (SH-4): Home's re-renders for other rails'
+// answers pass them by.
+const HomeMyListRail = memo(MyListRail);
+const HomeCustomListRails = memo(CustomListRails);
 
 export { minutesLeft, watchedFraction } from './progress';
 
@@ -123,7 +126,7 @@ export function DashboardPage() {
 }
 
 function DashboardBody() {
-  const { t, i18n } = useTranslation('shell');
+  const { t } = useTranslation('shell');
   const shell = useShell();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -142,20 +145,26 @@ function DashboardBody() {
   const hasSources = (sources.data?.length ?? 0) > 0;
   // Home plays streams: with something to play, warm hls.js and mpegts.js once the browser is idle
   // (preloadEngines waits for it), so the first play from here does not fetch them after the click.
+  // Behind import(), like playItem below (performance audit SH-2): Rollup puts the small
+  // enginePreload module in the player store's chunk, and a static import made Home's route chunk
+  // wait for about 97 kB of player code before its first render. The module itself, not the
+  // barrel: the barrel mocks in tests leave it alone.
   useEffect(() => {
-    if (hasSources) preloadEngines();
+    if (!hasSources) return;
+    void import('@/features/player/enginePreload').then((m) => m.preloadEngines()).catch(() => undefined);
   }, [hasSources]);
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
   // Hover prefetch targets (C4) need each card's source kind.
   const sourceKinds = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.kind])), [sources.data]);
 
-  const continueWatching = useRpcQuery('positions.continueWatching', { limit: RAIL_LIMIT }, { enabled: hasSources });
-  const favorites = useRpcQuery('favorites.list', {}, { enabled: hasSources });
-  const recent = useRpcQuery('recent.list', { limit: 60 }, { enabled: hasSources });
+  // The arguments come from bootPrefetch, which asks for the same queries at boot (SH-3).
+  const continueWatching = useRpcQuery('positions.continueWatching', homeContinueArgs(), { enabled: hasSources });
+  const favorites = useRpcQuery('favorites.list', homeFavoritesArgs(), { enabled: hasSources });
+  const recent = useRpcQuery('recent.list', homeRecentArgs(), { enabled: hasSources });
   // The hero rotates new arrivals too, so it loads them even when their rail is off.
   const wantAdded = hasSources && (show('hero') || show('recentlyAdded'));
-  const addedMovies = useRpcQuery('catalog.recentlyAdded', { contentType: 'movie', limit: RAIL_LIMIT }, { enabled: wantAdded });
-  const addedSeries = useRpcQuery('catalog.recentlyAdded', { contentType: 'series', limit: RAIL_LIMIT }, { enabled: wantAdded });
+  const addedMovies = useRpcQuery('catalog.recentlyAdded', homeRecentlyAddedArgs('movie'), { enabled: wantAdded });
+  const addedSeries = useRpcQuery('catalog.recentlyAdded', homeRecentlyAddedArgs('series'), { enabled: wantAdded });
   // The shared My List query its rail reads (C3): one fetch, so the quiet state, the
   // pending check and the shared retry below see the same list the rail shows.
   const myList = useMyList({ enabled: hasSources });
@@ -233,22 +242,41 @@ function DashboardBody() {
     if (myListOn && myList.isError) void myList.refetch();
   };
 
-  const play = (args: { ref: ItemRef; episodeId?: string; title: string; subtitle?: string; posterUrl?: string }) => {
-    const source = sourceById.get(args.ref.sourceId);
-    if (!source) {
-      toast({ variant: 'error', title: t('sourceMissing'), description: t('sourceMissingHint') });
-      return;
-    }
-    const isLive = args.ref.contentType === 'live' || args.ref.contentType === 'radio';
-    playItem({
-      ...args,
-      isLive,
-      isRadio: args.ref.contentType === 'radio',
-      sourceKind: source.kind,
-    }).catch((err: unknown) => {
-      toast({ variant: 'error', title: t('playFailed', { title: args.title }), description: err instanceof Error ? err.message : undefined });
-    });
-  };
+  // Stable while the sources hold, so the memoized rails keep their render (SH-4).
+  const play = useCallback<PlayFn>(
+    (args) => {
+      const source = sourceById.get(args.ref.sourceId);
+      if (!source) {
+        toast({ variant: 'error', title: t('sourceMissing'), description: t('sourceMissingHint') });
+        return;
+      }
+      const isLive = args.ref.contentType === 'live' || args.ref.contentType === 'radio';
+      // The player loads on the click (as the command palette does), not with Home's chunk (SH-2).
+      import('@/features/player')
+        .then(({ playItem }) =>
+          playItem({
+            ...args,
+            isLive,
+            isRadio: args.ref.contentType === 'radio',
+            sourceKind: source.kind,
+          }),
+        )
+        .catch((err: unknown) => {
+          toast({ variant: 'error', title: t('playFailed', { title: args.title }), description: err instanceof Error ? err.message : undefined });
+        });
+    },
+    [sourceById, toast, t],
+  );
+  const heroSourceName = useCallback((id: string) => sourceById.get(id)?.name, [sourceById]);
+  const heroCanPlay = useCallback((ref: ItemRef) => sourceById.has(ref.sourceId), [sourceById]);
+  const playSlide = useCallback(
+    (s: HeroSlide) => play({ ref: s.ref, episodeId: s.episodeId, title: s.title ?? '', subtitle: s.subtitle, posterUrl: s.posterUrl }),
+    [play],
+  );
+  const retryAdded = useCallback(() => {
+    void addedMovies.refetch();
+    void addedSeries.refetch();
+  }, [addedMovies.refetch, addedSeries.refetch]);
 
   // First run: nothing to show yet.
   if (sources.isSuccess && !hasSources) {
@@ -286,11 +314,6 @@ function DashboardBody() {
   const heroLayoutPending = sources.isPending || continueWatching.isPending;
   const heroLoading =
     heroLayoutPending || (continueRows.length === 0 && (addedMovies.isPending || addedSeries.isPending));
-  const playSlide = (s: HeroSlide) =>
-    play({ ref: s.ref, episodeId: s.episodeId, title: s.title ?? '', subtitle: s.subtitle, posterUrl: s.posterUrl });
-
-  const seriesBadge = (p: PlaybackPosition) => (p.ref.contentType === 'series' && p.snapshot?.subtitle ? <Badge variant="neutral">{p.snapshot.subtitle}</Badge> : undefined);
-
   // Only rails the user has switched on count: hidden rails with data must not suppress the quiet state.
   const anyRailVisible =
     (show('hero') && heroSlides.length > 0) ||
@@ -358,239 +381,83 @@ function DashboardBody() {
           (heroLoading ? (
             <HeroSkeleton />
           ) : heroSlides.length > 0 ? (
-            <HeroCarousel
-              slides={heroSlides}
-              sourceName={(id) => sourceById.get(id)?.name}
-              canPlay={(ref) => sourceById.has(ref.sourceId)}
-              onPlay={playSlide}
-            />
+            <HeroCarousel slides={heroSlides} sourceName={heroSourceName} canPlay={heroCanPlay} onPlay={playSlide} />
           ) : null)}
 
         {visible('continueWatching') && (
-          <DashboardRail<PlaybackPosition>
-            id="continue-watching"
-            title={t('railContinueWatching')}
+          <ContinueWatchingRail
             items={continueWatching.data ? continueRows : undefined}
             loading={continueWatching.isPending}
             loaded={continueWatching.isSuccess}
             error={railError(continueWatching.error)}
-            errorHint={t('dashboardLocalDataHint')}
-            onRetry={() => void continueWatching.refetch()}
-            getKey={(p) => `${itemKey(p.ref)}|${p.episodeId ?? ''}`}
-            cardWidth={168}
-            skeletonAspect={2 / 3}
-            renderCard={(p, rail) => {
-              // L2-visual-3: a snapshot saved before the player stored the base title still carries
-              // the provider's tags and year; show (and save to My List) what the detail page shows.
-              const base = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title) : undefined;
-              const title = base?.title ?? t('untitled');
-              const left = minutesLeft(p);
-              const snapshot: ItemSnapshot = p.snapshot
-                ? { ...p.snapshot, title, ...(base?.year && !p.snapshot.subtitle ? { subtitle: String(base.year) } : {}) }
-                : { title, contentType: p.ref.contentType };
-              return (
-                <PosterCard
-                  rail={rail}
-                  title={title}
-                  subtitle={left !== undefined ? t('minutesLeft', { count: left }) : p.snapshot?.subtitle}
-                  posterUrl={p.snapshot?.posterUrl}
-                  progress={watchedFraction(p)}
-                  badge={seriesBadge(p)}
-                  ariaLabel={t('resumeTitle', { title })}
-                  myList={{ itemRef: p.ref, snapshot }}
-                  onPlay={() =>
-                    play({ ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot?.subtitle, posterUrl: p.snapshot?.posterUrl })
-                  }
-                />
-              );
-            }}
+            refetch={continueWatching.refetch}
+            play={play}
           />
         )}
 
         {/* My List (C3): the rail checks settings.dashboardRails.myList and its own emptiness itself. */}
-        {visible('myList') && <MyListRail hideError={showSharedError} />}
+        {visible('myList') && <HomeMyListRail hideError={showSharedError} />}
         {/* Run 2 C3: one rail per custom list with "Show on Home" on, in list order. */}
-        <CustomListRails />
+        <HomeCustomListRails />
 
         {visible('liveFavorites') && (
-          <DashboardRail<FavoriteEntry>
-            id="live-favorites"
-            title={t('railLiveFavorites')}
+          <LiveFavoritesRail
             items={liveFavorites}
             loading={favorites.isPending}
             loaded={favorites.isSuccess}
             error={railError(favorites.error)}
-            errorHint={t('dashboardLocalDataHint')}
-            onRetry={() => void favorites.refetch()}
-            seeAll={{ to: '/favorites' }}
-            getKey={(f) => itemKey(f.ref)}
-            cardWidth={232}
-            skeletonAspect={16 / 9}
-            renderCard={(f, rail) => {
-              const nn = nowNext.data?.[itemKey(f.ref)];
-              return (
-                <ChannelCard
-                  rail={rail}
-                  name={f.snapshot.title}
-                  logoUrl={f.snapshot.posterUrl}
-                  now={nn?.now?.title}
-                  nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
-                  sourceName={sourceById.get(f.ref.sourceId)?.name}
-                  showSourceWithNow={manySources}
-                  isRadio={f.ref.contentType === 'radio'}
-                  ariaLabel={t('playTitle', { title: f.snapshot.title })}
-                  onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
-                  channel={snapshotChannel(f.ref, f.snapshot)}
-                />
-              );
-            }}
+            refetch={favorites.refetch}
+            nowNext={nowNext.data}
+            epgOffset={epgOffset}
+            sourceById={sourceById}
+            manySources={manySources}
+            play={play}
           />
         )}
 
         {visible('recentlyWatchedLive') && (
-          <DashboardRail<RecentEntry>
-            id="recent-live"
-            title={t('railRecentLive')}
+          <RecentLiveRail
             items={recentLive}
             loading={recent.isPending}
             loaded={recent.isSuccess}
             error={railError(recent.error)}
-            errorHint={t('dashboardLocalDataHint')}
-            onRetry={() => void recent.refetch()}
-            seeAll={{ to: '/recent' }}
-            getKey={(r) => itemKey(r.ref)}
-            cardWidth={232}
-            skeletonAspect={16 / 9}
-            renderCard={(r, rail) => (
-              <ChannelCard
-                rail={rail}
-                name={r.snapshot.title}
-                logoUrl={r.snapshot.posterUrl}
-                sourceName={sourceById.get(r.ref.sourceId)?.name}
-                isRadio={r.ref.contentType === 'radio'}
-                ariaLabel={t('playTitle', { title: r.snapshot.title })}
-                onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
-                channel={snapshotChannel(r.ref, r.snapshot)}
-              />
-            )}
+            refetch={recent.refetch}
+            sourceById={sourceById}
+            play={play}
           />
         )}
 
         {visible('favoriteMoviesAndSeries') && (
-          <DashboardRail<FavoriteEntry>
-            id="favorite-vod"
-            title={t('railFavoriteVod')}
+          <FavoriteVodRail
             items={vodFavorites}
             loading={favorites.isPending}
             loaded={favorites.isSuccess}
             // Both favorites rails read one query: only one of them shows its error.
             error={show('liveFavorites') ? undefined : railError(favorites.error)}
-            errorHint={t('dashboardLocalDataHint')}
-            onRetry={() => void favorites.refetch()}
-            seeAll={{ to: '/favorites' }}
-            getKey={(f) => itemKey(f.ref)}
-            cardWidth={168}
-            skeletonAspect={2 / 3}
-            renderCard={(f, rail) => {
-              // L2-visual-3: the base title, as on the detail page; a year stripped from it becomes the subtitle.
-              const base = snapshotTitle(f.ref, f.snapshot.title);
-              const year = f.snapshot.subtitle || (base.year ? String(base.year) : undefined);
-              // A year the title still ends with ("Summer Static (2025)") is not repeated under it.
-              const own = year && !titleEndsWithYear(base.title, year) ? year : undefined;
-              const subtitle = own ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
-              return (
-                <PosterCard
-                  rail={rail}
-                  title={base.title}
-                  subtitle={subtitle}
-                  posterUrl={f.snapshot.posterUrl}
-                  to={itemPath(f.ref)}
-                  ariaLabel={joinList([base.title, subtitle], i18n.language)}
-                  myList={{ itemRef: f.ref, snapshot: { ...f.snapshot, title: base.title, ...(year ? { subtitle: year } : {}) } }}
-                />
-              );
-            }}
+            refetch={favorites.refetch}
           />
         )}
 
-        {visible('recentSources') && (
-          <DashboardRail<Source>
-            id="recent-sources"
-            title={t('railRecentSources')}
-            items={rankedSources}
-            loading={sources.isPending}
-            seeAll={{ to: '/sources', label: t('manageSources') }}
-            getKey={(s) => s.id}
-            cardWidth={232}
-            skeletonAspect={16 / 9}
-            renderCard={(s, rail) => <SourceCard rail={rail} source={s} />}
-          />
-        )}
+        {visible('recentSources') && <RecentSourcesRail items={rankedSources} loading={sources.isPending} />}
 
         {visible('recentlyAdded') && (
-          <DashboardRail<VodItem | SeriesItem>
-            id="recently-added"
-            title={t('railRecentlyAdded')}
+          <RecentlyAddedRail
             items={recentlyAdded}
             loading={addedMovies.isPending || addedSeries.isPending}
             loaded={addedMovies.isSuccess && addedSeries.isSuccess}
             error={railError(addedMovies.error ?? addedSeries.error)}
-            errorHint={t('dashboardLocalDataHint')}
-            onRetry={() => {
-              void addedMovies.refetch();
-              void addedSeries.refetch();
-            }}
-            getKey={(v) => itemKey(v.ref)}
-            cardWidth={168}
-            skeletonAspect={2 / 3}
-            renderCard={(v, rail) => {
-              const rating = v.rating ? v.rating.toFixed(1) : undefined;
-              // The title the detail page and the hero show: no trailing year or provider tag.
-              const title = v.titleBase || v.title;
-              return (
-                <PosterCard
-                  rail={rail}
-                  title={title}
-                  subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, !titleEndsWithYear(title, v.year) && v.year], i18n.language)}
-                  posterUrl={v.posterUrl}
-                  backdropUrl={v.backdropUrl}
-                  badge={rating ? <Badge variant="neutral">{rating}</Badge> : undefined}
-                  to={itemPath(v.ref)}
-                  // Name first: the rating badge sits before the caption in the DOM.
-                  ariaLabel={joinList(
-                    [title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })],
-                    i18n.language,
-                  )}
-                  myList={myListTarget(v)}
-                />
-              );
-            }}
+            refetch={retryAdded}
+            sourceById={sourceById}
           />
         )}
 
         {visible('tmdbTrending') && tmdbEnabled && (
-          <DashboardRail<TmdbBrief>
-            id="tmdb-trending"
-            title={t('railTrending')}
+          <TrendingRail
             items={trending.data}
             loading={trending.isPending}
             loaded={trending.isSuccess}
             error={railError(trending.error)}
-            onRetry={() => void trending.refetch()}
-            getKey={(b) => `${b.mediaType}-${b.tmdbId}`}
-            cardWidth={168}
-            skeletonAspect={2 / 3}
-            renderCard={(b, rail) => (
-              <PosterCard
-                rail={rail}
-                title={b.title}
-                subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
-                posterUrl={b.posterUrl}
-                badge={b.rating ? <Badge variant="neutral">{b.rating.toFixed(1)}</Badge> : undefined}
-                to={`/search?q=${encodeURIComponent(b.title)}`}
-                ariaLabel={t('findTitle', { title: b.title })}
-              />
-            )}
+            refetch={trending.refetch}
           />
         )}
 
@@ -611,3 +478,304 @@ function DashboardBody() {
     </SourceKindContext.Provider>
   );
 }
+
+type PlayArgs = { ref: ItemRef; episodeId?: string; title: string; subtitle?: string; posterUrl?: string };
+type PlayFn = (args: PlayArgs) => void;
+
+/**
+ * What a rail gets from its query. `refetch` is TanStack's bound method (or a stable callback), so
+ * it stays the same function across renders.
+ */
+interface RailQueryProps {
+  loading: boolean;
+  loaded: boolean;
+  error: unknown;
+  refetch: () => unknown;
+}
+
+// Home's rails (performance audit SH-4). Each one is memoized and gets stable props (its rows,
+// its query's state, the shared `play`), so one of the ten or so answers of a cold start
+// re-renders the rail it belongs to, not every rail of up to 24 cards. The page keeps the queries:
+// the shared error, the layout gate and the quiet state read all of them.
+
+const continueKey = (p: PlaybackPosition) => `${itemKey(p.ref)}|${p.episodeId ?? ''}`;
+const refKey = (e: { ref: ItemRef }) => itemKey(e.ref);
+const sourceKey = (s: Source) => s.id;
+const trendingKey = (b: TmdbBrief) => `${b.mediaType}-${b.tmdbId}`;
+
+const seriesBadge = (p: PlaybackPosition) => (p.ref.contentType === 'series' && p.snapshot?.subtitle ? <Badge variant="neutral">{p.snapshot.subtitle}</Badge> : undefined);
+
+const ContinueWatchingRail = memo(function ContinueWatchingRail({
+  items,
+  loading,
+  loaded,
+  error,
+  refetch,
+  play,
+}: RailQueryProps & { items: readonly PlaybackPosition[] | undefined; play: PlayFn }) {
+  const { t } = useTranslation('shell');
+  return (
+    <DashboardRail<PlaybackPosition>
+      id="continue-watching"
+      title={t('railContinueWatching')}
+      items={items}
+      loading={loading}
+      loaded={loaded}
+      error={error}
+      errorHint={t('dashboardLocalDataHint')}
+      onRetry={() => void refetch()}
+      getKey={continueKey}
+      cardWidth={168}
+      skeletonAspect={2 / 3}
+      renderCard={(p, rail) => {
+        // L2-visual-3: a snapshot saved before the player stored the base title still carries
+        // the provider's tags and year; show (and save to My List) what the detail page shows.
+        const base = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title) : undefined;
+        const title = base?.title ?? t('untitled');
+        const left = minutesLeft(p);
+        const snapshot: ItemSnapshot = p.snapshot
+          ? { ...p.snapshot, title, ...(base?.year && !p.snapshot.subtitle ? { subtitle: String(base.year) } : {}) }
+          : { title, contentType: p.ref.contentType };
+        return (
+          <PosterCard
+            rail={rail}
+            title={title}
+            subtitle={left !== undefined ? t('minutesLeft', { count: left }) : p.snapshot?.subtitle}
+            posterUrl={p.snapshot?.posterUrl}
+            progress={watchedFraction(p)}
+            badge={seriesBadge(p)}
+            ariaLabel={t('resumeTitle', { title })}
+            myList={{ itemRef: p.ref, snapshot }}
+            onPlay={() => play({ ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot?.subtitle, posterUrl: p.snapshot?.posterUrl })}
+          />
+        );
+      }}
+    />
+  );
+});
+
+const LiveFavoritesRail = memo(function LiveFavoritesRail({
+  items,
+  loading,
+  loaded,
+  error,
+  refetch,
+  nowNext,
+  epgOffset,
+  sourceById,
+  manySources,
+  play,
+}: RailQueryProps & {
+  items: readonly FavoriteEntry[];
+  nowNext: RpcResult<'epg.nowNext'> | undefined;
+  epgOffset: number;
+  sourceById: ReadonlyMap<string, Source>;
+  manySources: boolean;
+  play: PlayFn;
+}) {
+  const { t } = useTranslation('shell');
+  return (
+    <DashboardRail<FavoriteEntry>
+      id="live-favorites"
+      title={t('railLiveFavorites')}
+      items={items}
+      loading={loading}
+      loaded={loaded}
+      error={error}
+      errorHint={t('dashboardLocalDataHint')}
+      onRetry={() => void refetch()}
+      seeAll={{ to: '/favorites' }}
+      getKey={refKey}
+      cardWidth={232}
+      skeletonAspect={16 / 9}
+      renderCard={(f, rail) => {
+        const nn = nowNext?.[itemKey(f.ref)];
+        return (
+          <ChannelCard
+            rail={rail}
+            name={f.snapshot.title}
+            logoUrl={f.snapshot.posterUrl}
+            now={nn?.now?.title}
+            nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
+            sourceName={sourceById.get(f.ref.sourceId)?.name}
+            showSourceWithNow={manySources}
+            isRadio={f.ref.contentType === 'radio'}
+            ariaLabel={t('playTitle', { title: f.snapshot.title })}
+            onPlay={() => play({ ref: f.ref, title: f.snapshot.title, posterUrl: f.snapshot.posterUrl })}
+            channel={snapshotChannel(f.ref, f.snapshot)}
+          />
+        );
+      }}
+    />
+  );
+});
+
+const RecentLiveRail = memo(function RecentLiveRail({
+  items,
+  loading,
+  loaded,
+  error,
+  refetch,
+  sourceById,
+  play,
+}: RailQueryProps & { items: readonly RecentEntry[]; sourceById: ReadonlyMap<string, Source>; play: PlayFn }) {
+  const { t } = useTranslation('shell');
+  return (
+    <DashboardRail<RecentEntry>
+      id="recent-live"
+      title={t('railRecentLive')}
+      items={items}
+      loading={loading}
+      loaded={loaded}
+      error={error}
+      errorHint={t('dashboardLocalDataHint')}
+      onRetry={() => void refetch()}
+      seeAll={{ to: '/recent' }}
+      getKey={refKey}
+      cardWidth={232}
+      skeletonAspect={16 / 9}
+      renderCard={(r, rail) => (
+        <ChannelCard
+          rail={rail}
+          name={r.snapshot.title}
+          logoUrl={r.snapshot.posterUrl}
+          sourceName={sourceById.get(r.ref.sourceId)?.name}
+          isRadio={r.ref.contentType === 'radio'}
+          ariaLabel={t('playTitle', { title: r.snapshot.title })}
+          onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
+          channel={snapshotChannel(r.ref, r.snapshot)}
+        />
+      )}
+    />
+  );
+});
+
+const FavoriteVodRail = memo(function FavoriteVodRail({ items, loading, loaded, error, refetch }: RailQueryProps & { items: readonly FavoriteEntry[] }) {
+  const { t, i18n } = useTranslation('shell');
+  return (
+    <DashboardRail<FavoriteEntry>
+      id="favorite-vod"
+      title={t('railFavoriteVod')}
+      items={items}
+      loading={loading}
+      loaded={loaded}
+      error={error}
+      errorHint={t('dashboardLocalDataHint')}
+      onRetry={() => void refetch()}
+      seeAll={{ to: '/favorites' }}
+      getKey={refKey}
+      cardWidth={168}
+      skeletonAspect={2 / 3}
+      renderCard={(f, rail) => {
+        // L2-visual-3: the base title, as on the detail page; a year stripped from it becomes the subtitle.
+        const base = snapshotTitle(f.ref, f.snapshot.title);
+        const year = f.snapshot.subtitle || (base.year ? String(base.year) : undefined);
+        // A year the title still ends with ("Summer Static (2025)") is not repeated under it.
+        const own = year && !titleEndsWithYear(base.title, year) ? year : undefined;
+        const subtitle = own ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
+        return (
+          <PosterCard
+            rail={rail}
+            title={base.title}
+            subtitle={subtitle}
+            posterUrl={f.snapshot.posterUrl}
+            to={itemPath(f.ref)}
+            ariaLabel={joinList([base.title, subtitle], i18n.language)}
+            myList={{ itemRef: f.ref, snapshot: { ...f.snapshot, title: base.title, ...(year ? { subtitle: year } : {}) } }}
+          />
+        );
+      }}
+    />
+  );
+});
+
+const RecentSourcesRail = memo(function RecentSourcesRail({ items, loading }: { items: readonly Source[]; loading: boolean }) {
+  const { t } = useTranslation('shell');
+  return (
+    <DashboardRail<Source>
+      id="recent-sources"
+      title={t('railRecentSources')}
+      items={items}
+      loading={loading}
+      seeAll={{ to: '/sources', label: t('manageSources') }}
+      getKey={sourceKey}
+      cardWidth={232}
+      skeletonAspect={16 / 9}
+      renderCard={(s, rail) => <SourceCard rail={rail} source={s} />}
+    />
+  );
+});
+
+const RecentlyAddedRail = memo(function RecentlyAddedRail({
+  items,
+  loading,
+  loaded,
+  error,
+  refetch,
+  sourceById,
+}: RailQueryProps & { items: readonly (VodItem | SeriesItem)[]; sourceById: ReadonlyMap<string, Source> }) {
+  const { t, i18n } = useTranslation('shell');
+  return (
+    <DashboardRail<VodItem | SeriesItem>
+      id="recently-added"
+      title={t('railRecentlyAdded')}
+      items={items}
+      loading={loading}
+      loaded={loaded}
+      error={error}
+      errorHint={t('dashboardLocalDataHint')}
+      onRetry={() => void refetch()}
+      getKey={refKey}
+      cardWidth={168}
+      skeletonAspect={2 / 3}
+      renderCard={(v, rail) => {
+        const rating = v.rating ? v.rating.toFixed(1) : undefined;
+        // The title the detail page and the hero show: no trailing year or provider tag.
+        const title = v.titleBase || v.title;
+        return (
+          <PosterCard
+            rail={rail}
+            title={title}
+            subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, !titleEndsWithYear(title, v.year) && v.year], i18n.language)}
+            posterUrl={v.posterUrl}
+            backdropUrl={v.backdropUrl}
+            badge={rating ? <Badge variant="neutral">{rating}</Badge> : undefined}
+            to={itemPath(v.ref)}
+            // Name first: the rating badge sits before the caption in the DOM.
+            ariaLabel={joinList([title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })], i18n.language)}
+            myList={myListTarget(v)}
+          />
+        );
+      }}
+    />
+  );
+});
+
+const TrendingRail = memo(function TrendingRail({ items, loading, loaded, error, refetch }: RailQueryProps & { items: readonly TmdbBrief[] | undefined }) {
+  const { t, i18n } = useTranslation('shell');
+  return (
+    <DashboardRail<TmdbBrief>
+      id="tmdb-trending"
+      title={t('railTrending')}
+      items={items}
+      loading={loading}
+      loaded={loaded}
+      error={error}
+      onRetry={() => void refetch()}
+      getKey={trendingKey}
+      cardWidth={168}
+      skeletonAspect={2 / 3}
+      renderCard={(b, rail) => (
+        <PosterCard
+          rail={rail}
+          title={b.title}
+          subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
+          posterUrl={b.posterUrl}
+          badge={b.rating ? <Badge variant="neutral">{b.rating.toFixed(1)}</Badge> : undefined}
+          to={`/search?q=${encodeURIComponent(b.title)}`}
+          ariaLabel={t('findTitle', { title: b.title })}
+        />
+      )}
+    />
+  );
+});

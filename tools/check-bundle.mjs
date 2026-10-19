@@ -1,8 +1,9 @@
 // Entry-chunk budget (C4, SC10): `pnpm build && pnpm size:check`.
 //
 // Prints every JavaScript chunk in dist/assets, largest first, and exits 1 when the entry chunk
-// (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, or when
-// there is no build to check. Plain Node, no dependencies.
+// (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when
+// Home's route chunk statically loads player code (performance audit SH-2), or when there is no
+// build to check. Plain Node, no dependencies.
 //
 //   node tools/check-bundle.mjs [distDir]    (default: dist)
 //
@@ -15,6 +16,17 @@ import { gzipSync } from 'node:zlib';
 /** About 10 % over the 243,927-byte entry measured before Run 1 (run.md SC10). */
 const BUDGET = 268_000;
 const ENTRY = /^index-[\w-]+\.js$/;
+/** Home's lazy route chunk, named after `src/shell/dashboard/DashboardPage.tsx`. */
+const HOME = /^DashboardPage-[\w-]+\.js$/;
+/**
+ * Player chunks (named after their first module: the player store, `playback`, `mpvExtras`, the
+ * `@/features/player` barrel, the stage and the engines). A lazy route renders only after its
+ * static imports have run, so one of these in Home's static closure made a cold Home wait for
+ * about 97 kB of player code it needs only after a click. Home loads the player behind import().
+ */
+const PLAYER = /^(?:store|playback|mpvExtras|player-index|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
+/** A static `import`/`export ... from "./chunk.js"` in Rollup's output; `import("./x.js")` is not one. */
+const STATIC_IMPORT = /\b(?:import|export)\s*(?:\{[^}]*\}\s*from\s*|\*\s*as\s*[\w$]+\s*from\s*|[\w$]+\s*from\s*)?["']\.\/([\w.-]+\.js)["']/g;
 
 const dist = resolve(process.argv[2] ?? 'dist');
 const assets = join(dist, 'assets');
@@ -78,3 +90,30 @@ if (over) {
   fail(`entry chunk over the ${bytes(BUDGET)}-byte budget. Load the new code lazily (route chunks, dialogs behind import()); see docs/architecture/performance.md.`);
 }
 console.log('size:check: entry chunk within budget.');
+console.log('');
+
+/** Every chunk `file` loads through static imports, itself included (each chunk read once). */
+function staticClosure(file) {
+  const seen = new Set();
+  const stack = [file];
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (seen.has(next) || !existsSync(join(assets, next))) continue;
+    seen.add(next);
+    for (const m of readFileSync(join(assets, next), 'utf8').matchAll(STATIC_IMPORT)) stack.push(m[1]);
+  }
+  return seen;
+}
+
+const home = chunks.find((c) => HOME.test(c.file));
+if (!home) fail(`no Home route chunk (DashboardPage-*.js) in ${shown}; update HOME in tools/check-bundle.mjs if the page moved.`);
+const homeClosure = staticClosure(home.file);
+const boot = (f) => ENTRY.test(f) || /^(?:vendor|locale)-/.test(f);
+const beyondBoot = chunks.filter((c) => homeClosure.has(c.file) && !boot(c.file));
+const homeBytes = beyondBoot.reduce((sum, c) => sum + c.size, 0);
+console.log(`Home ${home.file}: ${beyondBoot.length} chunks, ${bytes(homeBytes)} bytes beyond the boot chunks before its first render.`);
+const player = [...homeClosure].filter((f) => PLAYER.test(f)).sort();
+if (player.length > 0) {
+  fail(`Home's route chunk statically loads player code (${player.join(', ')}). Load the player inside the click handler with import('@/features/player'); see docs/architecture/performance.md.`);
+}
+console.log('size:check: no player chunks in Home\'s static imports.');

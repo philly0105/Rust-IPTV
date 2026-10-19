@@ -68,7 +68,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const { t, i18n } = useTranslation('live');
   const { toast } = useToast();
   const now = useNow(30_000);
-  const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const settings = useRpcQuery('settings.get', undefined);
   const [localMode, setLocalMode] = useState<Mode | null>(null);
   const mode: Mode = localMode ?? settings.data?.epgViewMode ?? 'timeline';
   const { channel, sourceKind } = props;

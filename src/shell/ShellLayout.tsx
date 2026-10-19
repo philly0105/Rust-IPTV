@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
+import type { Settings } from '@/api/types';
 import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
@@ -19,7 +20,7 @@ import { useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
-import { useSettings } from './useSettings';
+import { useSettings, useSettingsValue } from './useSettings';
 
 // player: the dock and the external-playback footer carry the whole playback UI (surfaces,
 // controls, engines, the store), about a third of the app's code, in their own chunk (C4 entry
@@ -277,6 +278,32 @@ function ShellNavigationEffects() {
   return null;
 }
 
+// SH-1 (performance audit): the shell's router and settings readers live in these leaves. The
+// router hands every route a new context on each navigation, and `useNavigate`/`useLocation` in
+// ShellLayout re-rendered it, and everything under it (dock, controls, rail, header), on each
+// navigation, each typed `?q=` and each `lastRoute` save. ShellLayout reads only the language.
+
+/** Wires app events to the cache, toasts and navigation (useShellEvents). Renders nothing. */
+function ShellEvents() {
+  useShellEvents();
+  return null;
+}
+
+/** Saves the current screen as settings.lastRoute (useLastRoutePersistence). Renders nothing. */
+function LastRoutePersistence() {
+  const settings = useSettings();
+  useLastRoutePersistence(settings.isSuccess, settings.data?.lastRoute);
+  return null;
+}
+
+/** ThemeSync fed from settings, so a settings write re-renders this leaf only. */
+function SettingsThemeSync() {
+  const settings = useSettings();
+  return <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />;
+}
+
+const selectLanguage = (s: Settings) => s.language;
+
 /**
  * Text-free stand-in for the shell, shown on a fresh profile while the
  * server's language loads (no English first frame). Same geometry as the
@@ -325,13 +352,12 @@ function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
  */
 export function ShellLayout() {
   const { t } = useTranslation('shell');
-  const settings = useSettings();
+  const language = useSettingsValue(selectLanguage);
   const railPref = useShellStore((s) => s.railCollapsed);
   const narrow = useMediaQuery('(max-width: 1023px)');
   const wide = useMediaQuery('(min-width: 1440px)');
   const collapsed = railPref || narrow;
 
-  useShellEvents();
   useParentalEvents();
   const player = usePlayerModule();
   useWatchStats(!!player);
@@ -339,8 +365,7 @@ export function ShellLayout() {
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
   useEffect(() => registerGateHost(), []);
-  const languageSettled = useLanguageSync(settings.data?.language, settings.isError);
-  useLastRoutePersistence(settings.isSuccess, settings.data?.lastRoute);
+  const languageSettled = useLanguageSync(language.data, language.isError);
   useWindowStatePersistence();
 
   useEffect(() => {
@@ -353,70 +378,81 @@ export function ShellLayout() {
       .catch(() => {});
   }, []);
 
+  // The same first child in both branches, so the leaves stay mounted when the skeleton goes.
+  const leaves = (
+    <>
+      <ShellEvents />
+      <LastRoutePersistence />
+      <SettingsThemeSync />
+    </>
+  );
+
   if (!languageSettled) {
     return (
       <>
-        <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />
+        {leaves}
         <ShellSkeleton collapsed={collapsed} />
       </>
     );
   }
 
   return (
-    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell">
-      <a
-        href="#main"
-        className="sr-only z-[90] rounded-md bg-accent px-4 py-2 text-accent-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
-      >
-        {t('skipToContent')}
-      </a>
-      <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />
-      <GlobalShortcuts />
-      <Rail collapsed={collapsed} autoCollapsed={narrow} />
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <Header panelInline={wide} narrow={narrow} />
-        <div className="flex min-h-0 flex-1">
-          {/*
-            The outlet is a bounded flex column at every width: the row above
-            has a definite height (h-dvh minus header and footer), and
-            min-h-0 lets it shrink. Pages either grow (main scrolls) or fill
-            it with `flex-1 min-h-0` / `h-full` and scroll inside, which gives
-            VirtualList / VirtualGrid a bounded scroll parent.
-          */}
-          <main
-            id="main"
-            tabIndex={-1}
-            data-shell-outlet=""
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
-          >
-            <Outlet />
-          </main>
-          <ShellNavigationEffects />
-          <ContextPanel inline={wide} />
+    <>
+      {leaves}
+      <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell">
+        <a
+          href="#main"
+          className="sr-only z-[90] rounded-md bg-accent px-4 py-2 text-accent-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
+        >
+          {t('skipToContent')}
+        </a>
+        <GlobalShortcuts />
+        <Rail collapsed={collapsed} autoCollapsed={narrow} />
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <Header panelInline={wide} narrow={narrow} />
+          <div className="flex min-h-0 flex-1">
+            {/*
+              The outlet is a bounded flex column at every width: the row above
+              has a definite height (h-dvh minus header and footer), and
+              min-h-0 lets it shrink. Pages either grow (main scrolls) or fill
+              it with `flex-1 min-h-0` / `h-full` and scroll inside, which gives
+              VirtualList / VirtualGrid a bounded scroll parent.
+            */}
+            <main
+              id="main"
+              tabIndex={-1}
+              data-shell-outlet=""
+              className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
+            >
+              <Outlet />
+            </main>
+            <ShellNavigationEffects />
+            <ContextPanel inline={wide} />
+          </div>
+          {player && <player.ExternalPlaybackFooter />}
         </div>
-        {player && <player.ExternalPlaybackFooter />}
-      </div>
-      {player && <player.PlayerDock />}
-      <Suspense fallback={null}>
-        <CommandPalette />
-        <ShortcutOverlay />
-      </Suspense>
-      <ToastViewport />
-      <Suspense fallback={null}>
-        <ParentalGateHost />
-      </Suspense>
-      {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
-      {player && (
+        {player && <player.PlayerDock />}
         <Suspense fallback={null}>
-          <RecordingWatcher />
+          <CommandPalette />
+          <ShortcutOverlay />
         </Suspense>
-      )}
-      {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
-      <ListsDialogHost />
-      <ChannelEditDialogHost />
-      <Suspense fallback={null}>
-        <OnboardingHost />
-      </Suspense>
-    </div>
+        <ToastViewport />
+        <Suspense fallback={null}>
+          <ParentalGateHost />
+        </Suspense>
+        {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
+        {player && (
+          <Suspense fallback={null}>
+            <RecordingWatcher />
+          </Suspense>
+        )}
+        {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
+        <ListsDialogHost />
+        <ChannelEditDialogHost />
+        <Suspense fallback={null}>
+          <OnboardingHost />
+        </Suspense>
+      </div>
+    </>
   );
 }

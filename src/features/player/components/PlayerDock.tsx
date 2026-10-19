@@ -1,5 +1,5 @@
 import { GripHorizontal, Maximize2, X } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useInRouterContext, useNavigate } from 'react-router';
@@ -97,8 +97,9 @@ function ExpandBase({ label, onExpand }: { label: string; onExpand(): void }) {
  * Rendered once by the shell. Owns one persistent host node for the player and moves it
  * (DOM move, no remount) into the mounted <PlayerStage /> or into the floating mini frame.
  * Also binds playback shortcuts, remote control, external-player events and unload flushes.
+ * Memoized (performance audit SH-1): the shell's own re-renders pass it by.
  */
-export function PlayerDock() {
+export const PlayerDock = memo(function PlayerDock() {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const mode = usePlayerStore((s) => s.mode);
@@ -340,4 +341,4 @@ export function PlayerDock() {
       <div ref={pipSlotRef} data-pip-layer="" hidden={!inPip} className="fixed inset-0 z-[2147483000] bg-black" />
     </>
   );
-}
+});

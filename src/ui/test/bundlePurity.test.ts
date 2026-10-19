@@ -11,22 +11,37 @@
  *
  * Tiny chunks are merged (experimentalMinChunkSize) and each language is one chunk, so a cold
  * start makes about half the JS requests and a foreign language loads in one.
+ *
+ * Performance audit: a production build resolves react-router's `dist/production` files
+ * (BUNDLE-ROUTER), `vendor-ui` holds only what the shell needs at boot (SH-10), and the build
+ * writes its asset list into the service worker (SH-11).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import viteConfig from '../../../vite.config';
+import viteConfigFn, { withAssetList } from '../../../vite.config';
 
 const ROOT = join(__dirname, '..', '..', '..');
+type ConfigEnv = Parameters<Extract<typeof viteConfigFn, (...args: never[]) => unknown>>[0];
+const resolveConfig = (command: ConfigEnv['command']) =>
+  (viteConfigFn as (env: ConfigEnv) => Record<string, unknown>)({ command, mode: command === 'build' ? 'production' : 'development' });
+const viteConfig = resolveConfig('build');
 const WRAPPERS = ['memo', 'lazy', 'forwardRef', 'createContext'];
+
+interface Alias {
+  find: string | RegExp;
+  replacement: string;
+}
+const aliases = (config: Record<string, unknown>): Alias[] => ((config as { resolve?: { alias?: Alias[] } }).resolve?.alias ?? []);
 
 interface RollupShape {
   treeshake?: { manualPureFunctions?: readonly string[] };
   output?: { experimentalMinChunkSize?: number; manualChunks?: (id: string) => string | undefined };
 }
 const rollup = (viteConfig as { build?: { rollupOptions?: RollupShape } }).build?.rollupOptions ?? {};
+const ROUTER = (a: Alias) => a.find instanceof RegExp && a.find.test('react-router');
 const pureList = (): readonly string[] => rollup.treeshake?.manualPureFunctions ?? [];
 
 function sources(dir: string): string[] {
@@ -71,7 +86,37 @@ describe('bundle shape', () => {
     expect(chunk!('C:\\app\\src\\i18n\\de\\common.json')).toBe('locale-de');
     expect(chunk!('/app/src/i18n/de/settings.json')).toBe('locale-de');
     expect(chunk!('/app/src/i18n/zhtw/live.json')).toBe('locale-zhtw');
+    // The folder's index.ts gathers its namespaces for loadLanguage and goes with them (SH-8).
+    expect(chunk!('/app/src/i18n/de/index.ts')).toBe('locale-de');
+    expect(chunk!('C:\\app\\src\\i18n\\ja\\index.ts')).toBe('locale-ja');
     expect(chunk!('/app/src/i18n/lazyLocales.ts')).toBeUndefined();
+    expect(chunk!('/app/src/i18n/index.ts')).toBeUndefined();
     expect(chunk!('/app/src/ui/VirtualGrid.tsx')).toBeUndefined();
+  });
+
+  it('builds against react-router\'s production files, not the dev build with ENABLE_DEV_WARNINGS', () => {
+    const router = aliases(viteConfig).find(ROUTER);
+    expect(router?.replacement.replace(/\\/g, '/')).toMatch(/node_modules\/react-router\/dist\/production\/index\.mjs$/);
+    // Only the bare specifier: `react-router/dom` and the `@/` alias are left alone.
+    expect((router!.find as RegExp).test('react-router/dom')).toBe(false);
+    // Dev keeps the warnings.
+    expect(aliases(resolveConfig('serve')).find(ROUTER)).toBeUndefined();
+    expect(aliases(viteConfig).find((a) => a.find === '@')).toBeDefined();
+  });
+
+  it('keeps cmdk, its Radix dialog stack and the icons out of the boot-time vendor-ui chunk', () => {
+    const chunk = rollup.output!.manualChunks!;
+    expect(chunk('/app/node_modules/.pnpm/zustand@5/node_modules/zustand/esm/index.mjs')).toBe('vendor-ui');
+    expect(chunk('/app/node_modules/.pnpm/cmdk@1/node_modules/cmdk/dist/index.mjs')).toBeUndefined();
+    expect(chunk('/app/node_modules/.pnpm/x/node_modules/@radix-ui/react-dialog/dist/index.mjs')).toBeUndefined();
+    expect(chunk('/app/node_modules/.pnpm/lucide-react@1/node_modules/lucide-react/dist/esm/icons/play.mjs')).toBeUndefined();
+  });
+
+  it("writes the build's /assets/ URLs into the service worker's placeholder", () => {
+    const source = readFileSync(join(ROOT, 'public', 'sw.js'), 'utf8');
+    expect(source).toContain('const ASSETS = /* build:assets */ null;');
+    const built = withAssetList(source, ['assets/index-b.js', 'assets/a.css', 'index.html', 'assets/DashboardPage-c.js']);
+    expect(built).toContain('const ASSETS = ["/assets/DashboardPage-c.js","/assets/a.css","/assets/index-b.js"];');
+    expect(built).not.toContain('build:assets');
   });
 });

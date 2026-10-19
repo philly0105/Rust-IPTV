@@ -229,7 +229,15 @@ with its `Content-Encoding`.
   `public/sw.js` are copied into `dist/`. The service worker is registered
   only in the web build (never in Tauri). It serves `/assets/*` cache-first,
   page navigations network-first with the cached shell as the offline
-  fallback, and never touches `/api/*`.
+  fallback, and never touches `/api/*`. `pnpm build` writes the build's
+  `/assets/*` URLs into `dist/sw.js` (the `serviceWorkerAssets` plugin in
+  `vite.config.ts` fills its `ASSETS` placeholder), so the worker's bytes
+  change with every build and the browser installs the new one. Its
+  activate handler then deletes cached `/assets/*` entries that are not in
+  the list; before, each deploy's chunks piled up in the one cache
+  (performance audit SH-11). A tab still running the old build can no
+  longer load an old lazy chunk from the cache after that, which the server
+  no longer has either.
 
 ### Compression
 `compression()` in `src/lib.rs` (tower-http `CompressionLayer`) wraps only

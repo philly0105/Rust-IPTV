@@ -1,7 +1,7 @@
 /**
  * The first data of the screen the app opens on, asked for at boot (L3-ui-data-x7). A cold start
- * or reload of a channel list or a VOD landing page otherwise sends its first requests only once
- * the page chunk has loaded and the page has rendered. main.tsx calls {@link prefetchScreenData}
+ * or reload of a channel list, a VOD landing page or Home otherwise sends its first requests only
+ * once the page chunk has loaded and the page has rendered. main.tsx calls {@link prefetchScreenData}
  * with the URL (a deep link) or the saved screen (after settings arrive), so those requests run
  * alongside the chunk download and the first render, under the keys and arguments the pages ask
  * with: the pages' queries then read the cache (or join the request in flight) instead of asking
@@ -14,7 +14,7 @@ import { matchPath } from 'react-router';
 
 import { queryClient, rpcKey, type RpcCommand } from './query';
 import { rpcRaw, type RpcArgs } from './transport';
-import type { ContentType, Source } from './types';
+import type { ContentType, Settings, Source } from './types';
 
 /** Rows per `catalog.channels` page (usePagedChannels). */
 export const CHANNEL_PAGE_SIZE = 120;
@@ -49,6 +49,32 @@ export function recentlyAddedArgs(sourceId: string, kind: 'movie' | 'series', li
   return { sourceId, contentType: kind, limit };
 }
 
+/** Cards in each Home rail (DashboardPage). */
+export const HOME_RAIL_LIMIT = 24;
+
+/** Recent entries Home reads: its recently watched live rail and the source ranking. */
+export const HOME_RECENT_LIMIT = 60;
+
+/** `positions.continueWatching` as Home's hero and Continue watching rail ask it. */
+export function homeContinueArgs(): RpcArgs<'positions.continueWatching'> {
+  return { limit: HOME_RAIL_LIMIT };
+}
+
+/** `favorites.list` as Home's two favourites rails ask it: every source. */
+export function homeFavoritesArgs(): RpcArgs<'favorites.list'> {
+  return {};
+}
+
+/** `recent.list` as Home asks it. */
+export function homeRecentArgs(): RpcArgs<'recent.list'> {
+  return { limit: HOME_RECENT_LIMIT };
+}
+
+/** `catalog.recentlyAdded` across every source, for Home's hero and new arrivals rail. */
+export function homeRecentlyAddedArgs(kind: 'movie' | 'series'): RpcArgs<'catalog.recentlyAdded'> {
+  return { contentType: kind, limit: HOME_RAIL_LIMIT };
+}
+
 function prefetch<K extends RpcCommand>(cmd: K, args: RpcArgs<K>): void {
   void queryClient.prefetchQuery({ queryKey: rpcKey(cmd, args), queryFn: () => rpcRaw(cmd, args) });
 }
@@ -73,9 +99,38 @@ function prefetchVodLanding(sourceId: string, kind: 'movie' | 'series'): void {
 }
 
 /**
+ * Home's rail queries (performance audit SH-3), once the boot `settings.get` and `sources.list`
+ * answer, under DashboardPage's keys and arguments: nothing without a source (Home shows its
+ * welcome), and the new arrivals and TMDB trending only when a rail on screen reads them.
+ */
+function prefetchHome(): void {
+  void Promise.all([
+    queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') }),
+    queryClient.ensureQueryData({ queryKey: rpcKey('sources.list'), queryFn: () => rpcRaw('sources.list') }),
+  ])
+    .then(([settings, sources]) => {
+      if (((sources as Source[] | undefined)?.length ?? 0) === 0) return;
+      const s = settings as Settings | undefined;
+      const show = (rail: keyof Settings['dashboardRails']) => s?.dashboardRails?.[rail] ?? true;
+      prefetch('positions.continueWatching', homeContinueArgs());
+      prefetch('favorites.list', homeFavoritesArgs());
+      prefetch('recent.list', homeRecentArgs());
+      if (show('hero') || show('recentlyAdded')) {
+        prefetch('catalog.recentlyAdded', homeRecentlyAddedArgs('movie'));
+        prefetch('catalog.recentlyAdded', homeRecentlyAddedArgs('series'));
+      }
+      // My List's shared query (LIST_ARGS in features/mylist/lib/cache.ts) and the custom list rails.
+      prefetch('watchlist.list', {});
+      prefetch('lists.list', undefined);
+      if (s?.tmdb?.enabled && show('tmdbTrending')) prefetch('tmdb.trending', undefined);
+    })
+    .catch(() => undefined);
+}
+
+/**
  * Starts the first requests of the page at `path` (pathname and query), if it is a channel list
- * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`) or a VOD landing page
- * (`/s/:id/movies`, `/s/:id/series`). Any other path asks for nothing.
+ * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`), a VOD landing page
+ * (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path asks for nothing.
  */
 export function prefetchScreenData(path: string): void {
   let url: URL;
@@ -85,6 +140,7 @@ export function prefetchScreenData(path: string): void {
     return;
   }
   const at = (pattern: string) => matchPath(pattern, url.pathname)?.params;
+  if (at('/dashboard')) return prefetchHome();
   const live = at('/s/:sourceId/live/:categoryId') ?? at('/s/:sourceId/live');
   if (live?.sourceId) return prefetchChannelList(live.sourceId, live.categoryId, false);
   const radio = at('/s/:sourceId/radio');

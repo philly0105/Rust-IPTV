@@ -92,7 +92,7 @@ pnpm check
 
 This runs, in order: `pnpm typecheck` (tsc-rs), `pnpm test` (vitest), `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --all -- --check`. Two more:
 
-- `pnpm build` produces `dist/`. `pnpm size:check` then lists every chunk and fails when the entry chunk (`dist/assets/index-*.js`) is over 268,000 bytes (`tools/check-bundle.mjs`; see `docs/architecture/performance.md`).
+- `pnpm build` produces `dist/`. `pnpm size:check` then lists every chunk and fails when the entry chunk (`dist/assets/index-*.js`) is over 268,000 bytes, or when Home's route chunk statically loads player code (`tools/check-bundle.mjs`; see `docs/architecture/performance.md`).
 - `pnpm e2e` runs Playwright against `iptv-server` (port 7180) and `iptv-mock` (port 7290) with a fresh `./.e2e-data`. It needs `dist/` and uses installed Microsoft Edge by default (`PW_CHANNEL=chromium` switches to Playwright's bundled Chromium, which cannot play H.264).
 
 The performance tests run in release mode: `cargo test -p iptv-core --release --test m3u_perf` (50k channels) and `--test epg_perf` (120 MB XMLTV). `--test catalog_perf` checks that live list pages and searches over 50k channels answer in under 100 ms.

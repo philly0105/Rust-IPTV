@@ -1,5 +1,5 @@
 import { Clapperboard, Radio, Tv } from 'lucide-react';
-import { useCallback, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, type ReactNode } from 'react';
 
 import { sizedImageUrl } from '@/api/images';
 
@@ -36,8 +36,9 @@ export interface PosterProps {
   /** The source the artwork belongs to, so the image cache can apply that source's network rules. */
   sourceId?: string;
   /**
-   * CSS px the picture is drawn at, for the cache's resized copy. Without it the frame is measured
-   * when the picture mounts; a `priority` picture (a detail hero) loads full size.
+   * CSS px the picture is drawn at, for the cache's resized copy. Without it the width comes from
+   * {@link PosterWidthContext}, or else the frame is measured when the picture mounts; a `priority`
+   * picture (a detail hero) loads full size.
    */
   width?: number;
   /**
@@ -71,6 +72,14 @@ export function initialsOf(text: string): string {
   if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
   return (words[0]![0]! + words[1]![0]!).toUpperCase();
 }
+
+/**
+ * The CSS width of the cards below, from a rail that sizes its cards itself (DashboardRail,
+ * PosterRail). A Poster without `width` uses it instead of reading its frame's `clientWidth` on
+ * mount, which forced a layout per card when the artwork was already cached (performance audit
+ * SH-6). Only for pictures that fill the card's width.
+ */
+export const PosterWidthContext = createContext<number | undefined>(undefined);
 
 /** A load this soon after the picture mounted came from a cache: it shows at once, without the fade. */
 export const INSTANT_REVEAL_MS = 120;
@@ -132,7 +141,9 @@ export function Poster({
   rounded = 'md',
   width,
 }: PosterProps) {
-  const image = useImageChain([src, fallbackSrc], sourceId, width);
+  const railWidth = useContext(PosterWidthContext);
+  const drawnWidth = width ?? (priority ? undefined : railWidth);
+  const image = useImageChain([src, fallbackSrc], sourceId, drawnWidth);
   const url = image.url;
   // One element per URL (key below), so this runs once per attempt. React renders no `src`:
   // the gate sets it when the picture may start, and holds it while the page scrolls.
@@ -141,7 +152,7 @@ export function Poster({
       if (!el || !url) return;
       // A card's width comes from its grid or rail, so the frame is measured once it is in the page
       // (the <img> fills it) and the cache sends a copy that size (L3-serve-ui-1).
-      const sized = priority || width !== undefined ? url : sizedImageUrl(url, el.clientWidth);
+      const sized = priority || drawnWidth !== undefined ? url : sizedImageUrl(url, el.clientWidth);
       const mountedAt = performance.now();
       const before = imageLoadedBefore(sized);
       const onLoad = () => reveal(el, sized, before || performance.now() - mountedAt < INSTANT_REVEAL_MS);
@@ -154,7 +165,7 @@ export function Poster({
         cancel();
       };
     },
-    [url, priority, eager, width],
+    [url, priority, eager, drawnWidth],
   );
 
   const fallbackText = label ?? alt;

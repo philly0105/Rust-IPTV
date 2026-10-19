@@ -17,15 +17,18 @@ const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly s
   ['vendor-react', ['react', 'react-dom', 'scheduler', 'react-router']],
   ['vendor-query', ['@tanstack/query-core', '@tanstack/react-query', '@tanstack/virtual-core', '@tanstack/react-virtual']],
   ['vendor-i18n', ['i18next', 'react-i18next']],
-  [
-    'vendor-ui',
-    ['cmdk', 'lucide-react', 'tailwind-merge', 'clsx', 'zustand', 'aria-hidden', 'react-remove-scroll', 'react-remove-scroll-bar', 'react-style-singleton', 'use-callback-ref', 'use-sidecar', 'tslib', 'get-nonce'],
-  ],
+  // cmdk, its Radix dialog stack and lucide-react are left out (performance audit SH-10): cmdk is
+  // used only by the lazy command palette and most icons only by lazy pages, so Rollup places them
+  // with their users instead of in a chunk that index.html preloads on every boot.
+  ['vendor-ui', ['tailwind-merge', 'clsx', 'zustand']],
   ['vendor-tauri', ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
 ];
 
-/** `src/i18n/<folder>/*.json`; group 1 is the language folder. */
-const LOCALE = /[\\/]src[\\/]i18n[\\/]([^\\/]+)[\\/][^\\/]+\.json$/;
+/**
+ * `src/i18n/<folder>/*.json` and the folder's `index.ts`, which gathers them for `loadLanguage`;
+ * group 1 is the language folder.
+ */
+const LOCALE = /[\\/]src[\\/]i18n[\\/]([^\\/]+)[\\/](?:[^\\/]+\.json|index\.ts)$/;
 
 function vendorChunk(id: string): string | undefined {
   // English strings change on every copy edit; their own chunk keeps the app
@@ -40,7 +43,6 @@ function vendorChunk(id: string): string | undefined {
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);
   const pkg = parts[0]?.startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
   if (!pkg) return undefined;
-  if (pkg.startsWith('@radix-ui/')) return 'vendor-ui';
   return VENDOR_CHUNKS.find(([, pkgs]) => pkgs.includes(pkg))?.[0];
 }
 
@@ -108,10 +110,61 @@ function precompress(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), precompress()],
+/**
+ * react-router 7.18's exports map has no `production` condition, so every build resolved
+ * `dist/development`, which ships with `ENABLE_DEV_WARNINGS = true` (performance audit
+ * BUNDLE-ROUTER). A production build points the bare specifier at `dist/production`; dev keeps the
+ * warnings, and vitest (vitest.config.ts) and the typecheck resolve the package normally.
+ */
+const ROUTER_PRODUCTION = fileURLToPath(new URL('./node_modules/react-router/dist/production/index.mjs', import.meta.url));
+
+/** The placeholder in `public/sw.js` that a build replaces with its asset list. */
+const SW_ASSETS = '/* build:assets */ null';
+
+/** `public/sw.js` with this build's `/assets/*` URLs in place of its placeholder (sorted). */
+export function withAssetList(source: string, fileNames: readonly string[]): string {
+  const assets = fileNames
+    .filter((f) => f.startsWith('assets/'))
+    .map((f) => `/${f}`)
+    .sort();
+  return source.replace(SW_ASSETS, JSON.stringify(assets));
+}
+
+/**
+ * Web build (performance audit SH-11): writes the build's asset list into `dist/sw.js`. The file
+ * then differs per build, so the browser installs the new worker, and its activate handler deletes
+ * cached assets from earlier builds instead of keeping every deploy's chunks. Runs in writeBundle,
+ * after Vite copied `public/` and before `precompress` compresses the result.
+ */
+function serviceWorkerAssets(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'tsrust-sw-assets',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    async writeBundle(_options, bundle) {
+      const file = join(outDir, 'sw.js');
+      let source: string;
+      try {
+        source = await readFile(file, 'utf8');
+      } catch {
+        return;
+      }
+      if (!source.includes(SW_ASSETS)) this.error(`${file} has no ${SW_ASSETS} placeholder for the asset list.`);
+      await writeFile(file, withAssetList(source, Object.keys(bundle)));
+    },
+  };
+}
+
+export default defineConfig(({ command }) => ({
+  plugins: [react(), tailwindcss(), serviceWorkerAssets(), precompress()],
   resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      ...(command === 'build' ? [{ find: /^react-router$/, replacement: ROUTER_PRODUCTION }] : []),
+    ],
   },
   clearScreen: false,
   envPrefix: ['VITE_', 'TAURI_ENV_'],
@@ -158,4 +211,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

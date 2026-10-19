@@ -378,5 +378,9 @@
   "discardedFailedHint": "首次导入失败。选择\"撤销\"可保留它，并从其卡片上重试。",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "节目指南时间偏移",
+  "epgShiftHint": "将此来源的所有节目移动指定的分钟数，叠加在“设置”中的偏移之上。留空表示不偏移。",
+  "epgShiftUnit": "分钟",
+  "epgShiftError": "请输入 -720 到 720 之间的整数分钟。"
 }

@@ -450,5 +450,10 @@
   "backupParentalBody": "Ebeveyn denetimi kilitli olduğundan yedekteki seçenekleri için PIN gerekiyor. Her şeyi içe aktarmak için PIN'i girin ya da geri kalanını içe aktarıp mevcut seçeneklerinizi koruyun.",
   "backupParentalSkip": "Onlar olmadan içe aktar",
   "backupParentalUnlock": "PIN'i gir ve içe aktar",
-  "backupParentalPinTitle": "Ebeveyn denetimi seçeneklerini içe aktarmak için PIN'i girin"
+  "backupParentalPinTitle": "Ebeveyn denetimi seçeneklerini içe aktarmak için PIN'i girin",
+  "windowStart": "Açılışta pencere",
+  "windowStartHint": "Uygulama penceresinin nasıl açılacağı. F11 tam ekrandan çıkar.",
+  "windowStartNormal": "Bıraktığım gibi",
+  "windowStartMaximized": "Ekranı kaplayan",
+  "windowStartFullscreen": "Tam ekran"
 }

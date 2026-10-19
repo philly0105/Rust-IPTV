@@ -88,6 +88,12 @@ pub const SETTABLE_PROPERTIES: &[&str] = &[
     "sub-shadow-offset",
     "sub-pos",
     "sub-ass-override",
+    // picture (aspect, zoom, crop and deinterlace in the player menu):
+    "video-aspect-override",
+    "keepaspect",
+    "panscan",
+    "video-zoom",
+    "deinterlace",
 ];
 
 /// Subtitle style properties: their values are range-checked by

@@ -397,5 +397,9 @@
   "discardedFailedHint": "La prima importazione non è riuscita. Scegli Annulla per tenerla e riprovare dalla sua scheda.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Spostamento orario della guida",
+  "epgShiftHint": "Sposta ogni programma di questa sorgente di questi minuti, oltre allo spostamento nelle Impostazioni. Lascia vuoto per nessuno.",
+  "epgShiftUnit": "minuti",
+  "epgShiftError": "Inserisci minuti interi tra -720 e 720."
 }

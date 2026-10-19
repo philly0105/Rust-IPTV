@@ -88,6 +88,23 @@ describe('Controls options menu', () => {
     expect(commands.setRate).not.toHaveBeenCalled();
   });
 
+  it('Picture sets the aspect and zoom for every channel; deinterlace only shows for mpv', async () => {
+    const { usePictureStore, setPicture, DEFAULT_PICTURE } = await import('../picture');
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^picture/i }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '4:3' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Crop to fill' }));
+    // The menu stays open to compare on the picture.
+    expect(screen.getByRole('menuitemradio', { name: '4:3' }).getAttribute('aria-checked')).toBe('true');
+    expect(usePictureStore.getState()).toMatchObject({ aspect: '4:3', zoom: 'crop' });
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Deinterlace' })).toBeNull();
+    act(() => usePlayerStore.setState({ mode: 'embedded-mpv' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Deinterlace' }));
+    expect(usePictureStore.getState().deinterlace).toBe(true);
+    act(() => setPicture(DEFAULT_PICTURE));
+  });
+
   it('Back returns to the root view and Escape closes the menu', () => {
     render(<Controls variant="dock" visible />);
     openMenu();

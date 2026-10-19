@@ -450,5 +450,10 @@
   "backupParentalBody": "家長監護已鎖定，備份中的家長監護選項需要 PIN。輸入 PIN 以匯入全部內容，或只匯入其餘部分並保留目前選項。",
   "backupParentalSkip": "不匯入這些選項",
   "backupParentalUnlock": "輸入 PIN 並匯入",
-  "backupParentalPinTitle": "輸入 PIN 以匯入家長監護選項"
+  "backupParentalPinTitle": "輸入 PIN 以匯入家長監護選項",
+  "windowStart": "啟動時的視窗",
+  "windowStartHint": "應用程式視窗的開啟方式。按 F11 離開全螢幕。",
+  "windowStartNormal": "維持上次狀態",
+  "windowStartMaximized": "最大化",
+  "windowStartFullscreen": "全螢幕"
 }

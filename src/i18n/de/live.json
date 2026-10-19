@@ -196,5 +196,11 @@
   "parentalHiddenHint": "Ihre Gruppen sind gesperrt. Gib deine PIN ein, um sie für diese Sitzung anzuzeigen.",
   "parentalUnlock": "Entsperren",
   "parentalUnlockTitle": "Gesperrte Sender anzeigen",
-  "parentalUnlockBody": "Gib deine PIN ein, um gesperrte Gruppen und Sender anzuzeigen, bis der Jugendschutz wieder sperrt."
+  "parentalUnlockBody": "Gib deine PIN ein, um gesperrte Gruppen und Sender anzuzeigen, bis der Jugendschutz wieder sperrt.",
+  "mappingShift": "Zeitverschiebung für diesen Sender",
+  "mappingShiftHint": "Minuten, statt des tvg-shift der Playlist. Leer lassen, um den Wert der Playlist zu verwenden. Die Verschiebung der Quelle gilt weiterhin.",
+  "mappingShiftUnit": "Minuten",
+  "mappingShiftError": "Geben Sie ganze Minuten zwischen -720 und 720 ein.",
+  "mappingShiftSave": "Verschiebung speichern",
+  "mappingShiftSaved": "Zeitverschiebung gespeichert"
 }

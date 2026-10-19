@@ -462,5 +462,10 @@
   "backupParentalBody": "Kontrola rodzicielska jest zablokowana, więc jej opcje z kopii wymagają PIN-u. Wpisz go, aby zaimportować wszystko, albo zaimportuj resztę i zachowaj obecne opcje.",
   "backupParentalSkip": "Importuj bez nich",
   "backupParentalUnlock": "Wpisz PIN i importuj",
-  "backupParentalPinTitle": "Wpisz PIN, aby zaimportować opcje kontroli rodzicielskiej"
+  "backupParentalPinTitle": "Wpisz PIN, aby zaimportować opcje kontroli rodzicielskiej",
+  "windowStart": "Okno przy uruchomieniu",
+  "windowStartHint": "Jak otwiera się okno aplikacji. F11 wyłącza pełny ekran.",
+  "windowStartNormal": "Tak jak je zostawiłem",
+  "windowStartMaximized": "Zmaksymalizowane",
+  "windowStartFullscreen": "Pełny ekran"
 }

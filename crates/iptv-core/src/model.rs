@@ -196,6 +196,12 @@ pub struct EpgLinks {
     pub detected_urls: Vec<String>,
     pub manual_urls: Vec<String>,
     pub disabled_urls: Vec<String>,
+    // guide:
+    /// Guide time shift of every channel of the source, in minutes (source
+    /// dialog); it adds to each channel's own shift or `tvg-shift`
+    /// (`epg::query::item_shift`). Absent = none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shift_minutes: Option<i32>,
 }
 
 /// A playlist source as returned by `sources.*`.
@@ -338,6 +344,12 @@ pub struct Channel {
     /// m3u catch-up attributes (`catchup`, `catchup-days`, `catchup-source`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catchup: Option<CatchupInfo>,
+    /// m3u ClearKey licence from `#KODIPROP` (`inputstream.adaptive.license_key`
+    /// with `license_type=clearkey`, or `drm_legacy=org.w3.clearkey|...`), as
+    /// written: kid:key pairs, a JSON key map or JWK set, or a licence URL. The
+    /// UI parses it and hands the keys to shaka for DASH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_key: Option<String>,
 }
 
 /// m3u catch-up attributes of a channel. `kind` is the lowercased `catchup`
@@ -867,6 +879,17 @@ pub enum StartupBehavior {
 }
 string_enum!(StartupBehavior { FirstView => "first-view", RestoreLastView => "restore-last-view" });
 
+/// How the desktop window opens (`Settings.windowStart`): with the size and
+/// position it had when it closed, maximized, or fullscreen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowStart {
+    Normal,
+    Maximized,
+    Fullscreen,
+}
+string_enum!(WindowStart { Normal => "normal", Maximized => "maximized", Fullscreen => "fullscreen" });
+
 /// EPG ribbon layout (`Settings.epgViewMode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1177,6 +1200,10 @@ pub struct Settings {
     /// App version whose "What's new" the user last saw: `''` (never) or 1..=32
     /// characters of `[0-9A-Za-z.+-]` ([`crate::settings::LAST_SEEN_VERSION_MAX_LEN`]).
     pub last_seen_version: String,
+    // desktop (machine-local, not in `backup::APP_SETTING_KEYS`):
+    /// How the desktop window opens; applied when it is first shown
+    /// (`reveal_main` in iptv-tauri). The browser and server mode ignore it.
+    pub window_start: WindowStart,
 }
 
 impl Default for Settings {
@@ -1247,6 +1274,8 @@ impl Default for Settings {
             image_cache_max_mb: 500,
             tour_completed: false,
             last_seen_version: String::new(),
+            // desktop:
+            window_start: WindowStart::Normal,
         }
     }
 }

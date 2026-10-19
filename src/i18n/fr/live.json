@@ -201,5 +201,11 @@
   "parentalHiddenHint": "Ses groupes sont verrouillés. Saisissez votre code PIN pour les afficher pendant cette session.",
   "parentalUnlock": "Déverrouiller",
   "parentalUnlockTitle": "Afficher les chaînes verrouillées",
-  "parentalUnlockBody": "Saisissez votre code PIN pour afficher les groupes et chaînes verrouillés jusqu’au prochain verrouillage du contrôle parental."
+  "parentalUnlockBody": "Saisissez votre code PIN pour afficher les groupes et chaînes verrouillés jusqu’au prochain verrouillage du contrôle parental.",
+  "mappingShift": "Décalage horaire de cette chaîne",
+  "mappingShiftHint": "En minutes, à la place du tvg-shift de la playlist. Laissez vide pour utiliser celui de la playlist. Le décalage de la source s’applique toujours.",
+  "mappingShiftUnit": "minutes",
+  "mappingShiftError": "Saisissez un nombre entier de minutes entre -720 et 720.",
+  "mappingShiftSave": "Enregistrer le décalage",
+  "mappingShiftSaved": "Décalage horaire enregistré"
 }

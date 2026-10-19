@@ -211,9 +211,55 @@ fn guide_urls_merge_detected_and_manual_minus_disabled() {
         ],
         manual_urls: vec!["http://a/x.xml".into(), "http://c/z.xml".into()],
         disabled_urls: vec!["http://b/y.xml".into()],
+        shift_minutes: None,
     };
     assert_eq!(
         sources::guide_urls(&links),
         vec!["http://a/x.xml".to_string(), "http://c/z.xml".to_string()]
     );
+}
+
+/// The source's guide shift (`epg.shiftMinutes`): stored by
+/// `sources.update`, read back by the guide queries, refused beyond 12
+/// hours, and removed by 0.
+#[tokio::test]
+async fn source_guide_shift_is_stored_checked_and_cleared() {
+    let env = env().await;
+    let st = env.state.clone();
+    let src = add_text(&st, "Shift", "#EXTM3U\n#EXTINF:-1,One\nhttp://h/one.ts\n").await;
+
+    let got = sources::update(
+        &st,
+        &src.id,
+        serde_json::from_value(json!({ "epg": { "shiftMinutes": 90 } })).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(got.epg.shift_minutes, Some(90));
+    let sid = src.id.clone();
+    let secs = st
+        .db_call(move |c| epg::query::source_shift(c, &sid))
+        .await
+        .unwrap();
+    assert_eq!(secs, 90 * 60);
+
+    let err = sources::update(
+        &st,
+        &src.id,
+        serde_json::from_value(json!({ "epg": { "shiftMinutes": 721 } })).unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("guide shift"), "{err}");
+
+    let got = sources::update(
+        &st,
+        &src.id,
+        serde_json::from_value(json!({ "epg": { "shiftMinutes": 0 } })).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(got.epg.shift_minutes, None);
+    let json = serde_json::to_value(&got).unwrap();
+    assert!(json["epg"].get("shiftMinutes").is_none());
 }

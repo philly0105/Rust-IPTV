@@ -201,5 +201,11 @@
   "parentalHiddenHint": "I suoi gruppi sono bloccati. Inserisci il PIN per mostrarli in questa sessione.",
   "parentalUnlock": "Sblocca",
   "parentalUnlockTitle": "Mostra i canali bloccati",
-  "parentalUnlockBody": "Inserisci il PIN per mostrare gruppi e canali bloccati finché il parental control non si riattiva."
+  "parentalUnlockBody": "Inserisci il PIN per mostrare gruppi e canali bloccati finché il parental control non si riattiva.",
+  "mappingShift": "Spostamento orario di questo canale",
+  "mappingShiftHint": "Minuti, al posto del tvg-shift della playlist. Lascia vuoto per usare quello della playlist. Lo spostamento della sorgente resta valido.",
+  "mappingShiftUnit": "minuti",
+  "mappingShiftError": "Inserisci minuti interi tra -720 e 720.",
+  "mappingShiftSave": "Salva spostamento",
+  "mappingShiftSaved": "Spostamento orario salvato"
 }

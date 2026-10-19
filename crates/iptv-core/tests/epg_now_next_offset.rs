@@ -144,3 +144,95 @@ async fn offset_outside_the_setting_range_is_rejected() {
     .await;
     assert!(edge["s|live|1"].is_object());
 }
+
+/// Guide shift per channel (`epg.setChannelShift`) and per source
+/// (`EpgLinks.shiftMinutes`): both move the programmes in the core, the
+/// channel's own shift in place of its `tvg-shift` and the source's on top.
+#[tokio::test]
+async fn channel_and_source_shifts_move_the_programmes() {
+    let (_tmp, state, router) = setup().await;
+    let refs = json!([{ "sourceId": "s", "contentType": "live", "itemId": "1" }]);
+    let r = json!({ "sourceId": "s", "contentType": "live", "itemId": "1" });
+
+    // +120 on the channel: "Earlier" airs now.
+    router
+        .dispatch(
+            state.clone(),
+            "epg.setChannelShift",
+            json!({ "ref": r, "minutes": 120 }),
+        )
+        .await
+        .unwrap();
+    let out = now_next(&state, &router, json!({ "refs": refs })).await;
+    assert_eq!(titles(&out), (Some("Earlier"), Some("Current")));
+    let res = router
+        .dispatch(state.clone(), "epg.resolve", json!({ "ref": r }))
+        .await
+        .unwrap();
+    assert_eq!(res["shiftMinutes"], 120);
+
+    // -240 on the source adds to it: -120 in all, "Later" airs now.
+    state
+        .db_call(|c| {
+            c.execute(
+                "UPDATE sources SET epg_json = ?1 WHERE id = 's'",
+                [r#"{"detectedUrls":[],"manualUrls":[],"disabledUrls":[],"shiftMinutes":-240}"#],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let out = now_next(&state, &router, json!({ "refs": refs })).await;
+    assert_eq!(titles(&out), (Some("Later"), None));
+    // epg.programs (the grid's reader) moves them the same way.
+    let at = |secs: i64| {
+        chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() + secs, 0)
+            .unwrap()
+            .to_rfc3339()
+    };
+    let list = router
+        .dispatch(
+            state.clone(),
+            "epg.programs",
+            json!({ "ref": r, "from": at(-600), "to": at(600) }),
+        )
+        .await
+        .unwrap();
+    let titles_now: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["title"].as_str())
+        .collect();
+    assert_eq!(titles_now, ["Later"]);
+
+    // Null removes the channel's shift; the source's -240 remains.
+    router
+        .dispatch(
+            state.clone(),
+            "epg.setChannelShift",
+            json!({ "ref": r, "minutes": null }),
+        )
+        .await
+        .unwrap();
+    let out = now_next(&state, &router, json!({ "refs": refs })).await;
+    assert_eq!(titles(&out), (None, None));
+    let res = router
+        .dispatch(state.clone(), "epg.resolve", json!({ "ref": r }))
+        .await
+        .unwrap();
+    assert!(res.get("shiftMinutes").is_none());
+
+    // Beyond 12 hours either way is refused.
+    for bad in [721, -721] {
+        let err = router
+            .dispatch(
+                state.clone(),
+                "epg.setChannelShift",
+                json!({ "ref": r, "minutes": bad }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("guide shift"), "{}", err.message);
+    }
+}

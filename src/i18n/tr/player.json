@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "Gömülü MPV bunu yakalayabilir: Ayarlar > Oynatıcılar bölümünden seçin.",
   "screenshotNotReady": "Henüz görüntü yok. Video oynatılmaya başlayınca tekrar deneyin.",
   "screenshotNoVideo": "Radyonun yakalanacak bir görüntüsü yok.",
-  "screenshotExternal": "Bu, harici bir oynatıcıda oynatılıyor. O oynatıcının kendi ekran görüntüsü tuşunu kullanın."
+  "screenshotExternal": "Bu, harici bir oynatıcıda oynatılıyor. O oynatıcının kendi ekran görüntüsü tuşunu kullanın.",
+  "picture": "Görüntü",
+  "pictureAspect": "En boy oranı",
+  "aspectAuto": "Orijinal",
+  "aspectFill": "Uzat",
+  "pictureZoom": "Yakınlaştırma",
+  "zoomNone": "Yok",
+  "zoomCrop": "Doldurmak için kırp",
+  "deinterlace": "Taramayı birleştir"
 }

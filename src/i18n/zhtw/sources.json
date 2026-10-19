@@ -378,5 +378,9 @@
   "discardedFailedHint": "首次匯入失敗。選擇「復原」即可保留它，並從其卡片上重試。",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "節目表時間偏移",
+  "epgShiftHint": "將此來源的所有節目移動指定的分鐘數，疊加在「設定」中的偏移之上。留空表示不偏移。",
+  "epgShiftUnit": "分鐘",
+  "epgShiftError": "請輸入 -720 到 720 之間的整數分鐘。"
 }

@@ -107,6 +107,27 @@ async fn channel_rows_expose_headers_and_catchup() {
 }
 
 #[tokio::test]
+async fn channel_rows_expose_the_clear_key_licence() {
+    let env = env().await;
+    let text = "#EXTM3U\n\
+        #KODIPROP:inputstream.adaptive.license_type=clearkey\n\
+        #EXTINF:-1 group-title=\"A\",Keyed\n\
+        #KODIPROP:inputstream.adaptive.license_key=0011:2233\n\
+        http://h/keyed.mpd\n\
+        #EXTINF:-1 group-title=\"A\",Widevine\n\
+        #KODIPROP:inputstream.adaptive.license_type=com.widevine.alpha\n\
+        #KODIPROP:inputstream.adaptive.license_key=https://lic.example/wv\n\
+        http://h/wv.mpd\n\
+        #EXTINF:-1 group-title=\"A\",Plain\n\
+        http://h/plain.mpd\n";
+    let src = add_text(&env.state, "K", text).await;
+    let live = channels(&env, &src.id, false).await;
+    assert_eq!(by_name(&live, "Keyed")["clearKey"], "0011:2233");
+    assert!(by_name(&live, "Widevine").get("clearKey").is_none());
+    assert!(by_name(&live, "Plain").get("clearKey").is_none());
+}
+
+#[tokio::test]
 async fn live_and_radio_share_one_number_sequence() {
     let env = env().await;
     let text = "#EXTM3U\n\

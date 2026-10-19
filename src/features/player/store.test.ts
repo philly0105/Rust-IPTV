@@ -169,6 +169,19 @@ describe('store transitions', () => {
     env.desktop = false;
   });
 
+  it('a ClearKey source plays in the built-in player whatever player is set', async () => {
+    const keyed = { ...vod('2'), drm: { clearKeys: { aa: 'bb' } } };
+    env.desktop = true;
+    try {
+      expect(store.modeForSettings('mpv', keyed)).toBe('inline');
+      expect(store.modeForSettings('vlc', keyed)).toBe('inline');
+      expect(store.modeForSettings('embedded-mpv', keyed)).toBe('inline');
+      expect(store.modeForSettings('embedded-mpv', vod('2'))).toBe('embedded-mpv');
+    } finally {
+      env.desktop = false;
+    }
+  });
+
   it('queue next/prev and the autoplay-next card at the end', async () => {
     const queue = [vod('1'), vod('2'), vod('3')];
     await usePlayerStore.getState().play(queue[1]!, { queue });
@@ -479,6 +492,17 @@ describe('playItem resolution by kind', () => {
       kind: 'dash',
       headers: { userAgent: 'UA/1' },
     });
+  });
+
+  it('an m3u channel with a ClearKey licence carries the keys and skips embedded mpv', async () => {
+    const kid = '00112233445566778899aabbccddeeff';
+    const key = 'ffeeddccbbaa99887766554433221100';
+    handlers['settings.get'] = () => ({ player: 'embedded-mpv' });
+    handlers['catalog.item'] = () => ({ ...channel(1), url: 'http://m/stream.mpd', clearKey: `${kid}:${key}` });
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u' });
+    await playItem({ ...base, ref: liveRef, sourceKind: 'm3u' });
+    expect(usePlayerStore.getState().source).toMatchObject({ kind: 'dash', drm: { clearKeys: { [kid]: key } } });
+    expect(usePlayerStore.getState().mode).toBe('inline');
   });
 
   it('an m3u item without a url ends in the error state', async () => {

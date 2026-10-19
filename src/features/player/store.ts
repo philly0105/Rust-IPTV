@@ -28,6 +28,7 @@ import { itemKey, sameRef } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
+import { parseClearKey } from './clearKey';
 import { preloadEngineFor } from './enginePreload';
 import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
@@ -346,12 +347,13 @@ export async function sourceKindOf(sourceId: string): Promise<SourceKind> {
 /**
  * Map `settings.player` to a mode. Radio stays in-app unless an external player is chosen. External
  * players run only in the desktop app, so in the browser a saved mpv or VLC (such as one restored from
- * a desktop backup) plays in the built-in player instead of failing every time.
+ * a desktop backup) plays in the built-in player instead of failing every time. A ClearKey source
+ * (`drm`) always plays in the built-in player: neither mpv nor VLC takes the keys.
  */
 export function modeForSettings(player: VideoPlayer | undefined, source: PlayerSource): PlayerMode {
-  if ((player === 'mpv' || player === 'vlc') && isDesktop) return 'external';
+  if ((player === 'mpv' || player === 'vlc') && isDesktop && !source.drm) return 'external';
   if (source.isRadio) return 'radio';
-  if (player === 'embedded-mpv') return 'embedded-mpv';
+  if (player === 'embedded-mpv' && !source.drm) return 'embedded-mpv';
   return 'inline';
 }
 
@@ -541,8 +543,9 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     const settings = await getSettings();
     if (token !== playToken) return;
     let mode = opts?.mode ?? modeForSettings(settings?.player, source);
-    // Embedded mpv needs the desktop shell; everywhere else the built-in player takes over.
-    if (mode === 'embedded-mpv' && !isDesktop) mode = 'inline';
+    // Embedded mpv needs the desktop shell; everywhere else the built-in player takes over. It can't
+    // do ClearKey either.
+    if (mode === 'embedded-mpv' && (!isDesktop || source.drm)) mode = 'inline';
     if (mode === 'embedded-mpv') {
       // So it does when mpv is known not to start this session (not found): no surface mounts to
       // fail again. Loaded here, not imported: mpvExtras reaches back into this module as it loads.
@@ -1138,6 +1141,9 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
       if (h?.origin) headers.origin = h.origin;
     }
     if (Object.keys(headers).length > 0) resolved.headers = headers;
+    // ClearKey from the channel's #KODIPROP licence (shaka plays it; clearKey.ts).
+    const drm = parseClearKey('clearKey' in item ? item.clearKey : undefined);
+    if (drm) resolved.drm = drm;
   }
   sourceKindCache.set(ref.sourceId, args.sourceKind);
 

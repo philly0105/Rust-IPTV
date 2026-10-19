@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "內嵌 MPV 可以擷取：請在「設定 > 播放器」中選擇它。",
   "screenshotNotReady": "還沒有畫面。請在影片開始播放後再試一次。",
   "screenshotNoVideo": "廣播沒有可擷取的畫面。",
-  "screenshotExternal": "正在外部播放器中播放。請使用該播放器本身的擷圖按鍵。"
+  "screenshotExternal": "正在外部播放器中播放。請使用該播放器本身的擷圖按鍵。",
+  "picture": "畫面",
+  "pictureAspect": "長寬比",
+  "aspectAuto": "原始",
+  "aspectFill": "拉伸",
+  "pictureZoom": "縮放",
+  "zoomNone": "無",
+  "zoomCrop": "裁切填滿",
+  "deinterlace": "去交錯"
 }

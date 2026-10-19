@@ -202,6 +202,35 @@ impl ItemRow {
         Some(CatchupInfo { kind, days, source })
     }
 
+    /// The ClearKey licence from `extra.kodiProps` (keys lowercased by the
+    /// parser): `inputstream.adaptive.license_key` when `license_type` is
+    /// `clearkey` or `org.w3.clearkey`, else the part after `|` of
+    /// `inputstream.adaptive.drm_legacy=org.w3.clearkey|<licence>`. Other DRM
+    /// systems (Widevine, PlayReady) give `None`.
+    pub fn clear_key(&self) -> Option<String> {
+        let p = self.extra.get("kodiProps")?;
+        let prop = |k: &str| {
+            p.get(k)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        let is_clear_key = |t: &str| {
+            let t = t.trim().to_ascii_lowercase();
+            t == "clearkey" || t == "org.w3.clearkey"
+        };
+        if prop("inputstream.adaptive.license_type").is_some_and(|t| is_clear_key(t.as_str())) {
+            if let Some(key) = prop("inputstream.adaptive.license_key") {
+                return Some(key);
+            }
+        }
+        let legacy = prop("inputstream.adaptive.drm_legacy")?;
+        let (kind, licence) = legacy.split_once('|')?;
+        let licence = licence.trim();
+        (is_clear_key(kind) && !licence.is_empty()).then(|| licence.to_owned())
+    }
+
     fn archive(&self) -> Option<ArchiveInfo> {
         match self.archive_hours {
             Some(h) if h > 0 => Some(ArchiveInfo {
@@ -260,6 +289,7 @@ impl From<ItemRow> for Channel {
         let archive = r.archive();
         let headers = r.headers();
         let catchup = r.catchup();
+        let clear_key = r.clear_key();
         let is_radio = r.is_radio || r.content_type == ContentType::Radio;
         Channel {
             item_ref: ItemRef::new(r.source_id, r.content_type, r.item_id),
@@ -274,6 +304,7 @@ impl From<ItemRow> for Channel {
             archive,
             headers,
             catchup,
+            clear_key,
         }
     }
 }
@@ -2136,6 +2167,31 @@ mod tests {
         assert_eq!(row.catchup().unwrap().days, Some(366));
         row.extra = serde_json::json!({ "catchup": { "type": "xc", "days": -5 } });
         assert_eq!(row.catchup().unwrap().days, Some(0));
+    }
+
+    #[test]
+    fn clear_key_comes_from_kodi_props() {
+        let mut row = item("1", "a", "Dash", 0);
+        assert_eq!(row.clear_key(), None);
+        row.extra = serde_json::json!({ "kodiProps": {
+            "inputstream.adaptive.license_type": "ClearKey",
+            "inputstream.adaptive.license_key": " 0123:4567 ",
+        } });
+        assert_eq!(row.clear_key().as_deref(), Some("0123:4567"));
+        assert_eq!(Channel::from(row.clone()).clear_key.as_deref(), Some("0123:4567"));
+        row.extra = serde_json::json!({ "kodiProps": {
+            "inputstream.adaptive.license_type": "com.widevine.alpha",
+            "inputstream.adaptive.license_key": "https://lic.example/wv",
+        } });
+        assert_eq!(row.clear_key(), None);
+        row.extra = serde_json::json!({ "kodiProps": {
+            "inputstream.adaptive.drm_legacy": "org.w3.clearkey|ab:cd",
+        } });
+        assert_eq!(row.clear_key().as_deref(), Some("ab:cd"));
+        row.extra = serde_json::json!({ "kodiProps": {
+            "inputstream.adaptive.license_type": "clearkey",
+        } });
+        assert_eq!(row.clear_key(), None);
     }
 
     #[test]

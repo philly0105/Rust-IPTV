@@ -378,5 +378,9 @@
   "discardedFailedHint": "Az első importálás nem sikerült. Válaszd a Visszavonás gombot, ha megtartanád, és a kártyájáról újra próbálnád.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Műsorújság időeltolása",
+  "epgShiftHint": "Ennyi perccel tolja el a forrás minden műsorát, a Beállításokban megadott eltoláson felül. Hagyja üresen, ha nem kell.",
+  "epgShiftUnit": "perc",
+  "epgShiftError": "Egész percet adjon meg -720 és 720 között."
 }

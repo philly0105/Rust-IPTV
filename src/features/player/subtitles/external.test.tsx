@@ -291,7 +291,11 @@ describe('reading subtitle files', () => {
 
   it('embedded mpv: the subtitle look goes out as checked properties, again when it changes', async () => {
     const { sendSubtitleStyle, bindMpvExtras } = await import('../mpvExtras');
-    const sent = (): unknown[] => rpcMock.mock.calls.filter((c) => c[0] === 'mpv.setProperty').map((c) => c[1]);
+    // The subtitle properties; bindMpvExtras also sends the picture controls (picture.ts).
+    const sent = (): unknown[] =>
+      rpcMock.mock.calls
+        .filter((c) => c[0] === 'mpv.setProperty' && String((c[1] as { name: string }).name).startsWith('sub-'))
+        .map((c) => c[1]);
     await sendSubtitleStyle();
     expect(sent()).toEqual([
       { name: 'sub-ass-override', value: 'scale' },
@@ -306,6 +310,7 @@ describe('reading subtitle files', () => {
 
     const unbind = bindMpvExtras();
     await vi.waitFor(() => expect(sent()).toHaveLength(16));
+    expect(rpcMock).toHaveBeenCalledWith('mpv.setProperty', { name: 'video-aspect-override', value: '-1' });
     // Another setting changing sends nothing; a style change sends the set again.
     setSettingsCache({ subtitleSize: 'medium', subtitleColor: 'white', subtitleBackground: 'box', subtitlePosition: 10, zapBanner: false } as never);
     setSettingsCache({ subtitleSize: 'large', subtitleColor: 'white', subtitleBackground: 'box', subtitlePosition: 10 } as never);

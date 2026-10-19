@@ -378,5 +378,9 @@
   "discardedFailedHint": "Its first import failed. Choose Undo to keep it and try again from its card.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Guide time shift",
+  "epgShiftHint": "Moves every programme of this source by this many minutes, on top of the shift in Settings. Leave empty for none.",
+  "epgShiftUnit": "minutes",
+  "epgShiftError": "Enter whole minutes between -720 and 720."
 }

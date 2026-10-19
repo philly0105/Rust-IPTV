@@ -3,6 +3,7 @@ import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, PlayerKind, PlayerSource, RequestHeaders, Source, SourceKind } from '@/api/types';
 
 import { playItem, playSource } from '@/features/player';
+import { parseClearKey } from '@/features/player/clearKey';
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
 import { type CatchupChannel, resolveM3uCatchupUrl } from './catchup';
@@ -92,6 +93,9 @@ export function m3uCatchupSource(channel: Channel, program: EpgProgram, now: num
   const out: PlayerSource = { url, kind: guessKind(url), title: channel.name, ref: channel.ref, isLive: false, isRadio: false };
   const headers = mergeHeaders(sourceHeaders, channel.headers);
   if (headers) out.headers = headers;
+  // A ClearKey channel's archive is encrypted with the same keys.
+  const drm = parseClearKey(channel.clearKey);
+  if (drm) out.drm = drm;
   return out;
 }
 

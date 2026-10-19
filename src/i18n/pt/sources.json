@@ -397,5 +397,9 @@
   "discardedFailedHint": "A primeira importação falhou. Escolha Desfazer para a manter e tentar de novo a partir do cartão.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Ajuste de horário do guia",
+  "epgShiftHint": "Move todos os programas desta fonte por estes minutos, além do ajuste em Configurações. Deixe vazio para nenhum.",
+  "epgShiftUnit": "minutos",
+  "epgShiftError": "Digite minutos inteiros entre -720 e 720."
 }

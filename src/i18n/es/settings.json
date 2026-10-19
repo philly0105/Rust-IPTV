@@ -456,5 +456,10 @@
   "backupParentalBody": "El control parental está bloqueado, así que sus opciones de la copia necesitan el PIN. Introdúcelo para importarlo todo, o importa el resto y conserva tus opciones actuales.",
   "backupParentalSkip": "Importar sin ellas",
   "backupParentalUnlock": "Introducir PIN e importar",
-  "backupParentalPinTitle": "Introduce el PIN para importar las opciones del control parental"
+  "backupParentalPinTitle": "Introduce el PIN para importar las opciones del control parental",
+  "windowStart": "Ventana al iniciar",
+  "windowStartHint": "Cómo se abre la ventana de la aplicación. F11 sale de la pantalla completa.",
+  "windowStartNormal": "Como la dejé",
+  "windowStartMaximized": "Maximizada",
+  "windowStartFullscreen": "Pantalla completa"
 }

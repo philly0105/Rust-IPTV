@@ -208,6 +208,8 @@ export interface EpgChannelMatch {
 export interface EpgResolution {
   epgChannelId?: string;
   via: 'manual' | 'item' | 'name' | 'none';
+  /** The channel's own guide shift in minutes (`epg.setChannelShift`); absent when it has none. */
+  shiftMinutes?: number;
 }
 
 export interface DownloadStartArgs {
@@ -508,6 +510,11 @@ export interface RpcMap {
   /** `null` = explicitly unmapped. */
   'epg.setMapping': Cmd<{ ref: ItemRef; epgChannelId: string | null }, void>;
   'epg.clearMapping': Cmd<{ ref: ItemRef }, void>;
+  /**
+   * The channel's own guide shift in minutes (-720..720), used instead of its `tvg-shift`; the
+   * source's `epg.shiftMinutes` still adds to it. null removes it. Emits epg.changed.
+   */
+  'epg.setChannelShift': Cmd<{ ref: ItemRef; minutes: number | null }, void>;
   'epg.resolve': Cmd<{ ref: ItemRef }, EpgResolution>;
   'epg.setEnabled': Cmd<{ url: string; enabled: boolean }, void>;
   /** Deletes all programmes and guide channels (urls and mappings kept); emits epg.changed. */
@@ -840,6 +847,7 @@ export const RPC_COMMANDS = [
   'epg.channelsSearch',
   'epg.setMapping',
   'epg.clearMapping',
+  'epg.setChannelShift',
   'epg.resolve',
   'epg.setEnabled',
   'epg.clearAll',

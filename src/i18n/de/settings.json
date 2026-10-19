@@ -450,5 +450,10 @@
   "backupParentalBody": "Der Jugendschutz ist gesperrt, daher brauchen seine Optionen aus der Sicherung die PIN. Gib sie ein, um alles zu importieren, oder importiere den Rest und behalte deine aktuellen Optionen.",
   "backupParentalSkip": "Ohne sie importieren",
   "backupParentalUnlock": "PIN eingeben und importieren",
-  "backupParentalPinTitle": "PIN eingeben, um die Jugendschutz-Optionen zu importieren"
+  "backupParentalPinTitle": "PIN eingeben, um die Jugendschutz-Optionen zu importieren",
+  "windowStart": "Fenster beim Start",
+  "windowStartHint": "Wie das App-Fenster öffnet. F11 beendet den Vollbildmodus.",
+  "windowStartNormal": "Wie zuletzt",
+  "windowStartMaximized": "Maximiert",
+  "windowStartFullscreen": "Vollbild"
 }

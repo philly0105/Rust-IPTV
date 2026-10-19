@@ -378,5 +378,9 @@
   "discardedFailedHint": "Η πρώτη εισαγωγή απέτυχε. Επιλέξτε Αναίρεση για να την κρατήσετε και να δοκιμάσετε ξανά από την κάρτα της.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Μετατόπιση ώρας οδηγού",
+  "epgShiftHint": "Μετακινεί κάθε πρόγραμμα αυτής της πηγής κατά τόσα λεπτά, επιπλέον της μετατόπισης στις Ρυθμίσεις. Αφήστε το κενό για καμία.",
+  "epgShiftUnit": "λεπτά",
+  "epgShiftError": "Εισαγάγετε ακέραια λεπτά από -720 έως 720."
 }

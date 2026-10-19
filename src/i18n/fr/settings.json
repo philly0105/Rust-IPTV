@@ -456,5 +456,10 @@
   "backupParentalBody": "Le contrôle parental est verrouillé : ses options dans la sauvegarde demandent le code PIN. Saisissez-le pour tout importer, ou importez le reste et gardez vos options actuelles.",
   "backupParentalSkip": "Importer sans elles",
   "backupParentalUnlock": "Saisir le PIN et importer",
-  "backupParentalPinTitle": "Saisissez le code PIN pour importer les options du contrôle parental"
+  "backupParentalPinTitle": "Saisissez le code PIN pour importer les options du contrôle parental",
+  "windowStart": "Fenêtre au démarrage",
+  "windowStartHint": "Comment s’ouvre la fenêtre de l’application. F11 quitte le plein écran.",
+  "windowStartNormal": "Comme je l’ai laissée",
+  "windowStartMaximized": "Agrandie",
+  "windowStartFullscreen": "Plein écran"
 }

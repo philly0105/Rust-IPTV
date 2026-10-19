@@ -2,8 +2,8 @@ import { RotateCcw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { rpc } from '@/api/transport';
-import type { CoverSize, DashboardRails, StartupBehavior } from '@/api/types';
+import { isDesktop, rpc } from '@/api/transport';
+import type { CoverSize, DashboardRails, StartupBehavior, WindowStart } from '@/api/types';
 import { LANGUAGES, applyLanguage } from '@/i18n';
 
 import { Button, Dialog, Select, useToast } from '@/ui';
@@ -189,6 +189,24 @@ export function GeneralSection({ settings, update }: SectionProps) {
             />
           )}
         </SettingsRow>
+        {/* The desktop window only: a browser tab has no window to size. */}
+        {isDesktop && (
+          <SettingsRow label={t('windowStart')} description={t('windowStartHint')}>
+            {({ id }) => (
+              <Segmented<WindowStart>
+                id={id}
+                label={t('windowStart')}
+                value={settings.windowStart ?? 'normal'}
+                options={[
+                  { value: 'normal', label: t('windowStartNormal') },
+                  { value: 'maximized', label: t('windowStartMaximized') },
+                  { value: 'fullscreen', label: t('windowStartFullscreen') },
+                ]}
+                onChange={(windowStart) => void update({ windowStart })}
+              />
+            )}
+          </SettingsRow>
+        )}
         <SettingsRow label={t('coverSize')} description={t('coverSizeHint')}>
           {({ id }) => (
             <Segmented<CoverSize>

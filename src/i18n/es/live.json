@@ -201,5 +201,11 @@
   "parentalHiddenHint": "Sus grupos están bloqueados. Introduce tu PIN para mostrarlos en esta sesión.",
   "parentalUnlock": "Desbloquear",
   "parentalUnlockTitle": "Mostrar canales bloqueados",
-  "parentalUnlockBody": "Introduce tu PIN para mostrar los grupos y canales bloqueados hasta que el control parental vuelva a bloquear."
+  "parentalUnlockBody": "Introduce tu PIN para mostrar los grupos y canales bloqueados hasta que el control parental vuelva a bloquear.",
+  "mappingShift": "Desfase horario de este canal",
+  "mappingShiftHint": "Minutos, en lugar del tvg-shift de la lista. Déjalo vacío para usar el de la lista. El desfase de la fuente se sigue aplicando.",
+  "mappingShiftUnit": "minutos",
+  "mappingShiftError": "Introduce minutos enteros entre -720 y 720.",
+  "mappingShiftSave": "Guardar desfase",
+  "mappingShiftSaved": "Desfase horario guardado"
 }

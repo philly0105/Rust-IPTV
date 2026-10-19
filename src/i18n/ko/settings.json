@@ -450,5 +450,10 @@
   "backupParentalBody": "자녀 보호가 잠겨 있어 백업의 자녀 보호 옵션에는 PIN이 필요합니다. PIN을 입력해 모두 가져오거나, 나머지만 가져오고 현재 옵션을 유지하세요.",
   "backupParentalSkip": "제외하고 가져오기",
   "backupParentalUnlock": "PIN 입력 후 가져오기",
-  "backupParentalPinTitle": "자녀 보호 옵션을 가져오려면 PIN을 입력하세요"
+  "backupParentalPinTitle": "자녀 보호 옵션을 가져오려면 PIN을 입력하세요",
+  "windowStart": "시작 시 창",
+  "windowStartHint": "앱 창이 열리는 방식입니다. F11을 누르면 전체 화면이 해제됩니다.",
+  "windowStartNormal": "마지막 상태대로",
+  "windowStartMaximized": "최대화",
+  "windowStartFullscreen": "전체 화면"
 }

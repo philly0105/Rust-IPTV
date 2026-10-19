@@ -474,5 +474,10 @@
   "backupParentalBody": "الرقابة الأبوية مقفلة، لذا تحتاج خيارات الرقابة في النسخة الاحتياطية إلى رمز PIN. أدخله لاستيراد كل شيء، أو استورد الباقي واحتفظ بخيارات الرقابة الحالية.",
   "backupParentalSkip": "استيراد بدونها",
   "backupParentalUnlock": "أدخل رمز PIN واستورد",
-  "backupParentalPinTitle": "أدخل رمز PIN لاستيراد خيارات الرقابة الأبوية"
+  "backupParentalPinTitle": "أدخل رمز PIN لاستيراد خيارات الرقابة الأبوية",
+  "windowStart": "النافذة عند بدء التشغيل",
+  "windowStartHint": "كيف تُفتح نافذة التطبيق. يخرج F11 من ملء الشاشة.",
+  "windowStartNormal": "كما تركتها",
+  "windowStartMaximized": "مكبّرة",
+  "windowStartFullscreen": "ملء الشاشة"
 }

@@ -859,6 +859,33 @@ describe('epg mapping dialog (round 2)', () => {
   });
 });
 
+describe('epg mapping dialog: the channel\'s own time shift', () => {
+  it('shows the saved shift, refuses a bad one, and saves a new one (blank clears it)', async () => {
+    rpcMock.handlers['epg.channelsSearch'] = () => [];
+    rpcMock.handlers['epg.resolve'] = () => ({ via: 'item', epgChannelId: 'one.uk', shiftMinutes: 60 });
+    rpcMock.handlers['epg.setChannelShift'] = () => null;
+    render(
+      <QueryClientProvider client={queryClient}>
+        <I18nextProvider i18n={i18n}>
+          <EpgMappingDialog channel={makeChannel(1)} onClose={() => undefined} />
+        </I18nextProvider>
+      </QueryClientProvider>,
+    );
+    const input = await screen.findByTestId('epg-mapping-shift');
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('60'));
+    const save = screen.getByRole('button', { name: 'Save shift' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '1.5' } });
+    expect(screen.getByRole('alert').textContent).toContain('-720 and 720');
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(rpcMock.calls).toContainEqual({ cmd: 'epg.setChannelShift', args: { ref: makeChannel(1).ref, minutes: null } }),
+    );
+  });
+});
+
 describe('Live context menu: Copy stream address (round 2)', () => {
   const openMenu = async (row: number) => {
     // The row, not its text: once the cursor settles on the row, the guide ribbon shows the same name.

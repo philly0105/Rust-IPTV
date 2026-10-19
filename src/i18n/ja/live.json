@@ -196,5 +196,11 @@
   "parentalHiddenHint": "グループがロックされています。PIN を入力すると、このセッションの間表示されます。",
   "parentalUnlock": "ロック解除",
   "parentalUnlockTitle": "ロック中のチャンネルを表示",
-  "parentalUnlockBody": "PIN を入力すると、ペアレンタルコントロールが再びロックするまで、ロック中のグループとチャンネルを表示します。"
+  "parentalUnlockBody": "PIN を入力すると、ペアレンタルコントロールが再びロックするまで、ロック中のグループとチャンネルを表示します。",
+  "mappingShift": "このチャンネルの時刻調整",
+  "mappingShiftHint": "分単位。プレイリストの tvg-shift の代わりに使います。空欄ならプレイリストの値を使います。ソースの時刻調整は引き続き加算されます。",
+  "mappingShiftUnit": "分",
+  "mappingShiftError": "-720～720の整数で分を入力してください。",
+  "mappingShiftSave": "調整を保存",
+  "mappingShiftSaved": "時刻調整を保存しました"
 }

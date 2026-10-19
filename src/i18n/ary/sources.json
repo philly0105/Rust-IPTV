@@ -454,5 +454,9 @@
   "discardedFailedHint": "الاستيراد الأول فشل. ختار «رجّع» باش تخليه وتعاود من البطاقة ديالو.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "تزحيل وقت الدليل",
+  "epgShiftHint": "كيزحل كاع البرامج ديال هاد المصدر بهاد العدد ديال الدقايق، زايد على التزحيل اللي فالإعدادات. خليه خاوي إلا ما بغيتيش.",
+  "epgShiftUnit": "دقايق",
+  "epgShiftError": "دخل دقايق كاملين بين -720 و 720."
 }

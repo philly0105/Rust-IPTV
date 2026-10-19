@@ -474,5 +474,10 @@
   "backupParentalBody": "الرقابة الأبوية مسدودة، داكشي علاش خيارات الرقابة اللي فالنسخة خاصهم الرمز PIN. دخّلو باش تستورد كلشي، ولا استورد الباقي وخلّي خيارات الرقابة ديالك كيفما هوما.",
   "backupParentalSkip": "استورد بلا بيهم",
   "backupParentalUnlock": "دخّل PIN واستورد",
-  "backupParentalPinTitle": "دخّل الرمز PIN باش تستورد خيارات الرقابة الأبوية"
+  "backupParentalPinTitle": "دخّل الرمز PIN باش تستورد خيارات الرقابة الأبوية",
+  "windowStart": "الشرجم ملي يتحل التطبيق",
+  "windowStartHint": "كيفاش كيتحل الشرجم ديال التطبيق. F11 كيخرج من الشاشة الكاملة.",
+  "windowStartNormal": "كيف خليتو",
+  "windowStartMaximized": "مكبّر",
+  "windowStartFullscreen": "الشاشة الكاملة"
 }

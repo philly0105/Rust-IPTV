@@ -505,13 +505,26 @@ fn reveal_window(app: AppHandle) {
 
 /// Shows the main window the first time it is called (the UI rendered, or a
 /// fallback timer); later calls do nothing, so reloads never steal focus.
+/// The `windowStart` setting applies here: maximized goes through the same
+/// hidden maximize as `unstick_fullscreen_size`, fullscreen follows the show.
+/// Before the state is open (only the fallback timer can be that early) the
+/// window opens as it closed.
 fn reveal_main(app: &AppHandle) {
     if SHOWN.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
     if let Some(w) = app.get_webview_window("main") {
+        let start = app
+            .try_state::<Arc<AppState>>()
+            .map(|state| state.settings_snapshot().window_start);
+        if start == Some(iptv_core::model::WindowStart::Maximized) {
+            let _ = w.maximize();
+        }
         clear_hidden_maximize(&w);
         let _ = w.show();
+        if start == Some(iptv_core::model::WindowStart::Fullscreen) {
+            let _ = w.set_fullscreen(true);
+        }
         let _ = w.set_focus();
     }
 }

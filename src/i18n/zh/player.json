@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "嵌入式 MPV 可以截取：请在“设置 > 播放器”中选择它。",
   "screenshotNotReady": "还没有画面。请在视频开始播放后重试。",
   "screenshotNoVideo": "电台没有可截取的画面。",
-  "screenshotExternal": "正在外部播放器中播放。请使用该播放器自己的截图键。"
+  "screenshotExternal": "正在外部播放器中播放。请使用该播放器自己的截图键。",
+  "picture": "画面",
+  "pictureAspect": "宽高比",
+  "aspectAuto": "原始",
+  "aspectFill": "拉伸",
+  "pictureZoom": "缩放",
+  "zoomNone": "无",
+  "zoomCrop": "裁剪填满",
+  "deinterlace": "去隔行"
 }

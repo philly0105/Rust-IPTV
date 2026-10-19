@@ -460,6 +460,7 @@ mod tests {
             }),
             headers: None,
             catchup,
+            clear_key: None,
         }
     }
 

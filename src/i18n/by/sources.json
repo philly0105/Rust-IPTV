@@ -416,5 +416,9 @@
   "discardedFailedHint": "Першы імпарт не ўдаўся. Націсніце «Адрабіць», каб пакінуць крыніцу і паўтарыць спробу з яе карткі.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Зрух часу праграмы перадач",
+  "epgShiftHint": "Зрушвае ўсе перадачы гэтай крыніцы на столькі хвілін, дадаткова да зруху ў Наладах. Пакіньце пустым, каб без зруху.",
+  "epgShiftUnit": "хвілін",
+  "epgShiftError": "Увядзіце цэлую колькасць хвілін ад -720 да 720."
 }

@@ -450,5 +450,10 @@
   "backupParentalBody": "家长控制已锁定，备份中的家长控制选项需要 PIN。输入 PIN 以导入全部内容，或只导入其余部分并保留当前选项。",
   "backupParentalSkip": "不导入这些选项",
   "backupParentalUnlock": "输入 PIN 并导入",
-  "backupParentalPinTitle": "输入 PIN 以导入家长控制选项"
+  "backupParentalPinTitle": "输入 PIN 以导入家长控制选项",
+  "windowStart": "启动时的窗口",
+  "windowStartHint": "应用窗口的打开方式。按 F11 退出全屏。",
+  "windowStartNormal": "保持上次状态",
+  "windowStartMaximized": "最大化",
+  "windowStartFullscreen": "全屏"
 }

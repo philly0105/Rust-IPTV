@@ -416,5 +416,9 @@
   "discardedFailedHint": "Первый импорт не удался. Нажмите «Отменить», чтобы оставить источник и повторить попытку с его карточки.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Сдвиг времени телегида",
+  "epgShiftHint": "Сдвигает все передачи этого источника на столько минут, вдобавок к сдвигу в Настройках. Оставьте пустым, чтобы без сдвига.",
+  "epgShiftUnit": "минут",
+  "epgShiftError": "Введите целое число минут от -720 до 720."
 }

@@ -450,5 +450,10 @@
   "backupParentalBody": "A szülői felügyelet zárolva van, ezért a mentésben lévő beállításaihoz PIN-kód kell. Add meg az összes adat importálásához, vagy importáld a többit, és tartsd meg a jelenlegi beállításokat.",
   "backupParentalSkip": "Importálás nélkülük",
   "backupParentalUnlock": "PIN megadása és importálás",
-  "backupParentalPinTitle": "Add meg a PIN-kódot a szülői felügyelet beállításainak importálásához"
+  "backupParentalPinTitle": "Add meg a PIN-kódot a szülői felügyelet beállításainak importálásához",
+  "windowStart": "Ablak indításkor",
+  "windowStartHint": "Hogyan nyílik meg az alkalmazás ablaka. Az F11 kilép a teljes képernyőből.",
+  "windowStartNormal": "Ahogy hagytam",
+  "windowStartMaximized": "Teljes méretű",
+  "windowStartFullscreen": "Teljes képernyő"
 }

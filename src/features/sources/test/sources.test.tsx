@@ -292,6 +292,22 @@ describe('Guide (EPG) loads after add and edit', () => {
     await waitFor(() => expect(rpcMock.callsOf('epg.refresh')).toEqual([{ url: added }]));
   });
 
+  it('edit: the guide time shift is saved with the guide links; blank removes it', async () => {
+    const before = makeSource('a', { name: 'First', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [], shiftMinutes: 30 } });
+    rpcMock.handlers['sources.list'] = () => [before];
+    rpcMock.handlers['sources.update'] = () => before;
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Guide' }));
+    const shift = screen.getByTestId('epg-shift-minutes') as HTMLInputElement;
+    expect(shift.value).toBe('30');
+    fireEvent.change(shift, { target: { value: '9999' } });
+    expect(within(dialog()).getByText('Enter whole minutes between -720 and 720.')).toBeTruthy();
+    fireEvent.change(shift, { target: { value: '-90' } });
+    fireEvent.click(screen.getByTestId('edit-source-save'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.update')).toEqual([{ id: 'a', patch: { epg: { shiftMinutes: -90 } } }]));
+  });
+
   it('edit: a name-only change does not touch the guide', async () => {
     const before = makeSource('a', { name: 'First', epg: { detectedUrls: ['http://g.example.com/a.xml'], manualUrls: [], disabledUrls: [] } });
     rpcMock.handlers['sources.list'] = () => [before];

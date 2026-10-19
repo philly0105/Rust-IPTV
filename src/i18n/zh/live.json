@@ -196,5 +196,11 @@
   "parentalHiddenHint": "其分组已锁定。输入 PIN 即可在本次会话中显示。",
   "parentalUnlock": "解锁",
   "parentalUnlockTitle": "显示已锁定的频道",
-  "parentalUnlockBody": "输入 PIN，在家长控制重新锁定前显示已锁定的分组和频道。"
+  "parentalUnlockBody": "输入 PIN，在家长控制重新锁定前显示已锁定的分组和频道。",
+  "mappingShift": "此频道的时间偏移",
+  "mappingShiftHint": "以分钟计，代替播放列表中的 tvg-shift。留空则使用播放列表的值。来源的偏移仍会叠加。",
+  "mappingShiftUnit": "分钟",
+  "mappingShiftError": "请输入 -720 到 720 之间的整数分钟。",
+  "mappingShiftSave": "保存偏移",
+  "mappingShiftSaved": "时间偏移已保存"
 }

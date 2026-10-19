@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "MPV integrato può catturarla: sceglilo in Impostazioni > Lettori.",
   "screenshotNotReady": "Non c'è ancora un'immagine. Riprova quando il video è in riproduzione.",
   "screenshotNoVideo": "La radio non ha immagini da catturare.",
-  "screenshotExternal": "Viene riprodotto in un lettore esterno. Usa il suo tasto per le schermate."
+  "screenshotExternal": "Viene riprodotto in un lettore esterno. Usa il suo tasto per le schermate.",
+  "picture": "Immagine",
+  "pictureAspect": "Proporzioni",
+  "aspectAuto": "Originali",
+  "aspectFill": "Allunga",
+  "pictureZoom": "Zoom",
+  "zoomNone": "Nessuno",
+  "zoomCrop": "Ritaglia per riempire",
+  "deinterlace": "Deinterlacciamento"
 }

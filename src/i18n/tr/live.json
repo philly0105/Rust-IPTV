@@ -196,5 +196,11 @@
   "parentalHiddenHint": "Grupları kilitli. Bu oturumda göstermek için PIN kodunu gir.",
   "parentalUnlock": "Kilidi aç",
   "parentalUnlockTitle": "Kilitli kanalları göster",
-  "parentalUnlockBody": "Ebeveyn denetimi yeniden kilitleyene kadar kilitli grupları ve kanalları göstermek için PIN kodunu gir."
+  "parentalUnlockBody": "Ebeveyn denetimi yeniden kilitleyene kadar kilitli grupları ve kanalları göstermek için PIN kodunu gir.",
+  "mappingShift": "Bu kanalın saat kaydırması",
+  "mappingShiftHint": "Dakika; oynatma listesindeki tvg-shift yerine kullanılır. Listedekini kullanmak için boş bırakın. Kaynağın kaydırması yine uygulanır.",
+  "mappingShiftUnit": "dakika",
+  "mappingShiftError": "-720 ile 720 arasında tam dakika girin.",
+  "mappingShiftSave": "Kaydırmayı kaydet",
+  "mappingShiftSaved": "Saat kaydırması kaydedildi"
 }

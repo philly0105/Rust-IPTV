@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
+import { isDesktop } from '@/api/transport';
+import { leaveBareWindowFullscreen } from '@/api/window';
 import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
 import { registerGateHost } from '@/features/parental/gate';
@@ -178,8 +180,15 @@ export function toggleFullscreenKey(): void {
     player.toggleFullscreen();
     return;
   }
-  if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => undefined);
-  else void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
+  if (document.fullscreenElement) {
+    void document.exitFullscreen?.()?.catch(() => undefined);
+    return;
+  }
+  const enter = () => void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
+  // A desktop window that opened fullscreen (settings.windowStart) has no page fullscreen to leave:
+  // F11 takes the window itself out.
+  if (isDesktop) void leaveBareWindowFullscreen().then((left) => left || enter());
+  else enter();
 }
 
 /**

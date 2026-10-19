@@ -416,5 +416,9 @@
   "discardedFailedHint": "Pierwszy import się nie powiódł. Wybierz Cofnij, aby zachować źródło i spróbować ponownie z jego karty.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Przesunięcie czasu przewodnika",
+  "epgShiftHint": "Przesuwa każdy program z tego źródła o tyle minut, oprócz przesunięcia w Ustawieniach. Zostaw puste, aby nie przesuwać.",
+  "epgShiftUnit": "minut",
+  "epgShiftError": "Wpisz pełne minuty od -720 do 720."
 }

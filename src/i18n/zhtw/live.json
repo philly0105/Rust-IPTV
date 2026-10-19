@@ -196,5 +196,11 @@
   "parentalHiddenHint": "其群組已鎖定。輸入 PIN 即可在本次工作階段中顯示。",
   "parentalUnlock": "解鎖",
   "parentalUnlockTitle": "顯示已鎖定的頻道",
-  "parentalUnlockBody": "輸入 PIN，在家長監護重新鎖定前顯示已鎖定的群組和頻道。"
+  "parentalUnlockBody": "輸入 PIN，在家長監護重新鎖定前顯示已鎖定的群組和頻道。",
+  "mappingShift": "此頻道的時間偏移",
+  "mappingShiftHint": "以分鐘計，取代播放清單中的 tvg-shift。留空則使用播放清單的值。來源的偏移仍會疊加。",
+  "mappingShiftUnit": "分鐘",
+  "mappingShiftError": "請輸入 -720 到 720 之間的整數分鐘。",
+  "mappingShiftSave": "儲存偏移",
+  "mappingShiftSaved": "時間偏移已儲存"
 }

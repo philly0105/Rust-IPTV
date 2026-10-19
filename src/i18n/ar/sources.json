@@ -454,5 +454,9 @@
   "discardedFailedHint": "فشل الاستيراد الأول. اختر «تراجع» للاحتفاظ بالمصدر وإعادة المحاولة من بطاقته.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "إزاحة توقيت الدليل",
+  "epgShiftHint": "تُزاح كل برامج هذا المصدر بهذا العدد من الدقائق، إضافةً إلى الإزاحة في الإعدادات. اتركه فارغًا لعدم الإزاحة.",
+  "epgShiftUnit": "دقيقة",
+  "epgShiftError": "أدخل عددًا صحيحًا من الدقائق بين -720 و720."
 }

@@ -297,6 +297,9 @@ pub struct EpgPatch {
     pub manual_urls: Option<Vec<String>>,
     #[serde(default)]
     pub disabled_urls: Option<Vec<String>>,
+    /// Guide time shift of the source in minutes; 0 removes it.
+    #[serde(default)]
+    pub shift_minutes: Option<i32>,
 }
 
 /// `sources.update` patch. Config changes do not re-import.
@@ -1527,6 +1530,9 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 crate::epg::fetch::check_server_url(state, u)?;
             }
         }
+        if let Some(m) = p.shift_minutes {
+            crate::epg::query::check_shift_minutes(m)?;
+        }
     }
     let epg = patch.epg.map(|p| {
         let mut e: EpgLinks = current.epg.clone();
@@ -1539,8 +1545,15 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         if let Some(v) = p.disabled_urls {
             e.disabled_urls = normalize_urls(v);
         }
+        if let Some(m) = p.shift_minutes {
+            e.shift_minutes = (m != 0).then_some(m);
+        }
         e
     });
+    // A new source shift moves every guide time of the source.
+    let shift_changed = epg
+        .as_ref()
+        .is_some_and(|e| e.shift_minutes != current.epg.shift_minutes);
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
@@ -1645,6 +1658,9 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         crate::stalker::forget_source(state, id).await;
     }
     emit_changed(state, Some(id), ChangeReason::Config);
+    if shift_changed {
+        state.emit("epg.changed", serde_json::json!({}));
+    }
     Ok(updated)
 }
 

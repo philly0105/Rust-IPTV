@@ -450,5 +450,10 @@
   "backupParentalBody": "Parental controls are locked, so the backup's parental options need the PIN. Enter it to import everything, or import the rest and keep your current parental options.",
   "backupParentalSkip": "Import without them",
   "backupParentalUnlock": "Enter PIN and import",
-  "backupParentalPinTitle": "Enter the PIN to import parental options"
+  "backupParentalPinTitle": "Enter the PIN to import parental options",
+  "windowStart": "Window at startup",
+  "windowStartHint": "How the app window opens. F11 leaves fullscreen.",
+  "windowStartNormal": "As I left it",
+  "windowStartMaximized": "Maximized",
+  "windowStartFullscreen": "Fullscreen"
 }

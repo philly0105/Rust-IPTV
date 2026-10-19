@@ -196,5 +196,11 @@
   "parentalHiddenHint": "Its groups are locked. Enter your PIN to show them for this session.",
   "parentalUnlock": "Unlock",
   "parentalUnlockTitle": "Show locked channels",
-  "parentalUnlockBody": "Enter your PIN to show locked groups and channels until parental controls lock again."
+  "parentalUnlockBody": "Enter your PIN to show locked groups and channels until parental controls lock again.",
+  "mappingShift": "Time shift for this channel",
+  "mappingShiftHint": "Minutes, used instead of the playlist's tvg-shift. Leave empty to use the playlist's. The source's shift still applies.",
+  "mappingShiftUnit": "minutes",
+  "mappingShiftError": "Enter whole minutes between -720 and 720.",
+  "mappingShiftSave": "Save shift",
+  "mappingShiftSaved": "Time shift saved"
 }

@@ -196,5 +196,11 @@
   "parentalHiddenHint": "그룹이 잠겨 있습니다. PIN을 입력하면 이번 세션 동안 표시됩니다.",
   "parentalUnlock": "잠금 해제",
   "parentalUnlockTitle": "잠긴 채널 표시",
-  "parentalUnlockBody": "PIN을 입력하면 자녀 보호 기능이 다시 잠글 때까지 잠긴 그룹과 채널을 표시합니다."
+  "parentalUnlockBody": "PIN을 입력하면 자녀 보호 기능이 다시 잠글 때까지 잠긴 그룹과 채널을 표시합니다.",
+  "mappingShift": "이 채널의 시간 조정",
+  "mappingShiftHint": "분 단위이며, 재생목록의 tvg-shift 대신 사용합니다. 비워 두면 재생목록 값을 씁니다. 소스의 시간 조정은 계속 적용됩니다.",
+  "mappingShiftUnit": "분",
+  "mappingShiftError": "-720~720 사이의 정수(분)를 입력하세요.",
+  "mappingShiftSave": "조정 저장",
+  "mappingShiftSaved": "시간 조정을 저장했습니다"
 }

@@ -378,5 +378,9 @@
   "discardedFailedHint": "Der erste Import ist fehlgeschlagen. Wählen Sie Rückgängig, um die Quelle zu behalten und es auf ihrer Karte erneut zu versuchen.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Zeitverschiebung des Programmführers",
+  "epgShiftHint": "Verschiebt jede Sendung dieser Quelle um so viele Minuten, zusätzlich zur Verschiebung in den Einstellungen. Leer lassen für keine.",
+  "epgShiftUnit": "Minuten",
+  "epgShiftError": "Geben Sie ganze Minuten zwischen -720 und 720 ein."
 }

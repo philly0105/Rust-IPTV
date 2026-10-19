@@ -378,5 +378,9 @@
   "discardedFailedHint": "첫 가져오기에 실패했습니다. 소스를 유지하고 카드에서 다시 시도하려면 실행 취소를 선택하세요.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "가이드 시간 조정",
+  "epgShiftHint": "이 소스의 모든 프로그램을 이만큼(분) 옮깁니다. 설정의 시간 조정에 더해집니다. 비워 두면 조정하지 않습니다.",
+  "epgShiftUnit": "분",
+  "epgShiftError": "-720~720 사이의 정수(분)를 입력하세요."
 }

@@ -619,11 +619,16 @@ async function shakaEngine(
     },
     manifest: { retryParameters: { maxAttempts: 4, baseDelay: 500, backoffFactor: 2, timeout: 20_000 } },
   });
+  // ClearKey from the channel's #KODIPROP licence (clearKey.ts): the keys, or a licence server.
+  if (source.drm?.clearKeys) player.configure({ drm: { clearKeys: source.drm.clearKeys } });
+  else if (source.drm?.licenseServer) player.configure({ drm: { servers: { 'org.w3.clearkey': source.drm.licenseServer } } });
   const route = proxyRoute(url);
   const rewrite = proxyRewrite(url);
   if (route && rewrite) {
     const net = player.getNetworkingEngine();
-    net?.registerRequestFilter((_type, request) => {
+    net?.registerRequestFilter((type, request) => {
+      // A ClearKey licence request is a POST, which the media proxy (GET only) cannot carry.
+      if (type === shaka.net.NetworkingEngine.RequestType.LICENSE) return;
       request.uris = request.uris.map(rewrite);
     });
     // The DASH parser resolves BaseURL/SegmentTemplate against the manifest response URI; make

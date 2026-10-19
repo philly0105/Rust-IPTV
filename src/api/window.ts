@@ -47,16 +47,66 @@ export function setWindowFullscreen(on: boolean): Promise<void> {
   return fullscreenRun;
 }
 
+async function windowIsFullscreen(): Promise<boolean> {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    return await getCurrentWindow().isFullscreen();
+  } catch {
+    return false;
+  }
+}
+
+/** The page was fullscreen at the last `fullscreenchange` (`bindWindowFullscreen`). */
+let pageFullscreen = false;
+/**
+ * The window was already fullscreen when the page went fullscreen: it opened so
+ * (`settings.windowStart`, Rust `reveal_main`). Leaving the page's fullscreen keeps the window's.
+ */
+let windowWasFullscreen = false;
+
+/**
+ * Leaves an OS fullscreen that no page fullscreen stands behind (the window opened fullscreen,
+ * `settings.windowStart`), so F11 takes it out rather than entering one. True when it did;
+ * false on the web, while the page is fullscreen, or when the window is not.
+ */
+export async function leaveBareWindowFullscreen(): Promise<boolean> {
+  if (!isDesktop || typeof document === 'undefined' || document.fullscreenElement) return false;
+  if (!(await windowIsFullscreen())) return false;
+  windowWasFullscreen = false;
+  await setWindowFullscreen(false);
+  return true;
+}
+
 /**
  * Mirrors element fullscreen (player `requestFullscreen`) onto the desktop
  * window. Call once at startup; returns an unsubscribe function. It also repairs the window
  * after a webview reload right away, without waiting for the player code to load: a reload
  * while fullscreen gives a page that is not, and the window follows it out; a reload in PiP
- * puts the normal window back (`recoverPipWindow`).
+ * puts the normal window back (`recoverPipWindow`). A window that opened fullscreen stays so
+ * when the page leaves a fullscreen entered over it.
  */
 export function bindWindowFullscreen(): () => void {
   if (!isDesktop || typeof document === 'undefined') return () => {};
-  const sync = () => void setWindowFullscreen(document.fullscreenElement != null);
+  const sync = () => {
+    const on = document.fullscreenElement != null;
+    const entering = on && !pageFullscreen;
+    pageFullscreen = on;
+    if (!on) {
+      const keep = windowWasFullscreen;
+      windowWasFullscreen = false;
+      if (!keep) void setWindowFullscreen(false);
+      return;
+    }
+    // With no change in flight, a fullscreen window at entry is one the page did not make.
+    if (entering && fullscreenRun === null) {
+      void windowIsFullscreen().then((already) => {
+        if (already && document.fullscreenElement != null) windowWasFullscreen = true;
+        return setWindowFullscreen(true);
+      });
+      return;
+    }
+    void setWindowFullscreen(true);
+  };
   document.addEventListener('fullscreenchange', sync);
   sync();
   void recoverPipWindow().catch(() => undefined);

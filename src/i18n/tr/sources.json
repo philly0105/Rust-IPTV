@@ -378,5 +378,9 @@
   "discardedFailedHint": "İlk içe aktarma başarısız oldu. Kaynağı tutup kartından yeniden denemek için Geri al’ı seçin.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Rehber saat kaydırması",
+  "epgShiftHint": "Bu kaynaktaki her programı bu kadar dakika kaydırır; Ayarlar’daki kaydırmaya eklenir. Kaydırma istemiyorsanız boş bırakın.",
+  "epgShiftUnit": "dakika",
+  "epgShiftError": "-720 ile 720 arasında tam dakika girin."
 }

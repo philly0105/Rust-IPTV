@@ -90,7 +90,7 @@ fn check_refs(refs: &[ItemRef]) -> CoreResult<()> {
 }
 
 /// Resolves each ref once, sharing the directory snapshot: its XMLTV
-/// channel id and `tvg-shift` in seconds ([`query::item_shift`]).
+/// channel id and guide shift in seconds ([`query::item_shift`]).
 fn resolve_many(
     conn: &rusqlite::Connection,
     rt: &EpgRuntime,
@@ -304,13 +304,47 @@ pub async fn clear_mapping(state: &AppState, r: ItemRef) -> CoreResult<()> {
     Ok(())
 }
 
-/// `epg.resolve`.
+/// `epg.setChannelShift`: the channel's own guide shift in minutes, used
+/// instead of its `tvg-shift` (its source's shift still adds to it); `None`
+/// removes it. At most [`query::MAX_SHIFT_MINUTES`] either way.
+pub async fn set_channel_shift(
+    state: &AppState,
+    r: ItemRef,
+    minutes: Option<i32>,
+) -> CoreResult<()> {
+    if let Some(m) = minutes {
+        query::check_shift_minutes(m)?;
+    }
+    state
+        .db_call(move |c| {
+            ensure_source(c, &r.source_id)?;
+            match minutes {
+                Some(m) => c.execute(
+                    "INSERT INTO epg_channel_shift(source_id, content_type, item_id, shift_minutes) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET shift_minutes = excluded.shift_minutes",
+                    params![r.source_id, r.content_type.as_str(), r.item_id, m],
+                )?,
+                None => c.execute(
+                    "DELETE FROM epg_channel_shift WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+                    params![r.source_id, r.content_type.as_str(), r.item_id],
+                )?,
+            };
+            Ok(())
+        })
+        .await?;
+    state.emit("epg.changed", serde_json::json!({}));
+    Ok(())
+}
+
+/// `epg.resolve`, with the channel's own guide shift (`shiftMinutes`).
 pub async fn resolve_ref(state: &AppState, r: ItemRef) -> CoreResult<Resolution> {
     let rt = runtime(state);
     state
         .db_call(move |c| {
             let dir = resolve::directory(c, &rt)?;
-            resolve::resolve(c, &dir, &r)
+            let mut res = resolve::resolve(c, &dir, &r)?;
+            res.shift_minutes = query::channel_shift_minutes(c, &r)?;
+            Ok(res)
         })
         .await
 }

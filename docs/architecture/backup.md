@@ -114,6 +114,7 @@ Every other settings field is in `backup::APP_SETTING_EXCLUDED` with its reason,
 | `liveFailover`, `streamReconnect` | Describe this machine's playback setup. |
 | `imageCacheMaxMb` | Sizes this machine's disk cache. |
 | `tourCompleted`, `lastSeenVersion` | Record what this install has shown. |
+| `windowStart` | How this machine's screen opens the window. |
 
 The remote pairing token is a secret and never appears in a backup.
 

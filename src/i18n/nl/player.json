@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "Ingebouwde MPV kan het vastleggen: kies het via Instellingen > Spelers.",
   "screenshotNotReady": "Er is nog geen beeld. Probeer het opnieuw zodra de video speelt.",
   "screenshotNoVideo": "Radio heeft geen beeld om vast te leggen.",
-  "screenshotExternal": "Dit speelt in een externe speler. Gebruik de eigen screenshottoets daarvan."
+  "screenshotExternal": "Dit speelt in een externe speler. Gebruik de eigen screenshottoets daarvan.",
+  "picture": "Beeld",
+  "pictureAspect": "Beeldverhouding",
+  "aspectAuto": "Origineel",
+  "aspectFill": "Uitrekken",
+  "pictureZoom": "Zoom",
+  "zoomNone": "Geen",
+  "zoomCrop": "Bijsnijden tot vullend",
+  "deinterlace": "Deïnterlacing"
 }

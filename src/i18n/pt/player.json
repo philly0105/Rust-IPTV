@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "O MPV incorporado consegue capturá-la: escolha-o em Configurações > Reprodutores.",
   "screenshotNotReady": "Ainda não há imagem. Tente novamente quando o vídeo estiver em reprodução.",
   "screenshotNoVideo": "O rádio não tem imagem para capturar.",
-  "screenshotExternal": "Isto é reproduzido num reprodutor externo. Use a tecla de captura dele."
+  "screenshotExternal": "Isto é reproduzido num reprodutor externo. Use a tecla de captura dele.",
+  "picture": "Imagem",
+  "pictureAspect": "Proporção",
+  "aspectAuto": "Original",
+  "aspectFill": "Esticar",
+  "pictureZoom": "Zoom",
+  "zoomNone": "Nenhum",
+  "zoomCrop": "Cortar para preencher",
+  "deinterlace": "Desentrelaçar"
 }

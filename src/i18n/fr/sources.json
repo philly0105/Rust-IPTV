@@ -397,5 +397,9 @@
   "discardedFailedHint": "Sa première importation a échoué. Choisissez Annuler pour la garder et réessayer depuis sa carte.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Décalage horaire du guide",
+  "epgShiftHint": "Décale chaque programme de cette source de ce nombre de minutes, en plus du décalage des Réglages. Laissez vide pour aucun.",
+  "epgShiftUnit": "minutes",
+  "epgShiftError": "Saisissez un nombre entier de minutes entre -720 et 720."
 }

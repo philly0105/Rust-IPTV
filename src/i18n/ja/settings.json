@@ -450,5 +450,10 @@
   "backupParentalBody": "ペアレンタルコントロールがロック中のため、バックアップ内の設定には PIN が必要です。PIN を入力してすべてをインポートするか、それ以外をインポートして現在の設定を残してください。",
   "backupParentalSkip": "それ以外をインポート",
   "backupParentalUnlock": "PIN を入力してインポート",
-  "backupParentalPinTitle": "ペアレンタルコントロールの設定をインポートするには PIN を入力してください"
+  "backupParentalPinTitle": "ペアレンタルコントロールの設定をインポートするには PIN を入力してください",
+  "windowStart": "起動時のウィンドウ",
+  "windowStartHint": "アプリのウィンドウの開き方です。F11 で全画面を終了できます。",
+  "windowStartNormal": "前回のまま",
+  "windowStartMaximized": "最大化",
+  "windowStartFullscreen": "全画面"
 }

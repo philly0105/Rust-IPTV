@@ -206,5 +206,11 @@
   "parentalHiddenHint": "Jego grupy są zablokowane. Wpisz PIN, aby pokazać je w tej sesji.",
   "parentalUnlock": "Odblokuj",
   "parentalUnlockTitle": "Pokaż zablokowane kanały",
-  "parentalUnlockBody": "Wpisz PIN, aby pokazywać zablokowane grupy i kanały, dopóki kontrola rodzicielska znów ich nie zablokuje."
+  "parentalUnlockBody": "Wpisz PIN, aby pokazywać zablokowane grupy i kanały, dopóki kontrola rodzicielska znów ich nie zablokuje.",
+  "mappingShift": "Przesunięcie czasu dla tego kanału",
+  "mappingShiftHint": "Minuty, zamiast tvg-shift z playlisty. Zostaw puste, aby użyć wartości z playlisty. Przesunięcie źródła nadal obowiązuje.",
+  "mappingShiftUnit": "minut",
+  "mappingShiftError": "Wpisz pełne minuty od -720 do 720.",
+  "mappingShiftSave": "Zapisz przesunięcie",
+  "mappingShiftSaved": "Zapisano przesunięcie czasu"
 }

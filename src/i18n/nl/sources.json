@@ -378,5 +378,9 @@
   "discardedFailedHint": "De eerste import is mislukt. Kies Ongedaan maken om de bron te houden en het opnieuw te proberen vanaf de kaart.",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "Tijdverschuiving van de gids",
+  "epgShiftHint": "Verschuift elk programma van deze bron zoveel minuten, bovenop de verschuiving in Instellingen. Laat leeg voor geen.",
+  "epgShiftUnit": "minuten",
+  "epgShiftError": "Voer hele minuten in tussen -720 en 720."
 }

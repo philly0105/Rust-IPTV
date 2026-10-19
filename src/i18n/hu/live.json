@@ -196,5 +196,11 @@
   "parentalHiddenHint": "A csoportjai zárolva vannak. Add meg a PIN-kódot, hogy ebben a munkamenetben megjelenjenek.",
   "parentalUnlock": "Feloldás",
   "parentalUnlockTitle": "Zárolt csatornák megjelenítése",
-  "parentalUnlockBody": "Add meg a PIN-kódot, hogy a zárolt csoportok és csatornák látszódjanak, amíg a szülői felügyelet újra nem zárol."
+  "parentalUnlockBody": "Add meg a PIN-kódot, hogy a zárolt csoportok és csatornák látszódjanak, amíg a szülői felügyelet újra nem zárol.",
+  "mappingShift": "Időeltolás ehhez a csatornához",
+  "mappingShiftHint": "Percben, a lejátszási lista tvg-shift értéke helyett. Hagyja üresen a lista értékéhez. A forrás eltolása továbbra is érvényes.",
+  "mappingShiftUnit": "perc",
+  "mappingShiftError": "Egész percet adjon meg -720 és 720 között.",
+  "mappingShiftSave": "Eltolás mentése",
+  "mappingShiftSaved": "Időeltolás mentve"
 }

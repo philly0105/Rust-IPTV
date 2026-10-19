@@ -450,5 +450,10 @@
   "backupParentalBody": "Ouderlijk toezicht is vergrendeld, dus de opties ervan in de back-up vragen de pincode. Voer die in om alles te importeren, of importeer de rest en houd je huidige opties.",
   "backupParentalSkip": "Importeren zonder deze opties",
   "backupParentalUnlock": "Pincode invoeren en importeren",
-  "backupParentalPinTitle": "Voer de pincode in om de opties voor ouderlijk toezicht te importeren"
+  "backupParentalPinTitle": "Voer de pincode in om de opties voor ouderlijk toezicht te importeren",
+  "windowStart": "Venster bij opstarten",
+  "windowStartHint": "Hoe het app-venster opent. F11 verlaat volledig scherm.",
+  "windowStartNormal": "Zoals ik het liet",
+  "windowStartMaximized": "Gemaximaliseerd",
+  "windowStartFullscreen": "Volledig scherm"
 }

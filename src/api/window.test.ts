@@ -91,6 +91,7 @@ const {
   fitsOnScreen,
   setWindowFullscreen,
   bindWindowFullscreen,
+  leaveBareWindowFullscreen,
   bindTrayLabels,
   sizeForAspect,
   setPipWindowAspect,
@@ -462,6 +463,49 @@ describe('setWindowFullscreen', () => {
     const unbind = bindWindowFullscreen();
     await vi.waitFor(() => expect(last('setPosition')).toMatchObject({ x: 40, y: 30 }));
     expect(last('setDecorations')).toBe(true);
+    unbind();
+  });
+});
+
+describe('a window that opened fullscreen (settings.windowStart)', () => {
+  let pageElement: Element | null = null;
+  const setPage = (el: Element | null) => {
+    pageElement = el;
+    document.dispatchEvent(new Event('fullscreenchange'));
+  };
+  beforeEach(() => {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => pageElement });
+  });
+  afterEach(() => {
+    pageElement = null;
+    Reflect.deleteProperty(document, 'fullscreenElement');
+  });
+
+  it('stays fullscreen when the page leaves a fullscreen entered over it', async () => {
+    const unbind = bindWindowFullscreen();
+    // The startup sync has settled before Rust shows the window.
+    await setWindowFullscreen(false);
+    fake.state.fullscreen = true; // Rust reveal_main
+    setPage(document.body);
+    await new Promise((r) => setTimeout(r, 0));
+    setPage(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(named('setFullscreen')).toEqual([]);
+    expect(fake.state.fullscreen).toBe(true);
+    // F11 with no page fullscreen takes the window out.
+    expect(await leaveBareWindowFullscreen()).toBe(true);
+    expect(fake.state.fullscreen).toBe(false);
+    expect(await leaveBareWindowFullscreen()).toBe(false);
+    unbind();
+  });
+
+  it('a window the page made fullscreen still follows the page out', async () => {
+    const unbind = bindWindowFullscreen();
+    setPage(document.body);
+    await vi.waitFor(() => expect(fake.state.fullscreen).toBe(true));
+    setPage(null);
+    await vi.waitFor(() => expect(fake.state.fullscreen).toBe(false));
+    expect(named('setFullscreen')).toEqual([true, false]);
     unbind();
   });
 });

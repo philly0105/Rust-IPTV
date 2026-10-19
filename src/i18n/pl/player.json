@@ -294,5 +294,13 @@
   "screenshotCorsMpv": "Osadzony MPV może go przechwycić: wybierz go w Ustawienia > Odtwarzacze.",
   "screenshotNotReady": "Nie ma jeszcze obrazu. Spróbuj ponownie, gdy wideo zacznie się odtwarzać.",
   "screenshotNoVideo": "Radio nie ma obrazu do przechwycenia.",
-  "screenshotExternal": "To jest odtwarzane w zewnętrznym odtwarzaczu. Użyj jego własnego klawisza zrzutu ekranu."
+  "screenshotExternal": "To jest odtwarzane w zewnętrznym odtwarzaczu. Użyj jego własnego klawisza zrzutu ekranu.",
+  "picture": "Obraz",
+  "pictureAspect": "Proporcje obrazu",
+  "aspectAuto": "Oryginalne",
+  "aspectFill": "Rozciągnij",
+  "pictureZoom": "Powiększenie",
+  "zoomNone": "Brak",
+  "zoomCrop": "Przytnij, aby wypełnić",
+  "deinterlace": "Usuwanie przeplotu"
 }

@@ -378,5 +378,9 @@
   "discardedFailedHint": "最初のインポートに失敗しました。残してカードから再試行するには「元に戻す」を選んでください。",
   "kindM3uShort": "M3U",
   "kindXtreamShort": "Xtream",
-  "kindStalkerShort": "Stalker"
+  "kindStalkerShort": "Stalker",
+  "epgShift": "番組表の時刻調整",
+  "epgShiftHint": "このソースの全番組を指定した分だけずらします（設定の時刻調整に加算）。空欄なら調整しません。",
+  "epgShiftUnit": "分",
+  "epgShiftError": "-720～720の整数で分を入力してください。"
 }

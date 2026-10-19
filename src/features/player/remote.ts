@@ -84,6 +84,9 @@ export function bindRemote(): () => void {
       case 'togglePlay':
         s.togglePlay();
         break;
+      case 'seekBy':
+        if (ev.seconds !== undefined) s.seekBy(ev.seconds);
+        break;
       case 'stop':
         // An external player is closed the way its stage's Stop does it.
         if (s.mode === 'external') void stopExternalPlayback();

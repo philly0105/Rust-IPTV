@@ -518,10 +518,7 @@ async fn a_busy_port_at_startup_is_retried_until_it_frees_up() {
 #[tokio::test]
 async fn play_pause_and_stop_emit_remote_commands() {
     let mut f = fixture().await;
-    for (path, command) in [
-        ("playback/toggle", "togglePlay"),
-        ("playback/stop", "stop"),
-    ] {
+    for (path, command) in [("playback/toggle", "togglePlay"), ("playback/stop", "stop")] {
         let res = f
             .http
             .post(format!("{}/{path}", f.base))
@@ -534,6 +531,42 @@ async fn play_pause_and_stop_emit_remote_commands() {
             json!({ "command": command })
         );
     }
+}
+
+#[tokio::test]
+async fn seek_emits_seek_by_and_rejects_bad_steps() {
+    let mut f = fixture().await;
+    for seconds in [30.0, -10.0] {
+        let res = f
+            .http
+            .post(format!("{}/playback/seek", f.base))
+            .json(&json!({ "seconds": seconds }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "{seconds}");
+        assert_eq!(
+            next_command(&mut f.events).await,
+            json!({ "command": "seekBy", "seconds": seconds })
+        );
+    }
+    for body in [
+        json!({}),
+        json!({ "seconds": 0 }),
+        json!({ "seconds": 100000 }),
+        json!({ "seconds": "30" }),
+    ] {
+        let res = f
+            .http
+            .post(format!("{}/playback/seek", f.base))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "{body}");
+    }
+    assert_no_command(&mut f.events);
+    remote::stop(f.state.clone()).await.unwrap();
 }
 
 async fn channel_names(http: &reqwest::Client, base: &str) -> Vec<String> {

@@ -46,6 +46,15 @@ pub fn cached_playlist_path(data_dir: &Path, source_id: &str) -> PathBuf {
     data_dir.join("playlists").join(format!("{source_id}.m3u"))
 }
 
+/// Where `sources.update` stages large new text until its transaction
+/// commits; it is renamed over [`cached_playlist_path`] then. A copy left by
+/// a crash is swept as an orphan at start-up.
+pub fn staged_playlist_path(data_dir: &Path, source_id: &str) -> PathBuf {
+    data_dir
+        .join("playlists")
+        .join(format!("{source_id}.update.m3u"))
+}
+
 /// Stores playlist text that arrived in memory (a backup restore) the way an
 /// import stores a downloaded playlist: inline when it fits in
 /// [`RAW_INLINE_MAX`], otherwise written to [`cached_playlist_path`].
@@ -53,16 +62,20 @@ pub fn cached_playlist_path(data_dir: &Path, source_id: &str) -> PathBuf {
 /// went to disk. The write goes through a temp file and a rename, so a
 /// failure never leaves a truncated copy behind.
 pub fn place_raw_text<'a>(data_dir: &Path, source_id: &str, text: &'a str) -> CoreResult<&'a str> {
+    place_raw_text_at(&cached_playlist_path(data_dir, source_id), text)
+}
+
+/// [`place_raw_text`] with large text written to `dest`.
+pub fn place_raw_text_at<'a>(dest: &Path, text: &'a str) -> CoreResult<&'a str> {
     if text.len() as u64 <= RAW_INLINE_MAX {
         return Ok(text);
     }
-    let dest = cached_playlist_path(data_dir, source_id);
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let part = dest.with_extension("m3u.part");
     std::fs::write(&part, text.as_bytes())
-        .and_then(|()| std::fs::rename(&part, &dest))
+        .and_then(|()| std::fs::rename(&part, dest))
         .map_err(|e| {
             let _ = std::fs::remove_file(&part);
             CoreError::Io(std::io::Error::new(

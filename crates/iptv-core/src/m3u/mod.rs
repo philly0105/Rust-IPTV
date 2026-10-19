@@ -10,7 +10,8 @@ pub mod series;
 
 pub use importer::{
     cached_playlist_path, classify, group_id, import_source, item_id, place_raw_text,
-    remove_cached_playlist, stored_text, M3uImporter, RowBuilder,
+    place_raw_text_at, remove_cached_playlist, staged_playlist_path, stored_text, M3uImporter,
+    RowBuilder,
 };
 pub use parser::{parse_str, M3uEntry, M3uHeader, M3uReader, ParseStats};
 

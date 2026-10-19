@@ -149,6 +149,50 @@ async fn small_paste_stays_inline() {
     assert_eq!(again.channel_count, 10);
 }
 
+/// A large new text reaches the cached copy only when `sources.update`
+/// commits; a refused update keeps the stored playlist and leaves no file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refused_large_update_keeps_the_stored_copy() {
+    let env = env().await;
+    let text = big_text();
+    let src = add_text(&env.state, "Big paste", &text).await;
+    let path = cache(&env.state.data_dir, &src.id);
+    let new_text = text.replace("Channel ", "Renamed ");
+    let patch = || sources::SourcePatch {
+        text: Some(new_text.clone()),
+        ..Default::default()
+    };
+
+    // A write inside the update's transaction fails.
+    env.state
+        .db_call(|c| {
+            c.execute_batch(
+                "CREATE TRIGGER refuse_update BEFORE UPDATE OF updated_at ON sources
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(sources::update(&env.state, &src.id, patch()).await.is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    assert_eq!(
+        playlist_files(&env.state.data_dir),
+        vec![format!("{}.m3u", src.id)]
+    );
+
+    env.state
+        .db_call(|c| {
+            c.execute_batch("DROP TRIGGER refuse_update;")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    sources::update(&env.state, &src.id, patch()).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), new_text);
+    assert_eq!(raw_row(&env.state, &src.id).await.0, 0);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn replace_import_and_boot_sweep_remove_orphan_copies() {
     let env = env().await;

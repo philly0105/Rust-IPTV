@@ -100,7 +100,11 @@ async fn m3u_plus_episodes_import_as_one_series_with_seasons() {
         .unwrap_err();
     assert_eq!(err.code, iptv_core::RpcErrorCode::NotFound);
     let err = r
-        .dispatch(env.state.clone(), "m3u.streamUrl", json!({ "ref": series_ref }))
+        .dispatch(
+            env.state.clone(),
+            "m3u.streamUrl",
+            json!({ "ref": series_ref }),
+        )
         .await
         .unwrap_err();
     assert_eq!(err.code, iptv_core::RpcErrorCode::Invalid);
@@ -116,7 +120,12 @@ async fn m3u_plus_episodes_import_as_one_series_with_seasons() {
 }
 
 async fn series_watched(env: &Env, series_ref: &Value) -> bool {
-    let v = call(env, "positions.watchedContains", json!({ "refs": [series_ref] })).await;
+    let v = call(
+        env,
+        "positions.watchedContains",
+        json!({ "refs": [series_ref] }),
+    )
+    .await;
     !v.as_array().unwrap().is_empty()
 }
 
@@ -153,14 +162,20 @@ async fn watching_every_episode_marks_the_m3u_series_watched() {
         json!({ "ref": series_ref, "episodeId": ids[2], "watched": true }),
     )
     .await;
-    assert!(series_watched(&env, &series_ref).await, "every stored episode is watched");
+    assert!(
+        series_watched(&env, &series_ref).await,
+        "every stored episode is watched"
+    );
     call(
         &env,
         "userstate.setWatched",
         json!({ "ref": series_ref, "episodeId": ids[0], "watched": false }),
     )
     .await;
-    assert!(!series_watched(&env, &series_ref).await, "unmarking an episode clears the series");
+    assert!(
+        !series_watched(&env, &series_ref).await,
+        "unmarking an episode clears the series"
+    );
 }
 
 async fn exec(env: &Env, sql: &'static str, a: String, b: String) {
@@ -287,7 +302,14 @@ async fn state_saved_on_episodes_imported_as_movies_moves_to_the_series() {
             )?;
             let rows = st
                 .query_map(params![sid], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows)
@@ -305,7 +327,11 @@ async fn state_saved_on_episodes_imported_as_movies_moves_to_the_series() {
     assert_eq!(snap["title"], "EN - Dark (2017)");
     assert!(snap["subtitle"].as_str().unwrap().starts_with("S01E01 · "));
     assert_eq!(
-        (positions[1].0.as_str(), positions[1].2.as_str(), positions[1].3),
+        (
+            positions[1].0.as_str(),
+            positions[1].2.as_str(),
+            positions[1].3
+        ),
         ("series", e2.as_str(), 300)
     );
 

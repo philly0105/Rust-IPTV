@@ -30,6 +30,8 @@ The client talks to `player_api.php` on an Xtream panel, imports live channels, 
 | `xtream.accountInfo` | `{sourceId}` | `XtreamAccountInfo` |
 | `xtream.test` | `{config}` | `ConnectionTestResult` (never errors on a bad server; `ok: false` plus a message) |
 
+`xtream.streamUrl` and `xtream.catchupUrl` carry the source's own User-Agent, Referer and Origin in `PlayerSource.headers` when any is set (absent otherwise, so players keep their defaults), so playback, downloads (which re-resolve through `streamUrl`) and recordings send what the API calls send. `sources.add` / `sources.update` refuse a header value with a line break or other control character.
+
 ## Server URL normalization
 
 `url::normalize_server_url`: trim, add `http://` when no scheme is given, reject other schemes, embedded credentials and empty hosts. Strip trailing slashes, then a trailing `/player_api.php` or `/get.php` (case-insensitive), then trailing slashes again. The port and base path stay; a default port is dropped and the host is lowercased. `http://Host:8080/base/get.php?username=x` becomes `http://host:8080/base`.

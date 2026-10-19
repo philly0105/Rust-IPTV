@@ -27,6 +27,9 @@ const BODY_LIMIT: usize = 16 * 1024;
 /// Largest channel number accepted by `channel/select`.
 const MAX_CHANNEL_NUMBER: i64 = 999_999;
 
+/// Largest step, in seconds either way, accepted by `playback/seek`.
+const MAX_SEEK_SECONDS: f64 = 6.0 * 3600.0;
+
 const CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
 connect-src 'self'; img-src 'self' data: http: https:; base-uri 'none'; form-action 'none'; \
 frame-ancestors 'none'";
@@ -69,6 +72,7 @@ pub fn router_with_lan(state: Arc<AppState>, port: u16, lan: Vec<Ipv4Addr>) -> R
         .route("/volume", post(volume))
         .route("/playback/toggle", post(playback_toggle))
         .route("/playback/stop", post(playback_stop))
+        .route("/playback/seek", post(playback_seek))
         // Paths of the old IPTVnator remote API, kept so existing clients work.
         .route("/channel/select-number", post(channel_select))
         .route("/volume/up", post(volume_up))
@@ -565,6 +569,8 @@ struct CommandEvent<'a> {
     id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     level: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seconds: Option<f64>,
 }
 
 impl CommandEvent<'_> {
@@ -574,6 +580,7 @@ impl CommandEvent<'_> {
             number: None,
             id: None,
             level: None,
+            seconds: None,
         }
     }
 }
@@ -787,6 +794,38 @@ async fn playback_toggle(State(ctx): State<Ctx>) -> Response {
 async fn playback_stop(State(ctx): State<Ctx>) -> Response {
     emit(&ctx, CommandEvent::plain("stop"));
     accepted(&["stop"])
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SeekBody {
+    seconds: Option<f64>,
+}
+
+/// `{seconds}` jumps that far from the current position (negative: back).
+async fn playback_seek(State(ctx): State<Ctx>, body: Bytes) -> Response {
+    let body: SeekBody = match parse_body(&body) {
+        Ok(b) => b,
+        Err(e) => return bad_json(e),
+    };
+    let seconds = match body.seconds {
+        Some(s) if s.is_finite() && s != 0.0 && s.abs() <= MAX_SEEK_SECONDS => s,
+        _ => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid",
+                "seconds must be a non-zero number of seconds, at most 6 hours either way",
+            )
+        }
+    };
+    emit(
+        &ctx,
+        CommandEvent {
+            seconds: Some(seconds),
+            ..CommandEvent::plain("seekBy")
+        },
+    );
+    accepted(&["seekBy"])
 }
 
 async fn volume_up(State(ctx): State<Ctx>) -> Response {

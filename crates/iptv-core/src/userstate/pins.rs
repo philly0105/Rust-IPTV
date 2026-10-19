@@ -58,7 +58,10 @@ pub fn get(conn: &Connection, key: &str) -> CoreResult<Option<SourcePin>> {
 /// replacing any earlier pin of the key.
 pub fn set(conn: &Connection, key: &str, item_ref: &ItemRef) -> CoreResult<SourcePin> {
     check_key(key)?;
-    if !matches!(item_ref.content_type, ContentType::Movie | ContentType::Series) {
+    if !matches!(
+        item_ref.content_type,
+        ContentType::Movie | ContentType::Series
+    ) {
         return Err(CoreError::invalid("only movies and series can be pinned"));
     }
     let known: Option<i64> = conn

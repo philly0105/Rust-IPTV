@@ -2178,7 +2178,10 @@ mod tests {
             "inputstream.adaptive.license_key": " 0123:4567 ",
         } });
         assert_eq!(row.clear_key().as_deref(), Some("0123:4567"));
-        assert_eq!(Channel::from(row.clone()).clear_key.as_deref(), Some("0123:4567"));
+        assert_eq!(
+            Channel::from(row.clone()).clear_key.as_deref(),
+            Some("0123:4567")
+        );
         row.extra = serde_json::json!({ "kodiProps": {
             "inputstream.adaptive.license_type": "com.widevine.alpha",
             "inputstream.adaptive.license_key": "https://lic.example/wv",

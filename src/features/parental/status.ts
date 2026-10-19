@@ -238,7 +238,8 @@ export async function lockNow(): Promise<ParentalStatus> {
 /**
  * Mod+Alt+L locks at once, bound only while a session unlock is active.
  * Not while typing: on Windows Ctrl+Alt is AltGr, and AltGr+L types a letter
- * on some layouts (Polish "ł").
+ * on some layouts (Polish "ł"). It does fire while a dialog is open: locking
+ * navigates nowhere, so nothing in the dialog is lost.
  */
 function useLockNowShortcut(s: ParentalStatus | undefined): void {
   const { t } = useTranslation('parental');
@@ -249,7 +250,7 @@ function useLockNowShortcut(s: ParentalStatus | undefined): void {
         () => toast({ variant: 'success', title: t('lockedNowToast') }),
         (err: unknown) => toast({ variant: 'error', title: t('saveFailed'), description: errorDescription(err) }),
       ),
-    { description: t('shortcutLockNow'), area: t('shell:settingsParental'), enabled: !!s?.enabled && s.unlocked },
+    { description: t('shortcutLockNow'), area: t('shell:settingsParental'), enabled: !!s?.enabled && s.unlocked, allowInModal: true },
   );
 }
 

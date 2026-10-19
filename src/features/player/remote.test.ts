@@ -12,6 +12,7 @@ const store = vi.hoisted(() => ({
   zapToNumber: vi.fn(async () => undefined),
   adjustVolume: vi.fn(),
   togglePlay: vi.fn(),
+  seekBy: vi.fn(),
   stop: vi.fn(),
   stopExternal: vi.fn(async () => undefined),
   mode: 'inline' as 'inline' | 'external',
@@ -42,7 +43,15 @@ vi.mock('./store', () => ({
     return () => player.settingsListeners.delete(fn);
   },
   usePlayerStore: {
-    getState: () => ({ adjustVolume: store.adjustVolume, togglePlay: store.togglePlay, stop: store.stop, mode: store.mode, volume: 1, muted: false }),
+    getState: () => ({
+      adjustVolume: store.adjustVolume,
+      togglePlay: store.togglePlay,
+      seekBy: store.seekBy,
+      stop: store.stop,
+      mode: store.mode,
+      volume: 1,
+      muted: false,
+    }),
     subscribe: (fn: (s: unknown, prev: unknown) => void) => {
       player.storeListeners.add(fn);
       return () => player.storeListeners.delete(fn);
@@ -69,6 +78,15 @@ describe('bindRemote', () => {
     bus.emit({ command: 'stop' });
     expect(store.stopExternal).toHaveBeenCalledTimes(1);
     expect(store.stop).toHaveBeenCalledTimes(1);
+    unbind();
+  });
+
+  it('seeks by the remote step', () => {
+    const unbind = bindRemote();
+    bus.emit({ command: 'seekBy', seconds: -10 });
+    bus.emit({ command: 'seekBy' });
+    expect(store.seekBy).toHaveBeenCalledTimes(1);
+    expect(store.seekBy).toHaveBeenCalledWith(-10);
     unbind();
   });
 

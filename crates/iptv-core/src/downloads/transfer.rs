@@ -159,7 +159,10 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
 async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
     // A catch-up programme's archive URL cannot be rebuilt from its ref: that
     // would resolve the channel's live stream.
-    if matches!(row.download.item_ref.content_type, ContentType::Live | ContentType::Radio) {
+    if matches!(
+        row.download.item_ref.content_type,
+        ContentType::Live | ContentType::Radio
+    ) {
         return;
     }
     let item_ref = row.download.item_ref.clone();

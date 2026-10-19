@@ -374,6 +374,26 @@ fn clean_headers(h: RequestHeaders) -> RequestHeaders {
     }
 }
 
+/// Rejects header values HTTP cannot carry (a line break or other control
+/// character), so a bad User-Agent fails here instead of on every request.
+fn check_headers(h: &RequestHeaders) -> CoreResult<()> {
+    for (name, value) in [
+        ("User-Agent", &h.user_agent),
+        ("Referer", &h.referrer),
+        ("Origin", &h.origin),
+    ] {
+        if value
+            .as_deref()
+            .is_some_and(|v| reqwest::header::HeaderValue::from_str(v).is_err())
+        {
+            return Err(CoreError::Invalid(format!(
+                "the {name} header has a line break or control character; remove it"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn check_http_url(raw: &str, what: &str) -> CoreResult<url::Url> {
     let u = url::Url::parse(raw.trim()).map_err(|e| {
         CoreError::Invalid(format!(
@@ -468,11 +488,13 @@ pub fn validate_xtream(cfg: XtreamSourceConfig) -> CoreResult<XtreamSourceConfig
     if cfg.password.trim().is_empty() {
         return Err(CoreError::Invalid("enter the Xtream password".into()));
     }
+    let headers = clean_headers(cfg.headers);
+    check_headers(&headers)?;
     Ok(XtreamSourceConfig {
         server_url: server,
         username,
         password: cfg.password,
-        headers: clean_headers(cfg.headers),
+        headers,
     })
 }
 
@@ -1571,7 +1593,11 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
         None => None,
     };
     let data_dir = state.data_dir.clone();
-    let (updated, config_changed, text_inline) = state
+    // Large new text waits next to the cached copy until the transaction
+    // commits, so a refused update leaves the stored playlist as it was.
+    let staged = crate::m3u::staged_playlist_path(&data_dir, id);
+    let staged_in = staged.clone();
+    let result = state
         .db_call(move |c| {
             let mut config_changed = false;
             // Checked and placed before the write lock, as `store::insert` does.
@@ -1582,11 +1608,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                             "this is not an M3U playlist (no channels found); paste the playlist text".into(),
                         ));
                     }
-                    Some(crate::m3u::place_raw_text(&data_dir, &sid, t)?)
+                    Some(crate::m3u::place_raw_text_at(&staged_in, t)?)
                 }
                 None => None,
             };
             let text_inline = raw.is_some_and(|r| !r.is_empty());
+            let text_staged = raw.is_some_and(str::is_empty);
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             if let Some(raw) = raw {
                 // The sha stays the current catalog's, so the next import sees
@@ -1637,12 +1664,21 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 rusqlite::params![sid, crate::db::now_rfc3339()],
             )?;
             tx.commit()?;
+            if text_staged {
+                let dest = crate::m3u::cached_playlist_path(&data_dir, &sid);
+                std::fs::rename(&staged_in, dest)?;
+            }
             if let Some(p) = position {
                 store::move_to(c, &sid, p)?;
             }
             Ok((store::get(c, &sid)?, config_changed, text_inline))
         })
-        .await?;
+        .await;
+    if result.is_err() {
+        // Refused or failed: the staged text (if any) never counts.
+        let _ = std::fs::remove_file(&staged);
+    }
+    let (updated, config_changed, text_inline) = result?;
     if text_inline {
         // A disk copy of the previous (large) text is stale now.
         crate::m3u::remove_cached_playlist(state, id);
@@ -1962,6 +1998,16 @@ mod tests {
             headers: Default::default(),
         })
         .is_err());
+        let bad_ua = validate_xtream(XtreamSourceConfig {
+            server_url: "http://h".into(),
+            username: "u".into(),
+            password: "p".into(),
+            headers: RequestHeaders {
+                user_agent: Some("Agent\n1".into()),
+                ..Default::default()
+            },
+        });
+        assert!(matches!(bad_ua, Err(CoreError::Invalid(_))), "{bad_ua:?}");
         assert_eq!(
             normalize_urls(vec![" a ".into(), "".into(), "a".into(), "b".into()]),
             vec!["a", "b"]

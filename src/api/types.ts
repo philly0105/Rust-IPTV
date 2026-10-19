@@ -824,7 +824,8 @@ export type RemoteCommand =
   | 'mute'
   | 'setVolume'
   | 'togglePlay'
-  | 'stop';
+  | 'stop'
+  | 'seekBy';
 
 // ---------------------------------------------------------------------------
 // TMDB (C4 tmdb). Images: w500 posters, w1280 backdrops.
@@ -988,6 +989,8 @@ export interface RemoteCommandEvent {
   number?: number;
   id?: string;
   level?: number;
+  /** `seekBy`: seconds from the current position (negative: back). */
+  seconds?: number;
 }
 
 export interface PlayerExternalEvent {

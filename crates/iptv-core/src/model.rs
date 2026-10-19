@@ -2273,6 +2273,7 @@ mod tests {
             archive: None,
             headers: None,
             catchup: None,
+            clear_key: None,
         };
         let v = serde_json::to_value(&ch).unwrap();
         assert_eq!(v["ref"]["sourceId"], "s1");

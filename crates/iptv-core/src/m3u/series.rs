@@ -11,8 +11,7 @@ use super::parser::{url_extension, M3uEntry};
 use crate::catalog::{self, ItemRow};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    ContentType, Episode, ItemRef, PlayerKind, PlayerSource, RequestHeaders, Season,
-    SeriesDetail,
+    ContentType, Episode, ItemRef, PlayerKind, PlayerSource, RequestHeaders, Season, SeriesDetail,
 };
 use crate::state::AppState;
 use once_cell::sync::Lazy;
@@ -678,7 +677,8 @@ mod tests {
         assert_eq!((d.show.as_str(), d.numbers), ("Dark Pilot", None));
         // A marker on a file URL counts too; a plain movie does not.
         assert!(detect(&entry("#EXTINF:-1,Dark 1x03\nhttp://h/dark.103.mkv")).is_some());
-        assert!(detect(&entry("#EXTINF:-1,Heat (1995)\nhttp://h:8080/movie/u/p/1.mkv")).is_none());
+        let heat = entry("#EXTINF:-1,Heat (1995)\nhttp://h:8080/movie/u/p/1.mkv");
+        assert!(detect(&heat).is_none());
         // Nothing before the marker: tvg-name, then the group, names the show.
         let e = entry(
             "#EXTINF:-1 tvg-name=\"Dark S01E01\" group-title=\"G\",S01E01 Secrets\nhttp://h/series/u/p/1.mp4",
@@ -760,7 +760,9 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let eps = stored_episodes(&rows[0].extra);
         assert_eq!(
-            eps.iter().map(|e| (e.season, e.episode)).collect::<Vec<_>>(),
+            eps.iter()
+                .map(|e| (e.season, e.episode))
+                .collect::<Vec<_>>(),
             [(1, 1), (1, 2)]
         );
         assert_ne!(eps[0].id, eps[1].id);

@@ -284,7 +284,10 @@ The runtime stage also installs Debian's `mpv` package (found on `PATH`), so
 scheduled and series recordings work in the container; recordings go to
 `/data/downloads/recordings`. Server mode uses mpv only for recording, never
 for playback. It makes the image larger; an image built without it hides
-Record (see recording.md).
+Record (see recording.md). The remote control server listens on the
+container's own 127.0.0.1 only, and server mode has no LAN pairing, so the
+remote page cannot be reached from outside the container; publishing its
+port does not change that (remote-control.md).
 
 ```
 docker build -t tsrust-iptv .

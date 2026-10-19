@@ -97,9 +97,13 @@ fn resolve_many(
     refs: &[ItemRef],
 ) -> CoreResult<Vec<Option<(String, i64)>>> {
     let dir = resolve::directory(conn, rt)?;
+    let mut source_shifts = HashMap::new();
     refs.iter()
         .map(|r| match resolve::resolve(conn, &dir, r)?.epg_channel_id {
-            Some(id) => Ok(Some((id, query::item_shift(conn, r)?))),
+            Some(id) => {
+                let source = query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
+                Ok(Some((id, query::item_shift_with(conn, r, source)?)))
+            }
             None => Ok(None),
         })
         .collect()

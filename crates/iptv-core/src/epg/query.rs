@@ -8,6 +8,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{EpgNowNext, EpgProgram, ItemRef};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Programmes longer than this may be missed by range queries that start
 /// inside them (the lookback bound keeps queries on the index).
@@ -93,11 +94,32 @@ pub fn check_shift_minutes(minutes: i32) -> CoreResult<()> {
 /// source ([`source_shift`]). The global `epgOffsetMinutes` comes on top, in
 /// the UI. Now/next, programmes, the grid and guide search all use it.
 pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
+    let source_secs = source_shift(conn, &r.source_id)?;
+    item_shift_with(conn, r, source_secs)
+}
+
+/// [`item_shift`] with the source's shift (seconds) already read, for callers
+/// that resolve many channels ([`cached_source_shift`]).
+pub fn item_shift_with(conn: &Connection, r: &ItemRef, source_secs: i64) -> CoreResult<i64> {
     let channel = match channel_shift_minutes(conn, r)? {
         Some(m) => i64::from(m) * 60,
         None => tvg_shift(conn, r)?,
     };
-    Ok(channel + source_shift(conn, &r.source_id)?)
+    Ok(channel + source_secs)
+}
+
+/// [`source_shift`] read once per source id and kept in `cache`.
+pub fn cached_source_shift(
+    conn: &Connection,
+    cache: &mut HashMap<String, i64>,
+    source_id: &str,
+) -> CoreResult<i64> {
+    if let Some(s) = cache.get(source_id) {
+        return Ok(*s);
+    }
+    let s = source_shift(conn, source_id)?;
+    cache.insert(source_id.to_string(), s);
+    Ok(s)
 }
 
 /// The channel's own guide shift in minutes (`epg.setChannelShift`, set in

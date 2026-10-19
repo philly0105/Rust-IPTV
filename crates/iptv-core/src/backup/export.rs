@@ -641,10 +641,10 @@ fn stalker_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRe
 
 /// User state the IPTVnator format has no field for, as Tsrust extensions in
 /// `userState` (IPTVnator ignores unknown keys; backups without them still
-/// import): manual EPG mappings for every kind, and with `positions` /
-/// `hidden` the playback positions and hidden categories by catalog id
-/// (M3U and Stalker positions, Stalker hidden categories). Each key is
-/// written only when it has rows.
+/// import): manual EPG mappings and per-channel guide shifts for every kind,
+/// and with `positions` / `hidden` the playback positions and hidden
+/// categories by catalog id (M3U and Stalker positions, Stalker hidden
+/// categories). Each key is written only when it has rows.
 fn add_tsrust_state(
     conn: &Connection,
     source_id: &str,
@@ -674,6 +674,26 @@ fn add_tsrust_state(
     }
     if !maps.is_empty() {
         us.insert(super::EXT_EPG_MAPPINGS.into(), Value::Array(maps));
+    }
+    let mut shifts = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT content_type, item_id, shift_minutes FROM epg_channel_shift WHERE source_id = ?1
+             ORDER BY content_type, item_id",
+        )?;
+        let rows = stmt.query_map([source_id], |r| {
+            Ok(json!({
+                "contentType": r.get::<_, String>(0)?,
+                "itemId": r.get::<_, String>(1)?,
+                "shiftMinutes": r.get::<_, i64>(2)?,
+            }))
+        })?;
+        for row in rows {
+            shifts.push(row?);
+        }
+    }
+    if !shifts.is_empty() {
+        us.insert(super::EXT_EPG_SHIFTS.into(), Value::Array(shifts));
     }
     if positions {
         let mut out = Vec::new();

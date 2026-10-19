@@ -43,10 +43,14 @@ async fn app() -> App {
 
 impl App {
     async fn call(&self, cmd: &str, args: Value) -> Value {
-        self.router
+        let v = self
+            .router
             .dispatch(self.state.clone(), cmd, args)
             .await
-            .unwrap_or_else(|e| panic!("{cmd} failed: {} {:?}", e.message, e.code))
+            .unwrap_or_else(|e| panic!("{cmd} failed: {} {:?}", e.message, e.code));
+        // Listed Stalker rows reach `stalker_items` in the background (DB-1).
+        self.state.flush_background_writes().await;
+        v
     }
 
     async fn err(&self, cmd: &str, args: Value) -> RpcError {

@@ -52,7 +52,7 @@ export function usePrefetchSchedule(): void {
 
 /** Recording settings the guide needs (reminders on or off). */
 export function useRemindersEnabled(): boolean {
-  const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
+  const settings = useRpcQuery('settings.get', undefined);
   return settings.data?.remindersEnabled ?? true;
 }
 

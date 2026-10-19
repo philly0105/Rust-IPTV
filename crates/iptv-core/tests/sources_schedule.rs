@@ -163,6 +163,65 @@ async fn refreshes_due_sources_only() {
     assert_eq!(s.imp.calls.load(Ordering::SeqCst), 3);
 }
 
+/// ST-1: the startup pass re-imports a source only when it was never
+/// refreshed or is older than a day (or than a shorter interval), also with
+/// the interval at 0 ("Only at startup").
+#[tokio::test]
+async fn startup_pass_refreshes_only_due_sources() {
+    let s = setup().await;
+    source(&s.state, "never", true, None).await;
+    source(&s.state, "old", true, Some(ChronoDuration::hours(13))).await;
+    source(&s.state, "fresh", true, Some(ChronoDuration::hours(1))).await;
+    source(&s.state, "manual", false, Some(ChronoDuration::days(30))).await;
+    // Default interval (12 h): as a scheduler pass.
+    let r = schedule::startup(&s.state, &s.clock, Duration::ZERO).await;
+    let mut done = r.refreshed.clone();
+    done.sort();
+    assert_eq!(done, vec!["never", "old"]);
+
+    // Interval 0: a day. "day" is due, "half" is not.
+    set_interval(&s.state, 0).await;
+    source(&s.state, "day", true, Some(ChronoDuration::hours(25))).await;
+    source(&s.state, "half", true, Some(ChronoDuration::hours(13))).await;
+    let r = schedule::startup(&s.state, &s.clock, Duration::ZERO).await;
+    assert_eq!(r.refreshed, vec!["day"]);
+    // The scheduler itself still schedules nothing at 0.
+    assert_eq!(
+        schedule::tick(&s.state, &s.clock, Duration::ZERO).await,
+        schedule::TickReport::default()
+    );
+
+    // Interval 48 h: startup still refreshes past a day ("half" is 13 h old).
+    set_interval(&s.state, 48).await;
+    source(&s.state, "long", true, Some(ChronoDuration::hours(30))).await;
+    let r = schedule::startup(&s.state, &s.clock, Duration::ZERO).await;
+    assert_eq!(r.refreshed, vec!["long"]);
+    assert!(schedule::tick(&s.state, &s.clock, Duration::ZERO)
+        .await
+        .refreshed
+        .is_empty());
+}
+
+/// HO-4: app exit cancels every running import.
+#[tokio::test]
+async fn cancel_all_imports_stops_every_run() {
+    let s = setup().await;
+    *s.imp.mode.lock() = Mode::WaitForCancel;
+    source(&s.state, "a", true, None).await;
+    let st = s.state.clone();
+    let run = tokio::spawn(async move { sources::run_import(st, "a").await });
+    for _ in 0..200 {
+        if sources::is_import_running(&s.state, "a") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(sources::cancel_all_imports(&s.state), 1);
+    let err = run.await.unwrap().unwrap_err();
+    assert!(sources::is_cancelled_error(&err), "{err:?}");
+    assert_eq!(sources::cancel_all_imports(&s.state), 0);
+}
+
 #[tokio::test]
 async fn interval_zero_schedules_nothing() {
     let s = setup().await;

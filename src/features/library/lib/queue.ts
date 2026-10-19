@@ -60,26 +60,34 @@ export function buildQueueRows(downloads: readonly Download[]): QueueRow[] {
   return rows;
 }
 
+const PAUSE_CANCEL: readonly QueueAction[] = ['pause', 'cancel'];
+const RESUME_REMOVE: readonly QueueAction[] = ['resume', 'remove'];
+const RETRY_REVEAL_REMOVE: readonly QueueAction[] = ['retry', 'reveal', 'remove'];
+const RETRY_REMOVE: readonly QueueAction[] = ['retry', 'remove'];
+const REVEAL_REMOVE: readonly QueueAction[] = ['reveal', 'remove'];
+const REMOVE: readonly QueueAction[] = ['remove'];
+
 /**
  * Actions offered for a row, in display order. The first one is the primary
  * action. A row keeps two buttons in the same places while it toggles between
  * downloading and paused (Pause/Resume, then Cancel/Remove), so nothing shifts
  * under the pointer; a paused transfer is removed rather than canceled, since
- * a canceled one would only wait in Needs attention to be removed.
+ * a canceled one would only wait in Needs attention to be removed. The same
+ * array comes back for the same answer, so a memoised row keeps its props.
  */
-export function actionsFor(status: DownloadStatus, opts: { canReveal: boolean; hasFile: boolean }): QueueAction[] {
+export function actionsFor(status: DownloadStatus, opts: { canReveal: boolean; hasFile: boolean }): readonly QueueAction[] {
   switch (status) {
     case 'downloading':
     case 'queued':
-      return ['pause', 'cancel'];
+      return PAUSE_CANCEL;
     case 'paused':
-      return ['resume', 'remove'];
+      return RESUME_REMOVE;
     case 'failed':
-      return opts.canReveal && opts.hasFile ? ['retry', 'reveal', 'remove'] : ['retry', 'remove'];
+      return opts.canReveal && opts.hasFile ? RETRY_REVEAL_REMOVE : RETRY_REMOVE;
     case 'canceled':
-      return ['retry', 'remove'];
+      return RETRY_REMOVE;
     case 'completed':
-      return opts.canReveal && opts.hasFile ? ['reveal', 'remove'] : ['remove'];
+      return opts.canReveal && opts.hasFile ? REVEAL_REMOVE : REMOVE;
   }
 }
 

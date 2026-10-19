@@ -593,6 +593,17 @@ describe('U4-fix1: stalker VOD-as-series, episode downloads, TMDB attribution', 
     expect(screen.queryByTestId('tmdb-attribution')).toBeNull();
   });
 
+  it('holds the trailer button\'s place while TMDB answers (VD-8)', async () => {
+    let answer: (v: TmdbMovie) => void = () => undefined;
+    rpcMock.handlers['tmdb.movie'] = () => new Promise<TmdbMovie>((resolve) => (answer = resolve));
+    renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
+    await screen.findByRole('heading', { name: 'Dune: Part Two', level: 1 });
+    expect(await screen.findByTestId('vod-trailer-slot')).toBeTruthy();
+    act(() => answer({ ...tmdbMovie, trailerYoutubeKey: 'dQw4w9WgXcQ' }));
+    expect(await screen.findByRole('button', { name: 'Trailer' })).toBeTruthy();
+    expect(screen.queryByTestId('vod-trailer-slot')).toBeNull();
+  });
+
   it('tells a TMDB outage apart from "no similar titles"', async () => {
     rpcMock.handlers['tmdb.movie'] = () => {
       throw { code: 'network', message: 'TMDB unreachable', retryable: true };

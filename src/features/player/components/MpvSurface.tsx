@@ -102,14 +102,26 @@ export function boundsEqual(a: Bounds | null, b: Bounds): boolean {
   return !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
 }
 
-function trackLabel(t: MpvTrack, fallback: string): string {
-  const lang = t.lang ? (() => {
+/** Built once: mpv state events come several times a second, each with every track. */
+let languageNames: Intl.DisplayNames | null | undefined;
+
+function languageName(lang: string): string {
+  if (languageNames === undefined) {
     try {
-      return new Intl.DisplayNames(undefined, { type: 'language' }).of(t.lang) ?? t.lang;
+      languageNames = new Intl.DisplayNames(undefined, { type: 'language' });
     } catch {
-      return t.lang;
+      languageNames = null;
     }
-  })() : undefined;
+  }
+  try {
+    return languageNames?.of(lang) ?? lang;
+  } catch {
+    return lang;
+  }
+}
+
+function trackLabel(t: MpvTrack, fallback: string): string {
+  const lang = t.lang ? languageName(t.lang) : undefined;
   if (t.title && lang) return `${t.title} (${lang})`;
   return t.title ?? lang ?? fallback;
 }
@@ -122,6 +134,13 @@ export function mpvTracks(state: MpvState, fallbacks: { audio(i: number): string
     .filter((t) => t.type === 'sub')
     .map((t, i) => ({ id: String(t.id), label: trackLabel(t, fallbacks.sub(i + 1)), selected: t.selected }));
   return { qualities: [], qualityAuto: true, audio: audio.length > 1 ? audio : [], text };
+}
+
+/** Same choices, labels and selection: the control bar keeps the tracks object it has. */
+export function sameTracks(a: EngineTracks, b: EngineTracks): boolean {
+  const same = (x: TrackOption[], y: TrackOption[]): boolean =>
+    x.length === y.length && x.every((t, i) => t.id === y[i]?.id && t.label === y[i]?.label && t.selected === y[i]?.selected);
+  return a.qualityAuto === b.qualityAuto && same(a.qualities, b.qualities) && same(a.audio, b.audio) && same(a.text, b.text);
 }
 
 /**
@@ -348,9 +367,11 @@ export function MpvSurface({ className }: { className?: string }) {
 
     const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
+      const tracks = mpvTracks(st, { audio: (i) => t('audioFallback', { index: i }), sub: (i) => t('subtitleFallback', { index: i }) });
+      const shownTracks = useMediaStore.getState().tracks;
       useMediaStore.setState({
         mpv: st,
-        tracks: mpvTracks(st, { audio: (i) => t('audioFallback', { index: i }), sub: (i) => t('subtitleFallback', { index: i }) }),
+        tracks: sameTracks(tracks, shownTracks) ? shownTracks : tracks,
         captionsOn: st.tracks.some((x) => x.type === 'sub' && x.selected),
         // Mid-stream stalls (mpv's paused-for-cache) count as waiting too.
         waiting: !st.loaded || !!st.buffering,

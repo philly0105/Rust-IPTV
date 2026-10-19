@@ -11,7 +11,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ContentType, EpgLinks, ImportSummary, M3uOrigin, M3uSourceConfig, Source, SourceKind,
 };
-use crate::sources::{self, Importer};
+use crate::sources::{self, Importer, ProgressGate};
 use crate::state::AppState;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
-/// Progress cadence (items) during parse + save.
+/// Progress cadence (items) during parse + save; the events also pass a
+/// [`ProgressGate`] (at most one per 250 ms).
 pub const PROGRESS_EVERY: u64 = 2000;
 /// Content types an m3u source owns (all rewritten on import).
 pub const M3U_TYPES: [ContentType; 4] = [
@@ -198,6 +199,8 @@ fn url_path_lower(url: &str) -> String {
 pub struct RowBuilder {
     source_id: String,
     seen_ids: HashSet<String>,
+    /// Group name -> [`group_id`].
+    group_ids: HashMap<String, String>,
     categories: HashMap<ContentType, (Vec<CategoryRow>, HashSet<String>)>,
     channel_counter: i64,
     position: i64,
@@ -208,6 +211,7 @@ impl RowBuilder {
         Self {
             source_id: source_id.to_string(),
             seen_ids: HashSet::new(),
+            group_ids: HashMap::new(),
             categories: HashMap::new(),
             channel_counter: 0,
             position: 0,
@@ -230,15 +234,23 @@ impl RowBuilder {
         }
         self.seen_ids.insert(id.clone());
 
-        let group = e.group.clone().unwrap_or_default();
-        let cat_id = group_id(&group);
+        let group = e.group.as_deref().unwrap_or("");
+        // One sha256 per group, not per entry (IN-10).
+        let cat_id = match self.group_ids.get(group) {
+            Some(id) => id.clone(),
+            None => {
+                let id = group_id(group);
+                self.group_ids.insert(group.to_string(), id.clone());
+                id
+            }
+        };
         let (cats, cat_ids) = self.categories.entry(ct).or_default();
         if !cat_ids.contains(&cat_id) {
             cat_ids.insert(cat_id.clone());
             let name = if group.trim().is_empty() {
                 catalog::FALLBACK_CATEGORY_NAME.to_string()
             } else {
-                group.clone()
+                group.to_string()
             };
             cats.push(CategoryRow {
                 category_id: cat_id.clone(),
@@ -478,6 +490,9 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         .ok_or_else(|| CoreError::Invalid("source has no m3u configuration".into()))?;
     let source_id = source.id.clone();
     let _tmp_guard;
+    // A downloaded body, and its HTTP validators (stored once it is in).
+    let mut fetched = false;
+    let mut validators: Option<Validators> = None;
 
     // 1. Acquire bytes + sha256.
     let (payload, sha) = match cfg.origin {
@@ -540,14 +555,44 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
                 uuid::Uuid::new_v4().simple()
             ));
             _tmp_guard = TempFile(tmp.clone());
-            let sha = fetch_to_file(&state, &source_id, &url, &cfg, &tmp).await?;
-            (
-                Payload::File {
-                    path: tmp,
-                    temp: true,
-                },
-                sha,
-            )
+            // The last body's ETag / Last-Modified, when that body is the
+            // imported one: the server may answer 304 instead (ST-3).
+            let known = if source.last_refresh_at.is_some() {
+                let sid = source_id.clone();
+                state
+                    .db_call(move |c| stored_validators(c, &sid))
+                    .await?
+                    .filter(|v| v.url == url)
+            } else {
+                None
+            };
+            match fetch_conditional(&state, &source_id, &url, &cfg, &tmp, known.as_ref()).await? {
+                Download::NotModified => {
+                    tracing::info!(%source_id, "playlist not modified (HTTP 304)");
+                    return keep_unchanged(&state, &source_id).await;
+                }
+                Download::Body {
+                    sha,
+                    etag,
+                    last_modified,
+                } => {
+                    validators = (etag.is_some() || last_modified.is_some()).then(|| Validators {
+                        url,
+                        sha: sha.clone(),
+                        version: IMPORT_VERSION,
+                        etag,
+                        last_modified,
+                    });
+                    fetched = true;
+                    (
+                        Payload::File {
+                            path: tmp,
+                            temp: true,
+                        },
+                        sha,
+                    )
+                }
+            }
         }
     };
 
@@ -564,7 +609,11 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         })
         .await?;
     if source.last_refresh_at.is_some() && prev_sha.as_deref() == Some(sha.as_str()) {
-        return keep_unchanged(&state, &source_id).await;
+        let summary = keep_unchanged(&state, &source_id).await?;
+        if fetched {
+            save_validators(&state, &source_id, validators).await;
+        }
+        return Ok(summary);
     }
 
     // A remove or a settings change cancelled this import while it was
@@ -573,7 +622,9 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         return Err(sources::import_cancelled_error());
     }
 
-    // 3. Parse + write in one transaction on the blocking pool.
+    // 3. Parse + write in one transaction on the blocking pool, one import
+    // at a time (ST-2); the slot is held until the write ends.
+    let slot = sources::save_slot(&state).await?;
     sources::progress(&state, &source_id, "parsing", 0, None, None);
     let st = state.clone();
     let pool = state.db.clone();
@@ -584,13 +635,97 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     // missing and the cancelled import would commit. The DB-keyed writer
     // token is only a fallback for callers outside a run.
     let run_cancel = sources::import_cancel();
-    tokio::task::spawn_blocking(move || -> CoreResult<ImportSummary> {
+    let sid = source_id.clone();
+    let summary = tokio::task::spawn_blocking(move || -> CoreResult<ImportSummary> {
+        let _slot = slot;
         let mut conn = pool.get()?;
-        let cancel = run_cancel.or_else(|| sources::writer_cancel_token(&conn, &source_id));
-        write_catalog(&st, &mut conn, &source_id, payload, &sha, origin, cancel)
+        let cancel = run_cancel.or_else(|| sources::writer_cancel_token(&conn, &sid));
+        write_catalog(&st, &mut conn, &sid, payload, &sha, origin, cancel)
     })
     .await?
-    .map_err(|e| state.note_db_error(e))
+    .map_err(|e| state.note_db_error(e))?;
+    if fetched {
+        save_validators(&state, &source_id, validators).await;
+    }
+    Ok(summary)
+}
+
+/// `app_state` key of a URL source's [`Validators`] (dropped with the
+/// source, see `sources::store::delete`).
+fn validators_key(source_id: &str) -> String {
+    format!("m3u_validators:{source_id}")
+}
+
+/// The HTTP validators of the last downloaded playlist body (ST-3).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Validators {
+    /// The playlist URL they came from.
+    url: String,
+    /// The body's [`playlist_sha`].
+    sha: String,
+    /// [`IMPORT_VERSION`] when the body was imported.
+    version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    etag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_modified: Option<String>,
+}
+
+/// The stored validators, when they belong to the imported body (its sha
+/// is `m3u_raw.sha256`) and to this [`IMPORT_VERSION`]: after a parser
+/// change the body has to be fetched and imported again.
+fn stored_validators(conn: &Connection, source_id: &str) -> CoreResult<Option<Validators>> {
+    let stored: Option<Validators> = conn
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            [validators_key(source_id)],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|v| serde_json::from_str(&v).ok());
+    let Some(stored) = stored else {
+        return Ok(None);
+    };
+    let sha: Option<String> = conn
+        .query_row(
+            "SELECT sha256 FROM m3u_raw WHERE source_id = ?1",
+            [source_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok((stored.version == IMPORT_VERSION && sha.as_deref() == Some(stored.sha.as_str()))
+        .then_some(stored))
+}
+
+/// Stores the validators of a body that is now the imported one, or drops
+/// them when its server sent none. A failure only costs a full download on
+/// the next refresh.
+async fn save_validators(state: &Arc<AppState>, source_id: &str, validators: Option<Validators>) {
+    let sid = source_id.to_string();
+    let result = state
+        .db_call(move |c| {
+            match validators {
+                Some(v) => {
+                    c.execute(
+                        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                        params![validators_key(&sid), serde_json::to_string(&v)?],
+                    )?;
+                }
+                None => {
+                    c.execute(
+                        "DELETE FROM app_state WHERE key = ?1",
+                        [validators_key(&sid)],
+                    )?;
+                }
+            }
+            Ok(())
+        })
+        .await;
+    if let Err(err) = result {
+        tracing::warn!(%err, source_id, "could not store the playlist validators");
+    }
 }
 
 /// The playlist is unchanged since the last successful import: keeps the
@@ -667,6 +802,9 @@ fn write_catalog(
         };
         let mut parser = M3uReader::new(reader);
         let mut n = 0u64;
+        // Parse progress: every PROGRESS_EVERY rows, at most every 250 ms.
+        let mut gate = ProgressGate::default();
+        let mut reported = 0u64;
         // Categories already declared to the writer, per type: a row's group
         // is known before the row is written, so its verdict is final.
         let mut declared: HashMap<ContentType, usize> = HashMap::new();
@@ -684,8 +822,15 @@ fn write_catalog(
             n += 1;
             if n % PROGRESS_EVERY == 0 {
                 check_cancel()?;
-                sources::progress(state, source_id, "parsing", n, None, None);
+                if gate.due(std::time::Instant::now()) {
+                    sources::progress(state, source_id, "parsing", n, None, None);
+                    reported = n;
+                }
             }
+        }
+        if reported > 0 && reported != n {
+            // The final count, whatever the gate skipped.
+            sources::progress(state, source_id, "parsing", n, None, None);
         }
         if let Some(err) = parser.take_io_error() {
             return Err(CoreError::Io(err));
@@ -737,9 +882,10 @@ fn write_catalog(
         Payload::File { path: p, temp } => {
             // The limit applies to the decoded text: a small gzip file can
             // unpack far past it (L1-core-17). A file already over the limit
-            // is not read just to measure it.
+            // is not read just to measure it, and neither is a gzip file the
+            // parser already decoded past it (IN-6).
             let size = std::fs::metadata(p).map_err(|e| file_error(p, e))?.len();
-            let text = if size <= RAW_INLINE_MAX {
+            let text = if size <= RAW_INLINE_MAX && stats.bytes <= RAW_INLINE_MAX {
                 Some(read_text_lossy(p)?)
             } else {
                 None
@@ -822,8 +968,16 @@ fn store_copy(src: &Path, dest: &Path, temp: bool) -> std::io::Result<()> {
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    if temp && std::fs::rename(src, dest).is_ok() {
-        return Ok(());
+    if temp {
+        // The download was not synced (IN-10), but the kept copy outlives
+        // it: backups export it and an unchanged refresh never rewrites it.
+        // Opened for writing: Windows refuses to flush a read-only handle.
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(src) {
+            file.sync_data().ok();
+        }
+        if std::fs::rename(src, dest).is_ok() {
+            return Ok(());
+        }
     }
     std::fs::copy(src, dest).map(|_| ())
 }
@@ -877,11 +1031,13 @@ async fn hash_file(path: PathBuf) -> CoreResult<String> {
 }
 
 /// Time a playlist server may take before the response head. Large provider
-/// playlists are often generated on request and take 20-60 s to start.
+/// playlists are often generated on request and take 20-60 s to start. Xtream
+/// list actions get the same deadline (IN-2).
 #[cfg(not(test))]
-const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+pub(crate) const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 #[cfg(test)]
-const PLAYLIST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+pub(crate) const PLAYLIST_HEADER_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(1500);
 
 /// Longest gap between two body chunks of a playlist download.
 #[cfg(not(test))]
@@ -953,33 +1109,8 @@ pub(crate) fn after_tries(err: CoreError, tries: u32) -> CoreError {
     }
 }
 
-/// How often download progress is reported: the first chunk at once (so a
-/// slow host never reads "Connecting…" while bytes flow), then at most
-/// every [`ProgressGate::EVERY`], however fast or slow the chunks arrive.
-#[derive(Debug, Default)]
-struct ProgressGate {
-    last: Option<std::time::Instant>,
-}
-
-impl ProgressGate {
-    const EVERY: std::time::Duration = std::time::Duration::from_millis(250);
-
-    fn due(&mut self, now: std::time::Instant) -> bool {
-        match self.last {
-            Some(t) if now.saturating_duration_since(t) < Self::EVERY => false,
-            _ => {
-                self.last = Some(now);
-                true
-            }
-        }
-    }
-}
-
-/// Downloads `url` with the source headers into `dest` (streamed, never held
-/// in memory), retrying transient failures, but not a server that stalled in
-/// the middle of the body or sent it slower than [`MinRate`] allows. Stops
-/// with [`sources::import_cancelled_error`] as soon as the running import is
-/// cancelled ([`sources::import_cancel`]). Returns the body's sha256.
+/// [`fetch_conditional`] without validators: the body's sha256.
+#[cfg(test)]
 async fn fetch_to_file(
     state: &Arc<AppState>,
     source_id: &str,
@@ -987,6 +1118,39 @@ async fn fetch_to_file(
     cfg: &M3uSourceConfig,
     dest: &Path,
 ) -> CoreResult<String> {
+    match fetch_conditional(state, source_id, url, cfg, dest, None).await? {
+        Download::Body { sha, .. } => Ok(sha),
+        Download::NotModified => Err(CoreError::Invalid("unexpected HTTP 304".into())),
+    }
+}
+
+/// What [`fetch_conditional`] got.
+enum Download {
+    /// The body is in `dest`.
+    Body {
+        sha: String,
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+    /// HTTP 304 to the validators sent: the stored body is current.
+    NotModified,
+}
+
+/// Downloads `url` with the source headers into `dest` (streamed, never held
+/// in memory), retrying transient failures, but not a server that stalled in
+/// the middle of the body or sent it slower than [`MinRate`] allows. Stops
+/// with [`sources::import_cancelled_error`] as soon as the running import is
+/// cancelled ([`sources::import_cancel`]). Returns the body's sha256 and
+/// validators. With `known`, the request carries `If-None-Match` /
+/// `If-Modified-Since`, and a 304 answer is [`Download::NotModified`].
+async fn fetch_conditional(
+    state: &Arc<AppState>,
+    source_id: &str,
+    url: &str,
+    cfg: &M3uSourceConfig,
+    dest: &Path,
+    known: Option<&Validators>,
+) -> CoreResult<Download> {
     let safe_url = crate::logging::redact_url(url);
     sources::progress(state, source_id, "fetching", 0, None, None);
     // The playlist URL is the source's own address, so its host:port is
@@ -1002,13 +1166,32 @@ async fn fetch_to_file(
         .unwrap_or_else(|| "the server".to_owned());
     // Err((error, stalled)): `stalled` when the body stopped arriving.
     let attempt = || async {
-        let req = crate::http::apply_source_headers(client.get(url), &cfg.headers);
+        let mut req = crate::http::apply_source_headers(client.get(url), &cfg.headers);
+        if let Some(v) = known {
+            if let Some(etag) = &v.etag {
+                req = req.header(reqwest::header::IF_NONE_MATCH, etag.as_str());
+            }
+            if let Some(at) = &v.last_modified {
+                req = req.header(reqwest::header::IF_MODIFIED_SINCE, at.as_str());
+            }
+        }
         let resp = crate::http::send_within(req, PLAYLIST_HEADER_TIMEOUT)
             .await
             .map_err(|e| (e, false))?;
+        if known.is_some() && resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(Download::NotModified);
+        }
         if !resp.status().is_success() {
             return Err((playlist_status_error(resp.status(), &host), false));
         }
+        let validator = |name: reqwest::header::HeaderName| {
+            resp.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        let etag = validator(reqwest::header::ETAG);
+        let last_modified = validator(reqwest::header::LAST_MODIFIED);
         let total = resp.content_length();
         if total.is_some_and(|n| n > MAX_PLAYLIST_BYTES) {
             return Err((too_large_error(&host), false));
@@ -1065,8 +1248,9 @@ async fn fetch_to_file(
                 return Err((err, false));
             }
         }
+        // No fsync here: most bodies are parsed and dropped or stored inline.
+        // `store_copy` syncs one before keeping it on disk (IN-10).
         file.flush().await.map_err(|e| (e.into(), false))?;
-        file.sync_all().await.ok();
         sources::progress(
             state,
             source_id,
@@ -1075,7 +1259,11 @@ async fn fetch_to_file(
             total.or(Some(done)),
             None,
         );
-        Ok::<_, (CoreError, bool)>(hex::encode(hasher.finalize()))
+        Ok::<_, (CoreError, bool)>(Download::Body {
+            sha: hex::encode(hasher.finalize()),
+            etag,
+            last_modified,
+        })
     };
     // Outside `sources::run_import` (tests) nothing cancels.
     let cancel = sources::import_cancel().unwrap_or_default();
@@ -1091,7 +1279,7 @@ async fn fetch_to_file(
             }
         };
         match result {
-            Ok(sha) => return Ok(sha),
+            Ok(download) => return Ok(download),
             Err((err, stalled)) => {
                 tracing::warn!(url = %safe_url, error = %err, attempt = n + 1, "playlist download failed");
                 // A head that did not arrive within PLAYLIST_HEADER_TIMEOUT

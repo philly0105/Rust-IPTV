@@ -739,8 +739,8 @@ pub(crate) async fn open_state(
     sink: Arc<dyn EventSink>,
 ) -> iptv_core::CoreResult<Arc<AppState>> {
     let state = AppState::new(data_dir, sink, true).await?;
-    let proxy_base = match proxy::start(Arc::clone(&state)) {
-        Ok(base) => Some(base),
+    let bases = match proxy::start(Arc::clone(&state)) {
+        Ok(bases) => Some(bases),
         Err(err) => {
             tracing::error!(%err, "loopback media proxy unavailable; header streams play without headers");
             None
@@ -749,7 +749,8 @@ pub(crate) async fn open_state(
     set_desktop_info(
         &state,
         DesktopInfo {
-            proxy_base,
+            proxy_base: bases.as_ref().map(|b| b.proxy.clone()),
+            image_base: bases.map(|b| b.images),
             updater_available: cfg!(feature = "updater"),
         },
     );
@@ -824,7 +825,7 @@ fn observe_window(window: &tauri::Window) {
     });
 }
 
-/// Tracks the normal geometry; background windows ask WebView2 for its low
+/// Tracks the normal geometry; minimized windows ask WebView2 for its low
 /// memory target and trim the app's working set; focus restores the normal
 /// target. A minimized main window tells WebView2 it is hidden (the page
 /// stops rendering); restore or focus shows it again.
@@ -846,20 +847,14 @@ fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
             return;
         };
         let main = window.label() == pip_state::MAIN_WINDOW;
-        match event {
-            WindowEvent::Focused(false) => {
-                memory::set_webview_memory_low(&webview, true);
+        let minimized = || window.is_minimized().unwrap_or(false);
+        if let Some(low) = memory::memory_low_after(event, minimized) {
+            memory::set_webview_memory_low(&webview, low);
+            if low {
                 memory::trim_working_set();
             }
-            WindowEvent::Focused(true) => memory::set_webview_memory_low(&webview, false),
-            WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
-                memory::set_webview_memory_low(&webview, true);
-                memory::trim_working_set();
-            }
-            _ => {}
         }
         if main {
-            let minimized = || window.is_minimized().unwrap_or(false);
             if let Some(visible) = memory::visibility_after(event, minimized) {
                 memory::set_webview_visible(&webview, visible);
             }
@@ -969,27 +964,48 @@ pub fn run() {
     });
 }
 
-/// Exit cleanup: kill embedded mpv (synchronously, so it never outlives the
-/// app), stop the remote control server, and fold the SQLite WAL back into
-/// the database file. Downloads need no flush: every state change is already
-/// in SQLite and `downloads::init` re-queues interrupted transfers on the
-/// next start.
+/// Longest the exit cleanup may take. It runs on the event-loop thread:
+/// waiting there for an import's catalog save (the write lock, up to
+/// minutes) left a hidden process behind, and a relaunch in that window
+/// was handed to it, so no window appeared (HO-4).
+const SHUTDOWN_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Exit cleanup, within [`SHUTDOWN_BUDGET`]: cancel running imports (each
+/// keeps its previous catalog), stop recordings, kill embedded mpv
+/// (synchronously, so it never outlives the app), stop the remote control
+/// server, and fold the SQLite WAL back into the database file. Downloads
+/// need no flush: every state change is already in SQLite and
+/// `downloads::init` re-queues interrupted transfers on the next start.
 fn shutdown(app: &AppHandle) {
     let Some(state) = app.try_state::<Arc<AppState>>() else {
         return;
     };
     let state = Arc::clone(&state);
+    let deadline = std::time::Instant::now() + SHUTDOWN_BUDGET;
+    let left = || deadline.saturating_duration_since(std::time::Instant::now());
+    // Imports first: a catalog save holds the write lock, and the writes
+    // below would wait for it. A cancelled save rolls back.
+    let cancelled = iptv_core::sources::cancel_all_imports(&state);
+    if cancelled > 0 {
+        tracing::info!(cancelled, "imports cancelled for exit");
+    }
     // recording: stop scheduled recordings and save their final state first.
-    tauri::async_runtime::block_on(iptv_core::recording::shutdown(&state));
+    let budget = left();
+    let recorded = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(budget, iptv_core::recording::shutdown(&state)).await
+    });
+    if recorded.is_err() {
+        tracing::warn!("recordings did not stop in time on exit");
+    }
     iptv_core::player::kill_embedded(&state);
     let stop = iptv_core::remote::stop(Arc::clone(&state));
-    let stopped = tauri::async_runtime::block_on(async {
-        tokio::time::timeout(std::time::Duration::from_secs(2), stop).await
-    });
+    let budget = left().min(std::time::Duration::from_secs(2));
+    let stopped =
+        tauri::async_runtime::block_on(async { tokio::time::timeout(budget, stop).await });
     if !matches!(stopped, Ok(Ok(()))) {
         tracing::warn!("remote control did not stop cleanly on exit");
     }
-    checkpoint_wal(&state);
+    checkpoint_wal(&state, left());
     // Lets the next start skip the large-database background check.
     iptv_core::db::note_clean_shutdown(&state.db_path());
     tracing::info!("shutdown complete");
@@ -997,29 +1013,21 @@ fn shutdown(app: &AppHandle) {
 
 /// `PRAGMA wal_checkpoint(TRUNCATE)` on a pooled connection, so the next
 /// start opens a compact database and a copied data folder is complete
-/// without its `-wal` file. The pool itself closes with the process (it lives
-/// in `AppState`, which Tauri's managed state owns until exit).
-fn checkpoint_wal(state: &AppState) {
-    let result = state.conn().and_then(|conn| {
-        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })
-        .map_err(Into::into)
-    });
-    match result {
-        Ok((busy, log, done)) => {
-            tracing::info!(
-                busy,
-                log_frames = log,
-                checkpointed = done,
-                "WAL checkpointed"
-            )
+/// without its `-wal` file. [`iptv_core::db::checkpoint_truncate`] runs it
+/// without the busy handler, so a writer still holding the lock makes it do
+/// what it can instead of waiting; the connection wait is bounded by `wait`.
+/// The pool itself closes with the process (it lives in `AppState`, which
+/// Tauri's managed state owns until exit).
+fn checkpoint_wal(state: &AppState, wait: std::time::Duration) {
+    match state
+        .db
+        .get_timeout(wait.max(std::time::Duration::from_millis(100)))
+    {
+        Ok(conn) => {
+            iptv_core::db::checkpoint_truncate(&conn);
+            tracing::info!("WAL checkpoint attempted on exit");
         }
-        Err(err) => tracing::warn!(%err, "WAL checkpoint on exit failed"),
+        Err(err) => tracing::warn!(%err, "WAL checkpoint on exit skipped"),
     }
 }
 

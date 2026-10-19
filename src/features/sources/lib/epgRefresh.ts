@@ -8,6 +8,7 @@
 
 import { useEffect } from 'react';
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 
 import { onAppEvent } from '@/api/events';
 import { invalidate } from '@/api/query';
@@ -180,8 +181,17 @@ export function summarizeGuide(byUrl: Record<string, GuideEntry>, urls: readonly
   };
 }
 
-/** Guide progress for one source's enabled URLs. */
+/**
+ * Guide progress for one source's enabled URLs. Selects only those URLs' entries, so an event for
+ * another source's guide does not re-render this source's card (VD-5).
+ */
 export function useSourceGuide(links: EpgLinks | undefined): SourceGuideSummary | undefined {
-  const byUrl = useGuideProgressStore((s) => s.byUrl);
-  return summarizeGuide(byUrl, enabledEpgUrls(links));
+  const urls = enabledEpgUrls(links);
+  const entries = useGuideProgressStore(useShallow((s) => urls.map((u) => s.byUrl[u])));
+  const own: Record<string, GuideEntry> = {};
+  urls.forEach((u, i) => {
+    const e = entries[i];
+    if (e) own[u] = e;
+  });
+  return summarizeGuide(own, urls);
 }

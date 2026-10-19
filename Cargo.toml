@@ -92,6 +92,13 @@ opt-level = "s"
 panic = "unwind"
 strip = true
 
+# The bundled SQLite is C code built by the cc crate, which follows the
+# profile's opt-level: "s" compiles it for size (/O1 with MSVC). Every catalog
+# query runs in it, so it gets full optimization. The rest of the binary stays
+# at "s" until opt-level 3 is measured against the installer size.
+[profile.release.package.libsqlite3-sys]
+opt-level = 3
+
 # Debug builds keep line tables for our crates (readable backtraces) and no
 # debug info for dependencies. Full PDBs for every test binary filled tens of GB.
 [profile.dev]

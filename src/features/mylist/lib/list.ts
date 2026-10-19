@@ -4,6 +4,7 @@
  */
 
 import { itemKey, sameRef, type ItemRef, type ItemSnapshot, type WatchlistEntry } from '@/api/types';
+import { relativeTimeFormat } from '@/lib/intl';
 
 /** The page's type filter (`?type=`). */
 export type MyListFilter = 'all' | 'movie' | 'series';
@@ -50,11 +51,27 @@ export function fold(s: string): string {
   return s.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 }
 
+/** Folded title and subtitle per entry: entries keep their identity across keystrokes, so each is folded once. */
+const hayCache = new WeakMap<WatchlistEntry, string>();
+
+function hayOf(e: WatchlistEntry): string {
+  let hay = hayCache.get(e);
+  if (hay === undefined) {
+    hay = fold(`${e.snapshot.title} ${e.snapshot.subtitle ?? ''}`);
+    hayCache.set(e, hay);
+  }
+  return hay;
+}
+
+function queryWords(query: string): string[] {
+  return fold(query).split(/\s+/).filter(Boolean);
+}
+
 /** True when every word of `query` appears in the title or subtitle. */
 export function matchesQuery(e: WatchlistEntry, query: string): boolean {
-  const words = fold(query).split(/\s+/).filter(Boolean);
+  const words = queryWords(query);
   if (words.length === 0) return true;
-  const hay = fold(`${e.snapshot.title} ${e.snapshot.subtitle ?? ''}`);
+  const hay = hayOf(e);
   return words.every((w) => hay.includes(w));
 }
 
@@ -80,11 +97,13 @@ function collator(language: string): Intl.Collator {
 export function sortEntries(entries: readonly WatchlistEntry[], sort: MyListSort, language: string): WatchlistEntry[] {
   const out = [...entries];
   if (sort === 'added') {
-    const at = (e: WatchlistEntry) => {
+    // Parsed once per entry, not twice per comparison.
+    const at = new Map<WatchlistEntry, number>();
+    for (const e of out) {
       const t = Date.parse(e.addedAt);
-      return Number.isFinite(t) ? t : 0;
-    };
-    out.sort((a, b) => at(b) - at(a));
+      at.set(e, Number.isFinite(t) ? t : 0);
+    }
+    out.sort((a, b) => at.get(b)! - at.get(a)!);
   } else if (sort === 'title') {
     const c = collator(language);
     out.sort((a, b) => c.compare(a.snapshot.title, b.snapshot.title));
@@ -127,7 +146,13 @@ export function buildView(entries: readonly WatchlistEntry[], o: ViewOptions): M
   }
   const typed = o.filter === 'all' ? base : base.filter((e) => e.ref.contentType === o.filter);
   const unwatched = o.hideWatched ? typed.filter((e) => !e.watched) : typed;
-  const searched = o.query.trim() ? unwatched.filter((e) => matchesQuery(e, o.query)) : unwatched;
+  // The query is folded once per view, not once per entry.
+  const words = queryWords(o.query);
+  const matches = (e: WatchlistEntry) => {
+    const hay = hayOf(e);
+    return words.every((w) => hay.includes(w));
+  };
+  const searched = words.length > 0 ? unwatched.filter(matches) : unwatched;
   return { base, typed, unwatched, rows: sortEntries(searched, o.sort, o.language), counts, watchedCount };
 }
 
@@ -176,9 +201,9 @@ export function relativeTime(iso: string, language: string, now = Date.now()): s
   const abs = Math.abs(diff);
   let rtf: Intl.RelativeTimeFormat;
   try {
-    rtf = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
+    rtf = relativeTimeFormat(language, { numeric: 'auto' });
   } catch {
-    rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+    rtf = relativeTimeFormat(undefined, { numeric: 'auto' });
   }
   if (abs < 60) return rtf.format(Math.round(diff), 'second');
   if (abs < 3600) return rtf.format(Math.round(diff / 60), 'minute');

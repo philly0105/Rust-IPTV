@@ -59,6 +59,8 @@ The range lives in the URL as `yf` and `yt` (both inclusive), so a filtered grid
 
 `buildPageRequest` sends `yearFrom`, `yearTo` and `hideWatched` only to `catalog.*`. Stalker pages come straight from the portal, so a year range or Hide watched switches a Stalker grid to the in-order loader (`useVodPagesInOrder`), the same one the rating and English-only filters use. The grid filters the loaded pages with `filterByYear` (the same 1900..2100 rule as the core) and the watched set. With Hide watched on, a page is shown only once its watched lookup has answered, so watched titles never flash in and then disappear. The filtered count is final once every page has loaded.
 
+On SQLite grids each cell reads its own page, through the grid's page gate (`pageGate.ts`): a scrollbar drag fetches the pages it rests on, not every page it passes (see performance.md, "Long lists and grids").
+
 ### Watched tick
 
 Each loaded page asks `positions.watchedContains` once (`useWatchedKeys`, `useWatchedPages`), and the cells of that page share the query. A watched poster shows a check in the top-end corner, beside the rating chip, and its accessible name ends with "Watched". A watched title does not show a resume bar. If the lookup fails, nothing is ticked.

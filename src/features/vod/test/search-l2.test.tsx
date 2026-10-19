@@ -98,7 +98,7 @@ function BackStub() {
 /** The app frame: header field, a rail link that stays mounted, and the routes. */
 function renderApp(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>
         <MemoryRouter initialEntries={[path]}>
@@ -116,6 +116,7 @@ function renderApp(path: string) {
       </I18nextProvider>
     </QueryClientProvider>,
   );
+  return { ...utils, client };
 }
 
 const field = () => screen.getByLabelText('Header search');
@@ -202,6 +203,37 @@ describe('L2-perf-ui-5: a new query never blanks the results', () => {
   });
 });
 
+describe('VD-6: portal searches wait for a pause and three characters', () => {
+  const field = () => screen.getByLabelText('Header search') as HTMLInputElement;
+  const portalQueries = () => [...new Set(callsOf('stalker.search').map((c) => (c.args as { query: string }).query))];
+
+  it('sends one portal search for the word typed, not one per keystroke', async () => {
+    sources = [makeSource('src2', 'stalker', 'Beta Portal')];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderApp('/s/src2/search?q=d');
+    await screen.findByLabelText('Header search');
+    // Typed letter by letter, faster than the portal pause.
+    for (const q of ['du', 'dun', 'dune', 'dune ', 'dune p', 'dune pa']) {
+      fireEvent.change(field(), { target: { value: q } });
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    await waitFor(() => expect(portalQueries()).toEqual(['dune pa']), { timeout: 2000 });
+    // The library search still follows the field at its own pace.
+    expect(callsOf('catalog.search').length).toBeGreaterThan(1);
+  });
+
+  it('opens a link with a long enough query at once, and keeps short ones off the portal', async () => {
+    sources = [makeSource('src2', 'stalker', 'Beta Portal')];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderApp('/s/src2/search?q=ab');
+    await screen.findByText('No results for "ab"');
+    expect(callsOf('stalker.search')).toHaveLength(0);
+    cleanup();
+    renderApp('/s/src2/search?q=dune');
+    await waitFor(() => expect(portalQueries()).toEqual(['dune']));
+  });
+});
+
 describe('L2-perf-desktop-11: one catalog.search per query', () => {
   it('a capped query sends exactly one catalog.search, and its chips read "N+"', async () => {
     // 61 rows for a 60 cap, alternating sources: each holds 30 of the shown rows, a lower bound.
@@ -251,6 +283,23 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     const badge = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
     expect(badge.className).toContain('max-w-[110px]');
     expect(badge.querySelector('span')?.className).toContain('truncate');
+  });
+});
+
+describe('VD-1: poster results scroll without re-rendering every card', () => {
+  it('the cards share one My List subscription, not two per card', async () => {
+    rpcMock.handlers['watchlist.list'] = () => [];
+    rpcMock.handlers['positions.watchedContains'] = () => [];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: Array.from({ length: 40 }, (_, i) => movie(i)), series: [] });
+    const { client } = renderApp('/search?q=movie');
+    const grid = await screen.findByTestId('vod-search-movies');
+    await waitFor(() => expect(within(grid).getAllByTestId('mylist-button').length).toBeGreaterThan(4));
+    await waitFor(() => expect(within(grid).getAllByTestId('mylist-button')[0]!.dataset['state']).toBe('ready'));
+    const observers = client
+      .getQueryCache()
+      .findAll({ predicate: (q) => q.queryKey[0] === 'watchlist.list' })
+      .reduce((n, q) => n + q.getObserversCount(), 0);
+    expect(observers).toBeLessThanOrEqual(2);
   });
 });
 

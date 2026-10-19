@@ -120,6 +120,16 @@ const NOW_NEXT_STALE_MS = 60_000;
 export const STALKER_RANGE_SETTLE_MS = 150;
 
 /**
+ * How long the range must rest before the list switches to pages it has not read (LV-1). A
+ * scrollbar drag reports a new range every frame; switching on each would send a deep page read
+ * per frame, and the page the user stops on would queue behind all of them.
+ */
+export const PAGE_SETTLE_MS = 110;
+
+/** Read-ahead pages further than this from the visible pages are cancelled while still in flight. */
+const PREFETCH_KEEP_PAGES = 2;
+
+/**
  * Pages a channel list out of SQLite. The view virtualizes `total` rows and reports its
  * visible range; only the one or two pages that cover it are queried (C1 `useRpcQuery`
  * with offset paging), so memory never holds more than two pages of a 50k list.
@@ -183,48 +193,93 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
   const portalPrograms = useStalkerPreviews(args.sourceId, stalkerOn, visibleRefs, args.now ?? 0);
   const shortPrograms = useShortEpgPreviews(args.sourceId, shortOn, visibleRefs, args.now ?? 0);
 
-  // Pages ahead of a scroll are read before the rows reach the screen, with their now/next and
-  // favourite flags, so a brisk scroll lands on rows that are already there (L2-live-4).
-  const extrasOffset = args.epgOffsetMinutes ?? 0;
+  // Pages ahead of a scroll are read before the rows reach the screen, so a brisk scroll lands on
+  // rows that are already there (L2-live-4). Their now/next and favourite flags follow once the
+  // rows are on screen (usePageExtras), not for every page read ahead (LV-1).
+  const prefetched = useRef<{ key: string; pages: Set<number> }>({ key: '', pages: new Set() });
   const prefetchPage = useCallback(
     (page: number) => {
       const known = totalRef.current;
       if (page < 0 || known === undefined || page * size >= known || !args.sourceId) return;
-      const pageArgs = query(page);
-      void queryClient.prefetchQuery(channelPageOptions(pageArgs)).then(() => {
-        if (!extrasOn) return;
-        const data = queryClient.getQueryData<Page<Channel>>(rpcKey('catalog.channels', pageArgs));
-        if (!data?.items.length) return;
-        const refs = data.items.map((c) => c.ref);
-        const nn = nowNextArgs(refs, extrasOffset);
-        void queryClient.prefetchQuery({
-          queryKey: rpcKey('epg.nowNext', nn),
-          queryFn: ({ signal }) => rpcRaw('epg.nowNext', nn, { signal }),
-          staleTime: NOW_NEXT_STALE_MS,
-        });
-        void queryClient.prefetchQuery({
-          queryKey: rpcKey('favorites.contains', { refs }),
-          queryFn: ({ signal }) => rpcRaw('favorites.contains', { refs }, { signal }),
-        });
-      });
+      if (prefetched.current.key !== listKey) prefetched.current = { key: listKey, pages: new Set() };
+      prefetched.current.pages.add(page);
+      void queryClient.prefetchQuery(channelPageOptions(query(page)));
     },
-    [queryClient, query, size, args.sourceId, extrasOn, extrasOffset],
+    [queryClient, query, size, args.sourceId, listKey],
+  );
+  // Read-ahead that the range has left behind (more than two pages away) is cancelled while it
+  // waits, so the pages the user stops on do not queue behind it.
+  const dropFarPrefetches = useCallback(
+    (na: number, nb: number) => {
+      if (prefetched.current.key !== listKey) return;
+      for (const page of prefetched.current.pages) {
+        if (page >= na - PREFETCH_KEEP_PAGES && page <= nb + PREFETCH_KEEP_PAGES) continue;
+        prefetched.current.pages.delete(page);
+        const cached = queryClient.getQueryCache().find({ queryKey: rpcKey('catalog.channels', query(page)), exact: true });
+        if (cached && cached.state.fetchStatus === 'fetching' && cached.getObserversCount() === 0) void cached.cancel();
+      }
+    },
+    [queryClient, query, listKey],
+  );
+
+  // The pages on screen, for the range reports below (a and b of this list, or page 0 of a new one).
+  const observed = useRef({ key: listKey, a, b });
+  observed.current = { key: listKey, a, b };
+  /** Page `page` is on screen already, cached, or on its way: switching to it sends nothing new. */
+  const pageKnown = useCallback(
+    (page: number) => {
+      const o = observed.current;
+      if (o.key === listKey && (o.a === page || o.b === page)) return true;
+      const state = queryClient.getQueryState(rpcKey('catalog.channels', query(page)));
+      return state?.data !== undefined || state?.fetchStatus === 'fetching';
+    },
+    [queryClient, query, listKey],
   );
 
   const rangeTimer = useRef<number | undefined>(undefined);
+  const settleTimer = useRef<number | undefined>(undefined);
+  const settlePages = useRef<() => void>(() => undefined);
   const lastRange = useRef<{ key: string; start: number }>({ key: '', start: 0 });
-  useEffect(() => () => window.clearTimeout(rangeTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(rangeTimer.current);
+      window.clearTimeout(settleTimer.current);
+    },
+    [],
+  );
   const setVisibleRange = useCallback(
     (start: number, end: number) => {
       const na = Math.max(0, Math.floor(start / size));
       const nb = Math.max(na, Math.floor(Math.max(start, end) / size));
-      setPages((p) => (p.key === listKey && p.a === na && p.b === nb ? p : { key: listKey, a: na, b: nb }));
-      // Read ahead in the direction of travel once the range is within half a page of the next
-      // page, and two pages ahead while moving fast (more than a few rows per report).
+      const showPages = () => {
+        // A timer from a list the user has left since must not switch the new list's pages.
+        if (lastRange.current.key !== listKey) return;
+        setPages((p) => (p.key === listKey && p.a === na && p.b === nb ? p : { key: listKey, a: na, b: nb }));
+      };
       const prev = lastRange.current;
       lastRange.current = { key: listKey, start };
-      if (prev.key === listKey && prev.start !== start) {
-        const step = start - prev.start;
+      const step = prev.key === listKey ? start - prev.start : 0;
+      dropFarPrefetches(na, nb);
+      // LV-1: a range that jumps more than a page (a scrollbar drag, a fling) switches pages only
+      // once it has rested PAGE_SETTLE_MS, and reads nothing ahead meanwhile. A smaller step onto
+      // pages not read yet waits for the same timer without restarting it, so a slow drag reads
+      // at most one page pair per PAGE_SETTLE_MS. A scroll onto known pages switches at once.
+      const jump = Math.abs(step) > size;
+      if (jump || !pageKnown(na) || !pageKnown(nb)) {
+        settlePages.current = showPages;
+        if (jump || settleTimer.current === undefined) {
+          window.clearTimeout(settleTimer.current);
+          settleTimer.current = window.setTimeout(() => {
+            settleTimer.current = undefined;
+            settlePages.current();
+          }, PAGE_SETTLE_MS);
+        }
+      } else {
+        window.clearTimeout(settleTimer.current);
+        settleTimer.current = undefined;
+        showPages();
+        // Read ahead in the direction of travel once the range is within half a page of the next
+        // page, and two pages ahead while moving fast (more than a few rows per report).
         const fast = Math.abs(step) > 4;
         if (step > 0 && (Math.max(start, end) % size >= size / 2 || fast)) {
           prefetchPage(nb + 1);
@@ -243,7 +298,7 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
         STALKER_RANGE_SETTLE_MS,
       );
     },
-    [listKey, size, previewOn, prefetchPage],
+    [listKey, size, previewOn, prefetchPage, dropFarPrefetches, pageKnown],
   );
 
   // Rows outside pages a and b come from any page of this list already in the cache (read

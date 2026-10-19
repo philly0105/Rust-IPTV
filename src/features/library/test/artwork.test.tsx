@@ -60,7 +60,7 @@ describe('library artwork goes through the image cache with its source', () => {
     const d = makeDownload({ ref: { sourceId: 'portal-c', contentType: 'movie', itemId: 'm9' }, posterUrl: POSTER, status: 'queued' });
     const { container } = render(
       <I18nextProvider i18n={i18n}>
-        <DownloadRow download={d} progress={{ bytesDownloaded: 0 }} source={undefined} actions={[]} busy={false} onAction={() => undefined} />
+        <DownloadRow download={d} source={undefined} actions={[]} busy={false} onAction={() => undefined} />
       </I18nextProvider>,
     );
     expect(imageParams(container).get('sourceId')).toBe('portal-c');

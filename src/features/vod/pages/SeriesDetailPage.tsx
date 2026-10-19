@@ -37,7 +37,7 @@ import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState, useToast } from '@/ui';
+import { Button, EmptyState, ErrorState, Skeleton, useToast } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
@@ -337,11 +337,16 @@ export function SeriesDetailPage() {
                   {t('startOverEpisode', { code: episodeCode(start.episode.season, start.episode.episode) })}
                 </Button>
               )}
-              {trailer && (
+              {trailer ? (
                 <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
                   {t('trailer')}
                 </Button>
-              )}
+              ) : tmdbOn && tmdb.isLoading ? (
+                // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+                <span data-testid="vod-trailer-slot" className="inline-flex">
+                  <Skeleton className="h-12 w-32 rounded-md" />
+                </span>
+              ) : null}
               {favorite}
             </>
           }

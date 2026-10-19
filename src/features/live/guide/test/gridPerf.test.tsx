@@ -8,14 +8,17 @@
  */
 import { QueryClient } from '@tanstack/react-query';
 import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { buildScheduleIndex } from '@/features/recording/lib/schedule';
 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_CHUNK, GRID_ROW, GRID_SCROLL_ROOM_PX, gridWindowFor } from '../../components/EpgGridPage';
-import { HOUR, layoutBlocks } from '../../lib/epgTime';
-import { cellTextPadPx, fitCellText } from '../GuideRow';
+import { HOUR, MINUTE, layoutBlocks } from '../../lib/epgTime';
+import { cellTextPadPx, fitCellText, GuideRow, type GuideRowProps } from '../GuideRow';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -232,6 +235,47 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     expect(rendered.filter((r) => r !== 'c0')).toEqual([]);
     expect(screen.getByRole('button', { name: /^c2 P1,/ })).toBe(cell);
     expect(cell.style.left).toBe(left);
+  });
+});
+
+describe('clock ticks (LV-8)', () => {
+  it('a tick re-renders a row only when it moves a programme between past, now and future', () => {
+    const at = defaultStart(Date.now());
+    const props: GuideRowProps = {
+      index: 0,
+      top: 0,
+      height: GRID_ROW,
+      channel: makeChannel(5),
+      programs: [program('c5 P0', at, at + HOUR), program('c5 P1', at + HOUR, at + 2 * HOUR)],
+      origin: at,
+      now: at + 10 * MINUTE,
+      pxPerMin: 4,
+      channelCol: 200,
+      trackWidth: 2000,
+      compact: false,
+      rtl: false,
+      kind: 'm3u',
+      highlighted: false,
+      cursorStart: null,
+      lang: 'en',
+      stripCountryPrefix: false,
+      schedule: buildScheduleIndex(),
+      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), fitText: vi.fn(), press: vi.fn() },
+    };
+    let setNow: (n: number) => void = () => undefined;
+    function Host() {
+      const [now, set] = useState(props.now);
+      setNow = set;
+      return <GuideRow {...props} now={now} />;
+    }
+    renderGuide(<Host />);
+    vi.mocked(layoutBlocks).mockClear();
+    act(() => setNow(at + 10 * MINUTE + 30_000));
+    act(() => setNow(at + 40 * MINUTE));
+    expect(layoutBlocks).not.toHaveBeenCalled();
+    // P0 ends: the row lays its cells out again.
+    act(() => setNow(at + HOUR + 30_000));
+    expect(layoutBlocks).toHaveBeenCalledTimes(1);
   });
 });
 

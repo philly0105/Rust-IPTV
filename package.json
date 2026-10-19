@@ -70,6 +70,9 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "tsc-rs"
-    ]
+    ],
+    "patchedDependencies": {
+      "mpegts.js@1.8.2": "patches/mpegts.js@1.8.2.patch"
+    }
   }
 }

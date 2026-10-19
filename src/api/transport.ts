@@ -248,7 +248,9 @@ function proxyParams(source: PlayerSource, url: string): URLSearchParams {
 
 /**
  * URL a player element should load.
- * Desktop: a local `file` path goes through the asset protocol; every remote
+ * Desktop: recordings and downloads come as the loopback proxy's own file
+ * URLs (`recordings.playSource`, `myvideos.playSource`) and load directly; a
+ * local `file` path (the proxy did not start) goes through the asset protocol; every remote
  * http(s) stream goes through the loopback proxy (`app.info.proxyBase`), so
  * the source's request headers apply and a provider that sends no CORS
  * headers still plays in the inline player (hls.js, mpegts.js and shaka

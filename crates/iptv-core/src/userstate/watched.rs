@@ -58,7 +58,7 @@ pub async fn sync_series_mark(
     let key = r.clone();
     if mark == EpisodeMark::Unmarked {
         return state
-            .db_call(move |c| {
+            .db_write(move |c| {
                 c.execute(
                     "DELETE FROM playback_positions
                      WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3
@@ -92,7 +92,7 @@ pub async fn sync_series_mark(
     };
     let key = r.clone();
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             if all_watched(c, &key, &ids)? {
                 super::set_watched(c, &key, None, true)?;
             }

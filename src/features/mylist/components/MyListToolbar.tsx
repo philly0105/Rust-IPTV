@@ -9,6 +9,8 @@
 
 import { useTranslation } from 'react-i18next';
 
+import { numberFormat } from '@/lib/intl';
+
 import { SearchInput, Select, Tabs, Toggle, cn } from '../deps';
 import { FILTERS, SORTS, type MyListFilter, type MyListSort } from '../lib/list';
 
@@ -48,7 +50,7 @@ export function MyListToolbar({
   className,
 }: MyListToolbarProps) {
   const { t, i18n } = useTranslation('mylist');
-  const nf = new Intl.NumberFormat(i18n.language);
+  const nf = numberFormat(i18n.language);
   return (
     <div className={cn('flex flex-wrap items-center gap-x-6 gap-y-3', className)} data-testid="mylist-toolbar">
       <Tabs

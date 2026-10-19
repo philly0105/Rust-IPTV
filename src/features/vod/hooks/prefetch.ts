@@ -21,7 +21,7 @@ import type { ItemRef, SourceKind } from '@/api/types';
 
 import { normalizeQuery, SEARCH_LIMIT, searchRequestLimit } from '../lib/search';
 import { loadMovieDetailPage, loadSearchPage, loadSeriesDetailPage } from '../routes';
-import { movieDetailQuery, seriesDetailQuery } from './queries';
+import { movieDetailQuery, prefetchTmdb, seriesDetailQuery } from './queries';
 
 export interface PrefetchTarget {
   ref: ItemRef;
@@ -135,7 +135,8 @@ export function preloadDetailChunk(kind: 'movie' | 'series'): void {
  * the image cache (`preloadImage`, the same URL the page's <img> asks for,
  * at most once per session). When the target has no backdrop, the one the detail page shows
  * first (the item's, then the provider's first) is preloaded once the data
- * arrives. Live and other non-VOD refs are ignored.
+ * arrives, and so is the TMDB lookup the page sends next (VD-8). Live and
+ * other non-VOD refs are ignored.
  */
 export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget): void {
   const { ref } = t;
@@ -151,10 +152,18 @@ export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget): void {
   // retry: false: a failed prefetch costs nothing; the page asks again (with retries) on open.
   if (ref.contentType === 'movie') {
     const q = movieDetailQuery(t.sourceKind, ref);
-    void qc.prefetchQuery({ ...q, retry: false }).then(() => afterData(qc.getQueryData(q.queryKey)));
+    void qc.prefetchQuery({ ...q, retry: false }).then(() => {
+      const data = qc.getQueryData(q.queryKey);
+      afterData(data);
+      prefetchTmdb(qc, 'movie', data && ('item' in data ? data.item : data));
+    });
   } else {
     const q = seriesDetailQuery(t.sourceKind, ref);
-    void qc.prefetchQuery({ ...q, retry: false }).then(() => afterData(qc.getQueryData(q.queryKey)));
+    void qc.prefetchQuery({ ...q, retry: false }).then(() => {
+      const data = qc.getQueryData(q.queryKey);
+      afterData(data);
+      prefetchTmdb(qc, 'series', data && ('item' in data ? data.item : data));
+    });
   }
 }
 

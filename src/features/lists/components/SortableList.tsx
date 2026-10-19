@@ -7,7 +7,8 @@
  */
 
 import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react';
-import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import type { TFunction } from 'i18next';
+import { memo, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { IconButton, cn } from '../deps';
@@ -105,75 +106,43 @@ export function SortableList<T>(props: SortableListProps<T>) {
     setAnnounce(t('movedTo', { name: getLabel(item), position: to + 1, total: items.length }));
   };
 
+  // Rows are memoized and get these stable handlers, so a drag-over re-renders the rows whose drop
+  // marker changes, not all of a 2,000-channel list (LV-6).
+  const latest = useRef({ onRowKeyDown, onDragOver, onDrop, moveBy, setDrag });
+  latest.current = { onRowKeyDown, onDragOver, onDrop, moveBy, setDrag };
+  const handlers = useMemo<RowHandlers>(
+    () => ({
+      keyDown: (e, index) => latest.current.onRowKeyDown(e, index),
+      dragOver: (e, key) => latest.current.onDragOver(e, key),
+      drop: (e) => latest.current.onDrop(e),
+      dragStart: (key) => latest.current.setDrag({ key }),
+      dragEnd: () => latest.current.setDrag(null),
+      moveBy: (index, delta, part) => latest.current.moveBy(index, delta, part),
+    }),
+    [],
+  );
+
   return (
     <>
       <ul ref={listRef} aria-label={label} className="flex flex-col" data-testid={testId}>
         {items.map((item, index) => {
           const key = getKey(item);
-          const name = getLabel(item);
-          const isLocked = locked?.(item) ?? false;
-          const over = drag?.over?.key === key ? drag.over.where : undefined;
           return (
-            <li
+            <SortableRow<T>
               key={key}
-              data-sort-key={key}
-              onKeyDown={(e) => onRowKeyDown(e, index)}
-              onDragOver={(e) => onDragOver(e, key)}
-              onDrop={onDrop}
-              className={cn(
-                'relative flex min-h-12 items-center gap-1 border-b border-divider py-1.5 pe-1 ps-0.5 last:border-b-0',
-                drag?.key === key && 'opacity-50',
-                rowClassName?.(item),
-              )}
-            >
-              {over ? (
-                <span
-                  aria-hidden
-                  className={cn('pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-accent', over === 'before' ? '-top-px' : '-bottom-px')}
-                />
-              ) : null}
-              <button
-                type="button"
-                draggable={!isLocked}
-                disabled={isLocked}
-                data-sort-part="grip"
-                aria-label={t('dragHandle', { name })}
-                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                title={t('reorderHint')}
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = 'move';
-                  e.dataTransfer.setData('text/plain', name);
-                  setDrag({ key });
-                }}
-                onDragEnd={() => setDrag(null)}
-                className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-subtle outline-none hover:bg-surface-2 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
-              >
-                <GripVertical className="size-4" aria-hidden />
-              </button>
-              {renderRow(item, index)}
-              {/* Touch screens have no drag and drop: arrows instead, below tablet width.
-                  At the row's end, also when a row wraps onto a second line. */}
-              <span className="ms-auto flex shrink-0 md:hidden">
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  label={t('moveUp', { name })}
-                  icon={<ArrowUp className="size-4" />}
-                  disabled={isLocked || index === 0}
-                  data-sort-part="up"
-                  onClick={() => moveBy(index, -1, 'up')}
-                />
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  label={t('moveDown', { name })}
-                  icon={<ArrowDown className="size-4" />}
-                  disabled={isLocked || index === items.length - 1}
-                  data-sort-part="down"
-                  onClick={() => moveBy(index, 1, 'down')}
-                />
-              </span>
-            </li>
+              item={item}
+              index={index}
+              count={items.length}
+              rowKey={key}
+              name={getLabel(item)}
+              isLocked={locked?.(item) ?? false}
+              over={drag?.over?.key === key ? drag.over.where : undefined}
+              dragging={drag?.key === key}
+              className={rowClassName?.(item)}
+              renderRow={renderRow}
+              handlers={handlers}
+              t={t}
+            />
           );
         })}
       </ul>
@@ -183,3 +152,93 @@ export function SortableList<T>(props: SortableListProps<T>) {
     </>
   );
 }
+
+interface RowHandlers {
+  keyDown(e: KeyboardEvent<HTMLLIElement>, index: number): void;
+  dragOver(e: DragEvent<HTMLLIElement>, key: string): void;
+  drop(e: DragEvent<HTMLLIElement>): void;
+  dragStart(key: string): void;
+  dragEnd(): void;
+  moveBy(index: number, delta: number, part: string): void;
+}
+
+interface SortableRowProps<T> {
+  item: T;
+  index: number;
+  count: number;
+  rowKey: string;
+  name: string;
+  isLocked: boolean;
+  /** The drop marker on this row while a drag is over it. */
+  over: Over['where'] | undefined;
+  dragging: boolean;
+  className: string | undefined;
+  renderRow(item: T, index: number): ReactNode;
+  handlers: RowHandlers;
+  /** The `lists` namespace. */
+  t: TFunction;
+}
+
+const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: key, name, isLocked, over, dragging, className, renderRow, handlers, t }: SortableRowProps<T>) {
+  return (
+    <li
+      data-sort-key={key}
+      onKeyDown={(e) => handlers.keyDown(e, index)}
+      onDragOver={(e) => handlers.dragOver(e, key)}
+      onDrop={handlers.drop}
+      className={cn(
+        'relative flex min-h-12 items-center gap-1 border-b border-divider py-1.5 pe-1 ps-0.5 last:border-b-0',
+        dragging && 'opacity-50',
+        className,
+      )}
+    >
+      {over ? (
+        <span
+          aria-hidden
+          className={cn('pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-accent', over === 'before' ? '-top-px' : '-bottom-px')}
+        />
+      ) : null}
+      <button
+        type="button"
+        draggable={!isLocked}
+        disabled={isLocked}
+        data-sort-part="grip"
+        aria-label={t('dragHandle', { name })}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        title={t('reorderHint')}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', name);
+          handlers.dragStart(key);
+        }}
+        onDragEnd={handlers.dragEnd}
+        className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-subtle outline-none hover:bg-surface-2 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
+      >
+        <GripVertical className="size-4" aria-hidden />
+      </button>
+      {renderRow(item, index)}
+      {/* Touch screens have no drag and drop: arrows instead, below tablet width.
+          At the row's end, also when a row wraps onto a second line. */}
+      <span className="ms-auto flex shrink-0 md:hidden">
+        <IconButton
+          size="sm"
+          variant="ghost"
+          label={t('moveUp', { name })}
+          icon={<ArrowUp className="size-4" />}
+          disabled={isLocked || index === 0}
+          data-sort-part="up"
+          onClick={() => handlers.moveBy(index, -1, 'up')}
+        />
+        <IconButton
+          size="sm"
+          variant="ghost"
+          label={t('moveDown', { name })}
+          icon={<ArrowDown className="size-4" />}
+          disabled={isLocked || index === count - 1}
+          data-sort-part="down"
+          onClick={() => handlers.moveBy(index, 1, 'down')}
+        />
+      </span>
+    </li>
+  );
+}) as <T>(props: SortableRowProps<T> & { key?: string }) => ReactElement;

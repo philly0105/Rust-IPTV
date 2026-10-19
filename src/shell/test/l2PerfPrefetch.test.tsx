@@ -63,7 +63,12 @@ describe('L2-shell-4: startup data is asked for before the first render', () => 
   it('sends settings.get and sources.list at once, and the shell reads them without a second request', async () => {
     await import('@/main');
     // Before i18n settles and anything renders.
-    expect(rpcMock.calls.map((c) => c.cmd).sort()).toEqual(['settings.get', 'sources.list']);
+    expect(
+      rpcMock.calls
+        .map((c) => c.cmd)
+        .slice(0, 2)
+        .sort(),
+    ).toEqual(['settings.get', 'sources.list']);
     await act(async () => {
       gate.open();
       await gate.ready;
@@ -71,5 +76,7 @@ describe('L2-shell-4: startup data is asked for before the first render', () => 
     expect(await screen.findByText('ready 1')).toBeTruthy();
     expect(rpcMock.calls.filter((c) => c.cmd === 'settings.get')).toHaveLength(1);
     expect(rpcMock.calls.filter((c) => c.cmd === 'sources.list')).toHaveLength(1);
+    // Once both answered, `/` opens Home, whose rail queries started too (performance audit SH-3).
+    expect(rpcMock.calls.map((c) => c.cmd)).toContain('positions.continueWatching');
   });
 });

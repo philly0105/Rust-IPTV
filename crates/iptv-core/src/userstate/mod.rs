@@ -371,7 +371,9 @@ pub fn favorites_reorder(
     hide: Option<Hide>,
 ) -> CoreResult<()> {
     use std::collections::HashSet;
-    let tx = conn.transaction()?;
+    // IMMEDIATE: it reads before it writes, and a DEFERRED transaction
+    // fails with SQLITE_BUSY when another write commits in between.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     {
         let stored: Vec<ItemRef> = favorites_list(&tx, source_id)?
             .into_iter()

@@ -9,6 +9,7 @@ use super::store::STAGING_ORIGIN;
 use crate::error::CoreResult;
 use crate::model::ItemRef;
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,13 @@ use std::sync::Arc;
 pub const FUZZY_THRESHOLD: f64 = 0.9;
 /// A fuzzy match must beat every other channel by more than this.
 pub const FUZZY_MARGIN: f64 = 0.02;
+/// Shortest normalized key a fuzzy match can reach [`FUZZY_THRESHOLD`] with.
+/// Two different keys score at most `1 - 1 / longer` and `shorter / longer`,
+/// so a score of 0.9 needs the longer one to have 10 characters and the
+/// shorter 9 or more; shorter keys only match exactly.
+const MIN_FUZZY_KEY: usize = 9;
+/// Most fuzzy results a directory remembers; the memo is cleared when full.
+const FUZZY_MEMO_CAP: usize = 50_000;
 
 /// How a ref was resolved (`epg.resolve`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +184,9 @@ pub struct ChannelDirectory {
     names: HashMap<String, String>,
     /// (normalized name, channel id, [`qualifiers`]) for fuzzy matching.
     entries: Vec<(String, String, Vec<String>)>,
+    /// Title -> index in `entries` of its fuzzy match ([`Self::find_name`]).
+    /// The directory is replaced when the generation moves, and this with it.
+    fuzzy: Mutex<HashMap<String, Option<usize>>>,
 }
 
 impl ChannelDirectory {
@@ -193,6 +204,7 @@ impl ChannelDirectory {
             ids: HashMap::new(),
             names: HashMap::new(),
             entries: Vec::new(),
+            fuzzy: Mutex::new(HashMap::new()),
         };
         for row in rows {
             let (id, name) = row?;
@@ -223,7 +235,7 @@ impl ChannelDirectory {
     /// with the same [`qualifiers`], so "Sky Sports 1" never takes "Sky
     /// Sports 2" and "BBC One +1" never takes "BBC One +2". A fuzzy match
     /// whose runner-up (another channel) scores within [`FUZZY_MARGIN`] of
-    /// it is ambiguous and refused.
+    /// it is ambiguous and refused. Fuzzy results are remembered per title.
     pub fn find_name(&self, title: &str) -> Option<&str> {
         let key = normalize_name(title);
         if key.is_empty() {
@@ -232,16 +244,31 @@ impl ChannelDirectory {
         if let Some(id) = self.names.get(&key) {
             return Some(id);
         }
-        if key.chars().count() < 4 {
+        if key.chars().count() < MIN_FUZZY_KEY {
             return None;
         }
+        if let Some(&found) = self.fuzzy.lock().get(title) {
+            return found.map(|i| self.entries[i].1.as_str());
+        }
+        let found = self.fuzzy_match(&key, title);
+        let mut memo = self.fuzzy.lock();
+        if memo.len() >= FUZZY_MEMO_CAP {
+            memo.clear();
+        }
+        memo.insert(title.to_string(), found);
+        found.map(|i| self.entries[i].1.as_str())
+    }
+
+    /// Index in `entries` of the fuzzy match of `title` (normalized `key`),
+    /// see [`Self::find_name`].
+    fn fuzzy_match(&self, key: &str, title: &str) -> Option<usize> {
         let quals = qualifiers(title);
         let floor = FUZZY_THRESHOLD - FUZZY_MARGIN;
         let klen = key.chars().count() as f64;
-        let mut best: Option<(f64, &str)> = None;
+        let mut best: Option<(f64, usize)> = None;
         // Best score of a channel other than `best`.
         let mut runner_up = 0.0_f64;
-        for (name, id, q) in &self.entries {
+        for (i, (name, id, q)) in self.entries.iter().enumerate() {
             if *q != quals {
                 continue;
             }
@@ -250,27 +277,27 @@ impl ChannelDirectory {
             if (klen - nlen).abs() / klen.max(nlen) > 1.0 - floor {
                 continue;
             }
-            let score = strsim::normalized_levenshtein(&key, name);
+            let score = strsim::normalized_levenshtein(key, name);
             if score < floor {
                 continue;
             }
             match best {
-                None => best = Some((score, id)),
-                Some((b, bid)) if score > b => {
-                    if bid != id {
+                None => best = Some((score, i)),
+                Some((b, bi)) if score > b => {
+                    if self.entries[bi].1 != *id {
                         runner_up = runner_up.max(b);
                     }
-                    best = Some((score, id));
+                    best = Some((score, i));
                 }
-                Some((_, bid)) => {
-                    if bid != id {
+                Some((_, bi)) => {
+                    if self.entries[bi].1 != *id {
                         runner_up = runner_up.max(score);
                     }
                 }
             }
         }
-        let (score, id) = best?;
-        (score >= FUZZY_THRESHOLD && score - runner_up > FUZZY_MARGIN).then_some(id)
+        let (score, i) = best?;
+        (score >= FUZZY_THRESHOLD && score - runner_up > FUZZY_MARGIN).then_some(i)
     }
 
     /// Channel id whose normalized display name (or id) equals the
@@ -297,24 +324,29 @@ impl ChannelDirectory {
     }
 }
 
-/// The cached directory, rebuilt when the runtime generation changed.
+/// The cached directory, rebuilt when the runtime generation changed. The
+/// lock is held while it is rebuilt, so concurrent callers wait for one
+/// build instead of each loading every guide channel.
 pub fn directory(conn: &Connection, rt: &EpgRuntime) -> CoreResult<Arc<ChannelDirectory>> {
     let generation = rt.generation();
-    if let Some(d) = rt.names.lock().as_ref() {
-        if d.generation == generation {
+    let mut cached = rt.names.lock();
+    if let Some(d) = cached.as_ref() {
+        if d.generation >= generation {
             return Ok(d.clone());
         }
     }
     let d = Arc::new(ChannelDirectory::load(conn, generation)?);
-    *rt.names.lock() = Some(d.clone());
+    *cached = Some(d.clone());
     Ok(d)
 }
 
 /// Manual mapping of `r`: `None` = no row, `Some(None)` = explicitly unmapped.
 pub fn manual_mapping(conn: &Connection, r: &ItemRef) -> CoreResult<Option<Option<String>>> {
     Ok(conn
-        .query_row(
+        .prepare_cached(
             "SELECT epg_channel_id FROM epg_channel_map WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
             params![r.source_id, r.content_type.as_str(), r.item_id],
             |row| row.get::<_, Option<String>>(0),
         )
@@ -323,11 +355,8 @@ pub fn manual_mapping(conn: &Connection, r: &ItemRef) -> CoreResult<Option<Optio
 
 pub(crate) fn has_programmes(conn: &Connection, channel_id: &str) -> CoreResult<bool> {
     Ok(conn
-        .query_row(
-            "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",
-            [channel_id],
-            |_| Ok(()),
-        )
+        .prepare_cached("SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1")?
+        .query_row([channel_id], |_| Ok(()))
         .optional()?
         .is_some())
 }
@@ -341,8 +370,10 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
         });
     }
     let item: Option<(String, Option<String>)> = conn
-        .query_row(
+        .prepare_cached(
             "SELECT title, epg_channel_id FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
             params![r.source_id, r.content_type.as_str(), r.item_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -449,5 +480,35 @@ mod tests {
         assert_eq!(d.find_name("Nickelodeon U"), None);
         let d = dir(&[("nuk", "Nickelodeon UK")]);
         assert_eq!(d.find_name("Nickelodeon U"), Some("nuk"));
+    }
+
+    /// EP-2: keys shorter than [`MIN_FUZZY_KEY`] can never score
+    /// [`FUZZY_THRESHOLD`] against a different key, so they skip the scan.
+    #[test]
+    fn short_keys_cannot_reach_the_fuzzy_threshold() {
+        let best = |k: usize, n: usize| {
+            let (short, long) = (k.min(n) as f64, k.max(n) as f64);
+            (1.0 - 1.0 / long).min(short / long)
+        };
+        for k in 1..MIN_FUZZY_KEY {
+            for n in 1..=40 {
+                assert!(best(k, n) < FUZZY_THRESHOLD, "{k} vs {n}");
+            }
+        }
+        assert!(best(MIN_FUZZY_KEY, MIN_FUZZY_KEY + 1) >= FUZZY_THRESHOLD);
+        let d = dir(&[("e.uk", "Eurosport")]);
+        assert_eq!(d.find_name("Eurosprt"), None);
+        assert!(d.fuzzy.lock().is_empty(), "no scan for a short key");
+    }
+
+    /// EP-2: a fuzzy result is computed once per title and directory.
+    #[test]
+    fn fuzzy_results_are_remembered() {
+        let d = dir(&[("ss1.uk", "Sky Sports 1"), ("ss2.uk", "Sky Sports 2")]);
+        assert_eq!(d.find_name("Sky Sprts 2"), Some("ss2.uk"));
+        assert_eq!(d.find_name("Sky Sprts 2"), Some("ss2.uk"));
+        assert_eq!(d.find_name("Sky Sprots 3"), None);
+        assert_eq!(d.find_name("Sky Sprots 3"), None);
+        assert_eq!(d.fuzzy.lock().len(), 2);
     }
 }

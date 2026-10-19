@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lock } from 'lucide-react';
@@ -8,7 +7,7 @@ import type { Category } from '@/api/types';
 
 import { columnsFor, useElementWidth, useScrollMargin } from '../hooks/useContainerColumns';
 import { handleGridKeyDown } from '../lib/gridNav';
-import { cn } from '@/ui';
+import { cn, useListVirtualizer } from '@/ui';
 
 export interface CategoryEntry {
   id: string;
@@ -51,7 +50,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
   const { i18n } = useTranslation();
   const fmt = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
 
-  const v = useVirtualizer({
+  const v = useListVirtualizer({
     count: rows,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_H,

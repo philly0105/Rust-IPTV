@@ -76,8 +76,10 @@ pub fn parse_shift(value: &str) -> i64 {
 /// by the M3U import); 0 for items without one.
 pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
     let extra: Option<String> = conn
-        .query_row(
+        .prepare_cached(
             "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
             params![r.source_id, r.content_type.as_str(), r.item_id],
             |row| row.get(0),
         )
@@ -95,10 +97,18 @@ pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
 /// The feed a channel's programmes come from: the first enabled url (by
 /// rowid) with a programme of channel `?1` that starts in `[?2, ?3)` (the
 /// range plus the lookback before it) and still runs after `?4` (the range
-/// start). `+p.stop` keeps the plan on the `(channel_id, start)` index.
-pub const FEED_SQL: &str = "SELECT p.epg_url FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
-     WHERE p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3 AND +p.stop > ?4 AND p.stop > p.start
-       AND s.enabled = 1 AND s.origin <> ?5
+/// start). The urls are tried in rowid order, each with one probe of the
+/// `(epg_url, channel_id, start)` index read backwards from the range end:
+/// the latest start nearly always runs after the range start, so the probe
+/// stops at its first row. Joining from the programmes instead read every
+/// programme of the lookback and the range in every feed before sorting by
+/// url. `+p.stop` keeps the plan off the `stop` index.
+pub const FEED_SQL: &str = "SELECT s.url FROM epg_sources s
+     WHERE s.enabled = 1 AND s.origin <> ?5
+       AND (SELECT p.start FROM epg_programs p
+             WHERE p.epg_url = s.url AND p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3
+               AND +p.stop > ?4 AND p.stop > p.start
+             ORDER BY p.start DESC LIMIT 1) IS NOT NULL
      ORDER BY s.rowid LIMIT 1";
 /// The last programme of the feed starting in the lookback (zero-length rows
 /// are skipped here as [`tidy`] skips them: they clip nothing).
@@ -467,6 +477,59 @@ mod tests {
             now_next(&conn, "c", from, 0).unwrap().now.unwrap().title,
             "on"
         );
+    }
+
+    /// EP-5: the feed is the first enabled url (by rowid) with a programme
+    /// running in the range; disabled and staging urls never count.
+    #[test]
+    fn feed_is_the_first_enabled_url_with_a_programme_in_range() {
+        let now = 1_800_000_000;
+        let h = 3600;
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        for (url, enabled, origin) in [
+            ("off", 0, "settings"),
+            ("stage", 1, STAGING_ORIGIN),
+            ("old", 1, "settings"),
+            ("good", 1, "source"),
+            ("late", 1, "settings"),
+        ] {
+            conn.execute(
+                "INSERT INTO epg_sources(url, enabled, origin) VALUES (?1, ?2, ?3)",
+                params![url, enabled, origin],
+            )
+            .unwrap();
+        }
+        for (url, start, stop) in [
+            ("off", now - h, now + h),
+            ("stage", now - h, now + h),
+            // Ended before the range: no programme of "old" runs in it.
+            ("old", now - 30 * h, now - 29 * h),
+            ("old", now - 2 * h, now - h),
+            ("good", now - 20 * h, now - 19 * h),
+            ("good", now - h / 2, now + h / 2),
+            ("late", now - h, now + h),
+        ] {
+            conn.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, 'c', ?2, ?3, ?1)",
+                params![url, start, stop],
+            )
+            .unwrap();
+        }
+        let feed = |from: i64, to: i64| -> Option<String> {
+            conn.query_row(
+                FEED_SQL,
+                params!["c", from - MAX_PROGRAMME_SECS, to, from, STAGING_ORIGIN],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap()
+        };
+        assert_eq!(feed(now, now + 60).as_deref(), Some("good"));
+        assert_eq!(feed(now - 2 * h, now - h).as_deref(), Some("old"));
+        assert_eq!(feed(now + 5 * h, now + 6 * h), None);
+        let nn = now_next(&conn, "c", now, 0).unwrap();
+        assert_eq!(nn.now.unwrap().title, "good");
     }
 
     /// The brief statements differ from the full ones only in the

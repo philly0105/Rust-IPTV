@@ -235,7 +235,7 @@ pub async fn set_category_hidden(
     a: SetCategoryHiddenArgs,
 ) -> Result<(), RpcError> {
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             super::set_category_hidden(c, &a.source_id, a.content_type, &a.category_id, a.hidden)
         })
         .await?;
@@ -247,7 +247,7 @@ pub async fn set_categories_hidden(
     a: SetCategoriesHiddenArgs,
 ) -> Result<(), RpcError> {
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             super::set_categories_hidden(c, &a.source_id, a.content_type, &a.hidden_ids)
         })
         .await?;

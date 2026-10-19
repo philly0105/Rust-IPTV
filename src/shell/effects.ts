@@ -37,7 +37,8 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
     'channels.',
     'stats.',
   ],
-  'epg.changed': ['epg.'],
+  // No epg.changed entry: the api default refetches 'epg.', and only 'epg.sources' for a
+  // status-only change (a refresh starting or a 304), which an extra 'epg.' here would undo.
   // No downloads.update entry: the api default refetches only downloads.list and myvideos.;
   // a 'downloads.' prefix here refetched downloads.dir on every progress burst too.
   // account: a new subscription check.

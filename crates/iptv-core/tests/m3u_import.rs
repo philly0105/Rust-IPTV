@@ -247,3 +247,24 @@ async fn raw_and_preview_rpc() {
     assert_eq!(p["groups"].as_array().unwrap().len(), 4);
     assert_eq!(p["epgUrls"][0], "http://epg.example/guide.xml");
 }
+
+/// IN-8: parse progress passes the 250 ms gate (at most one event per 2000
+/// rows, fewer when they parse fast) and the final count always goes out.
+#[tokio::test]
+async fn parse_progress_is_throttled_and_ends_with_the_final_count() {
+    let mut env = env().await;
+    let src = add_text(&env.state, "Big", &gen_m3u(20_500, 10)).await;
+    assert_eq!(src.channel_count, 20_500);
+    let parsed: Vec<u64> = drain(&mut env.events)
+        .into_iter()
+        .filter(|e| {
+            e.kind == "import.progress"
+                && e.payload["sourceId"] == src.id.as_str()
+                && e.payload["phase"] == "parsing"
+        })
+        .filter_map(|e| e.payload["done"].as_u64())
+        .filter(|done| *done > 0)
+        .collect();
+    assert!(parsed.len() <= 11, "{parsed:?}");
+    assert_eq!(parsed.last(), Some(&20_500), "{parsed:?}");
+}

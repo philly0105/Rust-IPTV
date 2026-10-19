@@ -26,10 +26,9 @@ use super::matcher::{
 };
 use super::normalize::{normalize_title_keys, release_tag_year};
 use super::raw;
-use crate::db::DbPool;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{TmdbBrief, TmdbMediaType, TmdbMovie, TmdbPerson, TmdbSeason, TmdbTv};
-use crate::state::AppState;
+use crate::state::{AppState, DbWriter};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
@@ -186,11 +185,11 @@ impl Tmdb {
             return Ok(None);
         };
         let this = Arc::clone(self);
-        let db = state.db.clone();
+        let db = state.writer();
         let key = season_lookup_key(tmdb_id, season, &ctx.language);
         let entry = self
             .cache
-            .get_or_fetch(&state.db, "tv", key, DETAILS, move || async move {
+            .get_or_fetch(&state.writer(), "tv", key, DETAILS, move || async move {
                 this.fetch_season(db, ctx, tmdb_id, season).await
             })
             .await?;
@@ -212,7 +211,7 @@ impl Tmdb {
         let key = person_lookup_key(person_id, &ctx.language);
         let entry = self
             .cache
-            .get_or_fetch(&state.db, "person", key, DETAILS, move || async move {
+            .get_or_fetch(&state.writer(), "person", key, DETAILS, move || async move {
                 fetch_person(&client, &ctx, person_id).await
             })
             .await?;
@@ -227,7 +226,7 @@ impl Tmdb {
         let key = trending_lookup_key(&ctx.language);
         let entry = self
             .cache
-            .get_or_fetch(&state.db, "trending", key, TRENDING, move || async move {
+            .get_or_fetch(&state.writer(), "trending", key, TRENDING, move || async move {
                 let page: raw::ResultPage = client
                     .get_json(
                         "/trending/all/week",
@@ -261,7 +260,7 @@ impl Tmdb {
         let Some(ctx) = self.ctx(state) else {
             return Ok(Vec::new());
         };
-        let Some(details) = self.details(&state.db, &ctx, media, tmdb_id).await? else {
+        let Some(details) = self.details(&state.writer(), &ctx, media, tmdb_id).await? else {
             return Ok(Vec::new());
         };
         match details.get("similar") {
@@ -319,6 +318,8 @@ impl Tmdb {
 
     /// Deletes every cached TMDB row and the memory layer.
     pub async fn clear_cache(&self, state: &AppState) -> CoreResult<u64> {
+        // A row still being written in the background would come back.
+        state.flush_background_writes().await;
         let n = self.cache.clear(&state.db).await?;
         tracing::info!(rows = n, "tmdb cache cleared");
         Ok(n)
@@ -337,7 +338,7 @@ impl Tmdb {
         let Some(ctx) = self.ctx(state) else {
             return Ok(None);
         };
-        let db = &state.db;
+        let db = &state.writer();
         let title = title.trim();
 
         if let Some(pid) = parse_provider_tmdb_id(tmdb_id) {
@@ -368,7 +369,7 @@ impl Tmdb {
     /// Title -> TMDB id through the confidence gate, cached (negatives too).
     async fn resolve(
         &self,
-        db: &DbPool,
+        db: &DbWriter,
         ctx: &Ctx,
         media: TmdbMediaType,
         title: &str,
@@ -422,7 +423,7 @@ impl Tmdb {
     /// Mapped details payload (with hidden fields) for one id, cached.
     async fn details(
         &self,
-        db: &DbPool,
+        db: &DbWriter,
         ctx: &Ctx,
         media: TmdbMediaType,
         tmdb_id: i64,
@@ -441,7 +442,7 @@ impl Tmdb {
 
     async fn fetch_season(
         self: Arc<Self>,
-        db: DbPool,
+        db: DbWriter,
         ctx: Ctx,
         tmdb_id: i64,
         season: i64,

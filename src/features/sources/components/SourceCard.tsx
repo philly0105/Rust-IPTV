@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { CircleAlert, GripVertical, IdCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import { useId, type DragEvent, type KeyboardEvent } from 'react';
+import { memo, useId, type DragEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -11,7 +11,7 @@ import { Badge, Button, IconButton } from '@/ui';
 import { baseName } from '../lib/files';
 import { absoluteTime, formatCount, relativeTime } from '../lib/format';
 import { useSourceGuide } from '../lib/epgRefresh';
-import { isRunningPhase, type ProgressEntry } from '../lib/progress';
+import { isRunningPhase, useImportProgressStore, useSourceProgress } from '../lib/progress';
 import { redactText } from '../lib/redact';
 import { SOURCE_ERROR_KEYS, classifySourceError, sourceErrorDetail, splitErrorText } from '../lib/sourceError';
 import { displayHost } from '../lib/validate';
@@ -140,25 +140,22 @@ export interface SourceCardProps {
   source: Source;
   index: number;
   total: number;
-  progress?: ProgressEntry;
   refreshing: boolean;
   dragging: boolean;
   dropTarget: 'before' | 'after' | null;
-  onRefresh: () => void;
-  onEdit: () => void;
+  onRefresh: (s: Source) => void;
+  onEdit: (s: Source) => void;
   /** Opens the subscription details (Xtream and Stalker only). */
-  onAccount?: () => void;
-  onRemove: () => void;
+  onAccount?: (s: Source) => void;
+  onRemove: (s: Source) => void;
   /** Stops the running import or refresh (C8). */
-  onCancelImport?: () => void;
-  /** A cancel request for this source is out. */
-  cancelling?: boolean;
+  onCancelImport?: (id: string) => void;
   /** False while the list is sorted or filtered: order only changes in the manual view. */
   reorderable?: boolean;
-  onMove: (to: number) => void;
-  onDragStart: (e: DragEvent<HTMLElement>) => void;
-  onDragOver: (e: DragEvent<HTMLElement>) => void;
-  onDrop: (e: DragEvent<HTMLElement>) => void;
+  onMove: (id: string, to: number) => void;
+  onDragStart: (id: string, e: DragEvent<HTMLElement>) => void;
+  onDragOver: (id: string, e: DragEvent<HTMLElement>) => void;
+  onDrop: (id: string, e: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
   /** Cached subscription status (Xtream and Stalker). */
   account?: AccountStatus | null;
@@ -180,9 +177,16 @@ function nextRefreshText(entry: ScheduleEntry, lang: string, t: (k: string, o?: 
   return when ? t(entry.retrying ? 'nextRefreshRetry' : 'nextRefreshIn', { when }) : undefined;
 }
 
-export function SourceCard(props: SourceCardProps) {
-  const { source: s, index, total, progress, refreshing, reorderable = true } = props;
+/**
+ * The card is memoised (VD-5): its import progress and cancel state come from the progress store
+ * per source, and its handlers take the source (or its id), so the page can pass the same
+ * functions to every card. An import event then re-renders only the card it is about.
+ */
+export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
+  const { source: s, index, total, refreshing, reorderable = true } = props;
   const { t, i18n } = useTranslation('sources');
+  const progress = useSourceProgress(s.id);
+  const cancelling = useImportProgressStore((st) => st.cancelling[s.id] === true);
   const lang = i18n.language;
   const busy = refreshing || isRunningPhase(progress?.phase);
   // A cancelled run lingers briefly (LINGER_MS) in place of the error strip: the old catalog and its error are unchanged.
@@ -207,16 +211,16 @@ export function SourceCard(props: SourceCardProps) {
     if (!reorderable || !(e.altKey || onGrip)) return;
     if (e.key === 'ArrowUp' && index > 0) {
       e.preventDefault();
-      props.onMove(index - 1);
+      props.onMove(s.id, index - 1);
     } else if (e.key === 'ArrowDown' && index < total - 1) {
       e.preventDefault();
-      props.onMove(index + 1);
+      props.onMove(s.id, index + 1);
     } else if (onGrip && e.key === 'Home' && index > 0) {
       e.preventDefault();
-      props.onMove(0);
+      props.onMove(s.id, 0);
     } else if (onGrip && e.key === 'End' && index < total - 1) {
       e.preventDefault();
-      props.onMove(total - 1);
+      props.onMove(s.id, total - 1);
     }
   };
 
@@ -229,8 +233,8 @@ export function SourceCard(props: SourceCardProps) {
       data-testid="source-card"
       data-source-id={s.id}
       onKeyDown={onKeyDown}
-      onDragOver={props.onDragOver}
-      onDrop={props.onDrop}
+      onDragOver={(e) => props.onDragOver(s.id, e)}
+      onDrop={(e) => props.onDrop(s.id, e)}
       className={clsx(
         'relative rounded-lg border bg-surface shadow-1',
         s.lastError && !busy ? 'border-danger/60' : 'border-border',
@@ -250,7 +254,7 @@ export function SourceCard(props: SourceCardProps) {
           type="button"
           draggable
           data-grip="true"
-          onDragStart={props.onDragStart}
+          onDragStart={(e) => props.onDragStart(s.id, e)}
           onDragEnd={props.onDragEnd}
           aria-label={t('reorderHandle', { name: s.name, position: index + 1, total })}
           aria-describedby="sources-reorder-help"
@@ -339,24 +343,24 @@ export function SourceCard(props: SourceCardProps) {
             label={t('refreshSource', { name: s.name })}
             icon={<RefreshCw aria-hidden className={clsx('size-4', busy && 'motion-safe:animate-spin')} />}
             disabled={busy || s.m3u?.origin === 'text'}
-            onClick={props.onRefresh}
+            onClick={() => props.onRefresh(s)}
             data-testid="source-refresh"
           />
           {hasAccountInfo(s) && props.onAccount ? (
             <IconButton
               label={t('accountFor', { name: s.name })}
               icon={<IdCard aria-hidden className="size-4" />}
-              onClick={props.onAccount}
+              onClick={() => props.onAccount?.(s)}
               data-testid="source-account"
             />
           ) : (
             <span aria-hidden className="hidden h-10 w-10 @2xl:block" />
           )}
-          <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden className="size-4" />} onClick={props.onEdit} data-testid="source-edit" />
+          <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden className="size-4" />} onClick={() => props.onEdit(s)} data-testid="source-edit" />
           <IconButton
             label={t('removeSource', { name: s.name })}
             icon={<Trash2 aria-hidden className="size-4" />}
-            onClick={props.onRemove}
+            onClick={() => props.onRemove(s)}
             disabled={busy}
             data-testid="source-remove"
           />
@@ -370,8 +374,8 @@ export function SourceCard(props: SourceCardProps) {
             compact
             kind={s.kind}
             // Cancel needs a running import the core knows about: wait for its first event.
-            onCancel={progress && props.onCancelImport ? props.onCancelImport : undefined}
-            cancelling={props.cancelling}
+            onCancel={progress && props.onCancelImport ? () => props.onCancelImport?.(s.id) : undefined}
+            cancelling={cancelling}
           />
         </div>
       ) : s.lastError ? (
@@ -379,11 +383,11 @@ export function SourceCard(props: SourceCardProps) {
           <CircleAlert aria-hidden className="size-4 shrink-0 text-danger" />
           <SourceErrorText source={s} />
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" onClick={props.onEdit} aria-describedby={nameId}>
+            <Button size="sm" variant="ghost" onClick={() => props.onEdit(s)} aria-describedby={nameId}>
               {t('checkSettings')}
             </Button>
             {s.m3u?.origin !== 'text' ? (
-              <Button size="sm" variant="secondary" onClick={props.onRefresh} aria-describedby={nameId} data-testid="source-error-retry">
+              <Button size="sm" variant="secondary" onClick={() => props.onRefresh(s)} aria-describedby={nameId} data-testid="source-error-retry">
                 {t('tryAgain')}
               </Button>
             ) : null}
@@ -396,4 +400,4 @@ export function SourceCard(props: SourceCardProps) {
       ) : null}
     </li>
   );
-}
+});

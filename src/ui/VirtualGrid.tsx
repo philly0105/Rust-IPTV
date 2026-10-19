@@ -1,4 +1,4 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { useListVirtualizer } from './virtualizer';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
@@ -162,15 +162,12 @@ export function VirtualGrid<T>({
   const rowHeight = Math.round(cellWidth / aspectRatio(aspect) + captionHeight);
   const rowCount = Math.ceil(items.length / columns);
 
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: rowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight + gap,
     overscan,
     initialRect,
-    // A scroll event renders in the next frame with the others, not synchronously inside the
-    // event (L2-vod-1: flushSync per event made a fast scroll a string of 50-100 ms tasks).
-    useFlushSync: false,
   });
 
   useEffect(() => {

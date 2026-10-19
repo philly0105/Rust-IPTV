@@ -1273,6 +1273,12 @@ pub struct AppInfo {
     /// (`http://127.0.0.1:<port>/api/proxy`); `null` in server mode.
     #[serde(default)]
     pub proxy_base: Option<String>,
+    /// Desktop only: the image cache route on a second loopback listener
+    /// (`http://127.0.0.1:<port>/<token>/api/img`), so artwork does not wait
+    /// behind streams for the webview's six connections per host and port;
+    /// `null` in server mode.
+    #[serde(default)]
+    pub image_base: Option<String>,
     /// True only in a desktop build compiled with the `updater` feature.
     #[serde(default)]
     pub updater_available: bool,
@@ -1379,8 +1385,9 @@ pub struct ImportSummary {
     pub channels: i64,
     pub movies: i64,
     pub series: i64,
-    /// The playlist had not changed since the last import, so the catalog was
-    /// kept as is (m3u). `run_import` then reports `done` with the message
+    /// The playlist or the portal's answers had not changed since the last
+    /// import, so the catalog was kept as is (m3u, Xtream, Stalker).
+    /// `run_import` then reports `done` with the message
     /// `unchanged` and sends no `sources.changed`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unchanged: bool,

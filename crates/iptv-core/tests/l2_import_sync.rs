@@ -9,6 +9,7 @@
 //! - L1-core-14: a Stalker radio or VOD answer that fails for now keeps
 //!   that section's previous rows and sets `lastError`.
 //! - L2-sources-home-7: the Xtream saving phase carries no raw content type.
+//! - ST-2: an unchanged Xtream refresh does not wait for the save slot.
 
 use axum::extract::{RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
@@ -293,6 +294,20 @@ async fn unchanged_xtream_refresh_writes_nothing_and_says_unchanged() {
             .all(|p| p["phase"] != "saving" || p["done"] == 0),
         "an unchanged refresh saves no rows: {progress:?}"
     );
+}
+
+/// ST-2: a kind whose answer matches the last write is not decoded, so an
+/// unchanged refresh never waits for the save slot another import holds.
+#[tokio::test]
+async fn unchanged_xtream_refresh_does_not_wait_for_the_save_slot() {
+    let mut e = env().await;
+    e.add_xtream(XT).await;
+    e.refresh(XT).await;
+    let slot = iptv_core::sources::save_slot(&e.state).await.unwrap();
+    let refresh = tokio::time::timeout(std::time::Duration::from_secs(10), e.refresh(XT));
+    let (_, progress) = refresh.await.expect("waited for the save slot");
+    assert_eq!(done_message(&progress).as_deref(), Some("unchanged"));
+    drop(slot);
 }
 
 #[tokio::test]

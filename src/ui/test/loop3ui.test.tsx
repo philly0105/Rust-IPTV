@@ -21,7 +21,7 @@ import { Dialog } from '../Dialog';
 import { Select } from '../Field';
 import { gateImage, imageGateStats, MAX_ACTIVE, noteImageLoaded, pageIsScrolling, resetImageGate, SETTLE_MS } from '../imageGate';
 import { comboKeys, Kbd, LiveBadge } from '../Misc';
-import { Poster } from '../Poster';
+import { Poster, PosterWidthContext } from '../Poster';
 import { EmptyState } from '../States';
 import { dismissToast, focusToasts, toast, TOAST_AVOID_GAP, toastClearanceFor, ToastViewport, useToastStore } from '../Toast';
 import { VirtualGrid } from '../VirtualGrid';
@@ -274,6 +274,21 @@ describe('resized artwork (L3-serve-ui-1)', () => {
     card.unmount();
     const hero = render(<Poster src="http://cdn.example/hero.jpg" alt="Hero" priority />);
     expect(hero.container.querySelector('img')!.getAttribute('src')).not.toContain('w=');
+  });
+
+  it("takes a rail's card width instead of measuring its frame (performance audit SH-6)", () => {
+    const measured = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+    const card = render(
+      <PosterWidthContext.Provider value={168}>
+        <Poster src="http://cdn.example/rail.jpg" alt="Rail card" />
+        <Poster src="http://cdn.example/rail-hero.jpg" alt="Rail hero" priority />
+      </PosterWidthContext.Provider>,
+    );
+    const [railCard, railHero] = Array.from(card.container.querySelectorAll('img'));
+    expect(railCard!.getAttribute('src')).toMatch(/&w=192$/);
+    expect(measured).not.toHaveBeenCalled();
+    // A priority picture still loads full size.
+    expect(railHero!.getAttribute('src')).not.toContain('w=');
   });
 });
 

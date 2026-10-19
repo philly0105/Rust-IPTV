@@ -45,6 +45,15 @@ describe('nowNextFrom / preferNowNext', () => {
     expect(nowNextFrom(list, T)).toEqual({ now: list[1], next: list[0] });
   });
 
+  it('gives the same object for the same list at the same time, so memoized rows keep their render (LV-3)', () => {
+    const list = [p('now', T - 5 * MINUTE, T + 30 * MINUTE), p('next', T + 30 * MINUTE, T + HOUR)];
+    const first = nowNextFrom(list, T);
+    expect(nowNextFrom(list, T)).toBe(first);
+    const later = nowNextFrom(list, T + 40 * MINUTE);
+    expect(later).toEqual({ now: list[1], next: undefined });
+    expect(nowNextFrom([...list], T)).toEqual(first);
+  });
+
   it('reports only a next programme when nothing airs', () => {
     const list = [p('later', T + HOUR, T + 2 * HOUR)];
     expect(nowNextFrom(list, T)).toEqual({ next: list[0] });

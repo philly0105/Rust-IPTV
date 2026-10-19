@@ -39,7 +39,7 @@ import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { formatClock, isResumable, isWatched } from '../lib/format';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
 import { detailHref, isCachedStalkerSeries } from '../lib/search';
-import { Button, ErrorState } from '@/ui';
+import { Button, ErrorState, Skeleton } from '@/ui';
 
 export function MovieDetailPage() {
   const { t } = useTranslation('vod');
@@ -269,11 +269,16 @@ export function MovieDetailPage() {
                   {t('startOver')}
                 </Button>
               )}
-              {trailer && (
+              {trailer ? (
                 <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
                   {t('trailer')}
                 </Button>
-              )}
+              ) : tmdbOn && tmdb.isLoading ? (
+                // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+                <span data-testid="vod-trailer-slot" className="inline-flex">
+                  <Skeleton className="h-12 w-32 rounded-md" />
+                </span>
+              ) : null}
               {secondary}
             </>
           }

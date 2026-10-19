@@ -741,7 +741,7 @@ async fn check_engine(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<()> {
     }
     let resolved = tokio::time::timeout(Duration::from_secs(10), resolve_source(state, r)).await;
     match resolved {
-        Ok(Ok((source, kind))) => engine::choose(state, source, kind).map(|_| ()),
+        Ok(Ok((source, kind))) => engine::choose(state, source, kind, false).map(|_| ()),
         _ => Ok(()),
     }
 }
@@ -1386,6 +1386,8 @@ async fn record(
     let mut gave_up = false;
     let mut dropped = false;
     let mut last_error: Option<String> = None;
+    // A part copied over HTTP failed: mpv records the rest when installed.
+    let mut http_failed = false;
     let elapsed_base = row.started_at.unwrap_or(started);
     // Keeps reconnecting until the end (or a stop): only a refusal that
     // retrying cannot change ends it early.
@@ -1399,7 +1401,7 @@ async fn record(
                 last_error = Some(plain(e));
             }
             Ok((source, kind)) => {
-                let (engine, source) = engine::choose(state, source, kind)?;
+                let (engine, source) = engine::choose(state, source, kind, http_failed)?;
                 crate::player::args::validate_play_url(&source)?;
                 // Server mode: the same fetch guard as the stream proxy. A
                 // refusal is final (retrying cannot change it).
@@ -1459,6 +1461,17 @@ async fn record(
                     break;
                 }
                 dropped |= total_bytes(&parts) > 0;
+                if failed
+                    && !http_failed
+                    && engine == engine::Engine::Http
+                    && engine::mpv_path(state).is_some()
+                {
+                    // The copy could not record this stream (a provider that
+                    // refuses the TS variant, or a manifest behind a plain
+                    // address): mpv takes over at once.
+                    http_failed = true;
+                    continue;
+                }
                 if let Some(err) = end.error {
                     // Says why in words the user can act on when the
                     // address, the provider or the disk is the cause.

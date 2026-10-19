@@ -148,13 +148,13 @@ pub fn register(r: &mut RpcRouter) {
     r.add("favorites.reorder", |state, a: ReorderArgs| async move {
         let hide = crate::parental::hide_filter(&state).await?;
         state
-            .db_call(move |c| super::favorites_reorder(c, a.source_id.as_deref(), &a.refs, hide))
+            .db_write(move |c| super::favorites_reorder(c, a.source_id.as_deref(), &a.refs, hide))
             .await?;
         Ok::<(), RpcError>(())
     });
     r.add("favorites.remove", |state, a: RefOnly| async move {
         state
-            .db_call(move |c| super::favorite_remove(c, &a.item_ref).map(|_| ()))
+            .db_write(move |c| super::favorite_remove(c, &a.item_ref).map(|_| ()))
             .await?;
         Ok::<(), RpcError>(())
     });
@@ -177,13 +177,13 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("recent.remove", |state, a: RefOnly| async move {
         state
-            .db_call(move |c| super::recent_remove(c, &a.item_ref))
+            .db_write(move |c| super::recent_remove(c, &a.item_ref))
             .await?;
         Ok::<(), RpcError>(())
     });
     r.add("recent.clear", |state, a: SourceFilter| async move {
         state
-            .db_call(move |c| super::recent_clear(c, a.source_id.as_deref()).map(|_| ()))
+            .db_write(move |c| super::recent_clear(c, a.source_id.as_deref()).map(|_| ()))
             .await?;
         Ok::<(), RpcError>(())
     });
@@ -265,7 +265,7 @@ pub fn register(r: &mut RpcRouter) {
         "positions.remove",
         |state, a: RemovePositionArgs| async move {
             state
-                .db_call(move |c| {
+                .db_write(move |c| {
                     if a.all_episodes {
                         super::position_remove_unfinished(c, &a.item_ref).map(|_| ())
                     } else {
@@ -283,7 +283,7 @@ pub fn register(r: &mut RpcRouter) {
             let episode_id = a.episode_id.clone();
             let watched = a.watched;
             state
-                .db_call(move |c| {
+                .db_write(move |c| {
                     super::set_watched(c, &a.item_ref, a.episode_id.as_deref(), a.watched)
                 })
                 .await?;

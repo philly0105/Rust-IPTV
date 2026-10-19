@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import i18n, { applyLanguage, initI18n, loadLanguage, resources } from '@/i18n';
+import i18n, { LANGUAGES, NAMESPACES, applyLanguage, initI18n, loadLanguage, resources } from '@/i18n';
+import { languageLoaders } from '@/i18n/lazyLocales';
 
 describe('i18n lazy locales', () => {
   afterEach(async () => {
@@ -26,6 +27,17 @@ describe('i18n lazy locales', () => {
     await loadLanguage('by');
     expect(i18n.hasResourceBundle('be', 'library')).toBe(true);
     expect(i18n.hasResourceBundle('by', 'library')).toBe(false);
+  });
+
+  it('loads every namespace of a language through its one loader (SH-8)', async () => {
+    // One wrapper per non-English language in the entry, not a lazy map of every file.
+    expect(Object.keys(languageLoaders).sort()).toEqual(
+      LANGUAGES.filter((l) => l.code !== 'en')
+        .map((l) => `./${l.code}/index.ts`)
+        .sort(),
+    );
+    await loadLanguage('ja');
+    for (const ns of NAMESPACES) expect(i18n.hasResourceBundle('ja', ns), ns).toBe(true);
   });
 
   it('the newest request wins when switches overlap', async () => {

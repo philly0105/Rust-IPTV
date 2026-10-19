@@ -71,6 +71,10 @@ pub fn info(s: &AppState) -> AppInfo {
             .as_ref()
             .and_then(|d| d.proxy_base.clone())
             .filter(|_| s.is_desktop),
+        image_base: desktop
+            .as_ref()
+            .and_then(|d| d.image_base.clone())
+            .filter(|_| s.is_desktop),
         updater_available: s.is_desktop && desktop.is_some_and(|d| d.updater_available),
     }
 }
@@ -84,6 +88,9 @@ pub struct DesktopInfo {
     /// Loopback media proxy base (`http://127.0.0.1:<port>/<token>/api/proxy`, where
     /// `<token>` is a per-launch secret path segment).
     pub proxy_base: Option<String>,
+    /// Image cache route on the proxy's second listener
+    /// (`http://127.0.0.1:<port>/<token>/api/img`).
+    pub image_base: Option<String>,
     /// Built with the `updater` feature.
     pub updater_available: bool,
 }
@@ -91,6 +98,38 @@ pub struct DesktopInfo {
 /// Registers the desktop shell's facts (called by iptv-tauri at boot).
 pub fn set_desktop_info(s: &AppState, info: DesktopInfo) {
     s.set_ext(DESKTOP_INFO_KEY, Arc::new(info));
+}
+
+/// Desktop: the loopback proxy's API base
+/// (`http://127.0.0.1:<port>/<token>/api`), or `None` when the proxy is not
+/// running (server mode, tests, a proxy that failed to start).
+pub fn desktop_api_base(s: &AppState) -> Option<String> {
+    if !s.is_desktop {
+        return None;
+    }
+    let desktop = s.ext::<DesktopInfo>(DESKTOP_INFO_KEY)?;
+    let base = desktop.proxy_base.as_deref()?.strip_suffix("/proxy")?;
+    Some(base.to_owned())
+}
+
+/// Desktop: URL of a local recording or download on the loopback proxy,
+/// `<api base>/<route>/<id>/media.<ext>` (`route` is `recordings` or
+/// `files`). The proxy streams the file with Range support; the asset
+/// protocol read a file requested without Range whole into memory. The
+/// trailing name is ignored by the proxy and only carries the file's
+/// extension, so the player picks its engine (`.ts`: mpegts.js) as it would
+/// from the path. `None` when the proxy is not running.
+pub fn desktop_media_url(s: &AppState, route: &str, id: &str, path: &Path) -> Option<String> {
+    let api = desktop_api_base(s)?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty() && e.bytes().all(|b| b.is_ascii_alphanumeric()));
+    let name = match ext {
+        Some(ext) => format!("media.{ext}"),
+        None => "media".to_string(),
+    };
+    Some(format!("{api}/{route}/{id}/{name}"))
 }
 
 /// `AppState.extensions` key of [`PendingDeepLinks`].
@@ -281,6 +320,7 @@ mod tests {
             &s,
             DesktopInfo {
                 proxy_base: Some("http://127.0.0.1:1/api/proxy".into()),
+                image_base: Some("http://127.0.0.1:2/api/img".into()),
                 updater_available: true,
             },
         );
@@ -289,7 +329,69 @@ mod tests {
             i.proxy_base.as_deref(),
             Some("http://127.0.0.1:1/api/proxy")
         );
+        assert_eq!(i.image_base.as_deref(), Some("http://127.0.0.1:2/api/img"));
         assert!(i.updater_available);
+    }
+
+    #[tokio::test]
+    async fn desktop_recordings_play_from_the_proxy_and_players_get_the_path() {
+        use crate::model::PlayerKind;
+        use crate::recording::library;
+        let dir = tempfile::tempdir().unwrap();
+        let s = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            true,
+        )
+        .await
+        .unwrap();
+        let folder = crate::player::embedded::recordings_dir(&s);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("clip.ts");
+        std::fs::write(&file, b"0123456789").unwrap();
+        let id = format!("f.{}", hex::encode("clip.ts"));
+        let path = file.to_string_lossy().into_owned();
+
+        // No proxy (not started, or failed): the path, as before.
+        let src = library::play_source(&s, &id).await.unwrap();
+        assert_eq!(src.url, path);
+
+        set_desktop_info(
+            &s,
+            DesktopInfo {
+                proxy_base: Some("http://127.0.0.1:1/T/api/proxy".into()),
+                ..DesktopInfo::default()
+            },
+        );
+        assert_eq!(
+            desktop_api_base(&s).as_deref(),
+            Some("http://127.0.0.1:1/T/api")
+        );
+        let src = library::play_source(&s, &id).await.unwrap();
+        assert_eq!(
+            src.url,
+            format!("http://127.0.0.1:1/T/api/recordings/{id}/media.ts")
+        );
+        assert_eq!(src.kind, PlayerKind::File);
+
+        // mpv and VLC read the file itself.
+        let local = crate::player::with_local_file(&s, &src).await.unwrap();
+        assert_eq!(local.url, path);
+        assert_eq!(local.title, src.title);
+
+        // Other sources pass through unchanged.
+        let mut other = src.clone();
+        other.kind = PlayerKind::Direct;
+        let same = crate::player::with_local_file(&s, &other).await.unwrap();
+        assert_eq!(same.url, other.url);
+        other.kind = PlayerKind::File;
+        other.url = "http://127.0.0.1:2/T/api/recordings/x/media.ts".into();
+        let same = crate::player::with_local_file(&s, &other).await.unwrap();
+        assert_eq!(same.url, other.url);
+
+        // A file that went away is reported, not handed to the player.
+        std::fs::remove_file(&file).unwrap();
+        assert!(crate::player::with_local_file(&s, &src).await.is_err());
     }
 
     #[test]

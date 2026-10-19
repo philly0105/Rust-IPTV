@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { CircleCheck, CircleDashed, Play } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +8,7 @@ import { useScrollMargin } from '../../hooks/useContainerColumns';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { Menu, Poster, ProgressBar, Tabs, cn } from '@/ui';
+import { Menu, Poster, ProgressBar, Tabs, cn, useListVirtualizer } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
@@ -77,7 +76,7 @@ export function EpisodeList({
   const formatRuntime = useFormatRuntime();
   const listRef = useRef<HTMLDivElement>(null);
   const margin = useScrollMargin(listRef, scrollRef, [layoutKey, episodes.length]);
-  const v = useVirtualizer({
+  const v = useListVirtualizer({
     count: episodes.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_H,

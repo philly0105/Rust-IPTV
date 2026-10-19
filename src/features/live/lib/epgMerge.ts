@@ -37,9 +37,23 @@ export function mergePrograms(primary: readonly EpgProgram[], secondary: readonl
   return out.filter((p, i) => i === 0 || p.start !== out[i - 1]!.start);
 }
 
-/** Airing and following programme at `now`, from any (unsorted) list. */
+/** The last answer of {@link nowNextFrom} per programme list, for the `now` it was asked at. */
+const nowNextCache = new WeakMap<readonly EpgProgram[], { now: number; value: EpgNowNext | undefined }>();
+
+/**
+ * Airing and following programme at `now`, from any (unsorted) list. The same list at the same
+ * `now` gives the same object, so a memoized row fed from it keeps its render (LV-3).
+ */
 export function nowNextFrom(programs: readonly EpgProgram[] | undefined, now: number): EpgNowNext | undefined {
   if (!programs || programs.length === 0) return undefined;
+  const cached = nowNextCache.get(programs);
+  if (cached && cached.now === now) return cached.value;
+  const value = computeNowNext(programs, now);
+  nowNextCache.set(programs, { now, value });
+  return value;
+}
+
+function computeNowNext(programs: readonly EpgProgram[], now: number): EpgNowNext | undefined {
   const sorted = [...programs].filter(valid).sort((a, b) => ms(a.start) - ms(b.start));
   const i = sorted.findIndex((p) => ms(p.end) > now);
   if (i < 0) return undefined;

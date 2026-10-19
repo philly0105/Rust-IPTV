@@ -58,7 +58,7 @@ The stage height bounds the grid (`[container-type:size]`), so tiles never push 
 
 ## Tiles
 
-Each tile is a `Tile` component with its own playback hook, `useTilePlayback`. A tile resolves its source through `stream.ts`, which wraps the player's `resolveSource`. The tile then creates its own engine through `engine.ts`, a re-export of the player's hls.js / shaka / mpegts.js / native engines, attached to its own element. Nothing is shared between tiles, so one failure stays in its tile.
+Each tile is a `Tile` component with its own playback hook, `useTilePlayback`. A tile resolves its source through `stream.ts`, which wraps the player's `resolveSource`. The tile then creates its own engine through `engine.ts`, a re-export of the player's hls.js / shaka / mpegts.js / native engines, attached to its own element, with the `tile` buffer profile: a few seconds of back buffer, and hls.js renditions capped at the tile's size ([players.md](players.md#built-in-engines-ui)). Nothing is shared between tiles, so one failure stays in its tile. What the engines remember is shared with the main player: an extensionless live channel starts in mpegts.js, and its source's host is remembered as MPEG-TS or not.
 
 A tile's first start waits `slot × TILE_START_STAGGER_MS` (32 ms), so tiles that start together (the wall opening, a parental check answering) start in slot order, 32 ms apart. Each engine's parse and media attach then gets its own frames instead of all of them landing in one long task. The first slot starts at once, and so do later rebuilds of a tile (Retry, replace).
 
@@ -69,7 +69,7 @@ A tile's first start waits `slot × TILE_START_STAGGER_MS` (32 ms), so tiles tha
 | `error` | A panel with the class headline, one line of next step, Retry and Replace | The tile fails on a lookup error, an engine or element error, no frame within 25 s (`START_TIMEOUT_MS`), or waiting for data for 30 s (`STALL_TIMEOUT_MS`). Retry rebuilds only this tile. Offline, network and timeout errors also retry by themselves when the browser comes back online. |
 | `locked` | A lock panel instead of playback; no stream is requested | See Parental controls. |
 
-A stream the server refuses fails at once with the reason. The media element hides the HTTP status and reports a refusal (a 503, a 404) as a network or unsupported error, so on those two errors the tile asks the app's own server why (`fetchFailureReason`, one GET). An answer with a reason fails the tile with it. Only a 2xx answer, or one with no reason to read, still gets the single retry through mpegts.js that an extensionless stream the element cannot play is given. A tile on mpegts.js fails at once on an HTTP status too, since the player's mpegts.js engine no longer restarts on one ([failover.md](failover.md#starting-a-stream)).
+A stream the server refuses fails at once with the reason. The media element hides the HTTP status and reports a refusal (a 503, a 404) as a network or unsupported error. An extensionless stream the element rejects as unsupported goes straight to its single retry through mpegts.js, with no request first: mpegts.js sees a refusal's status and asks the app's own server for the reason itself. That retry is skipped when the element only took over because mpegts.js had found no MPEG-TS. Any other element error makes the tile ask the app's own server why (`fetchFailureReason`, one GET), and an answer with a reason fails the tile with it. A tile on mpegts.js fails at once on an HTTP status too, since the player's mpegts.js engine no longer restarts on one ([failover.md](failover.md#starting-a-stream)).
 
 The player's `classifyStreamError` classifies failures. The copy is the wall's own (`errors.ts`). When an account has more tiles than connections, failures of classes `auth`, `server`, `network`, `timeout`, `generic` and `notFound` on that account's tiles read as "Connection limit reached".
 
@@ -165,7 +165,7 @@ All copy is in the `multiview` namespace, in all 19 locales. The shared Close, C
   - parental locks, the connection-limit banner (with `account.status` read when a channel is added), and the empty, loading and no-source states;
   - staggered tile starts and the quick-picks skeleton;
   - the picker add flow.
-- `tilePlayback.test.tsx` covers a server-refused stream failing at once with its reason, the mpegts.js retry after a 2xx answer, and the start delay (none for the first slot, none for a retry).
+- `tilePlayback.test.tsx` covers a server-refused stream failing at once with its reason, the mpegts.js retry without a request first, no retry after an mpegts.js fallback, the tile buffer profile, and the start delay (none for the first slot, none for a retry).
 - `addChannel.test.tsx` covers the gate, duplicates and a full wall after the gate, replace, and `useMultiviewMenuItem`: disabled states, navigation, toasts and a cancelled PIN.
 - `e2e/multiview.spec.ts` (check 4) seeds the wall in localStorage against the mock portal and checks:
   - four tiles all advance `currentTime` and exactly one video is unmuted, after a click and after a number key;

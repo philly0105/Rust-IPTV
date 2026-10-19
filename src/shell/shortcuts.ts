@@ -205,7 +205,9 @@ export function findShortcut(e: KeyboardEvent): ShortcutEntry | undefined {
   const typing = isTypingTarget(e.target);
   const activation = isActivationTarget(e.target);
   const arrows = isArrowTarget(e.target);
-  const modal = modalOpen();
+  // Looked up once a shortcut matches that a modal would block, not on every keydown: a held
+  // arrow key auto-repeats, and most keys match nothing (performance audit SH-7).
+  let modal: boolean | undefined;
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;
     if (entry.enabled === false) continue;
@@ -215,7 +217,7 @@ export function findShortcut(e: KeyboardEvent): ShortcutEntry | undefined {
     if (activation && isBareActivationKey(entry.parsed)) continue;
     if (arrows && isBareArrowKey(entry.parsed)) continue;
     // While a modal is open only escape, mod+* combos, and opted-in shortcuts fire.
-    if (modal && !entry.allowInModal && !(entry.parsed.key === 'escape' || entry.parsed.mod)) continue;
+    if (!entry.allowInModal && !(entry.parsed.key === 'escape' || entry.parsed.mod) && (modal ??= modalOpen())) continue;
     return entry;
   }
   return undefined;

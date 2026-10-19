@@ -19,6 +19,8 @@
 import i18next, { type Resource } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
+import { languageLoaders } from './lazyLocales';
+
 export const NAMESPACES = [
   'common',
   'shell',
@@ -140,20 +142,18 @@ const loading = new Map<string, Promise<void>>();
  * Loads every namespace of a language folder into i18next (under its BCP 47
  * key). Cached per folder; a failed load is forgotten so a later call retries.
  * English resolves immediately; unknown codes load nothing. The loader map
- * itself is a lazy chunk (`lazyLocales.ts`), so it stays out of the entry.
+ * (`lazyLocales.ts`, one wrapper per language) is in the entry, so the
+ * language's chunk is the only request.
  */
 export function loadLanguage(code: string): Promise<void> {
   if (code === DEFAULT_LANGUAGE) return Promise.resolve();
   const cached = loading.get(code);
   if (cached) return cached;
-  const prefix = `./${code}/`;
-  const job = import('./lazyLocales')
-    .then(({ lazyModules }) => {
-      const entries = Object.entries(lazyModules).filter(([path]) => path.startsWith(prefix));
-      return Promise.all(entries.map(async ([path, load]) => [path, await load()] as const));
-    })
-    .then((mods) => {
-      const res = buildResources(Object.fromEntries(mods));
+  const load = languageLoaders[`./${code}/index.ts`];
+  const job = (load ? load() : Promise.resolve({ modules: {} }))
+    .then(({ modules }) => {
+      // `./common.json` in the folder's module is `./<code>/common.json` here.
+      const res = buildResources(Object.fromEntries(Object.entries(modules).map(([path, mod]) => [`./${code}/${path.slice(2)}`, mod])));
       for (const [lng, bundles] of Object.entries(res)) {
         for (const [ns, data] of Object.entries(bundles)) i18next.addResourceBundle(lng, ns, data, true, true);
       }

@@ -126,6 +126,79 @@ async fn rotated_stream_tokens_keep_favorites_recents_and_positions() {
     );
 }
 
+/// IN-5: the remapper keeps only referenced identities. A successor that
+/// is not unique (two new rows with the identity) still leaves the
+/// reference alone, and an unreferenced row never moves anything.
+#[tokio::test]
+async fn ambiguous_successors_leave_references_alone() {
+    let env = env().await;
+    let stub = stub(&playlist("tok1")).await;
+    let src = sources::add(env.state.clone(), url_args(&stub.url(), true))
+        .await
+        .map_err(|e| e.error)
+        .unwrap();
+    let ch2 = item_id(&env, &src.id, "Channel 2").await;
+    let sp1 = item_id(&env, &src.id, "Sport 1").await;
+    for id in [&ch2, &sp1] {
+        exec(
+            &env,
+            "INSERT INTO favorites (source_id, content_type, item_id, snapshot_json) VALUES (?1, 'live', ?2, '{}')",
+            src.id.clone(),
+            id.clone(),
+        )
+        .await;
+    }
+
+    // "Sport 1" comes back twice under new URLs: two successors.
+    let mut body = playlist("tok2");
+    body.push_str(
+        "#EXTINF:-1 group-title=\"Sport\",Sport 1\nhttp://s.example/live/user/tok2/s1b.ts\n",
+    );
+    stub.set_body(&body);
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    let new_ch2 = item_id(&env, &src.id, "Channel 2").await;
+    let mut want = vec![new_ch2, sp1];
+    want.sort();
+    assert_eq!(refs(&env, "favorites", &src.id).await, want);
+}
+
+/// ST-3: a URL refresh sends the last body's ETag, and a 304 keeps the
+/// catalog without a download; a new ETag brings the new body.
+#[tokio::test]
+async fn not_modified_playlist_keeps_the_catalog() {
+    let env = env().await;
+    let stub = stub(&playlist("tok1")).await;
+    stub.set_etag(Some("\"v1\""));
+    let src = sources::add(env.state.clone(), url_args(&stub.url(), true))
+        .await
+        .map_err(|e| e.error)
+        .unwrap();
+    assert_eq!(src.channel_count, 7);
+    let ch1 = item_id(&env, &src.id, "Channel 1").await;
+
+    let again = sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    assert_eq!(stub.not_modified(), 1, "the ETag was not sent");
+    assert_eq!(again.channel_count, 7);
+    assert_eq!(item_id(&env, &src.id, "Channel 1").await, ch1);
+
+    // A changed playlist under a new ETag is downloaded and imported.
+    stub.set_body(&playlist("tok2"));
+    stub.set_etag(Some("\"v2\""));
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    assert_eq!(stub.not_modified(), 1);
+    assert_ne!(item_id(&env, &src.id, "Channel 1").await, ch1);
+
+    // The server stops sending validators: the stored ones go, so the next
+    // refresh asks without them and gets the body.
+    stub.set_etag(None);
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    stub.set_etag(Some("\"v2\""));
+    let hits = stub.hits();
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    assert_eq!(stub.hits(), hits + 1);
+    assert_eq!(stub.not_modified(), 1, "stale validators were sent");
+}
+
 #[tokio::test]
 async fn empty_playlist_keeps_the_previous_catalog() {
     let env = env().await;

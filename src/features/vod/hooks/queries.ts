@@ -4,7 +4,7 @@
  * reaches them.
  */
 
-import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
@@ -132,6 +132,8 @@ export function sameGridSlot(a: readonly unknown[], b: readonly unknown[]): bool
 export function useVodPage(
   input: GridQueryInput | undefined,
   pageIndex: number,
+  /** False holds the request (a grid page the user is dragging past, VD-2); cached data still shows. */
+  fetchNow = true,
 ): UseQueryResult<Page<VodItem | SeriesItem>, RpcError> {
   const req = input ? buildPageRequest(input, pageIndex) : undefined;
   const queryKey = req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'];
@@ -141,7 +143,7 @@ export function useVodPage(
       if (!req) throw new RpcError('invalid', 'No source');
       return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
     },
-    enabled: !!req,
+    enabled: !!req && fetchNow,
     placeholderData: (prev, prevQuery) => (prev && prevQuery && sameGridSlot(prevQuery.queryKey, queryKey) ? prev : undefined),
     ...PAGE_TIMING,
   });
@@ -287,6 +289,30 @@ export function useTmdbTv(item: SeriesItem | undefined, enabled: boolean): UseQu
   return useRpcQuery('tmdb.tv', args ?? { title: '' }, { enabled: enabled && !!args });
 }
 
+/**
+ * Starts the TMDB lookup the detail page sends for `item` (the key and fn of useTmdbMovie and
+ * useTmdbTv), when enrichment is on, so a hover prefetch has the cast and trailer ready with the
+ * detail instead of after it (VD-8). A failure costs nothing; the page asks again on open.
+ */
+export function prefetchTmdb(qc: QueryClient, kind: 'movie' | 'series', item: Pick<VodItem, 'title' | 'titleBase' | 'year' | 'tmdbId'> | undefined): void {
+  if (qc.getQueryData<Settings>(rpcKey('settings.get', undefined))?.tmdb.enabled !== true) return;
+  const args = lookupArgs(item);
+  if (!args) return;
+  if (kind === 'movie') {
+    void qc.prefetchQuery({
+      queryKey: rpcKey('tmdb.movie', args),
+      queryFn: async ({ signal }) => (await rpcRaw('tmdb.movie', args, { signal })) as TmdbMovie | null,
+      retry: false,
+    });
+  } else {
+    void qc.prefetchQuery({
+      queryKey: rpcKey('tmdb.tv', args),
+      queryFn: async ({ signal }) => (await rpcRaw('tmdb.tv', args, { signal })) as TmdbTv | null,
+      retry: false,
+    });
+  }
+}
+
 export function useTmdbSimilar(mediaType: 'movie' | 'tv', tmdbId: number | undefined, enabled: boolean) {
   return useRpcQuery('tmdb.similar', { mediaType, tmdbId: tmdbId ?? 0 }, { enabled: enabled && !!tmdbId });
 }
@@ -296,8 +322,12 @@ export function useIsFavorite(ref: ItemRef): boolean {
   return (q.data?.length ?? 0) > 0;
 }
 
-/** Downloads list kept fresh by `downloads.update` / `downloads.progress` events. */
-export function useDownloads(enabled = true) {
+/**
+ * Downloads list kept fresh by `downloads.update` / `downloads.progress` events. With `tracked`,
+ * progress refetches only for the ids it holds (the page's own rows, VD-3): a transfer of some
+ * other title does not refetch the whole list twice a second.
+ */
+export function useDownloads(enabled = true, tracked?: { readonly current: ReadonlySet<number> }) {
   useEffect(() => {
     if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -309,13 +339,15 @@ export function useDownloads(enabled = true) {
       }, 500);
     };
     const off1 = onAppEvent('downloads.update', bump);
-    const off2 = onAppEvent('downloads.progress', bump);
+    const off2 = onAppEvent('downloads.progress', (e) => {
+      if (!tracked || (e && tracked.current.has(e.id))) bump();
+    });
     return () => {
       off1();
       off2();
       if (timer) clearTimeout(timer);
     };
-  }, [enabled]);
+  }, [enabled, tracked]);
   return useRpcQuery('downloads.list', undefined, { enabled, staleTime: 10_000 });
 }
 

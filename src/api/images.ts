@@ -4,9 +4,12 @@
  *
  * Posters, logos and backdrops load from `GET <base>/img?url=<absolute url>&sourceId=<id>`:
  * - server mode: `/api/img` on the app's own origin;
- * - desktop: the loopback proxy (`app.info.proxyBase`, `.../api/proxy`) with
- *   `/proxy` swapped for `/img`. Until that base is known (or when the proxy
- *   did not start) desktop returns the original URL, which loads directly.
+ * - desktop: the loopback proxy's image listener (`app.info.imageBase`,
+ *   `.../api/img` on a port of its own, so artwork does not wait behind
+ *   streams for the webview's six connections per host and port), else
+ *   `app.info.proxyBase` with `/proxy` swapped for `/img`. Until that base is
+ *   known (or when the proxy did not start) desktop returns the original URL,
+ *   which loads directly.
  *
  * Only remote http(s) artwork is rewritten. data:, blob: and asset: URLs,
  * relative paths, Tauri's own `*.localhost` hosts and anything already on the
@@ -35,21 +38,36 @@ export const WEB_IMAGE_ROUTE = '/api/img';
 
 const isDesktopWindow: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-/** Desktop: `<proxy origin>/<token>/api/img`, once known. */
+/** Desktop: `<image listener origin>/<token>/api/img`, once known. */
 let desktopImageBase: string | null = null;
+/** Desktop: the stream listener's origin (`app.info.proxyBase`), whose URLs are never wrapped. */
+let desktopProxyOrigin: string | null = null;
 
 /**
- * Sets the desktop cache base from `app.info.proxyBase` (`.../api/proxy`).
+ * Sets the desktop cache base from `app.info.imageBase` (`.../api/img`) or
+ * `app.info.proxyBase` (`.../api/proxy`, `/proxy` swapped for `/img`).
  * Null, or a base of any other shape, turns the rewrite off (original URLs).
  * Exported for tests and for a caller that already holds `app.info`.
  */
-export function setDesktopImageBase(proxyBase: string | null | undefined): void {
-  desktopImageBase = typeof proxyBase === 'string' && /\/proxy\/?$/.test(proxyBase) ? proxyBase.replace(/\/proxy\/?$/, '/img') : null;
+export function setDesktopImageBase(base: string | null | undefined): void {
+  if (typeof base === 'string' && /\/img\/?$/.test(base)) desktopImageBase = base.replace(/\/$/, '');
+  else if (typeof base === 'string' && /\/proxy\/?$/.test(base)) desktopImageBase = base.replace(/\/proxy\/?$/, '/img');
+  else desktopImageBase = null;
+}
+
+function originOf(url: string | null | undefined): string | null {
+  try {
+    return url ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Settles once the launch's one `app.info` request (bootInfo.ts) answered or failed; already settled on the web. */
 const baseSettled: Promise<void> = desktopAppInfo.then((info) => {
-  if (isDesktopWindow) setDesktopImageBase(info?.proxyBase);
+  if (!isDesktopWindow) return;
+  setDesktopImageBase(info?.imageBase || info?.proxyBase);
+  desktopProxyOrigin = originOf(info?.proxyBase);
 });
 
 /**
@@ -164,6 +182,7 @@ function cacheable(src: string): boolean {
   const origin = pageOrigin();
   if (origin && u.origin === origin) return false;
   if (desktopImageBase && src.startsWith(new URL(desktopImageBase).origin + '/')) return false;
+  if (desktopProxyOrigin && u.origin === desktopProxyOrigin) return false;
   return true;
 }
 

@@ -228,3 +228,40 @@ async fn gzip_playlist_file_imports() {
         .unwrap();
     assert_eq!(src.channel_count, 50);
 }
+
+/// IN-6: a small `.m3u.gz` that decodes past `RAW_INLINE_MAX` keeps its
+/// text on disk without being decoded a second time to measure it, and
+/// `m3u.raw` still returns the decoded text.
+#[tokio::test]
+async fn large_gzip_playlist_file_is_kept_on_disk() {
+    let env = env().await;
+    let text = playlist(70_000);
+    assert!(text.len() as u64 > iptv_core::m3u::importer::RAW_INLINE_MAX);
+    let path = env.dir.path().join("big.m3u.gz");
+    let gz = gzip(&text);
+    assert!((gz.len() as u64) < iptv_core::m3u::importer::RAW_INLINE_MAX);
+    std::fs::write(&path, gz).unwrap();
+    let src = sources::add(env.state.clone(), file_args(&path))
+        .await
+        .map_err(|e| e.error)
+        .unwrap();
+    assert_eq!(src.channel_count, 70_000);
+    let id = src.id.clone();
+    let inline: String = env
+        .state
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT raw FROM m3u_raw WHERE source_id = ?1",
+                params![id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert!(inline.is_empty(), "stored inline");
+    let raw = router()
+        .dispatch(env.state.clone(), "m3u.raw", json!({ "sourceId": src.id }))
+        .await
+        .unwrap();
+    assert_eq!(raw["text"].as_str().unwrap(), text);
+}

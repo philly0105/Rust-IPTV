@@ -61,6 +61,12 @@ describe('queue', () => {
     expect(actionsFor('canceled', o)).toEqual(['retry', 'remove']);
   });
 
+  it('returns the same actions array for the same answer, so a memoised row keeps its props (VD-4)', () => {
+    const o = { canReveal: true, hasFile: true };
+    expect(actionsFor('downloading', o)).toBe(actionsFor('queued', { canReveal: false, hasFile: false }));
+    expect(actionsFor('failed', o)).toBe(actionsFor('failed', o));
+  });
+
   it('counts by status', () => {
     expect(queueCounts(all)).toEqual({ downloading: 1, queued: 1, paused: 1, attention: 2 });
   });

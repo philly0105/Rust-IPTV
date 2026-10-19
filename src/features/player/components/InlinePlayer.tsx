@@ -322,9 +322,10 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
         }, ENGINE_ERROR_GRACE_MS);
         return;
       }
-      // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through mpegts.js.
+      // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through
+      // mpegts.js, unless mpegts.js already found something else there (a live stream starts in it).
       const k = mediaKey(s);
-      if (code === 4 && sniffedRef.current !== k && mseSupported() && worthSniffingAsMpegTs(s)) {
+      if (code === 4 && sniffedRef.current !== k && !engineRef.current?.fellBack && mseSupported() && worthSniffingAsMpegTs(s)) {
         sniffedRef.current = k;
         setRetryNonce((n) => n + 1);
         return;

@@ -1,4 +1,3 @@
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +6,7 @@ import { rpc } from '@/api/transport';
 import { itemKey, type Channel } from '@/api/types';
 import { useImageChain } from '@/ui/image';
 import { gateImage } from '@/ui/imageGate';
+import { useListVirtualizer } from '@/ui/virtualizer';
 
 import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
@@ -233,7 +233,7 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
   );
 
   const total = cache.total ?? 0;
-  const virtualizer = useVirtualizer({
+  const virtualizer = useListVirtualizer({
     count: total,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW,

@@ -7,6 +7,11 @@
 
 const CACHE = 'tsrust-iptv-v1';
 const SHELL = '/';
+// This build's /assets/* URLs. `pnpm build` writes the list here (`serviceWorkerAssets` in
+// vite.config.ts), so every deploy changes this file, the browser installs the new worker, and
+// activate drops the cached assets of earlier builds (performance audit SH-11). Stays null when
+// the file is served unbuilt; activate then deletes nothing.
+const ASSETS = /* build:assets */ null;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -18,11 +23,29 @@ self.addEventListener('install', (event) => {
   );
 });
 
+/** Deletes cached /assets/* entries that are not part of this build. */
+async function dropStaleAssets() {
+  if (!Array.isArray(ASSETS)) return;
+  const current = new Set(ASSETS);
+  const cache = await caches.open(CACHE);
+  const requests = await cache.keys();
+  await Promise.all(
+    requests
+      .filter((request) => {
+        const { pathname } = new URL(request.url);
+        return pathname.startsWith('/assets/') && !current.has(pathname);
+      })
+      .map((request) => cache.delete(request)),
+  );
+}
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(dropStaleAssets)
+      .catch(() => undefined)
       .then(() => self.clients.claim()),
   );
 });

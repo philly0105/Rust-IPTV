@@ -64,7 +64,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("channels.setHidden", |state, a: SetHiddenArgs| async move {
         let sources = state
-            .db_call(move |c| super::set_hidden(c, &a.refs, a.hidden))
+            .db_write(move |c| super::set_hidden(c, &a.refs, a.hidden))
             .await?;
         for s in &sources {
             changed(&state, s);
@@ -74,7 +74,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("channels.rename", |state, a: RenameArgs| async move {
         let source_id = a.item_ref.source_id.clone();
         let (row, did) = state
-            .db_call(move |c| super::rename(c, &a.item_ref, a.name.as_deref()))
+            .db_write(move |c| super::rename(c, &a.item_ref, a.name.as_deref()))
             .await?;
         if did {
             changed(&state, &source_id);
@@ -84,7 +84,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("channels.reset", |state, a: SourceArgs| async move {
         let source_id = a.source_id.clone();
         let n = state
-            .db_call(move |c| super::reset(c, &a.source_id))
+            .db_write(move |c| super::reset(c, &a.source_id))
             .await?;
         if n > 0 {
             changed(&state, &source_id);

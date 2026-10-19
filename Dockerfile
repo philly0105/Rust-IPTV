@@ -13,6 +13,8 @@ FROM node:24-bookworm-slim AS web
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
+# pnpm applies these to node_modules (package.json pnpm.patchedDependencies).
+COPY patches ./patches
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY index.html vite.config.ts tsconfig*.json ./

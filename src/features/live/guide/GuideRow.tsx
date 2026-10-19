@@ -19,7 +19,7 @@ import { ScheduleMarkView, type ScheduleIndex } from '@/features/recording';
 
 import { ChannelLogo } from '../components/ChannelLogo';
 import { displayChannelName } from '../lib/channelName';
-import { MINUTE, canCatchUp, cellTextMaxPx, formatRange, hasUsableArchive, layoutBlocks, ms } from '../lib/epgTime';
+import { MINUTE, canCatchUp, cellTextMaxPx, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 
 export { CELL_TEXT_MIN_PX, cellTextPadPx } from '../lib/epgTime';
@@ -270,4 +270,22 @@ export const GuideRow = memo(function GuideRow({
       </div>
     </div>
   );
-});
+}, sameRow);
+
+/**
+ * GuideRow's memo test. The page's clock ticks every 30 s; a tick re-renders the row (layout and
+ * every cell's labels, LV-8) only when it moves one of its programmes between past, now and
+ * future, or in or out of the catch-up window. Every other prop compares by identity.
+ */
+function sameRow(prev: GuideRowProps, next: GuideRowProps): boolean {
+  for (const k of Object.keys(next) as (keyof GuideRowProps)[]) {
+    if (k !== 'now' && prev[k] !== next[k]) return false;
+  }
+  if (prev.now === next.now) return true;
+  const ch = next.channel;
+  for (const p of next.programs ?? []) {
+    if (programWhen(p, prev.now) !== programWhen(p, next.now)) return false;
+    if (ch && canCatchUp(p, ch, next.kind, prev.now) !== canCatchUp(p, ch, next.kind, next.now)) return false;
+  }
+  return true;
+}

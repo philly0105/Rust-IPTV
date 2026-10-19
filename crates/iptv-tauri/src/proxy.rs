@@ -11,6 +11,14 @@
 //! logos load from `data_dir/image-cache` after the first view, with
 //! `X-Image-Cache: hit|miss` (exposed to the webview through CORS).
 //!
+//! Local recordings and downloads play from here too
+//! (`/<token>/api/recordings/{id}/{name}` and `/<token>/api/files/{id}/{name}`,
+//! server mode's `/api/recordings/{id}` and `/api/files/{id}` handlers):
+//! `ServeFile` streams the file and honours Range, where the asset protocol
+//! read a file requested without Range whole into memory. `recordings.playSource`
+//! and `myvideos.playSource` return these URLs on desktop; `{name}` only
+//! carries the file's extension for the player and is ignored.
+//!
 //! Hardening, since any local program or web page can reach a loopback port:
 //! - `guard::api_guard` with the default `AllowedHosts`: the `Host` header
 //!   must be `localhost`, a `*.localhost` name or an IP literal, which
@@ -28,12 +36,12 @@
 //! - Every request must carry the per-launch secret as its first path segment
 //!   (`/<token>/api/proxy`, 403 otherwise). Only `app.info.proxyBase` reveals
 //!   it, so a local program or a no-cors `<img>`/`<video>` request from a web
-//!   page that finds the port cannot use the proxy. The HLS rewriter emits
-//!   root-relative `/api/proxy?` URIs; `require_token` prefixes the token onto
-//!   them so segment and key requests keep working.
+//!   page that finds the port cannot use the proxy. The HLS rewriter writes
+//!   the token into the URIs of rewritten playlists
+//!   (`ServerOptions::proxy_path`), so segment and key requests keep working
+//!   and playlists still stream line by line.
 
-use axum::body::Body;
-use axum::extract::Request;
+use axum::extract::{Path, Request, State};
 use axum::http::header::{
     HeaderName, HeaderValue, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ORIGIN,
     RANGE,
@@ -45,7 +53,7 @@ use axum::routing::get;
 use axum::Router;
 use iptv_core::rpc::RpcRouter;
 use iptv_core::AppState;
-use iptv_server::{guard, img, proxy, Server, ServerOptions};
+use iptv_server::{files, guard, img, proxy, recordings, Server, ServerOptions};
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
@@ -77,33 +85,12 @@ async fn webview_origin_only(req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-/// Largest rewritten playlist the token layer buffers (VOD playlists with
-/// thousands of segments stay well under this).
-const MAX_PLAYLIST_BYTES: usize = 32 * 1024 * 1024;
-
 /// A fresh per-launch proxy secret (160 random bits, hex).
 pub fn new_token() -> String {
     iptv_core::stalker::protocol::random_hex40()
 }
 
-/// Copies `haystack`, replacing every `needle` with `with`.
-fn replace_all(haystack: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(haystack.len() + haystack.len() / 8);
-    let mut i = 0;
-    while i < haystack.len() {
-        if haystack[i..].starts_with(needle) {
-            out.extend_from_slice(with);
-            i += needle.len();
-        } else {
-            out.push(haystack[i]);
-            i += 1;
-        }
-    }
-    out
-}
-
-/// Refuses requests without the per-launch token in the path and keeps the
-/// token on the proxy URIs inside rewritten HLS playlists.
+/// Refuses requests without the per-launch token in the path.
 async fn require_token(token: Arc<str>, req: Request, next: Next) -> Response {
     let ok = req
         .uri()
@@ -114,26 +101,26 @@ async fn require_token(token: Arc<str>, req: Request, next: Next) -> Response {
     if !ok {
         return (StatusCode::FORBIDDEN, "missing or wrong media proxy token").into_response();
     }
-    let resp = next.run(req).await;
-    let playlist = resp
-        .headers()
-        .get(CONTENT_TYPE)
-        .is_some_and(|ct| ct.as_bytes() == b"application/vnd.apple.mpegurl");
-    if !playlist {
-        return resp;
-    }
-    let (mut parts, body) = resp.into_parts();
-    let bytes = match axum::body::to_bytes(body, MAX_PLAYLIST_BYTES).await {
-        Ok(b) => b,
-        Err(err) => {
-            tracing::warn!(%err, "proxied playlist unreadable or too large");
-            return StatusCode::BAD_GATEWAY.into_response();
-        }
-    };
-    let prefixed = format!("/{token}/api/proxy?");
-    let out = replace_all(&bytes, b"/api/proxy?", prefixed.as_bytes());
-    parts.headers.remove(CONTENT_LENGTH);
-    Response::from_parts(parts, Body::from(out))
+    next.run(req).await
+}
+
+/// A completed download (server mode's `/api/files/{id}`); `name` is ignored.
+async fn download_file(
+    state: State<Server>,
+    Path((id, _name)): Path<(String, String)>,
+    req: Request,
+) -> Response {
+    files::handler(state, Path(id), req).await
+}
+
+/// A recording or a loose file in the recordings folder (server mode's
+/// `/api/recordings/{id}`); `name` is ignored.
+async fn recording_file(
+    state: State<Server>,
+    Path((id, _name)): Path<(String, String)>,
+    req: Request,
+) -> Response {
+    recordings::handler(state, Path(id), req).await
 }
 
 /// The proxy-only router; every route sits under `/<token>/api`.
@@ -146,6 +133,7 @@ pub fn router(state: Arc<AppState>, token: &str) -> Router {
     let opts = ServerOptions {
         allow_private_targets: true,
         allow_cross_site: true,
+        proxy_path: format!("/{token}/api/proxy"),
         ..ServerOptions::new(std::path::PathBuf::new())
     };
     let server = Server::new(state, Arc::new(RpcRouter::new()), events, opts);
@@ -165,6 +153,8 @@ pub fn router(state: Arc<AppState>, token: &str) -> Router {
     let api = Router::new()
         .route("/proxy", get(proxy::handler))
         .route("/img", get(img::handler))
+        .route("/files/{id}/{name}", get(download_file))
+        .route("/recordings/{id}/{name}", get(recording_file))
         .layer(middleware::from_fn_with_state(
             server.clone(),
             guard::api_guard,
@@ -180,15 +170,42 @@ pub fn router(state: Arc<AppState>, token: &str) -> Router {
         .layer(cors)
 }
 
-/// Binds `127.0.0.1:0` and serves the proxy on the Tauri runtime. Returns
-/// the base URL (`http://127.0.0.1:<port>/<token>/api/proxy`) with a fresh
-/// per-launch token.
-pub fn start(state: Arc<AppState>) -> std::io::Result<String> {
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
-    listener.set_nonblocking(true)?;
-    let port = listener.local_addr()?.port();
+/// Base URLs of the running proxy (both carry the same per-launch token).
+pub struct ProxyBases {
+    /// `http://127.0.0.1:<port>/<token>/api/proxy`: streams and local media.
+    pub proxy: String,
+    /// `http://127.0.0.1:<port>/<token>/api/img` on a second listener.
+    /// Chromium opens at most 6 HTTP/1.1 connections per host and port, and
+    /// a multiview wall of MPEG-TS tiles holds 4 of them open, so posters and
+    /// logos get a port of their own.
+    pub images: String,
+}
+
+/// Binds two `127.0.0.1:0` listeners and serves the proxy on both on the
+/// Tauri runtime, with a fresh per-launch token.
+pub fn start(state: Arc<AppState>) -> std::io::Result<ProxyBases> {
+    let streams = bind_loopback()?;
+    let images = bind_loopback()?;
+    let port = streams.local_addr()?.port();
+    let image_port = images.local_addr()?.port();
     let token = new_token();
     let app = router(state, &token);
+    serve(streams, app.clone());
+    serve(images, app);
+    tracing::info!(port, image_port, "loopback media proxy listening");
+    Ok(ProxyBases {
+        proxy: format!("http://127.0.0.1:{port}/{token}/api/proxy"),
+        images: format!("http://127.0.0.1:{image_port}/{token}/api/img"),
+    })
+}
+
+fn bind_loopback() -> std::io::Result<std::net::TcpListener> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+    listener.set_nonblocking(true)?;
+    Ok(listener)
+}
+
+fn serve(listener: std::net::TcpListener, app: Router) {
     tauri::async_runtime::spawn(async move {
         let listener = match tokio::net::TcpListener::from_std(listener) {
             Ok(l) => l,
@@ -201,8 +218,6 @@ pub fn start(state: Arc<AppState>) -> std::io::Result<String> {
             tracing::error!(%err, "loopback proxy stopped");
         }
     });
-    tracing::info!(port, "loopback media proxy listening");
-    Ok(format!("http://127.0.0.1:{port}/{token}/api/proxy"))
 }
 
 #[cfg(test)]
@@ -265,26 +280,6 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    #[test]
-    fn replace_all_prefixes_every_proxy_uri() {
-        let out = replace_all(
-            b"#EXTM3U
-/api/proxy?url=a
-URI=\"/api/proxy?url=k\"
-",
-            b"/api/proxy?",
-            b"/T/api/proxy?",
-        );
-        assert_eq!(
-            out,
-            b"#EXTM3U
-/T/api/proxy?url=a
-URI=\"/T/api/proxy?url=k\"
-"
-            .to_vec()
-        );
-    }
-
     #[tokio::test]
     async fn guards_origin_host_and_sends_cors_only_to_the_webview() {
         let (_dir, app) = app().await;
@@ -319,7 +314,7 @@ URI=\"/T/api/proxy?url=k\"
             "http://tauri.localhost"
         );
 
-        // Only the proxy and image routes exist.
+        // Only the proxy, image and local media routes exist.
         let r = call(&app, None, "127.0.0.1:1", &format!("/{T}/api/rpc/app.info")).await;
         assert_eq!(r.status(), StatusCode::NOT_FOUND);
     }
@@ -435,6 +430,59 @@ URI=\"/T/api/proxy?url=k\"
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
         let r = call_with(&server, None, "127.0.0.1:1", &path, &[]).await;
         assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn local_recordings_stream_with_range_behind_the_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(iptv_core::events::NoopSink),
+            true,
+        )
+        .await
+        .unwrap();
+        let folder = iptv_core::player::embedded::recordings_dir(&state);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("clip.ts"), b"0123456789").unwrap();
+        // `recordings.library` id of a loose file: `f.` + the hex of its name.
+        let id = "636c69702e7473";
+        let app = router(state, T);
+        let path = format!("/{T}/api/recordings/f.{id}/media.ts");
+
+        // mpegts.js and <video> ask for ranges; only that slice is read.
+        let r = call_with(
+            &app,
+            Some("http://tauri.localhost"),
+            "127.0.0.1:1",
+            &path,
+            &[("range", "bytes=2-5")],
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(r.headers()[CONTENT_TYPE], "video/mp2t");
+        assert_eq!(r.headers()[CONTENT_RANGE], "bytes 2-5/10");
+        assert_eq!(
+            r.headers()["access-control-allow-origin"],
+            "http://tauri.localhost"
+        );
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"2345");
+
+        // Without Range: the whole file, streamed with its length.
+        let r = call(&app, None, "127.0.0.1:1", &path).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.headers()[CONTENT_LENGTH], "10");
+
+        // Without the launch token: refused. An unknown download: 404.
+        let bare = format!("/api/recordings/f.{id}/media.ts");
+        let r = call(&app, None, "127.0.0.1:1", &bare).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let missing = format!("/{T}/api/files/999/media.ts");
+        let r = call(&app, None, "127.0.0.1:1", &missing).await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

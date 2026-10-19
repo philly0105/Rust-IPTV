@@ -104,6 +104,20 @@ impl Default for ItemRow {
 }
 
 impl ItemRow {
+    /// Fills a movie or series row's `title_base`, and the year its title
+    /// carries, the way [`CatalogWriter::insert`] would. Importers that map
+    /// rows on the blocking pool call it there, so the title regexes do not
+    /// run inside the write transaction (IN-3).
+    pub fn derive_title_base(&mut self) {
+        if self.title_base.is_none()
+            && matches!(self.content_type, ContentType::Movie | ContentType::Series)
+        {
+            let (base, year) = title_base(&self.title);
+            self.year = self.year.or(year);
+            self.title_base = Some(base);
+        }
+    }
+
     /// The item's reference.
     pub fn item_ref(&self) -> ItemRef {
         ItemRef::new(
@@ -422,6 +436,10 @@ pub struct CatalogWriter<'c> {
     /// `(name, CREATE statement)` of the indexes dropped for a bulk rewrite;
     /// `None` while the indexes are maintained row by row.
     dropped_indexes: Option<Vec<(String, String)>>,
+    /// Rows of `items` this rewrite leaves alone (other sources and types),
+    /// counted once, the first time [`CatalogWriter::maybe_go_bulk`] needs
+    /// it: the number cannot change while the writer's transaction runs.
+    kept: Option<u64>,
     total: u64,
     duplicates: u64,
     /// Cancel token of the import run writing this catalog (C8), taken at
@@ -500,6 +518,7 @@ impl<'c> CatalogWriter<'c> {
             replaced,
             replaced_gone: false,
             dropped_indexes: None,
+            kept: None,
             total: 0,
             duplicates: 0,
             cancel: cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id)),
@@ -539,18 +558,26 @@ impl<'c> CatalogWriter<'c> {
         if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
             return Ok(());
         }
-        let all: i64 = self
-            .conn
-            .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
         // Rows the rebuild sorts although this rewrite leaves them alone: all
         // but the rewrite's own, which are the replaced rows until `begin`
-        // deletes them and the inserted rows after.
-        let own = if self.replaced_gone {
-            self.total
-        } else {
-            self.replaced
+        // deletes them and the inserted rows after. Counted once, not every
+        // WRITE_BATCH rows (IN-9).
+        let kept = match self.kept {
+            Some(kept) => kept,
+            None => {
+                let all: i64 = self
+                    .conn
+                    .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
+                let own = if self.replaced_gone {
+                    self.total
+                } else {
+                    self.replaced
+                };
+                let kept = (all as u64).saturating_sub(own);
+                self.kept = Some(kept);
+                kept
+            }
         };
-        let kept = (all as u64).saturating_sub(own);
         if touched < kept {
             return Ok(());
         }
@@ -1459,9 +1486,14 @@ pub fn query_named(
         // puts the category and English-only columns in it), then the full
         // rows of just those: OFFSET no longer reads and joins every skipped
         // row, which made pages near the end of a 100k list take 100-900 ms.
+        // OFFSET is bound, so each page of a list reuses one cached
+        // statement; LIMIT stays literal, as SQLite uses it in the row
+        // estimate (DB-3).
         let order = order_clause(&q.page);
+        args.push(offset.into());
         let sql = format!(
-            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}) ORDER BY {order}"
+            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET ?{}) ORDER BY {order}",
+            args.len()
         );
         let mut stmt = conn.prepare_cached(&sql)?;
         let items = stmt
@@ -2088,7 +2120,14 @@ pub fn all_live_channels(
 /// until then; see [`language::backfill_pending`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     tokio::spawn(async move {
-        match state.db_call(|c| Ok(language::backfill_pending(c)?)).await {
+        // Holds the write lock per catalog: other writes wait for it (DB-2).
+        let done = state
+            .db_call(|c| {
+                let _long = crate::db::long_write();
+                Ok(language::backfill_pending(c)?)
+            })
+            .await;
+        match done {
             Ok(0) => {}
             Ok(n) => tracing::info!(catalogs = n, "stored English-only verdicts"),
             Err(err) => tracing::warn!(%err, "could not store English-only verdicts"),
@@ -2136,6 +2175,31 @@ mod tests {
         assert_eq!(row.catchup().unwrap().days, Some(366));
         row.extra = serde_json::json!({ "catchup": { "type": "xc", "days": -5 } });
         assert_eq!(row.catchup().unwrap().days, Some(0));
+    }
+
+    /// IN-3: a title base worked out before the write is the one the
+    /// writer would have stored; live rows and set bases are left alone.
+    #[test]
+    fn derived_title_base_matches_the_writer() {
+        let mut movie = item("1", "a", "|EN| The Matrix (1999)", 0);
+        movie.content_type = ContentType::Movie;
+        movie.derive_title_base();
+        let (base, year) = title_base("|EN| The Matrix (1999)");
+        assert_eq!(movie.title_base.as_deref(), Some(base.as_str()));
+        assert_eq!(movie.year, year);
+        let mut dated = item("2", "a", "Heat (1995)", 0);
+        dated.content_type = ContentType::Series;
+        dated.year = Some(1996);
+        dated.derive_title_base();
+        assert_eq!(dated.year, Some(1996), "the row's own year wins");
+        let mut live = item("3", "a", "Heat (1995)", 0);
+        live.derive_title_base();
+        assert_eq!(live.title_base, None);
+        let mut set = item("4", "a", "Heat (1995)", 0);
+        set.content_type = ContentType::Movie;
+        set.title_base = Some("heat".into());
+        set.derive_title_base();
+        assert_eq!((set.title_base.as_deref(), set.year), (Some("heat"), None));
     }
 
     #[test]

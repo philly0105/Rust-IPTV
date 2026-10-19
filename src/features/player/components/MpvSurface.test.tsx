@@ -1087,6 +1087,26 @@ describe('wheel and context menu over the native video', () => {
     expect(calls('mpv.setProperty').map((c) => c[1])).toContainEqual({ name: 'sid', value: 5 });
   });
 
+  it('keeps the tracks object while mpv state events repeat the same tracks (PB-4)', async () => {
+    await attached();
+    const st = {
+      ...mpvState,
+      loaded: true,
+      tracks: [
+        { id: 1, type: 'audio', lang: 'en', selected: true },
+        { id: 2, type: 'audio', lang: 'fr', selected: false },
+      ],
+    } as MpvState;
+    act(() => emitState(st));
+    const first = useMediaStore.getState().tracks;
+    expect(first.audio.map((a) => a.selected)).toEqual([true, false]);
+    act(() => emitState({ ...st, timePos: 5, tracks: st.tracks.map((x) => ({ ...x })) }));
+    expect(useMediaStore.getState().tracks).toBe(first);
+    act(() => emitState({ ...st, tracks: st.tracks.map((x) => ({ ...x, selected: x.id === 2 })) }));
+    expect(useMediaStore.getState().tracks).not.toBe(first);
+    expect(useMediaStore.getState().tracks.audio.map((a) => a.selected)).toEqual([false, true]);
+  });
+
   it('never offers to copy a link that carries a login', async () => {
     await attached();
     for (const url of [

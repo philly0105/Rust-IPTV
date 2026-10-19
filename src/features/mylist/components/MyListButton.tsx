@@ -19,13 +19,14 @@
  */
 
 import { Bookmark, BookmarkCheck, BookmarkPlus, RefreshCw } from 'lucide-react';
+import type { TFunction } from 'i18next';
 import { useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type ItemRef, type ItemSnapshot } from '@/api/types';
 
 import { Button, cn } from '../deps';
-import { useMyListState } from '../hooks/useMyList';
+import { useMyListState, type MyListStatus } from '../hooks/useMyList';
 import { useMyListToggle } from '../hooks/useMyListToggle';
 import { canSave } from '../lib/list';
 
@@ -40,11 +41,47 @@ export interface MyListButtonProps {
   tabIndex?: number;
 }
 
-export function MyListButton({ itemRef, snapshot, variant = 'button', size = 'lg', className, tabIndex }: MyListButtonProps) {
+/** The shared list a button reads: one `useMyListState` and `useMyListToggle` for a whole grid. */
+export interface MyListButtonState {
+  keys: ReadonlySet<string>;
+  status: MyListStatus;
+  retry: () => Promise<boolean>;
+  toggle: ReturnType<typeof useMyListToggle>;
+}
+
+type ViewProps = MyListButtonProps & { state: MyListButtonState; /** The `mylist` namespace. */ t: TFunction };
+
+export function MyListButton(props: MyListButtonProps) {
   const { t } = useTranslation('mylist');
   const { keys, status, retry } = useMyListState();
   const toggle = useMyListToggle();
+  // Here, beside the list hooks: the render a click causes reads the optimistic patch at once.
   const [pending, setPending] = useState(false);
+  return <MyListButtonBody {...props} state={{ keys, status, retry, toggle }} t={t} pending={pending} setPending={setPending} />;
+}
+
+/**
+ * MyListButton over state its host already holds (a poster grid's shared list, VD-1), so a grid
+ * of cards does not mount two list observers and a `useTranslation` per card.
+ */
+export function MyListButtonView(props: ViewProps) {
+  const [pending, setPending] = useState(false);
+  return <MyListButtonBody {...props} pending={pending} setPending={setPending} />;
+}
+
+function MyListButtonBody({
+  itemRef,
+  snapshot,
+  variant = 'button',
+  size = 'lg',
+  className,
+  tabIndex,
+  state,
+  t,
+  pending,
+  setPending,
+}: ViewProps & { pending: boolean; setPending(pending: boolean): void }) {
+  const { keys, status, retry, toggle } = state;
   if (!canSave(itemRef)) return null;
 
   const ready = status === 'ready';

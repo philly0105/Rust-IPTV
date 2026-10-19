@@ -31,11 +31,15 @@ pub async fn export(
         .db_call(move |c| build_manifest(c, &data_dir, &epg_urls, include_secrets))
         .await?;
     add_app_settings(&mut manifest, &serde_json::to_value(&settings)?);
-    let json = serde_json::to_string_pretty(&manifest)?;
-    let date = chrono::Utc::now().format("%Y-%m-%d");
     let playlists = manifest["playlists"].as_array().map_or(0, Vec::len);
     let Some(target) = target else {
+        // On the blocking pool: with playlist text the manifest is tens of
+        // MB (ST-4).
+        let json = tokio::task::spawn_blocking(move || serde_json::to_string_pretty(&manifest))
+            .await
+            .map_err(|e| CoreError::Other(anyhow::anyhow!("backup export task failed: {e}")))??;
         tracing::info!(playlists, include_secrets, "backup exported");
+        let date = chrono::Utc::now().format("%Y-%m-%d");
         return Ok(ExportResult {
             json,
             file_name: format!("tsrust-iptv-backup-{date}.json"),
@@ -43,7 +47,13 @@ pub async fn export(
         });
     };
     let t = target.clone();
-    tokio::task::spawn_blocking(move || write_atomic(&t, json.as_bytes()))
+    // Streamed into the file: no JSON copy of the manifest in memory (ST-4).
+    let write = move |f: &mut std::fs::File| -> std::io::Result<()> {
+        let mut w = std::io::BufWriter::new(f);
+        serde_json::to_writer_pretty(&mut w, &manifest).map_err(std::io::Error::from)?;
+        w.flush()
+    };
+    tokio::task::spawn_blocking(move || write_atomic(&t, write))
         .await
         .map_err(|e| CoreError::Other(anyhow::anyhow!("backup write task failed: {e}")))??;
     tracing::info!(playlists, include_secrets, path = %target.display(), "backup written");
@@ -98,10 +108,13 @@ fn validate_target(state: &AppState, raw: &str) -> CoreResult<PathBuf> {
     Ok(target)
 }
 
-/// Writes `bytes` to a hidden temp file next to `target`, flushes it to disk
-/// and renames it over `target`, so a crash never leaves a half-written
+/// Writes a hidden temp file next to `target` with `write`, flushes it to
+/// disk and renames it over `target`, so a crash never leaves a half-written
 /// backup. The temp file is removed when any step fails.
-fn write_atomic(target: &Path, bytes: &[u8]) -> CoreResult<()> {
+fn write_atomic(
+    target: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> CoreResult<()> {
     let dir = target.parent().unwrap_or_else(|| Path::new("."));
     let name = target
         .file_name()
@@ -113,7 +126,7 @@ fn write_atomic(target: &Path, bytes: &[u8]) -> CoreResult<()> {
             .write(true)
             .create_new(true)
             .open(&tmp)?;
-        f.write_all(bytes)?;
+        write(&mut f)?;
         f.sync_all()?;
         drop(f);
         std::fs::rename(&tmp, target)
@@ -270,7 +283,8 @@ fn m3u_entry(conn: &Connection, data_dir: &Path, s: &Source) -> CoreResult<Value
         _ => "text",
     };
     source.insert("kind".into(), json!(kind));
-    source.insert("rawM3u".into(), json!(raw));
+    // Moved, not copied into the tree (ST-4).
+    source.insert("rawM3u".into(), Value::String(raw));
     if let Some(c) = &cfg {
         put_str(&mut source, "url", c.url.as_deref());
         put_str(&mut source, "userAgent", c.headers.user_agent.as_deref());

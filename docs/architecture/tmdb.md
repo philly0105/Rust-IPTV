@@ -157,8 +157,12 @@ Bumping `matcher::KEY_VERSION` invalidates every row.
 Lookup order: memory LRU (300 entries), then an in-flight request for the same
 key, then SQLite, then the network. Concurrent callers for one key share one
 spawned fetch, so a cancelled caller does not cancel the others. Errors are
-never cached; only real misses are. A failed cache write still serves the
-fetched value. Expired rows are ignored on read and purged by `tmdb::init`.
+never cached; only real misses are. The fetched value is returned (and put
+in the memory LRU) at once; its SQLite row is written in the background
+through the user-write gate (`AppState::writer`), so cast and trailer do not
+wait while an import holds the write lock. A failed write is logged and only
+costs a refetch later. `tmdb.clearCache` waits for pending writes first.
+Expired rows are ignored on read and purged by `tmdb::init`.
 
 ## Rate limits and retries
 

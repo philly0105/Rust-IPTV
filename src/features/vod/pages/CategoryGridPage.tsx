@@ -38,6 +38,7 @@ import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPage
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
 import { useCoverWidth } from '../hooks/useCoverWidth';
+import { PageGate, PageGateProvider, usePageOpen } from '../hooks/pageGate';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
@@ -62,7 +63,7 @@ import {
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
-import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass, cn } from '@/ui';
+import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -103,6 +104,25 @@ function GridCellError() {
   );
 }
 
+/**
+ * A loaded page's titles that pass the rating, year and language filters, kept per page object
+ * (VD-9): a new page filters only itself instead of every page loaded before it. Watched titles
+ * are taken out after this, since their lookup changes as pages arrive.
+ */
+const filteredPages = new WeakMap<object, { key: string; items: (VodItem | SeriesItem)[] }>();
+
+function filteredPage(
+  page: { items: (VodItem | SeriesItem)[] },
+  f: { minRating: number; years: YearRange; englishOnly: boolean; key: string },
+): (VodItem | SeriesItem)[] {
+  const hit = filteredPages.get(page);
+  if (hit && hit.key === f.key) return hit.items;
+  const kept = filterByYear(filterByRating(page.items, f.minRating), f.years);
+  const items = f.englishOnly ? kept.filter((i) => !isNonEnglish(i.title, i.categoryName)) : kept;
+  filteredPages.set(page, { key: f.key, items });
+  return items;
+}
+
 interface GridCellProps {
   input: GridQueryInput;
   index: number;
@@ -121,7 +141,7 @@ interface GridCellProps {
  */
 const GridCell = memo(function GridCell({ input, index, pageSize, active, gridFocused, resume, locks }: GridCellProps) {
   const page = pageOf(index, pageSize);
-  const q = useVodPage(input, page);
+  const q = useVodPage(input, page, usePageOpen(page));
   const item = q.data?.items[index - page * pageSize];
   // C4: one watched lookup per loaded page, shared by its cells.
   const watched = useWatchedKeys(q.data?.items);
@@ -275,10 +295,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const filteredItems = useMemo(() => {
     if (!clientFiltered) return [];
     const pages = inOrder.data?.pages ?? [];
-    const loaded = (hideWatched ? pages.slice(0, watchedPages.settled) : pages).flatMap((p) => p.items);
-    const unwatched = hideWatched ? loaded.filter((i) => !watchedPages.keys.has(itemKey(i.ref))) : loaded;
-    const kept = filterByYear(filterByRating(unwatched, minRating), years);
-    return englishOnly ? kept.filter((i) => !isNonEnglish(i.title, i.categoryName)) : kept;
+    const filter = { minRating, years, englishOnly, key: `${minRating}|${yearRangeKey(years)}|${englishOnly}` };
+    const kept = (hideWatched ? pages.slice(0, watchedPages.settled) : pages).flatMap((p) => filteredPage(p, filter));
+    return hideWatched ? kept.filter((i) => !watchedPages.keys.has(itemKey(i.ref))) : kept;
   }, [clientFiltered, englishOnly, inOrder.data, minRating, years, hideWatched, watchedPages]);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = inOrder;
   // Keep loading while the filter leaves too few titles to fill the view.
@@ -304,6 +323,9 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const firstReady = clientFiltered ? filteredDone : !!first.data;
   const indices = useMemo(() => Array.from({ length: total }, (_, i) => i), [total]);
   const pageSize = pageSizeFor(source.data?.kind ?? 'xtream');
+  // VD-2: cells fetch their page once the grid rests on it, not every page a drag passes.
+  const pageGate = useMemo(() => new PageGate(), [categoryId]);
+  useEffect(() => () => pageGate.dispose(), [pageGate]);
 
   const qc = useQueryClient();
   /** Item at a grid index, read from the page cache (Enter on the keyboard cursor). */
@@ -509,6 +531,34 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // back; otherwise the landing replaces the grid, so Escape never stacks grid/landing pairs.
   const fromLanding = (location.state as { fromLanding?: unknown } | null)?.fromLanding === true;
   useEscapeBack(true, () => void (fromLanding ? navigate(-1) : navigate(backHref, { replace: true })));
+
+  // VD-9: stable cell renderers, so VirtualGrid's memoised slots hold while the page re-renders
+  // (menus, header, focus). Only the cursor's cell sees `gridFocused`: focusing the grid
+  // re-renders that one poster, not every cell on screen.
+  const sourceKind = input?.sourceKind;
+  const watchedKeys = watchedPages.keys;
+  const renderFilteredCell = useCallback(
+    (item: VodItem | SeriesItem, _index: number, state: VirtualItemState) =>
+      sourceKind ? (
+        <GridPoster
+          item={item}
+          sourceKind={sourceKind}
+          active={state.active}
+          gridFocused={state.active && gridFocused}
+          resume={resume}
+          watched={watchedKeys.has(itemKey(item.ref))}
+          locked={locks.itemLocked(item)}
+        />
+      ) : null,
+    [sourceKind, gridFocused, resume, watchedKeys, locks],
+  );
+  const renderPagedCell = useCallback(
+    (i: number, _index: number, state: VirtualItemState) =>
+      input ? (
+        <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={state.active && gridFocused} resume={resume} locks={locks} />
+      ) : null,
+    [input, pageSize, gridFocused, resume, locks],
+  );
 
   return (
     // The grid's posters share one My List subscription (L2-vod-1).
@@ -732,17 +782,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               initialActiveIndex={restoredIndex}
               resetKey={filterKey}
               getKey={(item) => item.ref.itemId}
-              render={(item, _index, state) => (
-                <GridPoster
-                  item={item}
-                  sourceKind={input.sourceKind}
-                  active={state.active}
-                  gridFocused={gridFocused}
-                  resume={resume}
-                  watched={watchedPages.keys.has(itemKey(item.ref))}
-                  locked={locks.itemLocked(item)}
-                />
-              )}
+              render={renderFilteredCell}
               onEndReached={() => {
                 if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
               }}
@@ -757,28 +797,28 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
             />
           ) : (
-            <VirtualGrid<number>
-              // Keyed on the category only (L2-vod-8, L3-vod-3): a new sort, search or filter refills the
-              // mounted cells, whose pages keep their titles until the new ones arrive (useVodPage).
-              key={categoryId}
-              items={indices}
-              minColumnWidth={coverWidth}
-              aspect="poster"
-              label={categoryName}
-              testId="vod-grid"
-              initialActiveIndex={restoredIndex}
-              resetKey={filterKey}
-              render={(i, _index, state) => (
-                <GridCell input={input} index={i} pageSize={pageSize} active={state.active} gridFocused={gridFocused} resume={resume} locks={locks} />
-              )}
-              onSelect={(i) => {
-                const item = queryItem(i);
-                // A cell whose page failed: selecting it retries that page.
-                if (!item) return retryPageOf(i);
-                openTitle(item.ref, i);
-              }}
-              className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            />
+            <PageGateProvider value={pageGate}>
+              <VirtualGrid<number>
+                // Keyed on the category only (L2-vod-8, L3-vod-3): a new sort, search or filter refills the
+                // mounted cells, whose pages keep their titles until the new ones arrive (useVodPage).
+                key={categoryId}
+                items={indices}
+                minColumnWidth={coverWidth}
+                aspect="poster"
+                label={categoryName}
+                testId="vod-grid"
+                initialActiveIndex={restoredIndex}
+                resetKey={filterKey}
+                render={renderPagedCell}
+                onSelect={(i) => {
+                  const item = queryItem(i);
+                  // A cell whose page failed: selecting it retries that page.
+                  if (!item) return retryPageOf(i);
+                  openTitle(item.ref, i);
+                }}
+                className="rounded-md pb-8 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              />
+            </PageGateProvider>
           )}
         </div>
         <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={menu ? menu.item.titleBase || menu.item.title : ''} onClose={closeMenu} />

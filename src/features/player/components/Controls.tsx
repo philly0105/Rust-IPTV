@@ -23,7 +23,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop, rpc } from '@/api/transport';
@@ -32,7 +32,7 @@ import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
 import { setHistoryOpen, useHistoryStore } from '../history';
-import { useMediaStore } from '../media';
+import { useMediaStore, type TimeRange } from '../media';
 import { usePipStore } from '../pip';
 import { nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnded, usePlayerStore, type PlayerState } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
@@ -667,6 +667,128 @@ function LiveBadge({ status, pulseKey, className }: { status: PlayerState['statu
   );
 }
 
+/** Live DVR window: scrub only when the window is at least 30 s. */
+function liveWindowOf(seekable: TimeRange | undefined): TimeRange | undefined {
+  return seekable && seekable.end - seekable.start >= 30 ? seekable : undefined;
+}
+
+interface Subscribable<S> {
+  getState(): S;
+  subscribe(listener: () => void): () => void;
+}
+
+/**
+ * `select(store state)`, followed only while `shown`. Playback progress changes the position 4-7
+ * times a second; chrome that is hidden keeps what it last showed instead of re-rendering with
+ * it, and reads the current value when it shows again.
+ */
+function useWhileShown<S, T>(store: Subscribable<S>, select: (s: S) => T, shown: boolean): T {
+  const subscribe = useCallback((onChange: () => void) => (shown ? store.subscribe(onChange) : () => undefined), [store, shown]);
+  return useSyncExternalStore(subscribe, () => select(store.getState()));
+}
+
+/** The seek bar, with its own subscriptions to the position and buffer (the bar around it stays put). */
+function PositionSeekBar({
+  shown,
+  live,
+  duration,
+  edgeSlack,
+  onSeek,
+}: {
+  shown: boolean;
+  live: boolean;
+  duration: number | undefined;
+  edgeSlack: number;
+  onSeek(seconds: number): void;
+}) {
+  const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
+  const buffered = useWhileShown(useMediaStore, (s) => s.buffered, shown);
+  const seekable = useWhileShown(useMediaStore, (s) => s.seekable, shown);
+  const liveWindow = live ? liveWindowOf(seekable) : undefined;
+  if (live && !liveWindow) return null;
+  return (
+    <SeekBar
+      min={liveWindow ? liveWindow.start : 0}
+      max={liveWindow ? liveWindow.end : (duration ?? 0)}
+      value={position}
+      buffered={buffered}
+      live={!!liveWindow}
+      edgeSlack={edgeSlack}
+      onSeek={onSeek}
+      className="mb-0.5"
+    />
+  );
+}
+
+/** VOD: position and duration. */
+function TimeReadout({ shown, duration, narrow }: { shown: boolean; duration: number | undefined; narrow: boolean }) {
+  const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
+  return (
+    <span className={cn('ms-1 font-display whitespace-nowrap text-white/90 tabular-nums', narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : 'text-sm')}>
+      {formatTime(position)}
+      <span className="text-white/70"> / {formatTime(duration)}</span>
+    </span>
+  );
+}
+
+/** Live: the badge at the live edge (or after a failure), else Go live and how far behind it playback is. */
+function LiveEdge({
+  shown,
+  status,
+  pulseKey,
+  short,
+  narrow,
+  edgeSlack,
+  mpv,
+}: {
+  shown: boolean;
+  status: PlayerState['status'];
+  pulseKey: string;
+  /** Compact or narrow: "Live" and "-1:30" instead of "Go live" and "1:30 behind live". */
+  short: boolean;
+  narrow: boolean;
+  edgeSlack: number;
+  mpv: boolean;
+}) {
+  const { t } = useTranslation('player');
+  const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
+  const seekable = useWhileShown(useMediaStore, (s) => s.seekable, shown);
+  const liveWindow = liveWindowOf(seekable);
+  const behindLive = liveWindow ? Math.max(0, liveWindow.end - position) : 0;
+  const atLiveEdge = !liveWindow || behindLive < edgeSlack;
+  if (atLiveEdge || status === 'error') {
+    // At the edge there is nothing to jump to: a status badge, not a dead button.
+    return <LiveBadge status={status} pulseKey={pulseKey} className={cn(narrow && NARROW_YIELD_TO_VOLUME)} />;
+  }
+  return (
+    <>
+      <button
+        type="button"
+        data-ctl="golive"
+        onClick={(e) => {
+          // At the edge this button gives way to the LIVE badge: hand focus to play/pause
+          // first, or it would fall to the page and the player's keys would stop working.
+          const bar = e.currentTarget.closest('[data-player-controls]');
+          bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
+          usePlayerStore.getState().seekTo(mpv ? liveWindow.end - 1 : liveWindow.end);
+        }}
+        aria-label={t('goLive')}
+        title={t('goLive')}
+        className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
+      >
+        <span className="size-2 rounded-full bg-white/50" aria-hidden />
+        {short ? t('live') : t('goLive')}
+      </button>
+      <span
+        className={cn('ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums', narrow && NARROW_YIELD_TO_VOLUME)}
+        data-testid="behind-live"
+      >
+        {short ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
+      </span>
+    </>
+  );
+}
+
 /** The record toggle as one of the options menu's moved controls. */
 function RecordMenuAction({ onDone }: { onDone(): void }) {
   const { t } = useTranslation('player');
@@ -771,15 +893,16 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
-  const position = usePlayerStore((s) => s.positionSeconds);
+  // The position, buffer and live window are read by the leaves that show them (PositionSeekBar,
+  // TimeReadout, LiveEdge): the bar itself re-renders only when what it lays out changes.
+  const hasPosition = usePlayerStore((s) => s.positionSeconds > 0);
   const duration = usePlayerStore((s) => s.durationSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const mode = usePlayerStore((s) => s.mode);
   const mpvAttached = useMediaStore((s) => !!s.mpv?.attached);
   const ended = usePlayerStore(selectEnded);
   usePlayerStore((s) => s.queue);
-  const buffered = useMediaStore((s) => s.buffered);
-  const seekable = useMediaStore((s) => s.seekable);
+  const liveWindowed = useMediaStore((s) => !!liveWindowOf(s.seekable));
   const tracks = useMediaStore((s) => s.tracks);
   const canPip = useMediaStore((s) => s.canPip);
   const browserPip = useMediaStore((s) => s.inPip);
@@ -794,6 +917,8 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const narrow = useNarrow(root) && !compact;
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const spareRoom = useSpareSlots(row, narrow);
+  // A narrow row measures its spare room after each render: the time readout growing a digit is one.
+  useWhileShown(usePlayerStore, (s) => formatTime(s.positionSeconds).length, narrow && visible);
 
   const setMenu = (v: MenuView | null): void => {
     setMenuState(v);
@@ -860,15 +985,11 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   const hasOptions = true;
   const episodic = !!source.episodeId;
 
-  // Live DVR window: scrub only when the window is at least 30 s.
-  const liveWindow = isLive && seekable && seekable.end - seekable.start >= 30 ? seekable : undefined;
   // mpv's cache runs a few seconds ahead of playback even at the live edge.
   const edgeSlack = mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK;
-  const behindLive = liveWindow ? Math.max(0, liveWindow.end - position) : 0;
-  const atLiveEdge = !liveWindow || behindLive < edgeSlack;
-  const showSeek = isVod ? !!duration : !!liveWindow;
+  const showSeek = isVod ? !!duration : isLive && liveWindowed;
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
-  const showTime = !!duration || position > 0 || status !== 'loading';
+  const showTime = !!duration || hasPosition || status !== 'loading';
   const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
   const showPip = canPip && (variant === 'overlay' || !compact);
 
@@ -1012,18 +1133,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
           variant === 'overlay' && compact && 'border-t px-1',
         )}
       >
-        {showSeek && (
-          <SeekBar
-            min={liveWindow ? liveWindow.start : 0}
-            max={liveWindow ? liveWindow.end : (duration ?? 0)}
-            value={position}
-            buffered={buffered}
-            live={!!liveWindow}
-            edgeSlack={edgeSlack}
-            onSeek={(s) => store.seekTo(s)}
-            className="mb-0.5"
-          />
-        )}
+        {showSeek && <PositionSeekBar shown={visible} live={isLive} duration={duration} edgeSlack={edgeSlack} onSeek={(s) => store.seekTo(s)} />}
         <div ref={setRow} data-ctl-row="" className="flex min-w-0 items-center gap-0.5">
           {!compact && !narrow && prevButton}
           {ended ? (
@@ -1045,55 +1155,22 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
           <VolumeControl compact={compact || narrow} />
 
           {isLive ? (
-            atLiveEdge || failed ? (
-              // At the edge there is nothing to jump to: a status badge, not a dead button.
-              <LiveBadge status={status} pulseKey={source.url} className={cn(narrow && NARROW_YIELD_TO_VOLUME)} />
-            ) : (
-              <>
-                <button
-                  type="button"
-                  data-ctl="golive"
-                  onClick={(e) => {
-                    if (!liveWindow) return;
-                    // At the edge this button gives way to the LIVE badge: hand focus to play/pause
-                    // first, or it would fall to the page and the player's keys would stop working.
-                    const bar = e.currentTarget.closest('[data-player-controls]');
-                    bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
-                    store.seekTo(mode === 'embedded-mpv' ? liveWindow.end - 1 : liveWindow.end);
-                  }}
-                  aria-label={t('goLive')}
-                  title={t('goLive')}
-                  className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
-                >
-                  <span className="size-2 rounded-full bg-white/50" aria-hidden />
-                  {compact || narrow ? t('live') : t('goLive')}
-                </button>
-                <span
-                  className={cn(
-                    'ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums',
-                    narrow && NARROW_YIELD_TO_VOLUME,
-                  )}
-                  data-testid="behind-live"
-                >
-                  {compact || narrow ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
-                </span>
-              </>
-            )
+            <LiveEdge
+              shown={visible}
+              status={status}
+              pulseKey={source.url}
+              short={!!compact || narrow}
+              narrow={narrow}
+              edgeSlack={edgeSlack}
+              mpv={mode === 'embedded-mpv'}
+            />
           ) : source.isRadio ? (
             <span className="ms-1 inline-flex items-center gap-1.5 text-xs text-white/70">
               <Radio className="size-4" aria-hidden />
               {t('radio')}
             </span>
           ) : showTime ? (
-            <span
-              className={cn(
-                'ms-1 font-display whitespace-nowrap text-white/90 tabular-nums',
-                narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : 'text-sm',
-              )}
-            >
-              {formatTime(position)}
-              <span className="text-white/70"> / {formatTime(duration)}</span>
-            </span>
+            <TimeReadout shown={visible} duration={duration} narrow={narrow} />
           ) : null}
           {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
           <SleepChip compact={compact || narrow} onOpen={() => setMenu(menu === 'sleep' ? null : 'sleep')} />

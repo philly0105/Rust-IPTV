@@ -1,7 +1,7 @@
 /**
  * One tile's playback hook on its own: how an element error that hides a refusal is told
- * apart from a stream worth retrying through mpegts.js (L2-live-8), and the staggered first
- * start of tiles that mount together (L2-live-13).
+ * apart from a stream worth retrying through mpegts.js (L2-live-8, PB-2), the tile's buffer
+ * profile (PB-5), and the staggered first start of tiles that mount together (L2-live-13).
  */
 
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -15,9 +15,13 @@ import { input, installMediaStubs } from './harness';
 
 const h = vi.hoisted(() => ({
   created: [] as { url: string; forceMpegts: boolean }[],
+  profiles: [] as (string | undefined)[],
   probe: null as { status: number; reason: string } | null,
   probes: [] as string[],
   resolved: [] as string[],
+  sniffable: true,
+  /** The engine is the element after mpegts.js found no MPEG-TS (`Engine.fellBack`). */
+  fellBack: false,
 }));
 
 vi.mock('@/api/transport', async (orig) => ({
@@ -34,9 +38,10 @@ vi.mock('../stream', () => ({
 }));
 
 vi.mock('../engine', () => ({
-  createEngine: async (_el: HTMLVideoElement, src: PlayerSource, _url: string, _cb: unknown, opts: { forceMpegts?: boolean }) => {
+  createEngine: async (_el: HTMLVideoElement, src: PlayerSource, _url: string, _cb: unknown, opts: { forceMpegts?: boolean; profile?: string }) => {
     h.created.push({ url: src.url, forceMpegts: !!opts.forceMpegts });
-    return { kind: opts.forceMpegts ? 'mpegts' : 'native', destroy: () => undefined };
+    h.profiles.push(opts.profile);
+    return { kind: opts.forceMpegts ? 'mpegts' : 'native', fellBack: !opts.forceMpegts && h.fellBack, destroy: () => undefined };
   },
   fetchFailureReason: async (url: string) => {
     h.probes.push(url);
@@ -45,7 +50,7 @@ vi.mock('../engine', () => ({
   looksLikeMpegTs: () => false,
   mseSupported: () => true,
   withReason: (fallback: string, reason: string | null, status?: number) => (reason ? (status ? `${reason} (HTTP ${status})` : reason) : fallback),
-  worthSniffingAsMpegTs: () => true,
+  worthSniffingAsMpegTs: () => h.sniffable,
 }));
 
 function Probe({ ch, opts }: { ch: MultiviewChannelInput; opts: TilePlaybackOptions }) {
@@ -75,35 +80,60 @@ beforeEach(() => {
   h.created.length = 0;
   h.probes.length = 0;
   h.resolved.length = 0;
+  h.profiles.length = 0;
   h.probe = null;
+  h.sniffable = true;
+  h.fellBack = false;
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 
-describe('element errors that hide the HTTP status (L2-live-8)', () => {
-  it('a stream our server says was refused (503) fails at once with the reason, without mpegts.js', async () => {
+describe('element errors that hide the HTTP status (L2-live-8, PB-2)', () => {
+  it('a stream the server refused (503) fails at once with the reason when it is not worth mpegts.js', async () => {
     h.probe = { status: 503, reason: 'Service Unavailable' };
+    h.sniffable = false;
     render(<Probe ch={input(1)} opts={OPTS} />);
     await waitFor(() => expect(h.created).toHaveLength(1));
     elementRefuses();
     await waitFor(() => expect(tile().dataset['phase']).toBe('error'));
     expect(tile().dataset['message']).toBe('Service Unavailable (HTTP 503)');
     expect(h.probes).toEqual(['/api/proxy?url=http%3A%2F%2Fprovider%2Flive%2Fc1']);
-    // No second engine: mpegts.js would only be refused again.
     await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
     expect(h.created).toEqual([{ url: 'http://provider/live/c1', forceMpegts: false }]);
   });
 
-  it('a stream the server answered (2xx) or could not explain gets one retry through mpegts.js', async () => {
-    h.probe = null;
+  it('an extensionless stream the element rejects goes straight to mpegts.js, with no request to ask why first', async () => {
+    h.probe = { status: 503, reason: 'Service Unavailable' };
     render(<Probe ch={input(2)} opts={OPTS} />);
     await waitFor(() => expect(h.created).toHaveLength(1));
     elementRefuses();
     await waitFor(() => expect(h.created).toHaveLength(2));
     expect(h.created[1]).toEqual({ url: 'http://provider/live/c2', forceMpegts: true });
+    // mpegts.js sees a refusal's status itself and asks our server for the reason.
+    expect(h.probes).toEqual([]);
     expect(tile().dataset['phase']).not.toBe('error');
+  });
+
+  it('no second try through mpegts.js when it already found no MPEG-TS and the element took over', async () => {
+    h.fellBack = true;
+    render(<Probe ch={input(5)} opts={OPTS} />);
+    await waitFor(() => expect(h.created).toHaveLength(1));
+    elementRefuses();
+    await waitFor(() => expect(tile().dataset['phase']).toBe('error'));
+    expect(h.created).toHaveLength(1);
+    expect(h.probes).toHaveLength(1);
+  });
+});
+
+describe('buffer profile (PB-5)', () => {
+  it('builds every engine, the mpegts.js retry too, with the tile profile', async () => {
+    render(<Probe ch={input(6)} opts={OPTS} />);
+    await waitFor(() => expect(h.created).toHaveLength(1));
+    elementRefuses();
+    await waitFor(() => expect(h.created).toHaveLength(2));
+    expect(h.profiles).toEqual(['tile', 'tile']);
   });
 });
 

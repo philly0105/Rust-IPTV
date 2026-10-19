@@ -8,7 +8,7 @@
 use super::protocol::{self as p, Body, Probe};
 use super::Runtime;
 use crate::error::{CoreError, CoreResult};
-use crate::http::{status_error, with_retry};
+use crate::http::{status_error, with_retry_if};
 use crate::model::StalkerSourceConfig;
 use crate::state::AppState;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -20,8 +20,11 @@ use std::time::Duration;
 
 /// Default per-request timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Timeout for the big list calls (`get_all_channels`, `get_epg_info`).
-pub const LONG_TIMEOUT: Duration = Duration::from_secs(90);
+/// Response-head deadline of the big list calls (`get_all_channels`,
+/// `get_epg_info`), the same as an M3U playlist's: portals build these
+/// replies before answering. Their body has no whole deadline but must keep
+/// the minimum rate, and a timeout is not retried (IN-2).
+pub const LONG_TIMEOUT: Duration = Duration::from_secs(120);
 /// Timeout used while probing discovery candidates.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Attempts for one portal request (Network/Timeout only).
@@ -303,7 +306,11 @@ impl StalkerClient {
         let url = p::build_request_url(endpoint, &req.params);
         let label = req.label();
         let headers = self.headers(token);
-        with_retry(attempts, || {
+        let long = req.timeout >= LONG_TIMEOUT;
+        // A big list that timed out (no head in time, or a body under the
+        // minimum rate) would be as slow again: not retried.
+        let retry = |err: &CoreError| !(long && matches!(err, CoreError::Timeout(_)));
+        let op = || {
             let url = url.clone();
             let headers = headers.clone();
             let label = label.clone();
@@ -312,8 +319,14 @@ impl StalkerClient {
                 // Server mode: guarded client, portal host:port trusted.
                 let request = crate::http::trusted_client(&self.state, &self.config.portal_url)
                     .get(&url)
-                    .headers(headers)
-                    .timeout(req.timeout);
+                    .headers(headers);
+                // A big list keeps a minimum body rate instead of a whole
+                // deadline: tens of MB on a slow link take minutes.
+                let request = if long {
+                    request
+                } else {
+                    request.timeout(req.timeout)
+                };
                 // The head deadline is the request's own deadline: portals
                 // build big replies (get_all_channels) before answering.
                 let resp = crate::http::send_within(request, req.timeout)
@@ -330,9 +343,12 @@ impl StalkerClient {
                 // timeout alone lets a fast hostile server fill memory.
                 // reqwest runs without its `charset` feature, so `text()`
                 // was UTF-8 lossy too.
-                let body =
-                    crate::http::read_capped(resp, &format!("Stalker {label}"), MAX_BODY_BYTES)
-                        .await?;
+                let context = format!("Stalker {label}");
+                let body = if long {
+                    crate::http::read_capped_at_rate(resp, &context, MAX_BODY_BYTES).await?
+                } else {
+                    crate::http::read_capped(resp, &context, MAX_BODY_BYTES).await?
+                };
                 let text = String::from_utf8_lossy(&body);
                 match p::classify_body(&text) {
                     b @ (Body::Js(_) | Body::AuthFailure(_)) => Ok(b),
@@ -347,8 +363,8 @@ impl StalkerClient {
                     ))),
                 }
             }
-        })
-        .await
+        };
+        with_retry_if(attempts, op, retry).await
     }
 
     /// Authenticated call returning `js`. On an auth failure the session

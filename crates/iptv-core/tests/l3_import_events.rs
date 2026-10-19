@@ -184,6 +184,14 @@ async fn sources_changed_names_the_source_and_the_reason() {
     let changed = drain(&mut rx, "sources.changed");
     assert_eq!(changed, [json!({"sourceId": sid, "reason": "config"})]);
 
+    // ST-5: an auto-refresh toggle leaves every catalog reader alone.
+    let patch = serde_json::from_value(json!({"autoRefresh": true})).unwrap();
+    iptv_core::sources::update(&state, &sid, patch)
+        .await
+        .unwrap();
+    let changed = drain(&mut rx, "sources.changed");
+    assert_eq!(changed, [json!({"sourceId": sid, "reason": "status"})]);
+
     iptv_core::sources::remove(&state, &sid).await.unwrap();
     let changed = drain(&mut rx, "sources.changed");
     assert_eq!(changed, [json!({"sourceId": sid, "reason": "removed"})]);

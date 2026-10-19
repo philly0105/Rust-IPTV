@@ -5,7 +5,9 @@
 //! EXT-X-PRELOAD-HINT, EXT-X-RENDITION-REPORT, ...) is resolved against the
 //! playlist's final URL and replaced with `/api/proxy?url=<abs>&sourceId=<id>`
 //! (plus the request's `ua` / `referer` / `origin` overrides, so every
-//! segment and key is fetched with the same headers).
+//! segment and key is fetched with the same headers). The desktop loopback
+//! proxy serves the route under a per-launch token and sets its own path
+//! ([`HlsRewriter::at_path`]: `/<token>/api/proxy`).
 //! Non-HTTP URIs (`data:`, `skd:`) are left alone. The rewriter works line by
 //! line on chunks as they arrive, so a playlist is never buffered whole.
 
@@ -67,9 +69,14 @@ pub fn looks_like_playlist(prefix: &[u8]) -> bool {
     p[start..].starts_with(b"#EXTM3U")
 }
 
+/// Path rewritten URIs point at unless [`HlsRewriter::at_path`] sets another.
+pub const PROXY_PATH: &str = "/api/proxy";
+
 /// Incremental playlist rewriter.
 pub struct HlsRewriter {
     base: Url,
+    /// Proxy route path (`/api/proxy`, or the desktop's `/<token>/api/proxy`).
+    path: String,
     /// Query parameters after `url=`: `&sourceId=..&ua=..`.
     suffix: String,
     pending: Vec<u8>,
@@ -86,9 +93,17 @@ impl HlsRewriter {
     pub fn with_params(base: Url, params: &[(&str, &str)]) -> Self {
         Self {
             base,
+            path: PROXY_PATH.to_owned(),
             suffix: query_suffix(params),
             pending: Vec::new(),
         }
+    }
+
+    /// Points rewritten URIs at the proxy route under `path` instead of
+    /// [`PROXY_PATH`] (the desktop loopback proxy's `/<token>/api/proxy`).
+    pub fn at_path(mut self, path: &str) -> Self {
+        self.path = path.to_owned();
+        self
     }
 
     /// Feeds a chunk; returns the rewritten complete lines it finished.
@@ -189,7 +204,8 @@ impl HlsRewriter {
             return None;
         }
         Some(format!(
-            "/api/proxy?url={}{}",
+            "{}?url={}{}",
+            self.path,
             utf8_percent_encode(abs.as_str(), QUERY_VALUE),
             self.suffix
         ))
@@ -262,6 +278,18 @@ mod tests {
             "/api/proxy?url=http%3A%2F%2Fcdn.example.com%2Flive%2Fchan%2Fseg.ts&sourceId=s&ua=VLC%2F3.0%20x&origin=https%3A%2F%2Fo.example
 "
         );
+    }
+
+    #[test]
+    fn at_path_points_uris_at_another_proxy_route() {
+        let mut rw = HlsRewriter::new(base(), None).at_path("/T/api/proxy");
+        let out = rw
+            .push(b"#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\nseg.ts\n")
+            .unwrap();
+        let text = std::str::from_utf8(&out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].contains("URI=\"/T/api/proxy?url="), "{text}");
+        assert!(lines[1].starts_with("/T/api/proxy?url="), "{text}");
     }
 
     #[test]

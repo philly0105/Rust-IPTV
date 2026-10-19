@@ -65,12 +65,12 @@ A variant is stored under `variant_key`, the SHA-256 of `<normalised url>#w=<buc
 
 - When the original is cached (a row or a pending entry), the variant is made from that file with no upstream request, and the reply reports `hit`.
 - Otherwise the image is fetched once and only the resized copy is stored.
-- Only still JPEG and PNG wider than the bucket are resized (wider as shown, after the EXIF orientation). The copy is the bucket's width with the aspect ratio kept (Catmull-Rom). JPEG is encoded at quality 82 (`JPEG_QUALITY`); PNG stays PNG and keeps its alpha channel. The orientation is applied and the ICC profile carried over. Sources over 8192 px on a side, or needing more than 192 MiB to decode, are not decoded. Decode, resize and encode run on `spawn_blocking`.
+- Only still JPEG and PNG wider than the bucket are resized (wider as shown, after the EXIF orientation). The copy is the bucket's width with the aspect ratio kept: a source more than twice the bucket's width is first box-shrunk to twice the bucket (`imageops::thumbnail`, `PRESHRINK_FACTOR`), then resampled with Catmull-Rom, so a 2000x3000 original costs about what a 600x900 poster does. JPEG is encoded at quality 82 (`JPEG_QUALITY`); PNG stays PNG and keeps its alpha channel. The orientation is applied and the ICC profile carried over. Sources over 8192 px on a side, or needing more than 192 MiB to decode, are not decoded. Decode, resize and encode run on `spawn_blocking`, at most one fewer at once than the machine has cores (at least one; `resize_slots`), so a poster wall's first view does not take every core.
 - Everything else is served as stored: SVG, GIF, WebP, AVIF, ICO, BMP, animated PNG, images no wider than the bucket, files that do not decode, and copies that would not be smaller. The answer is then the original (fetched and stored under its own key when it was not cached), and the variant key is remembered in memory (`kept`, at most 65,536 keys, emptied by `images.clear`), so later requests at that width read the original without decoding it again. The memory does not survive a restart.
 
 In the UI, `imageUrl(src, sourceId, width)` and the helpers built on it (`imageAttempts`, `imageCandidates`, `preloadImage`, and `useImageChain` in `src/ui/image.ts`) take the CSS width and add `w`, rounded up on the client to the same buckets (`IMAGE_WIDTH_BUCKETS`, `imageWidthBucket`). A card then keeps one URL, and one browser-cache entry, across small layout changes; a picture wider than 1024 device px gets no `w`. Callers:
 
-- `Poster` measures its frame when the `<img>` mounts and adds `w` from its `clientWidth` (`sizedImageUrl`). `priority` posters (the movie, series and My Videos detail pages) load the original.
+- `Poster` takes `width`, or else the card width a rail provides through `PosterWidthContext` (`DashboardRail`, the VOD `PosterRail`), or else measures its frame when the `<img>` mounts and adds `w` from its `clientWidth` (`sizedImageUrl`). Reading `clientWidth` forced a layout per card when the artwork was cached (performance audit SH-6), so the rails pass the width they already set on each card. `priority` posters (the movie, series and My Videos detail pages) load the original.
 - `ChannelLogo` passes its `size` (36 by default: 64 at 1x, 96 at 2x), and the fullscreen channel panel passes 32.
 - No `w`: backdrops and heroes (`DetailHero`, `HeroCarousel`), cast photos, player artwork, the zap banner, channel history, multiview marks and the hover prefetch (`preloadImage` in `src/features/vod/hooks/prefetch.ts`, which warms the detail page's original).
 
@@ -88,7 +88,7 @@ The desktop loopback proxy mounts the same handler, so `w` works there too.
 `iptv_server::img::handler` serves `GET <base>/img?url=<absolute http(s) url>&sourceId=<id?>&w=<px?>`. The first value of each parameter wins (`w` trimmed), a blank `sourceId` counts as absent, and any other parameter is ignored (see [Browser copies after Clear](#browser-copies-after-clear)).
 
 - Server mode mounts it at `/api/img`, before the `/{*rest}` catch-all, outside the response compression layer (server.md): images go out as stored.
-- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks. CORS exposes `X-Image-Cache` to the webview.
+- The desktop loopback proxy mounts it at `/<token>/api/img`, next to `/proxy`, behind the same token, Origin and Host checks, and the UI loads it from the proxy's second listener (`app.info.imageBase`), so artwork does not wait behind streams for the webview's six connections per host and port. CORS exposes `X-Image-Cache` to the webview. Both listeners take a random port and the token is new on every launch, so desktop image URLs change between launches and the webview's own HTTP cache never serves a poster from an earlier session; the disk cache here still answers it without an upstream fetch. A stable image origin (a fixed loopback port or a token-free image path) would change the proxy's hardening model and is left for a separate decision (audit EP-6).
 
 | Status | When | Body |
 | --- | --- | --- |
@@ -127,4 +127,4 @@ With the guard active (`allow_private` off), a private or loopback target is ref
 
 ## Desktop
 
-The desktop app has no guard. Images are fetched with the shared client, plus the source's headers when `sourceId` is given. `imageUrl` builds the route from the proxy base (`.../proxy` becomes `.../img`), so images go through the token-protected loopback server.
+The desktop app has no guard. Images are fetched with the shared client, plus the source's headers when `sourceId` is given; the source row is read only on a miss, so a cache hit costs no database read for it. `imageUrl` builds the route from `app.info.imageBase` (or from the proxy base, `.../proxy` becoming `.../img`, when it is missing), so images go through the token-protected loopback server.

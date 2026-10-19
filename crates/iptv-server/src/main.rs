@@ -169,6 +169,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             allow_private_targets: args.allow_private_targets,
             allowed_hosts,
             allow_cross_site: false,
+            proxy_path: iptv_server::proxy::hls::PROXY_PATH.to_owned(),
         },
     );
 

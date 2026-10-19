@@ -1,9 +1,11 @@
 /**
- * Locale-aware number formatting with no other dependencies. The shell's import-progress toast
- * (shell/effects.ts) is in the entry chunk and needs only these two, so they live here instead of
- * pulling all of sources/lib/files.ts (decoders, pickers) and format.ts into the entry. Both are
- * re-exported from their old homes for existing callers.
+ * Locale-aware number formatting with no dependencies beyond the formatter cache (intl.ts). The
+ * shell's import-progress toast (shell/effects.ts) is in the entry chunk and needs only these two,
+ * so they live here instead of pulling all of sources/lib/files.ts (decoders, pickers) and
+ * format.ts into the entry. Both are re-exported from their old homes for existing callers.
  */
+
+import { numberFormat } from './intl';
 
 /** `1.2 GB`, `350 MB`, `12 KB` in the user's number format. */
 export function formatFileSize(bytes: number, lang: string): string {
@@ -16,7 +18,7 @@ export function formatFileSize(bytes: number, lang: string): string {
   }
   let text: string;
   try {
-    text = new Intl.NumberFormat(lang, { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
+    text = numberFormat(lang, { maximumFractionDigits: value < 10 && unit > 0 ? 1 : 0 }).format(value);
   } catch {
     text = String(Math.round(value));
   }
@@ -25,7 +27,7 @@ export function formatFileSize(bytes: number, lang: string): string {
 
 export function formatCount(n: number, lang: string): string {
   try {
-    return new Intl.NumberFormat(lang).format(n);
+    return numberFormat(lang).format(n);
   } catch {
     return String(n);
   }

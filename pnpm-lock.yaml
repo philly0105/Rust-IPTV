@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  mpegts.js@1.8.2:
+    hash: 8d96db66ce333e315f0d046c7134cb2c2433ed176b85916e6be06575ff6207e9
+    path: patches/mpegts.js@1.8.2.patch
+
 importers:
 
   .:
@@ -43,7 +48,7 @@ importers:
         version: 1.55.0(@types/react@19.3.0)(react@19.3.0)
       mpegts.js:
         specifier: 1.8.2
-        version: 1.8.2
+        version: 1.8.2(patch_hash=8d96db66ce333e315f0d046c7134cb2c2433ed176b85916e6be06575ff6207e9)
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -2855,7 +2860,7 @@ snapshots:
 
   mdn-data@2.27.1: {}
 
-  mpegts.js@1.8.2:
+  mpegts.js@1.8.2(patch_hash=8d96db66ce333e315f0d046c7134cb2c2433ed176b85916e6be06575ff6207e9):
     dependencies:
       es6-promise: 4.2.8
       events: 3.3.0

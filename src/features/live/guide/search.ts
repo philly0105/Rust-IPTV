@@ -76,11 +76,11 @@ export function groupForHit(current: string | undefined, hit: Pick<GuideSearchHi
 
 /** Channels per request while looking for a row; the core's largest page. */
 export const LOCATE_PAGE = 1000;
-/** Pages looked through before giving up (60k channels). */
-export const LOCATE_MAX_PAGES = 60;
 
 /**
- * Index of the channel `key` in a paged channel list, reading pages in order until it turns up.
+ * Index of the channel `key` in a paged channel list, reading pages in order until it turns up
+ * or the list ends (bounded by its total, not a page count: a row past 60k was reported missing,
+ * LV-2). The fallback after `paged.locate`, which finds a numbered channel in a few reads.
  * Null when it is not in the list (hidden, another group) or `isCancelled` says to stop.
  */
 export async function findChannelIndex(
@@ -88,12 +88,11 @@ export async function findChannelIndex(
   key: ItemKey,
   isCancelled: () => boolean = () => false,
 ): Promise<number | null> {
-  for (let page = 0; page < LOCATE_MAX_PAGES; page++) {
+  for (let page = 0; ; page++) {
     if (isCancelled()) return null;
     const res = await fetchPage(page * LOCATE_PAGE, LOCATE_PAGE);
     const i = res.items.findIndex((c) => itemKey(c.ref) === key);
     if (i >= 0) return res.offset + i;
     if (res.items.length === 0 || res.offset + res.items.length >= res.total) return null;
   }
-  return null;
 }

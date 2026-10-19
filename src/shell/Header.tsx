@@ -1,5 +1,5 @@
 import { ListTree, Moon, Search, SquareChevronRight, Sun } from 'lucide-react';
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -12,8 +12,9 @@ import { useTheme } from './theme';
 /**
  * `narrow`: below lg, where the rail is auto-collapsed. The tour's search anchor (Run 3 C7) then
  * moves to the rail's Search link, since the "Search everything" button folds away there.
+ * Memoized (performance audit SH-1): the shell's own re-renders pass it by.
  */
-export function Header({ panelInline, narrow = false }: { panelInline: boolean; narrow?: boolean }) {
+export const Header = memo(function Header({ panelInline, narrow = false }: { panelInline: boolean; narrow?: boolean }) {
   const { t } = useTranslation('shell');
   const header = useShellStore((s) => s.header);
   const hasPanel = useShellStore((s) => s.contextPanel !== null && s.panelDrawer);
@@ -152,4 +153,4 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
       </div>
     </header>
   );
-}
+});

@@ -134,10 +134,14 @@ struct Env {
 
 impl Env {
     async fn call(&self, cmd: &str, args: Value) -> Value {
-        self.router
+        let v = self
+            .router
             .dispatch(self.state.clone(), cmd, args)
             .await
-            .unwrap_or_else(|e| panic!("{cmd} failed: {e:?}"))
+            .unwrap_or_else(|e| panic!("{cmd} failed: {e:?}"));
+        // Cache rows are written in the background (DB-1).
+        self.state.flush_background_writes().await;
+        v
     }
 
     fn enable(&self, key: Option<&str>) {

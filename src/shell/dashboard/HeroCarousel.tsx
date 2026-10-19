@@ -34,7 +34,7 @@
  */
 
 import { ChevronLeft, ChevronRight, Info, Pause, Play, Star } from 'lucide-react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -439,7 +439,8 @@ function SlideBody({
 const oscButton =
   'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-glass-muted hover:bg-on-glass/15 hover:text-on-glass active:bg-on-glass/25 motion-safe:transition-colors';
 
-export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HERO_DWELL_MS }: HeroCarouselProps) {
+/** Memoized (SH-4): Home passes stable props, so another rail's answer does not re-render the hero. */
+export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HERO_DWELL_MS }: HeroCarouselProps) {
   const { t } = useTranslation('shell');
   const baseId = useId();
   const panelId = `${baseId}-slide`;
@@ -643,4 +644,4 @@ export function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HE
       </div>
     </section>
   );
-}
+});

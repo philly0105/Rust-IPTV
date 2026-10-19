@@ -8,8 +8,14 @@ vi.mock('@/api/transport', () => ({
   isDesktop: false,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+// Unchanged behaviour; the calls count the bar's own renders (it asks once per render).
+vi.mock('./useNarrow', async (orig) => {
+  const real = await orig<typeof import('./useNarrow')>();
+  return { ...real, useNarrow: vi.fn(real.useNarrow) };
+});
 
-const { usePlayerStore, __resetPlayerForTests } = await import('../store');
+const { useNarrow } = await import('./useNarrow');
+const { usePlayerStore, __resetPlayerForTests, reportProgress } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { Controls, RecordControl, keepSpares, playerMenuJustClosed } = await import('./Controls');
 const { usePipStore } = await import('../pip');
@@ -211,6 +217,62 @@ describe('Controls live rewind', () => {
     render(<Controls variant="dock" visible />);
     expect(screen.getByTestId('live-badge')).toBeTruthy();
     expect(screen.getByRole('slider', { name: /seek/i }).getAttribute('aria-valuetext')).not.toMatch(/behind/);
+  });
+});
+
+describe('Controls re-renders (PB-4)', () => {
+  const seek = (): HTMLElement => screen.getByRole('slider', { name: /seek/i });
+  const barRenders = (): number => vi.mocked(useNarrow).mock.calls.length;
+
+  it('playback progress re-renders the seek bar and time, not the whole bar', () => {
+    render(<Controls variant="overlay" visible />);
+    const before = barRenders();
+    act(() => {
+      usePlayerStore.setState({ positionSeconds: 11 });
+      useMediaStore.setState({ buffered: [{ start: 0, end: 30 }] });
+    });
+    act(() => usePlayerStore.setState({ positionSeconds: 12.5 }));
+    expect(seek().getAttribute('aria-valuenow')).toBe('12');
+    expect(screen.getByText(/^0:12/)).toBeTruthy();
+    expect(barRenders()).toBe(before);
+  });
+
+  it('hidden chrome stops following the position and shows the current one when it comes back', () => {
+    const { rerender } = render(<Controls variant="overlay" visible={false} />);
+    act(() => usePlayerStore.setState({ positionSeconds: 42 }));
+    expect(seek().getAttribute('aria-valuenow')).toBe('10');
+    rerender(<Controls variant="overlay" visible />);
+    expect(seek().getAttribute('aria-valuenow')).toBe('42');
+    act(() => usePlayerStore.setState({ positionSeconds: 43 }));
+    expect(seek().getAttribute('aria-valuenow')).toBe('43');
+  });
+
+  it('live: the go-live readout follows the position on its own too', () => {
+    const live = { url: 'http://h/live/1.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false };
+    act(() => {
+      usePlayerStore.setState({ source: live, durationSeconds: undefined, positionSeconds: 1000 });
+      useMediaStore.setState({ seekable: { start: 900, end: 1090 } });
+    });
+    render(<Controls variant="overlay" visible />);
+    const before = barRenders();
+    act(() => usePlayerStore.setState({ positionSeconds: 1030 }));
+    expect(screen.getByTestId('behind-live').textContent).toBe('1:00 behind live');
+    act(() => usePlayerStore.setState({ positionSeconds: 1089 }));
+    expect(screen.queryByTestId('behind-live')).toBeNull();
+    expect(screen.getByTestId('live-badge')).toBeTruthy();
+    expect(barRenders()).toBe(before);
+  });
+
+  it('a report that repeats the last one leaves the store alone', () => {
+    const listener = vi.fn();
+    const stop = usePlayerStore.subscribe(listener);
+    reportProgress(10, 600);
+    reportProgress(10);
+    expect(listener).not.toHaveBeenCalled();
+    reportProgress(11, 600);
+    reportProgress(11, 601);
+    expect(listener).toHaveBeenCalledTimes(2);
+    stop();
   });
 });
 

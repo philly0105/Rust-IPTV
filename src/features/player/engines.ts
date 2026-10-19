@@ -5,6 +5,10 @@
  * hls.js, shaka and mpegts.js are code-split; a direct mp4 never loads any of them.
  */
 
+// The ESM build of hls.js only starts its transmuxing worker from a script URL; without one it
+// demuxes every fragment on the UI thread.
+import hlsWorkerUrl from 'hls.js/dist/hls.worker.js?url';
+
 import type { MpvStats, PlayerSource } from '@/api/types';
 
 import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
@@ -52,8 +56,19 @@ export interface Engine {
   timeOffset?(): number;
   /** What the library knows about the stream now (stream info overlay); the element adds the rest. */
   stats?(): Partial<MpvStats>;
+  /**
+   * The element took over after mpegts.js found no MPEG-TS in an extensionless live stream
+   * (`createEngine`): an element error then is not worth another try through mpegts.js.
+   */
+  readonly fellBack?: boolean;
   destroy(): void;
 }
+
+/**
+ * Buffer settings. `tile`: a multi-view tile, which can't seek and plays small, so it keeps
+ * only a few seconds behind the playhead and hls.js picks no rendition above the tile's size.
+ */
+export type EngineProfile = 'main' | 'tile';
 
 export const EMPTY_TRACKS: EngineTracks = { qualities: [], qualityAuto: true, audio: [], text: [] };
 
@@ -375,12 +390,24 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
 // hls.js
 // ---------------------------------------------------------------------------
 
+/**
+ * The main player's last hls.js bandwidth estimate (bits/s). Each zap builds a new `Hls`, which
+ * would otherwise start every multi-rendition stream from hls.js's 500 kbps default.
+ */
+let hlsBandwidth: number | undefined;
+
+/** Test hook: forget the carried bandwidth estimate. */
+export function resetHlsBandwidth(): void {
+  hlsBandwidth = undefined;
+}
+
 async function hlsEngine(
   el: HTMLMediaElement,
   source: PlayerSource,
   url: string,
   cb: EngineCallbacks,
   wantCaptions: boolean,
+  profile: EngineProfile,
   signal?: AbortSignal,
 ): Promise<Engine> {
   const { default: Hls } = await import('hls.js');
@@ -394,10 +421,16 @@ async function hlsEngine(
     return nativeEngine(el, url, cb);
   }
   const rewrite = proxyRewrite(url);
+  const tile = profile === 'tile';
   const hls = new Hls({
     enableWorker: true,
+    workerPath: hlsWorkerUrl,
     lowLatencyMode: false,
-    backBufferLength: source.isLive ? 30 : 90,
+    backBufferLength: tile ? 5 : source.isLive ? 30 : 90,
+    // A tile never seeks back, and fetching the top rendition for a 640x360 slot wastes bandwidth.
+    ...(tile ? { maxBufferLength: 10, capLevelToPlayerSize: true } : {}),
+    // Undefined would replace hls.js's default, so the key is only there with a value.
+    ...(hlsBandwidth ? { abrEwmaDefaultEstimate: hlsBandwidth } : {}),
     startPosition: !source.isLive && source.resumeSeconds ? source.resumeSeconds : -1,
     // Bounded retries with backoff, then a fatal error the overlay can act on.
     fragLoadPolicy: {
@@ -533,6 +566,9 @@ async function hlsEngine(
     },
     destroy() {
       destroyed = true;
+      // Tiles share the link four ways: only the main player's estimate is carried.
+      const bw = hls.bandwidthEstimate;
+      if (!tile && Number.isFinite(bw) && bw > 0) hlsBandwidth = bw;
       hls.destroy();
       el.removeAttribute('src');
     },
@@ -548,6 +584,25 @@ interface ShakaErrorLike {
   code?: number;
   category?: number;
   data?: unknown[];
+}
+
+/**
+ * shaka's `destroy()` is async and clears the element's `src` when it is done. The next engine on
+ * the element waits for it (`createEngine`), at most SHAKA_TEARDOWN_WAIT_MS, or shaka would empty
+ * the element under it.
+ */
+const shakaTeardowns = new WeakMap<HTMLMediaElement, Promise<void>>();
+export const SHAKA_TEARDOWN_WAIT_MS = 300;
+
+/** Resolves when shaka has let go of `el`, or after SHAKA_TEARDOWN_WAIT_MS; at once when it never held it. */
+function shakaReleased(el: HTMLMediaElement): Promise<void> | null {
+  const pending = shakaTeardowns.get(el);
+  if (!pending) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, SHAKA_TEARDOWN_WAIT_MS);
+  });
+  return Promise.race([pending, cap]).finally(() => clearTimeout(timer));
 }
 
 /** shaka BAD_HTTP_STATUS (1001) carries `[uri, status, responseText, ...]`: the reason from our own server. */
@@ -712,7 +767,11 @@ async function shakaEngine(
     },
     destroy() {
       destroyed = true;
-      void player.destroy();
+      const done = player.destroy().catch(() => undefined);
+      shakaTeardowns.set(el, done);
+      void done.then(() => {
+        if (shakaTeardowns.get(el) === done) shakaTeardowns.delete(el);
+      });
     },
   };
 }
@@ -751,6 +810,69 @@ export function mseSupported(): boolean {
   return typeof window !== 'undefined' && ('MediaSource' in window || 'ManagedMediaSource' in window);
 }
 
+/**
+ * A live TV stream (not radio) whose URL names no container (`/live/u/p/123`). Most of them
+ * serve raw MPEG-TS, which Chromium's element can't play: they start in mpegts.js
+ * (`createEngine`), and what each source's host turned out to serve is remembered.
+ */
+export function isUnlabelledLive(source: Pick<PlayerSource, 'kind' | 'url' | 'isLive' | 'isRadio'>): boolean {
+  return source.isLive && !source.isRadio && worthSniffingAsMpegTs(source);
+}
+
+/** What an unlabelled live stream from a source's host played in: mpegts.js or the element. */
+export type LiveFormat = 'ts' | 'native';
+
+/** localStorage: `{ "<sourceId>|<host>": "ts" | "native" }`, most recent last. */
+export const LIVE_FORMATS_KEY = 'player.liveFormats';
+/** Hosts remembered; the oldest go first. */
+const LIVE_FORMATS_MAX = 200;
+
+type LiveFormatSource = Pick<PlayerSource, 'kind' | 'url' | 'isLive' | 'isRadio' | 'ref'>;
+
+function liveFormatKey(source: LiveFormatSource): string | null {
+  if (!isUnlabelledLive(source)) return null;
+  try {
+    return `${source.ref?.sourceId ?? ''}|${new URL(source.url).host}`;
+  } catch {
+    return null;
+  }
+}
+
+function readLiveFormats(): Record<string, LiveFormat> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(LIVE_FORMATS_KEY) ?? '{}');
+    const out: Record<string, LiveFormat> = {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
+    for (const [k, v] of Object.entries(parsed)) if (v === 'ts' || v === 'native') out[k] = v;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** What this source's host served last time, if this is an unlabelled live stream. */
+export function liveFormatFor(source: LiveFormatSource): LiveFormat | undefined {
+  const key = liveFormatKey(source);
+  return key ? readLiveFormats()[key] : undefined;
+}
+
+/** An unlabelled live stream played in `format`: the next one from its source's host starts there. */
+export function rememberLiveFormat(source: LiveFormatSource, format: LiveFormat): void {
+  const key = liveFormatKey(source);
+  if (!key) return;
+  const all = readLiveFormats();
+  if (all[key] === format) return;
+  delete all[key];
+  all[key] = format;
+  const keys = Object.keys(all);
+  for (const old of keys.slice(0, Math.max(0, keys.length - LIVE_FORMATS_MAX))) delete all[old];
+  try {
+    localStorage.setItem(LIVE_FORMATS_KEY, JSON.stringify(all));
+  } catch {
+    // storage full or blocked: the next zap probes again
+  }
+}
+
 /** Live restarts (stream closed, network drop) allowed before the error surfaces. */
 export const TS_MAX_RESTARTS = 4;
 /** Playback this long without trouble refills the restart budget. */
@@ -768,7 +890,10 @@ async function mpegtsEngine(
   source: PlayerSource,
   url: string,
   cb: EngineCallbacks,
+  profile: EngineProfile,
   signal?: AbortSignal,
+  /** Called instead of `cb.onError` when the stream turns out not to be MPEG-TS before any media played. */
+  onNotTs?: () => void,
 ): Promise<Engine> {
   const { default: mpegts } = await import('mpegts.js');
   // A superseded engine attaching late would steal the element from the newer one.
@@ -796,6 +921,8 @@ async function mpegtsEngine(
   let loadComplete = false;
   /** The stream produced media once: only then is a dropped connection restarted here. */
   let hadMedia = false;
+  /** Handed to `onNotTs`: whatever this pipeline reports after that is moot. */
+  let handedOff = false;
   /** Live only: element time lost to reconnects, so the displayed position keeps running. */
   let offset = 0;
   /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
@@ -807,10 +934,10 @@ async function mpegtsEngine(
     // (or serve a whole loop at once) would be skipped to the last seconds, then end and reconnect.
     enableStashBuffer: !isLive,
     liveBufferLatencyChasing: false,
-    // Hours-long sessions must not sit at the SourceBuffer quota.
+    // Hours-long sessions must not sit at the SourceBuffer quota. A tile never seeks back.
     autoCleanupSourceBuffer: true,
-    autoCleanupMaxBackwardDuration: 60,
-    autoCleanupMinBackwardDuration: 30,
+    autoCleanupMaxBackwardDuration: profile === 'tile' ? 10 : 60,
+    autoCleanupMinBackwardDuration: profile === 'tile' ? 5 : 30,
     lazyLoad: !isLive,
     lazyLoadMaxDuration: 60,
     reuseRedirectedURL: true,
@@ -844,7 +971,7 @@ async function mpegtsEngine(
     const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: absolute, cors: true }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
-      if (player !== p || destroyed) return;
+      if (player !== p || destroyed || handedOff) return;
       const http = info?.code && info.code > 0 ? ` (HTTP ${info.code})` : '';
       const message = `${detail || type}${http}`;
       if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
@@ -864,6 +991,12 @@ async function mpegtsEngine(
         return;
       }
       if (type === mpegts.ErrorTypes.MEDIA_ERROR) {
+        const notTs = detail === mpegts.ErrorDetails.MEDIA_FORMAT_UNSUPPORTED || detail === mpegts.ErrorDetails.MEDIA_FORMAT_ERROR;
+        if (notTs && !hadMedia && onNotTs) {
+          handedOff = true;
+          onNotTs();
+          return;
+        }
         const unsupported =
           detail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED || detail === mpegts.ErrorDetails.MEDIA_FORMAT_UNSUPPORTED;
         fail({ message, fatal: true, kind: unsupported ? 'unsupported' : 'media' });
@@ -918,6 +1051,7 @@ async function mpegtsEngine(
   };
   // Listener order does not matter: until rebased, `timeOffset()` holds the display at the anchor.
   const onData = (): void => {
+    if (!hadMedia) rememberLiveFormat(source, 'ts');
     hadMedia = true;
   };
   el.addEventListener('timeupdate', rebase);
@@ -982,26 +1116,84 @@ async function mpegtsEngine(
 }
 
 /**
+ * An unlabelled live stream (`isUnlabelledLive`): mpegts.js first, which knows from the first
+ * chunk whether the data is MPEG-TS. When it is not, and nothing has played yet, the element gets
+ * the stream instead, once. Either outcome is remembered for the source's host.
+ */
+async function tsFirstEngine(
+  el: HTMLMediaElement,
+  source: PlayerSource,
+  url: string,
+  cb: EngineCallbacks,
+  profile: EngineProfile,
+  signal?: AbortSignal,
+): Promise<Engine> {
+  let destroyed = false;
+  let fellBack = false;
+  let current: Engine = NOOP_ENGINE;
+  const onNativeData = (): void => rememberLiveFormat(source, 'native');
+  const fallBack = (): void => {
+    if (destroyed || fellBack) return;
+    fellBack = true;
+    current.destroy();
+    el.addEventListener('loadeddata', onNativeData, { once: true });
+    current = nativeEngine(el, url, cb);
+    // A new `src` pauses the element.
+    void el.play().catch(() => undefined);
+  };
+  // Out of mpegts.js's own error dispatch before its player is torn down.
+  current = await mpegtsEngine(el, source, url, cb, profile, signal, () => queueMicrotask(fallBack));
+  if (current === NOOP_ENGINE) return current;
+  return {
+    get kind() {
+      return current.kind;
+    },
+    get fellBack() {
+      return fellBack;
+    },
+    setQuality: (id) => current.setQuality(id),
+    setAudio: (id) => current.setAudio(id),
+    setText: (id) => current.setText(id),
+    recover: () => current.recover(),
+    timeOffset: () => current.timeOffset?.() ?? 0,
+    stats: () => current.stats?.() ?? {},
+    destroy() {
+      destroyed = true;
+      el.removeEventListener('loadeddata', onNativeData);
+      current.destroy();
+    },
+  };
+}
+
+/**
  * Attach the right engine. `loadUrl` is `proxiedUrl(source)`.
  * Resume for direct/file (including MPEG-TS VOD) is applied by the caller on `loadedmetadata`.
  * `forceMpegts` is set after the element rejected an extensionless direct stream.
+ * `profile` defaults to the main player's buffers.
  */
 export async function createEngine(
   el: HTMLMediaElement,
   source: PlayerSource,
   loadUrl: string,
   cb: EngineCallbacks,
-  opts: { captions: boolean; signal?: AbortSignal; forceMpegts?: boolean },
+  opts: { captions: boolean; signal?: AbortSignal; forceMpegts?: boolean; profile?: EngineProfile },
 ): Promise<Engine> {
+  const profile = opts.profile ?? 'main';
+  const released = shakaReleased(el);
+  if (released) {
+    await released;
+    if (opts.signal?.aborted) return NOOP_ENGINE;
+  }
   switch (source.kind) {
     case 'hls':
-      return hlsEngine(el, source, loadUrl, cb, opts.captions, opts.signal);
+      return hlsEngine(el, source, loadUrl, cb, opts.captions, profile, opts.signal);
     case 'dash':
       return shakaEngine(el, source, loadUrl, cb, opts.captions, opts.signal);
     default:
-      if ((opts.forceMpegts || looksLikeMpegTs(source)) && mseSupported()) {
-        return mpegtsEngine(el, source, loadUrl, cb, opts.signal);
-      }
+      if (!mseSupported()) return nativeEngine(el, loadUrl, cb);
+      if (opts.forceMpegts || looksLikeMpegTs(source)) return mpegtsEngine(el, source, loadUrl, cb, profile, opts.signal);
+      // The element would download until FFmpeg's probe gives up on raw MPEG-TS, then error.
+      if (isUnlabelledLive(source) && liveFormatFor(source) !== 'native') return tsFirstEngine(el, source, loadUrl, cb, profile, opts.signal);
       return nativeEngine(el, loadUrl, cb);
   }
 }

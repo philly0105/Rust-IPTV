@@ -51,6 +51,77 @@ const mpegtsMock = {
 };
 vi.mock('mpegts.js', () => ({ default: mpegtsMock }));
 
+class FakeHls {
+  static created: FakeHls[] = [];
+  static isSupported = (): boolean => true;
+  static Events = {
+    MANIFEST_PARSED: 'manifestParsed',
+    LEVELS_UPDATED: 'levelsUpdated',
+    LEVEL_SWITCHED: 'levelSwitched',
+    AUDIO_TRACKS_UPDATED: 'audioTracksUpdated',
+    AUDIO_TRACK_SWITCHED: 'audioTrackSwitched',
+    SUBTITLE_TRACKS_UPDATED: 'subtitleTracksUpdated',
+    SUBTITLE_TRACK_SWITCH: 'subtitleTrackSwitch',
+    ERROR: 'hlsError',
+  };
+  static ErrorTypes = { NETWORK_ERROR: 'networkError', MEDIA_ERROR: 'mediaError' };
+  levels = [];
+  audioTracks = [];
+  subtitleTracks = [];
+  subtitleDisplay = false;
+  bandwidthEstimate = Number.NaN;
+  destroyed = false;
+  constructor(public config: Record<string, unknown>) {
+    FakeHls.created.push(this);
+  }
+  on(): void {}
+  loadSource(): void {}
+  attachMedia(): void {}
+  destroy(): void {
+    this.destroyed = true;
+  }
+}
+vi.mock('hls.js', () => ({ default: FakeHls }));
+
+class FakeShaka {
+  static created: FakeShaka[] = [];
+  static isBrowserSupported = (): boolean => true;
+  /** Resolves `destroy()`; a test that never calls it leaves shaka's teardown pending. */
+  release: () => void = () => undefined;
+  constructor() {
+    FakeShaka.created.push(this);
+  }
+  configure(): void {}
+  getNetworkingEngine(): null {
+    return null;
+  }
+  addEventListener(): void {}
+  async attach(): Promise<void> {}
+  async load(): Promise<void> {}
+  getVariantTracks(): [] {
+    return [];
+  }
+  getAudioLanguagesAndRoles(): [] {
+    return [];
+  }
+  getTextTracks(): [] {
+    return [];
+  }
+  destroy(): Promise<void> {
+    return new Promise((resolve) => {
+      this.release = resolve;
+    });
+  }
+}
+vi.mock('shaka-player', () => ({
+  default: {
+    polyfill: { installAll() {} },
+    Player: FakeShaka,
+    net: { NetworkingEngine: { RequestType: { MANIFEST: 0 } } },
+    util: { Error: { Severity: { CRITICAL: 2 }, Category: { NETWORK: 1 } } },
+  },
+}));
+
 const engines = await import('./engines');
 const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS } = engines;
 
@@ -69,6 +140,10 @@ const cb = () => ({ onTracks: vi.fn(), onError: vi.fn() });
 
 beforeEach(() => {
   FakeTsPlayer.created = [];
+  FakeHls.created = [];
+  FakeShaka.created = [];
+  engines.resetHlsBandwidth();
+  localStorage.clear();
   mpegtsMock.createPlayer.mockClear();
   mpegtsMock.isSupported.mockReturnValue(true);
   (window as unknown as { MediaSource?: unknown }).MediaSource = function MediaSource() {};
@@ -159,6 +234,196 @@ describe('engine selection', () => {
     el.setAttribute('src', 'blob:mse');
     old.destroy();
     expect(el.getAttribute('src')).toBe('blob:mse');
+  });
+});
+
+describe('hls.js setup', () => {
+  const hls = (extra: Partial<PlayerSource> = {}): PlayerSource => src('http://h/live/1.m3u8', { kind: 'hls', ...extra });
+
+  it('transmuxes in a worker: the config names the worker script (PB-1)', async () => {
+    await createEngine(video(), hls(), 'http://h/live/1.m3u8', cb(), { captions: false });
+    const config = FakeHls.created[0]!.config;
+    expect(config['enableWorker']).toBe(true);
+    expect(config['workerPath']).toEqual(expect.stringContaining('hls.worker'));
+  });
+
+  it("starts the next stream from the main player's last bandwidth estimate (PB-6)", async () => {
+    const first = await createEngine(video(), hls(), 'http://h/live/1.m3u8', cb(), { captions: false });
+    // No estimate yet: hls.js keeps its own default (an undefined key would replace it).
+    expect(FakeHls.created[0]!.config).not.toHaveProperty('abrEwmaDefaultEstimate');
+    FakeHls.created[0]!.bandwidthEstimate = 8_000_000;
+    first.destroy();
+    await createEngine(video(), hls(), 'http://h/live/2.m3u8', cb(), { captions: false });
+    expect(FakeHls.created[1]!.config['abrEwmaDefaultEstimate']).toBe(8_000_000);
+
+    // A tile reads it but does not write its share of the link back.
+    const tile = await createEngine(video(), hls(), 'http://h/live/3.m3u8', cb(), { captions: false, profile: 'tile' });
+    expect(FakeHls.created[2]!.config['abrEwmaDefaultEstimate']).toBe(8_000_000);
+    FakeHls.created[2]!.bandwidthEstimate = 2_000_000;
+    tile.destroy();
+    await createEngine(video(), hls(), 'http://h/live/4.m3u8', cb(), { captions: false });
+    expect(FakeHls.created[3]!.config['abrEwmaDefaultEstimate']).toBe(8_000_000);
+  });
+
+  it('a multi-view tile keeps a short buffer and caps the rendition at its size (PB-5)', async () => {
+    await createEngine(video(), hls(), 'http://h/live/1.m3u8', cb(), { captions: false });
+    await createEngine(video(), hls(), 'http://h/live/1.m3u8', cb(), { captions: false, profile: 'tile' });
+    const [main, tile] = FakeHls.created.map((x) => x.config);
+    expect(main).toMatchObject({ backBufferLength: 30 });
+    expect(main).not.toHaveProperty('capLevelToPlayerSize');
+    expect(tile).toMatchObject({ backBufferLength: 5, maxBufferLength: 10, capLevelToPlayerSize: true });
+  });
+});
+
+describe('mpegts.js buffer profile (PB-5)', () => {
+  it('a tile cleans up behind the playhead after 10 s, down to 5 s', async () => {
+    await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', cb(), { captions: false, profile: 'tile' });
+    await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', cb(), { captions: false });
+    const [tile, main] = FakeTsPlayer.created.map((p) => p.config);
+    expect(tile).toMatchObject({ autoCleanupMaxBackwardDuration: 10, autoCleanupMinBackwardDuration: 5 });
+    expect(main).toMatchObject({ autoCleanupMaxBackwardDuration: 60, autoCleanupMinBackwardDuration: 30 });
+  });
+});
+
+describe("shaka's async teardown (PB-7)", () => {
+  const dash = src('http://h/m.mpd', { kind: 'dash', isLive: false });
+
+  it('the next engine on the element waits until shaka has let go of it', async () => {
+    const el = video();
+    const old = await createEngine(el, dash, 'http://h/m.mpd', cb(), { captions: false });
+    old.destroy();
+    let attached = false;
+    const next = createEngine(el, src('http://h/n.mp4', { isLive: false }), 'http://h/n.mp4', cb(), { captions: false }).then((e) => {
+      attached = true;
+      return e;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(attached).toBe(false);
+    expect(el.hasAttribute('src')).toBe(false);
+    FakeShaka.created[0]!.release();
+    expect((await next).kind).toBe('native');
+    expect(el.getAttribute('src')).toBe('http://h/n.mp4');
+  });
+
+  it('waits at most SHAKA_TEARDOWN_WAIT_MS, and a superseded request never touches the element', async () => {
+    vi.useFakeTimers();
+    const el = video();
+    (await createEngine(el, dash, 'http://h/m.mpd', cb(), { captions: false })).destroy();
+    const abort = new AbortController();
+    const stale = createEngine(el, src('http://h/a.mp4', { isLive: false }), 'http://h/a.mp4', cb(), { captions: false, signal: abort.signal });
+    const next = createEngine(el, src('http://h/b.mp4', { isLive: false }), 'http://h/b.mp4', cb(), { captions: false });
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(engines.SHAKA_TEARDOWN_WAIT_MS);
+    (await stale).destroy();
+    expect((await next).kind).toBe('native');
+    expect(el.getAttribute('src')).toBe('http://h/b.mp4');
+  });
+
+  it('an element shaka never held starts at once', async () => {
+    vi.useFakeTimers();
+    const pending = createEngine(video(), src('http://h/a.mp4', { isLive: false }), 'http://h/a.mp4', cb(), { captions: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await pending).kind).toBe('native');
+  });
+});
+
+describe('extensionless live streams start in mpegts.js (PB-2)', () => {
+  const { liveFormatFor, rememberLiveFormat, isUnlabelledLive } = engines;
+  const ref = { sourceId: 's1', contentType: 'live' as const, itemId: '1' };
+  const ch = (url: string, extra: Partial<PlayerSource> = {}): PlayerSource => src(url, { ref, ...extra });
+
+  it('only live TV with no container in the URL counts', () => {
+    expect(isUnlabelledLive(ch('http://h/live/u/p/101'))).toBe(true);
+    expect(isUnlabelledLive(ch('http://h/live/u/p/101', { isRadio: true }))).toBe(false);
+    expect(isUnlabelledLive(ch('http://h/movie/u/p/9', { isLive: false }))).toBe(false);
+    expect(isUnlabelledLive(ch('http://h/live/u/p/101.m3u8'))).toBe(false);
+    expect(isUnlabelledLive(ch('http://h/live/u/p/101.ts'))).toBe(false); // mpegts.js anyway, nothing to learn
+  });
+
+  it('starts in mpegts.js and remembers the host as MPEG-TS once it plays', async () => {
+    const el = video();
+    const engine = await createEngine(el, ch('http://h/live/u/p/101'), 'http://h/live/u/p/101', cb(), { captions: false });
+    expect(engine.kind).toBe('mpegts');
+    expect(FakeTsPlayer.created).toHaveLength(1);
+    expect(liveFormatFor(ch('http://h/live/u/p/102'))).toBeUndefined();
+    el.dispatchEvent(new Event('loadeddata'));
+    expect(liveFormatFor(ch('http://h/live/u/p/102'))).toBe('ts');
+    expect(JSON.parse(localStorage.getItem(engines.LIVE_FORMATS_KEY)!)).toEqual({ 's1|h': 'ts' });
+  });
+
+  it('hands the stream to the element once when mpegts.js finds no MPEG-TS, and remembers that', async () => {
+    const el = video();
+    const callbacks = cb();
+    const engine = await createEngine(el, ch('http://h/live/u/p/101'), 'http://h/live/u/p/101', callbacks, { captions: false });
+    const ts = FakeTsPlayer.created[0]!;
+    ts.emit('error', 'MediaError', 'FormatUnsupported', { msg: 'Non MPEG-TS/FLV' });
+    ts.emit('error', 'MediaError', 'FormatUnsupported', { msg: 'Non MPEG-TS/FLV' });
+    await Promise.resolve();
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    expect(ts.destroyed).toBe(true);
+    expect(engine.kind).toBe('native');
+    expect(engine.fellBack).toBe(true);
+    expect(el.getAttribute('src')).toBe('http://h/live/u/p/101');
+    expect(el.play).toHaveBeenCalled();
+    expect(liveFormatFor(ch('http://h/live/u/p/102'))).toBeUndefined();
+    el.dispatchEvent(new Event('loadeddata'));
+    expect(liveFormatFor(ch('http://h/live/u/p/102'))).toBe('native');
+
+    // The next channel from that host goes to the element directly.
+    const next = await createEngine(video(), ch('http://h/live/u/p/102'), 'http://h/live/u/p/102', cb(), { captions: false });
+    expect(next.kind).toBe('native');
+    expect(FakeTsPlayer.created).toHaveLength(1);
+    engine.destroy();
+    expect(el.hasAttribute('src')).toBe(false);
+  });
+
+  it('a format error after media played, or a refusal, is reported instead', async () => {
+    const el = video();
+    const callbacks = cb();
+    const engine = await createEngine(el, ch('http://h/live/u/p/101'), 'http://h/live/u/p/101', callbacks, { captions: false });
+    el.dispatchEvent(new Event('loadeddata'));
+    FakeTsPlayer.created[0]!.emit('error', 'MediaError', 'FormatError', {});
+    await Promise.resolve();
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'media', fatal: true }));
+    expect(engine.kind).toBe('mpegts');
+
+    const refused = cb();
+    await createEngine(video(), ch('http://h2/live/u/p/7'), 'http://h2/live/u/p/7', refused, { captions: false });
+    FakeTsPlayer.created[1]!.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 404 });
+    expect(refused.onError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 404)' }));
+  });
+
+  it('remembers per source and host; radio, VOD and named containers stay on the element', async () => {
+    rememberLiveFormat(ch('http://h/live/u/p/1'), 'native');
+    const otherSource = await createEngine(video(), ch('http://h/live/u/p/2', { ref: { ...ref, sourceId: 's2' } }), 'http://h/live/u/p/2', cb(), { captions: false });
+    const otherHost = await createEngine(video(), ch('http://h2/live/u/p/2'), 'http://h2/live/u/p/2', cb(), { captions: false });
+    expect([otherSource.kind, otherHost.kind]).toEqual(['mpegts', 'mpegts']);
+
+    const radio = await createEngine(video(), ch('http://r/stream', { isRadio: true }), 'http://r/stream', cb(), { captions: false });
+    const vod = await createEngine(video(), ch('http://h/movie/u/p/9', { isLive: false }), 'http://h/movie/u/p/9', cb(), { captions: false });
+    const mp4 = await createEngine(video(), ch('http://h/live/clip.mp4'), 'http://h/live/clip.mp4', cb(), { captions: false });
+    expect([radio.kind, vod.kind, mp4.kind]).toEqual(['native', 'native', 'native']);
+    expect(FakeTsPlayer.created).toHaveLength(2);
+  });
+
+  it('a host remembered as native that the element rejects, and then plays in mpegts.js, is MPEG-TS again', async () => {
+    rememberLiveFormat(ch('http://h/live/u/p/1'), 'native');
+    const el = video();
+    // The player's own retry after the element's error (`forceMpegts`).
+    const engine = await createEngine(el, ch('http://h/live/u/p/1'), 'http://h/live/u/p/1', cb(), { captions: false, forceMpegts: true });
+    expect(engine.kind).toBe('mpegts');
+    expect(engine.fellBack).toBeUndefined();
+    el.dispatchEvent(new Event('loadeddata'));
+    expect(liveFormatFor(ch('http://h/live/u/p/3'))).toBe('ts');
+  });
+
+  it('a stored entry that is not a format map reads as nothing remembered', () => {
+    localStorage.setItem(engines.LIVE_FORMATS_KEY, '["ts"]');
+    expect(liveFormatFor(ch('http://h/live/u/p/1'))).toBeUndefined();
+    localStorage.setItem(engines.LIVE_FORMATS_KEY, '{"s1|h":"flv"}');
+    expect(liveFormatFor(ch('http://h/live/u/p/1'))).toBeUndefined();
+    localStorage.setItem(engines.LIVE_FORMATS_KEY, '{oops');
+    expect(liveFormatFor(ch('http://h/live/u/p/1'))).toBeUndefined();
   });
 });
 

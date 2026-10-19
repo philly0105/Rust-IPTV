@@ -202,24 +202,20 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
         fail({ kind, message });
         return;
       }
-      // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through mpegts.js.
-      const sniff = code === 4 && sniffedRef.current !== s.url && mseSupported() && worthSniffingAsMpegTs(s);
-      // The element hides the HTTP status and reports a refusal (a 503, a 404) as code 4 too; our own
-      // server's answer says why. A refusal fails now instead of going through mpegts.js, which would
-      // only be refused again. A 2xx answer, or none to read, still gets the mpegts.js retry.
-      void fetchFailureReason(proxiedUrl(s)).then((r) => {
-        if (!isCurrent()) return;
-        if (r) {
-          fail({ kind: 'network', message: withReason(message, r.reason, r.status) });
-          return;
-        }
-        if (!sniff) {
-          fail({ kind, message });
-          return;
-        }
+      // An extensionless stream the element cannot play is often raw MPEG-TS: one retry through
+      // mpegts.js, unless mpegts.js already found something else there (a live stream starts in it).
+      // A refusal (a 503, a 404) also reads as code 4 here; mpegts.js sees the status and asks our
+      // own server for the reason itself, so no request goes out first to find out.
+      if (code === 4 && sniffedRef.current !== s.url && !engineRef.current?.fellBack && mseSupported() && worthSniffingAsMpegTs(s)) {
         sniffedRef.current = s.url;
         failed = true;
         setNonce((n) => n + 1);
+        return;
+      }
+      // The element hides the HTTP status and body; our own server's answer says why.
+      void fetchFailureReason(proxiedUrl(s)).then((r) => {
+        if (!isCurrent()) return;
+        fail(r ? { kind: 'network', message: withReason(message, r.reason, r.status) } : { kind, message });
       });
     };
 
@@ -246,7 +242,7 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
                 if (err.fatal) fail({ kind: err.kind, message: err.message });
               },
             },
-            { captions: false, signal: abort.signal, forceMpegts: sniffedRef.current === src.url },
+            { captions: false, signal: abort.signal, forceMpegts: sniffedRef.current === src.url, profile: 'tile' },
           );
           if (!isCurrent()) {
             engine.destroy();

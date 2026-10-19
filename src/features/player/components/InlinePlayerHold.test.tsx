@@ -1,6 +1,7 @@
 /**
  * A zap between live channels keeps the last frame up until the next channel draws its own
  * (L3-player-ui-x4): no black flash between engines. A retry, a stop or a move to VOD does not.
+ * Also: which element errors on an extensionless live channel get a retry through mpegts.js (PB-2).
  */
 
 import { act, cleanup, render } from '@testing-library/react';
@@ -22,6 +23,7 @@ vi.mock('../engines', async (importOriginal) => ({
   createEngine: vi.fn(async () => ({ destroy: vi.fn() })),
 }));
 
+const { createEngine } = await import('../engines');
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { resetMedia } = await import('../media');
 const { InlinePlayer, holdLastFrame, ZAP_HOLD_MAX_MS } = await import('./InlinePlayer');
@@ -117,5 +119,42 @@ describe('the last frame across a zap (L3-player-ui-x4)', () => {
     expect(drawImage).not.toHaveBeenCalled();
     const el = document.createElement('video');
     expect(holdLastFrame(el, document.createElement('canvas'))).toBe(false);
+  });
+});
+
+describe('element errors on an extensionless live channel (PB-2)', () => {
+  const channel: PlayerSource = { url: 'http://h/live/u/p/101', kind: 'direct', title: 'News', isLive: true, isRadio: false };
+  const rejects = (): void => {
+    Object.defineProperty(video(), 'error', { value: { code: 4, message: '' }, configurable: true });
+    act(() => void video().dispatchEvent(new Event('error')));
+  };
+
+  beforeEach(() => {
+    (window as unknown as { MediaSource?: unknown }).MediaSource = function MediaSource() {};
+    vi.mocked(createEngine).mockClear();
+  });
+  afterEach(() => {
+    delete (window as unknown as { MediaSource?: unknown }).MediaSource;
+    vi.mocked(createEngine).mockImplementation(async () => ({ destroy: vi.fn() }) as never);
+  });
+
+  it('the element (a host remembered as not MPEG-TS) gets one retry through mpegts.js', async () => {
+    vi.mocked(createEngine).mockImplementation(async () => ({ kind: 'native', destroy: vi.fn() }) as never);
+    render(<InlinePlayer />);
+    await tune(channel);
+    await vi.waitFor(() => expect(createEngine).toHaveBeenCalledTimes(1));
+    rejects();
+    await vi.waitFor(() => expect(createEngine).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(createEngine).mock.calls[1]![4]).toMatchObject({ forceMpegts: true });
+  });
+
+  it('the element that took over after mpegts.js found no MPEG-TS gets no second mpegts.js try', async () => {
+    vi.mocked(createEngine).mockImplementation(async () => ({ kind: 'native', fellBack: true, destroy: vi.fn() }) as never);
+    render(<InlinePlayer />);
+    await tune(channel);
+    await vi.waitFor(() => expect(createEngine).toHaveBeenCalledTimes(1));
+    rejects();
+    await vi.waitFor(() => expect(usePlayerStore.getState().status).toBe('error'));
+    expect(createEngine).toHaveBeenCalledTimes(1);
   });
 });

@@ -277,58 +277,77 @@ pub async fn persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
     }
     let rt = Runtime::get(state);
     let res = state
-        .db_call(move |conn| {
-            ensure_items_table(&rt, conn)?;
-            let now = chrono::Utc::now().timestamp_millis();
-            let tx = conn.transaction()?;
-            let mut sources: Vec<String> = Vec::new();
-            {
-                let mut stmt = tx.prepare_cached(
-                    "INSERT INTO stalker_items (source_id, content_type, item_id, raw_json, category_name, touched_at, category_id)
-                     SELECT id, ?2, ?3, ?4, ?5, ?6, ?7 FROM sources WHERE id = ?1
-                     ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET
-                       raw_json = excluded.raw_json,
-                       category_name = COALESCE(excluded.category_name, stalker_items.category_name),
-                       category_id = COALESCE(excluded.category_id, stalker_items.category_id),
-                       touched_at = excluded.touched_at",
-                )?;
-                for (r, item) in &rows {
-                    stmt.execute(rusqlite::params![
-                        r.source_id,
-                        r.content_type.as_str(),
-                        r.item_id,
-                        item.raw.to_string(),
-                        item.category_name,
-                        now,
-                        item.category_id
-                    ])?;
-                    if !sources.contains(&r.source_id) {
-                        sources.push(r.source_id.clone());
-                    }
-                }
-            }
-            // Rows of titles the user saved (favorites, history, continue
-            // watching, My List) are kept past the cap: parental controls
-            // read their category from here.
-            for sid in &sources {
-                tx.execute(
-                    "DELETE FROM stalker_items WHERE source_id = ?1 AND touched_at < (
-                       SELECT touched_at FROM stalker_items WHERE source_id = ?1
-                       ORDER BY touched_at DESC LIMIT 1 OFFSET ?2)
-                     AND NOT EXISTS (SELECT 1 FROM favorites u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
-                     AND NOT EXISTS (SELECT 1 FROM recent u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
-                     AND NOT EXISTS (SELECT 1 FROM playback_positions u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
-                     AND NOT EXISTS (SELECT 1 FROM watchlist u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)",
-                    rusqlite::params![sid, PERSISTED_ROWS_CAP],
-                )?;
-            }
-            tx.commit()?;
-            Ok(())
-        })
+        .db_write(move |conn| write_items(&rt, conn, &rows))
         .await;
     if let Err(err) = res {
         tracing::warn!(error = %err, "could not persist Stalker rows");
     }
+}
+
+/// [`persist_items`] in the background: a movie or series page does not
+/// wait for the write while an import holds the write lock (DB-1). The rows
+/// are in the runtime's memory already.
+pub fn spawn_persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
+    if rows.is_empty() {
+        return;
+    }
+    let rt = Runtime::get(state);
+    state
+        .writer()
+        .spawn("Stalker rows", move |conn| write_items(&rt, conn, &rows));
+}
+
+fn write_items(
+    rt: &Runtime,
+    conn: &mut rusqlite::Connection,
+    rows: &[(ItemRef, CachedItem)],
+) -> CoreResult<()> {
+    ensure_items_table(rt, conn)?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let tx = conn.transaction()?;
+    let mut sources: Vec<String> = Vec::new();
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO stalker_items (source_id, content_type, item_id, raw_json, category_name, touched_at, category_id)
+             SELECT id, ?2, ?3, ?4, ?5, ?6, ?7 FROM sources WHERE id = ?1
+             ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET
+               raw_json = excluded.raw_json,
+               category_name = COALESCE(excluded.category_name, stalker_items.category_name),
+               category_id = COALESCE(excluded.category_id, stalker_items.category_id),
+               touched_at = excluded.touched_at",
+        )?;
+        for (r, item) in rows {
+            stmt.execute(rusqlite::params![
+                r.source_id,
+                r.content_type.as_str(),
+                r.item_id,
+                item.raw.to_string(),
+                item.category_name,
+                now,
+                item.category_id
+            ])?;
+            if !sources.contains(&r.source_id) {
+                sources.push(r.source_id.clone());
+            }
+        }
+    }
+    // Rows of titles the user saved (favorites, history, continue
+    // watching, My List) are kept past the cap: parental controls
+    // read their category from here.
+    for sid in &sources {
+        tx.execute(
+            "DELETE FROM stalker_items WHERE source_id = ?1 AND touched_at < (
+               SELECT touched_at FROM stalker_items WHERE source_id = ?1
+               ORDER BY touched_at DESC LIMIT 1 OFFSET ?2)
+             AND NOT EXISTS (SELECT 1 FROM favorites u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
+             AND NOT EXISTS (SELECT 1 FROM recent u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
+             AND NOT EXISTS (SELECT 1 FROM playback_positions u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)
+             AND NOT EXISTS (SELECT 1 FROM watchlist u WHERE u.source_id = stalker_items.source_id AND u.content_type = stalker_items.content_type AND u.item_id = stalker_items.item_id)",
+            rusqlite::params![sid, PERSISTED_ROWS_CAP],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// A row remembered in memory or, failing that, in `stalker_items`.

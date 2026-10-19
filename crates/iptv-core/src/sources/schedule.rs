@@ -1,11 +1,17 @@
 //! Scheduled auto-refresh of sources.
 //!
-//! Every [`TICK`] (and once 3 s after boot) each source with `autoRefresh`
-//! whose last good refresh is older than `sourceRefreshIntervalHours` is
-//! re-imported through [`super::try_run_import`], one source at a time with
-//! [`STAGGER`] between them. With the interval at 0 nothing is scheduled
-//! (the startup pass in [`super::init`] still refreshes every auto-refresh
-//! source, the behavior before the scheduler existed).
+//! Every [`TICK`] each source with `autoRefresh` whose last good refresh is
+//! older than `sourceRefreshIntervalHours` is re-imported through
+//! [`super::try_run_import`], one source at a time with [`STAGGER`] between
+//! them. With the interval at 0 nothing is scheduled.
+//!
+//! The startup pass ([`startup`], run [`super::STARTUP_REFRESH_DELAY`] after
+//! boot by [`super::init`]) uses the same rules, planned against
+//! [`STARTUP_MAX_AGE_HOURS`] when the interval is 0 or longer: an
+//! auto-refresh source is re-imported at startup when it was never
+//! refreshed or its last good refresh is more than a day old (sooner with a
+//! shorter interval), as the setting's hint says. Before (ST-1) every
+//! auto-refresh source was re-imported on every launch.
 //!
 //! Rules (all decided by the pure [`next_due`]):
 //! - A source that was never refreshed is due at once.
@@ -38,6 +44,8 @@ pub const TICK: Duration = Duration::from_secs(10 * 60);
 pub const STAGGER: Duration = Duration::from_secs(20);
 /// First retry delay after a failed scheduled refresh.
 pub const BACKOFF_BASE: Duration = Duration::from_secs(30 * 60);
+/// Oldest a source may be at startup before [`startup`] refreshes it.
+pub const STARTUP_MAX_AGE_HOURS: u32 = 24;
 
 const MEMORY_KEY: &str = "sources.schedule";
 
@@ -176,15 +184,43 @@ pub struct TickReport {
     pub busy: Vec<String>,
 }
 
+/// The interval a pass plans against for the setting `hours`: the setting
+/// itself for the scheduler (`None`, nothing scheduled, at 0), and at most
+/// [`STARTUP_MAX_AGE_HOURS`] for the startup pass.
+pub fn plan_hours(hours: u32, startup: bool) -> Option<u32> {
+    match (hours, startup) {
+        (0, false) => None,
+        (0, true) => Some(STARTUP_MAX_AGE_HOURS),
+        (h, false) => Some(h),
+        (h, true) => Some(h.min(STARTUP_MAX_AGE_HOURS)),
+    }
+}
+
 /// One scheduler pass: refreshes every due source, one at a time, `stagger`
 /// apart. Each source is re-checked right before its refresh (settings,
 /// edits, removes and manual refreshes during the stagger count).
 pub async fn tick(state: &Arc<AppState>, clock: &dyn Clock, stagger: Duration) -> TickReport {
+    pass(state, clock, stagger, false).await
+}
+
+/// The startup pass: [`tick`] planned against [`plan_hours`] for startup, so
+/// only sources never refreshed or older than a day (or than a shorter
+/// interval) are re-imported, also with the interval at 0.
+pub async fn startup(state: &Arc<AppState>, clock: &dyn Clock, stagger: Duration) -> TickReport {
+    pass(state, clock, stagger, true).await
+}
+
+async fn pass(
+    state: &Arc<AppState>,
+    clock: &dyn Clock,
+    stagger: Duration,
+    startup: bool,
+) -> TickReport {
     let mut report = TickReport::default();
-    let interval = state.settings_snapshot().source_refresh_interval_hours;
-    if interval == 0 {
+    let setting = state.settings_snapshot().source_refresh_interval_hours;
+    let Some(interval) = plan_hours(setting, startup) else {
         return report;
-    }
+    };
     let sources = match list(state).await {
         Ok(s) => s,
         Err(err) => {
@@ -202,10 +238,10 @@ pub async fn tick(state: &Arc<AppState>, clock: &dyn Clock, stagger: Duration) -
         if i > 0 && !stagger.is_zero() {
             tokio::time::sleep(stagger).await;
         }
-        let interval = state.settings_snapshot().source_refresh_interval_hours;
-        if interval == 0 {
+        let setting = state.settings_snapshot().source_refresh_interval_hours;
+        let Some(interval) = plan_hours(setting, startup) else {
             break;
-        }
+        };
         let Ok(source) = get(state, id).await else {
             continue;
         };
@@ -429,6 +465,16 @@ mod tests {
             Some("2026-10-11T00:00:00Z"),
         );
         assert_eq!(next_due(&old, 12, None), Some(t("2026-10-12T12:00:00Z")));
+    }
+
+    #[test]
+    fn startup_plans_against_a_day_at_most() {
+        assert_eq!(plan_hours(0, false), None);
+        assert_eq!(plan_hours(12, false), Some(12));
+        assert_eq!(plan_hours(48, false), Some(48));
+        assert_eq!(plan_hours(0, true), Some(24));
+        assert_eq!(plan_hours(6, true), Some(6));
+        assert_eq!(plan_hours(48, true), Some(24));
     }
 
     #[test]

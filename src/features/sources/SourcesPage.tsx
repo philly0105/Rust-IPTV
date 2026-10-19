@@ -36,7 +36,7 @@ import {
   type StatusFilter,
 } from './lib/listView';
 import { isRemovalPending, scheduleRemoval, usePendingRemovals } from './lib/pendingRemoval';
-import { beginImport, cancelImport, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
+import { beginImport, cancelImport, isRunningPhase, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
 import { redactText } from './lib/redact';
 import { dropSourcesFromLists } from './lib/userLists';
 import { applyOrder, moveItem } from './lib/reorder';
@@ -193,7 +193,9 @@ export function SourcesPage() {
     beginImport(s.id);
     try {
       const updated = await rpc('sources.refresh', { id: s.id });
-      await Promise.all([invalidate('sources.'), invalidate('catalog.')]);
+      // Catalog queries refetch on the core's `sources.changed` when the catalog changed; an
+      // unchanged playlist keeps them (ST-5).
+      await invalidate('sources.');
       // A re-import can detect guide links that were not there before (new url-tvg, changed Xtream login).
       const guides = newlyEnabledEpgUrls(s.epg, updated.epg);
       if (guides.length > 0) void refreshGuides(guides);
@@ -243,6 +245,8 @@ export function SourcesPage() {
         if (run.stopped) break;
         // Removed (waiting for Undo) since the run started.
         if (isRemovalPending(s.id)) continue;
+        // Importing already (its own Refresh, the schedule, a sync): no second import (ST-2).
+        if (isRunningPhase(useImportProgressStore.getState().bySource[s.id]?.phase)) continue;
         setRefreshAllStep({ current: i + 1, total: targets.length });
         run.currentId = s.id;
         const outcome = await refreshOne(s);

@@ -8,7 +8,7 @@ use super::Runtime;
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, ImportSummary, Source, SourceKind};
-use crate::sources::{progress, Importer};
+use crate::sources::{progress, Importer, ProgressGate};
 use crate::state::AppState;
 use crate::xtream::sync::{replace_catalogs_with, CatalogPart};
 use serde_json::Value;
@@ -195,8 +195,13 @@ async fn run(
     let keep_radio = radio.is_none();
     let radio = radio.unwrap_or_default();
 
+    // One import maps and saves at a time (ST-2); held until the write ends.
+    let slot = crate::sources::save_slot(state).await?;
+
     // Map rows.
     let total = (channels.len() + radio.len()) as u64;
+    // At most one parse event per 250 ms; the final count always goes out.
+    let mut gate = ProgressGate::default();
     let known: HashSet<&str> = genres.iter().map(|g| g.category_id.as_str()).collect();
     let mut live_rows: Vec<ItemRow> = Vec::with_capacity(channels.len());
     let mut seen: HashSet<String> = HashSet::new();
@@ -211,7 +216,7 @@ async fn run(
                 live_rows.push(row);
             }
         }
-        if (i + 1) % 2000 == 0 {
+        if (i + 1) % 2000 == 0 && gate.due(std::time::Instant::now()) {
             emit("parsing", (i + 1) as u64, Some(total), None);
         }
     }
@@ -297,6 +302,7 @@ async fn run(
     let st = state.clone();
     let (counts, kept_radio) = state
         .db_call(move |conn| {
+            let _slot = slot;
             // A refresh deletes the previous rows first (L3-perf-core-4).
             let had_rows: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM items WHERE source_id = ?1)",

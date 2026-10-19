@@ -30,8 +30,13 @@ use store::SourceConfig;
 pub const IMPORTERS_KEY: &str = "importers";
 /// `AppState.extensions` key of the per-source import locks.
 pub const LOCKS_KEY: &str = "sources.locks";
-/// Delay between boot and the startup refresh of auto-refresh sources.
-pub const STARTUP_REFRESH_DELAY: Duration = Duration::from_secs(3);
+/// Delay between boot and the startup refresh of auto-refresh sources
+/// ([`schedule::startup`]). Late enough that the window, the first screen's
+/// queries and the first stream are done on a slow machine before an import
+/// downloads and takes the write lock; at 3 s the pass ran while WebView2
+/// was still loading (ST-1). The pass refreshes only sources that are due,
+/// so most launches import nothing.
+pub const STARTUP_REFRESH_DELAY: Duration = Duration::from_secs(30);
 
 /// Importer registry stored under [`IMPORTERS_KEY`].
 pub type ImporterRegistry = DashMap<SourceKind, Arc<dyn Importer>>;
@@ -118,7 +123,9 @@ impl SaveStep {
     }
 }
 
-/// Emits `import.progress` (C6). Importers call it at least every 2000 items.
+/// Emits `import.progress` (C6). Importers report parse and save counts at
+/// most every 2000 items and at most every [`ProgressGate::EVERY`], plus the
+/// final count.
 pub fn progress(
     state: &AppState,
     source_id: &str,
@@ -161,6 +168,30 @@ pub fn progress_step(state: &AppState, source_id: &str, step: SaveStep, written:
             step: Some(step.as_str()),
         },
     );
+}
+
+/// How often an importer reports progress: the first event at once, then at
+/// most every [`Self::EVERY`], however fast the rows or chunks arrive (each
+/// event re-renders every source card). A run sends its final count
+/// whatever the gate says.
+#[derive(Debug, Default)]
+pub struct ProgressGate {
+    last: Option<std::time::Instant>,
+}
+
+impl ProgressGate {
+    pub const EVERY: Duration = Duration::from_millis(250);
+
+    /// True when an event may go out at `now` (and counts it as sent).
+    pub fn due(&mut self, now: std::time::Instant) -> bool {
+        match self.last {
+            Some(t) if now.saturating_duration_since(t) < Self::EVERY => false,
+            _ => {
+                self.last = Some(now);
+                true
+            }
+        }
+    }
 }
 
 /// Emits `import.progress` with `phase: "error"`, the message and its
@@ -690,6 +721,36 @@ pub fn is_cancelled_error(err: &CoreError) -> bool {
     matches!(err, CoreError::Conflict(m) if m == REMOVED_OR_CHANGED_MESSAGE || m == USER_CANCELLED_MESSAGE)
 }
 
+/// True for [`user_cancelled_error`] only.
+fn is_user_cancel(err: &CoreError) -> bool {
+    matches!(err, CoreError::Conflict(m) if m == USER_CANCELLED_MESSAGE)
+}
+
+/// A copy of `err` for the refreshes that joined a running import
+/// (`CoreError` is not `Clone`): the same variant, code and message.
+fn copy_error(err: &CoreError) -> CoreError {
+    match err {
+        CoreError::NotFound(m) => CoreError::NotFound(m.clone()),
+        CoreError::Invalid(m) => CoreError::Invalid(m.clone()),
+        CoreError::Network(m) => CoreError::Network(m.clone()),
+        CoreError::Auth(m) => CoreError::Auth(m.clone()),
+        CoreError::Timeout(m) => CoreError::Timeout(m.clone()),
+        CoreError::Server(m) => CoreError::Server(m.clone()),
+        CoreError::EngineMissing(m) => CoreError::EngineMissing(m.clone()),
+        CoreError::Conflict(m) => CoreError::Conflict(m.clone()),
+        CoreError::Unsupported(m) => CoreError::Unsupported(m.clone()),
+        CoreError::Io(e) => CoreError::Io(std::io::Error::new(e.kind(), e.to_string())),
+        CoreError::Db(rusqlite::Error::QueryReturnedNoRows) => {
+            CoreError::Db(rusqlite::Error::QueryReturnedNoRows)
+        }
+        CoreError::Db(rusqlite::Error::SqliteFailure(e, m)) => CoreError::Db(
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(e.extended_code), m.clone()),
+        ),
+        CoreError::Db(e) => CoreError::Other(anyhow::anyhow!("{e}")),
+        CoreError::Other(e) => CoreError::Other(anyhow::anyhow!("{e:#}")),
+    }
+}
+
 /// How long a cancelled import may take to stop on its own (cooperative
 /// checks between fetch, parse and save) before [`run_import`] drops it.
 /// A catalog writer still running on the blocking pool then rolls back at
@@ -854,6 +915,21 @@ pub fn cancel_import(state: &AppState, id: &str) -> bool {
     true
 }
 
+/// Cancels every import, refresh and partial sync running now, for app exit
+/// (HO-4): each stops at its next check and keeps its previous catalog, and
+/// a catalog writer rolls back before it commits, which releases the write
+/// lock. Returns how many were running.
+pub fn cancel_all_imports(state: &AppState) -> usize {
+    let runs: Vec<Arc<ActiveRun>> = active(state)
+        .iter()
+        .map(|r| Arc::clone(r.value()))
+        .collect();
+    for run in &runs {
+        run.token.cancel();
+    }
+    runs.len()
+}
+
 /// Runs `fut` while holding the per-source import lock that [`run_import`]
 /// and [`remove`] take, so a partial sync (e.g. `xtream.sync` with a
 /// `contentTypes` subset) never interleaves with a full refresh of the same
@@ -927,6 +1003,111 @@ impl<T> CancelOutcome for CoreResult<T> {
 impl<T> CancelOutcome for Result<T, String> {
     fn cancelled(err: CoreError) -> Self {
         Err(error_text(&err))
+    }
+}
+
+/// `AppState.extensions` key of the full imports in progress, which a
+/// [`refresh`] of the same source joins instead of importing again (ST-2).
+const INFLIGHT_KEY: &str = "sources.inflight";
+
+/// The result of a full import, once it has ended.
+type Joined = Option<Arc<CoreResult<(Source, ImportSummary)>>>;
+
+/// One full import in progress ([`run_import`], not a partial sync).
+struct Running {
+    token: tokio_util::sync::CancellationToken,
+    result: tokio::sync::watch::Receiver<Joined>,
+}
+
+type InflightMap = DashMap<String, Arc<Running>>;
+
+/// Registers a full import for [`join_running_import`]; [`Self::finish`]
+/// hands its result to the refreshes that joined it, and dropping it
+/// unregisters the run.
+struct Inflight {
+    map: Arc<InflightMap>,
+    id: String,
+    running: Arc<Running>,
+    tx: tokio::sync::watch::Sender<Joined>,
+}
+
+impl Inflight {
+    fn new(state: &AppState, id: &str, token: tokio_util::sync::CancellationToken) -> Self {
+        let (tx, result) = tokio::sync::watch::channel(None);
+        let running = Arc::new(Running { token, result });
+        let map =
+            state.ext_or_insert_with::<InflightMap>(INFLIGHT_KEY, || Arc::new(DashMap::new()));
+        map.insert(id.to_string(), running.clone());
+        Self {
+            map,
+            id: id.to_string(),
+            running,
+            tx,
+        }
+    }
+
+    fn finish(&self, result: &CoreResult<(Source, ImportSummary)>) {
+        let copy = match result {
+            Ok(done) => Ok(done.clone()),
+            Err(err) => Err(copy_error(err)),
+        };
+        self.tx.send_modify(|joined| *joined = Some(Arc::new(copy)));
+    }
+}
+
+impl Drop for Inflight {
+    fn drop(&mut self) {
+        self.map
+            .remove_if(&self.id, |_, r| Arc::ptr_eq(r, &self.running));
+    }
+}
+
+/// Waits for the full import of `id` that is running and returns a copy of
+/// its result. `None` when there is none to join: nothing runs, a partial
+/// sync holds the lock, the run was already cancelled, or it ended without
+/// a result (dropped).
+async fn join_running_import(
+    state: &AppState,
+    id: &str,
+) -> Option<CoreResult<(Source, ImportSummary)>> {
+    let running = state
+        .ext::<InflightMap>(INFLIGHT_KEY)?
+        .get(id)
+        .map(|r| Arc::clone(r.value()))?;
+    if running.token.is_cancelled() {
+        return None;
+    }
+    let mut rx = running.result.clone();
+    drop(running);
+    let done = rx.wait_for(Option::is_some).await.ok()?;
+    let joined: Joined = (*done).clone();
+    drop(done);
+    let shared = joined?;
+    Some(match &*shared {
+        Ok(v) => Ok(v.clone()),
+        Err(err) => Err(copy_error(err)),
+    })
+}
+
+/// `AppState.extensions` key of the import save slot ([`save_slot`]).
+const SAVE_SLOT_KEY: &str = "sources.saveSlot";
+
+/// Waits for the app's one import decode-and-save slot (ST-2). Imports of
+/// several sources may download at the same time, but only one decodes its
+/// answers and writes its catalog, so two large syncs never hold their rows
+/// in memory together. The slot is held until the permit drops. Inside a
+/// run, a cancel ends the wait.
+pub async fn save_slot(state: &AppState) -> CoreResult<tokio::sync::OwnedSemaphorePermit> {
+    let slot = state.ext_or_insert_with::<tokio::sync::Semaphore>(SAVE_SLOT_KEY, || {
+        Arc::new(tokio::sync::Semaphore::new(1))
+    });
+    let closed = || CoreError::Other(anyhow::anyhow!("the import queue is closed"));
+    match import_cancel() {
+        Some(token) => tokio::select! {
+            permit = slot.acquire_owned() => permit.map_err(|_| closed()),
+            () = token.cancelled() => Err(import_cancelled_error()),
+        },
+        None => slot.acquire_owned().await.map_err(|_| closed()),
     }
 }
 
@@ -1170,6 +1351,19 @@ async fn run_import_locked(
     guard: tokio::sync::OwnedMutexGuard<()>,
 ) -> CoreResult<(Source, ImportSummary)> {
     let token = current_token(&state, id);
+    // A refresh of this source while it runs joins it (ST-2).
+    let inflight = Inflight::new(&state, id, token.clone());
+    let result = run_import_inner(state, id, guard, token).await;
+    inflight.finish(&result);
+    result
+}
+
+async fn run_import_inner(
+    state: Arc<AppState>,
+    id: &str,
+    guard: tokio::sync::OwnedMutexGuard<()>,
+    token: tokio_util::sync::CancellationToken,
+) -> CoreResult<(Source, ImportSummary)> {
     if token.is_cancelled() {
         // Queued behind an import that `remove` cancelled.
         return Err(import_cancelled_error());
@@ -1514,6 +1708,13 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
+    // Only the auto-refresh flag changed: no catalog, list or guide reader
+    // cares, so clients refetch `sources.*` only (ST-5).
+    let reason = if name.is_none() && config.is_none() && epg.is_none() && position.is_none() {
+        ChangeReason::Status
+    } else {
+        ChangeReason::Config
+    };
     let _same = match claim {
         Some(_) => Some(identity_lock(state).lock_owned().await),
         None => None,
@@ -1578,7 +1779,7 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     if portal_changed {
         crate::stalker::forget_source(state, id).await;
     }
-    emit_changed(state, Some(id), ChangeReason::Config);
+    emit_changed(state, Some(id), reason);
     Ok(updated)
 }
 
@@ -1589,7 +1790,12 @@ pub async fn remove(state: &AppState, id: &str) -> CoreResult<()> {
     let lock = lock_for(state, id);
     let _guard = lock.lock().await;
     let sid = id.to_string();
+    // Deleting a large catalog holds the write lock for seconds: other
+    // writes wait for it instead of failing after the 5 s busy timeout, as
+    // during an import (DB-2). `remove_all` and a backup Replace come here.
+    let long = crate::db::long_write();
     let deleted = state.db_call(move |c| store::delete(c, &sid)).await;
+    drop(long);
     // Imports after this (a failed delete, or an id reused) start uncancelled.
     cancels(state).remove(id);
     deleted?;
@@ -1635,9 +1841,19 @@ pub async fn reorder(state: &AppState, ids: Vec<String>) -> CoreResult<()> {
 ///
 /// User-initiated (a card's Refresh, the add dialog's Try again): an
 /// unreachable host fails after the short connect timeout, as in [`add`]
-/// (L4-settings-4). The startup pass ([`refresh_all`]) and the schedule
-/// call the importer directly and keep the background 10 s and retries.
+/// (L4-settings-4). The startup pass and the schedule ([`schedule`]) call
+/// the importer directly and keep the background 10 s and retries.
+///
+/// A source that is importing already is not imported twice (ST-2): the
+/// refresh waits for that import and returns its result. A run that an
+/// edit or a remove stopped does not count; the refresh then imports again
+/// (with the new settings) as before.
 pub async fn refresh(state: Arc<AppState>, id: &str) -> CoreResult<Source> {
+    match join_running_import(&state, id).await {
+        Some(Err(err)) if is_cancelled_error(&err) && !is_user_cancel(&err) => {}
+        Some(joined) => return joined.map(|(source, _)| source),
+        None => {}
+    }
     Ok(crate::http::interactive(run_import(state, id)).await?.0)
 }
 
@@ -1674,28 +1890,33 @@ pub async fn counts(state: &AppState, id: &str) -> CoreResult<SourceCounts> {
     })
 }
 
-/// Schedules the startup refresh of auto-refresh sources 3 s after boot (in
-/// the background; boot does not wait for it), then the periodic refresh
-/// every `sourceRefreshIntervalHours` (see [`schedule`]; 0 = startup only).
+/// Schedules the startup refresh of the auto-refresh sources that are due
+/// [`STARTUP_REFRESH_DELAY`] after boot (in the background; boot does not
+/// wait for it; see [`schedule::startup`]), then the periodic refresh every
+/// `sourceRefreshIntervalHours` (see [`schedule`]; 0 = startup only).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     if state.ext::<()>("sources.started").is_some() {
         return Ok(());
     }
     state.set_ext("sources.started", Arc::new(()));
+    // Weak: the task ends when the app state is dropped.
+    let weak = Arc::downgrade(&state);
+    drop(state);
     tokio::spawn(async move {
         tokio::time::sleep(STARTUP_REFRESH_DELAY).await;
-        match refresh_all(state.clone()).await {
-            Ok(r) if r.refreshed.is_empty() && r.failed.is_empty() => {}
-            Ok(r) => tracing::info!(
+        let Some(state) = weak.upgrade() else {
+            return;
+        };
+        let r = schedule::startup(&state, &schedule::SystemClock, schedule::STAGGER).await;
+        if !(r.refreshed.is_empty() && r.failed.is_empty()) {
+            tracing::info!(
                 refreshed = r.refreshed.len(),
                 failed = r.failed.len(),
                 "startup refresh finished"
-            ),
-            Err(err) => tracing::warn!(%err, "startup refresh failed"),
+            );
         }
-        // account: the periodic refresh. Weak: the loop ends when the app state is dropped.
-        let weak = Arc::downgrade(&state);
         drop(state);
+        // account: the periodic refresh.
         schedule::run(weak, schedule::TICK).await;
     });
     Ok(())

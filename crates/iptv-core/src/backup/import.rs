@@ -1419,7 +1419,11 @@ async fn import_entry(
         )
         .await
         {
-            Ok(()) => true,
+            Ok(total) => {
+                // Ends the source's progress toast, as `sources::run_import` does.
+                crate::sources::progress(state, id, "done", total, Some(total), None);
+                true
+            }
             Err(msg) => {
                 warnings.push(format!(
                     "{}: catalog not loaded ({msg}); the source was kept and its favorites and history will be restored after the first successful refresh",
@@ -1469,13 +1473,13 @@ async fn load_deferred(
 ) {
     let mut failed = 0usize;
     for d in deferred {
-        let ok = crate::sources::run_import_with(
+        let loaded = crate::sources::run_import_with(
             &state,
             &d.id,
             run_importer(&state, &d.id, d.kind, d.run_cfg),
         )
-        .await
-        .is_ok();
+        .await;
+        let ok = loaded.is_ok();
         failed += usize::from(!ok);
         // As in the foreground: Stalker state applies even without a catalog.
         if ok || d.kind == SourceKind::Stalker {
@@ -1488,6 +1492,11 @@ async fn load_deferred(
                     tracing::warn!(source_id = %d.id, %err, "parked backup state could not be applied");
                 }
             }
+        }
+        // `done` once the parked state is in, so it and `sources.changed`
+        // reach clients together: one refetch round, not two (ST-5).
+        if let Ok(total) = loaded {
+            crate::sources::progress(&state, &d.id, "done", total, Some(total), None);
         }
         crate::sources::emit_changed(&state, Some(&d.id), crate::sources::ChangeReason::Catalog);
     }
@@ -1519,7 +1528,8 @@ async fn set_error_coded(
 }
 
 /// Runs the registered importer for `kind` on source `id`, recording the
-/// outcome on the row. Returns a user-facing message on failure. `run_cfg`
+/// outcome on the row. Returns the item total for the caller's `done`
+/// progress, or a user-facing message on failure. `run_cfg`
 /// replaces the stored m3u config for this run only (the `text` origin that
 /// parses the embedded playlist).
 async fn run_importer(
@@ -1527,7 +1537,7 @@ async fn run_importer(
     id: &str,
     kind: SourceKind,
     run_cfg: Option<M3uSourceConfig>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let Some(imp) = crate::sources::importer(state, kind) else {
         let msg = format!("no {kind} importer is available");
         let code = crate::error::RpcErrorCode::Unsupported;
@@ -1569,10 +1579,7 @@ async fn run_importer(
                     tracing::warn!(source_id = %id, error = %err, "could not record the portal totals");
                 }
             }
-            // Ends the source's progress toast, as `sources::run_import` does.
-            let total = (summary.channels + summary.movies + summary.series).max(0) as u64;
-            crate::sources::progress(state, id, "done", total, Some(total), None);
-            Ok(())
+            Ok((summary.channels + summary.movies + summary.series).max(0) as u64)
         }
         Err(err) => {
             let msg = crate::sources::error_text(&err);

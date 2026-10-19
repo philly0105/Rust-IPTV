@@ -23,7 +23,10 @@ struct Env {
 
 impl Env {
     async fn call(&self, cmd: &str, args: Value) -> Result<Value, RpcError> {
-        self.router.dispatch(self.state.clone(), cmd, args).await
+        let out = self.router.dispatch(self.state.clone(), cmd, args).await;
+        // Listed rows reach `stalker_items` in the background (DB-1).
+        self.state.flush_background_writes().await;
+        out
     }
 
     async fn ok(&self, cmd: &str, args: Value) -> Value {

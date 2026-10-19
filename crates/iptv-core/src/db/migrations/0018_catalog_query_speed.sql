@@ -29,15 +29,15 @@ END;
 -- tie-break of every sort), then the category (category pages, the hidden-
 -- category filter) and the verdict. Rating, year and added sort descending
 -- by default, NULLs last, which is the natural order of a DESC index.
--- idx_items_cat also holds the year for a category's year facets, and
--- idx_items_title (name sort, substring search) the same tail as the others.
+-- idx_items_cat also holds the year for a category's year facets.
+--
+-- The sort indexes (idx_items_title, _pos, _year, _rating, _added_src) are
+-- built by 0019, which widened them; this file only drops the older ones.
+-- It created them too until 2026-10-19, so an upgrade from schema 17 built
+-- each one twice (DB-6). Migrations are tracked by version only, so a
+-- database that already ran this file is not affected.
 DROP INDEX IF EXISTS idx_items_cat;
 CREATE INDEX idx_items_cat ON items(source_id, content_type, category_id, position, non_english, year);
 DROP INDEX IF EXISTS idx_items_title;
-CREATE INDEX idx_items_title ON items(source_id, content_type, title COLLATE NOCASE, position, category_id, non_english);
 DROP INDEX IF EXISTS idx_items_pos;
-CREATE INDEX idx_items_pos ON items(source_id, content_type, position, category_id, non_english);
 DROP INDEX IF EXISTS idx_items_year;
-CREATE INDEX idx_items_year ON items(source_id, content_type, year DESC, position, category_id, non_english);
-CREATE INDEX idx_items_rating ON items(source_id, content_type, rating DESC, position, category_id, non_english);
-CREATE INDEX idx_items_added_src ON items(source_id, content_type, added DESC, position, category_id, non_english);

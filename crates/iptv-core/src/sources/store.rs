@@ -361,12 +361,29 @@ fn renumber(conn: &Connection, ids: &[String]) -> CoreResult<()> {
 /// Deletes a source; catalog, raw playlist, favorites, recent, positions and
 /// EPG mappings cascade. Also drops per-source keys in `app_state` (cached
 /// stalker session, user state parked by a backup import).
+///
+/// The search index and `items_rank` rows go in bulk, as
+/// `catalog::CatalogWriter::begin` deletes them: the per-row triggers are
+/// suspended for the source (`fts_suspend`) while its items cascade (DB-2).
 pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(
+        "INSERT OR IGNORE INTO fts_suspend (source_id) VALUES (?1)",
+        [id],
+    )?;
+    tx.execute(
+        "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1",
+        [id],
+    )?;
+    tx.execute(
+        "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1)",
+        [id],
+    )?;
     let n = tx.execute("DELETE FROM sources WHERE id = ?1", [id])?;
     if n == 0 {
         return Err(CoreError::NotFound(format!("source {id} not found")));
     }
+    tx.execute("DELETE FROM fts_suspend WHERE source_id = ?1", [id])?;
     forget_session(&tx, id)?;
     tx.execute(
         "DELETE FROM app_state WHERE key = 'backup_pending:' || ?1",

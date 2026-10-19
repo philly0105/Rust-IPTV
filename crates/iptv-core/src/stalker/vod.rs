@@ -184,7 +184,8 @@ pub async fn category_names(
 }
 
 /// Remembers listed rows for details/playback, in memory and in
-/// `stalker_items` (so they survive resyncs and restarts).
+/// `stalker_items` (so they survive resyncs and restarts; that write runs in
+/// the background).
 pub async fn remember_rows(
     state: &AppState,
     source_id: &str,
@@ -220,7 +221,8 @@ pub async fn remember_rows(
         runtime.remember(&r, item.clone());
         persisted.push((r, item));
     }
-    super::persist_items(state, persisted).await;
+    // Written in the background: the page does not wait for it (DB-1).
+    super::spawn_persist_items(state, persisted);
 }
 
 /// Finds a VOD/series row: memory, then `stalker_items`, then a portal

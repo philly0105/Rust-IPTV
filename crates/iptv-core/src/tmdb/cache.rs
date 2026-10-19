@@ -16,6 +16,7 @@
 use super::config::MEMORY_CACHE_CAPACITY;
 use crate::db::DbPool;
 use crate::error::{CoreError, CoreResult};
+use crate::state::DbWriter;
 use chrono::{DateTime, SecondsFormat, Utc};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
@@ -229,34 +230,44 @@ impl TmdbCache {
         }))
     }
 
+    /// The entry for a fetch made at `now`, kept for `ttl`.
+    fn entry_for(fetched: Fetched, ttl: Duration, now: DateTime<Utc>) -> CacheEntry {
+        CacheEntry {
+            tmdb_id: fetched.tmdb_id,
+            payload: fetched.payload.map(Arc::new),
+            expires_at: now + chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::days(1)),
+        }
+    }
+
+    /// Stores `entry`, fetched at `now`.
     fn write_db(
-        db: &DbPool,
+        conn: &rusqlite::Connection,
         media: &str,
         key: &str,
-        fetched: &Fetched,
-        ttl: Duration,
-    ) -> CoreResult<CacheEntry> {
-        let now = Utc::now();
-        let expires_at = now + chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::days(1));
-        let payload_text = fetched
+        entry: &CacheEntry,
+        now: DateTime<Utc>,
+    ) -> CoreResult<()> {
+        let payload_text = entry
             .payload
-            .as_ref()
+            .as_deref()
             .map(serde_json::to_string)
             .transpose()?;
-        let conn = db.get()?;
         conn.execute(
             "INSERT INTO tmdb_cache (media_type, lookup_key, tmdb_id, payload_json, fetched_at, expires_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(media_type, lookup_key) DO UPDATE SET
                tmdb_id = excluded.tmdb_id, payload_json = excluded.payload_json,
                fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
-            rusqlite::params![media, key, fetched.tmdb_id, payload_text, ts(now), ts(expires_at)],
+            rusqlite::params![
+                media,
+                key,
+                entry.tmdb_id,
+                payload_text,
+                ts(now),
+                ts(entry.expires_at)
+            ],
         )?;
-        Ok(CacheEntry {
-            tmdb_id: fetched.tmdb_id,
-            payload: fetched.payload.clone().map(Arc::new),
-            expires_at,
-        })
+        Ok(())
     }
 
     fn memory_get(&self, mk: &str) -> Option<CacheEntry> {
@@ -276,7 +287,7 @@ impl TmdbCache {
     /// returns it. Fetch errors are shared with every waiter and not cached.
     pub async fn get_or_fetch<F, Fut>(
         self: &Arc<Self>,
-        db: &DbPool,
+        db: &DbWriter,
         media: &'static str,
         key: String,
         ttl: Ttl,
@@ -324,7 +335,7 @@ impl TmdbCache {
 
     async fn load<F, Fut>(
         &self,
-        db: DbPool,
+        db: DbWriter,
         media: &'static str,
         key: String,
         ttl: Ttl,
@@ -334,7 +345,7 @@ impl TmdbCache {
         F: FnOnce() -> Fut,
         Fut: Future<Output = CoreResult<Fetched>>,
     {
-        let (db2, key2) = (db.clone(), key.clone());
+        let (db2, key2) = (db.pool().clone(), key.clone());
         let from_db =
             tokio::task::spawn_blocking(move || Self::read_db(&db2, media, &key2)).await?;
         match from_db {
@@ -349,22 +360,14 @@ impl TmdbCache {
         } else {
             ttl.positive
         };
-        let written = tokio::task::spawn_blocking(move || {
-            Self::write_db(&db, media, &key, &fetched, ttl).map_err(|e| Box::new((e, fetched, ttl)))
-        })
-        .await?;
-        match written {
-            Ok(entry) => Ok(entry),
-            Err(failed) => {
-                let (err, fetched, ttl) = *failed;
-                tracing::warn!(media, error = %err, "tmdb cache write failed; serving uncached");
-                Ok(CacheEntry {
-                    tmdb_id: fetched.tmdb_id,
-                    payload: fetched.payload.map(Arc::new),
-                    expires_at: Utc::now() + chrono::Duration::from_std(ttl).unwrap_or_default(),
-                })
-            }
-        }
+        // The row is written in the background, through the user-write
+        // gate: cast and trailer do not wait for an import's write lock
+        // (DB-1). A failed write is logged and only costs a refetch later.
+        let now = Utc::now();
+        let entry = Self::entry_for(fetched, ttl, now);
+        let row = entry.clone();
+        db.spawn("tmdb cache", move |conn| Self::write_db(conn, media, &key, &row, now));
+        Ok(entry)
     }
 
     /// Deletes every row and the memory layer.

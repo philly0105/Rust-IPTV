@@ -124,7 +124,7 @@ pub fn register(r: &mut RpcRouter) {
         let hide = crate::parental::hide_filter(&s).await?;
         let items = a.items.unwrap_or_default();
         let v = s
-            .db_call(move |c| super::create(c, &a.name, &items, hide))
+            .db_write(move |c| super::create(c, &a.name, &items, hide))
             .await?;
         changed(&s);
         Ok::<CustomList, RpcError>(v)
@@ -132,7 +132,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("lists.update", |s: S, a: UpdateArgs| async move {
         let hide = crate::parental::hide_filter(&s).await?;
         let (v, did) = s
-            .db_call(move |c| super::update(c, &a.id, a.name.as_deref(), a.on_dashboard, hide))
+            .db_write(move |c| super::update(c, &a.id, a.name.as_deref(), a.on_dashboard, hide))
             .await?;
         if did {
             changed(&s);
@@ -140,13 +140,13 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<CustomList, RpcError>(v)
     });
     r.add("lists.remove", |s: S, a: IdArgs| async move {
-        if s.db_call(move |c| super::remove(c, &a.id)).await? {
+        if s.db_write(move |c| super::remove(c, &a.id)).await? {
             changed(&s);
         }
         Ok::<(), RpcError>(())
     });
     r.add("lists.reorder", |s: S, a: ReorderArgs| async move {
-        s.db_call(move |c| super::reorder(c, &a.ids)).await?;
+        s.db_write(move |c| super::reorder(c, &a.ids)).await?;
         changed(&s);
         Ok::<(), RpcError>(())
     });
@@ -157,7 +157,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("lists.addItems", |s: S, a: AddItemsArgs| async move {
         let added = s
-            .db_call(move |c| super::add_items(c, &a.id, &a.items))
+            .db_write(move |c| super::add_items(c, &a.id, &a.items))
             .await?;
         if added > 0 {
             changed(&s);
@@ -165,7 +165,7 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<_, RpcError>(AddedResult { added })
     });
     r.add("lists.removeItems", |s: S, a: RefsArgs| async move {
-        if s.db_call(move |c| super::remove_items(c, &a.id, &a.refs))
+        if s.db_write(move |c| super::remove_items(c, &a.id, &a.refs))
             .await?
             > 0
         {
@@ -174,7 +174,7 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<(), RpcError>(())
     });
     r.add("lists.reorderItems", |s: S, a: RefsArgs| async move {
-        s.db_call(move |c| super::reorder_items(c, &a.id, &a.refs))
+        s.db_write(move |c| super::reorder_items(c, &a.id, &a.refs))
             .await?;
         changed(&s);
         Ok::<(), RpcError>(())

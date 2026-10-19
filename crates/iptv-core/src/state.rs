@@ -12,6 +12,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::any::Any;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Shared state handed to every RPC handler and background task.
@@ -34,7 +35,80 @@ pub struct AppState {
     /// (download queue, mpv session, remote server handle, importers, ...).
     pub extensions: DashMap<&'static str, Arc<dyn Any + Send + Sync>>,
     /// Admits one user write at a time to the pool; see [`Self::db_write`].
-    write_gate: tokio::sync::Semaphore,
+    write_gate: Arc<tokio::sync::Semaphore>,
+    /// Writes started with [`DbWriter::spawn`] that have not finished.
+    background_writes: Arc<AtomicUsize>,
+}
+
+/// Runs best-effort writes after their caller has returned: the cache rows a
+/// read fills (TMDB lookups, listed Stalker rows). They pass the gate of
+/// [`AppState::db_write`] like user writes, so while an import holds the
+/// write lock they never park more than that one pooled connection, and the
+/// read that started them does not wait for the lock (DB-1). Cloned out of
+/// the state by [`AppState::writer`] for tasks that outlive a borrow of it.
+#[derive(Clone)]
+pub struct DbWriter {
+    pool: DbPool,
+    db_path: PathBuf,
+    gate: Arc<tokio::sync::Semaphore>,
+    pending: Arc<AtomicUsize>,
+}
+
+/// Counts a write of [`DbWriter::spawn`] as pending until dropped.
+struct Pending(Arc<AtomicUsize>);
+
+impl Pending {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl DbWriter {
+    /// The pool, for the reads that go with the writes.
+    pub fn pool(&self) -> &DbPool {
+        &self.pool
+    }
+
+    /// Runs `f` through the write gate in a background task and returns at
+    /// once. A failure is logged with `what`; a corruption error flags the
+    /// next boot as in [`AppState::db_call`]. Must be called inside a Tokio
+    /// runtime.
+    pub fn spawn<F>(&self, what: &'static str, f: F)
+    where
+        F: FnOnce(&mut Connection) -> CoreResult<()> + Send + 'static,
+    {
+        let this = self.clone();
+        let pending = Pending::new(&self.pending);
+        tokio::spawn(async move {
+            let _pending = pending;
+            let Ok(_permit) = this.gate.acquire().await else {
+                return;
+            };
+            let activity = db::activity();
+            let pool = this.pool.clone();
+            let joined = tokio::task::spawn_blocking(move || -> CoreResult<()> {
+                let _activity = activity;
+                let mut conn = pool.get()?;
+                f(&mut conn)
+            })
+            .await;
+            let result = match joined {
+                Ok(r) => r,
+                Err(err) => Err(CoreError::from(err)),
+            };
+            if let Err(err) = result {
+                db::note_error(&this.db_path, &err);
+                tracing::warn!(what, error = %err, "background database write failed");
+            }
+        });
+    }
 }
 
 tokio::task_local! {
@@ -134,7 +208,8 @@ impl AppState {
             settings: Arc::new(parking_lot::RwLock::new(settings)),
             is_desktop,
             extensions: DashMap::new(),
-            write_gate: tokio::sync::Semaphore::new(1),
+            write_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            background_writes: Arc::new(AtomicUsize::new(0)),
         }))
     }
 
@@ -215,6 +290,25 @@ impl AppState {
             .await
             .map_err(|_| CoreError::Other(anyhow::anyhow!("the database is closing")))?;
         self.db_call(f).await
+    }
+
+    /// A handle for best-effort writes that run through the gate of
+    /// [`Self::db_write`] without the caller waiting; see [`DbWriter`].
+    pub fn writer(&self) -> DbWriter {
+        DbWriter {
+            pool: self.db.clone(),
+            db_path: self.db_path(),
+            gate: Arc::clone(&self.write_gate),
+            pending: Arc::clone(&self.background_writes),
+        }
+    }
+
+    /// Waits until every write started with [`DbWriter::spawn`] has finished
+    /// (a cache clear, tests that read the rows a call wrote).
+    pub async fn flush_background_writes(&self) {
+        while self.background_writes.load(Ordering::SeqCst) > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 
     /// Records a database error for boot-time recovery when it is a

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
 import { blurError, clearChangedErrors, emptyDraft, withFieldError } from '../lib/draft';
+import { handleImportEvent, resetProgressForTests } from '../lib/progress';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -424,6 +425,35 @@ describe('refresh failures', () => {
     await act(async () => waiters.shift()!(undefined));
     await waitFor(() => expect(btn.textContent).toBe('Refresh all'));
     expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  it('Refresh all skips a source that is importing already (ST-2)', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a'), xtream('b')];
+    rpcMock.handlers['sources.refresh'] = (a) => xtream((a as { id: string }).id);
+    try {
+      renderAt(routes(), '/sources');
+      const btn = await screen.findByTestId('sources-refresh-all');
+      // The schedule is importing "a".
+      act(() => handleImportEvent({ sourceId: 'a', phase: 'fetching', done: 0 }));
+      fireEvent.click(btn);
+      await waitFor(() => expect(btn.textContent).toBe('Refresh all'));
+      expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'b' }]);
+    } finally {
+      resetProgressForTests();
+    }
+  });
+
+  it('a card refresh leaves catalog queries to the core events (ST-5)', async () => {
+    const { queryClient, rpcKey } = await import('@/api/query');
+    rpcMock.handlers['sources.list'] = () => [xtream('a')];
+    rpcMock.handlers['sources.refresh'] = () => xtream('a');
+    renderAt(routes(), '/sources');
+    const key = rpcKey('catalog.categories', { sourceId: 'a', contentType: 'live' });
+    queryClient.setQueryData(key, []);
+    fireEvent.click(await screen.findByTestId('source-refresh'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('source-refresh').hasAttribute('disabled')).toBe(false));
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBe(false);
   });
 
   it('disables Refresh all when every source is a pasted playlist', async () => {

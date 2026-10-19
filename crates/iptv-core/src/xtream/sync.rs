@@ -33,7 +33,7 @@ use super::url::{clean_extension, is_xmltv_url_for, xmltv_url};
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgLinks, ImportSummary, XtreamSourceConfig};
-use crate::sources::{progress, progress_step, SaveStep};
+use crate::sources::{progress, progress_step, ProgressGate, SaveStep};
 use crate::state::AppState;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-/// Progress is emitted at least this often while saving.
+/// Progress is emitted at most this often while saving (rows), and at most
+/// every 250 ms ([`ProgressGate`]); the last row is always reported.
 const PROGRESS_EVERY: u64 = 2000;
 
 /// Which content types to sync.
@@ -158,6 +159,10 @@ pub async fn sync_source(
     let mut written: Vec<(Kind, Option<String>)> = Vec::new();
     // Kinds that failed without failing the sync: their rows stay too.
     let mut failed: Vec<Kind> = Vec::new();
+    // The import save slot (ST-2), taken before the first answer is decoded
+    // and held until the write ends: the decoded rows of every kind stay in
+    // memory until then.
+    let mut slot: Option<tokio::sync::OwnedSemaphorePermit> = None;
 
     let steps: [(bool, Kind); 3] = [
         (plan.live, Kind::Live),
@@ -173,7 +178,7 @@ pub async fn sync_source(
         if crate::sources::is_import_cancelled() {
             return Err(crate::sources::import_cancelled_error());
         }
-        match fetch_kind(&state, &client, source_id, kind, &previous).await {
+        match fetch_kind(&state, &client, source_id, kind, &previous, &mut slot).await {
             Ok(Fetched::Unchanged) => {
                 tracing::info!(
                     source_id,
@@ -253,17 +258,22 @@ pub async fn sync_source(
         // A refresh deletes the previous rows first (seconds on a large
         // account): say so instead of leaving "parsing" up (L3-perf-core-4).
         let replacing = parts.iter().any(|p| previous.rows(p.content_type) > 0);
+        let slot = slot.take();
         state
             .db_call(move |conn| {
+                let _slot = slot;
                 if replacing {
                     progress_step(&state2, &sid, SaveStep::Replacing, 0);
                 }
                 let mut done = 0u64;
+                let mut gate = ProgressGate::default();
                 // No message: the phase label already says "Saving"; a raw
                 // content type under the bar is not translated (L2-sources-home-7).
                 let mut on_row = |_: ContentType| {
                     done += 1;
-                    if done % PROGRESS_EVERY == 0 || done == total {
+                    if done == total
+                        || (done % PROGRESS_EVERY == 0 && gate.due(std::time::Instant::now()))
+                    {
                         progress(&state2, &sid, "saving", done, Some(total), None);
                     }
                 };
@@ -554,6 +564,7 @@ async fn fetch_kind(
     source_id: &str,
     kind: Kind,
     previous: &Previous,
+    slot: &mut Option<tokio::sync::OwnedSemaphorePermit>,
 ) -> CoreResult<Fetched> {
     let (cat_action, list_action) = kind.actions();
     progress(state, source_id, "fetching", 0, None, Some(kind.label()));
@@ -584,6 +595,9 @@ async fn fetch_kind(
     };
     let bytes = list?;
 
+    if slot.is_none() {
+        *slot = Some(crate::sources::save_slot(state).await?);
+    }
     progress(state, source_id, "parsing", 0, None, Some(kind.label()));
     let sid = source_id.to_string();
     let previous = previous.clone();

@@ -1,5 +1,5 @@
 //! Sources (B1): CRUD, reorder, validation, lastError, unsupported kinds,
-//! refreshAll, counts, cascade on remove, startup init.
+//! refreshAll, counts, cascade on remove, startup init, joined refreshes.
 
 #[path = "m3u_support.rs"]
 mod support;
@@ -122,6 +122,24 @@ async fn add_list_get_update_reorder_remove_via_rpc() {
         .await
         .unwrap();
     assert_eq!(leftover, 0, "catalog, raw and counts cascade");
+    // DB-2: the search index and the ranking rows went in bulk, the
+    // triggers are live again, and the other sources' rows are intact.
+    let (rank, suspended, rows): (i64, i64, i64) = st
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO items_fts(items_fts, rank) VALUES ('integrity-check', 1)",
+                [],
+            )?;
+            Ok(c.query_row(
+                "SELECT (SELECT COUNT(*) FROM items_rank), (SELECT COUNT(*) FROM fts_suspend), (SELECT COUNT(*) FROM items)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(suspended, 0);
+    assert_eq!(rank, rows, "items_rank holds one row per item left");
     let gone = r
         .dispatch(st.clone(), "sources.get", json!({"id": b}))
         .await
@@ -253,8 +271,10 @@ async fn refresh_all_only_auto_refresh_and_reports_failures() {
         .is_none());
 }
 
+/// ST-1: the startup pass waits about 30 s and re-imports only the sources
+/// that are due; a source refreshed moments ago is not fetched again.
 #[tokio::test]
-async fn init_refreshes_auto_sources_after_delay() {
+async fn startup_pass_skips_a_fresh_source() {
     let env = env().await;
     let st = env.state.clone();
     let stub = stub(ONE).await;
@@ -263,22 +283,76 @@ async fn init_refreshes_auto_sources_after_delay() {
         .map_err(|e| e.error)
         .unwrap();
     let before = stub.hits();
+    assert_eq!(
+        sources::STARTUP_REFRESH_DELAY,
+        std::time::Duration::from_secs(30)
+    );
     sources::init(st.clone()).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    assert_eq!(stub.hits(), before, "nothing before the 3 s delay");
-    tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
-    assert_eq!(stub.hits(), before + 1);
+    assert_eq!(stub.hits(), before, "nothing before the startup delay");
+
+    // The pass itself, without the delay: the source was refreshed just now.
+    let r = sources::schedule::startup(
+        &st,
+        &sources::schedule::SystemClock,
+        std::time::Duration::ZERO,
+    )
+    .await;
+    assert!(r.refreshed.is_empty(), "{r:?}");
+    assert_eq!(stub.hits(), before, "a fresh source is not fetched again");
 }
 
+/// ST-2: a refresh of a source that is importing waits for that import and
+/// returns its result; the source is imported once.
 #[tokio::test]
-async fn concurrent_refreshes_are_serialized() {
-    let env = env().await;
+async fn concurrent_refreshes_share_one_import() {
+    let mut env = env().await;
     let st = env.state.clone();
     let src = add_text(&st, "T", TWO).await;
+    drain(&mut env.events);
     let (a, b) = tokio::join!(
         sources::refresh(st.clone(), &src.id),
         sources::refresh(st.clone(), &src.id)
     );
     assert!(a.is_ok() && b.is_ok());
+    assert_eq!(a.unwrap().id, b.unwrap().id);
     assert_eq!(sources::get(&st, &src.id).await.unwrap().channel_count, 2);
+    let runs = drain(&mut env.events)
+        .into_iter()
+        .filter(|e| {
+            e.kind == "import.progress"
+                && e.payload["sourceId"] == src.id.as_str()
+                && e.payload["phase"] == "connecting"
+        })
+        .count();
+    assert_eq!(runs, 1, "the second refresh joined the first import");
+
+    // Once it is over, a refresh imports again.
+    sources::refresh(st.clone(), &src.id).await.unwrap();
+    let runs = drain(&mut env.events)
+        .into_iter()
+        .filter(|e| e.kind == "import.progress" && e.payload["phase"] == "connecting")
+        .count();
+    assert_eq!(runs, 1);
+}
+
+/// ST-2: one import decodes and saves at a time; the next waits for the slot.
+#[tokio::test]
+async fn one_import_saves_at_a_time() {
+    let env = env().await;
+    let first = sources::save_slot(&env.state).await.unwrap();
+    let waiting = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        sources::save_slot(&env.state),
+    )
+    .await;
+    assert!(waiting.is_err(), "a second import waits for the slot");
+    drop(first);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        sources::save_slot(&env.state),
+    )
+    .await
+    .expect("the slot is free again")
+    .unwrap();
 }

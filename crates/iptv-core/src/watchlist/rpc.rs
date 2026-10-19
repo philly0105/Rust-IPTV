@@ -79,7 +79,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("watchlist.toggle", |s: S, a: ToggleArgs| async move {
         let in_list = s
-            .db_call(move |c| super::toggle(c, &a.item_ref, &a.snapshot))
+            .db_write(move |c| super::toggle(c, &a.item_ref, &a.snapshot))
             .await?;
         changed(&s);
         Ok::<_, RpcError>(ToggleResult { in_list })
@@ -90,13 +90,13 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("watchlist.remove", |s: S, a: RefArgs| async move {
         // Removing an absent item is a no-op: nothing changed, no event.
-        if s.db_call(move |c| super::remove(c, &a.item_ref)).await? {
+        if s.db_write(move |c| super::remove(c, &a.item_ref)).await? {
             changed(&s);
         }
         Ok::<(), RpcError>(())
     });
     r.add("watchlist.reorder", |s: S, a: RefsArgs| async move {
-        s.db_call(move |c| super::reorder(c, &a.refs)).await?;
+        s.db_write(move |c| super::reorder(c, &a.refs)).await?;
         changed(&s);
         Ok::<(), RpcError>(())
     });

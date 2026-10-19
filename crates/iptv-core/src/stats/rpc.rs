@@ -47,7 +47,7 @@ pub fn register(r: &mut RpcRouter) {
         let today = utc_today();
         let mark = prune_mark(&s);
         let prune = mark.due(today);
-        s.db_call(move |c| {
+        s.db_write(move |c| {
             let rec = Record {
                 item_ref: &a.item_ref,
                 title: &a.title,
@@ -79,7 +79,7 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<WatchStats, RpcError>(v)
     });
     r.add("stats.clear", |s: S, _: ()| async move {
-        s.db_call(|c| super::clear(c)).await?;
+        s.db_write(|c| super::clear(c)).await?;
         Ok::<(), RpcError>(())
     });
 }

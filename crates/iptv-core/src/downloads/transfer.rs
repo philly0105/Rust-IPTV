@@ -536,7 +536,7 @@ async fn attempt(
                 }
                 offset += chunk.len() as i64;
                 ctl.bytes.store(offset, Ordering::Relaxed);
-                progress.tick(state, id, offset, rep.total).await;
+                progress.tick(state, id, offset, rep.total);
                 if throttle(&mut pace, mgr, ctl, offset).await {
                     break None;
                 }
@@ -553,6 +553,10 @@ async fn attempt(
     .await;
     drop(out);
     let progressed = offset > started_at;
+    // The last periodic write lands first, so it never overwrites this one.
+    if let Some(write) = progress.persisting.take() {
+        let _ = write.await;
+    }
     let persist = state
         .db_call(move |c| store::set_progress(c, id, offset))
         .await;
@@ -690,6 +694,10 @@ struct Progress {
     last_bytes: i64,
     window_start: Instant,
     last_persist: Instant,
+    /// The periodic progress write in flight. The copy loop never waits for
+    /// it (an import may hold the write lock for seconds, DB-1); while one
+    /// is in flight the next is skipped.
+    persisting: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Progress {
@@ -700,10 +708,11 @@ impl Progress {
             last_bytes: bytes,
             window_start: now,
             last_persist: now,
+            persisting: None,
         }
     }
 
-    async fn tick(&mut self, state: &Arc<AppState>, id: i64, bytes: i64, total: Option<i64>) {
+    fn tick(&mut self, state: &Arc<AppState>, id: i64, bytes: i64, total: Option<i64>) {
         let now = Instant::now();
         if self
             .last_emit
@@ -727,14 +736,19 @@ impl Progress {
             self.last_bytes = bytes;
             self.window_start = now;
         }
-        if now.duration_since(self.last_persist) >= PERSIST_INTERVAL {
+        if now.duration_since(self.last_persist) >= PERSIST_INTERVAL
+            && self.persisting.as_ref().is_none_or(|w| w.is_finished())
+        {
             self.last_persist = now;
-            if let Err(e) = state
-                .db_call(move |c| store::set_progress(c, id, bytes))
-                .await
-            {
-                tracing::warn!(id, error = %e, "could not persist download progress");
-            }
+            let state = Arc::clone(state);
+            self.persisting = Some(tokio::spawn(async move {
+                if let Err(e) = state
+                    .db_call(move |c| store::set_progress(c, id, bytes))
+                    .await
+                {
+                    tracing::warn!(id, error = %e, "could not persist download progress");
+                }
+            }));
         }
     }
 }

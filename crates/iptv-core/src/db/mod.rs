@@ -369,8 +369,14 @@ fn checked_recently(path: &Path) -> bool {
 /// more. The cache is private to each connection and fills only as pages are
 /// read, so the pool's [`POOL_MAX`] connections hold at most 256 MiB.
 /// `mmap_size` (pages shared through the OS cache) measured no gain.
+///
+/// Each connection caches [`STATEMENT_CACHE`] prepared statements instead of
+/// rusqlite's 16: one Live scroll step alone uses 10-14 statements, and
+/// moving between Live, VOD and Home cycles 40-60, so 16 slots evicted
+/// statements still in use (DB-3).
 pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.busy_handler(Some(busy_wait))?;
+    conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
     crate::catalog::language::register(conn)?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=67108864; PRAGMA cache_size=-32768;",
@@ -378,8 +384,16 @@ pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Prepared statements cached per connection (see [`configure`]).
+pub const STATEMENT_CACHE: usize = 64;
+
 /// Opens a pool on `path` (max 8 connections, pragmas applied). Does not migrate;
 /// see [`open_and_migrate`] for the boot path with recovery.
+///
+/// Connections are kept for the life of the pool (no idle timeout, no
+/// maximum lifetime): r2d2's defaults closed idle ones after 10 minutes and
+/// replaced every one after 30, and each new connection starts with a cold
+/// 32 MiB page cache and no prepared statements (DB-4).
 pub fn open(path: &Path) -> CoreResult<DbPool> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -388,6 +402,8 @@ pub fn open(path: &Path) -> CoreResult<DbPool> {
     let pool = r2d2::Pool::builder()
         .max_size(POOL_MAX)
         .min_idle(Some(1))
+        .idle_timeout(None)
+        .max_lifetime(None)
         .connection_timeout(Duration::from_secs(15))
         .build(manager)?;
     Ok(pool)

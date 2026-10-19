@@ -11,7 +11,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ContentType, EpgLinks, ImportSummary, M3uOrigin, M3uSourceConfig, Source, SourceKind,
 };
-use crate::sources::{self, Importer};
+use crate::sources::{self, Importer, ProgressGate};
 use crate::state::AppState;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
-/// Progress cadence (items) during parse + save.
+/// Progress cadence (items) during parse + save; the events also pass a
+/// [`ProgressGate`] (at most one per 250 ms).
 pub const PROGRESS_EVERY: u64 = 2000;
 /// Content types an m3u source owns (all rewritten on import).
 pub const M3U_TYPES: [ContentType; 4] = [
@@ -573,7 +574,9 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
         return Err(sources::import_cancelled_error());
     }
 
-    // 3. Parse + write in one transaction on the blocking pool.
+    // 3. Parse + write in one transaction on the blocking pool, one import
+    // at a time (ST-2); the slot is held until the write ends.
+    let slot = sources::save_slot(&state).await?;
     sources::progress(&state, &source_id, "parsing", 0, None, None);
     let st = state.clone();
     let pool = state.db.clone();
@@ -585,6 +588,7 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     // token is only a fallback for callers outside a run.
     let run_cancel = sources::import_cancel();
     tokio::task::spawn_blocking(move || -> CoreResult<ImportSummary> {
+        let _slot = slot;
         let mut conn = pool.get()?;
         let cancel = run_cancel.or_else(|| sources::writer_cancel_token(&conn, &source_id));
         write_catalog(&st, &mut conn, &source_id, payload, &sha, origin, cancel)
@@ -667,6 +671,9 @@ fn write_catalog(
         };
         let mut parser = M3uReader::new(reader);
         let mut n = 0u64;
+        // Parse progress: every PROGRESS_EVERY rows, at most every 250 ms.
+        let mut gate = ProgressGate::default();
+        let mut reported = 0u64;
         // Categories already declared to the writer, per type: a row's group
         // is known before the row is written, so its verdict is final.
         let mut declared: HashMap<ContentType, usize> = HashMap::new();
@@ -684,8 +691,15 @@ fn write_catalog(
             n += 1;
             if n % PROGRESS_EVERY == 0 {
                 check_cancel()?;
-                sources::progress(state, source_id, "parsing", n, None, None);
+                if gate.due(std::time::Instant::now()) {
+                    sources::progress(state, source_id, "parsing", n, None, None);
+                    reported = n;
+                }
             }
+        }
+        if reported > 0 && reported != n {
+            // The final count, whatever the gate skipped.
+            sources::progress(state, source_id, "parsing", n, None, None);
         }
         if let Some(err) = parser.take_io_error() {
             return Err(CoreError::Io(err));
@@ -950,28 +964,6 @@ pub(crate) fn after_tries(err: CoreError, tries: u32) -> CoreError {
         CoreError::Timeout(m) => CoreError::Timeout(say(m)),
         CoreError::Server(m) => CoreError::Server(say(m)),
         other => other,
-    }
-}
-
-/// How often download progress is reported: the first chunk at once (so a
-/// slow host never reads "Connecting…" while bytes flow), then at most
-/// every [`ProgressGate::EVERY`], however fast or slow the chunks arrive.
-#[derive(Debug, Default)]
-struct ProgressGate {
-    last: Option<std::time::Instant>,
-}
-
-impl ProgressGate {
-    const EVERY: std::time::Duration = std::time::Duration::from_millis(250);
-
-    fn due(&mut self, now: std::time::Instant) -> bool {
-        match self.last {
-            Some(t) if now.saturating_duration_since(t) < Self::EVERY => false,
-            _ => {
-                self.last = Some(now);
-                true
-            }
-        }
     }
 }
 

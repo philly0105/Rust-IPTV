@@ -422,6 +422,10 @@ pub struct CatalogWriter<'c> {
     /// `(name, CREATE statement)` of the indexes dropped for a bulk rewrite;
     /// `None` while the indexes are maintained row by row.
     dropped_indexes: Option<Vec<(String, String)>>,
+    /// Rows of `items` this rewrite leaves alone (other sources and types),
+    /// counted once, the first time [`CatalogWriter::maybe_go_bulk`] needs
+    /// it: the number cannot change while the writer's transaction runs.
+    kept: Option<u64>,
     total: u64,
     duplicates: u64,
     /// Cancel token of the import run writing this catalog (C8), taken at
@@ -500,6 +504,7 @@ impl<'c> CatalogWriter<'c> {
             replaced,
             replaced_gone: false,
             dropped_indexes: None,
+            kept: None,
             total: 0,
             duplicates: 0,
             cancel: cancel.or_else(|| crate::sources::writer_cancel_token(conn, source_id)),
@@ -539,18 +544,26 @@ impl<'c> CatalogWriter<'c> {
         if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
             return Ok(());
         }
-        let all: i64 = self
-            .conn
-            .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
         // Rows the rebuild sorts although this rewrite leaves them alone: all
         // but the rewrite's own, which are the replaced rows until `begin`
-        // deletes them and the inserted rows after.
-        let own = if self.replaced_gone {
-            self.total
-        } else {
-            self.replaced
+        // deletes them and the inserted rows after. Counted once, not every
+        // WRITE_BATCH rows (IN-9).
+        let kept = match self.kept {
+            Some(kept) => kept,
+            None => {
+                let all: i64 = self
+                    .conn
+                    .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
+                let own = if self.replaced_gone {
+                    self.total
+                } else {
+                    self.replaced
+                };
+                let kept = (all as u64).saturating_sub(own);
+                self.kept = Some(kept);
+                kept
+            }
         };
-        let kept = (all as u64).saturating_sub(own);
         if touched < kept {
             return Ok(());
         }
@@ -1459,9 +1472,14 @@ pub fn query_named(
         // puts the category and English-only columns in it), then the full
         // rows of just those: OFFSET no longer reads and joins every skipped
         // row, which made pages near the end of a 100k list take 100-900 ms.
+        // OFFSET is bound, so each page of a list reuses one cached
+        // statement; LIMIT stays literal, as SQLite uses it in the row
+        // estimate (DB-3).
         let order = order_clause(&q.page);
+        args.push(offset.into());
         let sql = format!(
-            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET {offset}) ORDER BY {order}"
+            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET ?{}) ORDER BY {order}",
+            args.len()
         );
         let mut stmt = conn.prepare_cached(&sql)?;
         let items = stmt
@@ -2088,7 +2106,14 @@ pub fn all_live_channels(
 /// until then; see [`language::backfill_pending`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     tokio::spawn(async move {
-        match state.db_call(|c| Ok(language::backfill_pending(c)?)).await {
+        // Holds the write lock per catalog: other writes wait for it (DB-2).
+        let done = state
+            .db_call(|c| {
+                let _long = crate::db::long_write();
+                Ok(language::backfill_pending(c)?)
+            })
+            .await;
+        match done {
             Ok(0) => {}
             Ok(n) => tracing::info!(catalogs = n, "stored English-only verdicts"),
             Err(err) => tracing::warn!(%err, "could not store English-only verdicts"),

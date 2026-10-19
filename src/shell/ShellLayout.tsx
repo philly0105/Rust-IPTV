@@ -8,6 +8,7 @@ import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
 import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
+import { isTypingTarget } from '@/ui/focus';
 
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
@@ -15,7 +16,7 @@ import { focusSearchWhenReady } from './focusSearch';
 import { Header } from './Header';
 import { Rail } from './Rail';
 import { useOutletScrollMemory } from './scrollMemory';
-import { useShortcut } from './shortcuts';
+import { modalOpen, useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
@@ -181,6 +182,16 @@ export function toggleFullscreenKey(): void {
   else void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
 }
 
+/**
+ * Ctrl+F and Ctrl+R leave the page, which would throw away a dialog's or a field's typed text
+ * (the Add source URL and credentials): there they claim the key, so the browser neither
+ * reloads nor opens its find bar, and do nothing. From the command palette they still run.
+ */
+function navigationKeyBlocked(e: KeyboardEvent): boolean {
+  if (useShellStore.getState().paletteOpen) return false;
+  return modalOpen() || isTypingTarget(e.target);
+}
+
 function GlobalShortcuts() {
   const { t } = useTranslation('shell');
   const navigate = useNavigate();
@@ -191,13 +202,16 @@ function GlobalShortcuts() {
     'mod+k',
     () => {
       const s = useShellStore.getState();
+      // Inside the palette it closes it; over another dialog it does not open.
+      if (!s.paletteOpen && modalOpen()) return;
       s.setPaletteOpen(!s.paletteOpen);
     },
-    { description: t('scPalette'), area, allowInInput: true },
+    { description: t('scPalette'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut(
     'mod+f',
-    () => {
+    (e) => {
+      if (navigationKeyBlocked(e)) return;
       useShellStore.getState().setPaletteOpen(false);
       const field = document.querySelector<HTMLInputElement>('[data-shell-search], [data-page-search]');
       if (field && !window.location.pathname.startsWith('/search')) {
@@ -208,15 +222,16 @@ function GlobalShortcuts() {
       navigate('/search');
       focusSearchWhenReady();
     },
-    { description: t('scSearch'), area, allowInInput: true },
+    { description: t('scSearch'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut(
     'mod+r',
-    () => {
+    (e) => {
+      if (navigationKeyBlocked(e)) return;
       useShellStore.getState().setPaletteOpen(false);
       navigate('/recent');
     },
-    { description: t('scRecent'), area, allowInInput: true },
+    { description: t('scRecent'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut(
     '?',
@@ -229,7 +244,7 @@ function GlobalShortcuts() {
   useShortcut(
     'mod+shift+l',
     () => toggleTheme(),
-    { description: t('scTheme'), area, allowInInput: true },
+    { description: t('scTheme'), area, allowInInput: true, allowInModal: true },
   );
   useShortcut('f8', () => focusToasts(), { description: t('scNotifications'), area, allowInInput: true });
   useShortcut('f11', toggleFullscreenKey, { description: t('scFullscreen'), area, allowInInput: true, allowInModal: true });

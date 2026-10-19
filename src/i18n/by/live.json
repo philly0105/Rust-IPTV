@@ -132,7 +132,7 @@
   "searchStations": "Пошук станцый",
   "searchInGroup": "Пошук у {{group}}",
   "shortcutArea": "Прамы эфір",
-  "shortcutDigits": "Увядзіце нумар канала (пераключэнне праз 1,5 с)",
+  "shortcutDigits": "Увядзіце нумар канала (Enter пераключае адразу, інакш праз 1,5 с)",
   "shortcutFocusSearch": "Пошук каналаў",
   "shortcutToggleSidebar": "Паказаць або схаваць панэль груп",
   "stage": "Плэер",

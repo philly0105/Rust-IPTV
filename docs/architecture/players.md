@@ -161,6 +161,10 @@ Code: `src/features/player/` (`sync.ts`, `textDelay.ts`, `streamInfo.ts`, `inlin
 - History: `history.ts` records each live source that has a catalog ref (live TV and radio, never VOD) when it starts, newest first, deduplicated, capped at 10, in memory only. B plays the most recent entry that is not the current channel. A failover hop or pin redirect replaces the channel's entry instead of adding one. The popover and the stream info panel close when playback stops or turns to radio, and Shift+B and I do nothing in radio mode, which shows neither. The popover (Shift+B or the history button) fetches now/next for the listed refs once per list, with `settings.epgOffsetMinutes`.
 - Previous episode: Shift+P calls the queue's `prev()`. The series page offers the previous episode by `previousEpisode()` in `vod/lib/merge.ts`, which never crosses between specials and regular seasons.
 
+## Playback keys (UI)
+
+`usePlaybackShortcuts` (registered once by `PlayerDock`) binds the playback keys while something plays in the app. Space, the arrows (with and without Shift) and Page Up/Down are also how a page scrolls and how radio groups, lists and tabs move, so they carry `when: playerOwnsPageKeys`: they drive the player only when it is expanded (a page's `PlayerStage`, `dock === 'stage'`), fullscreen, in picture-in-picture, or when focus is inside it (`[data-player-mini]`, the mini frame; `[data-player-host]`; `[data-pip-layer]`). With only the mini dock showing and focus on the page, the registry skips them and the key keeps its default. Letter keys (K, M, F, J, L and the rest) and the media keys stay app-wide.
+
 ## Sleep timer, zap banner and glass (UI, C5)
 
 Code: `src/features/player/` (`sleepTimer.ts`, `sleepReadout.ts`, `zapBanner.ts`, `nowNext.ts`, `parentalHook.ts`, `parentalGuard.ts`, `parentalLocks.ts`, `player.css`, and `components/SleepTimer.tsx`, `ZapBanner.tsx`, `zapHooks.ts`).

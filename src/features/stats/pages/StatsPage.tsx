@@ -112,7 +112,7 @@ export function StatsPage() {
               {t('watchLive')}
             </Link>
           ) : (
-            <Link to="/" className={buttonClass('secondary')} data-testid="stats-go-home">
+            <Link to="/dashboard" className={buttonClass('secondary')} data-testid="stats-go-home">
               {t('goHome')}
             </Link>
           )

@@ -3,14 +3,15 @@ import { Navigate } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import type { Settings, Source } from '@/api/types';
+import type { CustomList, Settings, Source } from '@/api/types';
 import { HeroSkeleton } from './dashboard/HeroSkeleton';
 import { consumeStartupDeepLink, isRestorableRoute, useStartupDeepLink } from './effects';
+import { routeSourceId } from './railLinks';
 import { useSettings } from './useSettings';
 
-/** The source id of a `/s/:id/...` route, decoded; undefined for any other path. */
-export function routeSourceId(path: string): string | undefined {
-  const m = /^\/s\/([^/?#]+)/.exec(path);
+/** The list id of a `/lists/:id` route, decoded; undefined for any other path. */
+export function routeListId(path: string): string | undefined {
+  const m = /^\/lists\/([^/?#]+)/.exec(path);
   if (!m) return undefined;
   try {
     return decodeURIComponent(m[1]!);
@@ -19,17 +20,39 @@ export function routeSourceId(path: string): string | undefined {
   }
 }
 
+/** What startup knows to check the saved screen against. A missing piece is not checked. */
+export interface StartupChecks {
+  /** The current source list. */
+  sources?: readonly Pick<Source, 'id'>[];
+  /** The current custom lists. */
+  lists?: readonly Pick<CustomList, 'id'>[];
+  /** False for a path no route renders (the app's 404 page). */
+  isKnownPath?: (pathname: string) => boolean;
+}
+
+/** The screen `/` restores, before any check: lastRoute in restore-last-view mode. */
+function savedRoute(settings: Settings | undefined): string | undefined {
+  const last = settings?.lastRoute;
+  return settings?.startupBehavior === 'restore-last-view' && last && isRestorableRoute(last) ? last : undefined;
+}
+
 /**
- * Where `/` goes on start (C7): lastRoute, /dashboard, or /sources. A saved screen of a source
- * that no longer exists (removed here or from another client) is not restored: `sources` is the
- * current list, when known.
+ * Where `/` goes on start (C7): lastRoute, /dashboard, or /sources. A saved screen that no
+ * longer exists is not restored: a path no route knows, a screen of a source that was removed
+ * (here or from another client; the catch-up archive included), or a deleted custom list.
  */
-export function startupTarget(settings: Settings | undefined, sources?: readonly Pick<Source, 'id'>[]): string {
+export function startupTarget(settings: Settings | undefined, checks: StartupChecks = {}): string {
   if (!settings) return '/dashboard';
-  const last = settings.lastRoute;
-  if (settings.startupBehavior === 'restore-last-view' && last && isRestorableRoute(last)) {
-    const sourceId = routeSourceId(last);
-    if (sourceId === undefined || !sources || sources.some((s) => s.id === sourceId)) return last;
+  const last = savedRoute(settings);
+  if (last) {
+    const pathname = last.replace(/[?#].*$/, '');
+    const sourceId = routeSourceId(pathname);
+    const listId = routeListId(pathname);
+    const dead =
+      (checks.isKnownPath && !checks.isKnownPath(pathname)) ||
+      (sourceId !== undefined && !!checks.sources && !checks.sources.some((s) => s.id === sourceId)) ||
+      (listId !== undefined && !!checks.lists && !checks.lists.some((l) => l.id === listId));
+    if (!dead) return last;
   }
   return settings.showDashboard ? '/dashboard' : '/sources';
 }
@@ -37,29 +60,32 @@ export function startupTarget(settings: Settings | undefined, sources?: readonly
 /** Starts the dashboard chunk download; shared by the route and the startup prefetch. */
 export const loadDashboard = () => import('./dashboard/DashboardPage');
 
-/** The saved screen points at a source, so startup needs the source list to check it. */
-function needsSources(settings: Settings | undefined): boolean {
-  const last = settings?.lastRoute;
-  return settings?.startupBehavior === 'restore-last-view' && !!last && routeSourceId(last) !== undefined;
-}
-
 /**
  * The index route. On desktop it first waits for the cold-start deep link
  * pull; a pending link wins over the startup target, so the app lands where
  * the link points even when its route is lazy or settings answer late.
+ * `isKnownPath` (from the app's route tree) lets it drop a saved path no route renders.
  */
-export function StartupRedirect() {
+export function StartupRedirect({ isKnownPath }: { isKnownPath?: (pathname: string) => boolean } = {}) {
   const settings = useSettings();
   const link = useStartupDeepLink();
-  const checkSource = needsSources(settings.data);
+  // The saved screen points at a source or a list, so startup needs that list to check it.
+  const saved = savedRoute(settings.data);
+  const checkSource = saved !== undefined && routeSourceId(saved) !== undefined;
+  const checkList = saved !== undefined && routeListId(saved) !== undefined;
   const sources = useRpcQuery('sources.list', undefined, { enabled: checkSource });
-  // Waits for the list only when the saved screen is a source's; a failed list restores it anyway.
-  const sourcesPending = checkSource && sources.isPending;
-  const target = startupTarget(settings.data, checkSource && sources.isSuccess ? sources.data : undefined);
-  const stale = checkSource && sources.isSuccess && target !== settings.data?.lastRoute;
+  const lists = useRpcQuery('lists.list', undefined, { enabled: checkList });
+  // Waits for a list only when the saved screen needs it; a failed list restores the screen anyway.
+  const checksPending = (checkSource && sources.isPending) || (checkList && lists.isPending);
+  const target = startupTarget(settings.data, {
+    sources: checkSource && sources.isSuccess ? sources.data : undefined,
+    lists: checkList && lists.isSuccess ? lists.data : undefined,
+    isKnownPath,
+  });
+  const stale = saved !== undefined && !checksPending && target !== saved;
   // The dashboard's chunks download only when it is where startup goes (on desktop already
   // while the deep-link pull runs); restoring another screen no longer pays for them.
-  const toDashboard = !link.path && !settings.isPending && !sourcesPending && target === '/dashboard';
+  const toDashboard = !link.path && !settings.isPending && !checksPending && target === '/dashboard';
   useEffect(() => {
     if (toDashboard) void loadDashboard().catch(() => undefined);
   }, [toDashboard]);
@@ -76,7 +102,7 @@ export function StartupRedirect() {
     }
   }, [stale, target]);
   if (link.path) return <Navigate to={link.path} replace />;
-  if (settings.isPending || !link.settled || sourcesPending) {
+  if (settings.isPending || !link.settled || checksPending) {
     return (
       // Same frame as the dashboard's loading state, the most common landing page.
       <div className="flex flex-col gap-10 pt-8" aria-busy="true" data-testid="startup-pending">

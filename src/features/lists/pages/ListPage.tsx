@@ -73,6 +73,7 @@ export function ListPage() {
   const settings = useRpcQuery('settings.get', undefined, { staleTime: 60_000 });
   const sources = useVisibleSources();
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  const firstSource = sources.data?.[0];
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
 
   // ---- playback -----------------------------------------------------------
@@ -370,7 +371,12 @@ export function ListPage() {
         title={paged.unavailable.length > 0 ? t('allUnavailableTitle') : t('listEmptyTitle')}
         description={t('listEmptyHint')}
         action={
-          <Link to="/" className={buttonClass('secondary', 'sm')}>
+          // Live TV, where L adds a channel (the hint above). Not `/`: it restores the saved screen, this one.
+          <Link
+            to={firstSource ? `/s/${encodeURIComponent(firstSource.id)}/live` : '/dashboard'}
+            className={buttonClass('secondary', 'sm')}
+            data-testid="list-browse-channels"
+          >
             {t('browseChannels')}
           </Link>
         }

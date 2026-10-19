@@ -36,6 +36,20 @@ export function sourceBasePath(sourceId: string): string {
   return `/s/${encodeURIComponent(sourceId)}`;
 }
 
+/**
+ * The source id a route belongs to, decoded: `/s/:id/...`, and the catch-up archive
+ * `/live/archive/:id/...`, which sits outside `/s/:id`. Undefined for any other path.
+ */
+export function routeSourceId(path: string): string | undefined {
+  const m = /^\/(?:s|live\/archive)\/([^/?#]+)/.exec(path);
+  if (!m) return undefined;
+  try {
+    return decodeURIComponent(m[1]!);
+  } catch {
+    return m[1];
+  }
+}
+
 export function railLinkIds(source: Pick<Source, 'kind' | 'movieCount'>, opts: RailLinkOptions = {}): RailLinkId[] {
   if (source.kind !== 'm3u') return ['live', 'radio', 'movies', 'series', 'favorites', 'recent'];
   const ids: RailLinkId[] = ['live'];

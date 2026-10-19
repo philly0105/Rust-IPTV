@@ -10,7 +10,7 @@ import { startupTarget } from '@/shell/StartupRedirect';
 import { RpcError } from '@/api/transport';
 import { ErrorState } from '@/ui';
 
-import { AppLoading, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes } from './routes';
+import { AppLoading, isKnownPath, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes } from './routes';
 
 /** Every C7 path; each must resolve to a real page, never the `*` fallback. */
 const C7_PATHS = [
@@ -64,6 +64,13 @@ describe('route tree (C7)', () => {
     const m = matchRoutes(routes, '/no/such/page');
     expect(m?.[0]?.route.path).toBe('/');
     expect(m?.at(-1)?.route.path).toBe('*');
+  });
+
+  it('knows which saved paths still render a page', () => {
+    expect(isKnownPath('/no/such/page')).toBe(false);
+    expect(isKnownPath('/live/archive/a/ch1')).toBe(true);
+    expect(isKnownPath('/lists/l1')).toBe(true);
+    expect(isKnownPath('/settings/general')).toBe(true);
   });
 });
 

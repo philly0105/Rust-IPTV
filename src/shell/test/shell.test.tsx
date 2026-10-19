@@ -201,6 +201,34 @@ describe('ShellLayout', () => {
     await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
+  it('Ctrl+R, Ctrl+F and Ctrl+K do nothing over a dialog or in a text field, and keep the browser from reloading', async () => {
+    const { router } = renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    const field = document.createElement('input');
+    dialog.appendChild(field);
+    document.body.appendChild(dialog);
+    field.focus();
+    expect(fireEvent.keyDown(field, { key: 'r', code: 'KeyR', ctrlKey: true })).toBe(false);
+    expect(fireEvent.keyDown(field, { key: 'f', code: 'KeyF', ctrlKey: true })).toBe(false);
+    fireEvent.keyDown(field, { key: 'k', code: 'KeyK', ctrlKey: true });
+    expect(useShellStore.getState().paletteOpen).toBe(false);
+    dialog.remove();
+
+    // A text field on the page, no dialog.
+    const pageField = document.createElement('input');
+    document.body.appendChild(pageField);
+    pageField.focus();
+    fireEvent.keyDown(pageField, { key: 'r', code: 'KeyR', ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(router.state.location.pathname).toBe('/favorites');
+    pageField.remove();
+
+    key('r', { code: 'KeyR', ctrlKey: true });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
+  });
+
   it('mod+k toggles the palette closed from inside its input, and Escape still closes it', async () => {
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');

@@ -142,7 +142,7 @@
   "searchStations": "قلّب على المحطات",
   "searchInGroup": "قلّب ف {{group}}",
   "shortcutArea": "البث المباشر",
-  "shortcutDigits": "كتب رقم القناة (كيتأكد من بعد 1.5 ث)",
+  "shortcutDigits": "كتب رقم القناة (Enter كيبدل دغيا، ولا كيتأكد من بعد 1.5 ث)",
   "shortcutFocusSearch": "قلّب على القنوات",
   "shortcutToggleSidebar": "ورّي ولا خبّي شريط المجموعات",
   "stage": "المشغل",

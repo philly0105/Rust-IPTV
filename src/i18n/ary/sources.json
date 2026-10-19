@@ -23,6 +23,8 @@
   "cancel": "إلغاء",
   "closeKeepImporting": "سد، وكمّل الاستيراد",
   "shortcutAddSource": "زيد مصدر",
+  "shortcutMoveUp": "طلّع المصدر المختار",
+  "shortcutMoveDown": "هبّط المصدر المختار",
 
   "kindM3u": "قائمة تشغيل M3U",
   "kindXtream": "Xtream Codes",

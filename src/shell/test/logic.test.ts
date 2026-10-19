@@ -9,7 +9,8 @@ import { railLinks } from '../railLinks';
 import { groupShortcuts } from '../ShortcutOverlay';
 import { matches, normalizeCombo, parseCombo } from '../shortcuts';
 import { titleEndsWithYear } from '../dashboard/heroSlides';
-import { routeSourceId, startupTarget } from '../StartupRedirect';
+import { routeSourceId } from '../railLinks';
+import { routeListId, startupTarget } from '../StartupRedirect';
 import { resolveTheme } from '../theme';
 
 const ev = (key: string, init: Partial<KeyboardEventInit> = {}) => new KeyboardEvent('keydown', { key, ...init });
@@ -37,7 +38,12 @@ describe('shortcut matching', () => {
 describe('deep links', () => {
   it('routes iptv://add?url= to the add-source flow', () => {
     expect(deepLinkToPath('iptv://add?url=http%3A%2F%2Fx.test%2Fa.m3u')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u');
-    expect(deepLinkToPath('iptv://add')).toBe('/sources?add=1');
+    expect(deepLinkToPath('iptv://add')).toBe('/sources?add=');
+  });
+  it('keeps the kind and reads the path form of add links', () => {
+    expect(deepLinkToPath('iptv://add?url=http%3A%2F%2Fx.test%2Fa.m3u&kind=xtream')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u&kind=xtream');
+    expect(deepLinkToPath('iptv://add/http%3A%2F%2Fx.test%2Fa.m3u')).toBe('/sources?add=http%3A%2F%2Fx.test%2Fa.m3u');
+    expect(deepLinkToPath('iptv://add?url=file%3A%2F%2F%2Fetc%2Fpasswd')).toBeNull();
   });
   it('routes search and ignores unknown actions', () => {
     expect(deepLinkToPath('iptv://search?q=news')).toBe('/search?q=news');
@@ -56,12 +62,32 @@ describe('startup target', () => {
   });
   it('does not restore a screen of a source that no longer exists', () => {
     const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/s/gone/live', showDashboard: true };
-    expect(startupTarget(s, [{ id: 'other' }])).toBe('/dashboard');
-    expect(startupTarget(s, [{ id: 'gone' }])).toBe('/s/gone/live');
+    expect(startupTarget(s, { sources: [{ id: 'other' }] })).toBe('/dashboard');
+    expect(startupTarget(s, { sources: [{ id: 'gone' }] })).toBe('/s/gone/live');
     // Unknown list (failed or not needed): restore as before.
     expect(startupTarget(s)).toBe('/s/gone/live');
     expect(routeSourceId('/s/a%20b/movies')).toBe('a b');
     expect(routeSourceId('/epg')).toBeUndefined();
+  });
+  it('does not restore the archive of a removed source', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/live/archive/gone/ch1', showDashboard: true };
+    expect(routeSourceId('/live/archive/a%20b/ch1')).toBe('a b');
+    expect(startupTarget(s, { sources: [{ id: 'other' }] })).toBe('/dashboard');
+    expect(startupTarget(s, { sources: [{ id: 'gone' }] })).toBe('/live/archive/gone/ch1');
+  });
+  it('does not restore a deleted list', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/lists/l1', showDashboard: true };
+    expect(routeListId('/lists/l%201')).toBe('l 1');
+    expect(routeListId('/lists')).toBeUndefined();
+    expect(startupTarget(s, { lists: [{ id: 'l2' }] })).toBe('/dashboard');
+    expect(startupTarget(s, { lists: [{ id: 'l1' }] })).toBe('/lists/l1');
+    expect(startupTarget(s)).toBe('/lists/l1');
+  });
+  it('does not restore a path no route renders', () => {
+    const s = { ...DEFAULT_SETTINGS, startupBehavior: 'restore-last-view' as const, lastRoute: '/no/such/page?x=1', showDashboard: false };
+    const isKnownPath = (p: string) => p !== '/no/such/page';
+    expect(startupTarget(s, { isKnownPath })).toBe('/sources');
+    expect(startupTarget({ ...s, lastRoute: '/epg?source=a' }, { isKnownPath })).toBe('/epg?source=a');
   });
   it('never restores transient routes', () => {
     expect(isRestorableRoute('/sources?add=1')).toBe(false);

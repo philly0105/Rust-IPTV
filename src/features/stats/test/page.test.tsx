@@ -134,7 +134,7 @@ describe('stats page', () => {
     rpc.handlers['stats.summary'] = (raw) => h.summary((raw as { days: 7 | 30 }).days);
     open('/stats?range=30');
     expect(await screen.findByText('Time spent on live TV, movies and series shows up here.')).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId('stats-go-home').getAttribute('href')).toBe('/'));
+    await waitFor(() => expect(screen.getByTestId('stats-go-home').getAttribute('href')).toBe('/dashboard'));
     expect(screen.queryByTestId('stats-show-month')).toBeNull();
   });
 

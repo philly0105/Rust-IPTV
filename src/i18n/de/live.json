@@ -122,7 +122,7 @@
   "searchStations": "Radiosender suchen",
   "searchInGroup": "In {{group}} suchen",
   "shortcutArea": "Live-TV",
-  "shortcutDigits": "Sendernummer eingeben (wird nach 1,5 s übernommen)",
+  "shortcutDigits": "Sendernummer eingeben (Enter schaltet sofort um, sonst nach 1,5 s übernommen)",
   "shortcutFocusSearch": "Sender durchsuchen",
   "shortcutToggleSidebar": "Gruppen-Seitenleiste ein- oder ausblenden",
   "stage": "Player",

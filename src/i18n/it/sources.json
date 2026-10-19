@@ -17,6 +17,8 @@
   "cancel": "Annulla",
   "closeKeepImporting": "Chiudi e continua l'importazione",
   "shortcutAddSource": "Aggiungi una sorgente",
+  "shortcutMoveUp": "Sposta su la sorgente selezionata",
+  "shortcutMoveDown": "Sposta giù la sorgente selezionata",
 
   "kindM3u": "Playlist M3U",
   "kindXtream": "Xtream Codes",

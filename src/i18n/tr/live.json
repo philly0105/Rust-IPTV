@@ -122,7 +122,7 @@
   "searchStations": "İstasyon ara",
   "searchInGroup": "{{group}} içinde ara",
   "shortcutArea": "Canlı TV",
-  "shortcutDigits": "Kanal numarası yazın (1,5 sn sonra uygulanır)",
+  "shortcutDigits": "Kanal numarası yazın (Enter hemen geçer, yoksa 1,5 sn sonra uygulanır)",
   "shortcutFocusSearch": "Kanallarda ara",
   "shortcutToggleSidebar": "Grup kenar çubuğunu göster veya gizle",
   "stage": "Oynatıcı",

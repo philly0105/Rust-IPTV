@@ -127,7 +127,7 @@
   "searchStations": "Rechercher des stations",
   "searchInGroup": "Rechercher dans {{group}}",
   "shortcutArea": "TV en direct",
-  "shortcutDigits": "Saisir un numéro de chaîne (validé après 1,5 s)",
+  "shortcutDigits": "Saisir un numéro de chaîne (Entrée change tout de suite, sinon validé après 1,5 s)",
   "shortcutFocusSearch": "Rechercher des chaînes",
   "shortcutToggleSidebar": "Afficher ou masquer la barre latérale des groupes",
   "stage": "Lecteur",

@@ -122,7 +122,7 @@
   "searchStations": "Radiozenders zoeken",
   "searchInGroup": "Zoeken in {{group}}",
   "shortcutArea": "Live tv",
-  "shortcutDigits": "Typ een kanaalnummer (wordt na 1,5 s bevestigd)",
+  "shortcutDigits": "Typ een kanaalnummer (Enter schakelt meteen, anders na 1,5 s bevestigd)",
   "shortcutFocusSearch": "Zenders zoeken",
   "shortcutToggleSidebar": "Groepenzijbalk tonen of verbergen",
   "stage": "Speler",

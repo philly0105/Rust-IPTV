@@ -15,6 +15,8 @@
   "cancel": "취소",
   "closeKeepImporting": "닫고 계속 가져오기",
   "shortcutAddSource": "소스 추가",
+  "shortcutMoveUp": "선택한 소스를 위로 이동",
+  "shortcutMoveDown": "선택한 소스를 아래로 이동",
 
   "kindM3u": "M3U 재생목록",
   "kindXtream": "Xtream Codes",

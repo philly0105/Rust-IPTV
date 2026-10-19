@@ -115,12 +115,14 @@ Press `?` in the app for the full list. The main ones:
 | Ctrl+Shift+L | Switch light / dark theme |
 | Ctrl+Alt+L | Lock parental controls now (while an unlock is running) |
 | F8 | Move focus to notifications |
+| F11 | Fullscreen: the player while something plays, otherwise the whole app |
 | ? | Shortcut help |
 | Ctrl+B | Toggle the live TV group sidebar |
 | / | Focus the live TV channel search (in the TV guide: the programme search) |
 | T | Jump to a date and time (TV guide) |
-| 0-9 | Type a channel number to zap |
+| 0-9 | Type a channel number to zap; Enter zaps at once instead of waiting |
 | Page Up / Page Down | Previous / next channel (live TV; from a custom list, the list's order) |
+| Shift+Page Up / Shift+Page Down | Page through the focused channel list (plain Page Up / Page Down change the channel while live TV plays) |
 | Space or K | Play / pause |
 | F | Fullscreen (in picture-in-picture: back to the full window) |
 | Left / Right | Seek 10 s |
@@ -139,20 +141,23 @@ Press `?` in the app for the full list. The main ones:
 | Shift+C | Subtitles menu: load a subtitle file, pick a track, change the look |
 | Z | Sleep timer: off, 15, 30, 45, 60, 90 minutes |
 | S | Take a screenshot (while a video plays; in a focused live channel list S still toggles the favorite) |
+| Play/Pause, Stop, Next track, Previous track | The keyboard's media keys: play or pause, stop, and next or previous channel on live TV (otherwise the next or previous item). They also work while typing |
 | Shift+N | Add a source (Sources page) |
 | L | Add the focused channel to a custom list (live TV, list pages) |
 | F2 | Rename the focused channel (live TV, list pages) |
 | Shift+Delete | Hide the focused channel (live TV, list pages) |
-| Alt+Up / Alt+Down | Move the focused favorite, title, list or list channel up / down (Favorites, My List, and the Manage lists and Edit channels dialogs) |
+| Alt+Up / Alt+Down | Move the focused source, favorite, title, list or list channel up / down (Sources, Favorites, My List, and the Manage lists and Edit channels dialogs) |
 | W | Mark the focused movie watched or unwatched (My List), or the title under the cursor (movie and series grids) |
 | Shift+W | Hide or show watched titles (movie and series grids) |
 | 7 / 3 | Show the last 7 / 30 days (Watch stats) |
 | S | Add or remove the title under the cursor in My List (movie and series groups) |
 | Shift+F10 or the context-menu key | Open the poster menu for the title under the cursor (movie and series groups) |
-| Delete | Remove the focused title (My List), favorite (Favorites), or item (Recently watched, My Videos) |
-| P / R / X / Delete | Pause or resume / retry / cancel / remove the focused download (Downloads) |
+| Delete | Remove the focused title (My List), favorite (Favorites), item (Recently watched), or episode (a title's page in My Videos; the My Videos grid has no Delete) |
+| P / R / X / Delete / O | Pause or resume / retry / cancel / remove / show in its folder the focused download (Downloads; O in the desktop app) |
 | Backspace | Back to My Videos from a video's page |
 | Esc | Close the open dialog or overlay; leave picture-in-picture; on a movie or series page, go back to where you came from (a grid returns to the title you opened) |
+
+Space, the arrows and Page Up / Page Down control the player while it is expanded on a page, fullscreen, in picture-in-picture, or focused. While only the mini player shows and focus is on the page, they scroll the page and move through its lists and radio buttons as usual. Over an open dialog the app's shortcuts are off except Esc, F11, Ctrl+Shift+L, and Ctrl+K inside the command palette (it closes it). Ctrl+F and Ctrl+R also do nothing in a text field, so they never throw away what you typed.
 
 On the multi-view page:
 

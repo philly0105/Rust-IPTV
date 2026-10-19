@@ -55,11 +55,25 @@ export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'play
 }
 
 /**
+ * Space, the arrows and Page Up/Down belong to the page while the player is only the mini dock:
+ * they scroll it and move through its lists and radio groups. They drive playback when the
+ * player is expanded (a page's stage), fullscreen or in picture-in-picture, or when focus is
+ * inside the player.
+ */
+export function playerOwnsPageKeys(e: KeyboardEvent): boolean {
+  const { dock, isFullscreen } = usePlayerStore.getState();
+  if (dock === 'stage' || isFullscreen || usePipStore.getState().active) return true;
+  const target = e.target;
+  return target instanceof Element && target.closest('[data-player-mini], [data-player-host], [data-pip-layer]') !== null;
+}
+
+/**
  * Playback shortcuts (C16: space/k, f, arrows, m; plus c, page up/down; and the player
  * slice's j/l, g/h, i, b, shift+b, shift+p, z for the sleep timer, shift+c for the
  * Subtitles menu, and s for a screenshot), and the keyboard's media keys, which also reach the
  * player through the system's media controls (`mediaSession.ts`). Registered once by the dock;
- * active while something plays in-app.
+ * active while something plays in-app. Space, the arrows and Page Up/Down wait for
+ * {@link playerOwnsPageKeys}.
  */
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
   const { t, i18n } = useTranslation('player');
@@ -126,7 +140,9 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   };
 
   const base = { area: AREA, enabled: active };
-  useShortcut('space', once(guard('space', () => s().togglePlay())), { ...base, description: t('shortcutPlayPause') });
+  // Space, arrows and Page Up/Down: only while the player is more than the mini dock, or focused.
+  const pageKeys = { ...base, when: playerOwnsPageKeys };
+  useShortcut('space', once(guard('space', () => s().togglePlay())), { ...pageKeys, description: t('shortcutPlayPause') });
   useShortcut('k', once(guard('letter', () => s().togglePlay())), { ...base, description: t('shortcutPlayPauseK') });
   // In picture-in-picture, f returns to the full app window instead.
   useShortcut('f', once(guard('letter', () => (usePipStore.getState().active ? void exitPip() : s().toggleFullscreen()))), {
@@ -138,10 +154,10 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     s().seekBy(delta);
     seekOsd(delta);
   };
-  useShortcut('arrowleft', guard('arrow', seek(-SEEK_STEP)), { ...base, description: t('shortcutSeekBack') });
-  useShortcut('arrowright', guard('arrow', seek(SEEK_STEP)), { ...base, description: t('shortcutSeekForward') });
-  useShortcut('shift+arrowleft', guard('arrow', seek(-SEEK_STEP_LARGE)), { ...base, description: t('shortcutSeekBackLarge') });
-  useShortcut('shift+arrowright', guard('arrow', seek(SEEK_STEP_LARGE)), { ...base, description: t('shortcutSeekForwardLarge') });
+  useShortcut('arrowleft', guard('arrow', seek(-SEEK_STEP)), { ...pageKeys, description: t('shortcutSeekBack') });
+  useShortcut('arrowright', guard('arrow', seek(SEEK_STEP)), { ...pageKeys, description: t('shortcutSeekForward') });
+  useShortcut('shift+arrowleft', guard('arrow', seek(-SEEK_STEP_LARGE)), { ...pageKeys, description: t('shortcutSeekBackLarge') });
+  useShortcut('shift+arrowright', guard('arrow', seek(SEEK_STEP_LARGE)), { ...pageKeys, description: t('shortcutSeekForwardLarge') });
   // Next episode (or the next item of whatever queue is playing), like the bar's Next button.
   const nextItem = (): void => {
     const next = nextInQueue();
@@ -161,14 +177,14 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     guard('arrow', () => {
       stepVolume(1, t);
     }),
-    { ...base, description: t('shortcutVolumeUp') },
+    { ...pageKeys, description: t('shortcutVolumeUp') },
   );
   useShortcut(
     'arrowdown',
     guard('arrow', () => {
       stepVolume(-1, t);
     }),
-    { ...base, description: t('shortcutVolumeDown') },
+    { ...pageKeys, description: t('shortcutVolumeDown') },
   );
   useShortcut(
     'm',
@@ -256,12 +272,12 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     { ...base, enabled: active && live && video, description: t('shortcutChannelHistory') },
   );
   useShortcut('pageup', guard('arrow', () => void zap('up').catch(() => undefined)), {
-    ...base,
+    ...pageKeys,
     enabled: active && zappable,
     description: t('shortcutChannelUp'),
   });
   useShortcut('pagedown', guard('arrow', () => void zap('down').catch(() => undefined)), {
-    ...base,
+    ...pageKeys,
     enabled: active && zappable,
     description: t('shortcutChannelDown'),
   });

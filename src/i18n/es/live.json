@@ -127,7 +127,7 @@
   "searchStations": "Buscar emisoras",
   "searchInGroup": "Buscar en {{group}}",
   "shortcutArea": "TV en vivo",
-  "shortcutDigits": "Escribe un número de canal (se confirma tras 1,5 s)",
+  "shortcutDigits": "Escribe un número de canal (Intro cambia al instante; si no, se confirma tras 1,5 s)",
   "shortcutFocusSearch": "Buscar canales",
   "shortcutToggleSidebar": "Mostrar u ocultar la barra lateral de grupos",
   "stage": "Reproductor",

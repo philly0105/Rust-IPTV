@@ -122,7 +122,7 @@
   "searchStations": "局を検索",
   "searchInGroup": "{{group}} 内を検索",
   "shortcutArea": "ライブTV",
-  "shortcutDigits": "チャンネル番号を入力（1.5秒後に確定）",
+  "shortcutDigits": "チャンネル番号を入力（Enterですぐに切り替え、押さなければ1.5秒後に確定）",
   "shortcutFocusSearch": "チャンネルを検索",
   "shortcutToggleSidebar": "グループのサイドバーを表示／非表示",
   "stage": "プレーヤー",

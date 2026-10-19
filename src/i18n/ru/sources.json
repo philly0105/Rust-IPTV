@@ -19,6 +19,8 @@
   "cancel": "Отмена",
   "closeKeepImporting": "Закрыть, продолжая импорт",
   "shortcutAddSource": "Добавить источник",
+  "shortcutMoveUp": "Переместить выбранный источник вверх",
+  "shortcutMoveDown": "Переместить выбранный источник вниз",
 
   "kindM3u": "Плейлист M3U",
   "kindXtream": "Xtream Codes",

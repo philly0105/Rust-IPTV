@@ -15,6 +15,8 @@
   "cancel": "取消",
   "closeKeepImporting": "關閉，繼續匯入",
   "shortcutAddSource": "新增播放來源",
+  "shortcutMoveUp": "上移目前的播放來源",
+  "shortcutMoveDown": "下移目前的播放來源",
 
   "kindM3u": "M3U 播放清單",
   "kindXtream": "Xtream Codes",

@@ -142,7 +142,7 @@
   "searchStations": "البحث في المحطات",
   "searchInGroup": "البحث في {{group}}",
   "shortcutArea": "البث المباشر",
-  "shortcutDigits": "اكتب رقم قناة (يُنفَّذ بعد 1.5 ث)",
+  "shortcutDigits": "اكتب رقم قناة (Enter ينتقل فورًا، وإلا يُنفَّذ بعد 1.5 ث)",
   "shortcutFocusSearch": "البحث في القنوات",
   "shortcutToggleSidebar": "إظهار الشريط الجانبي للمجموعات أو إخفاؤه",
   "stage": "المشغل",

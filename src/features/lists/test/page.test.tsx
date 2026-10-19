@@ -167,6 +167,8 @@ describe('list page', () => {
     h.renderAt('/lists/L1', routes);
     expect(await screen.findByText('This list is empty')).toBeTruthy();
     expect(screen.getByText(/press L on a channel/)).toBeTruthy();
+    // Browse channels opens Live TV, not `/` (which restores the saved screen: this one).
+    await waitFor(() => expect(screen.getByTestId('list-browse-channels').getAttribute('href')).toBe('/s/src1/live'));
   });
 
   it('a list whose channels were all dropped says so', async () => {

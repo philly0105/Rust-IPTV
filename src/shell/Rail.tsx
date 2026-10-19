@@ -30,7 +30,7 @@ import { useRpcQuery } from '@/api/query';
 import type { Source, SourceKind } from '@/api/types';
 import { cn, hueOf, initialsOf, Skeleton } from '@/ui';
 
-import { railLinks } from './railLinks';
+import { railLinks, routeSourceId } from './railLinks';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
 
@@ -430,7 +430,8 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
   const toggleRail = useShellStore((s) => s.toggleRail);
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const location = useLocation();
-  const activeSourceId = /^\/s\/([^/]+)/.exec(location.pathname)?.[1];
+  // The archive (`/live/archive/:id/...`) belongs to its source too: the rail marks and opens it.
+  const activeSourceId = routeSourceId(location.pathname);
   const primaryRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollKey = `${location.pathname}|${sources.data ? 'ready' : 'pending'}`;
@@ -540,7 +541,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
                     key={s.id}
                     source={s}
                     collapsed={collapsed}
-                    active={activeSourceId === encodeURIComponent(s.id) || activeSourceId === s.id}
+                    active={activeSourceId === s.id}
                     // The tour's "Live TV" step points at a source whose channels are there to watch.
                     tour={s.id === tourSourceId ? 'live' : undefined}
                   />

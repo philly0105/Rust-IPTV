@@ -15,6 +15,8 @@
   "cancel": "İptal",
   "closeKeepImporting": "Kapat, içe aktarma sürsün",
   "shortcutAddSource": "Kaynak ekle",
+  "shortcutMoveUp": "Odaktaki kaynağı yukarı taşı",
+  "shortcutMoveDown": "Odaktaki kaynağı aşağı taşı",
 
   "kindM3u": "M3U oynatma listesi",
   "kindXtream": "Xtream Codes",

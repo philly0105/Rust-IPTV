@@ -122,7 +122,7 @@
   "searchStations": "Search stations",
   "searchInGroup": "Search in {{group}}",
   "shortcutArea": "Live TV",
-  "shortcutDigits": "Type a channel number (commits after 1.5 s)",
+  "shortcutDigits": "Type a channel number (Enter zaps at once, else it commits after 1.5 s)",
   "shortcutFocusSearch": "Search channels",
   "shortcutToggleSidebar": "Show or hide the groups sidebar",
   "stage": "Player",

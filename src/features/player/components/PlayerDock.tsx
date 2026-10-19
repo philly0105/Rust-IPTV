@@ -276,6 +276,8 @@ export function PlayerDock() {
         aria-label={t('nowPlaying')}
         // Toasts lift above the docked mini player instead of covering its controls (ui/Toast.tsx).
         data-toast-avoid=""
+        // Focus in here gives Space, the arrows and Page Up/Down to the player (playerOwnsPageKeys).
+        data-player-mini=""
         hidden={!inMini}
         className={cn(
           'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-2',

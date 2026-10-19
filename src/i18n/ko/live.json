@@ -122,7 +122,7 @@
   "searchStations": "방송국 검색",
   "searchInGroup": "{{group}}에서 검색",
   "shortcutArea": "라이브 TV",
-  "shortcutDigits": "채널 번호 입력 (1.5초 후 적용)",
+  "shortcutDigits": "채널 번호 입력 (Enter로 바로 전환, 아니면 1.5초 후 적용)",
   "shortcutFocusSearch": "채널 검색",
   "shortcutToggleSidebar": "그룹 사이드바 표시/숨기기",
   "stage": "플레이어",

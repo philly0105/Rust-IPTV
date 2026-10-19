@@ -18,7 +18,7 @@ export interface ShortcutOptions {
   area: string;
   enabled?: boolean;
   allowInInput?: boolean;
-  /** Fire while a modal dialog is open. Default: only `escape` and `mod+*` combos do. */
+  /** Fire while a modal dialog is open. Default: only `escape` does. */
   allowInModal?: boolean;
   /**
    * Global shortcut: fires everywhere, including while typing, inside modal
@@ -26,6 +26,16 @@ export interface ShortcutOptions {
    * `allowInModal`.
    */
   global?: boolean;
+  /**
+   * Checked at key time, after the combo matched: false skips this entry as if it were not
+   * registered, so an older entry or the browser default gets the key.
+   */
+  when?: (e: KeyboardEvent) => boolean;
+  /**
+   * Higher wins over newer registrations of the same combo (default 0). A page's own keys
+   * use it to beat app-wide ones that may register after the page mounted.
+   */
+  priority?: number;
 }
 
 export interface ShortcutInfo {
@@ -150,7 +160,8 @@ function emit(): void {
   for (const l of listeners) l();
 }
 
-function modalOpen(): boolean {
+/** True while a modal dialog is open. */
+export function modalOpen(): boolean {
   return typeof document !== 'undefined' && document.querySelector('[aria-modal="true"]') !== null;
 }
 
@@ -186,39 +197,73 @@ export function isActivationTarget(target: EventTarget | null): boolean {
 
 const ARROW_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end', 'pageup', 'pagedown']);
 
-/** True when bare arrow/Home/End/Page keys adjust the focused control (slider, spinbutton, select). */
+/** Roles whose widgets move or adjust with the arrow keys (the player's `targetOwnsKey` lists the same). */
+const ARROW_ROLES = new Set([
+  'slider',
+  'spinbutton',
+  'scrollbar',
+  'listbox',
+  'option',
+  'grid',
+  'gridcell',
+  'menu',
+  'menuitem',
+  'menuitemradio',
+  'tab',
+  'tablist',
+  'radiogroup',
+  'radio',
+  'tree',
+  'treeitem',
+]);
+
+/**
+ * True when bare arrow/Home/End/Page keys adjust the focused control: a select, a range or
+ * radio input (the browser moves the checked radio), or a slider, list, menu, tab or radio widget.
+ */
 export function isArrowTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.tagName === 'SELECT') return true;
-  if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'range') return true;
+  if (target.tagName === 'INPUT') {
+    const type = (target as HTMLInputElement).type;
+    if (type === 'range' || type === 'radio') return true;
+  }
   const role = target.getAttribute('role');
-  return role === 'slider' || role === 'spinbutton' || role === 'scrollbar';
+  return role !== null && ARROW_ROLES.has(role);
 }
 
 const bare = (p: ParsedCombo) => !p.mod && !p.ctrl && !p.meta && !p.alt;
 const isBareActivationKey = (p: ParsedCombo) => (p.key === 'space' || p.key === 'enter') && bare(p);
 const isBareArrowKey = (p: ParsedCombo) => ARROW_KEYS.has(p.key) && bare(p);
 
-/** Picks the entry that should handle `e`, newest registration first. Exported for tests. */
+/**
+ * Picks the entry that should handle `e`: the highest `priority`, then the newest
+ * registration. Exported for tests.
+ */
 export function findShortcut(e: KeyboardEvent): ShortcutEntry | undefined {
   if (e.defaultPrevented || e.isComposing) return undefined;
   const typing = isTypingTarget(e.target);
   const activation = isActivationTarget(e.target);
   const arrows = isArrowTarget(e.target);
   const modal = modalOpen();
+  let best: ShortcutEntry | undefined;
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;
     if (entry.enabled === false) continue;
     if (!matches(entry.parsed, e)) continue;
-    if (entry.global) return entry;
-    if (typing && !entry.allowInInput) continue;
-    if (activation && isBareActivationKey(entry.parsed)) continue;
-    if (arrows && isBareArrowKey(entry.parsed)) continue;
-    // While a modal is open only escape, mod+* combos, and opted-in shortcuts fire.
-    if (modal && !entry.allowInModal && !(entry.parsed.key === 'escape' || entry.parsed.mod)) continue;
-    return entry;
+    if (best && (entry.priority ?? 0) <= (best.priority ?? 0)) continue;
+    if (!entry.global) {
+      if (typing && !entry.allowInInput) continue;
+      if (activation && isBareActivationKey(entry.parsed)) continue;
+      if (arrows && isBareArrowKey(entry.parsed)) continue;
+      // While a modal is open only escape and opted-in shortcuts fire: a navigating mod+ combo
+      // (Ctrl+R, Ctrl+F) would throw away what the dialog holds.
+      if (modal && !entry.allowInModal && entry.parsed.key !== 'escape') continue;
+    }
+    if (entry.when && !entry.when(e)) continue;
+    best = entry;
   }
-  return undefined;
+  return best;
 }
 
 function onKeyDown(e: KeyboardEvent): void {
@@ -275,12 +320,15 @@ export const shortcutRegistry = {
 
 /**
  * Registers a keyboard shortcut for the component's lifetime. The latest
- * handler is always called (no need to memoize it).
+ * handler and `when` are always called (no need to memoize them).
  */
 export function useShortcut(combo: string, handler: (e: KeyboardEvent) => void, opts: ShortcutOptions): void {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
-  const { description, area, enabled = true, allowInInput = false, allowInModal, global } = opts;
+  const whenRef = useRef(opts.when);
+  whenRef.current = opts.when;
+  const { description, area, enabled = true, allowInInput = false, allowInModal, global, priority } = opts;
+  const hasWhen = !!opts.when;
   useEffect(() => {
     if (!enabled) return;
     return shortcutRegistry.register(combo, (e) => handlerRef.current(e), {
@@ -290,8 +338,10 @@ export function useShortcut(combo: string, handler: (e: KeyboardEvent) => void, 
       allowInInput,
       allowInModal,
       global,
+      priority,
+      when: hasWhen ? (e) => whenRef.current?.(e) ?? true : undefined,
     });
-  }, [combo, description, area, enabled, allowInInput, allowInModal, global]);
+  }, [combo, description, area, enabled, allowInInput, allowInModal, global, priority, hasWhen]);
 }
 
 /** Live list of registered shortcuts. */

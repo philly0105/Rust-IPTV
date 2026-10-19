@@ -179,23 +179,73 @@ describe('shortcuts and focused controls', () => {
     expect(isActivationTarget(mount('div'))).toBe(false);
     expect(isArrowTarget(mount('select'))).toBe(true);
     expect(isArrowTarget(mount('input', { type: 'text' }))).toBe(false);
+    expect(isArrowTarget(mount('input', { type: 'radio' }))).toBe(true);
+    expect(isArrowTarget(mount('div', { role: 'radio' }))).toBe(true);
+    expect(isArrowTarget(mount('div', { role: 'tab' }))).toBe(true);
+    expect(isArrowTarget(mount('div', { role: 'option' }))).toBe(true);
+    expect(isArrowTarget(mount('div', { role: 'listitem' }))).toBe(false);
+    expect(isArrowTarget(mount('button'))).toBe(false);
+  });
+
+  it('leaves arrows and Page keys to a focused native radio group', () => {
+    const fn = vi.fn();
+    shortcutRegistry.register('arrowdown', fn, opts);
+    shortcutRegistry.register('pagedown', fn, opts);
+    const radio = mount('input', { type: 'radio', name: 'g' });
+    expect(press(radio, 'ArrowDown').defaultPrevented).toBe(false);
+    expect(press(radio, 'PageDown').defaultPrevented).toBe(false);
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe('shortcut conditions and priority', () => {
+  it('skips an entry whose `when` says no, leaving the key to an older entry or the browser', () => {
+    const older = vi.fn();
+    const scoped = vi.fn();
+    let ok = false;
+    shortcutRegistry.register('space', older, opts);
+    shortcutRegistry.register('space', scoped, { ...opts, when: () => ok });
+    press(document.body, ' ', { code: 'Space' });
+    expect(older).toHaveBeenCalledOnce();
+    expect(scoped).not.toHaveBeenCalled();
+    ok = true;
+    press(document.body, ' ', { code: 'Space' });
+    expect(scoped).toHaveBeenCalledOnce();
+
+    shortcutRegistry.reset();
+    shortcutRegistry.register('arrowdown', scoped, { ...opts, when: () => false });
+    expect(press(document.body, 'ArrowDown').defaultPrevented).toBe(false);
+  });
+
+  it('lets a higher priority win over a newer registration', () => {
+    const page = vi.fn();
+    const playback = vi.fn();
+    shortcutRegistry.register('l', page, { ...opts, priority: 1 });
+    shortcutRegistry.register('l', playback, opts);
+    press(document.body, 'l', { code: 'KeyL' });
+    expect(page).toHaveBeenCalledOnce();
+    expect(playback).not.toHaveBeenCalled();
   });
 });
 
 describe('shortcuts in modals', () => {
-  it('only lets escape, mod combos, and opted-in shortcuts through', () => {
+  it('only lets escape and opted-in shortcuts through, mod combos included', () => {
     mount('div', { 'aria-modal': 'true' });
     const plain = vi.fn();
     const opted = vi.fn();
     const mod = vi.fn();
+    const escape = vi.fn();
     shortcutRegistry.register('m', plain, opts);
     shortcutRegistry.register('f', opted, { ...opts, allowInModal: true });
-    shortcutRegistry.register('mod+k', mod, opts);
+    shortcutRegistry.register('mod+r', mod, opts);
+    shortcutRegistry.register('escape', escape, opts);
     expect(press(document.body, 'm', { code: 'KeyM' }).defaultPrevented).toBe(false);
     press(document.body, 'f', { code: 'KeyF' });
-    press(document.body, 'k', { code: 'KeyK', ctrlKey: true });
+    expect(press(document.body, 'r', { code: 'KeyR', ctrlKey: true }).defaultPrevented).toBe(false);
+    press(document.body, 'Escape');
     expect(plain).not.toHaveBeenCalled();
     expect(opted).toHaveBeenCalledOnce();
-    expect(mod).toHaveBeenCalledOnce();
+    expect(mod).not.toHaveBeenCalled();
+    expect(escape).toHaveBeenCalledOnce();
   });
 });

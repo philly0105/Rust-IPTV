@@ -413,6 +413,19 @@ describe('keyboard', () => {
     fireEvent.keyDown(window, { key: 'l' });
     expect(useMultiviewStore.getState().layout).toBe('2x2');
   });
+
+  it("the wall's L, F and M beat playback keys registered after the page (main playback starting)", async () => {
+    const { shortcutRegistry } = await import('@/shell/shortcuts');
+    seed([1, 2, 3]);
+    renderPage();
+    const playback = vi.fn();
+    const offs = ['l', 'm'].map((k) => shortcutRegistry.register(k, playback, { description: k, area: 'Playback' }));
+    fireEvent.keyDown(window, { key: 'l' });
+    expect(useMultiviewStore.getState().layout).toBe('1+3');
+    fireEvent.keyDown(window, { key: 'm' });
+    expect(playback).not.toHaveBeenCalled();
+    offs.forEach((off) => off());
+  });
 });
 
 // ---------------------------------------------------------------------------

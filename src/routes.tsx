@@ -164,7 +164,7 @@ export function RouteErrorPage() {
  * and prefetches the dashboard only when that is where it goes.
  */
 const shellChildRoutes: RouteObject[] = [
-  { index: true, element: <StartupRedirect /> },
+  { index: true, element: <StartupRedirect isKnownPath={isKnownPath} /> },
   { path: 'dashboard', lazy: async () => ({ Component: (await loadDashboard()).DashboardPage }) },
 ];
 
@@ -201,6 +201,16 @@ export const routes: RouteObject[] = [
     ],
   },
 ];
+
+/**
+ * True when a route other than the not-found page renders `pathname`. Startup uses it to drop a
+ * saved screen whose path no longer exists.
+ */
+export function isKnownPath(pathname: string): boolean {
+  const matched = matchRoutes(routes, pathname);
+  const leaf = matched?.[matched.length - 1]?.route;
+  return !!leaf && leaf.path !== '*';
+}
 
 /**
  * Starts downloading the lazy page chunks of `path` without rendering anything (L3-ui-data-x5).

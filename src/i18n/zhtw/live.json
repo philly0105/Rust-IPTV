@@ -122,7 +122,7 @@
   "searchStations": "搜尋電台",
   "searchInGroup": "在 {{group}} 中搜尋",
   "shortcutArea": "直播電視",
-  "shortcutDigits": "輸入頻道號碼（1.5 秒後確認）",
+  "shortcutDigits": "輸入頻道號碼（按 Enter 立即切換，否則 1.5 秒後確認）",
   "shortcutFocusSearch": "搜尋頻道",
   "shortcutToggleSidebar": "顯示或隱藏群組側邊欄",
   "stage": "播放器",

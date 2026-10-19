@@ -17,6 +17,8 @@
   "cancel": "Annuler",
   "closeKeepImporting": "Fermer et continuer l'importation",
   "shortcutAddSource": "Ajouter une source",
+  "shortcutMoveUp": "Monter la source sélectionnée",
+  "shortcutMoveDown": "Descendre la source sélectionnée",
 
   "kindM3u": "Liste de lecture M3U",
   "kindXtream": "Xtream Codes",

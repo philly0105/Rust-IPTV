@@ -29,13 +29,15 @@ describe('shortcut dispatch', () => {
     const seen: string[] = [];
     shortcutRegistry.register('k', () => seen.push('k'), opts);
     shortcutRegistry.register('mod+s', () => seen.push('mod+s'), opts);
+    // Keys that match nothing need no lookup, auto-repeat included.
     press(document.body, 'ArrowDown', { code: 'ArrowDown' });
     press(document.body, 'ArrowDown', { code: 'ArrowDown', repeat: true });
-    // A mod combo fires in a modal anyway, so it needs no lookup either.
-    press(document.body, 's', { code: 'KeyS', ctrlKey: true });
     expect(query.mock.calls.filter(([sel]) => sel === '[aria-modal="true"]')).toHaveLength(0);
-    press(document.body, 'k', { code: 'KeyK' });
+    // A modal blocks mod combos too (F-MODAL-SHORTCUTS), so a match looks once.
+    press(document.body, 's', { code: 'KeyS', ctrlKey: true });
     expect(query.mock.calls.filter(([sel]) => sel === '[aria-modal="true"]')).toHaveLength(1);
+    press(document.body, 'k', { code: 'KeyK' });
+    expect(query.mock.calls.filter(([sel]) => sel === '[aria-modal="true"]')).toHaveLength(2);
     expect(seen).toEqual(['mod+s', 'k']);
     // An open modal still blocks it.
     mount('div', { 'aria-modal': 'true' });

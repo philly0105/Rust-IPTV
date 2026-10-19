@@ -21,7 +21,7 @@ import { CustomListRails } from '@/features/lists/rails';
 import { MyListRail } from '@/features/mylist/components/MyListRail';
 import { useMyList } from '@/features/mylist/hooks/useMyList';
 import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
-import { formatRating } from '@/features/vod/lib/format';
+import { formatRating } from '@/features/vod/lib/rating';
 import { RpcError, type RpcResult } from '@/api/transport';
 import { snapshotTitle } from '@/lib/title';
 import { Badge, Button, EmptyState, ErrorState, buttonClass, useToast, errorDescription } from '@/ui';

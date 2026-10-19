@@ -449,7 +449,7 @@ pub async fn publish_source(state: &Arc<AppState>, source_id: &str) -> CoreResul
     if previous.as_deref() != Some(source_id.as_str()) {
         let sid = source_id.clone();
         state
-            .db_call(move |conn| {
+            .db_write(move |conn| {
                 conn.execute(
                     "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",

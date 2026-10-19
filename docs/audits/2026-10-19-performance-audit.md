@@ -475,7 +475,7 @@ The audit/fixes branch merges the performance lane (audit/perf-fixes) and the fe
 | ST-3 | Fixed | Stalker answers are fingerprinted; M3U URLs send ETag and Last-Modified and keep the catalog on a 304. |
 | ST-4 | Partial | Export to a path streams to the file and the download JSON is built on the blocking pool. The RPC layer still serializes the download a second time (DB-5), and there is no option to leave out the text of URL sources. |
 | ST-5 | Fixed | Refresh of one source refetches only `sources.*`; backup loads emit `done` with `sources.changed`; an autoRefresh-only update sends `status`. |
-| DB-1 | Partial | User writes and best-effort background writes go through the write gate. The separate read pool is not done. |
+| DB-1 | Partial | These writes go through the write gate (`db_write`): `stats.record`, watched marks, favorites (reorder now IMMEDIATE), recent entries, positions, source pins, `watchlist.*`, `lists.*`, `channels.*` edits, category hiding, settings, `epg.setMapping`, `epg.clearMapping`, `epg.setChannelShift` and `remote.publishSource`. Stalker VOD page writes and TMDB cache writes run through `writer()` without the read RPC waiting. Still on plain `db_call`: parental lock and PIN writes, `epg.setEnabled`, and the background writers (EPG refreshes, the image index writer, recording byte saves, and download progress, which is now spawned so the transfer no longer waits on it). The separate read pool is not done. |
 | DB-2 | Partial | Remove holds `long_write`, deletes FTS and rank rows in bulk and checkpoints the WAL. The index rebuild after a very large removal is not done. |
 | DB-3 | Fixed | OFFSET is bound, LIMIT stays literal, statement cache raised to 64. |
 | DB-4 | Fixed | Pool idle timeout and max lifetime are off. |

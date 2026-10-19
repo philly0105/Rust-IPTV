@@ -279,7 +279,7 @@ pub async fn set_mapping(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             ensure_source(c, &r.source_id)?;
             c.execute(
                 "INSERT INTO epg_channel_map(source_id, content_type, item_id, epg_channel_id) VALUES (?1, ?2, ?3, ?4)
@@ -296,7 +296,7 @@ pub async fn set_mapping(
 /// `epg.clearMapping`: back to automatic resolution.
 pub async fn clear_mapping(state: &AppState, r: ItemRef) -> CoreResult<()> {
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             c.execute(
                 "DELETE FROM epg_channel_map WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
                 params![r.source_id, r.content_type.as_str(), r.item_id],
@@ -320,7 +320,7 @@ pub async fn set_channel_shift(
         query::check_shift_minutes(m)?;
     }
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             ensure_source(c, &r.source_id)?;
             match minutes {
                 Some(m) => c.execute(

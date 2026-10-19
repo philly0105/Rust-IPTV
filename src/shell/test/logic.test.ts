@@ -9,7 +9,7 @@ import { railLinks } from '../railLinks';
 import { groupShortcuts } from '../ShortcutOverlay';
 import { matches, normalizeCombo, parseCombo } from '../shortcuts';
 import { titleEndsWithYear } from '../dashboard/heroSlides';
-import { routeSourceId } from '../railLinks';
+import { routeSourceId, sourceHomePath } from '../railLinks';
 import { routeListId, startupTarget } from '../StartupRedirect';
 import { resolveTheme } from '../theme';
 
@@ -132,6 +132,28 @@ describe('rail links', () => {
   });
   it('encodes the source id in paths', () => {
     expect(railLinks(src('xtream'), { hasRadio: false })[0]!.to).toBe('/s/a%20b/live');
+  });
+  it('drops empty Xtream sections once an import has counted them (F-RAIL-COUNTS)', () => {
+    const counted = (patch: Partial<Source>) => ({ ...src('xtream'), lastRefreshAt: '2026-10-19T10:00:00Z', radioCount: 0, seriesCount: 0, ...patch }) as Source;
+    expect(railLinks(counted({})).map((l) => l.id)).toEqual(['live', 'favorites', 'recent']);
+    expect(railLinks(counted({ movieCount: 4, seriesCount: 2, radioCount: 1 })).map((l) => l.id)).toEqual(['live', 'radio', 'movies', 'series', 'favorites', 'recent']);
+    // Not imported yet: the zeros are no answer, so every link stays.
+    expect(railLinks({ ...counted({}), lastRefreshAt: undefined }).map((l) => l.id)).toHaveLength(6);
+  });
+  it('keeps Stalker movies and series, whose totals the portal may not report', () => {
+    const portal = { ...src('stalker'), lastRefreshAt: '2026-10-19T10:00:00Z', radioCount: 0, seriesCount: 0 } as Source;
+    expect(railLinks(portal).map((l) => l.id)).toEqual(['live', 'movies', 'series', 'favorites', 'recent']);
+  });
+});
+
+describe('source home path (F-VOD-ONLY-SOURCE)', () => {
+  const counts = (patch: Partial<Source>) => ({ id: 'a b', channelCount: 0, movieCount: 0, seriesCount: 0, radioCount: 0, ...patch }) as Source;
+  it('opens live channels first, else the first section with anything in it', () => {
+    expect(sourceHomePath(counts({ channelCount: 3, movieCount: 5 }))).toBe('/s/a%20b/live');
+    expect(sourceHomePath(counts({ movieCount: 5, seriesCount: 2 }))).toBe('/s/a%20b/movies');
+    expect(sourceHomePath(counts({ seriesCount: 2 }))).toBe('/s/a%20b/series');
+    expect(sourceHomePath(counts({ radioCount: 2 }))).toBe('/s/a%20b/radio');
+    expect(sourceHomePath(counts({}))).toBe('/s/a%20b/live');
   });
 });
 

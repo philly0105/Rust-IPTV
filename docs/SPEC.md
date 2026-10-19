@@ -386,7 +386,7 @@ Each feature exports `export const <name>Routes: RouteObject[]` from `src/featur
 /s/:sourceId/actor/:personId                                     U4
 /s/:sourceId/search?q=                                           U4
 ```
-For every source kind `/s/:id` redirects to `/s/:id/live`. Rail links per source come from `src/shell/railLinks.ts` (U1) using `source.kind` to decide which of live/radio/movies/series/favorites/recent appear (m3u: live, radio when any, favorites, recent, movies when movieCount > 0; xtream/stalker: all).
+For every source kind `/s/:id` redirects to `/s/:id/live`, or, when the source has no live channels, to the first of movies, series and radio that holds something (`sourceHomePath`; the add toast and the source cards open the same page). Rail links per source come from `src/shell/railLinks.ts` (U1) using `source.kind` to decide which of live/radio/movies/series/favorites/recent appear (m3u: live, radio when any, favorites, recent, movies when movieCount > 0; xtream/stalker: all until the first import finished (`lastRefreshAt`), then live, favorites and recent always, and radio, movies and series only when their count is above 0; stalker keeps movies and series, whose totals come from the portal, which may not report them).
 
 ### C8. Player store (`src/features/player/store.ts`, U5; every other UI slice consumes it)
 

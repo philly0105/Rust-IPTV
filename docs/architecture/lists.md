@@ -81,6 +81,8 @@ The player recovers when the list stops matching what plays:
 - If `lists.neighbors` returns `not_found` (the channel left the list, or the list was deleted), the player drops `listId` and zaps through `catalog.neighbors` on the channel's own source. The fullscreen panel falls back to the source the same way when `lists.items` fails.
 - A play from outside the list (`playChannel` or `tuneChannel` without `keepList`: a Live row, a guide row, search, a dashboard card) clears `listId`. Zaps and picks in the channel panel pass `keepList`, so they stay in the list.
 
+Favorites zap the same way. A channel played from `/favorites` or `/s/:id/favorites` sets `zapContext.favorites` (`{}` for every source's favorites, `{ sourceId }` for one source's; `openEntry` in `src/features/library/lib/open.ts`, once the channel plays). Channel up and down then walk `favorites.list` with the page's arguments in favorites order, among favorites of the playing channel's type (live or radio), across sources on the global page. They wrap at both ends and step over favorites the catalog no longer answers for (`catalog.item`). A channel that is no longer a favorite drops the context and zaps through its source, and a play from elsewhere clears it, as for lists. The fullscreen channel panel keeps showing the source's channels.
+
 ## Events
 
 `lists.changed` (payload `{}`) is emitted after a write that changed something. `create`, `reorder` and `reorderItems` always emit. `update`, `remove`, `addItems` and `removeItems` emit only when they changed a row.

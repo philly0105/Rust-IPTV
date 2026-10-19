@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Przewodnik TV",
   "searchLabel": "Szukaj w przewodniku",
+  "zoomIn": "Powiększ",
+  "zoomOut": "Pomniejsz",
+  "viewFavorites": "Ulubione",
+  "viewList": "Lista: {{name}}",
+  "viewFavoritesEmpty": "Brak ulubionych kanałów z tego źródła",
+  "viewListEmpty": "Na tej liście nie ma kanałów z tego źródła",
+  "viewEmptyHint": "Wybierz inne źródło albo dodaj kanały z ich menu.",
   "searchPlaceholder": "Szukaj w przewodniku",
   "searchResults": "Wyszukiwanie w przewodniku",
   "searchHint": "Wpisz co najmniej 2 znaki.",

@@ -52,6 +52,7 @@
   "groupSettings": "Ajustes",
   "groupSearch": "Buscar",
   "groupFavoritesRecent": "Favoritos y recientes",
+  "groupProgrammes": "Programas de la guía",
   "sourceSection": "{{source}}: {{section}}",
   "themeDark": "Usar tema oscuro",
   "themeLight": "Usar tema claro",

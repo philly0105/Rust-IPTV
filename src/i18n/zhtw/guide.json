@@ -1,6 +1,13 @@
 {
   "shortcutArea": "節目表",
   "searchLabel": "搜尋節目表",
+  "zoomIn": "放大",
+  "zoomOut": "縮小",
+  "viewFavorites": "我的最愛",
+  "viewList": "清單：{{name}}",
+  "viewFavoritesEmpty": "此來源沒有我的最愛頻道",
+  "viewListEmpty": "此清單中沒有此來源的頻道",
+  "viewEmptyHint": "請選擇其他來源，或從頻道選單新增頻道。",
   "searchPlaceholder": "搜尋節目表",
   "searchResults": "節目表搜尋",
   "searchHint": "請至少輸入 2 個字元。",

@@ -170,6 +170,7 @@
   "group_movies": "الأفلام",
   "group_series": "المسلسلات",
   "group_live": "القنوات",
+  "group_programmes": "البرامج",
   "tmdbAttribution": "يستخدم هذا المنتج TMDB API ولكنه غير معتمد أو مصدّق من قِبل TMDB.",
   "tmdbLogoLabel": "TMDB (The Movie Database)، يفتح themoviedb.org",
   "tmdbUnavailable": "تعذّر الوصول إلى TMDB",

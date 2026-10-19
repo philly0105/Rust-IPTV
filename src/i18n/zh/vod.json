@@ -146,6 +146,7 @@
   "group_movies": "电影",
   "group_series": "剧集",
   "group_live": "频道",
+  "group_programmes": "节目",
   "tmdbAttribution": "本产品使用 TMDB API，但未获得 TMDB 的认可或认证。",
   "tmdbLogoLabel": "TMDB（The Movie Database），打开 themoviedb.org",
   "tmdbUnavailable": "无法连接到 TMDB",

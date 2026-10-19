@@ -8,8 +8,8 @@ export { registerCommands, useCommands, useCommandList, commandRegistry } from '
 export type { Command } from './commands';
 export { useShortcut, useShortcutList, shortcutRegistry, parseCombo, normalizeCombo, matches as comboMatches } from './shortcuts';
 export type { ShortcutInfo, ShortcutOptions } from './shortcuts';
-export { railLinks, railLinkIds, sourceBasePath } from './railLinks';
-export type { RailLink, RailLinkId, RailLinkOptions } from './railLinks';
+export { railLinks, railLinkIds, sourceBasePath, sourceHomePath } from './railLinks';
+export type { RailLink, RailLinkId, RailLinkOptions, RailLinkSource } from './railLinks';
 export {
   useTheme,
   persistTheme,

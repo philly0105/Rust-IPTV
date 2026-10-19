@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Programmagids",
   "searchLabel": "Programmagids doorzoeken",
+  "zoomIn": "Inzoomen",
+  "zoomOut": "Uitzoomen",
+  "viewFavorites": "Favorieten",
+  "viewList": "Lijst: {{name}}",
+  "viewFavoritesEmpty": "Geen favoriete kanalen van deze bron",
+  "viewListEmpty": "Geen kanalen van deze bron in deze lijst",
+  "viewEmptyHint": "Kies een andere bron of voeg kanalen toe via hun menu.",
   "searchPlaceholder": "Gids doorzoeken",
   "searchResults": "Zoeken in de gids",
   "searchHint": "Typ minstens 2 tekens.",

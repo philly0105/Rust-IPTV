@@ -11,6 +11,7 @@ import { intlLocale, listSeparator } from '@/lib/intl';
 import { Badge, CARD_ART, CARD_ROOT, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
+import { sourceHomePath } from '../railLinks';
 
 /** The focusable card; its focus ring, hover lift and press are drawn on the artwork (CARD_ART). */
 const cardRoot = cn(CARD_ROOT, 'block w-full rounded-md text-start');
@@ -457,7 +458,7 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
     ? joinList([phaseLabel, fraction !== undefined && new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent' }).format(fraction)], i18n.language)
     : joinList(counts, i18n.language) || t('emptySource');
   return (
-    <Link to={`/s/${encodeURIComponent(source.id)}/live`} {...rail} className={cardRoot}>
+    <Link to={sourceHomePath(source)} {...rail} className={cardRoot}>
       <div
         className={cn(CARD_ART, 'flex aspect-video w-full flex-col justify-between p-4')}
         style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 30%), hsl(${(hue + 36) % 360} 46% 16%))` }}

@@ -158,6 +158,7 @@
   "group_movies": "Фильмы",
   "group_series": "Сериалы",
   "group_live": "Каналы",
+  "group_programmes": "Передачи",
   "tmdbAttribution": "Этот продукт использует TMDB API, но не одобрен и не сертифицирован TMDB.",
   "tmdbLogoLabel": "TMDB (The Movie Database), открывает themoviedb.org",
   "tmdbUnavailable": "Не удалось подключиться к TMDB",

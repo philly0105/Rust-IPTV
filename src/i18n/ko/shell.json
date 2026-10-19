@@ -52,6 +52,7 @@
   "groupSettings": "설정",
   "groupSearch": "검색",
   "groupFavoritesRecent": "즐겨찾기 및 최근 시청",
+  "groupProgrammes": "가이드 프로그램",
   "sourceSection": "{{source}}: {{section}}",
   "themeDark": "다크 테마 사용",
   "themeLight": "라이트 테마 사용",

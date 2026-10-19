@@ -92,7 +92,8 @@ export function ProgramActionsView({ channelRef, channelName, program, now, vari
   const seriesLabel = rule ? (rule.enabled ? tg('seriesOn') : tg('seriesPaused')) : tg('recordSeries');
   const showRemind = options.remind || !!reminder;
   const showRecord = (options.record && canRecord) || !!recording;
-  const showSeries = (canRecord && canHaveRule(channelRef, program.title)) || !!rule;
+  // Rules match XMLTV programmes only: one made from the provider's guide would never schedule.
+  const showSeries = (canRecord && !program.fromProvider && canHaveRule(channelRef, program.title)) || !!rule;
   const toggleRemind = () => void run('remind', () => actions.toggleReminder(target, reminder));
   // Stopping a recording that is writing now cannot be undone: it asks first.
   const toggleRecord = () => {

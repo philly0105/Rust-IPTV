@@ -1,6 +1,6 @@
 import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 
-import { addLocalDays, canCatchUp, floorLocal, hasUsableArchive, ms, programWhen } from './epgTime';
+import { addLocalDays, canCatchUp, floorLocal, hasUsableArchive, HOUR, ms, programWhen } from './epgTime';
 
 /** Days the archive browser offers when the channel does not say how long its archive is. */
 export const DEFAULT_ARCHIVE_DAYS = 1;
@@ -80,6 +80,31 @@ export function programsInDay(list: readonly EpgProgram[], start: number, end: n
       seen.add(p.start);
       return true;
     });
+}
+
+/**
+ * A day without any guide: hour-long slots from the day's start (or the archive window's) up to
+ * the hour airing now, each a stand-in programme the catch-up URL builders play from its start.
+ * The window is `durationHours`, else the whole days `archiveDayCount` gives. `title` names each
+ * slot from its start.
+ */
+export function archiveHourSlots(
+  start: number,
+  end: number,
+  now: number,
+  channel: Pick<Channel, 'archive' | 'ref'> & { catchup?: Channel['catchup'] },
+  title: (slotStart: number) => string,
+): EpgProgram[] {
+  const hours = channel.archive?.durationHours ?? 0;
+  const oldest = now - (hours > 0 ? hours : archiveDayCount(channel) * 24) * HOUR;
+  const out: EpgProgram[] = [];
+  // Whole local hours: the day starts at local midnight, and a DST day just has 23 or 25 of them.
+  for (let s = start; s < end && s < now; s += HOUR) {
+    // A slot that starts before the window would be refused (canCatchUp): left out.
+    if (s < oldest) continue;
+    out.push({ channelId: channel.ref.itemId, start: new Date(s).toISOString(), end: new Date(Math.min(s + HOUR, end)).toISOString(), title: title(s) });
+  }
+  return out;
 }
 
 /** Row the list should focus first: the airing programme on today, else the last one that can play, else the first. */

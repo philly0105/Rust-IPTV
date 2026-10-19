@@ -68,7 +68,8 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
   }
   if (rule) {
     items.push({ id: 'series', label: tg('removeRuleFor', { title: rule.title }), icon: <Repeat className="size-4 text-live" />, onSelect: () => setRemoving(true) });
-  } else if (target && canRecord && canHaveRule(channel.ref, target.program.title)) {
+  } else if (target && canRecord && !target.program.fromProvider && canHaveRule(channel.ref, target.program.title)) {
+    // Rules match XMLTV programmes only: one made from the provider's guide would never schedule.
     const title = target.program.title;
     items.push({ id: 'series', label: tg('recordSeriesOf', { title }), icon: <Repeat className="size-4" />, onSelect: () => setSeriesTarget({ ref: channel.ref, channelName, title }) });
   }

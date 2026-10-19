@@ -1,9 +1,10 @@
 import { Compass } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, useRouteError, type RouteObject } from 'react-router';
+import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, useParams, useRouteError, type RouteObject } from 'react-router';
 
 import { getConnectionState, onConnectionState } from '@/api/events';
+import { useRpcQuery } from '@/api/query';
 import { isDesktop, RpcError } from '@/api/transport';
 import { libraryRoutes } from '@/features/library/routes';
 import { listsRoutes } from '@/features/lists/routes';
@@ -14,7 +15,7 @@ import { settingsRoutes } from '@/features/settings/routes';
 import { sourcesRoutes } from '@/features/sources/routes';
 import { statsRoutes } from '@/features/stats/routes';
 import { vodRoutes } from '@/features/vod/routes';
-import { ShellLayout, useShellHeader, useShellStore } from '@/shell';
+import { ShellLayout, sourceHomePath, useShellHeader, useShellStore } from '@/shell';
 import { loadDashboard, StartupRedirect } from '@/shell/StartupRedirect';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { buttonClass, cn, EmptyState, ERROR_TITLE_KEYS, ErrorState, Skeleton } from '@/ui';
@@ -168,8 +169,20 @@ const shellChildRoutes: RouteObject[] = [
   { path: 'dashboard', lazy: async () => ({ Component: (await loadDashboard()).DashboardPage }) },
 ];
 
-/** C7: every source kind opens on its live view. */
-const sourceRootRoutes: RouteObject[] = [{ path: 's/:sourceId', element: <Navigate to="live" replace /> }];
+/**
+ * C7: a source opens on its live view, or on its first section with anything in it when it has
+ * no live channels (a VOD-only Xtream account opens on Movies, not an empty channel list).
+ */
+export function SourceIndexRedirect() {
+  const { sourceId = '' } = useParams();
+  const sources = useRpcQuery('sources.list', undefined);
+  // The list is prefetched at boot, so this rarely waits; a failed list opens Live as before.
+  if (sources.isPending) return null;
+  const source = sources.data?.find((s) => s.id === sourceId);
+  return <Navigate to={source ? sourceHomePath(source) : 'live'} replace />;
+}
+
+const sourceRootRoutes: RouteObject[] = [{ path: 's/:sourceId', element: <SourceIndexRedirect /> }];
 
 /** C7 route tree: the shell layout at `/` with every feature's relative routes. */
 export const routes: RouteObject[] = [

@@ -187,3 +187,29 @@ describe('palette favourites and recent (L1-visual-12)', () => {
     expect(playerMock.playItem).not.toHaveBeenCalled();
   });
 });
+
+describe('palette guide programmes (F-SEARCH-PROGRAMMES)', () => {
+  it('lists programme hits of every source and opens the guide at one', async () => {
+    const start = Date.now() + 2 * 3_600_000;
+    rpcMock.handlers['epg.search'] = (a) => {
+      const { sourceId, query } = a as { sourceId: string; query: string };
+      if (sourceId !== 's1' || query !== 'cafe') return [];
+      return [
+        {
+          ref: { sourceId: 's1', contentType: 'live', itemId: '4' },
+          channelName: 'Arte',
+          program: { channelId: 'arte', title: 'Café Society', start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() },
+        },
+      ];
+    };
+    const { palette, router } = await openPaletteWith('cafe');
+    // The core folds diacritics ("cafe" finds "Café"): the palette keeps its answer.
+    const row = await within(palette).findByText('Café Society');
+    expect(within(palette).getByText('Guide programmes')).toBeTruthy();
+    expect(rpcMock.calls.filter((c) => c.cmd === 'epg.search').map((c) => (c.args as { sourceId: string }).sourceId).sort()).toEqual(['s1', 's2']);
+    fireEvent.click(row);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));
+    expect(router.state.location.search).toBe(`?source=s1&at=${start}`);
+    expect((router.state.location.state as { guideHit: { program: { title: string } } }).guideHit.program.title).toBe('Café Society');
+  });
+});

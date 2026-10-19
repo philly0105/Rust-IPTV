@@ -146,6 +146,7 @@
   "group_movies": "電影",
   "group_series": "影集",
   "group_live": "頻道",
+  "group_programmes": "節目",
   "tmdbAttribution": "本產品使用 TMDB API，但未經 TMDB 認可或認證。",
   "tmdbLogoLabel": "TMDB（The Movie Database），開啟 themoviedb.org",
   "tmdbUnavailable": "無法連線到 TMDB",

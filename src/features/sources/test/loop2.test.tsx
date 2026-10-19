@@ -70,6 +70,16 @@ describe('add toast total (L2-sources-home-6)', () => {
   });
 });
 
+describe('add toast for a source without live channels (F-VOD-ONLY-SOURCE)', () => {
+  it('opens the source on its movies', async () => {
+    rpcMock.handlers['sources.add'] = () => makeSource('vod', { name: 'Sample', channelCount: 0, radioCount: 0, movieCount: 1_200, seriesCount: 40 });
+    const { router } = await addSample('/sources?add=1');
+    await waitFor(() => expect(lastToast()?.title).toBe('Added Sample'));
+    lastToast()?.action?.onClick();
+    await waitFor(() => expect(router.state.location.pathname).toBe('/s/vod/movies'));
+  });
+});
+
 describe('return after a first add (L2-sources-home-12)', () => {
   beforeEach(() => {
     rpcMock.handlers['sources.add'] = () => makeSource('new', { name: 'Sample' });

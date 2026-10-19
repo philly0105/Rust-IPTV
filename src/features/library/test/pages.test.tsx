@@ -280,6 +280,20 @@ describe('FavoritesPage', () => {
     expect(await screen.findByRole('heading', { name: 'Favorites in Home portal' })).toBeTruthy();
   });
 
+  it('a channel played from the page zaps through the page favorites (F-FAVORITES-ZAP)', async () => {
+    const own = favs.filter((f) => f.ref.sourceId === 'src1');
+    rpc.handlers['favorites.list'] = () => own;
+    renderAt('/s/src1/favorites', [{ path: '/s/:sourceId/favorites', element: <FavoritesPage /> }]);
+    const rows = await screen.findAllByTestId('entry-row');
+    // The fake player does not change what plays: say the channel is playing once asked.
+    fakePlayer.usePlayerStore.setState({ source: { url: 'u', kind: 'hls', title: 't', isLive: true, isRadio: false, ref: favs[0]!.ref } });
+    fireEvent.click(within(rows[0]!).getByText('live c1'));
+    await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
+    await waitFor(() =>
+      expect((fakePlayer.usePlayerStore.getState() as { zapContext?: unknown }).zapContext).toEqual({ sourceId: 'src1', favorites: { sourceId: 'src1' } }),
+    );
+  });
+
   it('shows the empty state', async () => {
     rpc.handlers['favorites.list'] = () => [];
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);

@@ -170,6 +170,7 @@
   "group_movies": "الأفلام",
   "group_series": "السلاسل",
   "group_live": "القنوات",
+  "group_programmes": "البرامج",
   "tmdbAttribution": "هاد المنتج كيستعمل TMDB API ولكن ماشي معتمد ولا مصادق عليه من طرف TMDB.",
   "tmdbLogoLabel": "TMDB (The Movie Database)، كيحل themoviedb.org",
   "tmdbUnavailable": "ما قدرناش نوصلو لـ TMDB",

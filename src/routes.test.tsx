@@ -1,6 +1,9 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMemoryRouter, matchRoutes, RouterProvider } from 'react-router';
+import { createMemoryRouter, matchRoutes, RouterProvider, useLocation } from 'react-router';
+
+import { queryClient, rpcKey } from '@/api/query';
 
 import { DEFAULT_SETTINGS } from '@/api/types';
 import i18n from '@/i18n';
@@ -10,7 +13,7 @@ import { startupTarget } from '@/shell/StartupRedirect';
 import { RpcError } from '@/api/transport';
 import { ErrorState } from '@/ui';
 
-import { AppLoading, isKnownPath, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes } from './routes';
+import { AppLoading, isKnownPath, NotFoundPage, resetChunkFailureForTests, RouteErrorPage, routeErrorAsRpc, routes, SourceIndexRedirect } from './routes';
 
 /** Every C7 path; each must resolve to a real page, never the `*` fallback. */
 const C7_PATHS = [
@@ -175,5 +178,46 @@ describe('not-found page', () => {
     expect(screen.getByText(i18n.t('common:pageNotFoundHint'))).toBeTruthy();
     expect(screen.getByRole('link', { name: i18n.t('shell:navDashboard') }).getAttribute('href')).toBe('/dashboard');
     expect(useShellStore.getState().header?.title).toBe(i18n.t('common:errorTitleNotFound'));
+  });
+});
+
+describe('source root redirect (F-VOD-ONLY-SOURCE)', () => {
+  function Where() {
+    return <p>{useLocation().pathname}</p>;
+  }
+  const open = (path: string) => {
+    const router = createMemoryRouter(
+      [
+        { path: '/s/:sourceId', element: <SourceIndexRedirect /> },
+        { path: '/s/:sourceId/:section', element: <Where /> },
+      ],
+      { initialEntries: [path] },
+    );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+  };
+  const source = (id: string, channelCount: number, movieCount: number, seriesCount: number) => ({ id, kind: 'xtream', name: id, channelCount, movieCount, seriesCount, radioCount: 0 });
+  afterEach(() => {
+    cleanup();
+    queryClient.clear();
+  });
+
+  it('opens a source on Live, or on Movies or Series when it has no live channels', async () => {
+    queryClient.setQueryData(rpcKey('sources.list'), [source('tv', 5, 9, 0), source('vod', 0, 9, 3), source('shows', 0, 0, 3)]);
+    open('/s/vod');
+    expect(await screen.findByText('/s/vod/movies')).toBeTruthy();
+    cleanup();
+    open('/s/shows');
+    expect(await screen.findByText('/s/shows/series')).toBeTruthy();
+    cleanup();
+    open('/s/tv');
+    expect(await screen.findByText('/s/tv/live')).toBeTruthy();
+    cleanup();
+    // A source the list does not know opens Live as before.
+    open('/s/gone');
+    expect(await screen.findByText('/s/gone/live')).toBeTruthy();
   });
 });

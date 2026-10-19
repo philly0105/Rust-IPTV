@@ -146,6 +146,7 @@
   "group_movies": "映画",
   "group_series": "シリーズ",
   "group_live": "チャンネル",
+  "group_programmes": "番組",
   "tmdbAttribution": "本製品は TMDB API を使用していますが、TMDB による承認または認証を受けたものではありません。",
   "tmdbLogoLabel": "TMDB（The Movie Database）、themoviedb.orgを開きます",
   "tmdbUnavailable": "TMDBに接続できませんでした",

@@ -146,6 +146,7 @@
   "group_movies": "Ταινίες",
   "group_series": "Σειρές",
   "group_live": "Κανάλια",
+  "group_programmes": "Προγράμματα",
   "tmdbAttribution": "Αυτό το προϊόν χρησιμοποιεί το TMDB API, αλλά δεν είναι εγκεκριμένο ούτε πιστοποιημένο από το TMDB.",
   "tmdbLogoLabel": "TMDB (The Movie Database), ανοίγει το themoviedb.org",
   "tmdbUnavailable": "Δεν ήταν δυνατή η σύνδεση με το TMDB",

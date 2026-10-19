@@ -24,7 +24,7 @@ import type {
   SourceKind,
   VideoPlayer,
 } from '@/api/types';
-import { itemKey } from '@/api/types';
+import { itemKey, sameRef } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
@@ -42,6 +42,11 @@ export interface ZapContext {
   categoryId?: string;
   /** Set when playback started from a custom list: zapping walks `lists.neighbors` (Run 2 C3). */
   listId?: string;
+  /**
+   * Set when playback started from favorites: zapping walks the favorites in their order, one
+   * source's (`sourceId`, as `/s/:id/favorites` lists them) or every source's (`/favorites`).
+   */
+  favorites?: { sourceId?: string };
 }
 
 export interface PlayerState {
@@ -1241,12 +1246,14 @@ export async function playItem(args: PlayItemArgs, opts?: { queue?: PlayerSource
 export type StartOutcome = 'started' | 'refused' | 'superseded';
 
 /**
- * A play that does not walk a channel list ends list zapping: the next zap follows the playing
- * channel's own source, since a channel picked elsewhere may not be in the list (lists.neighbors
- * would answer not_found). Playing from a list sets the list again afterwards (lists/lib/play.ts).
+ * A play that does not walk a channel list ends list (or favorites) zapping: the next zap follows
+ * the playing channel's own source, since a channel picked elsewhere may not be in the list
+ * (lists.neighbors would answer not_found). Playing from a list or from favorites sets that again
+ * afterwards (lists/lib/play.ts, library/lib/open.ts).
  */
 function leaveListZap(ref: ItemRef): void {
-  if (usePlayerStore.getState().zapContext?.listId) usePlayerStore.setState({ zapContext: { sourceId: ref.sourceId } });
+  const ctx = usePlayerStore.getState().zapContext;
+  if (ctx?.listId || ctx?.favorites) usePlayerStore.setState({ zapContext: { sourceId: ref.sourceId } });
 }
 
 /**
@@ -1533,13 +1540,70 @@ function neighboursKey(ref: ItemRef, ctx: ZapContext | undefined): readonly unkn
   return rpcKey('catalog.neighbors', args);
 }
 
+/** A favorite's channel: one this session knows, else `catalog.item`; undefined when the catalog no longer has it. */
+async function favoriteChannel(ref: ItemRef): Promise<Channel | undefined> {
+  const known = knownChannels.get(itemKey(ref));
+  if (known) return known;
+  try {
+    const item = await queryClient.fetchQuery({
+      queryKey: rpcKey('catalog.item', { ref }),
+      queryFn: () => rpc('catalog.item', { ref }),
+      staleTime: NEIGHBOURS_STALE_MS,
+      retry: false,
+    });
+    return 'isRadio' in item ? item : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The channels either side of `ref` in favorites order (the `favorites.list` the Favorites page
+ * shows, so its reorders apply at once), among favorites of the same type (live or radio). It
+ * wraps like catalog.neighbors and steps over favorites the catalog no longer has. Undefined
+ * when `ref` is not one of them.
+ */
+async function favoriteNeighbours(ref: ItemRef, scope: { sourceId?: string }): Promise<Neighbours | undefined> {
+  const args = scope.sourceId ? { sourceId: scope.sourceId } : {};
+  const entries = await queryClient.fetchQuery({
+    queryKey: rpcKey('favorites.list', args),
+    queryFn: () => rpc('favorites.list', args),
+    staleTime: NEIGHBOURS_STALE_MS,
+    retry: false,
+  });
+  const refs = [...entries]
+    .sort((a, b) => a.position - b.position || a.addedAt.localeCompare(b.addedAt))
+    .map((e) => e.ref)
+    .filter((r) => r.contentType === ref.contentType);
+  const at = refs.findIndex((r) => sameRef(r, ref));
+  if (at < 0) return undefined;
+  const step = async (dir: 1 | -1): Promise<Channel | undefined> => {
+    for (let i = 1; i < refs.length; i++) {
+      const ch = await favoriteChannel(refs[(at + dir * i + refs.length) % refs.length]!);
+      if (ch) return ch;
+    }
+    return undefined;
+  };
+  const [prev, next] = await Promise.all([step(-1), step(1)]);
+  return { prev, next };
+}
+
 /**
  * The channels either side of `ref` in the zap context: a channel list's order (across
- * sources), else the source's (or its category's). Answers sit in the query cache, where
- * channel edits, list writes and imports invalidate them (`catalog.`, `lists.` prefixes).
+ * sources), the favorites' order, else the source's (or its category's). Answers sit in the
+ * query cache, where channel edits, list and favorite writes and imports invalidate them
+ * (`catalog.`, `lists.`, `favorites.` prefixes).
  */
 async function neighboursOf(ref: ItemRef): Promise<Neighbours> {
   let ctx = usePlayerStore.getState().zapContext;
+  const favorites = ctx?.favorites;
+  if (favorites) {
+    const res = await favoriteNeighbours(ref, favorites);
+    if (res) return res;
+    // No longer a favorite (removed meanwhile): zap through its source instead.
+    ctx = { sourceId: ref.sourceId };
+    if (usePlayerStore.getState().zapContext?.favorites === favorites) usePlayerStore.setState({ zapContext: ctx });
+  }
   if (ctx?.listId) {
     const listId = ctx.listId;
     try {

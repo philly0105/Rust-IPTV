@@ -92,7 +92,7 @@ A rule records every airing of one title on one channel: `RecordingRule {id, ref
 
 ## Re-matching after a guide refresh
 
-On a loop tick after each guide refresh, and at most every 5 minutes otherwise, pending reminders and scheduled programme recordings are matched again against the channel's guide: the programme with the same title (letters and digits, case-insensitive) whose start is nearest the stored one, within 3 hours. Its new start and end replace the stored ones. Channel recordings are not re-matched. Stalker portal-side EPG (`stalker.epg`) is not part of the local guide, so items scheduled from it are not re-matched.
+On a loop tick after each guide refresh, and at most every 5 minutes otherwise, pending reminders and scheduled programme recordings are matched again against the channel's guide: the programme with the same title (letters and digits, case-insensitive) whose start is nearest the stored one, within 3 hours. Its new start and end replace the stored ones. Channel recordings are not re-matched. Stalker portal-side EPG (`stalker.epg`) is not part of the local guide, so items scheduled from it are not re-matched. For the same reason the UI offers "Record series" only on XMLTV programmes: a programme from the provider's guide (`fromProvider`: the Xtream short EPG and archive table, Stalker's portal guide) has no "Record series" in the programme dialog, the search hits or the ribbon's record menu, because a rule made from it would never schedule anything. A rule that already exists for the title still shows, so it can be removed.
 
 Recordings are matched channel by channel (`scheduler::follow`), together with the series rules' cancelled airings (skips), so one airing never ends up with two recordings:
 

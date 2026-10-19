@@ -16,6 +16,7 @@ import { useShortEpgEnabled } from '../hooks/useShortEpg';
 import {
   archiveDayCount,
   archiveDays,
+  archiveHourSlots,
   archiveProgramState,
   canBrowseArchive,
   dayRange,
@@ -23,7 +24,7 @@ import {
   type ArchiveProgramState,
 } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
-import { formatClock, formatDay, formatRange, ms } from '../lib/epgTime';
+import { formatClock, formatDay, formatRange, HOUR, ms } from '../lib/epgTime';
 import { catchupDownloadArgs, playCatchup, playChannel } from '../lib/playback';
 import { timeStep, useIsRtl } from '../lib/rtl';
 import { ChannelLogo } from './ChannelLogo';
@@ -120,7 +121,16 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   const { start, end } = dayRange(day);
 
   const query = useArchiveDay({ ref: channel.ref, kind, start, end, offsetMinutes, isToday: selected === 0, shortEpg });
-  const programs = useMemo(() => query.data ?? [], [query.data]);
+  // No guide at all for the day: hourly slots across the archive window, so a channel that
+  // advertises catch-up can still be rewound to a time.
+  const slotted = !!query.data && query.data.length === 0;
+  const slots = useMemo(
+    () => (slotted ? archiveHourSlots(start, end, now, channel, (s) => t('archiveSlotTitle', { time: formatClock(s, i18n.language) })) : []),
+    // `now` moves every 30 s; the slots only change when a new hour starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [slotted, start, end, Math.floor(now / HOUR), channel, t, i18n.language],
+  );
+  const programs = useMemo(() => (slotted ? slots : (query.data ?? [])), [slotted, slots, query.data]);
   const states = useMemo(() => programs.map((p) => archiveProgramState(p, channel, kind, now)), [programs, channel, kind, now]);
   const fromProvider = programs.some((p) => p.fromProvider);
 
@@ -289,6 +299,11 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
         ) : (
           <>
             {fromProvider ? <p className="text-xs text-fg-subtle">{t('archiveFromProvider')}</p> : null}
+            {slotted ? (
+              <p className="text-xs text-fg-subtle" data-testid="archive-slots-note">
+                {t('archiveSlotsNote')}
+              </p>
+            ) : null}
             <ul aria-label={t('archivePrograms', { day: dayLabel(day, selected) })} onKeyDown={onListKey} className="flex flex-col gap-1" data-testid="archive-programs">
               {programs.map((p, i) => (
                 <ProgramRow

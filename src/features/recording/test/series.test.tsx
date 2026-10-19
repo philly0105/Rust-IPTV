@@ -181,6 +181,19 @@ describe('Record series', () => {
     await screen.findByTestId('record-unavailable');
     expect(screen.queryByTestId('program-record-series')).toBeNull();
   });
+
+  it('is not offered for a programme from the provider guide, which rules never match (F-RECORD-SERIES-PROVIDER)', async () => {
+    actions({ program: { ...PROGRAM, fromProvider: true } });
+    await screen.findByTestId('program-record');
+    expect(screen.queryByTestId('program-record-series')).toBeNull();
+    cleanup();
+
+    // A rule made earlier for the title can still be removed from here.
+    queryClient.clear();
+    rpc.handlers['recordings.rules'] = () => [rule({ ref: REF, title: 'Evening News' })];
+    actions({ program: { ...PROGRAM, fromProvider: true } });
+    expect(await seriesButton()).toBeTruthy();
+  });
 });
 
 describe('ScheduleMark', () => {

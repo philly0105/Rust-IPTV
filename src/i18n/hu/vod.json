@@ -146,6 +146,7 @@
   "group_movies": "Filmek",
   "group_series": "Sorozatok",
   "group_live": "Csatornák",
+  "group_programmes": "Műsorok",
   "tmdbAttribution": "Ez a termék a TMDB API-ját használja, de a TMDB nem hagyta jóvá és nem tanúsította.",
   "tmdbLogoLabel": "TMDB (The Movie Database), a themoviedb.org megnyitása",
   "tmdbUnavailable": "A TMDB nem érhető el",

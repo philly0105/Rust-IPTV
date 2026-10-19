@@ -1,6 +1,13 @@
 {
   "shortcutArea": "دليل البرامج",
   "searchLabel": "البحث في دليل البرامج",
+  "zoomIn": "تكبير",
+  "zoomOut": "تصغير",
+  "viewFavorites": "المفضلة",
+  "viewList": "القائمة: {{name}}",
+  "viewFavoritesEmpty": "لا توجد قنوات مفضلة من هذا المصدر",
+  "viewListEmpty": "لا توجد قنوات من هذا المصدر في هذه القائمة",
+  "viewEmptyHint": "اختر مصدرًا آخر، أو أضف قنوات من قائمتها.",
   "searchPlaceholder": "ابحث في الدليل",
   "searchResults": "البحث في الدليل",
   "searchHint": "اكتب حرفين على الأقل.",

@@ -146,6 +146,7 @@
   "group_movies": "영화",
   "group_series": "시리즈",
   "group_live": "채널",
+  "group_programmes": "프로그램",
   "tmdbAttribution": "이 제품은 TMDB API를 사용하지만 TMDB의 보증이나 인증을 받지 않았습니다.",
   "tmdbLogoLabel": "TMDB(The Movie Database), themoviedb.org 열기",
   "tmdbUnavailable": "TMDB에 연결할 수 없습니다",

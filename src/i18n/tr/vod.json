@@ -146,6 +146,7 @@
   "group_movies": "Filmler",
   "group_series": "Diziler",
   "group_live": "Kanallar",
+  "group_programmes": "Programlar",
   "tmdbAttribution": "Bu ürün TMDB API'sini kullanır ancak TMDB tarafından onaylanmamış veya sertifikalandırılmamıştır.",
   "tmdbLogoLabel": "TMDB (The Movie Database), themoviedb.org'u açar",
   "tmdbUnavailable": "TMDB'ye ulaşılamadı",

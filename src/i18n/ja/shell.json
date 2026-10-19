@@ -52,6 +52,7 @@
   "groupSettings": "設定",
   "groupSearch": "検索",
   "groupFavoritesRecent": "お気に入りと最近視聴した項目",
+  "groupProgrammes": "番組表の番組",
   "sourceSection": "{{source}}：{{section}}",
   "themeDark": "ダークテーマを使用",
   "themeLight": "ライトテーマを使用",

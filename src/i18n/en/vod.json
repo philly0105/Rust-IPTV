@@ -146,6 +146,7 @@
   "group_movies": "Movies",
   "group_series": "Series",
   "group_live": "Channels",
+  "group_programmes": "Programmes",
   "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
   "tmdbLogoLabel": "TMDB (The Movie Database), opens themoviedb.org",
   "tmdbUnavailable": "TMDB could not be reached",

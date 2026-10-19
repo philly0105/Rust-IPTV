@@ -127,7 +127,8 @@ export function FavoritesPage() {
 
   const open = useCallback(
     (entry: FavoriteEntry) => {
-      openEntry(entry.ref, entry.snapshot, sources.get(entry.ref.sourceId), navigate).catch((err: unknown) => {
+      // Channel up/down then walks this page's favorites in their order.
+      openEntry(entry.ref, entry.snapshot, sources.get(entry.ref.sourceId), navigate, args).catch((err: unknown) => {
         toast({
           title: t('openFailed', { title: entry.snapshot.title }),
           description: err instanceof SourceGoneError ? t('sourceRemovedHint') : errorDescription(err),
@@ -135,7 +136,7 @@ export function FavoritesPage() {
         });
       });
     },
-    [navigate, sources, t, toast],
+    [args, navigate, sources, t, toast],
   );
 
   const moveFocused = (delta: -1 | 1) => {

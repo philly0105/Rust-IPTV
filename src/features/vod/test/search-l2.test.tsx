@@ -6,7 +6,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
-import { Link, MemoryRouter, Route, Routes, useNavigate } from 'react-router';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, SeriesItem, Source, VodItem } from '@/api/types';
@@ -95,6 +95,12 @@ function BackStub() {
   );
 }
 
+function GuideStub() {
+  const location = useLocation();
+  const title = (location.state as { guideHit?: { program: { title: string } } } | null)?.guideHit?.program.title;
+  return <p>{`guide ${location.search} ${title ?? ''}`}</p>;
+}
+
 /** The app frame: header field, a rail link that stays mounted, and the routes. */
 function renderApp(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -111,6 +117,7 @@ function renderApp(path: string) {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/s/:sourceId/search" element={<SearchPage scoped />} />
             <Route path="/s/:sourceId/movie/:itemId" element={<BackStub />} />
+            <Route path="/epg" element={<GuideStub />} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>
@@ -287,6 +294,43 @@ describe('L3-vod-5: the results narrow to the typed query within a frame of the 
     await screen.findByText('Black Harbor');
     fireEvent.change(field(), { target: { value: 'black z' } });
     expect(screen.getByText('Black Harbor')).toBeTruthy();
+    expect(screen.queryByText(/No results/)).toBeNull();
+  });
+});
+
+describe('guide programmes in search (F-SEARCH-PROGRAMMES)', () => {
+  const start = Date.now() + 3_600_000;
+  const programmeHit = (sourceId: string, title: string, at: number) => ({
+    ref: { sourceId, contentType: 'live', itemId: 'c1' },
+    channelName: `News ${sourceId}`,
+    program: { channelId: 'n', title, start: new Date(at).toISOString(), end: new Date(at + 1_800_000).toISOString() },
+  });
+  beforeEach(() => {
+    rpcMock.handlers['epg.search'] = (a) => {
+      const { sourceId } = a as { sourceId: string };
+      return sourceId === 'src1' ? [programmeHit('src1', 'Alpha Report', start + 600_000)] : [programmeHit('src2', 'Alpha Hour', start)];
+    };
+  });
+
+  it('a Programmes tab lists every source’s hits by start, and one opens the guide at it', async () => {
+    renderApp('/search?q=alpha');
+    const tab = await screen.findByRole('tab', { name: /Programmes/ });
+    expect(tab.textContent).toContain('2');
+    expect(callsOf('epg.search').map((c) => (c.args as { sourceId: string }).sourceId).sort()).toEqual(['src1', 'src2']);
+    fireEvent.click(tab);
+    const list = await screen.findByTestId('search-programmes');
+    const rows = within(list).getAllByRole('button');
+    expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining('Alpha Hour'), expect.stringContaining('Alpha Report')]);
+    // Two sources: each row names its source.
+    expect(rows[1]!.textContent).toContain('Alpha IPTV');
+    fireEvent.click(rows[1]!);
+    expect(await screen.findByText(`guide ?source=src1&at=${start + 600_000} Alpha Report`)).toBeTruthy();
+  });
+
+  it('with nothing else matching, the programmes show at once', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderApp('/search?q=alpha');
+    expect(await screen.findByTestId('search-programmes')).toBeTruthy();
     expect(screen.queryByText(/No results/)).toBeNull();
   });
 });

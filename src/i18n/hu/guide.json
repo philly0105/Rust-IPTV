@@ -1,6 +1,13 @@
 {
   "shortcutArea": "Műsorújság",
   "searchLabel": "Keresés a műsorújságban",
+  "zoomIn": "Nagyítás",
+  "zoomOut": "Kicsinyítés",
+  "viewFavorites": "Kedvencek",
+  "viewList": "Lista: {{name}}",
+  "viewFavoritesEmpty": "Ebből a forrásból nincs kedvenc csatorna",
+  "viewListEmpty": "Ebben a listában nincs csatorna ebből a forrásból",
+  "viewEmptyHint": "Válasszon másik forrást, vagy adjon hozzá csatornákat a menüjükből.",
   "searchPlaceholder": "Keresés a műsorújságban",
   "searchResults": "Keresés a műsorújságban",
   "searchHint": "Írj be legalább 2 karaktert.",

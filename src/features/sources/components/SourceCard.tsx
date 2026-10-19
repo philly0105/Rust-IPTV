@@ -7,6 +7,7 @@ import { Link } from 'react-router';
 import type { AccountStatus, ScheduleEntry } from '@/api/rpc';
 import type { Source, SourceKind } from '@/api/types';
 
+import { sourceHomePath } from '@/shell/railLinks';
 import { Badge, Button, IconButton } from '@/ui';
 import { baseName } from '../lib/files';
 import { absoluteTime, formatCount, relativeTime } from '../lib/format';
@@ -271,7 +272,7 @@ export function SourceCard(props: SourceCardProps) {
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Link
-              to={`/s/${s.id}/live`}
+              to={sourceHomePath(s)}
               id={nameId}
               dir="auto"
               title={s.name}

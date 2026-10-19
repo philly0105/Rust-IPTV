@@ -669,6 +669,52 @@ describe('zap', () => {
     expect(calls('catalog.neighbors')).toEqual([{ ref: { sourceId: 's2', contentType: 'live', itemId: '777' } }, { ref: channel(6).ref }]);
   });
 
+  it('walks the favorites in their order when playback started from favorites (F-FAVORITES-ZAP)', async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', favorites: {} } });
+    const fav = (ch: Channel, position: number) => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: ch.ref.contentType } });
+    const other = channel(9, { ref: { sourceId: 's2', contentType: 'live', itemId: '555' } });
+    const gone = channel(8);
+    // Stored order, not catalog order: 5, gone, 1, movie, radio, other source. Gone is stepped over;
+    // the movie and the radio station are not live channels.
+    handlers['favorites.list'] = () => [
+      fav(channel(1), 2),
+      fav(other, 5),
+      fav(channel(5), 0),
+      fav(gone, 1),
+      { ...fav(channel(3), 3), ref: { sourceId: 's1', contentType: 'movie', itemId: 'm1' } },
+      { ...fav(channel(4), 4), ref: { sourceId: 's1', contentType: 'radio', itemId: 'r1' } },
+    ];
+    handlers['catalog.item'] = (a) => {
+      const id = (a as { ref: ItemRef }).ref.itemId;
+      if (id === '555') return other;
+      if (id === '105') return channel(5);
+      if (id === '101') return channel(1);
+      throw Object.assign(new Error(`item ${id} not found`), { code: 'not_found' });
+    };
+    const played = await zap('down');
+    expect(played?.ref.itemId).toBe('555');
+    expect(calls('catalog.neighbors')).toHaveLength(0);
+    expect(calls('favorites.list')[0]).toEqual({});
+    // Up from the first favorite wraps to the last one; from 555 the one before 1 skips "gone".
+    await zap('up');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('101');
+    await zap('up');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('105');
+    expect(usePlayerStore.getState().zapContext?.favorites).toEqual({});
+
+    // A channel that is not a favorite zaps through its source, and the favorites order ends.
+    await playChannel(channel(6), 'xtream');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', favorites: { sourceId: 's1' } } });
+    handlers['catalog.neighbors'] = () => ({ next: channel(7) });
+    await zap('down');
+    expect(calls('favorites.list').at(-1)).toEqual({ sourceId: 's1' });
+    expect(calls('catalog.neighbors')[0]).toEqual({ ref: channel(6).ref });
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('107');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
+  });
+
   it('zapToNumber resolves catalog.channelByNumber', async () => {
     await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
     handlers['catalog.channelByNumber'] = () => channel(42);

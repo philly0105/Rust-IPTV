@@ -23,6 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { type CSSProperties, type RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
@@ -428,6 +429,7 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
   const toggleRail = useShellStore((s) => s.toggleRail);
+  const toggleRailHidden = useShellStore((s) => s.toggleRailHidden);
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const location = useLocation();
   // The archive (`/live/archive/:id/...`) belongs to its source too: the rail marks and opens it.
@@ -574,7 +576,24 @@ export function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCol
           <Keyboard aria-hidden size={18} className="shrink-0" />
           {!collapsed && <span className="truncate">{t('keyboardShortcuts')}</span>}
         </button>
-        {!autoCollapsed && (
+        {autoCollapsed ? (
+          // Below lg the rail never expands; on a phone its icon column is a fifth of the width,
+          // so it can go away entirely. The header's Show sidebar button brings it back.
+          <button
+            type="button"
+            onClick={() => {
+              // The rail and this button go: focus moves on to the header's Show sidebar button.
+              flushSync(toggleRailHidden);
+              document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
+            }}
+            aria-label={t('hideRail')}
+            title={t('hideRail')}
+            data-rail-hide=""
+            className={itemClass(false, true)}
+          >
+            <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
+          </button>
+        ) : (
           <button
             type="button"
             onClick={toggleRail}

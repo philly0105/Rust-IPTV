@@ -248,3 +248,41 @@ describe('fullscreen channel panel keyboard (L3-player-6)', () => {
     await waitFor(() => expect(usePlayerStore.getState().source?.ref?.itemId).toBe('c42'));
   });
 });
+
+describe('fullscreen channel panel button', () => {
+  // The other tests leave the panel open (resetMedia keeps channelPanelOpen).
+  beforeEach(() => act(() => useMediaStore.setState({ channelPanelOpen: false })));
+  const button = () => screen.getByRole('button', { name: 'Open channel list' });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const panel = (chromeVisible: boolean) => (
+    <QueryClientProvider client={client}>
+      <FullscreenChannelPanel available chromeVisible={chromeVisible} />
+    </QueryClientProvider>
+  );
+
+  it('opens the panel, shows with the controls and names the C key', async () => {
+    play(5);
+    const { rerender } = render(panel(false));
+    // Hidden with the controls, it lets the pointer through to the video.
+    expect(button().className).toContain('opacity-0');
+    expect(button().className).toContain('pointer-events-none');
+    rerender(panel(true));
+    expect(button().className).not.toContain('opacity-0');
+    expect(button().getAttribute('aria-keyshortcuts')).toBe('C');
+    fireEvent.click(button());
+    expect(useMediaStore.getState().channelPanelOpen).toBe(true);
+    // Open, the panel has its own close button; the opener goes.
+    expect(screen.queryByRole('button', { name: 'Open channel list' })).toBeNull();
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+  });
+
+  it('gives way to the stream info panel on the same edge', async () => {
+    const { useStreamInfoStore } = await import('../streamInfo');
+    play(5);
+    act(() => useStreamInfoStore.setState({ open: true }));
+    render(panel(true));
+    expect(screen.queryByRole('button', { name: 'Open channel list' })).toBeNull();
+    act(() => useStreamInfoStore.setState({ open: false }));
+    expect(button()).toBeTruthy();
+  });
+});

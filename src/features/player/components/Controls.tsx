@@ -670,6 +670,12 @@ export function retryPlayback(): void {
   useMediaStore.getState().commands?.retry();
 }
 
+/**
+ * Below this width (CSS px) the compact mini bar is a phone's: see `tiny` in Controls. Under the
+ * desktop mini player's 280 px minimum, so only the phone sizes (PlayerDock below sm) get it.
+ */
+export const TINY_MINI_PX = 260;
+
 /** How long the live dot pulses after the stream starts playing; it then holds still. */
 export const LIVE_PULSES = 3;
 
@@ -833,6 +839,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   // A phone-width player (not the mini one, which has its own compact set): the row keeps its
   // core controls and the options menu takes the rest.
   const narrow = useNarrow(root) && !compact;
+  // A phone's mini player (PlayerDock below sm, 190 px at least): the compact row drops
+  // picture-in-picture and the duration, so play, mute, the time or live badge, and fullscreen fit.
+  const tiny = useNarrow(root, TINY_MINI_PX) && !!compact;
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const spareRoom = useSpareSlots(row, narrow);
 
@@ -911,7 +920,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
   const showTime = !!duration || position > 0 || status !== 'loading';
   const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
-  const showPip = canPip && (variant === 'overlay' || !compact);
+  const showPip = canPip && (variant === 'overlay' || !compact) && !tiny;
 
   const store = usePlayerStore.getState();
   // Overlay: a glass pane floating over a light scrim (the mini player's is full width, it has no
@@ -1129,11 +1138,11 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
             <span
               className={cn(
                 'ms-1 font-display whitespace-nowrap text-white/90 tabular-nums',
-                narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : 'text-sm',
+                narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : tiny ? 'text-xs' : 'text-sm',
               )}
             >
               {formatTime(position)}
-              <span className="text-white/70"> / {formatTime(duration)}</span>
+              {!tiny && <span className="text-white/70"> / {formatTime(duration)}</span>}
             </span>
           ) : null}
           {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}

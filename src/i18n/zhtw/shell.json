@@ -24,6 +24,8 @@
   "whatsNew": "新功能",
   "expandRail": "展開側邊欄",
   "collapseRail": "收合側邊欄",
+  "hideRail": "隱藏側邊欄",
+  "showRail": "顯示側邊欄",
 
   "railLive": "直播電視",
   "railRadio": "廣播",

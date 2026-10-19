@@ -48,6 +48,7 @@
   "channels": "Channels",
   "channelPanel": "Channel list",
   "channelPanelHint": "Press C to open the channel list",
+  "openChannelPanel": "Open channel list",
   "searchChannels": "Search channels",
   "noChannels": "No channels match",
   "channelsFailed": "Channels could not be loaded",

@@ -38,19 +38,34 @@ interface ShellStore {
   paletteOpen: boolean;
   helpOpen: boolean;
   railCollapsed: boolean;
+  /**
+   * Below 1024 px, where the rail is always icons: the user hid it (header button brings it back).
+   * Wider windows ignore it, so the rail never goes missing on a desktop.
+   */
+  railHidden: boolean;
   setPaletteOpen(open: boolean): void;
   setHelpOpen(open: boolean): void;
   setPanelOpen(open: boolean): void;
   toggleRail(): void;
+  toggleRailHidden(): void;
 }
 
 const RAIL_KEY = 'tsrust.railCollapsed';
+const RAIL_HIDDEN_KEY = 'tsrust.railHidden';
 
-function storedRail(): boolean {
+function storedFlag(key: string): boolean {
   try {
-    return localStorage.getItem(RAIL_KEY) === '1';
+    return localStorage.getItem(key) === '1';
   } catch {
     return false;
+  }
+}
+
+function storeFlag(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    // storage blocked
   }
 }
 
@@ -63,18 +78,20 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   panelOpen: false,
   paletteOpen: false,
   helpOpen: false,
-  railCollapsed: storedRail(),
+  railCollapsed: storedFlag(RAIL_KEY),
+  railHidden: storedFlag(RAIL_HIDDEN_KEY),
   setPaletteOpen: (open) => set({ paletteOpen: open, ...(open ? { helpOpen: false } : {}) }),
   setHelpOpen: (open) => set({ helpOpen: open, ...(open ? { paletteOpen: false } : {}) }),
   setPanelOpen: (open) => set({ panelOpen: open }),
   toggleRail: () => {
     const next = !get().railCollapsed;
-    try {
-      localStorage.setItem(RAIL_KEY, next ? '1' : '0');
-    } catch {
-      // storage blocked
-    }
+    storeFlag(RAIL_KEY, next);
     set({ railCollapsed: next });
+  },
+  toggleRailHidden: () => {
+    const next = !get().railHidden;
+    storeFlag(RAIL_HIDDEN_KEY, next);
+    set({ railHidden: next });
   },
 }));
 

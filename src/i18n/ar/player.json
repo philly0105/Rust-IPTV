@@ -48,6 +48,7 @@
   "channels": "القنوات",
   "channelPanel": "قائمة القنوات",
   "channelPanelHint": "اضغط C لفتح قائمة القنوات",
+  "openChannelPanel": "فتح قائمة القنوات",
   "searchChannels": "البحث في القنوات",
   "noChannels": "لا توجد قنوات مطابقة",
   "channelsFailed": "تعذّر تحميل القنوات",

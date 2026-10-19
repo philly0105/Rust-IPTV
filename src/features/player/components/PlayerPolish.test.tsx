@@ -390,6 +390,36 @@ describe('clicks on the DOM video', () => {
     expect(usePlayerStore.getState().isFullscreen).toBe(false);
   });
 
+  it('a tap toggles the controls and never pauses; a mouse click still does', () => {
+    const hidden = (): boolean => document.querySelector('[data-player-controls]')!.className.includes('opacity-0');
+    const tap = (): void => {
+      fireEvent.pointerDown(surface(), { pointerType: 'touch' });
+      fireEvent.click(surface(), { detail: 1 });
+    };
+    expect(hidden()).toBe(false);
+    tap();
+    expect(hidden()).toBe(true);
+    tap();
+    expect(hidden()).toBe(false);
+    expect(ctl.pause).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().isFullscreen).toBe(false);
+
+    fireEvent.pointerDown(surface(), { pointerType: 'mouse' });
+    fireEvent.click(surface(), { detail: 1 });
+    expect(ctl.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it('a double tap still goes fullscreen', () => {
+    fireEvent.pointerDown(surface(), { pointerType: 'touch' });
+    fireEvent.click(surface(), { detail: 1 });
+    fireEvent.pointerDown(surface(), { pointerType: 'touch' });
+    fireEvent.click(surface(), { detail: 2 });
+    fireEvent.doubleClick(surface(), { detail: 2 });
+    expect(ctl.pause).not.toHaveBeenCalled();
+    expect(ctl.play).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().isFullscreen).toBe(true);
+  });
+
   it('a slow (350 ms) double click goes fullscreen and keeps playing', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
     fireEvent.click(surface(), { detail: 1 });

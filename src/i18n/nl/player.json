@@ -48,6 +48,7 @@
   "channels": "Kanalen",
   "channelPanel": "Zenderlijst",
   "channelPanelHint": "Druk op C om de zenderlijst te openen",
+  "openChannelPanel": "Zenderlijst openen",
   "searchChannels": "Zenders zoeken",
   "noChannels": "Geen overeenkomende kanalen",
   "channelsFailed": "Kanalen konden niet worden geladen",

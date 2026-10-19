@@ -8,7 +8,7 @@ No IPTV content ships with the app. Bring your own playlists.
 
 ## Prerequisites
 
-- Rust stable (pinned by `rust-toolchain.toml`)
+- Rust stable, 1.85 or newer (`rust-version` in `Cargo.toml`). `rust-toolchain.toml` selects the current stable channel with rustfmt and clippy; it does not pin a version, so builds use whatever stable rustup has. The Docker image builds with `rust:1.96`.
 - Node 24 and pnpm 10 (`corepack enable`)
 - Microsoft Edge WebView2 runtime (preinstalled on Windows 11)
 - Optional: mpv for embedded and external playback. Put a Windows build in `vendor/mpv/` (so that `vendor/mpv/mpv.exe` exists), install it with WinGet/scoop/choco, or set its path in Settings > External players. See `docs/architecture/players.md`.
@@ -80,6 +80,8 @@ To try the app without a real provider, run `pnpm mock` and add a source:
 - Custom lists hold live channels from any of your sources. Press L on a channel or choose "Add to list…" in its right-click menu. Lists are in the side rail (`/lists`) and at the top of the live group sidebar, and a channel played from a list zaps through the list in its order (Page Up / Page Down). Manage lists renames, reorders (also with Alt+Up/Down) and deletes them with Undo, and a list can show as a rail on the dashboard. A channel the provider drops stays in the list, marked unavailable.
 - TV guide: the time window is part of the URL, so Back and Forward step through it and a link opens the same window. T, or the window label, jumps to a date and time. / searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. "Record series" on a hit records every airing of that title on that channel (XMLTV programmes only: the provider's own guide cannot feed a rule); Library > Scheduled lists the rules, which can be paused or removed. The group menu also shows your favorites or a custom list, the zoom buttons (or Ctrl+scroll over the grid) change the time scale, and a row's right-click menu has "Match guide channel" and the favorite toggle. Global search (Ctrl+F) and the command palette find programmes too, and open the guide at the one you pick.
 - A channel played from Favorites zaps through your favorites in their order.
+- In fullscreen live TV, the channel list opens with C, by resting the pointer on the left edge (right in Arabic), or with the Channel list button that shows with the player controls.
+- On a phone or narrow window (below 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
 - Subtitle files: in the player's options menu (Shift+C), Subtitles > "Load subtitle file…" takes SRT, WebVTT or ASS/SSA files, and Off turns them off. Settings > Playback sets the subtitle size, colour, background and position with a live preview; the player menu changes the same look in place.
 - Movie and series grids filter by decade or an exact year range (kept in the URL), mark watched titles with a tick, and "Hide watched" (Shift+W) leaves them out. W marks the title under the cursor watched or unwatched, and a series page can mark the whole series watched.
 - Watch stats (`/stats`, in the side rail): time watched per day over the last 7 or 30 days (7 and 3 switch), split into live TV and movies and series, with the most watched channels and titles. The log stays on this device, keeps 90 days, and Clear stats empties it.
@@ -102,6 +104,8 @@ This runs, in order: `pnpm typecheck` (tsc-rs), `pnpm test` (vitest), `cargo tes
 
 - `pnpm build` produces `dist/`. `pnpm size:check` then lists every chunk and fails when the entry chunk (`dist/assets/index-*.js`) is over 268,000 bytes (`tools/check-bundle.mjs`; see `docs/architecture/performance.md`).
 - `pnpm e2e` runs Playwright against `iptv-server` (port 7180) and `iptv-mock` (port 7290) with a fresh `./.e2e-data`. It needs `dist/` and uses installed Microsoft Edge by default (`PW_CHANNEL=chromium` switches to Playwright's bundled Chromium, which cannot play H.264).
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request: the frontend job runs `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, `pnpm build` and `pnpm size:check` on Ubuntu; a Windows job runs `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` (with a placeholder `dist/`, since the desktop crate embeds it); a Linux job runs `cargo test -p iptv-core -p iptv-server -p iptv-mock`. Playwright and the release-mode performance tests are not part of it.
 
 The performance tests run in release mode: `cargo test -p iptv-core --release --test m3u_perf` (50k channels) and `--test epg_perf` (120 MB XMLTV). `--test catalog_perf` checks that live list pages and searches over 50k channels answer in under 100 ms.
 

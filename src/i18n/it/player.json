@@ -48,6 +48,7 @@
   "channels": "Canali",
   "channelPanel": "Elenco dei canali",
   "channelPanelHint": "Premi C per aprire l'elenco dei canali",
+  "openChannelPanel": "Apri l'elenco dei canali",
   "searchChannels": "Cerca canali",
   "noChannels": "Nessun canale corrispondente",
   "channelsFailed": "Impossibile caricare i canali",

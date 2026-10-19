@@ -48,6 +48,7 @@
   "channels": "频道",
   "channelPanel": "频道列表",
   "channelPanelHint": "按 C 打开频道列表",
+  "openChannelPanel": "打开频道列表",
   "searchChannels": "搜索频道",
   "noChannels": "没有匹配的频道",
   "channelsFailed": "无法加载频道",

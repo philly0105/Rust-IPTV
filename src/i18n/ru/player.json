@@ -48,6 +48,7 @@
   "channels": "Каналы",
   "channelPanel": "Список каналов",
   "channelPanelHint": "Нажмите C, чтобы открыть список каналов",
+  "openChannelPanel": "Открыть список каналов",
   "searchChannels": "Поиск каналов",
   "noChannels": "Нет подходящих каналов",
   "channelsFailed": "Не удалось загрузить каналы",

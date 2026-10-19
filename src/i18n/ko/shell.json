@@ -24,6 +24,8 @@
   "whatsNew": "새로운 기능",
   "expandRail": "사이드바 펼치기",
   "collapseRail": "사이드바 접기",
+  "hideRail": "사이드바 숨기기",
+  "showRail": "사이드바 표시",
 
   "railLive": "라이브 TV",
   "railRadio": "라디오",

@@ -48,6 +48,7 @@
   "channels": "Csatornák",
   "channelPanel": "Csatornalista",
   "channelPanelHint": "A csatornalista megnyitásához nyomja meg a C billentyűt",
+  "openChannelPanel": "Csatornalista megnyitása",
   "searchChannels": "Csatornák keresése",
   "noChannels": "Nincs egyező csatorna",
   "channelsFailed": "Nem sikerült betölteni a csatornákat",

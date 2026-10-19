@@ -24,6 +24,8 @@
   "whatsNew": "What's new",
   "expandRail": "Expand sidebar",
   "collapseRail": "Collapse sidebar",
+  "hideRail": "Hide sidebar",
+  "showRail": "Show sidebar",
 
   "railLive": "Live TV",
   "railRadio": "Radio",

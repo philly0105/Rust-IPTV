@@ -166,6 +166,12 @@ Code: `src/features/player/` (`sync.ts`, `textDelay.ts`, `streamInfo.ts`, `inlin
 
 `usePlaybackShortcuts` (registered once by `PlayerDock`) binds the playback keys while something plays in the app. Space, the arrows (with and without Shift) and Page Up/Down are also how a page scrolls and how radio groups, lists and tabs move, so they carry `when: playerOwnsPageKeys`: they drive the player only when it is expanded (a page's `PlayerStage`, `dock === 'stage'`), fullscreen, in picture-in-picture, or when focus is inside it (`[data-player-mini]`, the mini frame; `[data-player-host]`; `[data-pip-layer]`). With only the mini dock showing and focus on the page, the registry skips them and the key keeps its default. Letter keys (K, M, F, J, L and the rest) and the media keys stay app-wide.
 
+## Touch, phone widths and the channel panel (UI)
+
+- Clicks on the DOM video (`PlayerSurface`): a mouse or pen click toggles pause at once and a double click toggles fullscreen (C6). A touch tap never pauses: the player's root records the press's `pointerType` and whether the chrome showed before it, and the tap then shows the chrome (`poke`) or, when it showed and the item plays, hides it. Play and pause are on the bar. A double tap still toggles fullscreen without touching the play state. The seek bar reads `pointerType` on its own (a touch press shows the preview time).
+- Mini player width (`PlayerDock`): `clamp(280px, 26vw, 440px)` from 640 px up; below that `max(190px, 45vw)`, under half a phone's width. Under `TINY_MINI_PX` (260 px) the compact bar (`Controls`, `tiny`) drops picture-in-picture and the duration and shows the time in the small size, so play, mute, the time or live badge and fullscreen fit. The desktop minimum (280 px) never reaches it.
+- Fullscreen channel panel (`FullscreenChannelPanel`): besides C, a dwell or tap on the 12 px inline-start edge strip, it opens from a "Channel list" button (`openChannelPanel`, `aria-keyshortcuts="C"`) at the middle of the inline-start edge. The button fades with the player chrome (`chromeVisible` from `PlayerSurface`, `pointer-events-none` while hidden), goes while the panel is open, and gives way to the stream info panel, which takes the same edge.
+
 ## Sleep timer, zap banner and glass (UI, C5)
 
 Code: `src/features/player/` (`sleepTimer.ts`, `sleepReadout.ts`, `zapBanner.ts`, `nowNext.ts`, `parentalHook.ts`, `parentalGuard.ts`, `parentalLocks.ts`, `player.css`, and `components/SleepTimer.tsx`, `ZapBanner.tsx`, `zapHooks.ts`).

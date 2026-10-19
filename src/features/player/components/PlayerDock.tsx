@@ -299,7 +299,9 @@ export function PlayerDock() {
         hidden={!inMini}
         className={cn(
           'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-2',
-          isRadio ? 'w-[min(420px,calc(100vw-32px))]' : 'w-[clamp(280px,26vw,440px)]',
+          // Below sm (a phone) the video frame takes under half the screen's width (190 px at
+          // least), not the 280 px that covered nearly all of a 390 px phone's content column.
+          isRadio ? 'w-[min(420px,calc(100vw-32px))]' : 'w-[max(190px,45vw)] sm:w-[clamp(280px,26vw,440px)]',
           inMini && 'motion-safe:animate-pop-in',
         )}
         style={{ insetInlineEnd: pos.end, bottom: pos.bottom }}

@@ -306,11 +306,12 @@ function ShellNavigationEffects() {
  * server's language loads (no English first frame). Same geometry as the
  * real rail and header, so nothing jumps when it swaps out.
  */
-function ShellSkeleton({ collapsed }: { collapsed: boolean }) {
+function ShellSkeleton({ collapsed, railHidden }: { collapsed: boolean; railHidden: boolean }) {
   return (
     <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell-skeleton" aria-busy="true">
       <div
         aria-hidden
+        hidden={railHidden}
         className={cn(
           'flex h-full shrink-0 flex-col gap-3 border-e border-divider bg-surface px-3 pt-5',
           collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
@@ -354,6 +355,8 @@ export function ShellLayout() {
   const narrow = useMediaQuery('(max-width: 1023px)');
   const wide = useMediaQuery('(min-width: 1440px)');
   const collapsed = railPref || narrow;
+  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows.
+  const railHidden = useShellStore((s) => s.railHidden) && narrow;
 
   useShellEvents();
   useParentalEvents();
@@ -381,7 +384,7 @@ export function ShellLayout() {
     return (
       <>
         <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />
-        <ShellSkeleton collapsed={collapsed} />
+        <ShellSkeleton collapsed={collapsed} railHidden={railHidden} />
       </>
     );
   }
@@ -396,9 +399,9 @@ export function ShellLayout() {
       </a>
       <ThemeSync settingsTheme={settings.data?.theme} appearance={settings.data} />
       <GlobalShortcuts />
-      <Rail collapsed={collapsed} autoCollapsed={narrow} />
+      {!railHidden && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <Header panelInline={wide} narrow={narrow} />
+        <Header panelInline={wide} narrow={narrow} railHidden={railHidden} />
         <div className="flex min-h-0 flex-1">
           {/*
             The outlet is a bounded flex column at every width: the row above

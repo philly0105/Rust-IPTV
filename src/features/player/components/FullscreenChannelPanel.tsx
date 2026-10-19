@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { X } from 'lucide-react';
+import { PanelLeftOpen, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -12,6 +12,7 @@ import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
+import { useStreamInfoStore } from '../streamInfo';
 import { fetchChannelInfo } from '../zapBanner';
 import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
 import { locateChannel } from './channelPanelLocate';
@@ -159,11 +160,15 @@ function useListPages(listId: string | undefined, search: string, enabled: boole
 
 /**
  * Slide-in channel list inside the fullscreen player. Opens with C, a dwell on the left
- * edge, or a tap there; closes on pointer leave (with grace), Escape, C, or a click on the video.
+ * edge, a tap there, or the Channel list button that shows with the player's controls
+ * (`chromeVisible`; touch screens have no edge to dwell on); closes on pointer leave (with
+ * grace), Escape, C, or a click on the video.
  */
-export function FullscreenChannelPanel({ available }: { available: boolean }) {
+export function FullscreenChannelPanel({ available, chromeVisible = false }: { available: boolean; chromeVisible?: boolean }) {
   const { t } = useTranslation('player');
   const open = useMediaStore((s) => s.channelPanelOpen);
+  // The stream info panel takes the same edge: the button gives it the room.
+  const statsOpen = useStreamInfoStore((s) => s.open);
   const zap = usePlayerStore((s) => s.zapContext);
   const current = usePlayerStore((s) => s.source?.ref);
   const sourceId = zap?.sourceId ?? current?.sourceId;
@@ -437,6 +442,28 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
             setOpen(true);
           }}
         />
+      )}
+      {!open && !statsOpen && (
+        <button
+          type="button"
+          aria-label={t('openChannelPanel')}
+          title={`${t('openChannelPanel')} (C)`}
+          aria-keyshortcuts="C"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(true);
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          // Fades with the controls; hidden, it lets the pointer through like the rest of the chrome.
+          className={cn(
+            'player-glass glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-white/90 hover:bg-white/12 hover:text-white',
+            'motion-safe:transition-opacity motion-safe:duration-200',
+            !chromeVisible && 'pointer-events-none opacity-0',
+          )}
+        >
+          <PanelLeftOpen className="size-5 rtl:-scale-x-100" aria-hidden />
+        </button>
       )}
       {open && (
         <div

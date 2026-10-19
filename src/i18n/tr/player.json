@@ -48,6 +48,7 @@
   "channels": "Kanallar",
   "channelPanel": "Kanal listesi",
   "channelPanelHint": "Kanal listesini açmak için C tuşuna basın",
+  "openChannelPanel": "Kanal listesini aç",
   "searchChannels": "Kanal ara",
   "noChannels": "Eşleşen kanal yok",
   "channelsFailed": "Kanallar yüklenemedi",

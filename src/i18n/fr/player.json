@@ -48,6 +48,7 @@
   "channels": "Chaînes",
   "channelPanel": "Liste des chaînes",
   "channelPanelHint": "Appuyez sur C pour ouvrir la liste des chaînes",
+  "openChannelPanel": "Ouvrir la liste des chaînes",
   "searchChannels": "Rechercher des chaînes",
   "noChannels": "Aucune chaîne ne correspond",
   "channelsFailed": "Les chaînes n'ont pas pu être chargées",

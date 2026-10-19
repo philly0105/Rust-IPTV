@@ -24,6 +24,8 @@
   "whatsNew": "Nouveautés",
   "expandRail": "Déployer la barre latérale",
   "collapseRail": "Réduire la barre latérale",
+  "hideRail": "Masquer la barre latérale",
+  "showRail": "Afficher la barre latérale",
 
   "railLive": "TV en direct",
   "railRadio": "Radio",

@@ -48,6 +48,7 @@
   "channels": "チャンネル",
   "channelPanel": "チャンネル一覧",
   "channelPanelHint": "Cキーでチャンネル一覧を開きます",
+  "openChannelPanel": "チャンネル一覧を開く",
   "searchChannels": "チャンネルを検索",
   "noChannels": "一致するチャンネルはありません",
   "channelsFailed": "チャンネルを読み込めませんでした",

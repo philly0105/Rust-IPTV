@@ -48,6 +48,7 @@
   "channels": "채널",
   "channelPanel": "채널 목록",
   "channelPanelHint": "C를 눌러 채널 목록 열기",
+  "openChannelPanel": "채널 목록 열기",
   "searchChannels": "채널 검색",
   "noChannels": "일치하는 채널이 없습니다",
   "channelsFailed": "채널을 불러올 수 없습니다",

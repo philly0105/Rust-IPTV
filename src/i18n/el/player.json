@@ -48,6 +48,7 @@
   "channels": "Κανάλια",
   "channelPanel": "Λίστα καναλιών",
   "channelPanelHint": "Πατήστε C για να ανοίξει η λίστα καναλιών",
+  "openChannelPanel": "Άνοιγμα λίστας καναλιών",
   "searchChannels": "Αναζήτηση καναλιών",
   "noChannels": "Δεν βρέθηκαν κανάλια",
   "channelsFailed": "Δεν ήταν δυνατή η φόρτωση των καναλιών",

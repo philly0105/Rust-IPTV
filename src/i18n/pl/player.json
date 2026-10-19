@@ -48,6 +48,7 @@
   "channels": "Kanały",
   "channelPanel": "Lista kanałów",
   "channelPanelHint": "Naciśnij C, aby otworzyć listę kanałów",
+  "openChannelPanel": "Otwórz listę kanałów",
   "searchChannels": "Szukaj kanałów",
   "noChannels": "Brak pasujących kanałów",
   "channelsFailed": "Nie udało się załadować kanałów",

@@ -11,17 +11,29 @@
 
 import {
   BookmarkPlus,
+  CalendarClock,
   CalendarRange,
   CalendarSearch,
   Camera,
   Captions,
   ChartColumn,
+  Clapperboard,
+  Download,
+  Gamepad2,
   Gauge,
+  Languages,
   LayoutGrid,
   ListPlus,
+  Maximize,
   MoonStar,
   Palette,
+  RefreshCw,
+  Scaling,
   ShieldCheck,
+  Smartphone,
+  TextSearch,
+  Wrench,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -37,6 +49,24 @@ export interface ReleaseNotes {
 }
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
+  {
+    // Loops 1-5 and the feature and performance audit fixes.
+    version: '0.2.0',
+    items: [
+      { key: 'noteM3uSeries', icon: Clapperboard },
+      { key: 'noteFaster', icon: Zap },
+      { key: 'noteProgrammeSearch', icon: TextSearch },
+      { key: 'noteGuideTools', icon: CalendarClock },
+      { key: 'notePicture', icon: Scaling },
+      { key: 'noteSourceUpdates', icon: RefreshCw },
+      { key: 'noteDownloadsMore', icon: Download },
+      { key: 'noteRemotePlay', icon: Gamepad2 },
+      { key: 'notePhoneLayout', icon: Smartphone },
+      { key: 'noteMessages', icon: Languages },
+      { key: 'noteWindowStart', icon: Maximize },
+      { key: 'noteFixes', icon: Wrench },
+    ],
+  },
   {
     version: '0.1.0',
     items: [

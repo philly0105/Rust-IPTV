@@ -101,6 +101,8 @@ Writing notes:
 - Describe what works in both the desktop app and server mode, or say which one a note is about. The screenshot note says "save the current frame as an image", because the desktop app saves to `Pictures\Tsrust IPTV` while server mode downloads the file.
 - In the right-to-left locales (`ar`, `ary`), never put a full stop in front of Latin text, as in `.srt`. Under the Unicode bidi algorithm the full stop takes the paragraph's right-to-left direction and shows on the far side of the word (`srt.`). Write the name without the dot (`SRT`), or wrap the Latin run in U+2066/U+2069 isolates. `test/notes.test.ts` checks this.
 
+Version 0.2.0 sums up Loops 1-5 and the feature and performance audit fixes in twelve notes: M3U series, speed, programme search, guide zoom and shifts with favorites zapping, picture settings and ClearKey, source updates, more downloads and hourly catch-up, play, pause and stop on the phone remote, the phone and touch layout, translated messages and formats, the window at startup, and the fixes. The version is set in four places that move together: `package.json`, the workspace `Cargo.toml` (`app.info` reports iptv-core's `CARGO_PKG_VERSION`), `crates/iptv-tauri/tauri.conf.json`, and the newest `RELEASE_NOTES` entry; `Cargo.lock` carries the workspace crates' version too. An upgrade from 0.1.0 lists the 0.2.0 notes only; an open by hand lists both releases under their headings.
+
 Version 0.1.0 lists the round-two features: multi-view, parental controls, My List, custom channel lists, guide search and series recording, subtitle files and styles, the sleep timer, browsing by decade, watch stats, the appearance options, screenshots, and the poster cache.
 
 ## Tests

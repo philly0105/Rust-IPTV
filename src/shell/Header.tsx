@@ -1,5 +1,6 @@
-import { ListTree, Moon, Search, SquareChevronRight, Sun } from 'lucide-react';
+import { ListTree, Moon, PanelLeftOpen, Search, SquareChevronRight, Sun } from 'lucide-react';
 import { useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -12,9 +13,11 @@ import { useTheme } from './theme';
 /**
  * `narrow`: below lg, where the rail is auto-collapsed. The tour's search anchor (Run 3 C7) then
  * moves to the rail's Search link, since the "Search everything" button folds away there.
+ * `railHidden`: the user hid the rail there; the header leads with the button that shows it.
  */
-export function Header({ panelInline, narrow = false }: { panelInline: boolean; narrow?: boolean }) {
+export function Header({ panelInline, narrow = false, railHidden = false }: { panelInline: boolean; narrow?: boolean; railHidden?: boolean }) {
   const { t } = useTranslation('shell');
+  const toggleRailHidden = useShellStore((s) => s.toggleRailHidden);
   const header = useShellStore((s) => s.header);
   const hasPanel = useShellStore((s) => s.contextPanel !== null && s.panelDrawer);
   const panelOpen = useShellStore((s) => s.panelOpen);
@@ -35,6 +38,19 @@ export function Header({ panelInline, narrow = false }: { panelInline: boolean; 
       data-testid="shell-header"
       className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/95 px-4 sm:gap-4 sm:px-5"
     >
+      {railHidden && (
+        <IconButton
+          label={t('showRail')}
+          icon={<PanelLeftOpen size={18} className="rtl:-scale-x-100" />}
+          onClick={() => {
+            // This button goes as the rail comes back: focus moves on to the rail's Hide button.
+            flushSync(toggleRailHidden);
+            document.querySelector<HTMLElement>('[data-rail-hide]')?.focus();
+          }}
+          className="-ms-2 shrink-0"
+          data-testid="rail-show"
+        />
+      )}
       {/* Below sm the title gives way to the page search while it is in use (focused or holding a query). */}
       <div
         className={cn(

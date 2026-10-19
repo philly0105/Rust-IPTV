@@ -24,6 +24,8 @@
   "whatsNew": "新機能",
   "expandRail": "サイドバーを展開",
   "collapseRail": "サイドバーを折りたたむ",
+  "hideRail": "サイドバーを隠す",
+  "showRail": "サイドバーを表示",
 
   "railLive": "ライブTV",
   "railRadio": "ラジオ",

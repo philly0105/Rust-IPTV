@@ -48,6 +48,7 @@
   "channels": "TV-Sender",
   "channelPanel": "Senderliste",
   "channelPanelHint": "Drücken Sie C, um die Senderliste zu öffnen",
+  "openChannelPanel": "Senderliste öffnen",
   "searchChannels": "Sender suchen",
   "noChannels": "Keine passenden Sender",
   "channelsFailed": "Sender konnten nicht geladen werden",

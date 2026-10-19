@@ -645,6 +645,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   const focusPin = useKeyboardFocusPin();
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastClick = useRef<{ at: number; wasPaused: boolean } | null>(null);
+  /** The press behind the coming click was a touch: whether the chrome showed before it. */
+  const touchPress = useRef<{ chromeWasVisible: boolean } | null>(null);
   /** A click on an ended item: the replay waits out the double-click time (C6). */
   const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -730,7 +732,19 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   // toggles fullscreen (C6). Waiting out the double-click time instead made clicks feel slow,
   // and any wait shorter than the system's (500 ms on Windows) both paused and went fullscreen.
   const onSurfaceClick = (e: MouseEvent): void => {
+    const touch = touchPress.current;
+    touchPress.current = null;
     if (e.detail > 1) return;
+    // A tap has no hover to bring the bar up, so it shows the controls (the next tap hides them)
+    // and never pauses: play and pause are on the bar. Mouse and pen clicks are unchanged.
+    if (touch) {
+      lastClick.current = null;
+      if (touch.chromeWasVisible && playing) {
+        if (hideTimer.current) clearTimeout(hideTimer.current);
+        setIdle(true);
+      } else poke();
+      return;
+    }
     const st = usePlayerStore.getState();
     if (selectEnded(st)) {
       // Replaying cannot be undone (it seeks to 0 and drops Up next), so it waits until the
@@ -762,7 +776,11 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
       ref={setRoot}
       className="relative h-full w-full overflow-hidden bg-black select-none"
       onPointerMove={onPointerActivity}
-      onPointerDown={onPointerActivity}
+      onPointerDown={(e) => {
+        // Read before the press brings the chrome up (onPointerActivity).
+        touchPress.current = e.pointerType === 'touch' ? { chromeWasVisible: chromeVisible } : null;
+        onPointerActivity(e);
+      }}
       onFocus={(e) => {
         focusPin.onFocus(e);
         poke();
@@ -853,7 +871,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         <Controls variant="overlay" visible={chromeVisible} compact={compact} onMenuOpenChange={setMenuOpen} />
       </div>
 
-      <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} />
+      <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} chromeVisible={chromeVisible} />
     </div>
   );
 }

@@ -24,6 +24,8 @@
   "whatsNew": "Neuigkeiten",
   "expandRail": "Seitenleiste ausklappen",
   "collapseRail": "Seitenleiste einklappen",
+  "hideRail": "Seitenleiste ausblenden",
+  "showRail": "Seitenleiste einblenden",
 
   "railLive": "Live-TV",
   "railRadio": "Radio",

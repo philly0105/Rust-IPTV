@@ -416,6 +416,34 @@ describe('Controls in a narrow player', () => {
   });
 });
 
+describe('Controls in a phone-size mini player', () => {
+  let width = 0;
+  beforeEach(() => {
+    // jsdom has no layout: the bar is as wide as the mini player's frame.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-player-controls') ? width : 0;
+    });
+    act(() => useMediaStore.setState({ canPip: true }));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('drops picture-in-picture and the duration under 260 px, so the core controls fit', () => {
+    width = 188;
+    render(<Controls variant="overlay" visible compact />);
+    for (const name of ['Pause', 'Mute', 'Fullscreen']) expect(screen.getByRole('button', { name })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
+    expect(document.body.textContent).toContain('0:10');
+    expect(document.body.textContent).not.toContain('10:00');
+  });
+
+  it("keeps both at the desktop mini player's 280 px", () => {
+    width = 278;
+    render(<Controls variant="overlay" visible compact />);
+    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
+    expect(document.body.textContent).toContain('10:00');
+  });
+});
+
 describe('Controls dock menus (L3-player-ui-x5)', () => {
   // Was: in the flow of the dock, up to 55 % of the player, which grew the strip embedded mpv
   // reserves and shrank its video (396 to 222 px). A menu now floats over the picture, which mpv

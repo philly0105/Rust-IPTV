@@ -133,6 +133,10 @@ pub struct XtreamSourceConfig {
     pub server_url: String,
     pub username: String,
     pub password: String,
+    /// Headers for `player_api.php` requests. Without a User-Agent the
+    /// client sends `xtream::client::XTREAM_USER_AGENT`.
+    #[serde(default, skip_serializing_if = "RequestHeaders::is_empty")]
+    pub headers: RequestHeaders,
 }
 
 impl fmt::Debug for XtreamSourceConfig {
@@ -141,6 +145,7 @@ impl fmt::Debug for XtreamSourceConfig {
             .field("server_url", &self.server_url)
             .field("username", &self.username)
             .field("password", &"<redacted>")
+            .field("headers", &self.headers)
             .finish()
     }
 }
@@ -2260,6 +2265,7 @@ mod tests {
             server_url: "http://x".into(),
             username: "u".into(),
             password: "supersecret".into(),
+            headers: Default::default(),
         };
         assert!(!format!("{x:?}").contains("supersecret"));
     }

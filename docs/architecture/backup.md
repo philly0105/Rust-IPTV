@@ -28,12 +28,12 @@ One entry per source, in `sources.list` order. Common fields: `portalType`, `exp
   - `favorites`: channel URLs, in favorite order.
   - `recentlyViewed`: `{source:'m3u', id, url, title, category_id:'live', added_at, poster_url?, tvg_id?, group_title?}`.
   - `hiddenGroupTitles`: names of hidden categories.
-- xtream: `connection {serverUrl, username, password?}`. User state:
+- xtream: `connection {serverUrl, username, password?, userAgent?, referrer?, origin?}`. The three headers are a Tsrust extension, named as in the Stalker connection, written only when the source sets them and read back on import. User state:
   - `hiddenCategories {categoryType: live|movies|series, xtreamId}`.
   - `favorites {contentType: live|movie|series, xtreamId, addedAt, position}`.
   - `recentlyViewed {contentType, xtreamId, viewedAt}`.
   - `playbackPositions`: `vod` for movies, and `episode` with `seriesXtreamId` plus `seasonNumber`/`episodeNumber` when known. A watched row adds `watched: true` (Tsrust extension). Unwatched rows leave the key out, so they keep the old app's exact shape.
-  - `sourcePins {matchKey, contentId, updatedAt}`.
+  - `sourcePins {matchKey, contentId, updatedAt}`: the source's rows of `vod_source_pins`, which the app writes through `sourcePins.*` when a title is pinned in Other sources (vod-browsing.md). Pins to copies on M3U or Stalker sources are not exported (the format holds numeric Xtream ids only).
   - Ids that are not numeric are left out, since the old format requires numbers.
 - stalker: `connection {portalUrl, macAddress, isFullStalkerPortal, username?, userAgent?, referrer?, origin?, stalkerSerialNumber?, stalkerDeviceId1?, stalkerDeviceId2?, password?, stalkerSignature1?, stalkerSignature2?}`. `favorites` and `recentlyViewed` are `StalkerPortalItem`s: the original portal object when the row came from a backup (kept as `portalItem` in the snapshot), otherwise a minimal `{id, name, title, type, category_id, logo/cover, added_at}`.
 

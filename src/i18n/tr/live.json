@@ -134,6 +134,7 @@
   "stationNumber": "İstasyon {{number}}",
   "watch": "İzle",
   "watchCatchup": "Kaydı izle",
+  "downloadCatchup": "{{title}} indir",
   "watchLive": "Canlı izle",
   "archiveTitle": "Arşiv",
   "archiveOf": "{{name}} arşivi",

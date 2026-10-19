@@ -134,6 +134,7 @@
   "stationNumber": "Zender {{number}}",
   "watch": "Bekijken",
   "watchCatchup": "Opname bekijken",
+  "downloadCatchup": "{{title}} downloaden",
   "watchLive": "Live bekijken",
   "archiveTitle": "Archief",
   "archiveOf": "Archief van {{name}}",

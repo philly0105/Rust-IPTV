@@ -302,6 +302,25 @@ export async function unhideMany(sourceId: string, refs: readonly ItemRef[]): Pr
 }
 
 /**
+ * `channels.reset`: every edit of the source goes, so each channel gets its
+ * provider name back and nothing stays hidden. No Undo (the dialog asks
+ * first); true when it landed.
+ */
+export async function resetEdits(sourceId: string, t: T): Promise<boolean> {
+  const refresh = editRefresh();
+  try {
+    await rpc('channels.reset', { sourceId });
+  } catch (err) {
+    refresh.cancel();
+    toast({ variant: 'error', title: t('resetEditsFailed'), description: failureText(err, t) });
+    return false;
+  }
+  void refresh.settle();
+  toast({ variant: 'success', title: t('resetEditsDone'), description: t('resetEditsDoneText') });
+  return true;
+}
+
+/**
  * Toasts for {@link unhideMany}: how many came back (with Undo that hides
  * them again) and how many the provider dropped, then how many could not be
  * unhidden.

@@ -173,6 +173,7 @@ async fn fix3_net_trust_does_not_survive_xtream_test() {
         server_url: up.base.clone(),
         username: "u".into(),
         password: "p".into(),
+        headers: Default::default(),
     };
     let _ = iptv_core::xtream::service::test(st, &cfg).await;
     assert!(

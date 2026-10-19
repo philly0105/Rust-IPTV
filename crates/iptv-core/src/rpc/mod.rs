@@ -341,7 +341,7 @@ mod tests {
             .collect();
 
         // Every module's own command list is registered.
-        let module_lists: [&[&str]; 13] = [
+        let module_lists: [&[&str]; 14] = [
             crate::downloads::rpc::COMMANDS,
             crate::player::rpc::COMMANDS,
             &crate::remote::rpc::COMMANDS,
@@ -359,6 +359,8 @@ mod tests {
             // imagecache, screenshot (Run 3):
             crate::imagecache::rpc::COMMANDS,
             crate::screenshot::rpc::COMMANDS,
+            // vod: preferred-source pins.
+            crate::userstate::pins::COMMANDS,
         ];
         for list in module_lists {
             for c in list {

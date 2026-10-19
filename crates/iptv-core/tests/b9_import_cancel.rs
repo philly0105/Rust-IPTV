@@ -247,6 +247,7 @@ async fn xtream_source(state: &AppState, id: &str, with_rows: usize) {
                 server_url: "http://127.0.0.1:9".into(),
                 username: "u".into(),
                 password: "p".into(),
+                headers: Default::default(),
             });
             store::insert(c, &id, "X", true, &cfg, None)?;
             let mut it = rows(&id, with_rows, "old").into_iter();

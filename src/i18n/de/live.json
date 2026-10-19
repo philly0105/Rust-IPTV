@@ -134,6 +134,7 @@
   "stationNumber": "Radiosender {{number}}",
   "watch": "Ansehen",
   "watchCatchup": "Aufzeichnung ansehen",
+  "downloadCatchup": "{{title}} herunterladen",
   "watchLive": "Live ansehen",
   "archiveTitle": "Archiv",
   "archiveOf": "Archiv von {{name}}",

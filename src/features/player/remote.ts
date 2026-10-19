@@ -7,6 +7,7 @@ import { onAppEvent } from '@/api/events';
 import { rpc } from '@/api/transport';
 import type { RemoteStatus } from '@/api/types';
 
+import { stopExternalPlayback } from './external';
 import { peekSettings, playChannel, subscribeSettings, usePlayerStore, zap, zapToNumber } from './store';
 
 /** The remote server is on (unknown settings count as on, so nothing is lost before they load). */
@@ -79,6 +80,14 @@ export function bindRemote(): () => void {
         break;
       case 'setVolume':
         if (ev.level !== undefined) s.setVolume(ev.level > 1 ? ev.level / 100 : ev.level);
+        break;
+      case 'togglePlay':
+        s.togglePlay();
+        break;
+      case 'stop':
+        // An external player is closed the way its stage's Stop does it.
+        if (s.mode === 'external') void stopExternalPlayback();
+        else s.stop();
         break;
     }
   });

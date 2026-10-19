@@ -80,7 +80,11 @@ When the grid comes back empty, the reason is checked in this order: the rating 
 
 ### Series detail
 
-The hero actions include a series-level `WatchedButton` (labels `markSeriesWatched` / `markSeriesUnwatched`). It writes the item-level row, and the page reads it back from `positions.forSeries`. The season button is separate and still marks episodes.
+The hero actions include a series-level `WatchedButton` (labels `markSeriesWatched` / `markSeriesUnwatched`). It writes the item-level row, and the page reads it back from `positions.forSeries`. The season button is separate and still marks episodes. Next to it, Download season queues every episode of the selected season that has no download yet, or only a failed, cancelled or missing one (downloads.md).
+
+### Preferred source
+
+A movie that other sources carry too (`catalog.sameTitle`) has an Other sources dialog, where one copy can be pinned so Play uses it. Pins are kept by the core in `vod_source_pins`, one per title match key (`matchKey` in `src/features/vod/lib/pins.ts`: the normalized title base plus the year), through `sourcePins.get`, `sourcePins.set` and `sourcePins.clear` (`useSourcePin`). Backups export and import the table (backup.md). Builds before these commands kept pins in localStorage (`vod.sourcePins.v1`); the first pin read of a page load moves them into the core (`migrateLocalPins`): a key the core already has keeps its pin, a pin whose source is gone is dropped, and the local copy is deleted once nothing is left to retry.
 
 ## Bundle budget
 

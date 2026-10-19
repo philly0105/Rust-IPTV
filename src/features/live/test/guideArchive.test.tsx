@@ -53,6 +53,8 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('./fakes')) }));
 vi.mock('@/shell', async () => await import('./fakes'));
 vi.mock('@/features/player', async () => await import('./fakes'));
+// The archive download asks the parental gate first; nothing is locked here.
+vi.mock('@/features/parental/gate', async (orig) => ({ ...(await orig<object>()), ensureUnlocked: async () => true }));
 
 // ---------------------------------------------------------------------------
 // Shared catch-up URL table (core runs the same file in catchup::m3u::tests)
@@ -320,7 +322,11 @@ describe('ArchivePage', () => {
     vi.useRealTimers();
   });
 
-  const rows = async () => within(await screen.findByTestId('archive-programs')).getAllByRole('button');
+  // The programme rows (a finished programme also has its Download button).
+  const rows = async () =>
+    within(await screen.findByTestId('archive-programs'))
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('data-state'));
 
   it('lists the days and today’s programmes with their states', async () => {
     renderAt('/live/archive/src1/c0', ROUTE);
@@ -381,6 +387,27 @@ describe('ArchivePage', () => {
     expect(recorded.playSource[0]).toMatchObject({ url: 'http://arc/x.ts', subtitle: 'Morning show', isLive: false });
     const call = rpcMock.calls.find((c) => c.cmd === 'xtream.catchupUrl');
     expect(call?.args).toMatchObject({ ref: REF, start: new Date(NOW - 3 * HOUR).toISOString(), durationMinutes: 60 });
+  });
+
+  it('downloads a finished programme from its archive URL, under the channel', async () => {
+    rpcMock.handlers['downloads.start'] = () => ({ id: 1 });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    await rows();
+    // Only the finished programme offers it: the airing one is still growing.
+    const buttons = within(screen.getByTestId('archive-programs')).getAllByTestId('archive-download');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.getAttribute('aria-label')).toBe('Download Morning show');
+    fireEvent.click(buttons[0]!);
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'downloads.start')).toBe(true));
+    const args = rpcMock.calls.find((c) => c.cmd === 'downloads.start')!.args as Record<string, unknown>;
+    expect(args).toMatchObject({
+      ref: REF,
+      episodeId: `catchup:${new Date(NOW - 3 * HOUR).toISOString()}`,
+      url: 'http://arc/x.ts',
+    });
+    expect(String(args.subtitle)).toMatch(/^Morning show · /);
+    expect(String(args.fileNameHint)).toMatch(/ - Morning show - .*\.ts$/);
+    expect(recorded.playSource).toHaveLength(0);
   });
 
   it('moves through programmes with the arrows and days with the tab keys', async () => {

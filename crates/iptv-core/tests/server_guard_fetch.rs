@@ -111,6 +111,7 @@ async fn server_guard_xtream_redirect_to_untrusted_authority_is_refused() {
         server_url: base.clone(),
         username: "u".into(),
         password: "p".into(),
+        headers: Default::default(),
     };
     let res = iptv_core::xtream::service::test(&e.state, &cfg)
         .await
@@ -155,6 +156,7 @@ async fn server_guard_xtream_and_stalker_reach_their_own_loopback_host() {
         server_url: mock.xtream_url(),
         username: "demo".into(),
         password: "secret".into(),
+        headers: Default::default(),
     };
     let res = iptv_core::xtream::service::test(&e.state, &cfg)
         .await

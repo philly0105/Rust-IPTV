@@ -139,6 +139,7 @@
   "stationNumber": "Emisora {{number}}",
   "watch": "Ver",
   "watchCatchup": "Ver grabación",
+  "downloadCatchup": "Descargar {{title}}",
   "watchLive": "Ver en directo",
   "archiveTitle": "Archivo",
   "archiveOf": "Archivo de {{name}}",

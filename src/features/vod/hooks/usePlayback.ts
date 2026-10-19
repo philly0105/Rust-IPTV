@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router';
 import { invalidate, queryClient } from '@/api/query';
 import type { DownloadStartArgs } from '@/api/rpc';
 import { RpcError, rpc } from '@/api/transport';
-import { sameRef, type Download, type ItemRef, type PlaybackPosition, type SourceKind } from '@/api/types';
+import { sameRef, type Download, type ItemRef, type PlaybackPosition, type RequestHeaders, type SourceKind } from '@/api/types';
 import { playItem, usePlayerStore } from '@/features/player';
 
 import { downloadFileName } from '../lib/format';
@@ -28,6 +28,56 @@ export interface PlayOptions {
   fromStart?: boolean;
   /** Play a different copy (another source) instead of the page's target. */
   target?: PlayTarget;
+}
+
+export interface DownloadOptions {
+  episodeId?: string;
+  subtitle?: string;
+  extension?: string;
+}
+
+/** The stream a download fetches: the provider's link, or an M3U row's URL with the playlist's headers. */
+async function streamSource(target: PlayTarget, episodeId: string | undefined): Promise<{ url: string; headers?: RequestHeaders }> {
+  const { ref } = target;
+  const linkArgs = episodeId ? { ref, episodeId } : { ref };
+  if (target.sourceKind === 'xtream') return rpc('xtream.streamUrl', linkArgs);
+  if (target.sourceKind === 'stalker') return rpc('stalker.streamUrl', linkArgs);
+  const [item, source] = await Promise.all([rpc('catalog.item', { ref }), rpc('sources.get', { id: ref.sourceId }).catch(() => null)]);
+  const url = 'url' in item ? item.url : undefined;
+  if (!url) throw new RpcError('not_found', 'This item has no stream URL');
+  // Per-row headers (#EXTVLCOPT) override the playlist's, as in playback.
+  const headers: RequestHeaders = { ...source?.m3u?.headers, ...('headers' in item ? item.headers : undefined) };
+  return Object.values(headers).some(Boolean) ? { url, headers } : { url };
+}
+
+/** The extension of a URL's path, lower case ('' when none). */
+const urlExtension = (url: string): string => /\.([a-z0-9]{2,5})$/i.exec(url.split(/[?#]/)[0] ?? '')?.[1]?.toLowerCase() ?? '';
+
+/** An HLS playlist URL (`.m3u8`, `.m3u`): not one file. */
+const isPlaylistUrl = (url: string): boolean => ['m3u8', 'm3u'].includes(urlExtension(url));
+
+/** Video extensions an M3U row's URL can give its download (the playlist has no container field). */
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'mpg', 'mpeg', 'wmv', 'flv']);
+
+/** `downloads.start` args for the movie or one episode, with the stream URL the player would use. */
+async function downloadArgs(target: PlayTarget, opts: DownloadOptions, notFileMessage: string): Promise<DownloadStartArgs> {
+  const src = await streamSource(target, opts.episodeId);
+  // The download would save the playlist text, not the film.
+  if (target.sourceKind === 'm3u' && isPlaylistUrl(src.url)) throw new RpcError('unsupported', notFileMessage);
+  const fromUrl = urlExtension(src.url);
+  const extension = opts.extension ?? (VIDEO_EXTENSIONS.has(fromUrl) ? fromUrl : undefined);
+  // Episodes: title = series name, subtitle = `S01E02 · Episode title` (the library groups and parses these).
+  const args: DownloadStartArgs = {
+    ref: target.ref,
+    title: target.title,
+    url: src.url,
+    fileNameHint: downloadFileName(target.title, opts.subtitle, extension),
+  };
+  if (opts.episodeId) args.episodeId = opts.episodeId;
+  if (opts.subtitle) args.subtitle = opts.subtitle;
+  if (src.headers) args.headers = src.headers;
+  if (target.posterUrl) args.posterUrl = target.posterUrl;
+  return args;
 }
 
 /** Play, start over, stop, and download for one movie or series. */
@@ -79,29 +129,17 @@ export function usePlayback(target: PlayTarget | undefined) {
     void queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'none' });
   }, []);
 
-  const canDownload = target?.sourceKind === 'xtream' || target?.sourceKind === 'stalker';
+  // Every source kind: Xtream and Stalker rows re-resolve their URL in the core, M3U rows keep the playlist's.
+  const canDownload = !!target;
+  const [pendingSeason, setPendingSeason] = useState(false);
 
   const download = useCallback(
-    async (opts: { episodeId?: string; subtitle?: string; extension?: string } = {}) => {
+    async (opts: DownloadOptions = {}) => {
       if (!target || !canDownload) return;
       const key = opts.episodeId ?? '';
       setPendingDownload(key);
       try {
-        const { ref } = target;
-        const linkArgs = opts.episodeId ? { ref, episodeId: opts.episodeId } : { ref };
-        const src = target.sourceKind === 'xtream' ? await rpc('xtream.streamUrl', linkArgs) : await rpc('stalker.streamUrl', linkArgs);
-        // Episodes: title = series name, subtitle = `S01E02 · Episode title` (the library groups and parses these).
-        const args: DownloadStartArgs = {
-          ref,
-          title: target.title,
-          url: src.url,
-          fileNameHint: downloadFileName(target.title, opts.subtitle, opts.extension),
-        };
-        if (opts.episodeId) args.episodeId = opts.episodeId;
-        if (opts.subtitle) args.subtitle = opts.subtitle;
-        if (src.headers) args.headers = src.headers;
-        if (target.posterUrl) args.posterUrl = target.posterUrl;
-        await rpc('downloads.start', args);
+        await rpc('downloads.start', await downloadArgs(target, opts, t('downloadNotFile')));
         void invalidate('downloads.');
         toast({
           title: t('downloadQueued'),
@@ -119,7 +157,46 @@ export function usePlayback(target: PlayTarget | undefined) {
     [target, canDownload, t, toast, navigate],
   );
 
-  return { play, stop, download, canDownload, pendingDownload };
+  /** Queues every episode in `episodes`, one after another; `name` is the season for the toast. */
+  const downloadSeason = useCallback(
+    async (episodes: DownloadOptions[], name: string) => {
+      if (!target || !canDownload) return;
+      if (episodes.length === 0) {
+        toast({ title: t('seasonDownloadNothing'), description: `${target.title}  ${name}` });
+        return;
+      }
+      setPendingSeason(true);
+      let queued = 0;
+      let failure: RpcError | undefined;
+      try {
+        for (const ep of episodes) {
+          try {
+            await rpc('downloads.start', await downloadArgs(target, ep, t('downloadNotFile')));
+            queued += 1;
+          } catch (err) {
+            failure ??= RpcError.from(err);
+          }
+        }
+      } finally {
+        setPendingSeason(false);
+      }
+      void invalidate('downloads.');
+      if (queued > 0) {
+        toast({
+          title: t('seasonDownloadQueued', { n: queued }),
+          description: `${target.title}  ${name}`,
+          variant: 'success',
+          action: { label: t('openDownloads'), onClick: () => void navigate('/downloads') },
+        });
+      }
+      if (failure) {
+        toast({ title: t('seasonDownloadFailed', { n: episodes.length - queued }), description: failure.message, variant: 'error' });
+      }
+    },
+    [target, canDownload, t, toast, navigate],
+  );
+
+  return { play, stop, download, downloadSeason, canDownload, pendingDownload, pendingSeason };
 }
 
 const isPositionsKey = (key: readonly unknown[]) => typeof key[0] === 'string' && key[0].startsWith('positions.');

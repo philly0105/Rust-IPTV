@@ -144,6 +144,7 @@
   "stationNumber": "Станция {{number}}",
   "watch": "Смотреть",
   "watchCatchup": "Смотреть из архива",
+  "downloadCatchup": "Скачать «{{title}}»",
   "watchLive": "Смотреть в эфире",
   "archiveTitle": "Архив",
   "archiveOf": "Архив {{name}}",

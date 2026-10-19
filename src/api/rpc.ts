@@ -80,6 +80,7 @@ import type {
 } from './types';
 // Run 3: image cache, screenshot.
 import type { ImageCacheStats, ScreenshotResult } from './types';
+import type { SourcePin } from './types';
 
 /** One command: payload and resolved value. */
 interface Cmd<A, R> {
@@ -118,6 +119,8 @@ export interface SourcePatch {
   xtream?: XtreamSourceConfig;
   stalker?: StalkerSourceConfig;
   epg?: Partial<EpgLinks>;
+  /** New playlist text for a pasted or uploaded M3U source; the next `sources.refresh` imports it under the same id. */
+  text?: string;
 }
 
 export interface SourceCounts {
@@ -432,6 +435,13 @@ export interface RpcMap {
   'positions.watchedContains': Cmd<{ refs: ItemRef[] }, ItemRef[]>;
   /** Watched: row kept with watched = true (position = duration when known). Unwatched: row cleared. */
   'userstate.setWatched': Cmd<{ ref: ItemRef; episodeId?: string; watched: boolean }, void>;
+  // vod: preferred-source pins ("Other sources"), one per title match key (`vod_source_pins`, C3).
+  /** matchKey blank or over 512 bytes -> invalid. */
+  'sourcePins.get': Cmd<{ matchKey: string }, SourcePin | null>;
+  /** Replaces the key's pin. ref must be a movie or series (else invalid) of an existing source (else not_found). */
+  'sourcePins.set': Cmd<{ matchKey: string; ref: ItemRef }, SourcePin>;
+  /** Removing a missing pin is not an error. */
+  'sourcePins.clear': Cmd<{ matchKey: string }, void>;
 
   // ---- settings (B2) ------------------------------------------------------
   'settings.get': Cmd<void, Settings>;
@@ -542,6 +552,12 @@ export interface RpcMap {
   'remote.status': Cmd<void, RemoteServerStatus>;
   'remote.reportStatus': Cmd<{ status: RemoteStatus }, void>;
   'remote.publishChannels': Cmd<{ channels: RemotePublishedChannel[] }, void>;
+  /**
+   * The source whose live channels the remote lists: the core fills the list from its catalog while
+   * the server runs, keeps the choice for the next start, and refills it when that catalog, its
+   * channel edits or parental controls change. Returns the number listed (0 while stopped).
+   */
+  'remote.publishSource': Cmd<{ sourceId: string }, number>;
   // remote: LAN pairing (desktop only; `unsupported` in server mode)
   'remote.pairingCode': Cmd<{ address?: string }, RemotePairing>;
   'remote.devices': Cmd<void, RemoteDevice[]>;
@@ -780,6 +796,9 @@ export const RPC_COMMANDS = [
   'positions.remove',
   'positions.watchedContains',
   'userstate.setWatched',
+  'sourcePins.get',
+  'sourcePins.set',
+  'sourcePins.clear',
   'settings.get',
   'settings.update',
   'settings.reset',
@@ -846,6 +865,7 @@ export const RPC_COMMANDS = [
   'remote.status',
   'remote.reportStatus',
   'remote.publishChannels',
+  'remote.publishSource',
   'remote.pairingCode',
   'remote.devices',
   'remote.revokeDevice',

@@ -143,7 +143,10 @@
   "saveFailed": "Değişiklikler kaydedilemedi",
   "refreshNow": "Şimdi yenile",
   "refresh": "Yenile",
-  "textOriginNotEditable": "Bu oynatma listesi yapıştırılarak eklendi, değiştirilecek bir adres yok. Kanalları değiştirmek için kaldırıp yeniden ekleyin. Aşağıdaki istek üst bilgileri yine de her yayına uygulanır.",
+  "textOriginReplaceNote": "Bu oynatma listesi yapıştırılarak veya yüklenerek eklendi, değiştirilecek bir adres yok. Güncellemek için yeni listeyi yapıştırın veya aşağıdan bir dosya seçin. Favoriler, geçmiş ve kanal düzenlemeleri listede kalan kanallarla birlikte korunur. Aşağıdaki istek üst bilgileri her yayına uygulanır.",
+  "replacePlaylistText": "Yeni oynatma listesi metni",
+  "replacePlaylistTextHint": "Mevcut kanalları korumak için boş bırakın.",
+  "replacePlaylistFileHint": "Veya bir oynatma listesi dosyası seçin (.m3u, .m3u8 veya .txt). Mevcut kanalların yerini alır.",
 
   "epgLinks": "Rehber kaynakları",
   "epgLinksHint": "Oynatma listesinde bulunan rehber URL'leri ve sizin ekledikleriniz. Kapattığınız URL artık indirilmez.",

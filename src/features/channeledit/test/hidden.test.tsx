@@ -334,6 +334,33 @@ describe('HiddenChannelsDialog', () => {
     expect(core.isHidden(tve.ref)).toBe(true);
   });
 
+  it('resets every edit of the source after asking, renames included (channels.reset)', async () => {
+    hide(bbc);
+    core.seed(cnn.ref, { name: 'CNN' });
+    open();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    fireEvent.click(await screen.findByTestId('hidden-channels-reset'));
+    expect(screen.getByTestId('hidden-channels-reset-confirm').textContent).toMatch(/provider's name back/);
+    expect(core.callsOf('channels.reset')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('hidden-channels-reset-yes'));
+    await waitFor(() => expect(toastTitles()).toContain('Channel edits reset'));
+    expect(core.callsOf('channels.reset')).toEqual([{ sourceId: 'src1' }]);
+    expect(core.isHidden(bbc.ref)).toBe(false);
+    expect(core.nameOf(cnn.ref)).toBeUndefined();
+    await waitFor(() => expect(screen.queryByText('No hidden channels')).toBeTruthy());
+  });
+
+  it('offers the reset for renames alone, and Cancel keeps them', async () => {
+    core.seed(cnn.ref, { name: 'CNN' });
+    open();
+    expect(await screen.findByText('No hidden channels')).toBeTruthy();
+    fireEvent.click(await screen.findByTestId('hidden-channels-reset'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('hidden-channels-reset-confirm')).toBeNull();
+    expect(core.callsOf('channels.reset')).toHaveLength(0);
+    expect(core.nameOf(cnn.ref)).toBe('CNN');
+  });
+
   it('moves between rows with the arrow keys, one Tab stop for the list', async () => {
     hide(bbc, tve, cnn);
     open();

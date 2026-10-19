@@ -20,14 +20,13 @@ const bus = vi.hoisted(() => {
     },
   };
 });
-const rpcMock = vi.hoisted(() => ({ running: false, channels: 2, calls: [] as { cmd: string; args: unknown }[] }));
+const rpcMock = vi.hoisted(() => ({ running: false, calls: [] as { cmd: string; args: unknown }[] }));
 
 vi.mock('@/api/events', () => ({ onAppEvent: bus.on, onAnyAppEvent: () => () => undefined }));
 vi.mock('@/api/transport', () => ({
   rpc: async (cmd: string, args?: unknown) => {
     rpcMock.calls.push({ cmd, args });
     if (cmd === 'remote.status') return { running: rpcMock.running, port: 7310 };
-    if (cmd === 'catalog.allLiveChannels') return Array.from({ length: rpcMock.channels }, (_, i) => makeChannel(i));
     return null;
   },
 }));
@@ -41,7 +40,7 @@ vi.mock('@/features/player/store', () => ({ peekSettings: () => settingsMock.val
 
 const fakes = await import('./fakes');
 
-const published = () => rpcMock.calls.filter((c) => c.cmd === 'remote.publishChannels');
+const published = () => rpcMock.calls.filter((c) => c.cmd === 'remote.publishSource');
 
 function mount() {
   const spies = { up: vi.fn(), down: vi.fn(), selectNumber: vi.fn(), selectRef: vi.fn() };
@@ -51,7 +50,6 @@ function mount() {
 
 beforeEach(() => {
   rpcMock.running = false;
-  rpcMock.channels = 2;
   rpcMock.calls.length = 0;
   bus.listeners.clear();
   settingsMock.value = null;
@@ -75,8 +73,7 @@ describe('useRemoteBridge', () => {
       await vi.advanceTimersByTimeAsync(3_500);
     });
     await waitFor(() => expect(published()).toHaveLength(1));
-    const args = published()[0]!.args as { channels: { id: string; name: string }[] };
-    expect(args.channels.map((c) => c.id)).toEqual(['src1|c0', 'src1|c1']);
+    expect(published()[0]!.args).toEqual({ sourceId: 'src1' });
   });
 
   it('publishes when a remote command shows the server is already running', async () => {
@@ -87,24 +84,15 @@ describe('useRemoteBridge', () => {
     await waitFor(() => expect(published()).toHaveLength(1));
   });
 
-  it('republishes the channel list when parental controls change (Hide mode drops locked channels)', async () => {
+  it('names the source and leaves the catalog, and parental changes, to the core (LV-7)', async () => {
     rpcMock.running = true;
     mount();
     await waitFor(() => expect(published()).toHaveLength(1));
-    const ids = (n: number) => (published()[n]!.args as { channels: { id: string }[] }).channels.map((c) => c.id);
-    expect(ids(0)).toEqual(['src1|c0', 'src1|c1']);
-
-    // Lock now in Hide mode: the core leaves the locked channel out of allLiveChannels.
-    rpcMock.channels = 1;
+    // Hide mode dropping a locked channel is the core's refill now: nothing more is sent.
     act(() => bus.emit('parental.changed', { enabled: true, mode: 'hide', unlocked: false }));
-    await waitFor(() => expect(published()).toHaveLength(2));
-    expect(ids(1)).toEqual(['src1|c0']);
-
-    // Unlocking brings it back.
-    rpcMock.channels = 2;
-    act(() => bus.emit('parental.changed', { enabled: true, mode: 'hide', unlocked: true }));
-    await waitFor(() => expect(published()).toHaveLength(3));
-    expect(ids(2)).toEqual(['src1|c0', 'src1|c1']);
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(published()).toHaveLength(1);
+    expect(rpcMock.calls.some((c) => c.cmd === 'catalog.allLiveChannels' || c.cmd === 'remote.publishChannels')).toBe(false);
   });
 
   it('owns channel commands while mounted', () => {

@@ -6,7 +6,7 @@ use super::naming::{self, Reservation};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay};
-use crate::model::SourceKind;
+use crate::model::{ContentType, SourceKind};
 use crate::state::AppState;
 use futures::StreamExt;
 use reqwest::header::{
@@ -152,10 +152,16 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
 }
 
 /// Replaces the row's URL (and headers) with a freshly resolved one for
-/// Xtream and Stalker sources and persists it. M3U/file sources, removed
-/// sources, and resolution failures keep the stored URL; the transfer then
-/// reports whatever the server says about it.
+/// Xtream and Stalker sources and persists it. M3U/file sources, catch-up
+/// programmes (live and radio refs), removed sources, and resolution failures
+/// keep the stored URL; the transfer then reports whatever the server says
+/// about it.
 async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
+    // A catch-up programme's archive URL cannot be rebuilt from its ref: that
+    // would resolve the channel's live stream.
+    if matches!(row.download.item_ref.content_type, ContentType::Live | ContentType::Radio) {
+        return;
+    }
     let item_ref = row.download.item_ref.clone();
     let episode_id = row.download.episode_id.clone();
     let sid = item_ref.source_id.clone();

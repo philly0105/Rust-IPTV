@@ -31,6 +31,7 @@ async fn app() -> App {
                 server_url: "http://127.0.0.1:9".into(),
                 username: "demo".into(),
                 password: "secret".into(),
+                headers: Default::default(),
             });
             store::insert(c, "x1", "Xtream", false, &cfg, None)
         })

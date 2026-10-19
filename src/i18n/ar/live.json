@@ -154,6 +154,7 @@
   "stationNumber": "المحطة {{number}}",
   "watch": "مشاهدة",
   "watchCatchup": "مشاهدة التسجيل",
+  "downloadCatchup": "تنزيل {{title}}",
   "watchLive": "مشاهدة مباشرة",
   "archiveTitle": "الأرشيف",
   "archiveOf": "أرشيف {{name}}",

@@ -2,7 +2,7 @@
 
 Code: `crates/iptv-core/src/downloads/`. Tests: `crates/iptv-core/tests/downloads.rs` (check 9 / SC7) plus unit tests in `naming.rs`, `transfer.rs`, and `rpc.rs`.
 
-The download manager keeps a FIFO queue of movie and episode downloads, runs at most two transfers at a time, resumes partial files over HTTP Range, and never overwrites a file it did not create. Completed rows make up My Videos, the offline library.
+The download manager keeps a FIFO queue of movie, episode and catch-up programme downloads, runs at most two transfers at a time, resumes partial files over HTTP Range, and never overwrites a file it did not create. Completed rows make up My Videos, the offline library.
 
 ## Layout
 
@@ -54,7 +54,7 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 
 ## Transfer
 
-- URL refresh: every run (start, resume, retry, restart after a missing file, boot restore) re-resolves the stream URL from the row's `ref` and `episodeId` before the first request. Xtream rows go through `xtream::service::stream_url` (the URL embeds the source's current credentials) and Stalker rows through `stalker::playback::stream_url` (a fresh tokenized `create_link`). The new URL and its headers replace the stored ones (`store::set_source`). M3U/file sources, rows whose source was removed, and resolution failures keep the stored URL, and the transfer then reports whatever the server says. A pause or cancel during resolution stops the run at once. The file name reserved at `start` does not change.
+- URL refresh: every run (start, resume, retry, restart after a missing file, boot restore) re-resolves the stream URL from the row's `ref` and `episodeId` before the first request, except for catch-up programmes (live and radio refs): their archive URL cannot be rebuilt from the ref, which would give the live stream, so they keep the stored one. Xtream rows go through `xtream::service::stream_url` (the URL embeds the source's current credentials) and Stalker rows through `stalker::playback::stream_url` (a fresh tokenized `create_link`). The new URL and its headers replace the stored ones (`store::set_source`). M3U/file sources, rows whose source was removed, and resolution failures keep the stored URL, and the transfer then reports whatever the server says. A pause or cancel during resolution stops the run at once. The file name reserved at `start` does not change.
 - `GET` through `state.http` with the stored source headers (`headers_json`: User-Agent, Referer, Origin) and `Accept-Encoding: identity`, so byte offsets and `Content-Length` describe the file itself.
 - Resume: a non-empty `.part` resumes only with evidence about the representation, meaning a stored `resume_validator` (strong ETag, else Last-Modified) or a recorded `total_bytes`. The request sends `Range: bytes=<offset>-`, plus `If-Range: <validator>` when a validator exists. A `206` must have a `Content-Range` that starts at the offset, and its total must equal the recorded total. A mismatch fails the run and discards the `.part`, because a tail cannot be rewritten in place. Any other `2xx` (Range ignored, or If-Range detected a change) restarts from byte zero over the same `.part`. A `416` truncates and restarts. A `.part` already at the recorded total is finalized without a request. A partial with neither validator nor total restarts from zero.
 - Retry: network and timeout errors, including a body that ends before the advertised size, are retried in the same task with `http::backoff_delay` (300 ms x 2^n plus jitter). After 5 consecutive failures without new bytes the row fails, and any progress resets the counter. Pausing or canceling interrupts the backoff sleep.
@@ -93,6 +93,16 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 - Xtream re-resolution: a download queued with a stale URL fails while the source password is wrong, and after the password is edited `retry` completes and persists the new URL; a start with an expired URL on a correct source completes;
 - a `pause` that times out (SQLite write lock held from another connection, stop wait shortened to 300 ms) returns `Timeout`, leaves the row `downloading` with its `.part`, and a second `pause` succeeds; a `cancel` after a timed-out `pause` ends `canceled` with the `.part` deleted;
 - every C4 command is registered.
+
+## What the UI queues
+
+- Movies and episodes from every source kind (`usePlayback` in `src/features/vod/hooks/`). Xtream and Stalker rows take the provider's link (`xtream.streamUrl`, `stalker.streamUrl`); M3U rows take the playlist row's URL from `catalog.item`, with the playlist's request headers under the row's own (`#EXTVLCOPT`), and their file extension from the URL when it names a video container. An M3U URL that is an HLS playlist (`.m3u8`, `.m3u`) is refused before anything is queued, since the download would save the playlist text.
+- A whole season from the series page (Download season): the season's episodes without a download, or with a failed, cancelled or missing one, one `downloads.start` after another; one toast counts what was queued and another what was not.
+- Catch-up programmes from the archive page (`ArchivePage`, finished programmes only): the portal's timeshift link or the M3U catch-up URL (`catchupDownloadArgs` in `src/features/live/lib/playback.ts`), behind the parental gate like playback. The row is the channel's ref with episode id `catchup:<start>`, title the channel, subtitle `<programme> · <day> <time>`, and the file is saved as MPEG-TS unless the URL names another container. HLS and DASH archives are refused. My Videos groups these rows under the channel.
+
+## Tests (UI)
+
+`src/features/vod/test/pages.test.tsx` (M3U movie, HLS refusal, Download season) and `src/features/live/test/guideArchive.test.tsx` (archive download). `crates/iptv-core/tests/downloads.rs` checks that a catch-up row keeps its archive URL.
 
 ## Not carried over from the old app
 

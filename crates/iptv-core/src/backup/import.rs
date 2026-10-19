@@ -375,6 +375,7 @@ fn parse_entry_with(v: &Value, index: usize, probe_files: bool) -> Result<Entry,
                     server_url: server,
                     username: user,
                     password: s_field(&c, "password").unwrap_or_default(),
+                    headers: headers_of(&c),
                 }),
                 fp,
             )

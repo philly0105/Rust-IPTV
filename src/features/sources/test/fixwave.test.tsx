@@ -55,9 +55,9 @@ describe('Edit dialog for a pasted M3U playlist', () => {
     renderAt(routes(), '/sources');
     fireEvent.click(await screen.findByTestId('source-edit'));
     expect(within(dialog()).getByTestId('m3u-text-origin-note')).toBeTruthy();
-    // No address or playlist text to edit.
+    // No address to edit; new text is optional and left empty here.
     expect(within(dialog()).queryByLabelText(/^Playlist URL/)).toBeNull();
-    expect(within(dialog()).queryByLabelText(/^Playlist text/)).toBeNull();
+    expect(within(dialog()).getByLabelText(/^New playlist text/)).toBeTruthy();
     type(/^User-Agent/, 'MyBox/1.0');
     type(/^Referer|^Referrer/, 'http://ref.example.com/');
     fireEvent.click(screen.getByTestId('edit-source-save'));
@@ -66,6 +66,35 @@ describe('Edit dialog for a pasted M3U playlist', () => {
         { id: 't', patch: { m3u: { origin: 'text', headers: { userAgent: 'MyBox/1.0', referrer: 'http://ref.example.com/' } } } },
       ]),
     );
+  });
+});
+
+describe('Updating a pasted M3U playlist in place', () => {
+  it('saves new text under the same source and imports it at once', async () => {
+    const before = makeSource('t', { name: 'Pasted', m3u: { origin: 'text', headers: {} } });
+    const text = '#EXTM3U\n#EXTINF:-1,One\nhttp://a.example.com/1\n#EXTINF:-1,Two\nhttp://a.example.com/2';
+    rpcMock.handlers['sources.list'] = () => [before];
+    rpcMock.handlers['sources.update'] = () => before;
+    rpcMock.handlers['sources.refresh'] = () => ({ ...before, channelCount: 2 });
+    rpcMock.handlers['m3u.parsePreview'] = () => ({ channelCount: 2, groups: [], epgUrls: [] });
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    type(/^New playlist text/, text);
+    fireEvent.click(screen.getByTestId('edit-source-save'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.update')).toEqual([{ id: 't', patch: { text } }]));
+    await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 't' }]));
+  });
+
+  it('refuses text that is not a playlist before saving', async () => {
+    const before = makeSource('t', { name: 'Pasted', m3u: { origin: 'text', headers: {} } });
+    rpcMock.handlers['sources.list'] = () => [before];
+    rpcMock.handlers['m3u.parsePreview'] = () => ({ channelCount: 0, groups: [], epgUrls: [] });
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    type(/^New playlist text/, 'hello world');
+    fireEvent.click(screen.getByTestId('edit-source-save'));
+    expect(await within(dialog()).findByText(/doesn't look like a playlist/)).toBeTruthy();
+    expect(rpcMock.callsOf('sources.update')).toHaveLength(0);
   });
 });
 
@@ -300,9 +329,10 @@ describe('Retrying a failed add reuses the source it created', () => {
     let n = 0;
     rpcMock.handlers['sources.list'] = () => [...store];
     rpcMock.handlers['sources.add'] = (a) => {
-      const args = a as { name: string; kind: 'm3u' | 'xtream'; m3u?: { origin: 'url'; url: string } };
+      const args = a as { name: string; kind: 'm3u' | 'xtream'; autoRefresh?: boolean; m3u?: { origin: 'url'; url: string } };
       const s = makeSource(`f${++n}`, {
         name: args.name,
+        autoRefresh: args.autoRefresh ?? false,
         kind: args.kind,
         channelCount: 0,
         m3u: args.m3u ? { ...args.m3u, headers: {} } : undefined,

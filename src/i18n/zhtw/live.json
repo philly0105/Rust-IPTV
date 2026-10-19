@@ -134,6 +134,7 @@
   "stationNumber": "電台 {{number}}",
   "watch": "觀看",
   "watchCatchup": "觀看回看",
+  "downloadCatchup": "下載 {{title}}",
   "watchLive": "觀看直播",
   "archiveTitle": "回看",
   "archiveOf": "{{name}} 的回看",

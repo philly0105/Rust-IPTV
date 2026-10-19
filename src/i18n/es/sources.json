@@ -151,7 +151,10 @@
   "saveFailed": "No se pudieron guardar los cambios",
   "refreshNow": "Actualizar ahora",
   "refresh": "Actualizar",
-  "textOriginNotEditable": "Esta lista se pegó como texto, así que no hay dirección que cambiar. Quítala y vuelve a añadirla para reemplazar los canales. Los encabezados de solicitud de abajo se siguen aplicando a todos los streams.",
+  "textOriginReplaceNote": "Esta lista se pegó o se subió como texto, así que no hay dirección que cambiar. Para actualizarla, pega la lista nueva o elige un archivo abajo. Los favoritos, el historial y los cambios de canales se quedan con los canales que sigan en ella. Los encabezados de solicitud de abajo se aplican a todos los streams.",
+  "replacePlaylistText": "Texto de la lista nueva",
+  "replacePlaylistTextHint": "Déjalo vacío para conservar los canales actuales.",
+  "replacePlaylistFileHint": "O elige un archivo de lista (.m3u, .m3u8 o .txt). Reemplaza los canales actuales.",
 
   "epgLinks": "Fuentes de guía",
   "epgLinksHint": "URL de guía encontradas en la lista más las que añadas. Desactiva una para dejar de descargarla.",

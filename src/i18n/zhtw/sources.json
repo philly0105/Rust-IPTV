@@ -143,7 +143,10 @@
   "saveFailed": "無法儲存變更",
   "refreshNow": "立即重新整理",
   "refresh": "重新整理",
-  "textOriginNotEditable": "此播放清單是以貼上方式匯入，沒有可變更的位址。若要取代頻道，請將其移除後重新新增。下方的要求標頭仍會套用到每個串流。",
+  "textOriginReplaceNote": "此播放清單是以貼上或上傳方式匯入，沒有可變更的位址。若要更新，請貼上新的播放清單或在下方選擇檔案。收藏、記錄和頻道編輯會保留在仍存在的頻道上。下方的要求標頭會套用到每個串流。",
+  "replacePlaylistText": "新的播放清單文字",
+  "replacePlaylistTextHint": "留空即可保留目前的頻道。",
+  "replacePlaylistFileHint": "或選擇播放清單檔案（.m3u、.m3u8 或 .txt），它會取代目前的頻道。",
 
   "epgLinks": "節目表來源",
   "epgLinksHint": "播放清單中找到的節目表 URL，以及您自行新增的 URL。關閉某個 URL 即停止擷取。",

@@ -110,6 +110,10 @@
   .deck__mid .key svg { width: 24px; height: 24px; }
   .key.muted { color: var(--live); }
 
+  /* Play/pause and stop */
+  .transport { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .transport .key { border-radius: 26px; }
+
   .vol { display: flex; align-items: center; gap: 12px; padding: 0 4px; }
   .vol input { flex: 1; height: 44px; accent-color: var(--lcd); background: transparent; }
   .vol__pct { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-muted); font-size: 0.9375rem; }
@@ -260,6 +264,17 @@
         <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
       </button>
     </div>
+  </section>
+
+  <section class="transport" aria-label="Playback">
+    <button class="key" id="playPause" data-act="playPause">
+      <svg viewBox="0 0 24 24"><path d="M5 5l8 7-8 7z"/><path d="M16 5v14M20 5v14"/></svg>
+      <span>Play / Pause</span>
+    </button>
+    <button class="key" id="stop" data-act="stop">
+      <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+      <span>Stop</span>
+    </button>
   </section>
 
   <div class="vol">
@@ -458,6 +473,10 @@
 
     const canVol = !!s.canVolume;
     for (const id of ["volUp", "volDown", "mute"]) $(id).disabled = !canVol;
+    // Something plays in the app (the built-in player reports volume; external players a channel).
+    const playing = canVol || !!s.channelName;
+    $("playPause").disabled = !canVol;
+    $("stop").disabled = !playing;
     $("volSlider").disabled = !canVol;
     const pct = volumePercent(s.volume);
     if (!sliderBusy && pct !== null) $("volSlider").value = String(pct);
@@ -681,6 +700,8 @@
     volUp: (b) => send("/volume", { delta: 0.05 }, b),
     volDown: (b) => send("/volume", { delta: -0.05 }, b),
     mute: (b) => send("/volume", { mute: !(status && status.muted) }, b),
+    playPause: (b) => send("/playback/toggle", undefined, b),
+    stop: (b) => send("/playback/stop", undefined, b),
     list: () => openList(),
     closeList: () => closeList(),
     back: () => backDigit(),
@@ -725,6 +746,7 @@
     else if (e.key === "+" || e.key === "=" || e.key === "ArrowRight") { e.preventDefault(); press("volUp"); }
     else if (e.key === "-" || e.key === "ArrowLeft") { e.preventDefault(); press("volDown"); }
     else if (e.key === "m" || e.key === "M") { e.preventDefault(); press("mute"); }
+    else if (e.key === "k" || e.key === "K") { e.preventDefault(); press("playPause"); }
     else if (e.key === "/" || e.key === "c" || e.key === "C") { e.preventDefault(); openList(); }
   });
 

@@ -143,7 +143,10 @@
   "saveFailed": "Änderungen konnten nicht gespeichert werden",
   "refreshNow": "Jetzt aktualisieren",
   "refresh": "Aktualisieren",
-  "textOriginNotEditable": "Diese Playlist wurde als Text eingefügt, daher gibt es keine Adresse zum Ändern. Entfernen Sie sie und fügen Sie sie erneut hinzu, um die Sender zu ersetzen. Die Anfrage-Header unten gelten weiterhin für jeden Stream.",
+  "textOriginReplaceNote": "Diese Playlist wurde eingefügt oder hochgeladen, daher gibt es keine Adresse zum Ändern. Fügen Sie zum Aktualisieren die neue Playlist ein oder wählen Sie unten eine Datei. Favoriten, Verlauf und Senderänderungen bleiben bei den Sendern, die weiterhin enthalten sind. Die Anfrage-Header unten gelten für jeden Stream.",
+  "replacePlaylistText": "Neuer Playlist-Text",
+  "replacePlaylistTextHint": "Leer lassen, um die aktuellen Sender zu behalten.",
+  "replacePlaylistFileHint": "Oder wählen Sie eine Playlist-Datei (.m3u, .m3u8 oder .txt). Sie ersetzt die aktuellen Sender.",
 
   "epgLinks": "Programmführer-Quellen",
   "epgLinksHint": "In der Playlist gefundene Programmführer-URLs sowie Ihre eigenen. Schalten Sie eine aus, um sie nicht mehr abzurufen.",

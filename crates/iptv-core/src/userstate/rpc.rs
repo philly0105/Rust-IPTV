@@ -302,4 +302,6 @@ pub fn register(r: &mut RpcRouter) {
     // vod: `positions.watchedContains` (Run 2 C4) is registered by the
     // watched module, which owns its handler.
     super::watched::register(r);
+    // vod: `sourcePins.*`.
+    super::pins::register(r);
 }

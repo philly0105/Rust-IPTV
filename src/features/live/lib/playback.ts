@@ -1,3 +1,4 @@
+import type { DownloadStartArgs } from '@/api/rpc';
 import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, PlayerKind, PlayerSource, RequestHeaders, Source, SourceKind } from '@/api/types';
 
@@ -94,6 +95,21 @@ export function m3uCatchupSource(channel: Channel, program: EpgProgram, now: num
   return out;
 }
 
+/** The archive source of a programme: the portal's timeshift link, or the M3U `catchup` URL. */
+export async function catchupSource(channel: Channel, kind: SourceKind, program: EpgProgram, now = Date.now()): Promise<PlayerSource> {
+  const args = { ref: channel.ref, start: program.start, durationMinutes: durationMinutes(program) };
+  if (kind === 'xtream') return rpc('xtream.catchupUrl', args);
+  if (kind === 'stalker') return rpc('stalker.catchupUrl', args);
+  if (kind === 'm3u') {
+    const [item, source] = await Promise.all([
+      channel.url ? channel : (rpc('catalog.item', { ref: channel.ref }) as Promise<Channel>),
+      rpc('sources.get', { id: channel.ref.sourceId }).catch(() => null),
+    ]);
+    return m3uCatchupSource(item, program, now, source?.m3u?.headers);
+  }
+  throw new Error('Catch-up is not available for this source.');
+}
+
 /**
  * Plays an archived programme: the portal's timeshift link, or the M3U `catchup` URL.
  * `displayName` (the name the live views show) titles the player when given.
@@ -105,21 +121,7 @@ export async function playCatchup(
   now = Date.now(),
   displayName?: string,
 ): Promise<void> {
-  const args = { ref: channel.ref, start: program.start, durationMinutes: durationMinutes(program) };
-  let src: PlayerSource;
-  if (kind === 'xtream') {
-    src = await rpc('xtream.catchupUrl', args);
-  } else if (kind === 'stalker') {
-    src = await rpc('stalker.catchupUrl', args);
-  } else if (kind === 'm3u') {
-    const [item, source] = await Promise.all([
-      channel.url ? channel : (rpc('catalog.item', { ref: channel.ref }) as Promise<Channel>),
-      rpc('sources.get', { id: channel.ref.sourceId }).catch(() => null),
-    ]);
-    src = m3uCatchupSource(item, program, now, source?.m3u?.headers);
-  } else {
-    throw new Error('Catch-up is not available for this source.');
-  }
+  const src = await catchupSource(channel, kind, program, now);
   await playSource({
     ...src,
     title: displayName || src.title || channel.name,
@@ -129,4 +131,40 @@ export async function playCatchup(
     isLive: false,
     isRadio: false,
   });
+}
+
+/** File extensions an archive download keeps from its URL; anything else (`.php`, none) saves as MPEG-TS. */
+const ARCHIVE_EXTENSIONS = new Set(['ts', 'mp4', 'mkv', 'avi', 'mov']);
+
+/**
+ * `downloads.start` args for an archived programme, behind the parental gate (C2) like playback;
+ * null when the prompt was cancelled. The row is the channel's ref with episode id
+ * `catchup:<start>`, so each programme is its own download and My Videos groups them under the
+ * channel; the core keeps the archive URL instead of re-resolving it. An HLS or DASH archive is a
+ * playlist, not one file, and is refused with `notFileMessage`.
+ */
+export async function catchupDownloadArgs(
+  channel: Channel,
+  kind: SourceKind,
+  program: EpgProgram,
+  opts: { now?: number; displayName?: string; subtitle: string; notFileMessage: string },
+): Promise<DownloadStartArgs | null> {
+  const title = opts.displayName || channel.name;
+  const allowed = await ensureUnlocked([{ ref: channel.ref, title, ...(channel.categoryId ? { categoryId: channel.categoryId } : {}) }]);
+  if (!allowed) return null;
+  const src = await catchupSource(channel, kind, program, opts.now);
+  if (src.kind === 'hls' || src.kind === 'dash') throw new Error(opts.notFileMessage);
+  const urlExt = /\.([a-z0-9]{2,4})$/i.exec(src.url.split(/[?#]/)[0] ?? '')?.[1]?.toLowerCase();
+  const ext = urlExt && ARCHIVE_EXTENSIONS.has(urlExt) ? urlExt : 'ts';
+  const args: DownloadStartArgs = {
+    ref: channel.ref,
+    episodeId: `catchup:${program.start}`,
+    title,
+    subtitle: opts.subtitle,
+    url: src.url,
+    fileNameHint: `${title} - ${opts.subtitle.replace(/\s*·\s*/g, ' - ')}.${ext}`,
+  };
+  if (src.headers) args.headers = src.headers;
+  if (channel.logoUrl) args.posterUrl = channel.logoUrl;
+  return args;
 }

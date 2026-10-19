@@ -143,7 +143,10 @@
   "saveFailed": "无法保存更改",
   "refreshNow": "立即刷新",
   "refresh": "刷新",
-  "textOriginNotEditable": "此播放列表是粘贴导入的，没有可更改的地址。如需替换频道，请将其移除后重新添加。下方的请求头仍适用于每个流。",
+  "textOriginReplaceNote": "此播放列表是粘贴或上传导入的，没有可更改的地址。如需更新，请粘贴新的播放列表或在下方选择文件。收藏、历史记录和频道编辑会保留在仍然存在的频道上。下方的请求头适用于每个流。",
+  "replacePlaylistText": "新的播放列表文本",
+  "replacePlaylistTextHint": "留空则保留当前频道。",
+  "replacePlaylistFileHint": "或选择播放列表文件（.m3u、.m3u8 或 .txt），它将替换当前频道。",
 
   "epgLinks": "节目指南来源",
   "epgLinksHint": "播放列表中找到的节目指南 URL，以及你添加的 URL。关闭某个 URL 即停止获取。",

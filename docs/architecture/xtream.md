@@ -11,7 +11,7 @@ The client talks to `player_api.php` on an Xtream panel, imports live channels, 
 | `mod.rs` | `XtreamImporter` and `init` (registers the importer with `sources::register_importer`, amendment A1). |
 | `url.rs` | Server URL normalization and builders for API, xmltv, live, movie, episode and timeshift URLs; catch-up stamp; extension cleanup. |
 | `raw.rs` | Wire types and lenient deserializers. |
-| `client.rs` | `XtreamClient`: GET with retry, VLC User-Agent, JSON/HTML detection, `check_auth`. Built on `http::trusted_client`: in server mode the guarded client with the panel's own `host:port` trusted, so a redirect elsewhere is refused. |
+| `client.rs` | `XtreamClient`: GET with retry, the source's User-Agent, Referer and Origin (`XtreamSourceConfig.headers`; without a User-Agent the VLC one, `XTREAM_USER_AGENT`, that some panels require), JSON/HTML detection, `check_auth`. Built on `http::trusted_client`: in server mode the guarded client with the panel's own `host:port` trusted, so a redirect elsewhere is refused. |
 | `meta.rs` | Per-source `ServerMeta` (clock offset, allowed formats, timezone), series-info cache, time helpers. |
 | `sync.rs` | Catalog sync per content type and xmltv detection. |
 | `service.rs` | Detail pages, stream and catch-up URLs, short EPG, account info, connection test. |

@@ -143,7 +143,10 @@
   "saveFailed": "Couldn't save changes",
   "refreshNow": "Refresh now",
   "refresh": "Refresh",
-  "textOriginNotEditable": "This playlist was pasted in, so there is no address to change. Remove it and add it again to replace the channels. The request headers below still apply to every stream.",
+  "textOriginReplaceNote": "This playlist was pasted in or uploaded, so there is no address to change. To update it, paste the new playlist or choose a file below. Favorites, history and channel edits stay with the channels that are still in it. The request headers below apply to every stream.",
+  "replacePlaylistText": "New playlist text",
+  "replacePlaylistTextHint": "Leave empty to keep the current channels.",
+  "replacePlaylistFileHint": "Or choose a playlist file (.m3u, .m3u8 or .txt). It replaces the current channels.",
 
   "epgLinks": "Guide sources",
   "epgLinksHint": "Guide URLs found in the playlist plus any you add. Turn one off to stop fetching it.",

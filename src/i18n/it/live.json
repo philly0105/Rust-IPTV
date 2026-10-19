@@ -139,6 +139,7 @@
   "stationNumber": "Stazione {{number}}",
   "watch": "Guarda",
   "watchCatchup": "Guarda la registrazione",
+  "downloadCatchup": "Scarica {{title}}",
   "watchLive": "Guarda in diretta",
   "archiveTitle": "Archivio",
   "archiveOf": "Archivio di {{name}}",

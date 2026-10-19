@@ -67,6 +67,8 @@ pub fn router_with_lan(state: Arc<AppState>, port: u16, lan: Vec<Ipv4Addr>) -> R
         .route("/channel/select", post(channel_select))
         .route("/channel/select-id", post(channel_select_id))
         .route("/volume", post(volume))
+        .route("/playback/toggle", post(playback_toggle))
+        .route("/playback/stop", post(playback_stop))
         // Paths of the old IPTVnator remote API, kept so existing clients work.
         .route("/channel/select-number", post(channel_select))
         .route("/volume/up", post(volume_up))
@@ -775,6 +777,16 @@ async fn volume(State(ctx): State<Ctx>, body: Bytes) -> Response {
         }
     }
     accepted(&sent)
+}
+
+async fn playback_toggle(State(ctx): State<Ctx>) -> Response {
+    emit(&ctx, CommandEvent::plain("togglePlay"));
+    accepted(&["togglePlay"])
+}
+
+async fn playback_stop(State(ctx): State<Ctx>) -> Response {
+    emit(&ctx, CommandEvent::plain("stop"));
+    accepted(&["stop"])
 }
 
 async fn volume_up(State(ctx): State<Ctx>) -> Response {

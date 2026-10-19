@@ -134,6 +134,7 @@
   "stationNumber": "Station {{number}}",
   "watch": "Watch",
   "watchCatchup": "Watch recording",
+  "downloadCatchup": "Download {{title}}",
   "watchLive": "Watch live",
   "archiveTitle": "Archive",
   "archiveOf": "Archive of {{name}}",

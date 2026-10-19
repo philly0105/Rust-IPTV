@@ -154,6 +154,7 @@
   "stationNumber": "المحطة {{number}}",
   "watch": "تفرج",
   "watchCatchup": "تفرج فالتسجيل",
+  "downloadCatchup": "حمّل {{title}}",
   "watchLive": "تفرج مباشر",
   "archiveTitle": "الأرشيف",
   "archiveOf": "الأرشيف ديال {{name}}",

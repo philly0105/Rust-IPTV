@@ -134,6 +134,7 @@
   "stationNumber": "{{number}}. állomás",
   "watch": "Lejátszás",
   "watchCatchup": "Felvétel megtekintése",
+  "downloadCatchup": "{{title}} letöltése",
   "watchLive": "Élő adás megtekintése",
   "archiveTitle": "Archívum",
   "archiveOf": "{{name}} archívuma",

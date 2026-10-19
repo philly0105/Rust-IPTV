@@ -245,6 +245,10 @@ pub fn emit_changed(state: &AppState, source_id: Option<&str>, reason: ChangeRea
             reason: reason.as_str(),
         },
     );
+    // remote: the phone's channel list follows the published source's catalog.
+    if matches!(reason, ChangeReason::Catalog | ChangeReason::Removed) {
+        crate::remote::channels_may_have_changed(state, source_id);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +317,11 @@ pub struct SourcePatch {
     pub stalker: Option<StalkerSourceConfig>,
     #[serde(default)]
     pub epg: Option<EpgPatch>,
+    /// New playlist text for a pasted or uploaded M3U source (origin `text`).
+    /// It replaces the stored text; the next `sources.refresh` imports it
+    /// under the same source id, so user state stays attached.
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 /// `sources.counts` result.
@@ -460,6 +469,7 @@ pub fn validate_xtream(cfg: XtreamSourceConfig) -> CoreResult<XtreamSourceConfig
         server_url: server,
         username,
         password: cfg.password,
+        headers: clean_headers(cfg.headers),
     })
 }
 
@@ -1456,6 +1466,26 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             s, stored_mac,
         )?));
     }
+    // New text for a pasted or uploaded playlist: stored here, imported by
+    // the next refresh.
+    let text = match patch.text {
+        Some(t) => {
+            let origin = match &config {
+                Some(SourceConfig::M3u(c)) => Some(c.origin),
+                _ => current.m3u.as_ref().map(|c| c.origin),
+            };
+            if origin != Some(M3uOrigin::Text) {
+                return Err(CoreError::Invalid(
+                    "only a pasted or uploaded playlist takes new playlist text".into(),
+                ));
+            }
+            if t.trim().is_empty() {
+                return Err(CoreError::Invalid("paste the playlist text".into()));
+            }
+            Some(t)
+        }
+        None => None,
+    };
     // Only the M3U catch-up override changed: it applies when channels are
     // read, so a running import of the same playlist carries on.
     let catchup_only = match (&current.m3u, &config) {
@@ -1514,14 +1544,46 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let sid = id.to_string();
     let auto_refresh = patch.auto_refresh;
     let position = patch.position;
+    // New text: stop an import of the old text, and keep imports out until
+    // the new text is stored.
+    let _import = match &text {
+        Some(_) => {
+            cancel_imports(state, id, false);
+            Some(lock_for(state, id).lock_owned().await)
+        }
+        None => None,
+    };
     let _same = match claim {
         Some(_) => Some(identity_lock(state).lock_owned().await),
         None => None,
     };
-    let (updated, config_changed) = state
+    let data_dir = state.data_dir.clone();
+    let (updated, config_changed, text_inline) = state
         .db_call(move |c| {
             let mut config_changed = false;
+            // Checked and placed before the write lock, as `store::insert` does.
+            let raw = match &text {
+                Some(t) => {
+                    if crate::m3u::rpc::preview(t).channel_count == 0 {
+                        return Err(CoreError::Invalid(
+                            "this is not an M3U playlist (no channels found); paste the playlist text".into(),
+                        ));
+                    }
+                    Some(crate::m3u::place_raw_text(&data_dir, &sid, t)?)
+                }
+                None => None,
+            };
+            let text_inline = raw.is_some_and(|r| !r.is_empty());
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some(raw) = raw {
+                // The sha stays the current catalog's, so the next import sees
+                // new text and re-imports it (the remapper keeps user state).
+                tx.execute(
+                    "INSERT INTO m3u_raw (source_id, raw, sha256, fetched_at) VALUES (?1, ?2, '', ?3)
+                     ON CONFLICT(source_id) DO UPDATE SET raw = excluded.raw",
+                    rusqlite::params![sid, raw, crate::db::now_rfc3339()],
+                )?;
+            }
             if let Some(cfg) = &claim {
                 if let Some((_, other)) = store::find_same(&tx, cfg, Some(&sid))? {
                     return Err(duplicate_error(cfg, &other));
@@ -1565,9 +1627,13 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             if let Some(p) = position {
                 store::move_to(c, &sid, p)?;
             }
-            Ok((store::get(c, &sid)?, config_changed))
+            Ok((store::get(c, &sid)?, config_changed, text_inline))
         })
         .await?;
+    if text_inline {
+        // A disk copy of the previous (large) text is stale now.
+        crate::m3u::remove_cached_playlist(state, id);
+    }
     if config_changed && !catchup_only {
         // An import still running fetches the old address (and may be stuck
         // on it); stop it so the next refresh uses the new settings.
@@ -1756,6 +1822,7 @@ mod tests {
             server_url: "http://h".into(),
             username: "u".into(),
             password: "p".into(),
+            headers: Default::default(),
         });
         state
             .db_call(move |c| store::insert(c, "x1", "X", false, &cfg, None))
@@ -1813,6 +1880,7 @@ mod tests {
                     server_url: server.into(),
                     username: "u".into(),
                     password: "p".into(),
+                    headers: Default::default(),
                 }),
             )
         };
@@ -1848,6 +1916,7 @@ mod tests {
             server_url: " http://h:8080/player_api.php ".into(),
             username: "u".into(),
             password: "p".into(),
+            headers: Default::default(),
         })
         .unwrap();
         assert_eq!(x.server_url, "http://h:8080");
@@ -1856,6 +1925,7 @@ mod tests {
             server_url: "http://h".into(),
             username: " u ".into(),
             password: " p ".into(),
+            headers: Default::default(),
         })
         .unwrap();
         assert_eq!(
@@ -1866,12 +1936,14 @@ mod tests {
             server_url: "http://h".into(),
             username: "u".into(),
             password: "   ".into(),
+            headers: Default::default(),
         })
         .is_err());
         assert!(validate_xtream(XtreamSourceConfig {
             server_url: "ftp://h".into(),
             username: "u".into(),
-            password: "p".into()
+            password: "p".into(),
+            headers: Default::default(),
         })
         .is_err());
         assert_eq!(

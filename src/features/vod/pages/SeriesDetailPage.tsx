@@ -1,4 +1,4 @@
-import { ListVideo, Lock, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
+import { Download, ListVideo, Lock, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigationType, useParams } from 'react-router';
@@ -37,7 +37,7 @@ import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState, useToast } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, useToast } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
@@ -267,6 +267,17 @@ export function SeriesDetailPage() {
   const seriesWrite = seriesWatchedWrite(allEpisodeIds, positionList, { watched: !seriesWatched });
   const seasonWrite = seriesWatchedWrite(allEpisodeIds, positionList, { episodeIds: seasonEpisodeIds, watched: !seasonWatched });
   const seasonName = selectedSeason !== undefined && selectedSeason <= 0 ? t('specials') : t('seasonNumber', { number: selectedSeason });
+  // Queues the season's episodes that have no download yet (or only a failed, cancelled or missing one).
+  const downloadSeason = () => {
+    const todo = episodes.filter((ep) => {
+      const d = downloads.get(ep.id);
+      return !d || d.status === 'failed' || d.status === 'canceled' || (d.status === 'completed' && d.fileAvailable === false);
+    });
+    void playback.downloadSeason(
+      todo.map((ep) => ({ episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), extension: ep.containerExtension })),
+      seasonName,
+    );
+  };
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
   const snapshot = {
@@ -381,16 +392,39 @@ export function SeriesDetailPage() {
               {t('episodes')}
             </h2>
             {episodes.length > 0 && (
-              <WatchedButton
-                key={selectedSeason}
-                itemRef={ref}
-                episodeIds={seasonWrite.episodeIds}
-                series={seasonWrite.series}
-                name={seasonName}
-                watched={seasonWatched}
-                compact={watch.active}
-                labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                {playback.canDownload &&
+                  (watch.active ? (
+                    <IconButton
+                      label={t('downloadSeason')}
+                      icon={<Download aria-hidden size={18} />}
+                      disabled={playback.pendingSeason}
+                      onClick={downloadSeason}
+                      data-testid="vod-download-season"
+                    />
+                  ) : (
+                    <Button
+                      size="lg"
+                      variant="ghost"
+                      icon={<Download aria-hidden size={18} />}
+                      loading={playback.pendingSeason}
+                      onClick={downloadSeason}
+                      data-testid="vod-download-season"
+                    >
+                      {t('downloadSeason')}
+                    </Button>
+                  ))}
+                <WatchedButton
+                  key={selectedSeason}
+                  itemRef={ref}
+                  episodeIds={seasonWrite.episodeIds}
+                  series={seasonWrite.series}
+                  name={seasonName}
+                  watched={seasonWatched}
+                  compact={watch.active}
+                  labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
+                />
+              </div>
             )}
           </div>
           {seasons.length === 0 ? (

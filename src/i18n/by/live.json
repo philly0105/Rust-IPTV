@@ -144,6 +144,7 @@
   "stationNumber": "Станцыя {{number}}",
   "watch": "Глядзець",
   "watchCatchup": "Глядзець запіс",
+  "downloadCatchup": "Спампаваць «{{title}}»",
   "watchLive": "Глядзець эфір",
   "archiveTitle": "Архіў",
   "archiveOf": "Архіў {{name}}",

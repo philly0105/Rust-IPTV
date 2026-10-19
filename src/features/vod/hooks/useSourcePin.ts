@@ -1,25 +1,45 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
-import type { ItemRef, VodItem } from '@/api/types';
+import { queryClient, rpcKey } from '@/api/query';
+import { RpcError, rpc } from '@/api/transport';
+import type { ItemRef, SourcePin, VodItem } from '@/api/types';
+import { useToast } from '@/ui';
 
-import { clearPin, getPin, matchKey, setPin, type SourcePin } from '../lib/pins';
+import { matchKey, migrateLocalPins } from '../lib/pins';
 
-/** Preferred-source pin for a title, plus the copy it points at when that copy is among `others`. */
+/** Preferred-source pin for a title (`sourcePins.*`), plus the copy it points at when that copy is among `others`. */
 export function useSourcePin(item: Pick<VodItem, 'title' | 'titleBase' | 'year'> | undefined, others: VodItem[]) {
+  const { t } = useTranslation('vod');
+  const { toast } = useToast();
   const key = item ? matchKey(item) : undefined;
-  const [version, setVersion] = useState(0);
-  // version forces a re-read after this page writes the pin
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const pin = useMemo<SourcePin | undefined>(() => (key ? getPin(key) : undefined), [key, version]);
+  const query = useQuery<SourcePin | null, RpcError>({
+    queryKey: rpcKey('sourcePins.get', { matchKey: key ?? '' }),
+    // Pins an older build kept in localStorage reach the core before the first read.
+    queryFn: async () => {
+      await migrateLocalPins();
+      return rpc('sourcePins.get', { matchKey: key ?? '' });
+    },
+    enabled: !!key,
+  });
+  const pin = query.data ?? undefined;
 
   const update = useCallback(
-    (ref: ItemRef | null) => {
+    async (ref: ItemRef | null) => {
       if (!key) return;
-      if (ref) setPin(key, ref);
-      else clearPin(key);
-      setVersion((v) => v + 1);
+      const queryKey = rpcKey('sourcePins.get', { matchKey: key });
+      try {
+        if (ref) queryClient.setQueryData(queryKey, await rpc('sourcePins.set', { matchKey: key, ref }));
+        else {
+          await rpc('sourcePins.clear', { matchKey: key });
+          queryClient.setQueryData(queryKey, null);
+        }
+      } catch (err) {
+        toast({ title: t('pinFailed'), description: RpcError.from(err).message, variant: 'error' });
+      }
     },
-    [key],
+    [key, t, toast],
   );
 
   const pinnedOther = pin ? others.find((o) => o.ref.sourceId === pin.sourceId && o.ref.itemId === pin.itemId) : undefined;

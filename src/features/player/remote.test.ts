@@ -7,7 +7,15 @@ const bus = vi.hoisted(() => {
     emit: (p: unknown) => listeners.forEach((fn) => fn(p)),
   };
 });
-const store = vi.hoisted(() => ({ zap: vi.fn(async () => undefined), zapToNumber: vi.fn(async () => undefined), adjustVolume: vi.fn() }));
+const store = vi.hoisted(() => ({
+  zap: vi.fn(async () => undefined),
+  zapToNumber: vi.fn(async () => undefined),
+  adjustVolume: vi.fn(),
+  togglePlay: vi.fn(),
+  stop: vi.fn(),
+  stopExternal: vi.fn(async () => undefined),
+  mode: 'inline' as 'inline' | 'external',
+}));
 /** The player store and settings the remote follows, driven by the tests. */
 const player = vi.hoisted(() => ({
   settings: null as null | { remoteControl: { enabled: boolean } },
@@ -22,6 +30,7 @@ vi.mock('@/api/events', () => ({
   },
 }));
 vi.mock('@/api/transport', () => ({ rpc: vi.fn(async () => null) }));
+vi.mock('./external', () => ({ stopExternalPlayback: store.stopExternal }));
 const { rpc } = await import('@/api/transport');
 vi.mock('./store', () => ({
   zap: store.zap,
@@ -33,7 +42,7 @@ vi.mock('./store', () => ({
     return () => player.settingsListeners.delete(fn);
   },
   usePlayerStore: {
-    getState: () => ({ adjustVolume: store.adjustVolume, volume: 1, muted: false }),
+    getState: () => ({ adjustVolume: store.adjustVolume, togglePlay: store.togglePlay, stop: store.stop, mode: store.mode, volume: 1, muted: false }),
     subscribe: (fn: (s: unknown, prev: unknown) => void) => {
       player.storeListeners.add(fn);
       return () => player.storeListeners.delete(fn);
@@ -46,9 +55,23 @@ const { bindRemote, claimRemoteChannelCommands } = await import('./remote');
 afterEach(() => {
   bus.listeners.clear();
   vi.clearAllMocks();
+  store.mode = 'inline';
 });
 
 describe('bindRemote', () => {
+  it('plays, pauses and stops for the remote; an external player closes through its own stop', () => {
+    const unbind = bindRemote();
+    bus.emit({ command: 'togglePlay' });
+    bus.emit({ command: 'stop' });
+    expect(store.togglePlay).toHaveBeenCalledTimes(1);
+    expect(store.stop).toHaveBeenCalledTimes(1);
+    store.mode = 'external';
+    bus.emit({ command: 'stop' });
+    expect(store.stopExternal).toHaveBeenCalledTimes(1);
+    expect(store.stop).toHaveBeenCalledTimes(1);
+    unbind();
+  });
+
   it('handles channel commands when no live view is mounted', () => {
     const unbind = bindRemote();
     bus.emit({ command: 'channelUp' });

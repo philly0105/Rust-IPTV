@@ -134,6 +134,7 @@
   "stationNumber": "{{number}}번 방송국",
   "watch": "시청",
   "watchCatchup": "아카이브 시청",
+  "downloadCatchup": "{{title}} 다운로드",
   "watchLive": "라이브 시청",
   "archiveTitle": "아카이브",
   "archiveOf": "{{name}} 아카이브",

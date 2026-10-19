@@ -44,6 +44,8 @@ Each write refreshes once (`editRefresh`). The app's event binding in `src/api/q
 
 The listener starts before the RPC, so an event that arrives before the answer still counts. When the core refuses `hideChannel`, `unhideChannel` or `renameChannel`, nothing is refreshed.
 
+The Hidden channels dialog has a Reset all edits button whenever the source has any edit, renames included (it reads `channels.edits` without `hiddenOnly`, so a source with renames but nothing hidden still offers it). The button asks first in the dialog's footer, then calls `channels.reset` (`resetEdits` in `actions.ts`): every channel gets its provider's name back and nothing stays hidden. There is no Undo, which is why it asks.
+
 ## Hidden channels in readers
 
 | Reader | How |

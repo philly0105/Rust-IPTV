@@ -13,6 +13,8 @@
 //! (`2026-10-11T02:30:00.123Z`) so lexical order equals time order even for
 //! several writes in the same second.
 
+// vod: preferred-source pins for titles several sources carry (`sourcePins.*`).
+pub mod pins;
 pub mod rpc;
 // vod: watched lookups for posters and "Hide watched" (Run 2 C4).
 pub mod watched;

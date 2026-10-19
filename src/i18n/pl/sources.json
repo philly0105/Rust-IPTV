@@ -159,7 +159,10 @@
   "saveFailed": "Nie udało się zapisać zmian",
   "refreshNow": "Odśwież teraz",
   "refresh": "Odśwież",
-  "textOriginNotEditable": "Ta lista odtwarzania została wklejona, więc nie ma adresu do zmiany. Usuń ją i dodaj ponownie, aby zastąpić kanały. Poniższe nagłówki żądania nadal dotyczą każdego strumienia.",
+  "textOriginReplaceNote": "Ta lista odtwarzania została wklejona lub przesłana, więc nie ma adresu do zmiany. Aby ją zaktualizować, wklej nową listę albo wybierz plik poniżej. Ulubione, historia i zmiany kanałów zostają przy kanałach, które nadal są na liście. Poniższe nagłówki żądania dotyczą każdego strumienia.",
+  "replacePlaylistText": "Nowy tekst listy odtwarzania",
+  "replacePlaylistTextHint": "Zostaw puste, aby zachować obecne kanały.",
+  "replacePlaylistFileHint": "Albo wybierz plik listy odtwarzania (.m3u, .m3u8 lub .txt). Zastąpi on obecne kanały.",
 
   "epgLinks": "Źródła przewodnika",
   "epgLinksHint": "URL-e przewodnika znalezione w liście odtwarzania oraz dodane przez Ciebie. Wyłącz któryś, aby przestać go pobierać.",

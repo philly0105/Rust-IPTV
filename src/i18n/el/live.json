@@ -134,6 +134,7 @@
   "stationNumber": "Σταθμός {{number}}",
   "watch": "Παρακολούθηση",
   "watchCatchup": "Παρακολούθηση εγγραφής",
+  "downloadCatchup": "Λήψη {{title}}",
   "watchLive": "Παρακολούθηση ζωντανά",
   "archiveTitle": "Αρχείο",
   "archiveOf": "Αρχείο του {{name}}",

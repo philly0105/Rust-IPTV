@@ -151,7 +151,10 @@
   "saveFailed": "Não foi possível salvar as alterações",
   "refreshNow": "Atualizar agora",
   "refresh": "Atualizar",
-  "textOriginNotEditable": "Esta playlist foi colada, então não há endereço para alterar. Remova-a e adicione-a novamente para substituir os canais. Os cabeçalhos da requisição abaixo continuam valendo para todos os streams.",
+  "textOriginReplaceNote": "Esta playlist foi colada ou enviada, então não há endereço para alterar. Para atualizá-la, cole a nova playlist ou escolha um arquivo abaixo. Favoritos, histórico e edições de canais continuam com os canais que ainda estiverem nela. Os cabeçalhos da requisição abaixo valem para todos os streams.",
+  "replacePlaylistText": "Novo texto da playlist",
+  "replacePlaylistTextHint": "Deixe vazio para manter os canais atuais.",
+  "replacePlaylistFileHint": "Ou escolha um arquivo de playlist (.m3u, .m3u8 ou .txt). Ele substitui os canais atuais.",
 
   "epgLinks": "Fontes do guia",
   "epgLinksHint": "URLs de guia encontradas na playlist, mais as que você adicionar. Desative uma para parar de buscá-la.",

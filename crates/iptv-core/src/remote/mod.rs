@@ -14,8 +14,10 @@
 //!
 //! The server never touches playback itself. Commands become `remote.command`
 //! app events (C1); the UI's player store applies them and reports back with
-//! `remote.reportStatus` / `remote.publishChannels`, which this module keeps in
-//! memory for the remote page to poll.
+//! `remote.reportStatus`, which this module keeps in memory for the remote
+//! page to poll. The channel list comes from the catalog of the source the app
+//! last showed (`remote.publishSource`, see [`refresh_channels`]);
+//! `remote.publishChannels` can still replace it with a list of the caller's.
 //!
 //! Runtime state lives in one [`RemoteHub`] stored at
 //! `state.extensions["remote"]`; it owns the graceful-shutdown handle of the
@@ -27,7 +29,7 @@ pub mod rpc;
 mod server;
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{RemoteControlSettings, RemoteStatus};
+use crate::model::{Channel, RemoteControlSettings, RemoteStatus};
 use crate::state::AppState;
 use lan::LanAddr;
 use pairing::{DeviceInfo, PairLimiter, Pairing, QrSvg, Sessions};
@@ -46,6 +48,10 @@ pub const EXT_KEY: &str = "remote";
 
 /// Most channels kept from `remote.publishChannels`.
 pub const MAX_CHANNELS: usize = 20_000;
+
+/// `app_state` key of the source whose channels the remote lists, so a
+/// restart can fill the list before the app shows Live TV again.
+pub const SOURCE_KEY: &str = "remote_source";
 
 /// How long `stop` waits for open connections to drain before aborting.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
@@ -146,6 +152,14 @@ pub struct RemoteHub {
     sessions: Mutex<Option<Sessions>>,
     /// Serializes writes so an older snapshot never lands after a newer one.
     persist_lock: tokio::sync::Mutex<()>,
+    /// The source whose live channels the list holds (`remote.publishSource`);
+    /// `None` until set or read back from `app_state`.
+    source: Mutex<Option<String>>,
+    /// Serializes catalog fills, so an older list never replaces a newer one.
+    fill_lock: tokio::sync::Mutex<()>,
+    /// The app state of the running server, for fills started from code that
+    /// only holds a `&AppState` ([`channels_may_have_changed`]).
+    app: Mutex<Weak<AppState>>,
 }
 
 impl RemoteHub {
@@ -386,6 +400,7 @@ pub async fn start_on(state: Arc<AppState>, port: u16) -> CoreResult<ServerInfo>
         }));
     }
     let lan_count = lan_bound.len();
+    *hub.app.lock() = Arc::downgrade(&state);
     *hub.running.lock() = Some(Running {
         port: bound,
         lan_requested: want_lan,
@@ -403,10 +418,142 @@ pub async fn start_on(state: Arc<AppState>, port: u16) -> CoreResult<ServerInfo>
     } else {
         tracing::info!(port = bound, "remote control listening on 127.0.0.1");
     }
+    // The list is in memory only: fill it from the source the app last showed.
+    let app = Arc::clone(&state);
+    tokio::spawn(async move {
+        if let Err(err) = refresh_channels(&app).await {
+            tracing::warn!(%err, "remote control: could not load the channel list");
+        }
+    });
     Ok(ServerInfo {
         url: url_for(bound),
         port: bound,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Channel list
+// ---------------------------------------------------------------------------
+
+/// `remote.publishSource`: the app shows the live channels of `source_id`.
+/// The choice is kept in memory and in `app_state` ([`SOURCE_KEY`]), and the
+/// list is filled from the catalog while the server runs (a later start fills
+/// it then). Returns the number of channels listed.
+pub async fn publish_source(state: &Arc<AppState>, source_id: &str) -> CoreResult<usize> {
+    let source_id = source_id.trim().to_string();
+    if source_id.is_empty() {
+        return Err(CoreError::invalid("sourceId is required"));
+    }
+    let hub = hub(state);
+    let previous = hub.source.lock().replace(source_id.clone());
+    if previous.as_deref() != Some(source_id.as_str()) {
+        let sid = source_id.clone();
+        state
+            .db_call(move |conn| {
+                conn.execute(
+                    "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    [SOURCE_KEY, sid.as_str()],
+                )?;
+                Ok(())
+            })
+            .await?;
+    }
+    if hub.running_port().is_none() {
+        return Ok(0);
+    }
+    refresh_channels(state).await
+}
+
+/// Fills the list from the catalog of the published source, read in the core
+/// (no round trip through the WebView): the live channels the app lists, with
+/// hidden groups and channels, parental hide mode and English only applied,
+/// custom names, at most [`MAX_CHANNELS`], keeping only the fields the remote
+/// shows. Without a published source the list is left alone (`Ok(0)`).
+pub async fn refresh_channels(state: &Arc<AppState>) -> CoreResult<usize> {
+    let hub = hub(state);
+    let cached = hub.source.lock().clone();
+    let source_id = match cached {
+        Some(s) => s,
+        None => {
+            let stored: Option<String> = state
+                .db_call(|c| {
+                    Ok(c.query_row(
+                        "SELECT value FROM app_state WHERE key = ?1",
+                        [SOURCE_KEY],
+                        |r| r.get(0),
+                    )
+                    .optional()?)
+                })
+                .await?;
+            let Some(stored) = stored else {
+                return Ok(0);
+            };
+            // A `remote.publishSource` that landed meanwhile wins.
+            let mut slot = hub.source.lock();
+            let s = slot.get_or_insert(stored).clone();
+            drop(slot);
+            s
+        }
+    };
+    let _fill = hub.fill_lock.lock().await;
+    let english = state.settings.read().english_only;
+    let hide = crate::parental::hide_filter(state).await?;
+    let sid = source_id.clone();
+    let channels = state
+        .db_call(move |c| {
+            let mut v: Vec<Channel> = crate::catalog::all_live_channels(c, &sid, english, hide)?
+                .into_iter()
+                .map(crate::catalog::NamedRow::into_channel)
+                .collect();
+            crate::channeledit::apply_names(c, &mut v)?;
+            Ok(v.into_iter()
+                .map(|ch| RemoteChannel {
+                    id: format!("{}|{}", ch.item_ref.source_id, ch.item_ref.item_id),
+                    name: ch.name,
+                    number: ch.number,
+                    logo_url: ch.logo_url,
+                })
+                .collect::<Vec<_>>())
+        })
+        .await?;
+    // The app switched sources while this one was read: its own fill follows.
+    let current = hub.source.lock().clone();
+    if current.as_deref() != Some(source_id.as_str()) {
+        return Ok(0);
+    }
+    Ok(hub.set_channels(channels))
+}
+
+/// Refills the list in the background when it may be stale: parental
+/// controls changed (`source_id` `None`), or the catalog or channel edits of
+/// `source_id` changed. Only while the server runs and a source is published;
+/// does nothing outside a Tokio runtime.
+pub fn channels_may_have_changed(state: &AppState, source_id: Option<&str>) {
+    let Some(hub) = state.ext::<RemoteHub>(EXT_KEY) else {
+        return;
+    };
+    if hub.running_port().is_none() {
+        return;
+    }
+    let published = hub.source.lock().clone();
+    let Some(published) = published else {
+        return;
+    };
+    if source_id.is_some_and(|s| s != published) {
+        return;
+    }
+    let Some(app) = hub.app.lock().upgrade() else {
+        return;
+    };
+    let Ok(rt) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    rt.spawn(async move {
+        if let Err(err) = refresh_channels(&app).await {
+            tracing::warn!(%err, "remote control: could not refresh the channel list");
+        }
+    });
 }
 
 /// True when the running server `(port, lan requested, LAN addresses bound)`

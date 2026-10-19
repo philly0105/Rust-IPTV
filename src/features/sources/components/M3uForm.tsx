@@ -37,7 +37,9 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
   const [fileError, setFileError] = useState<string | null>(null);
   const set = (patch: Partial<M3uDraft>) => onChange({ ...value, ...patch });
 
-  const previewText = value.origin === 'text' ? value.text : value.origin === 'file' ? value.fileText : '';
+  // Edit mode of a pasted playlist: a chosen file replaces the typed text.
+  const editText = value.origin === 'text' && mode === 'edit';
+  const previewText = editText && value.fileText ? value.fileText : value.origin === 'text' ? value.text : value.origin === 'file' ? value.fileText : '';
   const preview = usePlaylistPreview(previewText);
   const xtreamLink = value.origin === 'url' ? parseXtreamLink(value.url) : null;
 
@@ -70,7 +72,7 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
     setReading(true);
     try {
       const text = await readFileText(file);
-      set({ fileText: text, fileName: file.name, filePath: '' });
+      set({ fileText: text, fileName: file.name, filePath: '', ...(editText ? { text: '' } : {}) });
       onSuggestName?.(file.name);
     } catch (e) {
       setFileError(t('errorFileRead', { message: e instanceof Error ? e.message : String(e) }));
@@ -78,6 +80,40 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
       setReading(false);
     }
   };
+
+  // Reads the file in the page; the core gets its text (web uploads, and new text for a pasted playlist).
+  const uploadButton = (
+    <>
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/vnd.apple.mpegurl,application/x-mpegurl,text/plain"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        data-testid="m3u-file-input"
+        onChange={(e) => {
+          void onFileChosen(e.target.files?.[0]);
+          e.target.value = '';
+        }}
+      />
+      <Button
+        icon={<Upload aria-hidden className="size-4" />}
+        loading={reading}
+        disabled={disabled}
+        aria-describedby={fileHintId}
+        onClick={() => fileInput.current?.click()}
+      >
+        {value.fileName ? t('chooseAnotherFile') : t('chooseFile')}
+      </Button>
+    </>
+  );
+  const chosenFile = value.fileName ? (
+    <span className="flex min-w-0 items-center gap-1.5 text-sm text-fg-muted" title={value.filePath || value.fileName}>
+      <FileText aria-hidden className="size-4 shrink-0" />
+      <span className="truncate">{value.fileName}</span>
+    </span>
+  ) : null;
 
   const origins: { id: M3uOrigin; label: string }[] = [
     { id: 'url', label: t('originUrl') },
@@ -137,37 +173,9 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
                 {value.filePath ? t('chooseAnotherFile') : t('chooseFile')}
               </Button>
             ) : (
-              <>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/vnd.apple.mpegurl,application/x-mpegurl,text/plain"
-                  className="sr-only"
-                  tabIndex={-1}
-                  aria-hidden
-                  data-testid="m3u-file-input"
-                  onChange={(e) => {
-                    void onFileChosen(e.target.files?.[0]);
-                    e.target.value = '';
-                  }}
-                />
-                <Button
-                  icon={<Upload aria-hidden className="size-4" />}
-                  loading={reading}
-                  disabled={disabled}
-                  aria-describedby={fileHintId}
-                  onClick={() => fileInput.current?.click()}
-                >
-                  {value.fileName ? t('chooseAnotherFile') : t('chooseFile')}
-                </Button>
-              </>
+              uploadButton
             )}
-            {value.fileName ? (
-              <span className="flex min-w-0 items-center gap-1.5 text-sm text-fg-muted" title={value.filePath || value.fileName}>
-                <FileText aria-hidden className="size-4 shrink-0" />
-                <span className="truncate">{value.fileName}</span>
-              </span>
-            ) : null}
+            {chosenFile}
           </div>
           <p id={fileHintId} className="text-sm text-fg-muted">
             {isDesktop ? t('fileHintDesktop') : t('fileHintWeb')}
@@ -180,10 +188,40 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
         </div>
       ) : null}
 
-      {value.origin === 'text' && mode === 'edit' ? (
-        <p className="rounded-md border border-border bg-surface-2/60 p-3 text-sm text-fg-muted" data-testid="m3u-text-origin-note">
-          {t('textOriginNotEditable')}
-        </p>
+      {editText ? (
+        <>
+          <p className="rounded-md border border-border bg-surface-2/60 p-3 text-sm text-fg-muted" data-testid="m3u-text-origin-note">
+            {t('textOriginReplaceNote')}
+          </p>
+          <Field label={t('replacePlaylistText')} error={err('m3u.text')} hint={t('replacePlaylistTextHint')}>
+            {(p) => (
+              <Textarea
+                {...p}
+                rows={6}
+                spellCheck={false}
+                disabled={disabled}
+                className="font-mono text-sm"
+                data-testid="m3u-replace-text"
+                value={value.text}
+                onChange={(e) => set({ text: e.target.value, fileText: '', fileName: '' })}
+              />
+            )}
+          </Field>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-3">
+              {uploadButton}
+              {chosenFile}
+            </div>
+            <p id={fileHintId} className="text-sm text-fg-muted">
+              {t('replacePlaylistFileHint')}
+            </p>
+            {fileError || err('m3u.file') ? (
+              <p role="alert" className="text-sm text-danger">
+                {fileError ?? err('m3u.file')}
+              </p>
+            ) : null}
+          </div>
+        </>
       ) : null}
 
       {value.origin === 'text' && mode === 'add' ? (
@@ -203,7 +241,7 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
         </Field>
       ) : null}
 
-      {value.origin === 'file' || (value.origin === 'text' && mode === 'add') ? <PreviewPanel state={preview} /> : null}
+      {value.origin === 'file' || (value.origin === 'text' && mode === 'add') || (editText && previewText) ? <PreviewPanel state={preview} /> : null}
 
       <HeadersFields
         value={value.headers}

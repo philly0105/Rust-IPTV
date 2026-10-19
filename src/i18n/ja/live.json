@@ -134,6 +134,7 @@
   "stationNumber": "局{{number}}",
   "watch": "視聴",
   "watchCatchup": "アーカイブを視聴",
+  "downloadCatchup": "{{title}} をダウンロード",
   "watchLive": "ライブを視聴",
   "archiveTitle": "アーカイブ",
   "archiveOf": "{{name}} のアーカイブ",

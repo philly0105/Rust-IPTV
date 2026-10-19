@@ -54,7 +54,7 @@ export function initialDraft(initial: AddSourceInitial | undefined): SourceDraft
   const xt = url ? parseXtreamLink(url) : null;
   if (xt && (initial?.kind === undefined || initial.kind === 'xtream')) {
     const d = emptyDraft('xtream');
-    d.xtream = xt;
+    d.xtream = { ...d.xtream, ...xt };
     d.name = initial?.name ?? suggestName(xt.serverUrl);
     return d;
   }
@@ -526,7 +526,7 @@ export function AddSourceDialog({
             onSuggestName={suggest}
             onFieldBlur={onFieldBlur}
             onUseXtream={(xtream) => {
-              setDraft((d) => ({ ...d, kind: 'xtream', xtream }));
+              setDraft((d) => ({ ...d, kind: 'xtream', xtream: { ...d.xtream, ...xtream } }));
               setSuggested(suggestName(xtream.serverUrl));
               setErrors({});
             }}

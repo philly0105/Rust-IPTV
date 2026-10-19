@@ -49,6 +49,8 @@ export interface XtreamSourceConfig {
   serverUrl: string;
   username: string;
   password: string;
+  /** Sent with every panel request; without a User-Agent the core sends VLC's. */
+  headers?: RequestHeaders;
 }
 
 export interface StalkerSourceConfig {
@@ -320,6 +322,13 @@ export interface ItemSnapshot {
   subtitle?: string;
   posterUrl?: string;
   contentType: ContentType;
+}
+
+/** `sourcePins.*`: the copy of a title Play uses when several sources carry it. */
+export interface SourcePin {
+  sourceId: string;
+  itemId: string;
+  updatedAt: string;
 }
 
 export interface PlaybackPosition {
@@ -789,7 +798,9 @@ export type RemoteCommand =
   | 'volumeUp'
   | 'volumeDown'
   | 'mute'
-  | 'setVolume';
+  | 'setVolume'
+  | 'togglePlay'
+  | 'stop';
 
 // ---------------------------------------------------------------------------
 // TMDB (C4 tmdb). Images: w500 posters, w1280 backdrops.

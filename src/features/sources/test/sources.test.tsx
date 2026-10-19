@@ -55,7 +55,7 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(await submitAndGetArgs()).toEqual({
       kind: 'm3u',
       name: 'Home',
-      autoRefresh: false,
+      autoRefresh: true,
       m3u: { origin: 'url', url: 'http://lists.example.com/tv.m3u' },
     });
   });
@@ -84,8 +84,24 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(await submitAndGetArgs()).toEqual({
       kind: 'xtream',
       name: 'XC',
-      autoRefresh: false,
+      autoRefresh: true,
       xtream: { serverUrl: 'http://xt.example.com:8080', username: 'alice', password: 'pw' },
+    });
+  });
+
+  it('xtream with its own User-Agent', async () => {
+    await openAdd();
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Xtream Codes' }));
+    type(/^Name/, 'XC');
+    type(/^Server URL/, 'http://xt.example.com:8080/');
+    type(/^Username/, 'alice');
+    type(/^Password/, 'pw');
+    type(/^User-Agent/, 'MyBox/1.0');
+    expect(await submitAndGetArgs()).toEqual({
+      kind: 'xtream',
+      name: 'XC',
+      autoRefresh: true,
+      xtream: { serverUrl: 'http://xt.example.com:8080', username: 'alice', password: 'pw', headers: { userAgent: 'MyBox/1.0' } },
     });
   });
 
@@ -99,7 +115,7 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(await submitAndGetArgs()).toEqual({
       kind: 'stalker',
       name: 'Box',
-      autoRefresh: false,
+      autoRefresh: true,
       stalker: {
         portalUrl: 'http://portal.example.com/stalker_portal/c/',
         macAddress: '00:1A:79:AA:BB:CC',

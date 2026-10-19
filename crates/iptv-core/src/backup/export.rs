@@ -388,6 +388,16 @@ fn xtream_entry(conn: &Connection, s: &Source, include_secrets: bool) -> CoreRes
             cfg.map(|c| c.password.as_str()),
         );
     }
+    // Tsrust extension: request headers, named like the Stalker connection's.
+    if let Some(c) = cfg {
+        put_str(
+            &mut connection,
+            "userAgent",
+            c.headers.user_agent.as_deref(),
+        );
+        put_str(&mut connection, "referrer", c.headers.referrer.as_deref());
+        put_str(&mut connection, "origin", c.headers.origin.as_deref());
+    }
 
     let mut hidden = Vec::new();
     {

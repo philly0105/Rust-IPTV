@@ -2,6 +2,15 @@
 
 Subtitle files and the subtitle look, for the built-in player and embedded mpv (Run 2 contract C6). External players (mpv, VLC in their own windows) keep their own subtitle handling.
 
+## Show captions
+
+`settings.showCaptions` (Settings > Playback) turns a stream's own subtitles on when it has them:
+
+- hls.js and Shaka: the engine starts with its subtitle display on (`engines.ts`).
+- Native playback (MP4, WebM, native HLS): the first `subtitles` or `captions` track turns `showing` once the element lists it, unless one is already on; a choice in the Subtitles menu wins after that.
+- Embedded mpv: once an item is loaded, `MpvSurface` sets `sid` to its first subtitle track unless mpv already picked one (a default or forced track). Off leaves mpv's own choice alone.
+- mpegts.js has no subtitle output, so MPEG-TS streams in the built-in player show none, and external players use their own settings. The setting's hint says so.
+
 ## Files
 
 | Part | Path |

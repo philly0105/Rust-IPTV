@@ -36,7 +36,8 @@ Server flags: `iptv-server --port 7180 --data-dir ./.data --static ./dist`. It b
 
 - The API answers only when the browser uses localhost, an IP address, or a name listed in `--allowed-hosts` / `IPTV_ALLOWED_HOSTS` (comma list). Behind a reverse proxy at `tv.example.com`, set `IPTV_ALLOWED_HOSTS=tv.example.com`.
 - The stream proxy, downloads and playlist, guide, Xtream and Stalker requests only reach LAN addresses that belong to the source's own host and port. Pass `--allow-private-targets` (`IPTV_ALLOW_PRIVATE_TARGETS=true`, or `1`/`yes`/`on`) on a trusted network to lift that.
-- In the browser, playlists and EPG files cannot be opened from the server's disk (upload the playlist text or use an http(s) guide URL instead), and downloads always go to `<data dir>/downloads`.
+- In the browser, playlists and EPG files cannot be opened from the server's disk (upload the playlist text or use an http(s) guide URL instead), and downloads always go to `<data dir>/downloads` (Settings shows the folder, read-only). Playback uses the built-in player only: MPV, VLC and the External players settings are desktop features.
+- The Docker image includes mpv for scheduled recordings (it is not used for playback).
 - `iptv-server --health` checks a running server; the Docker image uses it as its HEALTHCHECK.
 - The web build can be installed as an app (PWA manifest and service worker).
 
@@ -225,7 +226,7 @@ Scheduled recordings and reminders:
 - Reminders fire a few minutes before the start (Settings > Recording) while the app runs, including when it is hidden in the tray. They show a Windows notification and a toast with "Watch now", or switch to the channel with Undo.
 - Recordings run without the player, through a headless mpv (or a direct copy for plain MPEG-TS streams), with 1 minute of padding before and 5 after by default. Files are named `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`. A dropped stream is retried into part files. A recording that was due while the app was closed is marked missed.
 - Library > Scheduled lists what is recording now, what is coming up, and recent results. My Videos > Recordings plays, shows and deletes the files (to the Recycle Bin, with Undo).
-- In the browser (server mode), recording needs mpv on the server. Without it Record is hidden. Reminders show in-app only.
+- In the browser (server mode), recording needs mpv on the server. The Docker image includes it; elsewhere, install mpv on the server's `PATH`. Without it Record is hidden. Reminders show in-app only.
 
 See `docs/architecture/recording.md`.
 

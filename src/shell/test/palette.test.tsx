@@ -118,6 +118,12 @@ describe('settings words (L3-app-8)', () => {
     await waitFor(() => expect(shown(palette).some((s) => s.includes(title))).toBe(true));
   });
 
+  it('the browser has no External players section to offer', async () => {
+    const { palette } = await openPaletteWith('settings');
+    await waitFor(() => expect(shown(palette).some((s) => s.includes('Settings: Playback'))).toBe(true));
+    expect(shown(palette).some((s) => s.includes('Settings: External players'))).toBe(false);
+  });
+
   it('words a section does not hold still find nothing there', async () => {
     const { palette } = await openPaletteWith('arabic');
     await waitFor(() => expect(shown(palette).some((s) => s.includes('Settings: General'))).toBe(true));

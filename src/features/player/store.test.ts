@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Channel, ItemRef, PlayerSource } from '@/api/types';
+import type { Channel, ItemRef, PlayerSource, Settings } from '@/api/types';
 
 const handlers: Record<string, (args: unknown) => unknown> = {};
 const rpcMock = vi.fn(async (name: string, args?: unknown) => {
@@ -9,9 +9,12 @@ const rpcMock = vi.fn(async (name: string, args?: unknown) => {
   return h(args);
 });
 
+const env = vi.hoisted(() => ({ desktop: false }));
 vi.mock('@/api/transport', () => ({
   rpc: (name: string, args?: unknown) => rpcMock(name, args),
-  isDesktop: false,
+  get isDesktop() {
+    return env.desktop;
+  },
   proxiedUrl: (s: { url: string }) => s.url,
 }));
 // The parental gate has its own tests (parentalHook.test.ts); here everything may play.
@@ -127,18 +130,33 @@ describe('store transitions', () => {
     expect(usePlayerStore.getState().muted).toBe(true);
   });
 
-  it('external player setting opens vlc and hides the dock', async () => {
-    handlers['settings.get'] = () => ({ player: 'vlc' });
-    handlers['player.openExternal'] = () => undefined;
-    await usePlayerStore.getState().play(vod('1'));
-    const s = usePlayerStore.getState();
-    expect(s.mode).toBe('external');
-    expect(s.dock).toBe('hidden');
-    expect(s.status).toBe('playing');
-    expect(calls('player.openExternal')).toEqual([
-      { player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }) },
-    ]);
-    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+  it('external player setting opens vlc and hides the dock (desktop)', async () => {
+    env.desktop = true;
+    try {
+      handlers['settings.get'] = () => ({ player: 'vlc' });
+      handlers['player.openExternal'] = () => undefined;
+      await usePlayerStore.getState().play(vod('1'));
+      const s = usePlayerStore.getState();
+      expect(s.mode).toBe('external');
+      expect(s.dock).toBe('hidden');
+      expect(s.status).toBe('playing');
+      expect(calls('player.openExternal')).toEqual([
+        { player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }) },
+      ]);
+      expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+    } finally {
+      env.desktop = false;
+    }
+  });
+
+  it('a saved mpv or vlc plays in the built-in player in the browser', async () => {
+    for (const player of ['mpv', 'vlc'] as const) {
+      store.setSettingsCache({ player } as Settings);
+      await usePlayerStore.getState().play(vod('1'));
+      expect(usePlayerStore.getState().mode).toBe('inline');
+    }
+    expect(calls('player.openExternal')).toEqual([]);
+    expect(store.modeForSettings('mpv', { ...vod('2'), isRadio: true })).toBe('radio');
   });
 
   it('embedded-mpv falls back to inline outside the desktop shell; radio gets radio mode', async () => {
@@ -146,7 +164,9 @@ describe('store transitions', () => {
     await usePlayerStore.getState().play(vod('1'));
     expect(usePlayerStore.getState().mode).toBe('inline');
     expect(store.modeForSettings('html5', { ...vod('2'), isRadio: true })).toBe('radio');
+    env.desktop = true;
     expect(store.modeForSettings('mpv', { ...vod('2'), isRadio: true })).toBe('external');
+    env.desktop = false;
   });
 
   it('queue next/prev and the autoplay-next card at the end', async () => {

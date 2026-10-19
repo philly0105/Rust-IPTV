@@ -338,9 +338,13 @@ export async function sourceKindOf(sourceId: string): Promise<SourceKind> {
   return src.kind;
 }
 
-/** Map `settings.player` to a mode. Radio stays in-app unless an external player is chosen. */
+/**
+ * Map `settings.player` to a mode. Radio stays in-app unless an external player is chosen. External
+ * players run only in the desktop app, so in the browser a saved mpv or VLC (such as one restored from
+ * a desktop backup) plays in the built-in player instead of failing every time.
+ */
 export function modeForSettings(player: VideoPlayer | undefined, source: PlayerSource): PlayerMode {
-  if (player === 'mpv' || player === 'vlc') return 'external';
+  if ((player === 'mpv' || player === 'vlc') && isDesktop) return 'external';
   if (source.isRadio) return 'radio';
   if (player === 'embedded-mpv') return 'embedded-mpv';
   return 'inline';

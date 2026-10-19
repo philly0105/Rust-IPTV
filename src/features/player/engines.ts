@@ -298,8 +298,13 @@ export function mediaCrossOrigin(url: string): 'anonymous' | null {
   return null;
 }
 
-function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): Engine {
+/**
+ * The element plays `url` itself. `wantCaptions` (settings.showCaptions) turns the first subtitle
+ * track the stream brings on once it appears, unless one is already on; a choice in the menu wins.
+ */
+function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks, wantCaptions = false): Engine {
   const owner = {};
+  let autoCaptions = wantCaptions;
   nativeOwner.set(el, owner);
   // Before `src`: the mode is fixed when the load starts.
   const cors = mediaCrossOrigin(url);
@@ -324,6 +329,15 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
         text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: isShownTrack(t) });
       }
     }
+    const first = text[0];
+    if (autoCaptions && first) {
+      autoCaptions = false;
+      const track = el.textTracks[Number(first.id)];
+      if (track && !text.some((o) => o.selected)) {
+        track.mode = 'showing';
+        first.selected = true;
+      }
+    }
     cb.onTracks({ qualities: [], qualityAuto: true, audio, text });
   };
   el.addEventListener('loadedmetadata', emitTracks);
@@ -341,6 +355,7 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks): E
       emitTracks();
     },
     setText(id) {
+      autoCaptions = false;
       for (let i = 0; i < el.textTracks.length; i++) {
         const t = el.textTracks[i];
         if (!t) continue;
@@ -389,7 +404,7 @@ async function hlsEngine(
   nativeOwner.set(el, {});
   if (!Hls.isSupported()) {
     // Safari / platforms with native HLS.
-    if (el.canPlayType('application/vnd.apple.mpegurl')) return nativeEngine(el, url, cb);
+    if (el.canPlayType('application/vnd.apple.mpegurl')) return nativeEngine(el, url, cb, wantCaptions);
     cb.onError({ message: 'HLS is not supported in this browser', fatal: true, kind: 'unsupported' });
     return nativeEngine(el, url, cb);
   }
@@ -1002,6 +1017,6 @@ export async function createEngine(
       if ((opts.forceMpegts || looksLikeMpegTs(source)) && mseSupported()) {
         return mpegtsEngine(el, source, loadUrl, cb, opts.signal);
       }
-      return nativeEngine(el, loadUrl, cb);
+      return nativeEngine(el, loadUrl, cb, opts.captions);
   }
 }

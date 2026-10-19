@@ -32,9 +32,11 @@ RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
  && install -m 0755 target/release/iptv-server /usr/local/bin/iptv-server
 
 # ---- 3. Runtime ------------------------------------------------------------
+# mpv is the server's recording engine (headless, found on PATH): without it
+# the guide hides Record. It is never used for playback in server mode.
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tini \
+ && apt-get install -y --no-install-recommends ca-certificates tini mpv \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 10001 iptv \
  && useradd --system --uid 10001 --gid iptv --home-dir /data --shell /usr/sbin/nologin iptv \

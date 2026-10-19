@@ -7,8 +7,7 @@ import { RpcError, isDesktop, rpc } from '@/api/transport';
 
 import { Button, Skeleton, useToast } from '@/ui';
 import { redactText } from '../../sources/lib/redact';
-import { CommitInput, SettingsRow } from '../components';
-import { cleanPath } from '../lib/patch';
+import { SettingsRow } from '../components';
 
 /** Desktop only: native folder picker. Undefined when canceled. */
 export async function pickDirectoryDesktop(title: string, defaultPath?: string): Promise<string | undefined> {
@@ -19,9 +18,10 @@ export async function pickDirectoryDesktop(title: string, defaultPath?: string):
 
 /**
  * Downloads folder (`downloads.dir` / `downloads.setDir`). Desktop picks with
- * the native dialog; the web build types a path on the server's machine. The
- * core checks the folder exists and is writable, and its message is shown
- * inline when it refuses. `custom` = settings.downloadsDir is set.
+ * the native dialog; the core checks the folder exists and is writable, and
+ * its message is shown inline when it refuses. In the browser the folder is
+ * fixed by the server (`downloads.setDir` refuses there), so the row only
+ * names it. `custom` = settings.downloadsDir is set.
  */
 export function DownloadsFolderRow({ custom }: { custom: boolean }) {
   const { t } = useTranslation('settings');
@@ -73,7 +73,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
       error={error}
       stack
     >
-      {({ id, describedBy, invalid }) =>
+      {({ id, describedBy }) =>
         dir.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : dir.isError ? (
@@ -107,26 +107,15 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
             ) : null}
           </div>
         ) : (
-          <div className="flex w-full items-center gap-2">
-            <CommitInput
-              id={id}
-              describedBy={describedBy}
-              invalid={invalid}
-              mono
-              value={path}
-              placeholder="D:\Videos"
-              disabled={busy}
-              onError={(key) => setError(key ? t(key) : null)}
-              validate={(v) => (/[\r\n]/.test(v) ? 'errorPathNewline' : !v.trim() ? 'errorRequired' : null)}
-              onCommit={(v) => void apply(cleanPath(v))}
-              testId="input-downloadsDir"
-            />
-            {custom ? (
-              <Button variant="ghost" icon={<RotateCcw aria-hidden className="size-4" />} disabled={busy} onClick={() => void apply('')}>
-                {t('useDefaultFolder')}
-              </Button>
-            ) : null}
-          </div>
+          <output
+            id={id}
+            aria-describedby={describedBy}
+            className="flex h-10 w-full min-w-0 items-center truncate rounded-md border border-border bg-surface-2 px-3 font-mono text-sm text-fg"
+            title={path}
+            data-testid="downloads-dir-path"
+          >
+            {path || t('downloadsFolderUnknown')}
+          </output>
         )
       }
     </SettingsRow>

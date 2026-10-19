@@ -1027,6 +1027,8 @@ export interface AppEventMap {
   'lists.changed': EmptyEvent;
   /** After every channel edit (rename, hide, restore). */
   'channels.changed': ChannelsChangedEvent;
+  /** A source's cached subscription status changed (`account.status`, `account.statusAll`). */
+  'account.changed': { sourceId: string };
 }
 
 export type AppEventType = keyof AppEventMap;

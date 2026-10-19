@@ -14,7 +14,8 @@ import { settle } from './helpers/layout';
 
 const NAME = 'Axe Xtream';
 
-const SETTINGS_SECTIONS = ['general', 'playback', 'players', 'epg', 'recording', 'metadata', 'appearance', 'parental', 'remote', 'backup', 'shortcuts', 'about'];
+// Every section the browser shows: External players ('players') is desktop only.
+const SETTINGS_SECTIONS = ['general', 'playback', 'epg', 'recording', 'metadata', 'appearance', 'parental', 'remote', 'backup', 'shortcuts', 'about'];
 
 function routes(id: string): string[] {
   return [

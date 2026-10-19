@@ -21,6 +21,7 @@ import {
   DOUBLE_CLICK_MS,
   ENDED_EPSILON,
   handleEnded,
+  peekSettings,
   reportFullscreen,
   reportProgress,
   reportStatus,
@@ -345,6 +346,8 @@ export function MpvSurface({ className }: { className?: string }) {
     };
     /** The item whose video shape PiP last followed (a zap in PiP reshapes the window once). */
     let aspectFollowed: string | null = null;
+    /** The item whose subtitle tracks `showCaptions` was last applied to (once per item). */
+    let captionsApplied: string | null = null;
 
     const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
@@ -373,6 +376,15 @@ export function MpvSurface({ className }: { className?: string }) {
       if (st.loaded && st.timePos > 0 && aspectFollowed !== loadedKey.current) {
         aspectFollowed = loadedKey.current;
         void refreshPipAspect();
+      }
+      // showCaptions: once the item is loaded, its first subtitle track turns on unless mpv already
+      // picked one (a default or forced track). Off leaves mpv's own choice alone.
+      if (st.loaded && captionsApplied !== loadedKey.current) {
+        captionsApplied = loadedKey.current;
+        const sub = st.tracks.find((x) => x.type === 'sub');
+        if (peekSettings()?.showCaptions && sub && !st.tracks.some((x) => x.type === 'sub' && x.selected)) {
+          void rpc('mpv.setProperty', { name: 'sid', value: sub.id }).catch(() => undefined);
+        }
       }
       // keep-open pauses at EOF instead of ending: treat "paused at the end" as ended, once.
       const atEnd = !!st.duration && st.timePos >= st.duration - ENDED_EPSILON && st.paused;

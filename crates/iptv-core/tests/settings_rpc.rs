@@ -243,11 +243,21 @@ async fn window_state_round_trips() {
 #[tokio::test]
 async fn detect_players_returns_shape() {
     let dir = tempfile::tempdir().unwrap();
-    let (s, _rx) = app(dir.path()).await;
+    let (s, _rx) = desktop(dir.path()).await;
     let got = call(&router(), &s, "settings.detectPlayers", Value::Null)
         .await
         .unwrap();
     assert!(got.is_object(), "{got}");
+}
+
+#[tokio::test]
+async fn detect_players_is_desktop_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let (s, _rx) = app(dir.path()).await;
+    let err = call(&router(), &s, "settings.detectPlayers", Value::Null)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::Unsupported);
 }
 
 #[tokio::test]

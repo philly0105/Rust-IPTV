@@ -1,6 +1,6 @@
 # Players: detection, external launch, embedded mpv
 
-Code: `crates/iptv-core/src/player/` (core) and `crates/iptv-tauri/src/mpv_window.rs` (Windows child window). RPC: `player.capabilities`, `player.detect`, `player.openExternal`, `player.stopExternal`, `mpv.attach`, `mpv.load`, `mpv.command`, `mpv.setProperty`, `mpv.setBounds`, `mpv.detach`, `mpv.state`, `mpv.record`, `mpv.stats` (SPEC C4 plus fix wave 1 and the player slice). Events: `player.external`, `mpv.state`.
+Code: `crates/iptv-core/src/player/` (core) and `crates/iptv-tauri/src/mpv_window.rs` (Windows child window). RPC: `player.capabilities`, `player.detect`, `player.openExternal`, `player.stopExternal`, `mpv.attach`, `mpv.load`, `mpv.command`, `mpv.setProperty`, `mpv.setBounds`, `mpv.detach`, `mpv.state`, `mpv.record`, `mpv.stats`, `mpv.addSubtitle` (SPEC C4 plus fix wave 1, the player slice and Run 2 C6). Events: `player.external`, `mpv.state`.
 
 | File | Role |
 | --- | --- |
@@ -27,7 +27,7 @@ The first existing file wins. mpv and VLC are searched separately:
    - WinGet: `%LOCALAPPDATA%\Microsoft\WinGet\Links`, then `...\WinGet\Packages\<id containing the name>\`.
    - Other OSes: `/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `/opt/local/bin`, `/snap/bin`, and `/Applications/{mpv,VLC}.app/Contents/MacOS/*` (also under `~/Applications`).
 
-`settings.detectPlayers` (B2) and `player.detect` both call `player::detect(&settings)`.
+`settings.detectPlayers` (B2) and `player.detect` both call `player::detect(&settings)`, and both are desktop only.
 
 ## External players
 
@@ -120,7 +120,7 @@ Behaviour:
 - `mpv.stats`: the stream info snapshot (`player/stats.rs`). It reads `STATS_PROPERTIES` (video-format, width, height, estimated-vf-fps then container-fps, video-bitrate, audio-codec-name, audio-params/channel-count, audio-bitrate, hwdec-current, frame-drop-count + decoder-frame-drop-count, demuxer-cache-duration, file-format) with concurrent `get_property` calls under a 2 s timeout. A property mpv cannot answer is left out. `hwdecKnown` tells "software decoding" (`hwdec-current` is `no`) apart from "no answer". The stream URL is never part of the reply. Errors like the other commands without a session.
 - Crash handling: a watcher notices when mpv exits or the pipe closes without a detach. It waits up to 1 s for the exit code, then sets `error: "mpv stopped unexpectedly (exit code N). Start playback again to restart it."`, tears the session down, destroys the window, and emits the result.
 - On other OSes every `mpv.*` command returns `Unsupported`, and the external players still work.
-- Server mode (`iptv-server`): `player.detect`, `player.openExternal`, `player.stopExternal` and every `mpv.*` command return `Unsupported` ("Players run only in the desktop app"), because a browser client must not start processes on the server. `player.capabilities` still answers.
+- Server mode (`iptv-server`): `player.detect`, `settings.detectPlayers`, `player.openExternal`, `player.stopExternal` and every `mpv.*` command return `Unsupported` ("Players run only in the desktop app"), because a browser client must not start processes on the server or learn its player paths. `player.capabilities` still answers. The browser UI therefore offers only the built-in player: Settings > Playback lists neither MPV nor VLC, there is no External players section, and a saved `mpv` or `vlc` (for example from a desktop backup) plays in the built-in player.
 - App exit: call `player::shutdown(&state).await` (graceful) or `player::kill_embedded(&state)` (synchronous) from the Tauri exit hook, so mpv never outlives the app.
 
 ## Dropping mpv into vendor/mpv
@@ -149,7 +149,7 @@ Smart reconnect (`streamReconnect`) and live failover (`liveFailover`) sit above
 - `tests/player_args.rs`: shell splitting (quotes, escapes, Windows paths), mpv and VLC argv with and without headers, header escaping, embedded flags and their order, `loadfile` options, legacy `%len%` options, raw-command validation.
 - `tests/player_ipc.rs`: framing (partial writes, several lines per write), reply and event parsing, concurrent `request_id` correlation, error and timeout paths, observer registration, `property-change` handling, track parsing, close handling, emitter throttling (50 updates produce at most 4 emits and the last state wins). It uses a fake mpv on `tokio::io::duplex`.
 - `tests/player_detect.rs`: every search location against temp-dir layouts, plus precedence and fallbacks.
-- `tests/player_rpc.rs`: exactly the 13 player names are registered; server mode refuses every player command; non-media schemes are refused; `player.stopExternal` with nothing running; reuse closing the previous external mpv; capabilities reasons; errors without a session; `player.openExternal` with `whoami.exe` as a stand-in player (the `started` then `exited` events); and, when an mpv is detectable, a real embedded end-to-end run with `--vo=null --ao=null`. That run covers attach, attach again, loading an mpv-encoded clip with resume and headers, pause, volume, seek, a blocked `quit`, an unknown property, setBounds, a crash via `taskkill` (error state, window destroyed), re-attach, attach with volume and mute, recording to `recordingsDir` (file name, state, `stream-record` property, non-empty file), `mpv.stats` on the test clip (size, codec, container, no URL), audio-delay and sub-delay round trips, and an idempotent detach.
+- `tests/player_rpc.rs`: exactly the 14 player names are registered; server mode refuses every player command; non-media schemes are refused; `player.stopExternal` with nothing running; reuse closing the previous external mpv; capabilities reasons; errors without a session; `player.openExternal` with `whoami.exe` as a stand-in player (the `started` then `exited` events); and, when an mpv is detectable, a real embedded end-to-end run with `--vo=null --ao=null`. That run covers attach, attach again, loading an mpv-encoded clip with resume and headers, pause, volume, seek, a blocked `quit`, an unknown property, setBounds, a crash via `taskkill` (error state, window destroyed), re-attach, attach with volume and mute, recording to `recordingsDir` (file name, state, `stream-record` property, non-empty file), `mpv.stats` on the test clip (size, codec, container, no URL), audio-delay and sub-delay round trips, and an idempotent detach.
 - `tests/player_args.rs` also covers the `--` separator, the URL allowlist, VLC reuse flags, the `stream-record` IPC command, and recording file names.
 
 ## Sync, stream info and channel history (UI)

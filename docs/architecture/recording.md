@@ -102,7 +102,7 @@ Recordings are matched channel by channel (`scheduler::follow`), together with t
 
 ## Server mode
 
-`recordings.capabilities` reports `supported: false` when the server machine has no mpv. The guide then hides Record and shows a one-line explanation; the Scheduled page notes it. Reminders work in server mode (toast only). Recordings made on the server are written under `<data dir>/downloads/recordings` and played back through `GET /api/recordings/{id}` (Range support). Before recording, the stream URL goes through the same fetch guard as other server fetches (http/https only, no private or loopback hosts unless allowed); mpv resolves names itself, so the host is also resolved first and refused unless every address is public. Redirects and HLS segment hosts that mpv follows are not checked.
+`recordings.capabilities` reports `supported: false` when the server machine has no mpv. The guide then hides Record and shows a one-line explanation; the Scheduled page notes it. The Docker image installs mpv in its runtime stage (server.md, Docker), so recording works there out of the box; a server run outside Docker needs mpv on its `PATH`. Reminders work in server mode (toast only). Recordings made on the server are written under `<data dir>/downloads/recordings` and played back through `GET /api/recordings/{id}` (Range support). Before recording, the stream URL goes through the same fetch guard as other server fetches (http/https only, no private or loopback hosts unless allowed); mpv resolves names itself, so the host is also resolved first and refused unless every address is public. Redirects and HLS segment hosts that mpv follows are not checked.
 
 ## Library
 

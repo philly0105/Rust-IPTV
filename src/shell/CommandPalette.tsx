@@ -36,7 +36,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import { RpcError } from '@/api/transport';
+import { RpcError, isDesktop } from '@/api/transport';
 import { itemKey, type ContentType, type ItemRef, type ItemSnapshot } from '@/api/types';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
@@ -283,6 +283,8 @@ export function usePaletteItems(): PaletteItem[] {
     }
     const en = i18n.getFixedT('en', 'shell');
     for (const section of SETTINGS_SECTIONS) {
+      // External players run only in the desktop app; the browser's settings page has no such section.
+      if (section === 'players' && !isDesktop) continue;
       const key = `settings${section[0]!.toUpperCase()}${section.slice(1)}`;
       items.push({
         id: `settings.${section}`,

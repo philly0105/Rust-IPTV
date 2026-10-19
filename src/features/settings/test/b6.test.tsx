@@ -11,11 +11,15 @@ import { eagerRoutes, installDomStubs, renderAt, rpcMock, settings } from '../..
 import { inspectBackup, parentalOptionsDiffer } from '../lib/backup';
 import { applyPatch, diffSettings, playerPathStatus, tmdbPatch } from '../lib/patch';
 
+const flags = vi.hoisted(() => ({ desktop: false }));
+
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
   rpc: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
   rpcRaw: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
-  isDesktop: false,
+  get isDesktop() {
+    return flags.desktop;
+  },
 }));
 vi.mock('@/api/events', () => ({
   onAppEvent: () => () => undefined,
@@ -54,6 +58,7 @@ function lastToast() {
 beforeAll(installDomStubs);
 beforeEach(() => {
   rpcMock.reset();
+  flags.desktop = false;
   useToastStore.setState({ toasts: [] });
   current = settings();
   rpcMock.handlers['settings.get'] = () => current;
@@ -342,7 +347,8 @@ describe('A saved player path that stopped working is flagged (D20)', () => {
     expect(playerPathStatus('C:\\gone\\mpv.exe', undefined)).toEqual({ kind: 'missing' });
   });
 
-  it('shows the fallback next to the field', async () => {
+  it('shows the fallback next to the field (desktop)', async () => {
+    flags.desktop = true;
     current = settings({ mpvPath: 'C:\\gone\\mpv.exe' });
     rpcMock.handlers['player.capabilities'] = () => ({ embeddedMpv: false, mpvPath: 'C:\\scoop\\mpv.exe' });
     renderAt(settingsRoutes, '/settings/players');
